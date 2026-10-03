@@ -1,0 +1,11 @@
+format: ess/15
+system: loom
+version: v1
+
+summary: >-
+  The native agent harness: one bounded run of a model inside a governed frontier, with the
+  model-visible catalogue projected from that frontier and action selection kept apart from
+  argument generation.
+
+domains:
+  - loom.run

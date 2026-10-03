@@ -1,0 +1,139 @@
+# Draft domain for Loom (story I-006). Nouns are read from docs/design/loom-design.md,
+# docs/contracts/loom-action-selection.md, crates/loom/src/lib.rs and Atlas ADRs 0071-0073. Every
+# relation the sources do not settle is marked UNMAPPED: and stays out of the model until a story
+# decides it. One lifecycle state per entity until a command outcome moves it.
+domain: loom.run
+
+summary: >-
+  One model session executing a commission's run. Each catalogue is projected from one frontier;
+  a selection names one action from that catalogue; arguments are generated for the selected action
+  only. Loom never decides authority or completion.
+
+naming:
+  wire: run
+  display: Run
+
+types:
+  - name: loom.run.SessionId
+    kind: newtype
+    of: Uuid
+
+  - name: loom.run.TurnId
+    kind: newtype
+    of: Uuid
+
+  - name: loom.run.CatalogueId
+    kind: newtype
+    of: Uuid
+
+  - name: loom.run.SelectionId
+    kind: newtype
+    of: Uuid
+
+  - name: loom.run.ArgumentRequestId
+    kind: newtype
+    of: Uuid
+
+  # docs/design/loom-design.md § Action selection strategies.
+  - name: loom.run.SelectionStrategy
+    kind: enum
+    variants: [ReasoningModel, FastTyped, Rule, Hybrid]
+
+entities:
+  # Session and transcript state for one run (loom-design.md § Owns).
+  # UNMAPPED: the commission run this session executes is an entity of the commission system; how
+  # Loom references it (a typed external id, or a value copied in) is decided in story L-002.
+  - name: loom.run.Session
+    identity:
+      name: session_id
+      type: loom.run.SessionId
+    fields:
+      - name: commission_run
+        type: String
+    relations:
+      # A turn is part of one session's transcript (loom-design.md: "model turn loop",
+      # "session/transcript state").
+      - name: turns
+        kind: owns
+        target: loom.run.Turn
+        cardinality: many
+        via: session_id
+    lifecycle:
+      initial: Active
+      states: [Active]
+      terminal: [Active]
+
+  - name: loom.run.Turn
+    identity:
+      name: turn_id
+      type: loom.run.TurnId
+    fields:
+      - name: session_id
+        type: loom.run.SessionId
+      - name: index
+        type: Integer
+    lifecycle:
+      initial: Taken
+      states: [Taken]
+      terminal: [Taken]
+
+  # The model-visible catalogue derived from one frontier (ADR 0072).
+  # UNMAPPED: whether a catalogue belongs to a turn or to a session (re-projected on every turn,
+  # or only when the frontier changes) is not settled by the sources.
+  - name: loom.run.ActionCatalogue
+    identity:
+      name: catalogue_id
+      type: loom.run.CatalogueId
+    fields:
+      - name: frontier
+        type: String
+      - name: case_revision
+        type: Integer
+    lifecycle:
+      initial: Projected
+      states: [Projected]
+      terminal: [Projected]
+
+  # loom-action-selection.md: one action id and an optional confidence. A selection never grants
+  # authority (ADR 0073).
+  # UNMAPPED: the confidence is an optional probability; its ESS scalar type is decided in story L-005.
+  - name: loom.run.Selection
+    identity:
+      name: selection_id
+      type: loom.run.SelectionId
+    fields:
+      - name: catalogue_id
+        type: loom.run.CatalogueId
+      - name: action
+        type: String
+      - name: strategy
+        type: loom.run.SelectionStrategy
+    relations:
+      - name: catalogue
+        kind: references
+        target: loom.run.ActionCatalogue
+        cardinality: one
+        via: catalogue_id
+    lifecycle:
+      initial: Selected
+      states: [Selected]
+      terminal: [Selected]
+
+  # loom-action-selection.md: arguments are generated for the selected action only.
+  - name: loom.run.ArgumentRequest
+    identity:
+      name: argument_request_id
+      type: loom.run.ArgumentRequestId
+    fields:
+      - name: selection_id
+        type: loom.run.SelectionId
+    relations:
+      - name: selection
+        kind: references
+        target: loom.run.Selection
+        cardinality: one
+        via: selection_id
+    lifecycle:
+      initial: Requested
+      states: [Requested]
+      terminal: [Requested]

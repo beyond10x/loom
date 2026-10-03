@@ -1,0 +1,26 @@
+version: '3'
+
+env:
+  CARGO_TARGET_DIR: '{{.HOME}}/.cache/b10x-target/loom'
+
+tasks:
+  default:
+    cmds: [{task: check}]
+
+  check:
+    desc: Format, lint, test.
+    cmds:
+      - task: spec
+      - cargo fmt --all --check
+      - cargo clippy --workspace --all-targets --locked -- -D warnings
+      - cargo test --workspace --locked
+
+  spec:
+    desc: Validate the ESS specification.
+    cmds:
+      - ess specify validate --path ess
+
+  plan:
+    desc: Validate the AEP planning store.
+    cmds:
+      - aep plan artifact validate

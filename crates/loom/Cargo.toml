@@ -1,0 +1,10 @@
+[package]
+name = "b10x-loom"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+b10x-canon = { git = "https://github.com/beyond10x/canon", branch = "main" }
+b10x-commission = { git = "https://github.com/beyond10x/commission", branch = "main" }

@@ -1,0 +1,74 @@
+# Contract Sketch — Loom Action Selection
+
+## Goal
+
+Separate **which admissible action to take** from **how to construct its arguments**.
+
+This allows cheap/fast decision models to perform routine routing.
+
+## Interfaces
+
+Conceptual:
+
+```rust
+pub trait ActionSelector {
+    fn select(
+        &self,
+        context: &SelectionContext,
+        candidates: &[ActionDescriptor],
+    ) -> Result<Selection, SelectionError>;
+}
+
+pub struct Selection {
+    pub action: ActionId,
+    pub confidence: Option<f32>,
+}
+
+pub trait ArgumentGenerator {
+    fn generate(
+        &self,
+        context: &ArgumentContext,
+        action: &ActionDescriptor,
+    ) -> Result<serde_json::Value, ArgumentError>;
+}
+```
+
+## Laya path
+
+```text
+Frontier candidates
+        ↓
+compact selection context
+        ↓
+Laya typed choice
+        ↓
+ActionId + probability
+        ↓
+threshold
+  ┌─────┴─────┐
+  │           │
+high        low
+  │           │
+  ▼           ▼
+argument   full reasoning
+generator  selector/planner
+  │
+  ▼
+schema validation
+  │
+  ▼
+revalidate frontier + revision + authority
+  │
+  ▼
+execute
+```
+
+## Safety rules
+
+1. Candidate labels originate from the current frontier.
+2. Unknown action IDs are rejected.
+3. Selection confidence never grants authority.
+4. A selected action is revalidated before effect.
+5. Low confidence falls back to a stronger path.
+6. For >~20 actions, selectors may use family → action hierarchy.
+7. Selection telemetry should be available to Metaharness for evaluation.
