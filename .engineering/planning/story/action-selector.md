@@ -15,6 +15,7 @@ relations:
 - serves: vision:O1
 - serves: vision:O3
 - serves: vision:governed-autonomy
+- depends_on: story:run-pipeline-skeleton
 scope:
 - confidence: cited
   path: crates/loom/src/lib.rs
@@ -22,11 +23,7 @@ scope:
   path: crates/loom/src/selection.rs
 - confidence: inferred
   path: crates/loom/tests/action_selector.rs
-- confidence: cited
-  path: ess/domains/run.yaml
-- confidence: cited
-  path: generated/rust/loom/
-revision: 7
+revision: 9
 ---
 ## Outcome
 
@@ -40,10 +37,14 @@ Laya, fallback and hierarchical selectors are `epic:fast-selector` (L-007 to L-0
 
 ## Shared surface
 
-Link 3 of the `epic:loom-native-harness` chain over `ess/domains/run.yaml`, `generated/rust/loom/`
-and `crates/loom/src/lib.rs`. It depends on `story:frontier-projection`, and
-`story:argument-generator` depends on it. The whole order is in `story:agent-executor` § Shared
-surface.
+Depends on `story:frontier-projection` for behaviour: it wires the projection into the executor
+pipeline in `crates/loom/src/lib.rs` and selects over the catalogue it returns. It depends on
+`story:run-pipeline-skeleton` for the select command and the `selection` module. It edits
+`lib.rs` (the selector seam moves out of it, and `Loom::run` selects over the catalogue), which
+`story:argument-generator`, `story:selection-revalidation` and `story:harness-loop-port` edit after
+it; `story:argument-generator` depends on it for behaviour. It shares no file with
+`story:session-transcript-streaming` and can run beside it. The whole order is in
+`story:agent-executor` § Shared surface.
 
 ## ESS first
 
@@ -52,9 +53,13 @@ surface.
   refuses it ("finite Binary64 is not admitted", probe 2026-10-04, ess 0.52.0). A selector's
   numeric confidence (`crates/loom/src/lib.rs:11`, today `Option<f32>`) is carried in the generated
   `primitives::Decimal`.
-- Add the select command with its accepted outcome and its refusal for an action id absent from the
-  catalogue; validate with `ess specify validate --path ess`; regenerate with `task generate`;
-  `task ess-gate` stays green.
+- **Declarations relied on** (landed by `story:run-pipeline-skeleton`): `loom.run.SelectAction`,
+  its `selected` outcome and its refusal naming an action id absent from the catalogue. This story
+  does not change `ess/`.
+- **Red test:** the first commit adds `selector_cannot_leave_catalogue` in
+  `crates/loom/tests/action_selector.rs`; it fails on that commit because the selector seam still
+  takes Commission's `Frontier`, not the projected catalogue, and no refusal names an id absent from
+  a catalogue. The implementation commit makes it pass.
 
 ## Domain relations
 
@@ -71,9 +76,9 @@ surface.
 
 ## Scope
 
-- `crates/loom/src/selection.rs` (new), `crates/loom/src/lib.rs`
+- `crates/loom/src/selection.rs` (created empty by `story:run-pipeline-skeleton`, filled here),
+  `crates/loom/src/lib.rs` (the executor pipeline)
 - `crates/loom/tests/action_selector.rs` (new)
-- `ess/domains/run.yaml`, `generated/rust/loom/` (chain surface)
 
 ## Acceptance
 

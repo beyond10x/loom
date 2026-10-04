@@ -21,6 +21,8 @@ relations:
 - serves: vision:O3
 - serves: vision:governed-autonomy
 - depends_on: story:harness-loop-port
+- depends_on: story:run-pipeline-skeleton
+- depends_on: story:harness-crate-port
 scope:
 - confidence: cited
   path: Cargo.lock
@@ -34,7 +36,7 @@ scope:
   path: ess/domains/run.yaml
 - confidence: cited
   path: generated/rust/loom/
-revision: 4
+revision: 5
 ---
 ## Outcome
 
@@ -65,23 +67,32 @@ synthesize / no-marker gate is `story:ess-hard-gate`'s (`task ess-gate`), not th
 
 ## Shared surface
 
-Link 10, the last, of the `epic:loom-native-harness` chain over `ess/domains/run.yaml` and
-`generated/rust/loom/`. It depends on `story:interruption-recovery`; the whole order is in
-`story:agent-executor` § Shared surface. `Taskfile.yml` and `Cargo.lock` are edited along the same
-chain.
+The last story of `epic:loom-native-harness`: it depends on every other open story of the epic,
+because the suite runs against the whole of `ess/` as they leave it. It edits `ess/domains/run.yaml`
+and `generated/rust/loom/` only when a scenario shows the specification wrong, and `Taskfile.yml`
+and `Cargo.lock` after `story:agent-executor` and `story:harness-crate-port`. The whole order is in
+`story:agent-executor` § Shared surface.
 
-## ESS
+## ESS first
 
 The suite covers the whole of `ess/`: `ess-inputs.yaml`, `system.yaml` and `domains/run.yaml`. This
 story changes the specification only when a scenario shows it is wrong; then `task ess-gate` passes
 and `task generate` regenerates. Every synthesize `note:` is relayed in the closing report.
+
+- **Specification change:** none planned — this story holds the implementation to the specification
+  the other stories leave; a change is made only when a scenario shows the specification wrong, and
+  then that change is its own first commit, red on `task drift`.
+- **Red test:** the first commit adds `crates/loom-conformance/` with the test
+  `ess_conformance_report` and an empty Rust target; it fails on that commit because the target
+  answers no command, so the report records failed scenarios (item 3). The target commits make it
+  pass.
 
 ## Scope
 
 - `crates/loom-conformance/` (new): `Cargo.toml`, `src/lib.rs`, `tests/conform.rs`
 - `Cargo.lock`; `Taskfile.yml` (task `conform`, one line in `check`)
 - `ess/SKIPPED.md` (new)
-- `ess/domains/run.yaml`, `generated/rust/loom/` (chain surface)
+- `ess/domains/run.yaml`, `generated/rust/loom/` (only when a scenario shows the specification wrong)
 
 ## Acceptance
 

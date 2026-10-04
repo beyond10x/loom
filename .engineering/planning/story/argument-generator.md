@@ -15,6 +15,7 @@ relations:
 - serves: vision:O1
 - serves: vision:O3
 - serves: vision:governed-autonomy
+- depends_on: story:run-pipeline-skeleton
 scope:
 - confidence: inferred
   path: crates/loom/src/arguments.rs
@@ -22,11 +23,7 @@ scope:
   path: crates/loom/src/lib.rs
 - confidence: inferred
   path: crates/loom/tests/argument_generator.rs
-- confidence: cited
-  path: ess/domains/run.yaml
-- confidence: cited
-  path: generated/rust/loom/
-revision: 6
+revision: 8
 ---
 ## Outcome
 
@@ -42,21 +39,29 @@ replaced: `ActionCandidate` is Canon's bootstrap type, deleted by Canon's wave 1
 
 - Validation of generated arguments against the action schema (ADR 0073 step 2) is not in this
   story: where an action schema comes from is held by `decision-blocker:action-argument-schema`.
-- Files: `crates/loom/src/arguments.rs` (new), `crates/loom/src/lib.rs`,
-  `crates/loom/tests/argument_generator.rs` (new), `ess/domains/run.yaml` and
-  `generated/rust/loom/` (chain surface).
+- Files: `crates/loom/src/arguments.rs` (created empty by `story:run-pipeline-skeleton`, filled
+  here), `crates/loom/src/lib.rs` (the executor pipeline),
+  `crates/loom/tests/argument_generator.rs` (new). Not `ess/` or `generated/`.
 
 ## Shared surface
 
-Link 4 of the `epic:loom-native-harness` chain over `ess/domains/run.yaml`, `generated/rust/loom/`
-and `crates/loom/src/lib.rs`. It depends on `story:action-selector`, and
+Depends on `story:action-selector` for behaviour: the generator is handed the catalogue entry the
+catalogue-based selection names, which that story introduces into the executor pipeline. Depends on
+`story:run-pipeline-skeleton` for the argument request command and the `arguments` module. It edits
+the executor pipeline in `crates/loom/src/lib.rs`, as `story:action-selector`,
+`story:selection-revalidation` and `story:harness-loop-port` do, so it is kept apart from them.
 `story:selection-revalidation` depends on it. The whole order is in `story:agent-executor` § Shared
 surface.
 
 ## ESS first
 
-Add the argument request command on `loom.run.ArgumentRequest` with its outcome; validate with
-`ess specify validate --path ess`; regenerate with `task generate`.
+- **Declarations relied on** (landed by `story:run-pipeline-skeleton`): `loom.run.RequestArguments`
+  and its `requested` outcome creating `loom.run.ArgumentRequest`. This story does not change
+  `ess/`.
+- **Red test:** the first commit adds `arguments_for_selected_action_only` in
+  `crates/loom/tests/argument_generator.rs`; it fails on that commit because the generator seam
+  still takes a `FrontierAction` and returns `{}` with no `ArgumentRequest` recorded. The
+  implementation commit makes it pass.
 
 ## Domain relations
 

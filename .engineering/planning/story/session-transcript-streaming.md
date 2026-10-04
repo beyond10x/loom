@@ -14,10 +14,9 @@ relations:
 - serves: vision:O1
 - serves: vision:O3
 - serves: vision:governed-autonomy
-- depends_on: story:harness-loop-port
+- depends_on: story:run-pipeline-skeleton
+- depends_on: story:harness-crate-port
 scope:
-- confidence: cited
-  path: crates/loom/src/lib.rs
 - confidence: inferred
   path: crates/loom/src/session.rs
 - confidence: inferred
@@ -26,13 +25,13 @@ scope:
   path: ess/domains/run.yaml
 - confidence: cited
   path: generated/rust/loom/
-revision: 4
+revision: 6
 ---
 ## Outcome
 
 Loom keeps the Harness behaviour for sessions, transcripts and streaming, through the disposition
 `story:harness-module-map` gives each crate (depend at a pinned revision, or port) and on top of the
-loop `story:harness-loop-port` carries in:
+loop `story:harness-crate-port` carries in:
 
 - turns are stateless and replayed whole;
 - opaque provider items are stored verbatim and refused across wires: a session recorded on one
@@ -44,17 +43,29 @@ loop `story:harness-loop-port` carries in:
 
 ## Shared surface
 
-Link 7 of the `epic:loom-native-harness` chain over `ess/domains/run.yaml`, `generated/rust/loom/`
-and `crates/loom/src/lib.rs`. It depends on `story:harness-loop-port`, and
-`story:compaction-contract` depends on it. The whole order is in `story:agent-executor` § Shared
-surface. It extends `loom.run.Session` and `loom.run.Turn`, which `story:compaction-contract` and
-`story:interruption-recovery` extend after it.
+Depends on `story:harness-crate-port` for type and behaviour: the carried `transcript.rs` depends
+only on the ported `harness-loop` and `harness-wire` (`docs/design/harness-map.md` § Why the rows
+fall this way), and every acceptance item runs a session over the ported loop against a
+provider-emulated endpoint without frontier tools. It does not need the frontier wiring of
+`story:harness-loop-port`, so that edge was dropped on 2026-10-04. Depends on
+`story:run-pipeline-skeleton` for the `session` module. It shares no file with
+`story:action-selector` and can run beside it.
+
+It still edits `ess/domains/run.yaml` and regenerates `generated/rust/loom/` itself: the `Session`
+and `Turn` shapes below are not settled enough for the skeleton to declare
+(`story:run-pipeline-skeleton` § Not declared here). `story:compaction-contract` and
+`story:interruption-recovery` depend on it and extend `loom.run.Session` after it. The whole order
+is in `story:agent-executor` § Shared surface.
 
 ## ESS first
 
-Extend `loom.run.Session` and `loom.run.Turn` with the filing and resume commands and their outcomes,
-including the cross-wire refusal; validate with `ess specify validate --path ess`; regenerate with
-`task generate`.
+- **First commit:** extend `loom.run.Session` and `loom.run.Turn` in `ess/domains/run.yaml` with the
+  filing and resume commands and their outcomes, including the cross-wire refusal naming both
+  wires; `ess specify validate --path ess` passes; nothing else changes.
+- **Red on it:** `task drift` fails, naming the first file of `generated/rust/loom/` that differs
+  from the model regenerated from the changed specification.
+- **Then:** `task generate`; the test `session_transcript_streaming`; the port of the carried
+  `transcript.rs` pieces that makes it pass.
 
 ## Domain relations
 
@@ -67,9 +78,9 @@ including the cross-wire refusal; validate with `ess specify validate --path ess
 
 ## Scope
 
-- `crates/loom/src/session.rs` (new), `crates/loom/src/lib.rs`
+- `crates/loom/src/session.rs` (created empty by `story:run-pipeline-skeleton`, filled here)
 - `crates/loom/tests/session_transcript_streaming.rs` (new)
-- `ess/domains/run.yaml`, `generated/rust/loom/` (chain surface)
+- `ess/domains/run.yaml`, `generated/rust/loom/` (its own `Session` and `Turn` declarations)
 
 ## Constraints
 

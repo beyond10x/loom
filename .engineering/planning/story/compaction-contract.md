@@ -14,6 +14,8 @@ relations:
 - serves: vision:O1
 - serves: vision:O3
 - serves: vision:governed-autonomy
+- depends_on: story:run-pipeline-skeleton
+- depends_on: story:harness-loop-port
 scope:
 - confidence: inferred
   path: crates/loom/src/compaction.rs
@@ -25,7 +27,7 @@ scope:
   path: ess/domains/run.yaml
 - confidence: cited
   path: generated/rust/loom/
-revision: 4
+revision: 5
 ---
 ## Outcome
 
@@ -38,17 +40,26 @@ that request, and nothing the model wrote is promoted to trusted context.
 
 ## Shared surface
 
-Link 8 of the `epic:loom-native-harness` chain over `ess/domains/run.yaml`, `generated/rust/loom/`
-and `crates/loom/src/lib.rs`. It depends on `story:session-transcript-streaming`, and
-`story:interruption-recovery` depends on it; both of those also edit `loom.run.Session`. The whole
-order is in `story:agent-executor` § Shared surface. It also depends on `story:frontier-projection`
-directly.
+Behavioural edges: `story:session-transcript-streaming` (the compaction record lives on the filed
+session), `story:frontier-projection` (the first request after compaction carries a fresh
+projection) and `story:harness-loop-port` (acceptance item 2 reads the tool list of the wired loop's
+requests). Depends on `story:run-pipeline-skeleton` for the `compaction` module.
+
+It still edits `loom.run.Session` in `ess/domains/run.yaml` and regenerates `generated/rust/loom/`
+itself (the compaction record and usage shapes are not settled for the skeleton), and so does
+`story:interruption-recovery`. The two have no behavioural edge between them; the former
+ordering-only edge from `story:interruption-recovery` to this story was dropped on 2026-10-04, and
+the shared `ess/` and `generated/` paths keep them in separate waves. The whole order is in
+`story:agent-executor` § Shared surface.
 
 ## ESS first
 
-Add the compaction command and its outcome on `loom.run.Session`, the outcome carrying the
-compaction's usage; validate with `ess specify validate --path ess`; regenerate with
-`task generate`.
+- **First commit:** add the compaction command and its outcome on `loom.run.Session` in
+  `ess/domains/run.yaml`, the outcome carrying the compaction's usage; `ess specify validate --path
+  ess` passes; nothing else changes.
+- **Red on it:** `task drift` fails, naming the first file of `generated/rust/loom/` that differs
+  from the model regenerated from the changed specification.
+- **Then:** `task generate`; the test `compaction_contract`; the implementation that makes it pass.
 
 ## Domain relations
 
@@ -57,9 +68,10 @@ compaction's usage; validate with `ess specify validate --path ess`; regenerate 
 
 ## Scope
 
-- `crates/loom/src/compaction.rs` (new), `crates/loom/src/lib.rs`
+- `crates/loom/src/compaction.rs` (created empty by `story:run-pipeline-skeleton`, filled here),
+  `crates/loom/src/lib.rs` (where compaction hooks into the run)
 - `crates/loom/tests/compaction_contract.rs` (new)
-- `ess/domains/run.yaml`, `generated/rust/loom/` (chain surface)
+- `ess/domains/run.yaml`, `generated/rust/loom/` (its own `Session` declarations)
 
 ## Acceptance
 

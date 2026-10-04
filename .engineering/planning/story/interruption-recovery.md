@@ -14,7 +14,8 @@ relations:
 - serves: vision:O1
 - serves: vision:O3
 - serves: vision:governed-autonomy
-- depends_on: story:compaction-contract
+- depends_on: story:run-pipeline-skeleton
+- depends_on: story:harness-loop-port
 scope:
 - confidence: cited
   path: crates/loom/src/lib.rs
@@ -26,7 +27,7 @@ scope:
   path: ess/domains/run.yaml
 - confidence: cited
   path: generated/rust/loom/
-revision: 4
+revision: 5
 ---
 ## Outcome
 
@@ -39,16 +40,25 @@ the interruption cannot be proposed against a moved case.
 
 ## Shared surface
 
-Link 9 of the `epic:loom-native-harness` chain over `ess/domains/run.yaml`, `generated/rust/loom/`
-and `crates/loom/src/lib.rs`. It depends on `story:compaction-contract`, and
-`story:loom-ess-conformance` depends on it. Both this story and the two before it edit
-`loom.run.Session`. The whole order is in `story:agent-executor` § Shared surface. It also depends on
-`story:session-transcript-streaming` and `story:selection-revalidation` directly.
+Behavioural edges: `story:session-transcript-streaming` (recovery resumes the filed session by
+id), `story:selection-revalidation` (recovery revalidates before proposing) and
+`story:harness-loop-port` (a resumed run re-projects and selects through the wired loop). Depends on
+`story:run-pipeline-skeleton` for the `recovery` module. The former edge to
+`story:compaction-contract` was ordering-only (both edit `loom.run.Session`) and was dropped on
+2026-10-04; the shared `ess/` and `generated/` paths still keep the two in separate waves.
+`story:loom-ess-conformance` depends on it. The whole order is in `story:agent-executor` § Shared
+surface.
 
 ## ESS first
 
-Add the interrupt and resume commands and their outcomes on `loom.run.Session`; validate with
-`ess specify validate --path ess`; regenerate with `task generate`.
+- **First commit:** add the interrupt and resume commands and their outcomes on `loom.run.Session`
+  in `ess/domains/run.yaml`; `ess specify validate --path ess` passes; nothing else changes. Whether
+  this resume is the resume `story:session-transcript-streaming` declares, extended, or a second
+  command is settled before that commit, and the story says which.
+- **Red on it:** `task drift` fails, naming the first file of `generated/rust/loom/` that differs
+  from the model regenerated from the changed specification.
+- **Then:** `task generate`; the test `interruption_recovery`; the implementation that makes it
+  pass.
 
 ## Domain relations
 
@@ -63,9 +73,10 @@ Add the interrupt and resume commands and their outcomes on `loom.run.Session`; 
 
 ## Scope
 
-- `crates/loom/src/recovery.rs` (new), `crates/loom/src/lib.rs`
+- `crates/loom/src/recovery.rs` (created empty by `story:run-pipeline-skeleton`, filled here),
+  `crates/loom/src/lib.rs` (where cancellation and resume hook into the run)
 - `crates/loom/tests/interruption_recovery.rs` (new)
-- `ess/domains/run.yaml`, `generated/rust/loom/` (chain surface)
+- `ess/domains/run.yaml`, `generated/rust/loom/` (its own `Session` declarations)
 
 ## Acceptance
 

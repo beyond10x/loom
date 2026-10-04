@@ -16,18 +16,13 @@ relations:
 - serves: vision:O3
 - serves: vision:governed-autonomy
 - depends_on: story:harness-module-map
+- depends_on: story:run-pipeline-skeleton
 scope:
-- confidence: cited
-  path: crates/loom/src/lib.rs
 - confidence: inferred
   path: crates/loom/src/projection.rs
 - confidence: inferred
   path: crates/loom/tests/frontier_projection.rs
-- confidence: cited
-  path: ess/domains/run.yaml
-- confidence: cited
-  path: generated/rust/loom/
-revision: 7
+revision: 9
 ---
 ## Outcome
 
@@ -51,22 +46,31 @@ are not used.
 - Tool membership only. The parameter schema each projected tool carries is held by
   `decision-blocker:action-argument-schema`. The intersection with available integrations in ADR
   0072 is `epic:effect-bindings`.
-- Files: `crates/loom/src/projection.rs` (new), `crates/loom/src/lib.rs`,
-  `crates/loom/tests/frontier_projection.rs` (new), `ess/domains/run.yaml` and
-  `generated/rust/loom/` (chain surface).
+- Files: `crates/loom/src/projection.rs` (created empty by `story:run-pipeline-skeleton`, filled
+  here) and `crates/loom/tests/frontier_projection.rs` (new). Not `crates/loom/src/lib.rs`, `ess/`
+  or `generated/`.
 
 ## Shared surface
 
-Link 2 of the `epic:loom-native-harness` chain over `ess/domains/run.yaml`, `generated/rust/loom/`
-and `crates/loom/src/lib.rs`. It depends on `story:agent-executor`, and `story:action-selector`
-depends on it. It also depends on `story:harness-module-map`, which names the seam above. The whole
-order is in `story:agent-executor` § Shared surface.
+Depends on `story:run-pipeline-skeleton` (the declarations below and the `projection` module),
+`story:agent-executor` (the generated model and the Commission frontier seam) and
+`story:harness-module-map` (the seam above). It shares no file with `story:harness-crate-port`
+and can run beside it. `story:action-selector` depends on it for behaviour: the selector selects
+over the catalogue this story projects. The whole order is in `story:agent-executor` § Shared
+surface.
 
 ## ESS first
 
-Add the projection command on `loom.run.ActionCatalogue` with its outcome and the projected entries
-(action id and status); validate with `ess specify validate --path ess`; regenerate with
-`task generate`; `task ess-gate` stays green. The catalogue's owner is settled, not declared here:
+- **Declarations relied on** (landed by `story:run-pipeline-skeleton`): `loom.run.ProjectCatalogue`,
+  `loom.run.CatalogueEntry` (action id and status), `loom.run.CatalogueEntryStatus` (`Admissible`,
+  `ApprovalRequired`) and `ActionCatalogue.entries`. This story does not change `ess/`; if the
+  projection needs an entry field beyond action id and status, it stops and reports it.
+- **Red test:** the first commit adds `projection_follows_frontier` in
+  `crates/loom/tests/frontier_projection.rs`; it fails on that commit because
+  `crates/loom/src/projection.rs` holds no projection function yet. The implementation commit
+  makes it pass.
+
+The catalogue's owner is settled, not declared here:
 one catalogue per turn (operator decision 2026-10-04 on `decision-blocker:catalogue-ownership`),
 modelled by `story:ess-hard-gate` as `ActionCatalogue.turn_id` and the relation `catalogue` on
 `loom.run.Turn` (owns, one). A projected catalogue carries the `turn_id` of the turn it is

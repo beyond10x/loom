@@ -15,6 +15,7 @@ relations:
 - serves: vision:O1
 - serves: vision:O3
 - serves: vision:governed-autonomy
+- depends_on: story:run-pipeline-skeleton
 scope:
 - confidence: cited
   path: crates/loom/src/lib.rs
@@ -22,11 +23,7 @@ scope:
   path: crates/loom/src/revalidation.rs
 - confidence: inferred
   path: crates/loom/tests/selection_revalidation.rs
-- confidence: cited
-  path: ess/domains/run.yaml
-- confidence: cited
-  path: generated/rust/loom/
-revision: 6
+revision: 8
 ---
 ## Outcome
 
@@ -48,16 +45,22 @@ again on its side (commission `story:stale-revision-action-request`, M-008).
 
 ## Shared surface
 
-Link 5 of the `epic:loom-native-harness` chain over `ess/domains/run.yaml`, `generated/rust/loom/`
-and `crates/loom/src/lib.rs`. It depends on `story:argument-generator`, and
-`story:harness-loop-port` depends on it. The whole order is in `story:agent-executor` § Shared
-surface.
+Depends on `story:argument-generator`: revalidation is the last step before the executor pipeline
+returns a `ProposedAction`, which carries the `ProposedActionArguments` that story produces, and
+both edit that pipeline in `crates/loom/src/lib.rs`. Depends on `story:run-pipeline-skeleton` for
+the revalidation command and the `revalidation` module. `story:harness-loop-port` and
+`story:interruption-recovery` depend on it for behaviour. The whole order is in
+`story:agent-executor` § Shared surface.
 
 ## ESS first
 
-Add the revalidation command on `loom.run.Selection` (lifecycle `Selected` to `Admitted` or
-`Refused`) with its two refusal outcomes (not in frontier, stale revision); validate with
-`ess specify validate --path ess`; regenerate with `task generate`.
+- **Declarations relied on** (landed by `story:run-pipeline-skeleton`): the `loom.run.Selection`
+  lifecycle `Selected` → `Admitted` or `Refused`, and `loom.run.RevalidateSelection` with outcomes
+  `admitted`, `not-in-frontier` and `stale-revision`. This story does not change `ess/`.
+- **Red test:** the first commit adds `revalidation_refuses_before_proposing` in
+  `crates/loom/tests/selection_revalidation.rs`; it fails on that commit because Loom returns a
+  `ProposedAction` without asking the governor for the current frontier (items 1, 2 and 4). The
+  implementation commit makes it pass.
 
 ## Domain relations
 
@@ -77,9 +80,9 @@ Add the revalidation command on `loom.run.Selection` (lifecycle `Selected` to `A
 
 ## Scope
 
-- `crates/loom/src/revalidation.rs` (new), `crates/loom/src/lib.rs`
+- `crates/loom/src/revalidation.rs` (created empty by `story:run-pipeline-skeleton`, filled here),
+  `crates/loom/src/lib.rs` (the executor pipeline)
 - `crates/loom/tests/selection_revalidation.rs` (new)
-- `ess/domains/run.yaml`, `generated/rust/loom/` (chain surface)
 
 ## Acceptance
 

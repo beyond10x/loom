@@ -62,6 +62,12 @@ An open question is settled before the specification changes — in a story, or 
 `decision-blocker` when nobody has decided it — and is never written into `ess/` as an
 `UNMAPPED:` marker.
 
+Spec first, then red, then implement (Atlas ADR 0080). A unit's first commit changes only `ess/`;
+on it a named test fails (a conformance scenario, `task drift`, or the story's own new test when
+its declarations already landed), and the run is recorded; later commits make it pass without
+changing `ess/`. Every story names that change and that test in its `## ESS first` section. Only a
+change with no behaviour change is exempt, and its story says so.
+
 ## Work
 
 - Planned in the AEP store under `.engineering/`, written only through `aep plan artifact`. Body
