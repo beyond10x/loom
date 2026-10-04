@@ -31,13 +31,13 @@
       "items": [
         {
           "title": "Selections stay inside the frontier",
-          "description": "An unknown or blocked action id fails the run, whatever confidence the selector reports. Confidence never grants authority.",
+          "description": "Every selection goes to Commission's admission check. One it refuses, such as an action outside the frontier, is never proposed, whatever the selector reported.",
           "status": "shipped",
           "href": "/docs/concepts/action-selection"
         },
         {
-          "title": "Approval-gated actions suspend",
-          "description": "An action that needs authority suspends the run with the capability it requires. Loom proposes nothing for it.",
+          "title": "Authority stays with Commission",
+          "description": "An action that needs authority is proposed, not suspended: Commission rechecks it and asks its authority provider. Loom holds no admission rule of its own.",
           "status": "shipped"
         },
         {
@@ -106,14 +106,19 @@
           "detail": "A run selects, checks and returns an executor outcome."
         },
         {
-          "label": "Selections outside the frontier are refused",
+          "label": "Selections Commission refuses are never proposed",
           "status": "shipped",
-          "detail": "Unknown or blocked ids fail the run; a unit test holds this."
+          "detail": "They end the run with NoUsefulAction; a unit test holds this."
         },
         {
-          "label": "Approval-gated actions suspend the run",
+          "label": "Actions that need authority go to Commission",
           "status": "shipped",
-          "detail": "Suspended, naming the capability required."
+          "detail": "Proposed for Commission to authorize; Loom never suspends for authority."
+        },
+        {
+          "label": "Run model generated from ESS",
+          "status": "shipped",
+          "detail": "Session, Turn, ActionCatalogue, Selection and ArgumentRequest, synthesized from ess/."
         },
         {
           "label": "ESS specification and its hard gate",
@@ -127,7 +132,8 @@
         },
         {
           "label": "Catalogue projection and argument schema validation",
-          "status": "planned"
+          "status": "planned",
+          "detail": "Declared in the specification; not built yet."
         },
         {
           "label": "Reasoning, fast typed and hybrid selectors",

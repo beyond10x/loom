@@ -103,10 +103,7 @@ const config: Config = {
       ],
       copyright: 'A beyond10x project. Loom · Apache-2.0.',
     },
-    mermaid: {
-      theme: {light: 'neutral', dark: 'dark'},
-    },
   } satisfies Preset.ThemeConfig,
 };
 
-export default withProductSite(config, {landing: './product.json', mark: 'L'});
+export default withProductSite(config, {landing: './product.json', product: 'loom'});
