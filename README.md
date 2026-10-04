@@ -10,7 +10,8 @@ run it:
 2. selects one action (a reasoning model, a deterministic rule, or a fast typed selector);
 3. asks the model for arguments to that action only, and validates them against its schema;
 4. hands the action back for revalidation against the current case revision and authority;
-5. executes it through a trusted adapter.
+5. returns it as a `ProposedAction`. The Commission runtime rechecks frontier, case revision and
+   authority, then invokes it through a trusted adapter (Atlas ADR 0082).
 
 A selector can be wrong about which admissible action is best. It cannot produce an action the
 frontier does not contain.
