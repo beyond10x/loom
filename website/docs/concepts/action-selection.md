@@ -23,9 +23,11 @@ arguments as JSON. It never sees the choice between actions; it only completes t
 chosen.
 
 A selector is given the selection context and the projected catalogue's entries, and returns one
-choice; Loom refuses a choice the catalogue does not list. A generator sees the entry it fills in,
-and arguments are still a JSON string. The candidate descriptors in the contract are the design the
-catalogue entries grow into.
+choice; Loom refuses a choice the catalogue does not list. A generator is given the argument context
+and the one catalogue entry the selection names, never the rest of the catalogue, and returns a
+JSON value, which becomes the proposed action's arguments. Before the generator is called, Loom
+records the argument request against the selection it serves. The candidate descriptors in the
+contract are the design the catalogue entries grow into.
 
 ## Safety rules
 
