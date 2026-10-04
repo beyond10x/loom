@@ -40,7 +40,7 @@ fn suite() -> Value {
     let out = out_dir.join("suite.json");
     let run = Command::new("ess")
         .args(["verify", "conform", "synthesize", "--path"])
-        .arg(root().join("ess"))
+        .arg(root().join("ess/commission"))
         .arg("--out")
         .arg(&out)
         .output()

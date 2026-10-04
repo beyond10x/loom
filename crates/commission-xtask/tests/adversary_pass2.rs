@@ -41,11 +41,16 @@ fn repo_copy(case: &Path) -> PathBuf {
     let root = repo_root();
     let copy = case.join("root");
     fs::create_dir_all(&copy).expect("create root copy");
-    for file in ["Cargo.toml", "Cargo.lock", "Taskfile.yml"] {
+    for file in [
+        "Cargo.toml",
+        "Cargo.lock",
+        "Taskfile.yml",
+        "Taskfile.commission.yml",
+    ] {
         fs::copy(root.join(file), copy.join(file)).expect("copy root file");
     }
     for dir in [
-        "ess",
+        "ess/commission",
         "crates/commission",
         "crates/commission-xtask",
         "generated/rust/commission",

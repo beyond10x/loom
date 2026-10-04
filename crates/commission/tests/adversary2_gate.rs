@@ -3,7 +3,7 @@
 //! The gate's functions are private to `ess_gate.rs`, so this binary compiles that file as a module
 //! and drives its real `ess_gate` test end to end: it re-runs itself, selecting only
 //! `ess_gate_src::ess_gate`, with `CARGO_MANIFEST_DIR` pointing at a scratch repository whose
-//! `ess/` is a mutated copy of this one. `ess_gate.rs` reads that variable when it runs, so the
+//! `ess/commission/` is a mutated copy of this one. `ess_gate.rs` reads that variable when it runs, so the
 //! child checks the copy, with the code as it stands in this tree.
 //!
 //! A side effect: the cases of `ess_gate.rs` also run once more inside this binary.
@@ -61,11 +61,14 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
-/// A scratch repository: `<dir>/ess` (a copy of this repository's `ess/`) and an empty
+/// A scratch repository: `<dir>/ess/commission` (a copy of this repository's `ess/commission/`) and an empty
 /// `<dir>/crates/commission`, so `CARGO_MANIFEST_DIR/../..` resolves to `<dir>`.
 fn scratch_repository(purpose: &str) -> Scratch {
     let scratch = Scratch::new(purpose);
-    copy_tree(&repository().join("ess"), &scratch.dir.join("ess"));
+    copy_tree(
+        &repository().join("ess/commission"),
+        &scratch.dir.join("ess/commission"),
+    );
     fs::create_dir_all(scratch.dir.join("crates/commission")).unwrap();
     scratch
 }
@@ -143,7 +146,9 @@ const INVARIANT_QUOTING_A_ZERO_COUNT: &str =
 #[test]
 fn adversary2_gate_reads_the_summary_count_not_a_quoted_one() {
     let scratch = scratch_repository("quoted-count");
-    let domain = scratch.dir.join("ess/domains/responsibility.yaml");
+    let domain = scratch
+        .dir
+        .join("ess/commission/domains/responsibility.yaml");
     let text = fs::read_to_string(&domain).unwrap();
     let lifecycle_end = "      terminal: [Issued]\n";
     assert_eq!(text.matches(lifecycle_end).count(), 1, "Frontier lifecycle");
@@ -160,7 +165,7 @@ fn adversary2_gate_reads_the_summary_count_not_a_quoted_one() {
     let suite = scratch.dir.join("probe-suite.json");
     let probe = Command::new("ess")
         .args(["verify", "conform", "synthesize", "--path"])
-        .arg(scratch.dir.join("ess"))
+        .arg(scratch.dir.join("ess/commission"))
         .arg("--out")
         .arg(&suite)
         .output()
@@ -190,7 +195,7 @@ fn adversary2_gate_reads_the_summary_count_not_a_quoted_one() {
 #[test]
 fn adversary2_gate_refuses_an_older_required_ess() {
     let scratch = scratch_repository("older-requires");
-    let inputs = scratch.dir.join("ess/ess-inputs.yaml");
+    let inputs = scratch.dir.join("ess/commission/ess-inputs.yaml");
     let text = fs::read_to_string(&inputs).unwrap();
     assert_eq!(
         text.matches("requires: ess 0.52.0").count(),

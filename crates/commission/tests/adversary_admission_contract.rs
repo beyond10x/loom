@@ -73,7 +73,7 @@ fn shape_keys(contract: &str) -> BTreeSet<String> {
 
 #[test]
 fn frontier_contract_shape_is_the_specified_fields() {
-    let domain = read("ess/domains/responsibility.yaml");
+    let domain = read("ess/commission/domains/responsibility.yaml");
     let mut specified = BTreeSet::new();
     for name in [
         "commission.responsibility.Frontier",
@@ -83,13 +83,13 @@ fn frontier_contract_shape_is_the_specified_fields() {
     ] {
         specified.extend(declared_fields(&domain, name));
     }
-    let shown = shape_keys(&read("docs/contracts/frontier.md"));
+    let shown = shape_keys(&read("docs/commission/contracts/frontier.md"));
 
     let missing: Vec<_> = specified.difference(&shown).collect();
     let extra: Vec<_> = shown.difference(&specified).collect();
     assert!(
         missing.is_empty() && extra.is_empty(),
-        "docs/contracts/frontier.md's shape disagrees with ess/domains/responsibility.yaml: \
+        "docs/commission/contracts/frontier.md's shape disagrees with ess/commission/domains/responsibility.yaml: \
          specified but not shown {missing:?}; shown but not specified {extra:?}"
     );
 }

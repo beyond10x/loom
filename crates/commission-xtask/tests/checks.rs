@@ -376,12 +376,17 @@ fn no_hand_model_does_not_flag_uses_comments_or_longer_names() {
 fn repo_copy(case: &Path, with_generated: bool) -> PathBuf {
     let root = repo_root();
     let copy = case.join("root");
-    for file in ["Cargo.toml", "Cargo.lock", "Taskfile.yml"] {
+    for file in [
+        "Cargo.toml",
+        "Cargo.lock",
+        "Taskfile.yml",
+        "Taskfile.commission.yml",
+    ] {
         fs::create_dir_all(&copy).expect("create root copy");
         fs::copy(root.join(file), copy.join(file)).expect("copy root file");
     }
     for dir in [
-        "ess",
+        "ess/commission",
         "crates/commission",
         "crates/commission-docs",
         "crates/commission-testkit",
@@ -579,7 +584,8 @@ fn no_hand_model_refuses_a_source_it_cannot_parse() {
 
 #[test]
 fn check_runs_drift_and_no_hand_model_before_any_cargo_step() {
-    let taskfile = fs::read_to_string(repo_root().join("Taskfile.yml")).expect("read Taskfile");
+    let taskfile =
+        fs::read_to_string(repo_root().join("Taskfile.commission.yml")).expect("read Taskfile");
     let check = taskfile
         .split("\n  check:\n")
         .nth(1)
@@ -721,8 +727,11 @@ fn generate_replaces_a_stale_tree_and_removes_files_synthesis_no_longer_writes()
 fn generate_keeps_the_committed_tree_when_synthesis_fails() {
     let case = case_dir("generate_keeps_the_committed_tree_when_synthesis_fails");
     let root = repo_copy(&case, true);
-    fs::write(root.join("ess/system.yaml"), "format: ess/20\nsystem: [\n")
-        .expect("break the specification");
+    fs::write(
+        root.join("ess/commission/system.yaml"),
+        "format: ess/20\nsystem: [\n",
+    )
+    .expect("break the specification");
     let tree = root.join("generated/rust/commission");
     let before = tree_bytes(&tree);
 
@@ -756,9 +765,18 @@ fn generate_keeps_the_committed_tree_when_synthesis_fails() {
 fn task_generate_writes_the_tree_when_it_is_absent() {
     let case = case_dir("task_generate_writes_the_tree_when_it_is_absent");
     let root = repo_copy(&case, false);
+    // `cargo --locked` loads the whole Loom workspace, so Loom's own members come along.
+    for dir in [
+        "crates/loom",
+        "crates/loom-docs",
+        "crates/loom-xtask",
+        "generated/rust/loom",
+    ] {
+        copy_tree(&repo_root().join(dir), &root.join(dir));
+    }
     let target = Path::new(env!("CARGO_TARGET_TMPDIR")).join("task-generate-target");
     let out = Command::new("task")
-        .arg("generate")
+        .arg("commission:generate")
         .current_dir(&root)
         .env("CARGO_TARGET_DIR", &target)
         .output()

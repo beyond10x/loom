@@ -352,7 +352,7 @@ fn frontier_for_another_case_is_not_admitted() {
 
 /// Expectation 5: the specification declares the action-request command.
 fn specification_declares_the_command() {
-    let path = root().join("ess/domains/responsibility.yaml");
+    let path = root().join("ess/commission/domains/responsibility.yaml");
     let source = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
     let commands = source
@@ -380,7 +380,7 @@ fn suite_synthesizes() {
     let out = out_dir.join("suite.json");
     let run = Command::new("ess")
         .args(["verify", "conform", "synthesize", "--path"])
-        .arg(root().join("ess"))
+        .arg(root().join("ess/commission"))
         .arg("--out")
         .arg(&out)
         .output()
@@ -425,7 +425,7 @@ fn suite_synthesizes() {
 fn authority_decision_references_one_request() {
     let validate = Command::new("ess")
         .args(["specify", "validate", "--path"])
-        .arg(root().join("ess"))
+        .arg(root().join("ess/commission"))
         .output()
         .unwrap_or_else(|error| panic!("run `ess specify validate`: {error}"));
     assert!(
@@ -437,7 +437,7 @@ fn authority_decision_references_one_request() {
 
     let compile = Command::new("ess")
         .args(["specify", "compile", "--path"])
-        .arg(root().join("ess"))
+        .arg(root().join("ess/commission"))
         .args(["--format", "json"])
         .output()
         .unwrap_or_else(|error| panic!("run `ess specify compile`: {error}"));

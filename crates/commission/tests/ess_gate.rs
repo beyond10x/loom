@@ -1,13 +1,13 @@
 //! Commission's ESS specification is a hard gate (Atlas ADR 0076).
 //!
-//! The specification under `ess/` passes four steps, in order, and the gate fails on the first that
+//! The specification under `ess/commission/` passes four steps, in order, and the gate fails on the first that
 //! does not hold, naming the step and quoting its output:
 //!
 //! 1. `ess specify validate --path ess --strict-requires` exits 0;
 //! 2. `ess specify compile --path ess --format json` exits 0 and prints JSON;
 //! 3. `ess verify conform synthesize --path ess --out <scratch>/suite.json` exits 0 and reports 0
 //!    refusals;
-//! 4. no file under `ess/` contains the open-question marker.
+//! 4. no file under `ess/commission/` contains the open-question marker.
 //!
 //! `ess` must be on `PATH`. When it cannot be run the gate fails and names it; it never skips.
 
@@ -38,7 +38,7 @@ fn root() -> PathBuf {
     let manifest = std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| {
         panic!(
             "CARGO_MANIFEST_DIR is unset: run this gate through cargo (`task ess-gate`), which \
-             names the crate whose repository's ess/ it checks"
+             names the crate whose repository's ess/commission/ it checks"
         )
     });
     let root = PathBuf::from(manifest).join("../..");
@@ -46,7 +46,7 @@ fn root() -> PathBuf {
 }
 
 fn specification() -> PathBuf {
-    root().join("ess")
+    root().join("ess/commission")
 }
 
 /// A fresh directory under `CARGO_TARGET_TMPDIR`, removed when dropped.
@@ -87,7 +87,7 @@ fn run_ess(step: &str, args: &[&str], cwd: &Path) -> Result<Output, String> {
         .map_err(|error| {
             format!(
                 "{step}: cannot run `{ESS}` ({error}); the gate needs ess 0.52.0 on PATH \
-                 (ess/ess-inputs.yaml)"
+                 (ess/commission/ess-inputs.yaml)"
             )
         })
 }
@@ -564,13 +564,13 @@ fn block<'a>(body: &'a str, header: &str, indent: usize) -> Vec<&'a str> {
 /// ADR 0076.
 #[test]
 fn check_runs_the_gate_and_agents_states_it() {
-    let taskfile_path = root().join("Taskfile.yml");
+    let taskfile_path = root().join("Taskfile.commission.yml");
     let taskfile = fs::read_to_string(&taskfile_path)
         .unwrap_or_else(|error| panic!("read {}: {error}", taskfile_path.display()));
     let check = block(&taskfile, "check:", 2);
     assert!(
         check.iter().any(|line| line.trim() == "- task: ess-gate"),
-        "Taskfile.yml: task `check` does not list `ess-gate` as a step:\n{}",
+        "Taskfile.commission.yml: task `check` does not list `ess-gate` as a step:\n{}",
         check.join("\n")
     );
     let ess_gate = block(&taskfile, "ess-gate:", 2);
@@ -582,7 +582,7 @@ fn check_runs_the_gate_and_agents_states_it() {
     assert_eq!(
         commands,
         ["- cargo test --locked -p b10x-commission --test ess_gate"],
-        "Taskfile.yml: task `ess-gate` must run exactly the whole ess_gate test, with no filter:\n{}",
+        "Taskfile.commission.yml: task `ess-gate` must run exactly the whole ess_gate test, with no filter:\n{}",
         ess_gate.join("\n")
     );
 

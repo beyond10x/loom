@@ -54,9 +54,13 @@ conditions fails `task check`:
 3. `ess verify conform synthesize` exits 0 with 0 refusals;
 4. no file under `ess/` contains `UNMAPPED:` — the specification carries no open question.
 
-No story is implemented while the gate is red. The `UNMAPPED:` scan stands in for ESS until
-ESS refuses open entries itself: it is removed when the ESS release that does
-(beyond10x/ess `epic:typed-open-questions`) is pinned.
+No story is implemented while the gate is red, whether or not it edits `ess/`. The `UNMAPPED:`
+scan stands in for ESS until ESS refuses open entries itself: the `UNMAPPED:` scan is removed when
+the ESS release that refuses open entries (beyond10x/ess `epic:typed-open-questions`) is pinned.
+
+Commission's specification is its own ESS system under `ess/commission/` (`system.yaml`,
+`ess-inputs.yaml`), held to the same four conditions with `--path ess/commission` by
+`task commission:ess-gate` (`crates/commission/tests/ess_gate.rs`), which `task check` also runs.
 
 An open question is settled before the specification changes — in a story, or in a
 `decision-blocker` when nobody has decided it — and is never written into `ess/` as an
@@ -77,8 +81,22 @@ change with no behaviour change is exempt, and its story says so.
   `generated/rustfmt.toml` sets `disable_all_formatting`, so `cargo fmt --all` (which reaches the
   path dependency) leaves it alone. Do not add a `rustfmt.toml` inside the generated tree: `task
   drift` would report it and `task generate` would delete it.
-- `b10x-commission` (and, for tests, `b10x-commission-testkit`) is a git dependency on `main`, pinned by
-  `Cargo.lock`. The frontier Loom reads is Commission's generated `Frontier`; Loom may use `b10x-canon`.
+- `b10x-commission` (and, for tests, `b10x-commission-testkit`) is a path dependency on
+  `crates/commission` (`crates/commission-testkit`) in this workspace. The frontier Loom reads is
+  Commission's generated `Frontier`; Loom may use `b10x-canon`, the Commission contracts crate may
+  not.
 - Every commit and push is `b10x-bot[bot]`'s through `b10x-gates bot`; every GitHub write goes
   through `b10x-gates api`.
 - Use a managed worktree (`worktree create --repo loom --purpose …`) for changes.
+
+## Commission
+
+Commission's history was merged into Loom; its files keep their Commission paths so `git log
+--follow` reaches it. Crates: `crates/commission` (`b10x-commission`, the contracts; its dependency
+tree names no `b10x-canon`, `b10x-loom` or model-provider crate, enforced by `task
+commission:deps-guard` and `crates/commission-testkit/tests/skeleton.rs`), `crates/commission-testkit`,
+`crates/commission-conformance`, `crates/commission-docs` and `crates/commission-xtask`. ESS:
+`ess/commission/`, generated into `generated/rust/commission/` (`task commission:generate`, pinned by
+`task commission:drift`). Docs: `docs/commission/`, reference pages in
+`website/docs/reference/commission/` (`task commission:docs`). Its tasks live in
+`Taskfile.commission.yml`, included under the `commission:` namespace.

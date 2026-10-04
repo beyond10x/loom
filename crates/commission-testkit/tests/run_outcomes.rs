@@ -380,7 +380,7 @@ fn resume_continues_the_same_run() {
 /// Expectation 8: `RunOutcome` is declared in the specification as a union of the six variants
 /// and reaches this crate generated, through `b10x-commission`'s re-export.
 fn run_outcome_is_the_generated_type() {
-    let path = root().join("ess/domains/responsibility.yaml");
+    let path = root().join("ess/commission/domains/responsibility.yaml");
     let source = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
     let declared = format!("- name: {NS}RunOutcome\n    kind: union\n");
@@ -392,7 +392,7 @@ fn run_outcome_is_the_generated_type() {
 
     let out = Command::new("ess")
         .args(["specify", "compile", "--path"])
-        .arg(root().join("ess"))
+        .arg(root().join("ess/commission"))
         .args(["--format", "json"])
         .output()
         .unwrap_or_else(|error| panic!("run `ess specify compile`: {error}"));

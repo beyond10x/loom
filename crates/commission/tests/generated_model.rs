@@ -44,13 +44,20 @@ fn synthesized_scenarios(root: &Path) -> Vec<String> {
         .join(format!("skipped-md-suite-{}.json", std::process::id()));
     let output = std::process::Command::new("ess")
         .current_dir(root)
-        .args(["verify", "conform", "synthesize", "--path", "ess", "--out"])
+        .args([
+            "verify",
+            "conform",
+            "synthesize",
+            "--path",
+            "ess/commission",
+            "--out",
+        ])
         .arg(&out)
         .output()
         .unwrap_or_else(|error| panic!("`ess` must be on PATH: {error}"));
     assert!(
         output.status.success(),
-        "`ess verify conform synthesize --path ess` exited {}:\n{}",
+        "`ess verify conform synthesize --path ess/commission` exited {}:\n{}",
         output.status,
         String::from_utf8_lossy(&output.stderr)
     );
@@ -70,7 +77,7 @@ fn every_skipped_entry_names_a_synthesized_scenario_and_gives_a_reason() {
     let manifest = std::env::var_os("CARGO_MANIFEST_DIR")
         .unwrap_or_else(|| panic!("CARGO_MANIFEST_DIR is unset: run this test through cargo"));
     let root = Path::new(&manifest).join("../..");
-    let path = root.join("ess/SKIPPED.md");
+    let path = root.join("ess/commission/SKIPPED.md");
     let body = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("{} must exist: {error}", path.display()));
 

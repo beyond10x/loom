@@ -20,7 +20,7 @@ fn read(relative: &str) -> String {
         .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
 
-const DOC: &str = "docs/contracts/commission-executor.md";
+const DOC: &str = "docs/commission/contracts/commission-executor.md";
 const MODEL: &str = "generated/rust/commission/src/responsibility.rs";
 
 /// The fenced ```rust blocks of a Markdown text, with the 1-based line each starts on.

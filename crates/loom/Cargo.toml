@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-b10x-commission = { git = "https://github.com/beyond10x/commission", branch = "main" }
+b10x-commission = { path = "../commission" }
 httpdate = "1.0.3"
 jsonschema = { version = "0.52.1", default-features = false }
 loom = { path = "../../generated/rust/loom" }
@@ -19,4 +19,4 @@ tokio = { version = "1.53", features = ["rt", "time", "macros"] }
 zeroize = { version = "1.8", features = ["derive"] }
 
 [dev-dependencies]
-b10x-commission-testkit = { git = "https://github.com/beyond10x/commission", branch = "main" }
+b10x-commission-testkit = { path = "../commission-testkit" }

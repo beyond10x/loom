@@ -1,0 +1,447 @@
+{
+  "domain": {
+    "display": "Responsibility",
+    "id": "commission.responsibility",
+    "source": "commission ess/commission/ compiled with ess 0.52.0",
+    "summary": "An agent revision commissioned to a durable case. The governor owns the case's truth and returns a frontier; a run is one bounded period of execution against it. The executor proposes; it never completes a case.",
+    "system": "commission"
+  },
+  "entities": [
+    {
+      "fields": [
+        {
+          "name": "run_id",
+          "type": "RunId"
+        },
+        {
+          "name": "case_id",
+          "type": "CaseId"
+        },
+        {
+          "name": "expected_case_revision",
+          "type": "integer"
+        },
+        {
+          "name": "action",
+          "type": "string"
+        },
+        {
+          "name": "arguments",
+          "type": "ProposedActionArguments"
+        }
+      ],
+      "id": "commission.responsibility.ActionRequest",
+      "identity": {
+        "name": "action_request_id",
+        "type": "ActionRequestId"
+      },
+      "lifecycle": {
+        "initial": "Requested",
+        "states": [
+          "Requested"
+        ],
+        "terminal": [
+          "Requested"
+        ]
+      },
+      "name": "ActionRequest"
+    },
+    {
+      "fields": [
+        {
+          "name": "name",
+          "type": "string"
+        }
+      ],
+      "id": "commission.responsibility.Agent",
+      "identity": {
+        "name": "agent_id",
+        "type": "AgentId"
+      },
+      "lifecycle": {
+        "initial": "Registered",
+        "states": [
+          "Registered"
+        ],
+        "terminal": [
+          "Registered"
+        ]
+      },
+      "name": "Agent"
+    },
+    {
+      "fields": [
+        {
+          "name": "agent_id",
+          "type": "AgentId"
+        },
+        {
+          "name": "revision",
+          "type": "integer"
+        }
+      ],
+      "id": "commission.responsibility.AgentRevision",
+      "identity": {
+        "name": "agent_revision_id",
+        "type": "AgentRevisionId"
+      },
+      "lifecycle": {
+        "initial": "Published",
+        "states": [
+          "Published"
+        ],
+        "terminal": [
+          "Published"
+        ]
+      },
+      "name": "AgentRevision"
+    },
+    {
+      "fields": [
+        {
+          "name": "action",
+          "type": "string"
+        },
+        {
+          "name": "granted",
+          "type": "boolean"
+        },
+        {
+          "name": "action_request_id",
+          "type": "ActionRequestId"
+        }
+      ],
+      "id": "commission.responsibility.AuthorityDecision",
+      "identity": {
+        "name": "authority_decision_id",
+        "type": "AuthorityDecisionId"
+      },
+      "lifecycle": {
+        "initial": "Decided",
+        "states": [
+          "Decided"
+        ],
+        "terminal": [
+          "Decided"
+        ]
+      },
+      "name": "AuthorityDecision"
+    },
+    {
+      "fields": [
+        {
+          "name": "protocol",
+          "type": "string"
+        },
+        {
+          "name": "revision",
+          "type": "integer"
+        }
+      ],
+      "id": "commission.responsibility.Case",
+      "identity": {
+        "name": "case_id",
+        "type": "CaseId"
+      },
+      "lifecycle": {
+        "initial": "Open",
+        "states": [
+          "Open"
+        ],
+        "terminal": [
+          "Open"
+        ]
+      },
+      "name": "Case"
+    },
+    {
+      "fields": [
+        {
+          "name": "agent_revision_id",
+          "type": "AgentRevisionId"
+        },
+        {
+          "name": "case_id",
+          "type": "CaseId"
+        },
+        {
+          "name": "principal",
+          "type": "PrincipalId"
+        },
+        {
+          "name": "authority_context",
+          "type": "AuthorityContext"
+        }
+      ],
+      "id": "commission.responsibility.Commission",
+      "identity": {
+        "name": "commission_id",
+        "type": "CommissionId"
+      },
+      "lifecycle": {
+        "initial": "Assigned",
+        "states": [
+          "Assigned"
+        ],
+        "terminal": [
+          "Assigned"
+        ]
+      },
+      "name": "Commission"
+    },
+    {
+      "fields": [
+        {
+          "name": "case_id",
+          "type": "CaseId"
+        },
+        {
+          "name": "kind",
+          "type": "string"
+        },
+        {
+          "name": "subject_revision",
+          "type": "integer"
+        },
+        {
+          "name": "producer",
+          "type": "string"
+        },
+        {
+          "name": "observation_ids",
+          "type": "List<ObservationId>"
+        },
+        {
+          "name": "facts",
+          "type": "json"
+        },
+        {
+          "name": "provenance",
+          "type": "json"
+        }
+      ],
+      "id": "commission.responsibility.Evidence",
+      "identity": {
+        "name": "evidence_id",
+        "type": "EvidenceId"
+      },
+      "lifecycle": {
+        "initial": "Submitted",
+        "states": [
+          "Submitted"
+        ],
+        "terminal": [
+          "Submitted"
+        ]
+      },
+      "name": "Evidence"
+    },
+    {
+      "fields": [
+        {
+          "name": "case_id",
+          "type": "CaseId"
+        },
+        {
+          "name": "case_revision",
+          "type": "integer"
+        },
+        {
+          "name": "claims",
+          "type": "List<FrontierClaim>"
+        },
+        {
+          "name": "obligations",
+          "type": "List<FrontierObligation>"
+        },
+        {
+          "name": "actions",
+          "type": "List<FrontierAction>"
+        }
+      ],
+      "id": "commission.responsibility.Frontier",
+      "identity": {
+        "name": "frontier_id",
+        "type": "FrontierId"
+      },
+      "lifecycle": {
+        "initial": "Issued",
+        "states": [
+          "Issued"
+        ],
+        "terminal": [
+          "Issued"
+        ]
+      },
+      "name": "Frontier"
+    },
+    {
+      "fields": [
+        {
+          "name": "source",
+          "type": "string"
+        },
+        {
+          "name": "subject",
+          "type": "string"
+        },
+        {
+          "name": "observed_at",
+          "type": "timestamp"
+        },
+        {
+          "name": "payload",
+          "type": "json"
+        }
+      ],
+      "id": "commission.responsibility.Observation",
+      "identity": {
+        "name": "observation_id",
+        "type": "ObservationId"
+      },
+      "lifecycle": {
+        "initial": "Reported",
+        "states": [
+          "Reported"
+        ],
+        "terminal": [
+          "Reported"
+        ]
+      },
+      "name": "Observation"
+    },
+    {
+      "createdBy": [
+        "StartRun"
+      ],
+      "fields": [
+        {
+          "name": "commission_id",
+          "type": "CommissionId"
+        },
+        {
+          "name": "case_revision",
+          "type": "integer"
+        }
+      ],
+      "id": "commission.responsibility.Run",
+      "identity": {
+        "name": "run_id",
+        "type": "RunId"
+      },
+      "lifecycle": {
+        "initial": "Running",
+        "states": [
+          "Running",
+          "Suspended"
+        ],
+        "transitions": [
+          {
+            "commands": [
+              "SuspendRun"
+            ],
+            "from": [
+              "Running"
+            ],
+            "name": "suspend",
+            "to": "Suspended"
+          },
+          {
+            "commands": [
+              "ResumeRun"
+            ],
+            "from": [
+              "Suspended"
+            ],
+            "name": "resume",
+            "to": "Running"
+          }
+        ]
+      },
+      "name": "Run"
+    }
+  ],
+  "format": "b10x-domain-graph/1",
+  "relations": [
+    {
+      "cardinality": "one",
+      "from": "commission.responsibility.ActionRequest",
+      "kind": "references",
+      "name": "case",
+      "to": "commission.responsibility.Case",
+      "via": "case_id"
+    },
+    {
+      "cardinality": "many",
+      "from": "commission.responsibility.Agent",
+      "kind": "owns",
+      "name": "revisions",
+      "to": "commission.responsibility.AgentRevision",
+      "via": "agent_id"
+    },
+    {
+      "cardinality": "one",
+      "from": "commission.responsibility.AuthorityDecision",
+      "kind": "references",
+      "name": "action_request",
+      "to": "commission.responsibility.ActionRequest",
+      "via": "action_request_id"
+    },
+    {
+      "cardinality": "one",
+      "from": "commission.responsibility.Commission",
+      "kind": "references",
+      "name": "agent_revision",
+      "to": "commission.responsibility.AgentRevision",
+      "via": "agent_revision_id"
+    },
+    {
+      "cardinality": "one",
+      "from": "commission.responsibility.Commission",
+      "kind": "references",
+      "name": "case",
+      "to": "commission.responsibility.Case",
+      "via": "case_id"
+    },
+    {
+      "cardinality": "many",
+      "from": "commission.responsibility.Commission",
+      "kind": "owns",
+      "name": "runs",
+      "to": "commission.responsibility.Run",
+      "via": "commission_id"
+    },
+    {
+      "cardinality": "one",
+      "from": "commission.responsibility.Evidence",
+      "kind": "references",
+      "name": "case",
+      "to": "commission.responsibility.Case",
+      "via": "case_id"
+    },
+    {
+      "cardinality": "many",
+      "from": "commission.responsibility.Evidence",
+      "kind": "references",
+      "name": "observations",
+      "to": "commission.responsibility.Observation",
+      "via": "observation_ids"
+    },
+    {
+      "cardinality": "one",
+      "from": "commission.responsibility.Frontier",
+      "kind": "references",
+      "name": "case",
+      "to": "commission.responsibility.Case",
+      "via": "case_id"
+    },
+    {
+      "cardinality": "many",
+      "from": "commission.responsibility.Run",
+      "kind": "owns",
+      "name": "requests",
+      "to": "commission.responsibility.ActionRequest",
+      "via": "run_id"
+    }
+  ]
+}

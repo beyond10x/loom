@@ -1,0 +1,73 @@
+version: '3'
+
+env:
+  CARGO_TARGET_DIR: '{{.HOME}}/.cache/b10x-target/loom'
+
+tasks:
+  check:
+    desc: Commission's own gate; its build, lint and test steps cover only the Commission crates.
+    cmds:
+      - task: spec
+      - task: ess-gate
+      - task: drift
+      - task: no-hand-model
+      - task: conform
+      - task: deps-guard
+      - task: docs-drift
+      - cargo fmt --all --check
+      - cargo clippy --locked --all-targets -p b10x-commission -p b10x-commission-conformance -p b10x-commission-testkit -p commission-docs -p commission-xtask -- -D warnings
+      - cargo test --locked -p b10x-commission -p b10x-commission-conformance -p b10x-commission-testkit -p commission-docs -p commission-xtask
+
+  docs:
+    desc: Regenerate website/docs/reference/commission/ from ess/commission/.
+    cmds:
+      - cargo run -q --locked -p commission-docs -- generate
+
+  docs-drift:
+    desc: Fail when website/docs/reference/commission/ differs from a fresh generation, or holds a page nothing generates.
+    cmds:
+      - cargo run -q --locked -p commission-docs -- generate --check
+
+  spec:
+    desc: Validate Commission's ESS specification.
+    cmds:
+      - ess specify validate --path ess/commission
+
+  ess-gate:
+    desc: Fail unless ess/commission/ validates strictly, compiles, synthesizes with 0 refusals and carries no UNMAPPED marker (ADR 0076).
+    cmds:
+      - cargo test --locked -p b10x-commission --test ess_gate
+
+  conform:
+    desc: Run the conformance suite synthesized from ess/commission/ against b10x-commission and fail unless its report passes.
+    cmds:
+      - cargo test --locked -p b10x-commission-conformance --test conform
+
+  deps-guard:
+    desc: Fail when b10x-commission depends on b10x-loom, b10x-canon or a crate in model-provider-deny.txt (ADR 0075).
+    cmds:
+      - cargo test --locked -p b10x-commission-testkit --test executor_port
+
+  generate:
+    desc: Rewrite generated/rust/commission/ from a fresh synthesis of ess/commission/.
+    cmds:
+      - task: generate-bootstrap
+      - cargo run -q --locked -p commission-xtask -- generate
+
+  generate-bootstrap:
+    desc: Write generated/rust/commission/ when it is absent, so cargo can load the workspace.
+    internal: true
+    status:
+      - test -f generated/rust/commission/Cargo.toml
+    cmds:
+      - ess generate synthesize --path ess/commission --target rust --layout crate --out generated/rust/commission
+
+  drift:
+    desc: Fail when generated/rust/commission/ differs from a fresh synthesis of ess/commission/, or b10x-commission does not take its model from it.
+    cmds:
+      - cargo run -q --locked -p commission-xtask -- drift
+
+  no-hand-model:
+    desc: Fail when crates/commission/src or crates/commission-testkit/src defines, or renames something to, a type the generated crate declares.
+    cmds:
+      - cargo run -q --locked -p commission-xtask -- no-hand-model

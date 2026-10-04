@@ -163,7 +163,7 @@ fn copy_tree(from: &Path, to: &Path) {
 
 #[test]
 fn adversary2_request_relations_match_the_story() {
-    let model = compile(&root().join("ess"));
+    let model = compile(&root().join("ess/commission"));
     if let Err(problem) = story_decisions(&model) {
         panic!("{problem}");
     }
@@ -175,7 +175,7 @@ fn adversary2_request_relations_match_the_story() {
         std::fs::remove_dir_all(&scratch)
             .unwrap_or_else(|error| panic!("clear {}: {error}", scratch.display()));
     }
-    copy_tree(&root().join("ess"), &scratch);
+    copy_tree(&root().join("ess/commission"), &scratch);
     let domain = scratch.join("domains/responsibility.yaml");
     let source = std::fs::read_to_string(&domain)
         .unwrap_or_else(|error| panic!("read {}: {error}", domain.display()));
@@ -216,7 +216,7 @@ fn adversary2_request_relations_match_the_story() {
 /// command cannot say which request needs the decision.
 #[test]
 fn adversary2_request_revalidation_input_is_the_request() {
-    let model = compile(&root().join("ess"));
+    let model = compile(&root().join("ess/commission"));
     let command = model
         .member("commands")
         .and_then(|commands| commands.member(&format!("{NS}RevalidateActionRequest")))

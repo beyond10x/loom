@@ -153,7 +153,14 @@ fn adversary2_stale_scenario_at_the_smallest_revision_passes() {
     ));
     let output = std::process::Command::new("ess")
         .current_dir(std::path::PathBuf::from(manifest).join("../.."))
-        .args(["verify", "conform", "synthesize", "--path", "ess", "--out"])
+        .args([
+            "verify",
+            "conform",
+            "synthesize",
+            "--path",
+            "ess/commission",
+            "--out",
+        ])
         .arg(&out)
         .output()
         .unwrap_or_else(|error| panic!("`ess` must be on PATH: {error}"));

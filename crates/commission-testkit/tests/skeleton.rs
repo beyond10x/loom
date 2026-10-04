@@ -46,7 +46,7 @@ fn root() -> PathBuf {
 fn compiled_model(root: &Path) -> Value {
     let out = Command::new("ess")
         .args(["specify", "compile", "--path"])
-        .arg(root.join("ess"))
+        .arg(root.join("ess/commission"))
         .args(["--format", "json"])
         .output()
         .unwrap_or_else(|error| panic!("run `ess specify compile`: {error}"));

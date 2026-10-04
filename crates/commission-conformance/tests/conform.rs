@@ -59,13 +59,20 @@ fn scratch() -> PathBuf {
 fn synthesize(out: &Path) -> String {
     let output = Command::new("ess")
         .current_dir(root())
-        .args(["verify", "conform", "synthesize", "--path", "ess", "--out"])
+        .args([
+            "verify",
+            "conform",
+            "synthesize",
+            "--path",
+            "ess/commission",
+            "--out",
+        ])
         .arg(out)
         .output()
         .unwrap_or_else(|error| panic!("`ess` must be on PATH: {error}"));
     assert!(
         output.status.success(),
-        "`ess verify conform synthesize --path ess` exited {}:\n{}{}",
+        "`ess verify conform synthesize --path ess/commission` exited {}:\n{}{}",
         output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
@@ -199,7 +206,7 @@ fn ess_conformance_report() {
         "the report does not cover every scenario of the suite"
     );
 
-    let skipped_md = root().join("ess/SKIPPED.md");
+    let skipped_md = root().join("ess/commission/SKIPPED.md");
     let named = skipped_md_names(
         &fs::read_to_string(&skipped_md)
             .unwrap_or_else(|error| panic!("read {}: {error}", skipped_md.display())),
@@ -208,7 +215,7 @@ fn ess_conformance_report() {
     // Expectation 4: the check refuses a skip ess/SKIPPED.md does not name, and names it.
     assert!(
         !named.contains(UNNAMED_SKIP),
-        "ess/SKIPPED.md names `{UNNAMED_SKIP}`, which expectation 4 needs unnamed"
+        "ess/commission/SKIPPED.md names `{UNNAMED_SKIP}`, which expectation 4 needs unnamed"
     );
     let before: BTreeSet<String> = violations(&report, &named).into_iter().collect();
     let after: BTreeSet<String> = violations(&with_skipped(&report, UNNAMED_SKIP), &named)

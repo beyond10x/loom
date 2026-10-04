@@ -255,7 +255,10 @@ fn adversary2_guard_refuses_a_deduplicated_proc_macro_provider() {
 fn task_block(taskfile: &str, task: &str) -> Vec<String> {
     let header = format!("  {task}:");
     let mut lines = taskfile.lines().skip_while(|line| *line != header);
-    assert!(lines.next().is_some(), "Taskfile.yml has no task `{task}`");
+    assert!(
+        lines.next().is_some(),
+        "Taskfile.commission.yml has no task `{task}`"
+    );
     lines
         .take_while(|line| line.is_empty() || line.starts_with("    "))
         .map(|line| line.trim().to_owned())
@@ -267,7 +270,7 @@ fn task_block(taskfile: &str, task: &str) -> Vec<String> {
 /// this wiring in place.
 #[test]
 fn adversary2_taskfile_check_runs_deps_guard_with_the_story_command() {
-    let path = root().join("Taskfile.yml");
+    let path = root().join("Taskfile.commission.yml");
     let taskfile = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
     let check = task_block(&taskfile, "check");

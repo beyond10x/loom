@@ -19,7 +19,14 @@ fn synthesized(tag: &str) -> Value {
         .join(format!("adversary2-text-{tag}-{}.json", std::process::id()));
     let output = Command::new("ess")
         .current_dir(root())
-        .args(["verify", "conform", "synthesize", "--path", "ess", "--out"])
+        .args([
+            "verify",
+            "conform",
+            "synthesize",
+            "--path",
+            "ess/commission",
+            "--out",
+        ])
         .arg(&out)
         .output()
         .unwrap_or_else(|error| panic!("`ess` must be on PATH: {error}"));
