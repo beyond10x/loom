@@ -45,13 +45,13 @@ types:
     kind: enum
     variants: [ReasoningModel, FastTyped, Rule, Hybrid]
 
-  # The two projected statuses of commission.responsibility.ActionStatus: a Blocked action is not
-  # projected. A Loom type, as CommissionRunId mirrors RunId.
+  # The two projected outcomes of Commission's admission (Admissible, NeedsAuthority): an action
+  # Commission refuses is not projected. A Loom type, as CommissionRunId mirrors RunId.
   - name: loom.run.CatalogueEntryStatus
     kind: enum
     variants: [Admissible, ApprovalRequired]
 
-  # One projected FrontierAction: its action id and its status.
+  # One projected action: its action id and the status its admission gives it.
   - name: loom.run.CatalogueEntry
     kind: struct
     fields:
@@ -224,8 +224,8 @@ errors:
         type: loom.run.SelectionId
 
 commands:
-  # One catalogue projected from one frontier for one turn: an entry per FrontierAction whose status
-  # is Admissible or ApprovalRequired, none for a Blocked one.
+  # One catalogue projected from one frontier for one turn: one entry per action, by Commission's
+  # admission: Admissible when admitted, ApprovalRequired when it needs authority, none when refused.
   - name: loom.run.ProjectCatalogue
     input:
       - name: catalogue_id
