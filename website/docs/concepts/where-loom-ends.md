@@ -20,13 +20,16 @@ authority, and then invokes the action through its binding. The alternative, Loo
 itself, was rejected: it saves a hop, but every other executor would need its own effect path.
 
 ```rust
-enum ExecutorOutcome {
-    ProposedAction { action, arguments_json },
-    NeedsHumanJudgment { request },
-    Suspended { reason },
-    NoUsefulAction,
+pub enum ExecutorOutcome {
+    ProposedAction(ExecutorOutcomeProposedAction),
+    NeedsHumanJudgment(ExecutorOutcomeNeedsHumanJudgment),
+    Suspended(ExecutorOutcomeSuspended),
+    NoUsefulAction(Unit),
+    CompletedLocalReasoning(Unit),
 }
 ```
 
-The Loom side holds today: the executor returns a `ProposedAction` and invokes nothing. The
-Commission side of the invocation is planned work in Commission, not shipped.
+The Loom side holds today: the executor returns a `ProposedAction` and invokes nothing. An action
+that needs authority is proposed too; Loom never suspends for authority, because Commission
+rechecks the proposal and asks its authority provider. The Commission side of the invocation is
+planned work in Commission, not shipped.
