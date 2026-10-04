@@ -2,11 +2,13 @@
 format: aep.planning-md/3
 id: decision-blocker:catalogue-ownership
 kind: decision-blocker
-status: open
+status: cleared
 title: Nobody has decided whether a Loom action catalogue belongs to a turn or to the session
 relations:
 - blocks: epic:loom-native-harness
-revision: 1
+revision: 3
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-04T00:59:17Z", actor: "human:timo", revision: 3}
 ---
 ## Question
 
@@ -31,3 +33,11 @@ with the marker open unless this blocker still holds it (`story:loom-ess-conform
 ## Source
 
 Decomposition of `epic:loom-native-harness`; `ess/domains/run.yaml`; Atlas ADR 0072.
+
+## Decision (operator, 2026-10-04)
+
+One catalogue per turn; modelled by story:ess-hard-gate.
+
+In `ess/` this is `loom.run.ActionCatalogue.turn_id: loom.run.TurnId` and the relation `catalogue`
+on `loom.run.Turn` (owns, cardinality one, via `turn_id`); the marker at `ess/domains/run.yaml:81`
+is deleted by the same story.

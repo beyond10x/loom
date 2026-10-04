@@ -14,22 +14,47 @@ relations:
 - serves: vision:O1
 - serves: vision:O3
 - serves: vision:governed-autonomy
-revision: 1
+- depends_on: story:harness-loop-port
+scope:
+- confidence: cited
+  path: crates/loom/src/lib.rs
+- confidence: inferred
+  path: crates/loom/src/session.rs
+- confidence: inferred
+  path: crates/loom/tests/session_transcript_streaming.rs
+- confidence: cited
+  path: ess/domains/run.yaml
+- confidence: cited
+  path: generated/rust/loom/
+revision: 4
 ---
 ## Outcome
 
 Loom keeps the Harness behaviour for sessions, transcripts and streaming, through the disposition
-`story:harness-module-map` gives each crate (depend at a pinned revision, or port): turns are
-stateless and replayed whole; opaque provider items are stored verbatim and refused across wires; a
-session is filed outside the workspace, `0700`, with no credential and no instruction text, written
-whether the run answered or died, and resumable by id; streamed reasoning reaches the stream sink as
-it arrives and is not stored.
+`story:harness-module-map` gives each crate (depend at a pinned revision, or port) and on top of the
+loop `story:harness-loop-port` carries in:
+
+- turns are stateless and replayed whole;
+- opaque provider items are stored verbatim and refused across wires: a session recorded on one
+  wire is refused by name, naming both wires, before anything is sent on another;
+- a session is filed outside the workspace, directory `0700` and file `0600`, with no credential
+  and no instruction text, written whether the run answered or died, and resumable by id;
+- streamed reasoning text (`reasoning_summary_text` and `thinking_delta`) reaches the stream sink as
+  it arrives and is not stored; the opaque item the turn ends with is what a session holds.
+
+## Shared surface
+
+Link 7 of the `epic:loom-native-harness` chain over `ess/domains/run.yaml`, `generated/rust/loom/`
+and `crates/loom/src/lib.rs`. It depends on `story:harness-loop-port`, and
+`story:compaction-contract` depends on it. The whole order is in `story:agent-executor` § Shared
+surface. It extends `loom.run.Session` and `loom.run.Turn`, which `story:compaction-contract` and
+`story:interruption-recovery` extend after it.
 
 ## ESS first
 
 Extend `loom.run.Session` and `loom.run.Turn` with the filing and resume commands and their outcomes,
-including the cross-wire refusal; validate with `ess specify validate --path ess`; regenerate the
-synthesized model.
+including the cross-wire refusal; validate with `ess specify validate --path ess`; regenerate with
+`task generate`.
 
 ## Domain relations
 
@@ -38,7 +63,13 @@ synthesized model.
   (owns, many, via `session_id`).
 - A resume continues the same session rather than opening a new one — inferable (inferred from
   `harness/crates/harness-cli/src/transcript.rs:184` and `:219`, `Session::save` and `Session::load`
-  by id, at harness `798325f0`; no ess/1 document declares it).
+  by id, at harness `798325f0`; no ESS document declares it).
+
+## Scope
+
+- `crates/loom/src/session.rs` (new), `crates/loom/src/lib.rs`
+- `crates/loom/tests/session_transcript_streaming.rs` (new)
+- `ess/domains/run.yaml`, `generated/rust/loom/` (chain surface)
 
 ## Constraints
 
@@ -46,11 +77,24 @@ synthesized model.
 
 ## Acceptance
 
-A `b10x-loom` test over a provider-emulated endpoint shows a run streaming its deltas to the stream
-sink as they arrive and filing a session outside the workspace with mode `0700` and no credential or
-instruction text, which a second run resumes by id and replays item for item.
+The test `session_transcript_streaming` in `crates/loom/tests/session_transcript_streaming.rs`
+passes. Over a provider-emulated endpoint, it checks:
+
+1. Each streamed delta reaches the stream sink before the endpoint emits the next one.
+2. After a run that answered, its session is filed outside the workspace directory, the session
+   directory has mode `0700` and the file `0600`.
+3. The filed session contains neither the credential the run used nor its instruction text.
+4. The filed session contains none of the streamed reasoning text, and does contain the opaque
+   reasoning item the turn ended with, byte for byte.
+5. A second run resuming that session by id sends, as its replayed history, the stored items in the
+   stored order, byte for byte.
+6. Resuming that session on the other wire is refused before any request is sent, and the refusal
+   names both wires.
+7. A run whose endpoint drops the connection mid-stream still files its session, holding every turn
+   completed before the drop.
 
 ## Source
 
 TASKBOARD L-011; Atlas ADR 0071; Harness README § Sessions, resume and chat, and AGENTS.md
-invariants 4 and 5 and § Safety envelope, at `798325f0`.
+invariants 4 and 5 and § Safety envelope, at `798325f0`; `harness-cli/src/transcript.rs:176` and
+`:480-496` (modes).

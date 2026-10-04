@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-04T00:48:47Z",
+  "actor": "human:timo",
+  "artifact": "story:harness-module-map",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:loom-native-harness-acceptance-r1",
+    "review": "review-result:loom-native-harness-acceptance-r1",
+    "outcome": "fixed"
+  }
+}

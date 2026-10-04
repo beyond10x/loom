@@ -5,6 +5,8 @@ kind: story
 status: draft
 title: Project frontier actions into model-visible tools
 refs:
+- provider: commission
+  reference: taskboard:M-002
 - provider: taskboard
   reference: L-003
 relations:
@@ -13,47 +15,96 @@ relations:
 - serves: vision:O1
 - serves: vision:O3
 - serves: vision:governed-autonomy
-revision: 1
+- depends_on: story:harness-module-map
+scope:
+- confidence: cited
+  path: crates/loom/src/lib.rs
+- confidence: inferred
+  path: crates/loom/src/projection.rs
+- confidence: inferred
+  path: crates/loom/tests/frontier_projection.rs
+- confidence: cited
+  path: ess/domains/run.yaml
+- confidence: cited
+  path: generated/rust/loom/
+revision: 7
 ---
 ## Outcome
 
-Loom derives the model-visible tool list from the current frontier only: admissible and
+Loom derives the model-visible catalogue from the current frontier only: admissible and
 approval-gated actions are projected, blocked ones are not, and nothing consequential is visible
 because it was registered at startup (Atlas ADR 0072). Loom adds no protocol or engineering
 semantics: it does not know that `repository.merge` waits on `tests.pass`; the frontier says so.
 
+The frontier is Commission's: `commission.responsibility.Frontier`, whose contents commission
+`story:ess-hard-gate` declares in Commission's own ESS specification as Commission value types
+(`FrontierAction` with its `ActionStatus`, `FrontierClaim`, `FrontierObligation`). Canon's bootstrap
+`Frontier`, `ActionId`, `ActionStatus` and `ActionCandidate` are deleted by Canon's wave-1 change and
+are not used.
+
 ## Scope
 
-- Projection is a function of the frontier and the runtime capability Loom is given; the
-  `TurnEnvironmentProvider` seam of Harness (`harness-loop/src/environment.rs:47`) is the expected
-  place, per `story:harness-module-map`.
-- Tool membership only. The parameter schema each projected tool carries is not decided here: it is
-  held by `decision-blocker:action-argument-schema` (filed by the `epic:fast-selector`
-  decomposition). The intersection with available integrations in ADR 0072 is `epic:effect-bindings`.
+- Projection is a function in `b10x-loom` of the frontier and the runtime capability Loom is given.
+  `story:harness-module-map` names the Harness seam it is later called from
+  (`TurnEnvironmentProvider`, `harness-loop/src/environment.rs:47` at `798325f0`);
+  `story:harness-loop-port` wires it there. This story does not touch the loop.
+- Tool membership only. The parameter schema each projected tool carries is held by
+  `decision-blocker:action-argument-schema`. The intersection with available integrations in ADR
+  0072 is `epic:effect-bindings`.
+- Files: `crates/loom/src/projection.rs` (new), `crates/loom/src/lib.rs`,
+  `crates/loom/tests/frontier_projection.rs` (new), `ess/domains/run.yaml` and
+  `generated/rust/loom/` (chain surface).
+
+## Shared surface
+
+Link 2 of the `epic:loom-native-harness` chain over `ess/domains/run.yaml`, `generated/rust/loom/`
+and `crates/loom/src/lib.rs`. It depends on `story:agent-executor`, and `story:action-selector`
+depends on it. It also depends on `story:harness-module-map`, which names the seam above. The whole
+order is in `story:agent-executor` § Shared surface.
 
 ## ESS first
 
 Add the projection command on `loom.run.ActionCatalogue` with its outcome and the projected entries
-(action id and status), validate with `ess specify validate --path ess`, and regenerate the
-synthesized model. The marker on `ActionCatalogue` (`ess/domains/run.yaml:81`, turn or session
-ownership) is not closed here: it is held by `decision-blocker:catalogue-ownership`, and this story
-declares no owner relation for the catalogue.
+(action id and status); validate with `ess specify validate --path ess`; regenerate with
+`task generate`; `task ess-gate` stays green. The catalogue's owner is settled, not declared here:
+one catalogue per turn (operator decision 2026-10-04 on `decision-blocker:catalogue-ownership`),
+modelled by `story:ess-hard-gate` as `ActionCatalogue.turn_id` and the relation `catalogue` on
+`loom.run.Turn` (owns, one). A projected catalogue carries the `turn_id` of the turn it is
+projected for.
 
 ## Domain relations
 
-- `loom.run.ActionCatalogue` to frontier: one catalogue per frontier at one case revision —
-  inferable from `ess/domains/run.yaml`, entity `loom.run.ActionCatalogue`, fields `frontier` and
-  `case_revision` (fields; no relation is declared).
-- Catalogue entries from `Frontier.actions`: one entry per projected candidate, the frontier owns its
-  candidates — inferable (inferred from `canon/crates/canon/src/lib.rs:52`,
-  `actions: Vec<ActionCandidate>`, at canon `cf29c4b`; no ess/1 document declares it).
+- `loom.run.Turn -> loom.run.ActionCatalogue`: owns, one, via `turn_id` — declared by
+  `story:ess-hard-gate` per the operator decision of 2026-10-04 on
+  `decision-blocker:catalogue-ownership`.
+- `loom.run.ActionCatalogue -> commission.responsibility.Frontier`: one catalogue per frontier at
+  one case revision — inferable from `ess/domains/run.yaml`, entity `loom.run.ActionCatalogue`,
+  fields `frontier` and `case_revision`, and from commission `ess/domains/responsibility.yaml:182-203`
+  at `013e392` (`commission.responsibility.Frontier`, one per case revision). A field, not a
+  `relations:` entry: ESS 0.52.0 cannot name another system's entity.
+- Catalogue entries from the frontier's actions: a frontier holds its actions as
+  `commission.responsibility.Frontier.actions: List<commission.responsibility.FrontierAction>` —
+  one frontier, many actions — declared by commission `story:ess-hard-gate` (§ ESS). A projected
+  catalogue has one entry per `FrontierAction` whose `status` is `Admissible` or
+  `ApprovalRequired`, and none for one that is `Blocked`.
+
+## Depends on, outside this store
+
+`commission:story:ess-hard-gate`, for the frontier's actions and their statuses;
+`commission:story:governor-port` (M-003) and `commission:story:local-runtime-loop` (M-009), for the
+fake governor that serves it.
 
 ## Acceptance
 
-With the Commission fake governor serving the software-change frontier at a revision where
-`tests.pass` is not `TRUE`, a `b10x-loom` test shows the tools Loom sends to the model contain no
-`repository.merge`, and once the frontier moves to a revision where `tests.pass` is `TRUE` the next
-projection contains it.
+The test `projection_follows_frontier` in `crates/loom/tests/frontier_projection.rs` passes. With
+the Commission fake governor serving the software-change frontier, it checks:
+
+1. At a revision where `tests.pass` is not `TRUE`, the projected catalogue contains no
+   `repository.merge`.
+2. After the fake governor moves to a revision where `tests.pass` is `TRUE`, the next projection
+   contains `repository.merge`.
+3. An action the frontier marks blocked is never in a projected catalogue; an approval-gated one is.
+4. Each catalogue's `case_revision` equals the case revision of the frontier it was projected from.
 
 ## Source
 

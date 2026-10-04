@@ -2,11 +2,13 @@
 format: aep.planning-md/3
 id: decision-blocker:selection-telemetry-record
 kind: decision-blocker
-status: open
+status: cleared
 title: Nobody has decided what a selection telemetry record is attached to
 relations:
 - blocks: epic:fast-selector
-revision: 1
+revision: 3
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-04T01:09:52Z", actor: "human:timo", revision: 3}
 ---
 ## Question
 
@@ -30,3 +32,12 @@ Selection telemetry, and with it the telemetry clause of the epic acceptance.
 ## Source
 
 Decomposition of `epic:fast-selector`; `docs/contracts/loom-action-selection.md`; Atlas ADRs 0073, 0074.
+
+## Decision (coordinator, 2026-10-04)
+
+One `SelectionRecord` per `loom.run.Selection` (the selection owns it, cardinality one): strategy,
+number of candidates, chosen action id, confidence, whether it fell back and to which strategy,
+selection latency in milliseconds, input and output tokens spent on selection. Refusals at the
+execution boundary are counted on the `loom.run.Session` (`boundary_refusals`), because they happen
+after selection. Metaharness reads both from Loom's session record. Neither is evidence (Atlas
+ADR 0074). Built by story:selection-telemetry.

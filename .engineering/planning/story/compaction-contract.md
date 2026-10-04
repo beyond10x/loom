@@ -14,32 +14,68 @@ relations:
 - serves: vision:O1
 - serves: vision:O3
 - serves: vision:governed-autonomy
-revision: 1
+scope:
+- confidence: inferred
+  path: crates/loom/src/compaction.rs
+- confidence: cited
+  path: crates/loom/src/lib.rs
+- confidence: inferred
+  path: crates/loom/tests/compaction_contract.rs
+- confidence: cited
+  path: ess/domains/run.yaml
+- confidence: cited
+  path: generated/rust/loom/
+revision: 4
 ---
 ## Outcome
 
 A Loom compaction contract. When a session crosses its trigger (Harness: 80 % of a declared context
 window, freeing to 50 %, otherwise the byte rule `MAX_CONVERSATION_BYTES` / `COMPACTED_TARGET_BYTES`,
 `harness-loop/src/lib.rs:885-937` at `798325f0`), the transcript prefix is compacted and the
-compaction is priced and recorded. Compaction never carries a stale catalogue forward: the first
-request after it carries the catalogue projected from the current frontier, and nothing the model
-wrote is promoted to trusted context.
+compaction is priced and recorded on the session. Compaction never carries a stale catalogue
+forward: the first request after it carries the catalogue projected from the frontier current at
+that request, and nothing the model wrote is promoted to trusted context.
+
+## Shared surface
+
+Link 8 of the `epic:loom-native-harness` chain over `ess/domains/run.yaml`, `generated/rust/loom/`
+and `crates/loom/src/lib.rs`. It depends on `story:session-transcript-streaming`, and
+`story:interruption-recovery` depends on it; both of those also edit `loom.run.Session`. The whole
+order is in `story:agent-executor` § Shared surface. It also depends on `story:frontier-projection`
+directly.
 
 ## ESS first
 
-Add the compaction command and its outcome on `loom.run.Session`; validate with
-`ess specify validate --path ess`; regenerate the synthesized model.
+Add the compaction command and its outcome on `loom.run.Session`, the outcome carrying the
+compaction's usage; validate with `ess specify validate --path ess`; regenerate with
+`task generate`.
 
 ## Domain relations
 
 - `loom.run.Session -> loom.run.Turn` (relation `turns`, owns): compaction rewrites turns the session
   owns — inferable from `ess/domains/run.yaml`, entity `loom.run.Session`.
 
+## Scope
+
+- `crates/loom/src/compaction.rs` (new), `crates/loom/src/lib.rs`
+- `crates/loom/tests/compaction_contract.rs` (new)
+- `ess/domains/run.yaml`, `generated/rust/loom/` (chain surface)
+
 ## Acceptance
 
-A `b10x-loom` test runs a session past the declared context-window trigger and shows it compacted to
-at or below the free target, with the tool list of the first request after compaction equal to the
-catalogue projected from the current frontier.
+The test `compaction_contract` in `crates/loom/tests/compaction_contract.rs` passes. Over a
+provider-emulated endpoint with a declared context window, with the Commission fake governor, it
+runs a session past the trigger and checks:
+
+1. After compaction the session is at or below 50 % of the declared window.
+2. Between the last request before compaction and the first after it, the fake governor moves the
+   frontier to a new case revision whose admissible set differs. The tool list of the first request
+   after compaction equals the catalogue projected from the new frontier, and differs from the tool
+   list of the last request before it.
+3. The filed session holds exactly one compaction record, and its usage equals the usage the
+   endpoint reported for the compaction request.
+4. The instruction text of the first request after compaction equals that of the last request
+   before it, byte for byte; the compacted summary appears only as model-authored content.
 
 ## Source
 
