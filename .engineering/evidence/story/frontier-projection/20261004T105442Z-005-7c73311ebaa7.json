@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-04T10:54:42Z",
+  "actor": "human:timo",
+  "artifact": "story:frontier-projection",
+  "kind": "story",
+  "revision": 12,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test --workspace --locked: 537 passed, 0 failed",
+    "reference": "https://github.com/beyond10x/loom/commit/68ac6cc"
+  }
+}

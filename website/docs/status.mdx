@@ -6,24 +6,27 @@ description: What Loom implements today and what is planned.
 
 # Status
 
-Loom is at the bootstrap stage. One crate, `b10x-loom`, holds the executor contract and a
-deterministic bootstrap selector. No model is called yet. **Shipped** means code in the library
-today, **decided** means recorded in an architecture decision, and **planned** means on the plan
-only.
+Loom is at the bootstrap stage. One crate, `b10x-loom`, holds the executor, a deterministic
+bootstrap selector and the run model generated from the specification. No model is called yet.
+**Shipped** means code in the library today, **decided** means recorded in an architecture
+decision, and **planned** means on the plan only.
 
 <StatusStrip items={[
-  {label: "Loom implements Commission's AgentExecutor", status: 'shipped', detail: 'A run selects, checks, and returns an executor outcome.'},
-  {label: 'Selections outside the catalogue are refused', status: 'shipped', detail: 'Loom::select refuses an action id the projected catalogue does not list (NotInCatalogue), whatever its confidence; Loom::run then ends with NoUsefulAction and generates no arguments.'},
-  {label: 'Approval-gated actions are proposed for Commission to authorize', status: 'shipped', detail: 'Loom proposes the action; Commission asks for the capability it requires (Atlas ADR 0082).'},
+  {label: "Loom implements Commission's AgentExecutor", status: 'shipped', detail: "Over Commission's generated model: a run projects the frontier, selects over that catalogue, asks Commission's admission check, and returns an executor outcome."},
+  {label: 'Selections outside the catalogue are refused', status: 'shipped', detail: 'The catalogue lists only actions Commission admission does not refuse. Loom::select refuses an action id the catalogue does not list (NotInCatalogue), whatever its confidence; Loom::run then ends with NoUsefulAction and generates no arguments.'},
+  {label: 'Actions that need authority are proposed for Commission to authorize', status: 'shipped', detail: 'Loom never suspends for authority; Commission rechecks the proposal and asks its authority provider (Atlas ADR 0082).'},
+  {label: 'An unavailable selector or argument generator suspends the run', status: 'shipped', detail: 'Suspended with ExternalAvailability, carrying the error.'},
   {label: 'The run ends at a ProposedAction', status: 'shipped', detail: 'No effect is invoked from Loom.'},
   {label: 'ActionSelector and ArgumentGenerator traits', status: 'shipped', detail: 'A selector is given the selection context and the entries of the projected catalogue and returns one choice; arguments are a JSON string.'},
   {label: 'Bootstrap selector and empty-arguments generator', status: 'shipped', detail: 'For tests and examples only: the first admissible action, with {} as its arguments.'},
-  {label: 'ESS specification and its hard gate', status: 'shipped', detail: 'A draft loom.run domain; task check fails unless it validates, compiles, synthesizes with no refusals and carries no open question.'},
+  {label: 'Run model generated from ESS', status: 'shipped', detail: 'Session, Turn, ActionCatalogue, Selection and ArgumentRequest are synthesized from ess/ and re-exported; none is written by hand.'},
+  {label: 'ESS specification and its hard gate', status: 'shipped', detail: 'The loom.run domain; task check fails unless it validates, compiles, synthesizes with no refusals and carries no open question.'},
   {label: 'Commission makes the effect call', status: 'decided', detail: 'Atlas ADR 0082. The Commission side is planned work in Commission.'},
-  {label: 'Catalogue projection', status: 'shipped', detail: 'The frontier projected to one entry per distinct action, its status decided by Commission admission.'},
-  {label: 'Schema validation of arguments, revalidation inside Loom', status: 'planned'},
+  {label: 'Catalogue projection', status: 'shipped', detail: 'The frontier projected to one entry per distinct action, at its first position, its status decided by Commission admission.'},
+  {label: 'Schema validation of arguments, revalidation inside Loom', status: 'planned', detail: 'Their commands are declared in the specification; neither is built yet.'},
   {label: 'Reasoning-model, fast typed and hybrid selectors; confidence fallback; selection telemetry', status: 'planned'},
-  {label: 'Harness port', status: 'planned', detail: 'Model wires, turn loop, sessions and transcripts, streaming, compaction, budgets, interruption and recovery. The module map is done; the port is not.'},
+  {label: 'Harness crates ported', status: 'shipped', detail: 'The provider wires, messages, responses, HTTP and the turn loop of Harness 798325f0, as modules of b10x-loom; not yet wired to a run.'},
+  {label: 'Harness loop wired to the run', status: 'planned', detail: 'Sessions and transcripts, streaming, compaction, budgets, interruption and recovery.'},
 ]} />
 
 Where Loom stops is [decided design](./concepts/where-loom-ends.md). The

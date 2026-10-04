@@ -23,8 +23,9 @@ arguments as JSON. It never sees the choice between actions; it only completes t
 chosen.
 
 A selector is given the selection context and the projected catalogue's entries, and returns one
-choice; Loom refuses a choice the catalogue does not list. Arguments are still a JSON string, and
-the candidate descriptors in the contract are the design the catalogue entries grow into.
+choice; Loom refuses a choice the catalogue does not list. A generator sees the entry it fills in,
+and arguments are still a JSON string. The candidate descriptors in the contract are the design the
+catalogue entries grow into.
 
 ## Safety rules
 
@@ -43,8 +44,9 @@ action-selection contract,
    action** within it.
 7. Selection telemetry should be available to **Metaharness** for evaluation.
 
-Rule 2 is enforced today: a selection outside the frontier, unknown or blocked, fails the run
-whatever its confidence. The others are design.
+Rule 2 is enforced today: Loom puts every selection to Commission's admission check, and
+one it refuses, such as an action outside the frontier, ends the run with `NoUsefulAction`
+whatever the selector reported. The others are design.
 
 ## Beyond tool selection
 
