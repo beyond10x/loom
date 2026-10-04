@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:session-transcript-streaming
 kind: story
-status: draft
+status: implemented
 title: Preserve Harness session, transcript and streaming behaviour
 refs:
 - provider: taskboard
@@ -17,15 +17,33 @@ relations:
 - depends_on: story:run-pipeline-skeleton
 - depends_on: story:harness-crate-port
 scope:
+- confidence: cited
+  path: crates/loom/src/lib.rs
 - confidence: inferred
   path: crates/loom/src/session.rs
+- confidence: cited
+  path: crates/loom/tests/adversary2_session_transcript.rs
+- confidence: cited
+  path: crates/loom/tests/adversary_session_transcript.rs
+- confidence: cited
+  path: crates/loom/tests/agent_executor.rs
 - confidence: inferred
   path: crates/loom/tests/session_transcript_streaming.rs
 - confidence: cited
   path: ess/domains/run.yaml
 - confidence: cited
   path: generated/rust/loom/
-revision: 6
+- confidence: cited
+  path: website/data/ess/
+- confidence: cited
+  path: website/docs/reference/ess/
+- confidence: cited
+  path: website/docs/status.mdx
+revision: 14
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-04T10:57:19Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":3}}}
+- {from: "proposed", to: "active", at: "2026-10-04T10:57:19Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":3}}}
+- {from: "active", to: "implemented", at: "2026-10-04T12:03:35Z", actor: "human:timo", revision: 14, decided_on: {"recorded":{"test_result":1,"review_outcome":7,"verification":1}}}
 ---
 ## Outcome
 
@@ -95,8 +113,9 @@ passes. Over a provider-emulated endpoint, it checks:
 2. After a run that answered, its session is filed outside the workspace directory, the session
    directory has mode `0700` and the file `0600`.
 3. The filed session contains neither the credential the run used nor its instruction text.
-4. The filed session contains none of the streamed reasoning text, and does contain the opaque
-   reasoning item the turn ended with, byte for byte.
+4. The filed session stores no streamed reasoning text outside the provider's opaque reasoning item,
+   and stores that item, the turn ended with, byte for byte (a provider may carry its summary inside
+   it).
 5. A second run resuming that session by id sends, as its replayed history, the stored items in the
    stored order, byte for byte.
 6. Resuming that session on the other wire is refused before any request is sent, and the refusal
@@ -109,3 +128,16 @@ passes. Over a provider-emulated endpoint, it checks:
 TASKBOARD L-011; Atlas ADR 0071; Harness README § Sessions, resume and chat, and AGENTS.md
 invariants 4 and 5 and § Safety envelope, at `798325f0`; `harness-cli/src/transcript.rs:176` and
 `:480-496` (modes).
+
+## Coordinator decisions (wave 2026-10-04-w15)
+
+- Adversary pass 1: the session file records its state, so resume refuses `wrong-state` and open
+  refuses `session-exists`; a panicking loop files the session as Failed; `RunEnding` gains
+  `Stopped` for a stop that is neither an answer nor an error; the run refuses a cross-wire session
+  by name; resume checks the resuming run's workspace; writes are fsynced and use `create_new`;
+  the file format is version 2. Acceptance 4 is reworded (see above). Per-turn `RecordTurn` moves to
+  story:harness-loop-port.
+- Adversary pass 2: `ReleaseSession` (Active -> Filed, ending Failed) recovers a session whose run
+  died; open refuses `session-exists` before any run; a session is filed up to its last completed
+  turn; spend is filed on every ending; `run_and_file` carries no hooks, cancel or environment, as
+  its docs say; a claim refused for its wire is released unchanged.

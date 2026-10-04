@@ -25,7 +25,7 @@ scope:
   path: crates/loom/src/lib.rs
 - confidence: inferred
   path: crates/loom/tests/harness_loop_port.rs
-revision: 8
+revision: 9
 ---
 ## Outcome
 
@@ -98,3 +98,9 @@ ADR 0071 and 0072; `docs/design/harness-map.md` § Seams a port reuses; finding 
 Harness `tests/provider_emulated.rs` at 798325f0 (39 cases across the two wires) was not carried: it
 drives Python fake endpoints over a socket. Port it to Rust here, or record why not; the contract,
 summary-request and transport tests were carried as `crates/loom/tests/harness_port_contract.rs`.
+
+## Carried from story:session-transcript-streaming (wave 2026-10-04-w15)
+
+`loom.run.RecordTurn` and `Turn.items` are declared, but the ported `session.rs` stores the whole
+conversation as Harness does and records no per-turn `Turn`. Wiring the loop to the run records one
+`Turn` per completed turn through `RecordTurn`, so the declared command has a caller.

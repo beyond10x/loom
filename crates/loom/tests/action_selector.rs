@@ -18,7 +18,7 @@ use b10x_commission::model::primitives::Uuid as CommissionUuid;
 use b10x_commission::model::responsibility::{
     ActionStatus, AgentRevisionId, AuthorityContext, CaseId, Commission, CommissionData,
     CommissionId, ExecutorOutcome, Frontier, FrontierAction, FrontierData, FrontierId, PrincipalId,
-    ProposedActionArguments, Unit, commission_state, frontier_state,
+    Unit, commission_state, frontier_state,
 };
 use b10x_commission::ports::executor::AgentExecutor;
 use b10x_loom::model::primitives::{Decimal, Uuid};
@@ -29,7 +29,10 @@ use b10x_loom::model::run::{
 };
 use b10x_loom::projection::project;
 use b10x_loom::selection::{Choice, SelectionContext, SelectionRefusal};
-use b10x_loom::{ActionSelector, ArgumentGenerator, FirstAdmissibleSelector, Loom, SelectorError};
+use b10x_loom::{
+    ActionSelector, ArgumentContext, ArgumentGenerator, FirstAdmissibleSelector, Loom,
+    SelectorError,
+};
 
 const CASE: &str = "CHG-1842";
 
@@ -158,11 +161,11 @@ struct Counting(Rc<Cell<usize>>);
 impl ArgumentGenerator for Counting {
     fn generate(
         &self,
-        _action: &FrontierAction,
-        _prompt: &str,
-    ) -> Result<ProposedActionArguments, String> {
+        _context: &ArgumentContext,
+        _entry: &CatalogueEntry,
+    ) -> Result<Value, String> {
         self.0.set(self.0.get() + 1);
-        Ok(ProposedActionArguments(Value::Object(Vec::new())))
+        Ok(Value::Object(Vec::new()))
     }
 }
 

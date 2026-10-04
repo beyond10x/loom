@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-04T12:03:35Z",
+  "actor": "human:timo",
+  "artifact": "story:session-transcript-streaming",
+  "kind": "story",
+  "revision": 13,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test --workspace --locked: 588 passed, 0 failed",
+    "reference": "https://github.com/beyond10x/loom/commit/67bca52"
+  }
+}

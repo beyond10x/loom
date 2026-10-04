@@ -532,7 +532,7 @@ mod tests {
         // like a secret. Not a prefix, not a length, not a digest — a digest of a token is an
         // oracle for it.
         let event = LoopEvent::CredentialRenewed(CredentialRenewal {
-            source: "/home/you/.codex/auth.json".to_owned(),
+            source: "~/.codex/auth.json".to_owned(),
             provider: "codex".to_owned(),
             expires_unix: Some(1_788_871_151),
             refresh_token_rotated: true,
@@ -541,7 +541,7 @@ mod tests {
         let encoded = serde_json::to_string(&event).expect("serializes");
         assert_eq!(
             encoded,
-            r#"{"kind":"credential-renewed","source":"/home/you/.codex/auth.json","provider":"codex","expires_unix":1788871151,"refresh_token_rotated":true,"byte_preserving":true}"#
+            r#"{"kind":"credential-renewed","source":"~/.codex/auth.json","provider":"codex","expires_unix":1788871151,"refresh_token_rotated":true,"byte_preserving":true}"#
         );
         assert_eq!(
             serde_json::from_str::<LoopEvent>(&encoded).expect("deserializes"),
@@ -554,7 +554,7 @@ mod tests {
         // Absent means *this build could not read a date out of what it got*. A zero, or a
         // now-plus-a-guess, would read as a fact.
         let event = LoopEvent::CredentialRenewed(CredentialRenewal {
-            source: "/home/you/.codex/auth.json".to_owned(),
+            source: "~/.codex/auth.json".to_owned(),
             provider: "codex".to_owned(),
             expires_unix: None,
             refresh_token_rotated: false,

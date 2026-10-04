@@ -128,6 +128,10 @@
         {
           "name": "commission_run",
           "type": "CommissionRunId"
+        },
+        {
+          "name": "wire",
+          "type": "string"
         }
       ],
       "id": "loom.run.Session",
@@ -138,10 +142,31 @@
       "lifecycle": {
         "initial": "Active",
         "states": [
-          "Active"
+          "Active",
+          "Filed"
         ],
-        "terminal": [
-          "Active"
+        "transitions": [
+          {
+            "from": [
+              "Active"
+            ],
+            "name": "file",
+            "to": "Filed"
+          },
+          {
+            "from": [
+              "Filed"
+            ],
+            "name": "resume",
+            "to": "Active"
+          },
+          {
+            "from": [
+              "Active"
+            ],
+            "name": "release",
+            "to": "Filed"
+          }
         ]
       },
       "name": "Session"
@@ -155,6 +180,10 @@
         {
           "name": "index",
           "type": "integer"
+        },
+        {
+          "name": "items",
+          "type": "List<string>"
         }
       ],
       "id": "loom.run.Turn",

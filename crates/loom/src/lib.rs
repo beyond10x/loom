@@ -7,8 +7,8 @@
 //! written by hand.
 //!
 //! Loom implements Commission's [`AgentExecutor`] over Commission's generated `Frontier`. Its
-//! selector chooses from the catalogue projected from that frontier ([`selection`]); the argument
-//! generator below is a minimal seam until `story:argument-generator` replaces it.
+//! selector chooses from the catalogue projected from that frontier ([`selection`]), and its
+//! argument generator is handed the one catalogue entry the selection names ([`arguments`]).
 //!
 //! Loom keeps no admission rule of its own: whether a selected action may be proposed is
 //! Commission's [`admit`]. An action that needs authority is proposed, and Commission rechecks it
@@ -26,60 +26,75 @@ pub mod revalidation;
 pub mod selection;
 pub mod session;
 
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard, PoisonError};
+
+use sha2::{Digest, Sha256};
+
 use b10x_commission::admission::admit;
 use b10x_commission::model::json::Value;
 use b10x_commission::model::responsibility::{
     ActionStatus, Admission, Commission, ExecutorOutcome, ExecutorOutcomeProposedAction,
-    ExecutorOutcomeSuspended, Frontier, FrontierAction, ProposedActionArguments, SuspensionReason,
-    Unit, commission_state, frontier_state,
+    ExecutorOutcomeSuspended, Frontier, ProposedActionArguments, SuspensionReason, Unit,
+    commission_state, frontier_state,
 };
 use b10x_commission::ports::executor::AgentExecutor;
 
+pub use arguments::{ArgumentContext, ArgumentGenerator, EmptyObjectArguments};
 pub use selection::{ActionSelector, FirstAdmissibleSelector, SelectorError};
 
+use arguments::RequestRecord;
+use model::behaviour::SelectionStorage;
+use model::run::obligations::RequestArgumentsBehavior;
 use model::run::{
-    ActionCatalogue, CatalogueId, Selection, SelectionId, TurnId, action_catalogue_state,
-    selection_state,
+    ActionCatalogue, AnySelection, ArgumentRequestId, ArgumentRequestSnapshot, CatalogueId,
+    RequestArguments, RequestArgumentsOutcome, Selection, SelectionId, SelectionSnapshot, TurnId,
+    action_catalogue_state, selection_state,
 };
 use selection::{SelectionContext, SelectionRefusal};
 
-/// Generates the arguments of one selected action.
-pub trait ArgumentGenerator {
-    /// The arguments for `action`: the frontier entry that decided the action's admission.
-    fn generate(
-        &self,
-        action: &FrontierAction,
-        prompt: &str,
-    ) -> Result<ProposedActionArguments, String>;
-}
-
-/// Bootstrap argument generator: always the empty object.
-#[derive(Debug, Default)]
-pub struct EmptyObjectArguments;
-
-impl ArgumentGenerator for EmptyObjectArguments {
-    fn generate(
-        &self,
-        _action: &FrontierAction,
-        _prompt: &str,
-    ) -> Result<ProposedActionArguments, String> {
-        Ok(ProposedActionArguments(Value::Object(Vec::new())))
-    }
-}
-
+/// Loom as Commission's agent executor: a selector, an argument generator and the run's prompt,
+/// with the record of every selection it has made and every argument request that serves one.
+///
+/// Each call of [`AgentExecutor::run`] is one run, numbered from 0 per Loom. A run's catalogue is
+/// identified by its frontier's id; its selection and its argument request get ids of their own,
+/// derived from the frontier's id and the run's number. Two runs on one frontier
+/// therefore keep two selections and two requests apart.
 pub struct Loom<S, G> {
     selector: S,
     arguments: G,
     prompt: String,
+    record: Mutex<RequestRecord>,
+    runs: AtomicU64,
 }
 
 impl<S, G> Loom<S, G> {
+    /// A Loom that selects with `selector`, generates arguments with `arguments` and works on
+    /// `prompt`, with an empty record and no runs yet.
     pub fn new(selector: S, arguments: G, prompt: impl Into<String>) -> Self {
         Self {
             selector,
             arguments,
             prompt: prompt.into(),
+            record: Mutex::default(),
+            runs: AtomicU64::new(0),
         }
+    }
+
+    /// Every selection this Loom has made, one per run that selected, in the order it made them.
+    pub fn selections(&self) -> Vec<SelectionSnapshot> {
+        self.record().selections().to_vec()
+    }
+
+    /// Every argument request this Loom has recorded, in the order it recorded them, each naming
+    /// the selection of its own run.
+    pub fn argument_requests(&self) -> Vec<ArgumentRequestSnapshot> {
+        self.record().argument_requests().to_vec()
+    }
+
+    /// The record, whatever a panicking holder left: each write to it is one whole snapshot.
+    fn record(&self) -> MutexGuard<'_, RequestRecord> {
+        self.record.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
@@ -107,20 +122,20 @@ fn admits_nothing(frontier: &Frontier<frontier_state::Issued>) -> bool {
         .all(|listed| matches!(admit(frontier, &listed.action), Admission::Refused(_)))
 }
 
-/// The entry of `action` that decided `admission`, whatever the order of the frontier's entries:
-/// an `Admissible` entry when admitted, an `ApprovalRequired` entry naming the capability when it
-/// needs authority. Among several such entries, the least by capability and then reasons.
-fn deciding_entry<'a>(
-    frontier: &'a Frontier<frontier_state::Issued>,
+/// Whether `frontier` lists an entry of `action` that decides `admission`, whatever the order of
+/// its entries: an `Admissible` entry when admitted, an `ApprovalRequired` entry naming the
+/// capability when it needs authority.
+fn has_deciding_entry(
+    frontier: &Frontier<frontier_state::Issued>,
     action: &str,
     admission: &Admission,
-) -> Option<&'a FrontierAction> {
+) -> bool {
     frontier
         .data()
         .actions
         .iter()
         .filter(|listed| listed.action == action)
-        .filter(|listed| match admission {
+        .any(|listed| match admission {
             Admission::Admissible(_) => listed.status == ActionStatus::Admissible,
             Admission::NeedsAuthority(needs) => {
                 listed.status == ActionStatus::ApprovalRequired
@@ -128,7 +143,27 @@ fn deciding_entry<'a>(
             }
             Admission::Refused(_) => false,
         })
-        .min_by(|a, b| (&a.capability, &a.reasons).cmp(&(&b.capability, &b.reasons)))
+}
+
+/// The `kind` id of run number `run` on the frontier `frontier_id`: a name-based UUID (RFC 9562
+/// version 8) over the SHA-256 of the three. Within one `Loom`, two runs, two frontiers or two kinds
+/// get different ids, up to a SHA-256 collision; a second `Loom` (or one restarted) numbers its runs
+/// from 0 again, so its ids are unique only within itself (story:interruption-recovery).
+fn run_id(kind: &str, frontier_id: &str, run: u64) -> model::primitives::Uuid {
+    let digest = Sha256::digest(format!("{kind}\n{frontier_id}\n{run}").as_bytes());
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x80;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    model::primitives::Uuid(format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    ))
 }
 
 fn no_useful_action() -> ExecutorOutcome {
@@ -153,49 +188,78 @@ where
     /// frontier that admits nothing, a selector that finds nothing admissible, a selection the
     /// projected catalogue does not list, and a selection Commission refuses are `NoUsefulAction`. A selector that is unavailable, or a failing
     /// argument generator, is `Suspended` with `ExternalAvailability` carrying its message.
+    ///
+    /// Every selection made is recorded; for one Commission does not refuse, the argument request
+    /// is recorded against it before the generator is handed the selected catalogue entry.
     fn run(
         &self,
         commission: &Commission<commission_state::Assigned>,
         frontier: &Frontier<frontier_state::Issued>,
     ) -> ExecutorOutcome {
+        let run = self.runs.fetch_add(1, Ordering::Relaxed);
         if frontier.data().case_id != commission.data().case_id || admits_nothing(frontier) {
             return no_useful_action();
         }
         // The selector sees only the catalogue projected from this frontier. Until a run assigns
-        // turn identities, one frontier is one turn, one catalogue and one selection, each
-        // identified by the frontier's id.
+        // turn identities, one frontier is one turn and one catalogue, identified by the
+        // frontier's id; the selection and the argument request are this run's own.
         let identity = || frontier.data().frontier_id.0.0.clone();
         let catalogue = projection::project(
             frontier,
             CatalogueId(model::primitives::Uuid(identity())),
             TurnId(model::primitives::Uuid(identity())),
         );
-        let selected =
-            match self.select(&catalogue, SelectionId(model::primitives::Uuid(identity()))) {
-                Ok(selection) => selection.into_data().action,
-                Err(SelectionRefusal::NotInCatalogue(_))
-                | Err(SelectionRefusal::Selector(SelectorError::NothingAdmissible)) => {
-                    return no_useful_action();
-                }
-                Err(SelectionRefusal::Selector(SelectorError::Unavailable(error))) => {
-                    return outage(error);
-                }
-            };
+        let selection = match self.select(
+            &catalogue,
+            SelectionId(run_id("selection", &identity(), run)),
+        ) {
+            Ok(selection) => selection,
+            Err(SelectionRefusal::NotInCatalogue(_))
+            | Err(SelectionRefusal::Selector(SelectorError::NothingAdmissible)) => {
+                return no_useful_action();
+            }
+            Err(SelectionRefusal::Selector(SelectorError::Unavailable(error))) => {
+                return outage(error);
+            }
+        };
+        let selection_id = selection.data().selection_id.clone();
+        let selected = selection.data().action.clone();
+        self.record()
+            .put(AnySelection::Selected(selection).snapshot());
 
         // Safety invariant: only what Commission admits, or admits once authorized, is proposed.
         // An action outside the catalogue was refused above; Commission decides the rest.
         let admission = admit(frontier, &selected);
-        if matches!(admission, Admission::Refused(_)) {
+        if matches!(admission, Admission::Refused(_))
+            || !has_deciding_entry(frontier, &selected, &admission)
+        {
             return no_useful_action();
         }
-        let Some(entry) = deciding_entry(frontier, &selected, &admission) else {
+        // The generator is handed the one entry the selection names, never the rest of the
+        // catalogue (Atlas ADR 0073, step 1); the selection was checked against the catalogue.
+        let Some(entry) = catalogue
+            .data()
+            .entries
+            .iter()
+            .find(|entry| entry.action == selected)
+        else {
             return no_useful_action();
         };
+        let requested = self.record().request_arguments(RequestArguments {
+            argument_request_id: ArgumentRequestId(run_id("argument-request", &identity(), run)),
+            selection_id,
+        });
+        if !matches!(requested, Ok(RequestArgumentsOutcome::Requested { .. })) {
+            return no_useful_action();
+        }
 
-        match self.arguments.generate(entry, &self.prompt) {
+        let context = ArgumentContext {
+            prompt: self.prompt.clone(),
+        };
+        match self.arguments.generate(&context, entry) {
             Ok(arguments) => ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
                 action: selected,
-                arguments,
+                arguments: ProposedActionArguments(arguments),
             }),
             Err(error) => outage(error),
         }
@@ -207,8 +271,8 @@ mod tests {
     use super::*;
     use b10x_commission::model::primitives::Uuid;
     use b10x_commission::model::responsibility::{
-        AgentRevisionId, AuthorityContext, CaseId, CommissionData, CommissionId, FrontierData,
-        FrontierId, PrincipalId,
+        AgentRevisionId, AuthorityContext, CaseId, CommissionData, CommissionId, FrontierAction,
+        FrontierData, FrontierId, PrincipalId,
     };
 
     /// A selector that names one action, or fails with one error.
@@ -347,5 +411,38 @@ mod tests {
             ),
         );
         assert_eq!(outcome, ExecutorOutcome::NoUsefulAction(Unit(true)));
+    }
+
+    /// A run id is a version-8 UUID, the same for the same inputs, and different when the kind,
+    /// the frontier or the run number differs.
+    #[test]
+    fn run_ids_are_uuids_of_their_kind_frontier_and_run() {
+        const FRONTIER: &str = "00000000-0000-4000-8000-000000000003";
+        let id = run_id("selection", FRONTIER, 0).0;
+        let groups: Vec<&str> = id.split('-').collect();
+        assert_eq!(
+            groups.iter().map(|group| group.len()).collect::<Vec<_>>(),
+            [8, 4, 4, 4, 12],
+            "{id}"
+        );
+        assert!(
+            id.bytes()
+                .all(|byte| byte == b'-' || matches!(byte, b'0'..=b'9' | b'a'..=b'f')),
+            "{id}"
+        );
+        assert!(groups[2].starts_with('8'), "version 8: {id}");
+        assert!(
+            matches!(groups[3].as_bytes()[0], b'8' | b'9' | b'a' | b'b'),
+            "RFC 9562 variant: {id}"
+        );
+        assert_eq!(run_id("selection", FRONTIER, 0).0, id);
+        for other in [
+            run_id("argument-request", FRONTIER, 0),
+            run_id("selection", FRONTIER, 1),
+            run_id("selection", "00000000-0000-4000-8000-000000000004", 0),
+            model::primitives::Uuid(FRONTIER.to_owned()),
+        ] {
+            assert_ne!(other.0, id);
+        }
     }
 }
