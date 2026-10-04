@@ -29,7 +29,7 @@ Commission        rechecks, then invokes
 A selector can be wrong about which admissible action is best. It cannot produce an action the
 frontier does not contain.
 
-:::caution Bootstrap
+:::caution[Bootstrap]
 Loom is at the start of its life. No model is called yet. Each page says whether what it describes
 is **shipped**, **decided design** or **planned**; the [status page](./status.mdx) lists what exists.
 :::

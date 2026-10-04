@@ -6,7 +6,7 @@ description: A fast typed-decision model as one implementation of ActionSelector
 
 # The fast selector
 
-:::caution Planned
+:::caution[Planned]
 No fast selector exists yet. This page describes the design.
 :::
 
@@ -41,7 +41,7 @@ An example policy:
 | `0.60 ≤ p < 0.90` | Use the reasoning-model selector instead. |
 | `p < 0.60` | Use the full planner, ask for clarification, or do nothing. |
 
-:::note These thresholds are an example
+:::note[These thresholds are an example]
 Exact thresholds must be calibrated per domain and measured by Metaharness. A high probability
 changes which path picks the action; it never changes what the action is allowed to do.
 :::
