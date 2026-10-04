@@ -11,6 +11,7 @@ tasks:
     desc: Format, lint, test.
     cmds:
       - task: spec
+      - task: ess-gate
       - cargo fmt --all --check
       - cargo clippy --workspace --all-targets --locked -- -D warnings
       - cargo test --workspace --locked
@@ -19,6 +20,11 @@ tasks:
     desc: Validate the ESS specification.
     cmds:
       - ess specify validate --path ess
+
+  ess-gate:
+    desc: ESS hard gate (Atlas ADR 0076) — validate, compile, synthesize with 0 refusals, no open question.
+    cmds:
+      - cargo test -p b10x-loom --test ess_gate --locked
 
   plan:
     desc: Validate the AEP planning store.

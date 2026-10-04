@@ -45,6 +45,23 @@ Loom is specified in ESS under `ess/`. The domain is drafted and validated befor
 introduces a noun, and `task check` runs its conformance suite once synthesized. Change the
 specification first.
 
+The specification is a hard gate (Atlas ADR 0076). `task check` enforces it through
+`task ess-gate`, which runs `crates/loom/tests/ess_gate.rs`; a failure of any of the four
+conditions fails `task check`:
+
+1. `ess specify validate --path ess --strict-requires` exits 0;
+2. `ess specify compile --path ess --format json` exits 0;
+3. `ess verify conform synthesize` exits 0 with 0 refusals;
+4. no file under `ess/` contains `UNMAPPED:` — the specification carries no open question.
+
+No story is implemented while the gate is red. The `UNMAPPED:` scan stands in for ESS until
+ESS refuses open entries itself: it is removed when the ESS release that does
+(beyond10x/ess `epic:typed-open-questions`) is pinned.
+
+An open question is settled before the specification changes — in a story, or in a
+`decision-blocker` when nobody has decided it — and is never written into `ess/` as an
+`UNMAPPED:` marker.
+
 ## Work
 
 - Planned in the AEP store under `.engineering/`, written only through `aep plan artifact`. Body
