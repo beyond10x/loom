@@ -73,7 +73,8 @@ change with no behaviour change is exempt, and its story says so.
 - Planned in the AEP store under `.engineering/`, written only through `aep plan artifact`. Body
   drafts go in `.engineering/drafts/` (ignored).
 - Build with `CARGO_TARGET_DIR=$HOME/.cache/b10x-target/loom` (the Taskfile sets it).
-- `b10x-canon` and `b10x-commission` are git dependencies on `main`, pinned by `Cargo.lock`.
+- `b10x-commission` (and, for tests, `b10x-commission-testkit`) is a git dependency on `main`, pinned by
+  `Cargo.lock`. Loom does not depend on `b10x-canon`; the frontier is Commission's generated `Frontier`.
 - Every commit and push is `b10x-bot[bot]`'s through `b10x-gates bot`; every GitHub write goes
   through `b10x-gates api`.
 - Use a managed worktree (`worktree create --repo loom --purpose …`) for changes.
