@@ -284,7 +284,9 @@ fn copy_with_probe_marker(name: &str) -> (PathBuf, usize) {
 }
 
 // Item 3: the whole gate over a copy that synthesize refuses fails at step 3, after steps 1 and 2
-// held. `Optional<Binary64>` validates and compiles, and the conformance suite refuses it.
+// held. `Optional<Binary64>` validates and compiles, and the conformance suite refuses it. Every
+// confidence is retyped: `SelectAction` copies its input into `Selection.confidence`, and
+// retyping one side alone fails validation instead.
 #[test]
 fn gate_over_a_copy_synthesize_refuses_fails_at_synthesize() {
     let copy = scratch("gate_refused_copy").join("ess");
@@ -297,7 +299,7 @@ fn gate_over_a_copy_synthesize_refuses_fails_at_synthesize() {
     );
     fs::write(
         &run,
-        text.replacen("type: Optional<Decimal>", "type: Optional<Binary64>", 1),
+        text.replace("type: Optional<Decimal>", "type: Optional<Binary64>"),
     )
     .expect("write run.yaml copy");
 
@@ -315,7 +317,10 @@ fn gate_over_a_copy_synthesize_refuses_fails_at_synthesize() {
 /// A command whose `never` outcome no input satisfies. ess 0.52.0 validates and compiles it, and
 /// `ess verify conform synthesize` refuses the outcome (`ESS-SYNTH-003`) and still exits 0 with
 /// `1 refusal(s)` on its summary line: the refusal count is the only signal that step 3 fails.
-const UNSATISFIABLE_COMMAND: &str = "
+/// It is a file of its own in domain `loom.run`, so it does not depend on which sections
+/// `run.yaml` already declares.
+const UNSATISFIABLE_COMMAND: &str = "domain: loom.run
+
 commands:
   - name: loom.run.Probe
     naming:
@@ -365,9 +370,14 @@ fn copy_with_edit(name: &str, file: &str, edit: impl FnOnce(String) -> String) -
 // Item 3, the refusal count: synthesize exits 0 and refuses one outcome; the gate fails at step 3.
 #[test]
 fn gate_over_a_copy_synthesize_refuses_with_exit_0_fails_at_synthesize() {
-    let copy = copy_with_edit("gate_refused_exit_0", "domains/run.yaml", |text| {
-        text + UNSATISFIABLE_COMMAND
+    let copy = copy_with_edit("gate_refused_exit_0", "ess-inputs.yaml", |text| {
+        text.replacen(
+            "  - domains/run.yaml\n",
+            "  - domains/run.yaml\n  - domains/probe.yaml\n",
+            1,
+        )
     });
+    fs::write(copy.join("domains/probe.yaml"), UNSATISFIABLE_COMMAND).expect("write probe.yaml");
     let suite = copy.parent().expect("scratch").join("loom-suite.json");
     let Err(failure) = run_gate(&copy, &suite) else {
         panic!(
