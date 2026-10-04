@@ -2,11 +2,38 @@
 format: aep.planning-md/3
 id: story:import-commission
 kind: story
-status: draft
+status: active
 title: Commission's crates, ESS and plan live in Loom with history; contracts refuse Canon
 relations:
 - decomposes: epic:runtime-consolidation
-revision: 1
+- serves: vision:governed-autonomy
+scope:
+- confidence: inferred
+  path: .github/workflows
+- confidence: inferred
+  path: Cargo.lock
+- confidence: inferred
+  path: Cargo.toml
+- confidence: inferred
+  path: Taskfile.yml
+- confidence: inferred
+  path: crates/commission
+- confidence: inferred
+  path: crates/commission-conformance
+- confidence: inferred
+  path: crates/commission-docs
+- confidence: inferred
+  path: crates/commission-testkit
+- confidence: inferred
+  path: crates/commission-xtask
+- confidence: inferred
+  path: ess
+- confidence: inferred
+  path: generated/rust/commission
+revision: 14
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-04T22:39:58Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-10-04T22:39:58Z", actor: "human:timo", revision: 3}
 ---
 ## Outcome
 
