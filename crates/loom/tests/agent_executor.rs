@@ -227,6 +227,8 @@ fn session_carries_commission_run_id() {
     let session = Session::new(SessionData {
         session_id: SessionId(Uuid("00000000-0000-4000-8000-0000000000b2".to_owned())),
         commission_run: run.clone(),
+        // The wire the session's items come from (story:session-transcript-streaming).
+        wire: "openai-responses".to_owned(),
     });
 
     assert_eq!(session.state(), SessionState::Active);
