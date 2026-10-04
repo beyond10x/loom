@@ -17,22 +17,35 @@ use b10x_commission::model::responsibility::{
     commission_state, frontier_state,
 };
 use b10x_commission::ports::executor::AgentExecutor;
+use b10x_loom::model::run::{CatalogueEntry, SelectionStrategy};
+use b10x_loom::selection::{Choice, SelectionContext};
 use b10x_loom::{ActionSelector, ArgumentGenerator, EmptyObjectArguments, Loom, SelectorError};
 
 const MERGE: &str = "repository.merge";
 
 /// A selector that names one action, or fails with one message.
+///
+/// `story:action-selector`: a selector is handed the catalogue projected from the frontier, so a
+/// selection Commission would refuse is now refused first as absent from the catalogue. The
+/// outcomes these cases assert are unchanged.
 struct Scripted(Result<&'static str, &'static str>);
 
 impl ActionSelector for Scripted {
     fn select(
         &self,
-        _frontier: &Frontier<frontier_state::Issued>,
-        _prompt: &str,
-    ) -> Result<String, SelectorError> {
+        _context: &SelectionContext,
+        _candidates: &[CatalogueEntry],
+    ) -> Result<Choice, SelectorError> {
         self.0
-            .map(str::to_owned)
+            .map(|action| Choice {
+                action: action.to_owned(),
+                confidence: None,
+            })
             .map_err(|error| SelectorError::Unavailable(error.to_owned()))
+    }
+
+    fn strategy(&self) -> SelectionStrategy {
+        SelectionStrategy::ReasoningModel
     }
 }
 

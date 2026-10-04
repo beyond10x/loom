@@ -20,13 +20,17 @@ use b10x_commission::model::primitives::Uuid as CommissionUuid;
 use b10x_commission::model::responsibility::{
     ActionStatus, Admission, AdmissionNeedsAuthority, AgentRevisionId, AuthorityContext, CaseId,
     Commission, CommissionData, CommissionId, ExecutorOutcome, ExecutorOutcomeProposedAction,
-    Frontier, FrontierAction, FrontierClaim, PrincipalId, Truth, commission_state, frontier_state,
+    FrontierAction, FrontierClaim, PrincipalId, Truth, commission_state,
 };
 use b10x_commission::ports::executor::AgentExecutor;
 use b10x_commission::ports::governor::Governor;
 use b10x_commission_testkit::fake_governor::{Answer, FakeGovernor};
 use b10x_loom::model::primitives::Uuid;
-use b10x_loom::model::run::{CommissionRunId, Session, SessionData, SessionId, SessionState};
+use b10x_loom::model::run::{
+    CatalogueEntry, CommissionRunId, SelectionStrategy, Session, SessionData, SessionId,
+    SessionState,
+};
+use b10x_loom::selection::{Choice, SelectionContext};
 use b10x_loom::{
     ActionSelector, EmptyObjectArguments, FirstAdmissibleSelector, Loom, SelectorError,
 };
@@ -101,26 +105,32 @@ fn after_tests_on_r2() -> Answer {
 }
 
 /// A selector that wants to merge, as a model asked to land a change would: it picks
-/// `repository.merge` whenever the frontier lists it as anything but `Blocked`, and otherwise
-/// whatever `FirstAdmissibleSelector` picks.
+/// `repository.merge` whenever it is a candidate, and otherwise whatever `FirstAdmissibleSelector`
+/// picks.
+///
+/// `story:action-selector`: a selector is handed the catalogue projected from the frontier, not the
+/// frontier. A `Blocked` merge is never projected, so "listed as anything but `Blocked`" is now
+/// "a candidate".
 struct MergeSeeking;
 
 impl ActionSelector for MergeSeeking {
     fn select(
         &self,
-        frontier: &Frontier<frontier_state::Issued>,
-        prompt: &str,
-    ) -> Result<String, SelectorError> {
-        let merge_open = frontier
-            .data()
-            .actions
-            .iter()
-            .any(|listed| listed.action == MERGE && listed.status != ActionStatus::Blocked);
-        if merge_open {
-            Ok(MERGE.to_owned())
+        context: &SelectionContext,
+        candidates: &[CatalogueEntry],
+    ) -> Result<Choice, SelectorError> {
+        if candidates.iter().any(|entry| entry.action == MERGE) {
+            Ok(Choice {
+                action: MERGE.to_owned(),
+                confidence: None,
+            })
         } else {
-            FirstAdmissibleSelector.select(frontier, prompt)
+            FirstAdmissibleSelector.select(context, candidates)
         }
+    }
+
+    fn strategy(&self) -> SelectionStrategy {
+        SelectionStrategy::Rule
     }
 }
 

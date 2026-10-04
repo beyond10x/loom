@@ -22,9 +22,9 @@ typed selector, a rule selector, and a hybrid.
 arguments as JSON. It never sees the choice between actions; it only completes the one already
 chosen.
 
-Both traits exist today in a bootstrap shape: a selector sees the frontier and a prompt, and
-arguments are a JSON string. The richer interface in the contract — a selection context and the
-candidate descriptors — is the design they grow into.
+A selector is given the selection context and the projected catalogue's entries, and returns one
+choice; Loom refuses a choice the catalogue does not list. Arguments are still a JSON string, and
+the candidate descriptors in the contract are the design the catalogue entries grow into.
 
 ## Safety rules
 

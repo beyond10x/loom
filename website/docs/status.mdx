@@ -13,14 +13,15 @@ only.
 
 <StatusStrip items={[
   {label: "Loom implements Commission's AgentExecutor", status: 'shipped', detail: 'A run selects, checks, and returns an executor outcome.'},
-  {label: 'Selections outside the frontier are refused', status: 'shipped', detail: 'An unknown or blocked action id fails the run, whatever its confidence. A unit test holds this.'},
-  {label: 'Approval-gated actions suspend the run', status: 'shipped', detail: 'Loom returns Suspended naming the capability required, and proposes nothing.'},
+  {label: 'Selections outside the catalogue are refused', status: 'shipped', detail: 'Loom::select refuses an action id the projected catalogue does not list (NotInCatalogue), whatever its confidence; Loom::run then ends with NoUsefulAction and generates no arguments.'},
+  {label: 'Approval-gated actions are proposed for Commission to authorize', status: 'shipped', detail: 'Loom proposes the action; Commission asks for the capability it requires (Atlas ADR 0082).'},
   {label: 'The run ends at a ProposedAction', status: 'shipped', detail: 'No effect is invoked from Loom.'},
-  {label: 'ActionSelector and ArgumentGenerator traits', status: 'shipped', detail: 'In a bootstrap shape: a selector sees the frontier and a prompt; arguments are a JSON string.'},
+  {label: 'ActionSelector and ArgumentGenerator traits', status: 'shipped', detail: 'A selector is given the selection context and the entries of the projected catalogue and returns one choice; arguments are a JSON string.'},
   {label: 'Bootstrap selector and empty-arguments generator', status: 'shipped', detail: 'For tests and examples only: the first admissible action, with {} as its arguments.'},
   {label: 'ESS specification and its hard gate', status: 'shipped', detail: 'A draft loom.run domain; task check fails unless it validates, compiles, synthesizes with no refusals and carries no open question.'},
   {label: 'Commission makes the effect call', status: 'decided', detail: 'Atlas ADR 0082. The Commission side is planned work in Commission.'},
-  {label: 'Catalogue projection, schema validation of arguments, revalidation inside Loom', status: 'planned'},
+  {label: 'Catalogue projection', status: 'shipped', detail: 'The frontier projected to one entry per distinct action, its status decided by Commission admission.'},
+  {label: 'Schema validation of arguments, revalidation inside Loom', status: 'planned'},
   {label: 'Reasoning-model, fast typed and hybrid selectors; confidence fallback; selection telemetry', status: 'planned'},
   {label: 'Harness port', status: 'planned', detail: 'Model wires, turn loop, sessions and transcripts, streaming, compaction, budgets, interruption and recovery. The module map is done; the port is not.'},
 ]} />

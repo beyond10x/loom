@@ -6,9 +6,9 @@
 //! generated from `ess/` into `generated/rust/loom/` and re-exported here as [`model`]. It is never
 //! written by hand.
 //!
-//! Loom implements Commission's [`AgentExecutor`] over Commission's generated `Frontier`. The
-//! selector and argument generator below are a minimal seam until `story:action-selector` and
-//! `story:argument-generator` replace them.
+//! Loom implements Commission's [`AgentExecutor`] over Commission's generated `Frontier`. Its
+//! selector chooses from the catalogue projected from that frontier ([`selection`]); the argument
+//! generator below is a minimal seam until `story:argument-generator` replaces it.
 //!
 //! Loom keeps no admission rule of its own: whether a selected action may be proposed is
 //! Commission's [`admit`]. An action that needs authority is proposed, and Commission rechecks it
@@ -35,25 +35,13 @@ use b10x_commission::model::responsibility::{
 };
 use b10x_commission::ports::executor::AgentExecutor;
 
-/// Why a selector picked no action.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SelectorError {
-    /// The frontier offers nothing to select. Loom answers it with `NoUsefulAction`.
-    NothingAdmissible,
-    /// The selector could not answer, for the reason given. Loom answers it with
-    /// `Suspended(ExternalAvailability)` carrying the reason.
-    Unavailable(String),
-}
+pub use selection::{ActionSelector, FirstAdmissibleSelector, SelectorError};
 
-/// Picks the action Loom proposes next.
-pub trait ActionSelector {
-    /// The `action` of one of `frontier`'s actions.
-    fn select(
-        &self,
-        frontier: &Frontier<frontier_state::Issued>,
-        prompt: &str,
-    ) -> Result<String, SelectorError>;
-}
+use model::run::{
+    ActionCatalogue, CatalogueId, Selection, SelectionId, TurnId, action_catalogue_state,
+    selection_state,
+};
+use selection::{SelectionContext, SelectionRefusal};
 
 /// Generates the arguments of one selected action.
 pub trait ArgumentGenerator {
@@ -63,26 +51,6 @@ pub trait ArgumentGenerator {
         action: &FrontierAction,
         prompt: &str,
     ) -> Result<ProposedActionArguments, String>;
-}
-
-/// Deterministic bootstrap selector used only for tests/examples: the first `Admissible` action.
-#[derive(Debug, Default)]
-pub struct FirstAdmissibleSelector;
-
-impl ActionSelector for FirstAdmissibleSelector {
-    fn select(
-        &self,
-        frontier: &Frontier<frontier_state::Issued>,
-        _prompt: &str,
-    ) -> Result<String, SelectorError> {
-        frontier
-            .data()
-            .actions
-            .iter()
-            .find(|listed| listed.status == ActionStatus::Admissible)
-            .map(|listed| listed.action.clone())
-            .ok_or(SelectorError::NothingAdmissible)
-    }
 }
 
 /// Bootstrap argument generator: always the empty object.
@@ -112,6 +80,21 @@ impl<S, G> Loom<S, G> {
             arguments,
             prompt: prompt.into(),
         }
+    }
+}
+
+impl<S: ActionSelector, G> Loom<S, G> {
+    /// The selector's choice from `catalogue`, as the selection `selection_id`. An action the
+    /// catalogue does not list is refused and named, whatever the selector's confidence.
+    pub fn select(
+        &self,
+        catalogue: &ActionCatalogue<action_catalogue_state::Projected>,
+        selection_id: SelectionId,
+    ) -> Result<Selection<selection_state::Selected>, SelectionRefusal> {
+        let context = SelectionContext {
+            prompt: self.prompt.clone(),
+        };
+        selection::select(&self.selector, &context, catalogue, selection_id)
     }
 }
 
@@ -167,8 +150,8 @@ where
     G: ArgumentGenerator,
 {
     /// The port has no error channel. A frontier for another case than the commission's, a
-    /// frontier that admits nothing, a selector that finds nothing admissible, and a selection
-    /// Commission refuses are `NoUsefulAction`. A selector that is unavailable, or a failing
+    /// frontier that admits nothing, a selector that finds nothing admissible, a selection the
+    /// projected catalogue does not list, and a selection Commission refuses are `NoUsefulAction`. A selector that is unavailable, or a failing
     /// argument generator, is `Suspended` with `ExternalAvailability` carrying its message.
     fn run(
         &self,
@@ -178,14 +161,29 @@ where
         if frontier.data().case_id != commission.data().case_id || admits_nothing(frontier) {
             return no_useful_action();
         }
-        let selected = match self.selector.select(frontier, &self.prompt) {
-            Ok(selected) => selected,
-            Err(SelectorError::NothingAdmissible) => return no_useful_action(),
-            Err(SelectorError::Unavailable(error)) => return outage(error),
-        };
+        // The selector sees only the catalogue projected from this frontier. Until a run assigns
+        // turn identities, one frontier is one turn, one catalogue and one selection, each
+        // identified by the frontier's id.
+        let identity = || frontier.data().frontier_id.0.0.clone();
+        let catalogue = projection::project(
+            frontier,
+            CatalogueId(model::primitives::Uuid(identity())),
+            TurnId(model::primitives::Uuid(identity())),
+        );
+        let selected =
+            match self.select(&catalogue, SelectionId(model::primitives::Uuid(identity()))) {
+                Ok(selection) => selection.into_data().action,
+                Err(SelectionRefusal::NotInCatalogue(_))
+                | Err(SelectionRefusal::Selector(SelectorError::NothingAdmissible)) => {
+                    return no_useful_action();
+                }
+                Err(SelectionRefusal::Selector(SelectorError::Unavailable(error))) => {
+                    return outage(error);
+                }
+            };
 
         // Safety invariant: only what Commission admits, or admits once authorized, is proposed.
-        // An action outside the frontier is refused there too.
+        // An action outside the catalogue was refused above; Commission decides the rest.
         let admission = admit(frontier, &selected);
         if matches!(admission, Admission::Refused(_)) {
             return no_useful_action();
@@ -219,10 +217,17 @@ mod tests {
     impl ActionSelector for Scripted {
         fn select(
             &self,
-            _frontier: &Frontier<frontier_state::Issued>,
-            _prompt: &str,
-        ) -> Result<String, SelectorError> {
-            self.0.clone().map(str::to_owned)
+            _context: &SelectionContext,
+            _candidates: &[model::run::CatalogueEntry],
+        ) -> Result<selection::Choice, SelectorError> {
+            self.0.clone().map(|action| selection::Choice {
+                action: action.to_owned(),
+                confidence: None,
+            })
+        }
+
+        fn strategy(&self) -> model::run::SelectionStrategy {
+            model::run::SelectionStrategy::ReasoningModel
         }
     }
 
@@ -261,6 +266,8 @@ mod tests {
             .run(&commission(), &frontier_for("CASE-1", actions))
     }
 
+    /// `story:action-selector`: the selector is handed the catalogue projected from the frontier,
+    /// and an action that catalogue does not list is refused before Commission is asked.
     #[test]
     fn selector_cannot_expand_frontier() {
         let outcome = run(
