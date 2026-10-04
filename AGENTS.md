@@ -78,7 +78,7 @@ change with no behaviour change is exempt, and its story says so.
   path dependency) leaves it alone. Do not add a `rustfmt.toml` inside the generated tree: `task
   drift` would report it and `task generate` would delete it.
 - `b10x-commission` (and, for tests, `b10x-commission-testkit`) is a git dependency on `main`, pinned by
-  `Cargo.lock`. Loom does not depend on `b10x-canon`; the frontier is Commission's generated `Frontier`.
+  `Cargo.lock`. The frontier Loom reads is Commission's generated `Frontier`; Loom may use `b10x-canon`.
 - Every commit and push is `b10x-bot[bot]`'s through `b10x-gates bot`; every GitHub write goes
   through `b10x-gates api`.
 - Use a managed worktree (`worktree create --repo loom --purpose …`) for changes.

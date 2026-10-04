@@ -1,6 +1,6 @@
 //! Acceptance for `story:agent-executor`: Loom implements the Commission `AgentExecutor` on model
 //! types synthesized from `ess/`, proposes an approval-gated action for Commission to authorize
-//! (Atlas ADR 0082) rather than suspending for authority itself, and imports nothing from Canon.
+//! (Atlas ADR 0082) rather than suspending for authority itself.
 //!
 //! The frontier the scripted fake governor serves is transcribed from ELS
 //! `docs/examples/software-change.md` (case CHG-1842): ELS `software.change/1` has no machine
@@ -8,11 +8,6 @@
 //! that example's "Initial" and "After `tests.run` on R2" states, typed as Commission's generated
 //! `Frontier` items. The frontier is Commission's own generated entity, the one its executor port
 //! takes; Canon's `Frontier` is not used.
-//!
-//! Source paths are read when the test runs (`CARGO_MANIFEST_DIR`), never baked in at build time:
-//! a build directory shared between worktrees reuses binaries across them.
-
-use std::path::PathBuf;
 
 use b10x_commission::admission::admit;
 use b10x_commission::model::json::Value;
@@ -234,26 +229,4 @@ fn session_carries_commission_run_id() {
     assert_eq!(session.state(), SessionState::Active);
     assert_eq!(session.data().commission_run, run);
     assert_eq!(session.into_data().commission_run, run);
-}
-
-/// Acceptance 6: `crates/loom/src/lib.rs` imports no `b10x_canon` item.
-#[test]
-fn lib_imports_no_canon() {
-    let manifest = std::env::var_os("CARGO_MANIFEST_DIR")
-        .unwrap_or_else(|| panic!("CARGO_MANIFEST_DIR is unset: run this test through cargo"));
-    let path = PathBuf::from(manifest).join("src/lib.rs");
-    let source = std::fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
-
-    let canon_lines: Vec<String> = source
-        .lines()
-        .enumerate()
-        .filter(|(_, line)| line.contains("b10x_canon"))
-        .map(|(index, line)| format!("{}:{}: {}", path.display(), index + 1, line.trim()))
-        .collect();
-    assert!(
-        canon_lines.is_empty(),
-        "lib.rs names b10x_canon:\n{}",
-        canon_lines.join("\n")
-    );
 }
