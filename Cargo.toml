@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
-exclude = ["generated/rust/loom"]
+exclude = ["generated/rust/loom", "generated/rust/commission"]
 
 [workspace.package]
 version = "0.0.0"

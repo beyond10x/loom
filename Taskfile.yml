@@ -3,21 +3,31 @@ version: '3'
 env:
   CARGO_TARGET_DIR: '{{.HOME}}/.cache/b10x-target/loom'
 
+includes:
+  commission: ./Taskfile.commission.yml
+
 tasks:
   default:
     cmds: [{task: check}]
 
   check:
-    desc: Format, lint, test.
+    desc: Format, lint, test; Loom's steps and every Commission step.
     cmds:
       - task: spec
+      - task: commission:spec
       - task: ess-gate
+      - task: commission:ess-gate
       - task: drift
+      - task: commission:drift
       - task: no-hand-model
+      - task: commission:no-hand-model
+      - task: commission:conform
+      - task: commission:deps-guard
       - cargo fmt --all --check
       - cargo clippy --workspace --all-targets --locked -- -D warnings
       - cargo test --workspace --locked
       - task: docs-check
+      - task: commission:docs-drift
 
   spec:
     desc: Validate the ESS specification.

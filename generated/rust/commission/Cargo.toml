@@ -1,0 +1,14 @@
+# generated from commission v1
+# model digest 8baad8a2a232f1823d8fce586ddd35c901af8923715a1eb1fbc3f62817da8e4f
+# contract digest c27daebab1de8a70c1c4985e2a48176db7d5700784cedf99b11902b83a5dea7a
+# do not edit: regenerate with `ess synthesize --layout crate`
+
+[package]
+name = "commission"
+description = "The `commission` specification, v1, synthesised as one crate."
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+
+[workspace]

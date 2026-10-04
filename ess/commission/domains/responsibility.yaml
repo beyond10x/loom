@@ -1,0 +1,712 @@
+# Draft domain for Commission (story M-001). Nouns and relations are read from
+# docs/design/commission-design.md, docs/contracts/{commission-executor,frontier,evidence}.md and
+# Atlas ADR 0070. A relation the sources do not settle stays out of the model until a story decides
+# it; its open question is a decision-blocker in the planning store, not a note here (Atlas ADR
+# 0076). One lifecycle state per entity until a command outcome moves it.
+domain: commission.responsibility
+
+summary: >-
+  An agent revision commissioned to a durable case. The governor owns the case's truth and returns
+  a frontier; a run is one bounded period of execution against it. The executor proposes; it never
+  completes a case.
+
+naming:
+  wire: responsibility
+  display: Responsibility
+
+types:
+  - name: commission.responsibility.AgentId
+    kind: newtype
+    of: Uuid
+
+  - name: commission.responsibility.AgentRevisionId
+    kind: newtype
+    of: Uuid
+
+  # A case id is issued by the governor (for example AEP) and is opaque here.
+  - name: commission.responsibility.CaseId
+    kind: newtype
+    of: String
+
+  - name: commission.responsibility.CommissionId
+    kind: newtype
+    of: Uuid
+
+  - name: commission.responsibility.RunId
+    kind: newtype
+    of: Uuid
+
+  - name: commission.responsibility.FrontierId
+    kind: newtype
+    of: Uuid
+
+  - name: commission.responsibility.EvidenceId
+    kind: newtype
+    of: Uuid
+
+  - name: commission.responsibility.ObservationId
+    kind: newtype
+    of: Uuid
+
+  - name: commission.responsibility.AuthorityDecisionId
+    kind: newtype
+    of: Uuid
+
+  - name: commission.responsibility.ActionRequestId
+    kind: newtype
+    of: Uuid
+
+  # The principal a commission acts for. Commission-local (operator, 2026-10-04).
+  - name: commission.responsibility.PrincipalId
+    kind: newtype
+    of: String
+
+  # What the principal delegated to this commission. Commission-local (operator, 2026-10-04). It is
+  # opaque to Commission: passed to the AuthorityProvider unchanged and read by nobody else.
+  - name: commission.responsibility.AuthorityContext
+    kind: newtype
+    of: Json
+
+  # The payload of a union variant that carries nothing; its value is always true. A stand-in until
+  # ESS supports unit variants, removed then (story:port-skeleton, coordinator decision 1).
+  - name: commission.responsibility.Unit
+    kind: newtype
+    of: Boolean
+
+  # story:governor-port: why a governor could not answer.
+  - name: commission.responsibility.GovernorError
+    kind: enum
+    variants: [UnknownCase, GovernorUnavailable]
+
+  # story:governor-port: whether the governor holds a case complete. Completion is the governor's
+  # determination, never the executor's.
+  - name: commission.responsibility.CompletionDetermination
+    kind: union
+    tag: kind
+    variants:
+      Open: commission.responsibility.Unit
+      Complete: commission.responsibility.CompletionDeterminationComplete
+
+  # The governor's outcome identifier, as the governor reports it.
+  - name: commission.responsibility.CompletionDeterminationComplete
+    kind: struct
+    fields:
+      - name: outcome
+        type: String
+
+  # docs/contracts/commission-executor.md: the arguments of a proposed action, as the model wrote them.
+  - name: commission.responsibility.ProposedActionArguments
+    kind: newtype
+    of: Json
+
+  # What a human is asked to decide. Commission's sources declare no structure for it.
+  - name: commission.responsibility.HumanDecisionRequest
+    kind: newtype
+    of: Json
+
+  # docs/history/beyond10x-agent-sdk-design-pre-commission-name.md:1477-1485: why a run is
+  # suspended. A payload Commission's sources declare nowhere is carried as Json, and no entity is
+  # invented for it.
+  - name: commission.responsibility.SuspensionReason
+    kind: union
+    tag: kind
+    variants:
+      Authority: Json
+      Human: commission.responsibility.HumanDecisionRequest
+      Evidence: List<String>
+      Time: Json
+      Dependency: List<commission.responsibility.CaseId>
+      Budget: Json
+      ExternalAvailability: Json
+
+  # docs/contracts/commission-executor.md: what an executor may hand back. It proposes; it never
+  # completes a case.
+  - name: commission.responsibility.ExecutorOutcome
+    kind: union
+    tag: kind
+    variants:
+      ProposedAction: commission.responsibility.ExecutorOutcomeProposedAction
+      NeedsHumanJudgment: commission.responsibility.ExecutorOutcomeNeedsHumanJudgment
+      Suspended: commission.responsibility.ExecutorOutcomeSuspended
+      NoUsefulAction: commission.responsibility.Unit
+      CompletedLocalReasoning: commission.responsibility.Unit
+
+  # The action is a FrontierAction's `action`; identity, authority and case revision are not part
+  # of a proposal (AGENTS.md § Rules).
+  - name: commission.responsibility.ExecutorOutcomeProposedAction
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: arguments
+        type: commission.responsibility.ProposedActionArguments
+
+  - name: commission.responsibility.ExecutorOutcomeNeedsHumanJudgment
+    kind: struct
+    fields:
+      - name: request
+        type: commission.responsibility.HumanDecisionRequest
+
+  - name: commission.responsibility.ExecutorOutcomeSuspended
+    kind: struct
+    fields:
+      - name: reason
+        type: commission.responsibility.SuspensionReason
+
+  # story:authority-provider-port: what an AuthorityProvider answers at the call. Distinct from the
+  # stored AuthorityDecision entity.
+  - name: commission.responsibility.AuthorityVerdict
+    kind: union
+    tag: kind
+    variants:
+      Allow: commission.responsibility.Unit
+      Deny: commission.responsibility.AuthorityVerdictDeny
+      ApprovalRequired: commission.responsibility.AuthorityVerdictApprovalRequired
+
+  - name: commission.responsibility.AuthorityVerdictDeny
+    kind: struct
+    fields:
+      - name: reason
+        type: String
+
+  - name: commission.responsibility.AuthorityVerdictApprovalRequired
+    kind: struct
+    fields:
+      - name: request
+        type: String
+
+  # story:run-outcomes: how a run ended or paused.
+  - name: commission.responsibility.RunOutcome
+    kind: union
+    tag: kind
+    variants:
+      Completed: commission.responsibility.RunOutcomeCompleted
+      Suspended: commission.responsibility.RunOutcomeSuspended
+      NeedsAuthority: commission.responsibility.RunOutcomeNeedsAuthority
+      NeedsHumanJudgment: commission.responsibility.RunOutcomeNeedsHumanJudgment
+      NeedsExternalEvidence: commission.responsibility.RunOutcomeNeedsExternalEvidence
+      NoAdmissibleAction: commission.responsibility.Unit
+
+  # The governor's outcome identifier, as the governor reports it.
+  - name: commission.responsibility.RunOutcomeCompleted
+    kind: struct
+    fields:
+      - name: outcome
+        type: String
+
+  - name: commission.responsibility.RunOutcomeSuspended
+    kind: struct
+    fields:
+      - name: reason
+        type: commission.responsibility.SuspensionReason
+
+  - name: commission.responsibility.RunOutcomeNeedsAuthority
+    kind: struct
+    fields:
+      - name: request
+        type: String
+
+  - name: commission.responsibility.RunOutcomeNeedsHumanJudgment
+    kind: struct
+    fields:
+      - name: request
+        type: commission.responsibility.HumanDecisionRequest
+
+  - name: commission.responsibility.RunOutcomeNeedsExternalEvidence
+    kind: struct
+    fields:
+      - name: requirements
+        type: List<String>
+
+  # docs/contracts/protocol-core.md: three-valued truth.
+  - name: commission.responsibility.Truth
+    kind: enum
+    variants: ["True", "False", "Unknown"]
+
+  # docs/contracts/frontier.md: what the frontier says about one action.
+  - name: commission.responsibility.ActionStatus
+    kind: enum
+    variants: [Admissible, ApprovalRequired, Blocked]
+
+  # docs/contracts/frontier.md: one claim of a frontier and its three-valued value.
+  - name: commission.responsibility.FrontierClaim
+    kind: struct
+    fields:
+      - name: claim
+        type: String
+      - name: value
+        type: commission.responsibility.Truth
+
+  # docs/contracts/frontier.md: one obligation of a frontier, open or discharged.
+  - name: commission.responsibility.FrontierObligation
+    kind: struct
+    fields:
+      - name: obligation
+        type: String
+      - name: open
+        type: Boolean
+
+  # docs/contracts/frontier.md: one action of a frontier, the capability an approval needs and the
+  # reasons a block names.
+  - name: commission.responsibility.FrontierAction
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: status
+        type: commission.responsibility.ActionStatus
+      - name: capability
+        type: Optional<String>
+      - name: reasons
+        type: List<String>
+
+  # story:frontier-admission: how the current frontier sorts one proposed action. An action the
+  # frontier does not list, or lists as ApprovalRequired with no capability to ask for, is refused.
+  - name: commission.responsibility.Admission
+    kind: union
+    tag: kind
+    variants:
+      Admissible: commission.responsibility.Unit
+      NeedsAuthority: commission.responsibility.AdmissionNeedsAuthority
+      Refused: commission.responsibility.AdmissionRefused
+
+  # The capability the frontier names for an ApprovalRequired action.
+  - name: commission.responsibility.AdmissionNeedsAuthority
+    kind: struct
+    fields:
+      - name: capability
+        type: String
+
+  # The refused action and the reasons the frontier gives for it; empty when it gives none.
+  - name: commission.responsibility.AdmissionRefused
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: reasons
+        type: List<String>
+
+entities:
+  # Reusable worker configuration.
+  - name: commission.responsibility.Agent
+    identity:
+      name: agent_id
+      type: commission.responsibility.AgentId
+    fields:
+      - name: name
+        type: String
+    relations:
+      # A revision has no meaning without its agent.
+      - name: revisions
+        kind: owns
+        target: commission.responsibility.AgentRevision
+        cardinality: many
+        via: agent_id
+    lifecycle:
+      initial: Registered
+      states: [Registered]
+      terminal: [Registered]
+
+  - name: commission.responsibility.AgentRevision
+    identity:
+      name: agent_revision_id
+      type: commission.responsibility.AgentRevisionId
+    fields:
+      - name: agent_id
+        type: commission.responsibility.AgentId
+      - name: revision
+        type: Integer
+    lifecycle:
+      initial: Published
+      states: [Published]
+      terminal: [Published]
+
+  # Durable undertaking under a protocol. Commission holds a reference; the governor holds truth.
+  - name: commission.responsibility.Case
+    identity:
+      name: case_id
+      type: commission.responsibility.CaseId
+    fields:
+      - name: protocol
+        type: String
+      - name: revision
+        type: Integer
+    lifecycle:
+      initial: Open
+      states: [Open]
+      terminal: [Open]
+
+  # Binds one agent revision to one case under a governor (ADR 0070).
+  # A case may hold many commissions at once, in parallel (operator, 2026-10-04). Each commission
+  # references exactly one case.
+  # Principal and authority context are Commission-local types (operator, 2026-10-04); binding them
+  # to Mandate is phase-7 work (Atlas epic:ga-governed-effects).
+  - name: commission.responsibility.Commission
+    identity:
+      name: commission_id
+      type: commission.responsibility.CommissionId
+    fields:
+      - name: agent_revision_id
+        type: commission.responsibility.AgentRevisionId
+      - name: case_id
+        type: commission.responsibility.CaseId
+      - name: principal
+        type: commission.responsibility.PrincipalId
+      - name: authority_context
+        type: commission.responsibility.AuthorityContext
+    relations:
+      - name: agent_revision
+        kind: references
+        target: commission.responsibility.AgentRevision
+        cardinality: one
+        via: agent_revision_id
+      - name: case
+        kind: references
+        target: commission.responsibility.Case
+        cardinality: one
+        via: case_id
+      # A run is one bounded period of execution of this commission.
+      - name: runs
+        kind: owns
+        target: commission.responsibility.Run
+        cardinality: many
+        via: commission_id
+    lifecycle:
+      initial: Assigned
+      states: [Assigned]
+      terminal: [Assigned]
+
+  - name: commission.responsibility.Run
+    identity:
+      name: run_id
+      type: commission.responsibility.RunId
+    fields:
+      - name: commission_id
+        type: commission.responsibility.CommissionId
+      # The case revision the run started against; a proposal made on another revision is stale.
+      - name: case_revision
+        type: Integer
+    relations:
+      # A request is made inside one run, against that run's case revision, and never outlives it
+      # (decision-blocker:action-request-commission). The commission is reached through the run.
+      - name: requests
+        kind: owns
+        target: commission.responsibility.ActionRequest
+        cardinality: many
+        via: run_id
+    # Resuming after a restart continues this same run (operator, 2026-10-04), so run state is
+    # durable. Resume keeps the run id and the case revision.
+    lifecycle:
+      initial: Running
+      states: [Running, Suspended]
+      terminal: []
+      transitions:
+        - {name: suspend, from: [Running], to: Suspended}
+        - {name: resume, from: [Suspended], to: Running}
+
+  # docs/contracts/frontier.md: the bridge between governance and execution, for one case revision.
+  # Its claims, obligations and actions are Commission's own value types (story M-002): none has an
+  # identity or a lifecycle of its own outside the frontier issued for one case revision.
+  - name: commission.responsibility.Frontier
+    identity:
+      name: frontier_id
+      type: commission.responsibility.FrontierId
+    fields:
+      - name: case_id
+        type: commission.responsibility.CaseId
+      - name: case_revision
+        type: Integer
+      - name: claims
+        type: List<commission.responsibility.FrontierClaim>
+      - name: obligations
+        type: List<commission.responsibility.FrontierObligation>
+      - name: actions
+        type: List<commission.responsibility.FrontierAction>
+    relations:
+      - name: case
+        kind: references
+        target: commission.responsibility.Case
+        cardinality: one
+        via: case_id
+    lifecycle:
+      initial: Issued
+      states: [Issued]
+      terminal: [Issued]
+
+  # docs/contracts/evidence.md: a raw report from a runtime, integration or verifier.
+  - name: commission.responsibility.Observation
+    identity:
+      name: observation_id
+      type: commission.responsibility.ObservationId
+    fields:
+      - name: source
+        type: String
+      - name: subject
+        type: String
+      - name: observed_at
+        type: Timestamp
+      - name: payload
+        type: Json
+    lifecycle:
+      initial: Reported
+      states: [Reported]
+      terminal: [Reported]
+
+  # Typed, attributable information admitted by the governor. A trace is not evidence (ADR 0074).
+  - name: commission.responsibility.Evidence
+    identity:
+      name: evidence_id
+      type: commission.responsibility.EvidenceId
+    fields:
+      - name: case_id
+        type: commission.responsibility.CaseId
+      - name: kind
+        type: String
+      - name: subject_revision
+        type: Integer
+      - name: producer
+        type: String
+      - name: observation_ids
+        type: List<commission.responsibility.ObservationId>
+      - name: facts
+        type: Json
+      - name: provenance
+        type: Json
+    relations:
+      - name: case
+        kind: references
+        target: commission.responsibility.Case
+        cardinality: one
+        via: case_id
+      # An evidence record interprets one or more observations (docs/contracts/evidence.md;
+      # operator, 2026-10-04).
+      - name: observations
+        kind: references
+        target: commission.responsibility.Observation
+        cardinality: many
+        via: observation_ids
+    lifecycle:
+      initial: Submitted
+      states: [Submitted]
+      terminal: [Submitted]
+
+  # A proposed action bound to the case revision of the frontier it was chosen from
+  # (docs/history/beyond10x-agent-sdk-design-pre-commission-name.md § 36). The expected revision
+  # comes from the frontier the run was given, never from executor output. The action is a
+  # FrontierAction's `action`. Revalidation takes the request as its input and changes nothing.
+  - name: commission.responsibility.ActionRequest
+    identity:
+      name: action_request_id
+      type: commission.responsibility.ActionRequestId
+    fields:
+      - name: run_id
+        type: commission.responsibility.RunId
+      - name: case_id
+        type: commission.responsibility.CaseId
+      - name: expected_case_revision
+        type: Integer
+      - name: action
+        type: String
+      - name: arguments
+        type: commission.responsibility.ProposedActionArguments
+    relations:
+      - name: case
+        kind: references
+        target: commission.responsibility.Case
+        cardinality: one
+        via: case_id
+    lifecycle:
+      initial: Requested
+      states: [Requested]
+      terminal: [Requested]
+
+  # Authority stays outside the model; a decision is supplied by an AuthorityProvider.
+  # A decision belongs to exactly one action request at one case revision (operator, 2026-10-04);
+  # a later action needs a new decision.
+  - name: commission.responsibility.AuthorityDecision
+    identity:
+      name: authority_decision_id
+      type: commission.responsibility.AuthorityDecisionId
+    fields:
+      - name: action
+        type: String
+      - name: granted
+        type: Boolean
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
+    relations:
+      - name: action_request
+        kind: references
+        target: commission.responsibility.ActionRequest
+        cardinality: one
+        via: action_request_id
+    lifecycle:
+      initial: Decided
+      states: [Decided]
+      terminal: [Decided]
+
+errors:
+  - name: commission.responsibility.RunStateConflict
+    fields:
+      - name: state
+        type: commission.responsibility.Run.State
+
+  # The request was made at a revision the case has moved past. Names both revisions.
+  - name: commission.responsibility.ActionRequestStale
+    fields:
+      - name: expected_case_revision
+        type: Integer
+      - name: current_case_revision
+        type: Integer
+
+  # The current frontier does not admit the action: it does not list it, blocks it, or lists it as
+  # ApprovalRequired with no single capability to ask for. Carries the frontier's reasons.
+  - name: commission.responsibility.ActionNotAdmitted
+    fields:
+      - name: action
+        type: String
+      - name: reasons
+        type: List<String>
+
+  # The current frontier lists the action as ApprovalRequired: it is not admitted without an
+  # authority decision for this capability.
+  - name: commission.responsibility.ActionNeedsAuthority
+    fields:
+      - name: action
+        type: String
+      - name: capability
+        type: String
+
+commands:
+  - name: commission.responsibility.StartRun
+    input:
+      - name: commission_id
+        type: commission.responsibility.CommissionId
+      - name: case_revision
+        type: Integer
+    outcomes:
+      - name: started
+        creates: commission.responsibility.Run
+        instance: run_id
+        sets:
+          commission_id: input.commission_id
+          case_revision: input.case_revision
+        emits: [commission.responsibility.RunStarted]
+        payload:
+          commission.responsibility.RunStarted:
+            run_id: {generated: true}
+            commission_id: input.commission_id
+            case_revision: input.case_revision
+
+  # The reason is reported, not stored on Run: where a suspension is kept is open
+  # (decision-blocker:suspension-durable-record).
+  - name: commission.responsibility.SuspendRun
+    input:
+      - name: run_id
+        type: commission.responsibility.RunId
+      - name: reason
+        type: commission.responsibility.SuspensionReason
+    outcomes:
+      - name: suspended
+        moves: commission.responsibility.Run.suspend
+        instance: run_id
+        emits: [commission.responsibility.RunSuspended]
+        payload:
+          commission.responsibility.RunSuspended:
+            run_id: input.run_id
+            reason: input.reason
+      - name: wrong-state
+        wrong_state: true
+        error: commission.responsibility.RunStateConflict
+
+  - name: commission.responsibility.ResumeRun
+    input:
+      - name: run_id
+        type: commission.responsibility.RunId
+    outcomes:
+      - name: resumed
+        moves: commission.responsibility.Run.resume
+        instance: run_id
+        emits: [commission.responsibility.RunResumed]
+        payload:
+          commission.responsibility.RunResumed:
+            run_id: input.run_id
+      - name: wrong-state
+        wrong_state: true
+        error: commission.responsibility.RunStateConflict
+
+  # Immediately before anything is done with a request, the request as the run built it is
+  # revalidated. The case's current revision and frontier come from the governor, never from the
+  # input, and the action is re-checked with frontier admission. A stale request is refused even
+  # when its action is admissible now. Answered in this order.
+  - name: commission.responsibility.RevalidateActionRequest
+    input:
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
+      - name: run_id
+        type: commission.responsibility.RunId
+      - name: case_id
+        type: commission.responsibility.CaseId
+      - name: expected_case_revision
+        type: Integer
+      - name: action
+        type: String
+      - name: arguments
+        type: commission.responsibility.ProposedActionArguments
+    outcomes:
+      - name: stale
+        external: the governor's current revision of the case is not the request's expected case revision
+        error: commission.responsibility.ActionRequestStale
+        payload:
+          commission.responsibility.ActionRequestStale:
+            expected_case_revision: input.expected_case_revision
+      - name: not-admitted
+        external: the current frontier refuses the action
+        error: commission.responsibility.ActionNotAdmitted
+        payload:
+          commission.responsibility.ActionNotAdmitted:
+            action: input.action
+      - name: needs-authority
+        external: the current frontier lists the action as ApprovalRequired, naming one capability
+        error: commission.responsibility.ActionNeedsAuthority
+        payload:
+          commission.responsibility.ActionNeedsAuthority:
+            action: input.action
+      - name: admitted
+        accepts: nothing
+
+events:
+  - name: commission.responsibility.RunStarted
+    fields:
+      - name: run_id
+        type: commission.responsibility.RunId
+      - name: commission_id
+        type: commission.responsibility.CommissionId
+      - name: case_revision
+        type: Integer
+
+  - name: commission.responsibility.RunSuspended
+    fields:
+      - name: run_id
+        type: commission.responsibility.RunId
+      - name: reason
+        type: commission.responsibility.SuspensionReason
+
+  - name: commission.responsibility.RunResumed
+    fields:
+      - name: run_id
+        type: commission.responsibility.RunId
+
+views:
+  - name: commission.responsibility.RunStates
+    source: commission.responsibility.Run
+    consistency: read_your_writes
+    fields:
+      - name: run_id
+        type: commission.responsibility.RunId
+      - name: commission_id
+        type: commission.responsibility.CommissionId
+      - name: case_revision
+        type: Integer
+      - name: state
+        type: commission.responsibility.Run.State

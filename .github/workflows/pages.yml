@@ -35,6 +35,7 @@ jobs:
       - name: Bind the built site to its source commit
         run: |
           cargo test --locked -p loom-docs
+          cargo test --locked -p commission-docs
           cargo run --locked -p loom-docs -- provenance --site website/build --commit "$GITHUB_SHA"
       - name: Upload the exact built site
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'

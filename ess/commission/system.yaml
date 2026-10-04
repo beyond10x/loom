@@ -1,0 +1,10 @@
+format: ess/20
+system: commission
+version: v1
+
+summary: >-
+  The responsibility model for governed autonomous workers: an agent revision commissioned to a
+  durable case under a governor, the frontier the governor returns, and the runs that act on it.
+
+domains:
+  - commission.responsibility
