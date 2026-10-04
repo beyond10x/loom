@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-04T23:47:19Z",
+  "actor": "human:timo",
+  "artifact": "story:import-commission",
+  "kind": "story",
+  "revision": 14,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "integration gate: 14 steps exit 0 (ess validate x2, ess_gate x2, drift x2, no-hand-model x2, conform, executor_port, docs --check x2, fmt, clippy); cargo test --workspace --no-fail-fast exit 0, 833 passed, 0 failed, 2 ignored",
+    "reference": "wave/2026-10-05-w19 004eebc"
+  }
+}

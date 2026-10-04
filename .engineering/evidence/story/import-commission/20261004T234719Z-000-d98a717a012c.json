@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-04T23:47:19Z",
+  "actor": "human:timo",
+  "artifact": "story:import-commission",
+  "kind": "story",
+  "revision": 14,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "base 78d261d: workspace does not load (multiple workspace roots), commission_import red 3; treatment 004eebc: commission_import 3 passed, cargo tree -i b10x-commission one copy, git log --follow reaches Commission's commits for ess/commission/system.yaml (5), docs/commission/contracts/frontier.md (3)",
+    "reference": "phase1-red.log vs int-gate.log + int-test2.log"
+  }
+}
