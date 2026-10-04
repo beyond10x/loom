@@ -73,6 +73,10 @@ change with no behaviour change is exempt, and its story says so.
 - Planned in the AEP store under `.engineering/`, written only through `aep plan artifact`. Body
   drafts go in `.engineering/drafts/` (ignored).
 - Build with `CARGO_TARGET_DIR=$HOME/.cache/b10x-target/loom` (the Taskfile sets it).
+- `generated/rust/loom/` is ess output, byte-pinned by `task drift`; it is never formatted.
+  `generated/rustfmt.toml` sets `disable_all_formatting`, so `cargo fmt --all` (which reaches the
+  path dependency) leaves it alone. Do not add a `rustfmt.toml` inside the generated tree: `task
+  drift` would report it and `task generate` would delete it.
 - `b10x-commission` (and, for tests, `b10x-commission-testkit`) is a git dependency on `main`, pinned by
   `Cargo.lock`. Loom does not depend on `b10x-canon`; the frontier is Commission's generated `Frontier`.
 - Every commit and push is `b10x-bot[bot]`'s through `b10x-gates bot`; every GitHub write goes
