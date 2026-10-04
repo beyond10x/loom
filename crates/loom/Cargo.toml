@@ -7,7 +7,16 @@ repository.workspace = true
 
 [dependencies]
 b10x-commission = { git = "https://github.com/beyond10x/commission", branch = "main" }
+httpdate = "1.0.3"
+jsonschema = { version = "0.52.1", default-features = false }
 loom = { path = "../../generated/rust/loom" }
+reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11.0"
+thiserror = "2"
+tokio = { version = "1.53", features = ["rt", "time", "macros"] }
+zeroize = { version = "1.8", features = ["derive"] }
 
 [dev-dependencies]
 b10x-commission-testkit = { git = "https://github.com/beyond10x/commission", branch = "main" }
