@@ -1,7 +1,7 @@
 # Draft domain for Loom (story I-006). Nouns are read from docs/design/loom-design.md,
 # docs/contracts/loom-action-selection.md, crates/loom/src/lib.rs and Atlas ADRs 0071-0073. Every
-# relation the sources do not settle is marked UNMAPPED: and stays out of the model until a story
-# decides it. One lifecycle state per entity until a command outcome moves it.
+# relation the sources do not settle stays out of the model until a story decides it. One lifecycle
+# state per entity until a command outcome moves it.
 domain: loom.run
 
 summary: >-
@@ -34,6 +34,12 @@ types:
     kind: newtype
     of: Uuid
 
+  # The id of the commission run a session executes: Commission's commission.responsibility.RunId.
+  # A typed id, not a relation: ESS cannot name another system's entity.
+  - name: loom.run.CommissionRunId
+    kind: newtype
+    of: Uuid
+
   # docs/design/loom-design.md § Action selection strategies.
   - name: loom.run.SelectionStrategy
     kind: enum
@@ -41,15 +47,13 @@ types:
 
 entities:
   # Session and transcript state for one run (loom-design.md § Owns).
-  # UNMAPPED: the commission run this session executes is an entity of the commission system; how
-  # Loom references it (a typed external id, or a value copied in) is decided in story L-002.
   - name: loom.run.Session
     identity:
       name: session_id
       type: loom.run.SessionId
     fields:
       - name: commission_run
-        type: String
+        type: loom.run.CommissionRunId
     relations:
       # A turn is part of one session's transcript (loom-design.md: "model turn loop",
       # "session/transcript state").
@@ -72,19 +76,27 @@ entities:
         type: loom.run.SessionId
       - name: index
         type: Integer
+    relations:
+      # A catalogue is projected once per turn and does not outlive it (operator decision
+      # 2026-10-04, decision-blocker:catalogue-ownership).
+      - name: catalogue
+        kind: owns
+        target: loom.run.ActionCatalogue
+        cardinality: one
+        via: turn_id
     lifecycle:
       initial: Taken
       states: [Taken]
       terminal: [Taken]
 
-  # The model-visible catalogue derived from one frontier (ADR 0072).
-  # UNMAPPED: whether a catalogue belongs to a turn or to a session (re-projected on every turn,
-  # or only when the frontier changes) is not settled by the sources.
+  # The model-visible catalogue derived from one frontier (ADR 0072), projected for one turn.
   - name: loom.run.ActionCatalogue
     identity:
       name: catalogue_id
       type: loom.run.CatalogueId
     fields:
+      - name: turn_id
+        type: loom.run.TurnId
       - name: frontier
         type: String
       - name: case_revision
@@ -95,8 +107,7 @@ entities:
       terminal: [Projected]
 
   # loom-action-selection.md: one action id and an optional confidence. A selection never grants
-  # authority (ADR 0073).
-  # UNMAPPED: the confidence is an optional probability; its ESS scalar type is decided in story L-005.
+  # authority (ADR 0073). The confidence is a Decimal: Binary64 is refused by the conformance suite.
   - name: loom.run.Selection
     identity:
       name: selection_id
@@ -106,6 +117,8 @@ entities:
         type: loom.run.CatalogueId
       - name: action
         type: String
+      - name: confidence
+        type: Optional<Decimal>
       - name: strategy
         type: loom.run.SelectionStrategy
     relations:
