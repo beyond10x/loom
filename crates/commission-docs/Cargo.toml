@@ -1,0 +1,12 @@
+[package]
+name = "commission-docs"
+description = "Generates the reference pages of the Commission documentation site and checks them for drift."
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }

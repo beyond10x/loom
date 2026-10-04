@@ -1,0 +1,14 @@
+[package]
+name = "b10x-commission-testkit"
+description = "Fakes of the Commission ports and conformance kits for adapters."
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+b10x-commission = { path = "../commission" }
+
+[dev-dependencies]
+syn = { version = "3", default-features = false, features = ["full", "parsing", "visit"] }
