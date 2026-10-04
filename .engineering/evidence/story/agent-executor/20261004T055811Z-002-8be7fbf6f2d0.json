@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-04T05:58:11Z",
+  "actor": "human:timo",
+  "artifact": "story:agent-executor",
+  "kind": "story",
+  "revision": 16,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "whole gate on wave/2026-10-04-w8 at 10741c3 (main merged): fmt --check, clippy -D warnings, test (93 passed, 0 failed), ess_gate, ESS validate and synthesize, drift, no-hand-model, loom-docs --check; every step exit 0",
+    "reference": "ga-wave-2026-10-04-w8/loom-integration-gate.log"
+  }
+}

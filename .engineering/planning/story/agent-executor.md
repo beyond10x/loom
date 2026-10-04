@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:agent-executor
 kind: story
-status: draft
+status: implemented
 title: Loom implements the Commission AgentExecutor on synthesized model types
 refs:
 - provider: commission
@@ -32,14 +32,17 @@ scope:
   path: crates/loom/tests/agent_executor.rs
 - confidence: cited
   path: generated/rust/loom/
-revision: 10
+revision: 17
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-04T05:19:50Z", actor: "human:timo", revision: 11, decided_on: {"recorded":{"review_outcome":4}}}
+- {from: "proposed", to: "active", at: "2026-10-04T05:19:50Z", actor: "human:timo", revision: 12, decided_on: {"recorded":{"review_outcome":4}}}
+- {from: "active", to: "implemented", at: "2026-10-04T05:58:11Z", actor: "human:timo", revision: 17, decided_on: {"recorded":{"test_result":1,"review_outcome":7,"verification":1}}}
 ---
 ## Outcome
 
 `b10x-loom` implements the Commission `AgentExecutor` on model types synthesized from `ess/`,
-replacing the hand-written bootstrap types in `crates/loom/src/lib.rs`, and carries the
-model-facing approval stop: an approval-gated selection returns `Suspended` and is never executed
-by Loom. It runs after `story:ess-hard-gate` and before `story:run-pipeline-skeleton`, and it owns
+replacing the hand-written bootstrap types in `crates/loom/src/lib.rs`, and proposes approval-gated selections for Commission to authorize (Atlas ADR 0082; decision F6
+below): Loom never suspends for authority and never executes an action itself. It runs after `story:ess-hard-gate` and before `story:run-pipeline-skeleton`, and it owns
 the generated model:
 
 - **Layout.** The synthesized model is committed under `generated/rust/loom/`, written by
@@ -72,8 +75,8 @@ the generated model:
   `commission.responsibility.Frontier` and returns the `action` of one of its `FrontierAction`s;
   `FirstAdmissibleSelector` returns the first whose `status` is `ActionStatus::Admissible`.
   `ArgumentGenerator::generate` takes one `FrontierAction`; `EmptyObjectArguments` returns `{}`.
-  `Loom::run` keeps its refusal of an action outside the frontier and returns `Suspended` on
-  `ActionStatus::ApprovalRequired`, naming the action's `capability`. This seam keeps the tree
+  `Loom::run` decides through Commission's `admit`: an admissible or approval-gated selection is
+  proposed, a refused one gives `NoUsefulAction` (decision F6 below). This seam keeps the tree
   green until `story:action-selector` replaces the selector seam with selection over the projected
   catalogue and `story:argument-generator` replaces the generator seam. Neither replacement is done here.
 
@@ -113,7 +116,8 @@ module list of `crates/loom/src/lib.rs` are no longer one chain through every st
   by `story:ess-hard-gate`; the behaviour it adds is generated from it.
 - **Red test:** the first commit adds `crates/loom/tests/agent_executor.rs`;
   `session_carries_commission_run_id` fails on that commit because no generated `Session` is
-  reachable through `b10x-loom` yet, and `executor_suspends_at_merge_approval` fails because Loom
+  reachable through `b10x-loom` yet, and `executor_proposes_merge_and_commission_asks_authority` (first named
+  `executor_suspends_at_merge_approval`) fails because Loom
   does not yet implement the generated `AgentExecutor`. The generation and executor commits make
   both pass.
 
@@ -133,7 +137,7 @@ module list of `crates/loom/src/lib.rs` are no longer one chain through every st
 story implements is today the bootstrap one, `run(&self, &Commission, &Frontier)` with Canon's
 `Frontier` (commission `crates/commission/src/lib.rs:53-55`); M-004 replaces it with the trait over
 the generated `commission.responsibility.Frontier` returning the generated `ExecutorOutcome`, and
-acceptance items 2 and 6 need exactly that (`Suspended` with a `SuspensionReason`, and no
+acceptance items 2 and 6 need exactly that (a proposal Commission's `admit` can judge, and no
 `b10x_canon` import left in `lib.rs`). Its test also needs commission `story:governor-port`
 (M-003) and `story:local-runtime-loop` (M-009) for the scripted fake governor; both are `proposed`.
 A `depends_on` cannot cross stores, so this is recorded here and not as an edge.
@@ -168,11 +172,11 @@ Loom decides no authority and no completion. `beyond10x/harness` is not changed.
 `task check` meets each of these expectations:
 
 1. It passes on the story's tree.
-2. Its test `executor_suspends_at_merge_approval` (`crates/loom/tests/agent_executor.rs`) drives
-   Loom as the `AgentExecutor`, with the Commission scripted fake governor serving the ELS
-   `software.change/1` frontier, through successive invocations until it returns `Suspended`
-   naming the merge approval capability; no invocation returns a `ProposedAction` for
-   `repository.merge`.
+2. Its test `executor_proposes_merge_and_commission_asks_authority`
+   (`crates/loom/tests/agent_executor.rs`) drives Loom as the `AgentExecutor` over the ELS
+   `software.change/1` frontiers: Loom proposes `repository.merge` only where the frontier lists it
+   `ApprovalRequired`, and Commission's `admit` on that proposal answers `NeedsAuthority` naming
+   `repository.write` (corrected by decision F6, Atlas ADR 0082).
 3. Its test `session_carries_commission_run_id` (same file) builds a generated `Session` through
    `b10x-loom`'s re-export with a `CommissionRunId`, and reads the same value back from its
    `commission_run` field.
@@ -188,3 +192,42 @@ Loom decides no authority and no completion. `beyond10x/harness` is not changed.
 TASKBOARD L-002; Atlas ADR 0071, 0075; `docs/design/loom-design.md` § Commission integration; the
 approval-stop clause of `epic:loom-native-harness`; the generated-model pattern of commission
 `story:generated-responsibility-model` (revision 9).
+
+## Pin bump to Commission (from commission port-skeleton adversary pass 1, wave 2026-10-04-w3)
+
+- loom `crates/loom/src/lib.rs:6,112` imports `b10x_commission::{AgentExecutor, Commission,
+  ExecutorOutcome, AgentId, CommissionId}` from the crate root; Loom's `Cargo.lock` pins commission
+  `652537e` (still with `b10x-canon`).
+- After the bump:
+  - the trait comes from `b10x_commission::ports::executor` (after commission story:agent-executor-port);
+  - the model types from `b10x_commission::model::responsibility`;
+  - `ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction { action: String, arguments:
+    ProposedActionArguments(Json) })` replaces `arguments_json: String`;
+  - `Suspended(ExecutorOutcomeSuspended { reason: SuspensionReason::Authority(Json) })` replaces
+    `reason: String`;
+  - `AgentExecutor::run` takes `CommissionData` instead of `Commission`;
+  - a decision on Canon `Frontier` vs Commission's own `Frontier` entity.
+
+## Adversary decisions (wave 2026-10-04-w8, pass 1)
+
+- F6, story corrected: the acceptance expectation "Loom suspends at merge approval" contradicts
+  Atlas ADR 0082 and Commission's runtime loop, where the executor proposes and Commission rechecks and
+  asks the AuthorityProvider. Loom now proposes `repository.merge`; Commission's `admit` answers
+  `NeedsAuthority` naming `repository.write`. The acceptance test is renamed
+  `executor_proposes_merge_and_commission_asks_authority`.
+- F1–F3: Loom calls `b10x_commission::admission::admit` and keeps no admission rule of its own; a
+  refused selection is not proposed (`NoUsefulAction`).
+- F5: a frontier that admits nothing gives `NoUsefulAction`, not `ExternalAvailability`.
+- F7: `no-hand-model` reserves every type the generated crate declares.
+- F8 (note): `drift` does not check the binding of `b10x-loom` to the generated tree, unlike
+  commission-xtask.
+
+## Adversary decisions (wave 2026-10-04-w8, pass 2)
+
+- The argument generator receives the entry that decided admission, independent of entry order
+  (fixed). `no-hand-model` refuses a reserved name passed alone to a macro (fixed). Four pass-1 cases
+  that could no longer fail under ADR 0082 are rewritten against `admit` and shown red under a mutant
+  (fixed). `SelectorError { NothingAdmissible, Unavailable }` replaces the exact-match string
+  (fixed). A frontier for another case than the commission's gives `NoUsefulAction` (fixed). The
+  story text now follows F6 (fixed).
+- Pass 1 F8 (note): `drift` does not check the binding of `b10x-loom` to the generated tree (no-op).

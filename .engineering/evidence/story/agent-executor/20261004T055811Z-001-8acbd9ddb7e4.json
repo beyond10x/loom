@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-04T05:58:11Z",
+  "actor": "human:timo",
+  "artifact": "story:agent-executor",
+  "kind": "story",
+  "revision": 16,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "agent_executor acceptance: phase-1 commit fad4bb1 vs treatment f2ca058",
+    "reference": "ga-wave-2026-10-04-w8/loom-agent-executor/scratch/phase1-red.log: agent_executor does not compile (10 errors: no b10x_loom::model, no b10x_commission ports/model at 652537e, no testkit); treatment passes; VERIFIED"
+  }
+}
