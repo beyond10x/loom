@@ -1,0 +1,14 @@
+# generated from loom v1
+# model digest 43dcb22fa4b8b8a3ab9e196467ad3d47be4a63873a6a7b541b59c4567d195883
+# contract digest 976fca135fea82818eebad3e94b5d61c4dc9a9754c5ed5bcb1f30531c2984b69
+# do not edit: regenerate with `ess synthesize --layout crate`
+
+[package]
+name = "loom"
+description = "The `loom` specification, v1, synthesised as one crate."
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+
+[workspace]

@@ -12,7 +12,9 @@ tasks:
     cmds:
       - task: spec
       - task: ess-gate
-      - cargo fmt --all --check
+      - task: drift
+      - task: no-hand-model
+      - cargo fmt --check
       - cargo clippy --workspace --all-targets --locked -- -D warnings
       - cargo test --workspace --locked
       - task: docs-check
@@ -26,6 +28,30 @@ tasks:
     desc: ESS hard gate (Atlas ADR 0076) — validate, compile, synthesize with 0 refusals, no open question.
     cmds:
       - cargo test -p b10x-loom --test ess_gate --locked
+
+  generate:
+    desc: Rewrite generated/rust/loom/ from a fresh synthesis of ess/.
+    cmds:
+      - task: generate-bootstrap
+      - cargo run -q --locked -p loom-xtask -- generate
+
+  generate-bootstrap:
+    desc: Write generated/rust/loom/ when it is absent, so cargo can load the workspace.
+    internal: true
+    status:
+      - test -f generated/rust/loom/Cargo.toml
+    cmds:
+      - ess generate synthesize --path ess --target rust --layout crate --out generated/rust/loom
+
+  drift:
+    desc: Fail when generated/rust/loom/ differs from a fresh synthesis of ess/, naming the file.
+    cmds:
+      - cargo run -q --locked -p loom-xtask -- drift
+
+  no-hand-model:
+    desc: Fail when crates/loom/src defines, or renames something to, a type ess/ declares.
+    cmds:
+      - cargo run -q --locked -p loom-xtask -- no-hand-model
 
   plan:
     desc: Validate the AEP planning store.

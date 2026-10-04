@@ -1,6 +1,6 @@
 //! Acceptance for `story:agent-executor`: Loom implements the Commission `AgentExecutor` on model
-//! types synthesized from `ess/`, stops at an approval-gated action with `Suspended` instead of
-//! proposing it, and imports nothing from Canon.
+//! types synthesized from `ess/`, proposes an approval-gated action for Commission to authorize
+//! (Atlas ADR 0082) rather than suspending for authority itself, and imports nothing from Canon.
 //!
 //! The frontier the scripted fake governor serves is transcribed from ELS
 //! `docs/examples/software-change.md` (case CHG-1842): ELS `software.change/1` has no machine
@@ -14,28 +14,30 @@
 
 use std::path::PathBuf;
 
+use b10x_commission::admission::admit;
 use b10x_commission::model::json::Value;
 use b10x_commission::model::primitives::Uuid as CommissionUuid;
 use b10x_commission::model::responsibility::{
-    ActionStatus, AgentRevisionId, AuthorityContext, CaseId, Commission, CommissionData,
-    CommissionId, ExecutorOutcome, ExecutorOutcomeProposedAction, ExecutorOutcomeSuspended,
-    Frontier, FrontierAction, FrontierClaim, PrincipalId, SuspensionReason, Truth,
-    commission_state, frontier_state,
+    ActionStatus, Admission, AdmissionNeedsAuthority, AgentRevisionId, AuthorityContext, CaseId,
+    Commission, CommissionData, CommissionId, ExecutorOutcome, ExecutorOutcomeProposedAction,
+    Frontier, FrontierAction, FrontierClaim, PrincipalId, Truth, commission_state, frontier_state,
 };
 use b10x_commission::ports::executor::AgentExecutor;
 use b10x_commission::ports::governor::Governor;
 use b10x_commission_testkit::fake_governor::{Answer, FakeGovernor};
 use b10x_loom::model::primitives::Uuid;
 use b10x_loom::model::run::{CommissionRunId, Session, SessionData, SessionId, SessionState};
-use b10x_loom::{ActionSelector, EmptyObjectArguments, FirstAdmissibleSelector, Loom};
+use b10x_loom::{
+    ActionSelector, EmptyObjectArguments, FirstAdmissibleSelector, Loom, SelectorError,
+};
 
-/// The action the approval stop is about.
+/// The approval-gated action.
 const MERGE: &str = "repository.merge";
 
 /// The capability the frontier names for the approval-gated merge.
 const MERGE_CAPABILITY: &str = "repository.write";
 
-/// More invocations than the scripted case needs to reach the approval stop.
+/// More invocations than the scripted case needs to reach the merge proposal.
 const MAX_INVOCATIONS: usize = 8;
 
 fn action(
@@ -108,7 +110,7 @@ impl ActionSelector for MergeSeeking {
         &self,
         frontier: &Frontier<frontier_state::Issued>,
         prompt: &str,
-    ) -> Result<String, String> {
+    ) -> Result<String, SelectorError> {
         let merge_open = frontier
             .data()
             .actions
@@ -136,11 +138,15 @@ fn commission(case: &CaseId) -> Commission<commission_state::Assigned> {
     })
 }
 
-/// Acceptance 2: Loom, as the `AgentExecutor`, is invoked on each frontier the scripted governor
-/// issues for CHG-1842 until it returns `Suspended`. It suspends naming the merge capability, and
-/// no invocation proposes `repository.merge`.
+/// Acceptance 2, as decided by Atlas ADR 0082 (coordinator decision F6 on adversary pass 1,
+/// wave 2026-10-04-w8): the executor proposes and Commission rechecks the proposal and asks its
+/// authority provider; Loom does not suspend for authority. Loom, as the `AgentExecutor`, is
+/// invoked on each frontier the scripted governor issues for CHG-1842 until it proposes
+/// `repository.merge`. It never proposes merge while merge is `Blocked`, it proposes merge on the
+/// frontier where merge is `ApprovalRequired`, and Commission's admission of that proposal is
+/// `NeedsAuthority` naming the merge capability.
 #[test]
-fn executor_suspends_at_merge_approval() {
+fn executor_proposes_merge_and_commission_asks_authority() {
     let case = CaseId("CHG-1842".to_owned());
     let governor = FakeGovernor::new();
     governor.script(case.clone(), [initial(), after_tests_on_r2()]);
@@ -148,59 +154,59 @@ fn executor_suspends_at_merge_approval() {
     let loom = Loom::new(MergeSeeking, EmptyObjectArguments, "land the change");
 
     let mut outcomes = Vec::new();
-    let mut suspended = None;
+    let mut merge = None;
     for _ in 0..MAX_INVOCATIONS {
         let frontier = governor
             .frontier(&case)
             .unwrap_or_else(|error| panic!("frontier for {} failed: {error:?}", case.0));
         let outcome = loom.run(&commission, &frontier);
         outcomes.push(outcome.clone());
-        if let ExecutorOutcome::Suspended(ExecutorOutcomeSuspended { reason }) = outcome {
-            suspended = Some(reason);
+        if proposes_merge(&outcome) {
+            merge = Some(frontier);
             break;
         }
     }
 
-    let proposed_merge: Vec<&ExecutorOutcome> = outcomes
-        .iter()
-        .filter(|outcome| {
-            matches!(
-                outcome,
-                ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction { action, .. })
-                    if action == MERGE
-            )
-        })
-        .collect();
-    assert!(
-        proposed_merge.is_empty(),
-        "Loom proposed {MERGE}, which needs approval: {proposed_merge:?} (all outcomes: {outcomes:?})"
-    );
-
-    assert!(
-        outcomes.len() > 1,
-        "the approval stop came on the first invocation, while merge was still Blocked: {outcomes:?}"
-    );
     assert!(
         matches!(
             &outcomes[0],
             ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction { action, .. })
                 if action == "repository.inspect"
         ),
-        "on the initial frontier Loom should propose the first admissible action: {:?}",
-        outcomes[0]
+        "on the initial frontier, where merge is Blocked, Loom should propose the first admissible \
+         action: {outcomes:?}"
     );
 
-    let reason = suspended.unwrap_or_else(|| {
-        panic!("Loom never returned Suspended in {MAX_INVOCATIONS} invocations: {outcomes:?}")
+    let frontier = merge.unwrap_or_else(|| {
+        panic!("Loom never proposed {MERGE} in {MAX_INVOCATIONS} invocations: {outcomes:?}")
     });
-    match &reason {
-        SuspensionReason::Authority(detail) => assert_eq!(
-            detail.member("capability"),
-            Some(&Value::Text(MERGE_CAPABILITY.to_owned())),
-            "the authority suspension does not name the merge capability: {detail:?}"
-        ),
-        other => panic!("Loom suspended for a reason other than authority: {other:?}"),
-    }
+    let listed: Vec<ActionStatus> = frontier
+        .data()
+        .actions
+        .iter()
+        .filter(|listed| listed.action == MERGE)
+        .map(|listed| listed.status)
+        .collect();
+    assert_eq!(
+        listed,
+        vec![ActionStatus::ApprovalRequired],
+        "Loom proposed {MERGE} on a frontier where it is not ApprovalRequired: {outcomes:?}"
+    );
+    assert_eq!(
+        admit(&frontier, MERGE),
+        Admission::NeedsAuthority(AdmissionNeedsAuthority {
+            capability: MERGE_CAPABILITY.to_owned(),
+        }),
+        "Commission does not ask for the merge capability on Loom's proposal"
+    );
+}
+
+fn proposes_merge(outcome: &ExecutorOutcome) -> bool {
+    matches!(
+        outcome,
+        ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction { action, .. })
+            if action == MERGE
+    )
 }
 
 /// Acceptance 3: a generated `Session`, built through `b10x-loom`'s re-export, carries the
