@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-04T01:41:59Z",
+  "actor": "human:timo",
+  "artifact": "story:harness-module-map",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adversary-w2-loom-harness-module-map-pass-1",
+    "review": "review-result:adversary-w2-loom-harness-module-map-pass-1",
+    "outcome": "fixed"
+  }
+}

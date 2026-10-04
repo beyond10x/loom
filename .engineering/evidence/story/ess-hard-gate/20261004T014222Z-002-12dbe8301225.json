@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-04T01:42:22Z",
+  "actor": "human:timo",
+  "artifact": "story:ess-hard-gate",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test --test ess_gate: baseline wave/2026-10-04-w2 at 7cab979 vs treatment impl/ess-hard-gate at 4b96f46",
+    "reference": "ga-wave-2026-10-04-w2/loom-ess-hard-gate/scratch/red2.log: baseline gate failed at the marker scan naming run.yaml:3, :44, :81, :99; treatment 10 passed exit 0; VERIFIED"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-04T01:42:22Z",
+  "actor": "human:timo",
+  "artifact": "story:ess-hard-gate",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "whole gate on wave/2026-10-04-w2 at cf3648c: ess validate --strict-requires, fmt, clippy -D warnings, test (42 passed, 0 failed); every step exit 0",
+    "reference": "ga-wave-2026-10-04-w2/loom-integration-gate.log"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-04T01:42:22Z",
+  "actor": "human:timo",
+  "artifact": "story:harness-module-map",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test --test harness_map: baseline wave/2026-10-04-w2 at 7cab979 vs treatment impl/harness-module-map at df0c93d",
+    "reference": "ga-wave-2026-10-04-w2/loom-harness-module-map/scratch/red-run.log: baseline harness_map_covers_every_crate failed (no docs/design/harness-map.md); treatment 1 passed exit 0; VERIFIED"
+  }
+}
