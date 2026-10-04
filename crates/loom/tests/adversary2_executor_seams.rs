@@ -13,13 +13,15 @@ use b10x_commission::model::primitives::Uuid;
 use b10x_commission::model::responsibility::{
     ActionStatus, Admission, AgentRevisionId, AuthorityContext, CaseId, Commission, CommissionData,
     CommissionId, ExecutorOutcome, ExecutorOutcomeSuspended, Frontier, FrontierAction,
-    FrontierData, FrontierId, PrincipalId, ProposedActionArguments, SuspensionReason, Unit,
-    commission_state, frontier_state,
+    FrontierData, FrontierId, PrincipalId, SuspensionReason, Unit, commission_state,
+    frontier_state,
 };
 use b10x_commission::ports::executor::AgentExecutor;
 use b10x_loom::model::run::{CatalogueEntry, SelectionStrategy};
 use b10x_loom::selection::{Choice, SelectionContext};
-use b10x_loom::{ActionSelector, ArgumentGenerator, EmptyObjectArguments, Loom, SelectorError};
+use b10x_loom::{
+    ActionSelector, ArgumentContext, ArgumentGenerator, EmptyObjectArguments, Loom, SelectorError,
+};
 
 const MERGE: &str = "repository.merge";
 
@@ -49,29 +51,28 @@ impl ActionSelector for Scripted {
     }
 }
 
-/// A generator whose arguments say which frontier entry it was given, as one that reads the
-/// entry's status or capability to shape its arguments would.
+/// A generator whose arguments say which entry it was given, as one that reads the entry to shape
+/// its arguments would.
+///
+/// `story:argument-generator`: the generator is handed the selected catalogue entry, not a
+/// frontier entry. A catalogue entry is an action and its status (`loom.run.CatalogueEntry`); it
+/// carries no capability, so the echo carries the action and the status only. The case below now
+/// asks whether that entry, not a frontier entry, depends on the order of the frontier.
 struct EchoEntry;
 
 impl ArgumentGenerator for EchoEntry {
     fn generate(
         &self,
-        action: &FrontierAction,
-        _prompt: &str,
-    ) -> Result<ProposedActionArguments, String> {
-        Ok(ProposedActionArguments(Value::Object(vec![
+        _context: &ArgumentContext,
+        entry: &CatalogueEntry,
+    ) -> Result<Value, String> {
+        Ok(Value::Object(vec![
+            ("action".to_owned(), Value::Text(entry.action.clone())),
             (
                 "status".to_owned(),
-                Value::Text(format!("{:?}", action.status)),
+                Value::Text(format!("{:?}", entry.status)),
             ),
-            (
-                "capability".to_owned(),
-                action
-                    .capability
-                    .as_ref()
-                    .map_or(Value::Null, |c| Value::Text(c.clone())),
-            ),
-        ])))
+        ]))
     }
 }
 
@@ -81,9 +82,9 @@ struct Failing(&'static str);
 impl ArgumentGenerator for Failing {
     fn generate(
         &self,
-        _action: &FrontierAction,
-        _prompt: &str,
-    ) -> Result<ProposedActionArguments, String> {
+        _context: &ArgumentContext,
+        _entry: &CatalogueEntry,
+    ) -> Result<Value, String> {
         Err(self.0.to_owned())
     }
 }
@@ -219,6 +220,10 @@ fn refused_selections_are_no_useful_action() {
 /// One action listed `Admissible` and `ApprovalRequired`: Commission's answer is `NeedsAuthority`
 /// whatever the order (`admission.rs` rule 4). Loom hands its argument generator the first entry
 /// listed, so what it proposes depends on the order of the frontier's entries.
+///
+/// `story:argument-generator`: the generator is now handed the action's one catalogue entry, which
+/// the projection derives from Commission's admission, so the case asks whether that entry depends
+/// on the order.
 #[test]
 fn generator_is_given_the_same_entry_whatever_the_order() {
     let admissible_first = frontier(vec![

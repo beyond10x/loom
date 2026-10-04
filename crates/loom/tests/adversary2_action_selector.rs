@@ -16,7 +16,7 @@ use b10x_commission::model::primitives::Uuid as CommissionUuid;
 use b10x_commission::model::responsibility::{
     ActionStatus, Admission, AgentRevisionId, AuthorityContext, CaseId, Commission, CommissionData,
     CommissionId, CompletionDetermination, ExecutorOutcome, Frontier, FrontierAction, FrontierData,
-    FrontierId, PrincipalId, ProposedActionArguments, Unit, commission_state, frontier_state,
+    FrontierId, PrincipalId, Unit, commission_state, frontier_state,
 };
 use b10x_commission::outcome::{Derived, derive};
 use b10x_commission::ports::executor::AgentExecutor;
@@ -27,7 +27,10 @@ use b10x_loom::model::run::{
 };
 use b10x_loom::projection::project;
 use b10x_loom::selection::{Choice, SelectionContext};
-use b10x_loom::{ActionSelector, ArgumentGenerator, FirstAdmissibleSelector, Loom, SelectorError};
+use b10x_loom::{
+    ActionSelector, ArgumentContext, ArgumentGenerator, FirstAdmissibleSelector, Loom,
+    SelectorError,
+};
 
 const CASE: &str = "CHG-1842";
 const MERGE: &str = "repository.merge";
@@ -94,18 +97,21 @@ impl ActionSelector for Names {
     }
 }
 
-/// An argument generator that keeps every frontier entry it is handed.
+/// An argument generator that keeps every entry it is handed.
+///
+/// `story:argument-generator`: the generator is handed the selected catalogue entry, no longer a
+/// frontier entry, so what it keeps is a `CatalogueEntry`.
 #[derive(Default, Clone)]
-struct Keeps(Rc<RefCell<Vec<FrontierAction>>>);
+struct Keeps(Rc<RefCell<Vec<CatalogueEntry>>>);
 
 impl ArgumentGenerator for Keeps {
     fn generate(
         &self,
-        action: &FrontierAction,
-        _prompt: &str,
-    ) -> Result<ProposedActionArguments, String> {
-        self.0.borrow_mut().push(action.clone());
-        Ok(ProposedActionArguments(Value::Object(Vec::new())))
+        _context: &ArgumentContext,
+        entry: &CatalogueEntry,
+    ) -> Result<Value, String> {
+        self.0.borrow_mut().push(entry.clone());
+        Ok(Value::Object(Vec::new()))
     }
 }
 
@@ -173,6 +179,12 @@ fn catalogue_of(
 /// (`Admissible` for `Admissible`, `ApprovalRequired` naming the capability Commission will ask
 /// for, for `ApprovalRequired`), and Commission's run derivation then takes the branch that status
 /// implies: continue for an admissible proposal, the authority path for an approval-gated one.
+///
+/// `story:argument-generator`: the generator is handed the selected catalogue entry itself, not a
+/// frontier entry, and a catalogue entry carries no capability. So "one of that action's frontier
+/// entries" is now "the catalogue entry the selector named", and the capability Commission will
+/// ask for is checked against the frontier entry that backs the proposal, not against the
+/// generator's input.
 #[test]
 fn the_generator_sees_the_entry_the_catalogue_showed_and_commission_decides() {
     let mut wrong = Vec::new();
@@ -203,12 +215,12 @@ fn the_generator_sees_the_entry_the_catalogue_showed_and_commission_decides() {
                 ));
                 continue;
             };
-            if !frontier.data().actions.contains(given) || given.action != entry.action {
+            if !catalogue.data().entries.contains(given) || given != entry {
                 wrong.push(format!("{shape}: generator handed {given:?} for {entry:?}"));
             }
             match (entry.status, admit(&frontier, &entry.action)) {
                 (CatalogueEntryStatus::Admissible, Admission::Admissible(_)) => {
-                    if given.status != ActionStatus::Admissible {
+                    if given.status != CatalogueEntryStatus::Admissible {
                         wrong.push(format!(
                             "{shape}: catalogue shows {entry:?}, generator handed {given:?}"
                         ));
@@ -225,9 +237,12 @@ fn the_generator_sees_the_entry_the_catalogue_showed_and_commission_decides() {
                 }
                 (CatalogueEntryStatus::ApprovalRequired, Admission::NeedsAuthority(needs)) => {
                     approval_entries += 1;
-                    if given.status != ActionStatus::ApprovalRequired
-                        || given.capability.as_deref() != Some(needs.capability.as_str())
-                    {
+                    let backed = frontier.data().actions.iter().any(|listed| {
+                        listed.action == entry.action
+                            && listed.status == ActionStatus::ApprovalRequired
+                            && listed.capability.as_deref() == Some(needs.capability.as_str())
+                    });
+                    if given.status != CatalogueEntryStatus::ApprovalRequired || !backed {
                         wrong.push(format!(
                             "{shape}: catalogue shows {entry:?} needing {:?}, generator handed \
                              {given:?}",
@@ -257,6 +272,9 @@ fn the_generator_sees_the_entry_the_catalogue_showed_and_commission_decides() {
 /// `Admissible` catalogue entry and hands the generator an `Admissible` frontier entry for it, or,
 /// when the catalogue has no `Admissible` entry, answers `NoUsefulAction`. The answer does not
 /// depend on where the frontier lists a duplicated action's entries relative to each other.
+///
+/// `story:argument-generator`: the entry the generator is handed is the `Admissible` catalogue
+/// entry the selector named, no longer a frontier entry.
 #[test]
 fn the_first_admissible_selector_follows_the_catalogue_not_the_raw_frontier_status() {
     let mut wrong = Vec::new();
@@ -277,7 +295,7 @@ fn the_first_admissible_selector_follows_the_catalogue_not_the_raw_frontier_stat
                 if &proposal.action == action =>
             {
                 let handed = kept.0.borrow();
-                if handed.len() != 1 || handed[0].status != ActionStatus::Admissible {
+                if handed.len() != 1 || handed[0].status != CatalogueEntryStatus::Admissible {
                     wrong.push(format!("{shape}: generator handed {handed:?}"));
                 }
             }
