@@ -20,7 +20,10 @@ use std::process::{Command, Output};
 /// `ess verify conform synthesize` refuses the outcome (`ESS-SYNTH-003`) and still exits 0, so the
 /// refusal count on the summary line is the only signal that step 3 does not hold. Observed
 /// 2026-10-04 on a copy of `ess/`: `1 scenario(s) (0 authored), 1 refusal(s), written to …`, exit 0.
-const UNSATISFIABLE_COMMAND: &str = "
+/// It is a file of its own in domain `loom.run`, so it does not depend on which sections
+/// `run.yaml` already declares.
+const UNSATISFIABLE_COMMAND: &str = "domain: loom.run
+
 commands:
   - name: loom.run.Probe
     naming:
@@ -145,13 +148,15 @@ fn replace(file: &Path, from: &str, to: &str) {
     fs::write(file, text.replacen(from, to, 1)).expect("write mutant");
 }
 
-fn append(file: &Path, tail: &str) {
-    let mut text = fs::read_to_string(file).expect("read file to mutate");
-    if !text.ends_with('\n') {
-        text.push('\n');
-    }
-    text.push_str(tail);
-    fs::write(file, text).expect("write mutant");
+/// Adds `UNSATISFIABLE_COMMAND` to the replica's specification as `domains/probe.yaml`.
+fn add_unsatisfiable_command(tree: &Path) {
+    fs::write(tree.join("ess/domains/probe.yaml"), UNSATISFIABLE_COMMAND)
+        .expect("write probe.yaml");
+    replace(
+        &tree.join("ess/ess-inputs.yaml"),
+        "  - domains/run.yaml\n",
+        "  - domains/run.yaml\n  - domains/probe.yaml\n",
+    );
 }
 
 /// Builds a replica, applies `mutate`, runs the gate suite in it with its own build directory, and
@@ -218,7 +223,7 @@ fn mutant_validate_without_strict_requires_is_killed() {
 fn mutant_spec_refused_by_synthesize_with_exit_0_is_killed() {
     mutant_is_killed(
         "spec_refused_exit_0",
-        |tree| append(&tree.join("ess/domains/run.yaml"), UNSATISFIABLE_COMMAND),
+        add_unsatisfiable_command,
         &[
             "gate_holds_on_the_specification ... FAILED",
             "1 refusal(s)",

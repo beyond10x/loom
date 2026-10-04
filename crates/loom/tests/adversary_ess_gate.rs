@@ -216,16 +216,25 @@ fn mutant_marker_mid_line_in_run_yaml_is_killed() {
 }
 
 // Item 2/3: confidence typed Binary64 is refused by synthesize and is not the decimal primitive.
+// Every confidence is retyped: `SelectAction` copies its input into `Selection.confidence`, and
+// retyping one side alone fails validation instead.
 #[test]
 fn mutant_confidence_binary64_is_killed() {
     mutant_is_killed(
         "confidence_binary64",
         |tree| {
-            replace(
-                &tree.join("ess/domains/run.yaml"),
-                "type: Optional<Decimal>",
-                "type: Optional<Binary64>",
+            let run = tree.join("ess/domains/run.yaml");
+            let text = fs::read_to_string(&run).expect("read file to mutate");
+            assert!(
+                text.contains("type: Optional<Decimal>"),
+                "mutant does not apply: {} lacks the Decimal confidence",
+                run.display()
             );
+            fs::write(
+                &run,
+                text.replace("type: Optional<Decimal>", "type: Optional<Binary64>"),
+            )
+            .expect("write mutant");
         },
         &[
             "gate_holds_on_the_specification ... FAILED",

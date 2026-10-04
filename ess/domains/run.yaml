@@ -45,6 +45,21 @@ types:
     kind: enum
     variants: [ReasoningModel, FastTyped, Rule, Hybrid]
 
+  # The two projected statuses of commission.responsibility.ActionStatus: a Blocked action is not
+  # projected. A Loom type, as CommissionRunId mirrors RunId.
+  - name: loom.run.CatalogueEntryStatus
+    kind: enum
+    variants: [Admissible, ApprovalRequired]
+
+  # One projected FrontierAction: its action id and its status.
+  - name: loom.run.CatalogueEntry
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: status
+        type: loom.run.CatalogueEntryStatus
+
 entities:
   # Session and transcript state for one run (loom-design.md § Owns).
   - name: loom.run.Session
@@ -101,6 +116,8 @@ entities:
         type: String
       - name: case_revision
         type: Integer
+      - name: entries
+        type: List<loom.run.CatalogueEntry>
     lifecycle:
       initial: Projected
       states: [Projected]
@@ -121,16 +138,24 @@ entities:
         type: Optional<Decimal>
       - name: strategy
         type: loom.run.SelectionStrategy
+      # The case revision of the catalogue the selection was made from, held equal to that
+      # catalogue's by SelectAction: revalidation compares it with the current one.
+      - name: case_revision
+        type: Integer
     relations:
       - name: catalogue
         kind: references
         target: loom.run.ActionCatalogue
         cardinality: one
         via: catalogue_id
+    # Revalidated once against the frontier current at revalidation: admitted, or refused.
     lifecycle:
       initial: Selected
-      states: [Selected]
-      terminal: [Selected]
+      states: [Selected, Admitted, Refused]
+      terminal: [Admitted, Refused]
+      transitions:
+        - {name: admit, from: [Selected], to: Admitted}
+        - {name: refuse, from: [Selected], to: Refused}
 
   # loom-action-selection.md: arguments are generated for the selected action only.
   - name: loom.run.ArgumentRequest
@@ -150,3 +175,308 @@ entities:
       initial: Requested
       states: [Requested]
       terminal: [Requested]
+
+errors:
+  # The catalogue a selection names was never projected.
+  - name: loom.run.CatalogueNotFound
+    fields:
+      - name: catalogue_id
+        type: loom.run.CatalogueId
+
+  # The case revision a selection claims is not the revision of the catalogue it names.
+  - name: loom.run.CatalogueRevisionMismatch
+    fields:
+      - name: catalogue_id
+        type: loom.run.CatalogueId
+      - name: case_revision
+        type: Integer
+      - name: catalogue_revision
+        type: Integer
+
+  # The selection an argument request names was never made.
+  - name: loom.run.SelectionNotFound
+    fields:
+      - name: selection_id
+        type: loom.run.SelectionId
+
+  # The selected action id is not among the catalogue's entries (ADR 0073). Names the id.
+  - name: loom.run.ActionNotInCatalogue
+    fields:
+      - name: action
+        type: String
+
+  # A selection is revalidated once.
+  - name: loom.run.SelectionStateConflict
+    fields:
+      - name: state
+        type: loom.run.Selection.State
+
+  # A catalogue is projected once: its id is never projected again.
+  - name: loom.run.CatalogueExists
+    fields:
+      - name: catalogue_id
+        type: loom.run.CatalogueId
+
+  # Arguments are requested only for a selection still Selected.
+  - name: loom.run.SelectionNotSelected
+    fields:
+      - name: selection_id
+        type: loom.run.SelectionId
+
+commands:
+  # One catalogue projected from one frontier for one turn: an entry per FrontierAction whose status
+  # is Admissible or ApprovalRequired, none for a Blocked one.
+  - name: loom.run.ProjectCatalogue
+    input:
+      - name: catalogue_id
+        type: loom.run.CatalogueId
+      - name: turn_id
+        type: loom.run.TurnId
+      - name: frontier
+        type: String
+      - name: case_revision
+        type: Integer
+      - name: entries
+        type: List<loom.run.CatalogueEntry>
+    outcomes:
+      - name: catalogue-exists
+        existing_instance: true
+        error: loom.run.CatalogueExists
+        payload:
+          loom.run.CatalogueExists:
+            catalogue_id: input.catalogue_id
+      - name: projected
+        creates: loom.run.ActionCatalogue
+        instance: catalogue_id
+        sets:
+          turn_id: input.turn_id
+          frontier: input.frontier
+          case_revision: input.case_revision
+          entries: input.entries
+        emits: [loom.run.CatalogueProjected]
+        payload:
+          loom.run.CatalogueProjected:
+            catalogue_id: input.catalogue_id
+            turn_id: input.turn_id
+            case_revision: input.case_revision
+
+  # A selector picks only from the catalogue it was handed; an action id the catalogue does not
+  # list is refused whatever the confidence (ADR 0073).
+  - name: loom.run.SelectAction
+    input:
+      - name: selection_id
+        type: loom.run.SelectionId
+      - name: catalogue_id
+        type: loom.run.CatalogueId
+      - name: action
+        type: String
+      - name: confidence
+        type: Optional<Decimal>
+      - name: strategy
+        type: loom.run.SelectionStrategy
+      # The case revision of the catalogue named by catalogue_id.
+      - name: case_revision
+        type: Integer
+    outcomes:
+      - name: catalogue-unknown
+        when_related: {via: input.catalogue_id, exists: false}
+        error: loom.run.CatalogueNotFound
+        payload:
+          loom.run.CatalogueNotFound:
+            catalogue_id: input.catalogue_id
+      - name: not-in-catalogue
+        when_related:
+          via: input.catalogue_id
+          predicate:
+            not:
+              exists:
+                in: entries
+                as: entry
+                that: entry.action == input.action
+        error: loom.run.ActionNotInCatalogue
+        payload:
+          loom.run.ActionNotInCatalogue:
+            action: input.action
+      - name: revision-mismatch
+        when_related:
+          via: input.catalogue_id
+          predicate: case_revision != input.case_revision
+        error: loom.run.CatalogueRevisionMismatch
+        payload:
+          loom.run.CatalogueRevisionMismatch:
+            catalogue_id: input.catalogue_id
+            case_revision: input.case_revision
+            catalogue_revision: {related: {via: input.catalogue_id, field: case_revision}}
+      - name: selected
+        creates: loom.run.Selection
+        instance: selection_id
+        sets:
+          catalogue_id: input.catalogue_id
+          action: input.action
+          confidence: input.confidence
+          strategy: input.strategy
+          case_revision: input.case_revision
+        emits: [loom.run.ActionSelected]
+        payload:
+          loom.run.ActionSelected:
+            selection_id: input.selection_id
+            catalogue_id: input.catalogue_id
+            action: input.action
+
+  # Arguments are generated for the selected action only.
+  - name: loom.run.RequestArguments
+    input:
+      - name: argument_request_id
+        type: loom.run.ArgumentRequestId
+      - name: selection_id
+        type: loom.run.SelectionId
+    outcomes:
+      - name: selection-unknown
+        when_related: {via: input.selection_id, exists: false}
+        error: loom.run.SelectionNotFound
+        payload:
+          loom.run.SelectionNotFound:
+            selection_id: input.selection_id
+      - name: selection-not-selected
+        when_related:
+          via: input.selection_id
+          predicate: state != Selected
+        error: loom.run.SelectionNotSelected
+        payload:
+          loom.run.SelectionNotSelected:
+            selection_id: input.selection_id
+      - name: requested
+        creates: loom.run.ArgumentRequest
+        instance: argument_request_id
+        sets:
+          selection_id: input.selection_id
+        emits: [loom.run.ArgumentsRequested]
+        payload:
+          loom.run.ArgumentsRequested:
+            argument_request_id: input.argument_request_id
+            selection_id: input.selection_id
+
+  # Before a selection is proposed it is revalidated against the case revision and the action ids
+  # of the frontier current at revalidation, which come from the governor, never from the model.
+  # not-in-frontier is `external:`: ess 0.52.0 does not witness a stored action in an input list
+  # (ESS-SYNTH-003).
+  - name: loom.run.RevalidateSelection
+    input:
+      - name: selection_id
+        type: loom.run.SelectionId
+      - name: case_revision
+        type: Integer
+      - name: frontier_actions
+        type: List<String>
+    outcomes:
+      - name: stale-revision
+        when_subject:
+          predicate: case_revision != input.case_revision
+        moves: loom.run.Selection.refuse
+        instance: selection_id
+        emits: [loom.run.SelectionStale]
+        payload:
+          loom.run.SelectionStale:
+            selection_id: input.selection_id
+            catalogue_revision: {subject: case_revision}
+            case_revision: input.case_revision
+      - name: not-in-frontier
+        external: the frontier action ids in the input do not list the selection's action
+        moves: loom.run.Selection.refuse
+        instance: selection_id
+        emits: [loom.run.SelectionNotInFrontier]
+        payload:
+          loom.run.SelectionNotInFrontier:
+            selection_id: input.selection_id
+            action: {subject: action}
+      - name: admitted
+        moves: loom.run.Selection.admit
+        instance: selection_id
+        emits: [loom.run.SelectionAdmitted]
+        payload:
+          loom.run.SelectionAdmitted:
+            selection_id: input.selection_id
+      - name: wrong-state
+        wrong_state: true
+        error: loom.run.SelectionStateConflict
+
+events:
+  - name: loom.run.CatalogueProjected
+    fields:
+      - name: catalogue_id
+        type: loom.run.CatalogueId
+      - name: turn_id
+        type: loom.run.TurnId
+      - name: case_revision
+        type: Integer
+
+  - name: loom.run.ActionSelected
+    fields:
+      - name: selection_id
+        type: loom.run.SelectionId
+      - name: catalogue_id
+        type: loom.run.CatalogueId
+      - name: action
+        type: String
+
+  - name: loom.run.ArgumentsRequested
+    fields:
+      - name: argument_request_id
+        type: loom.run.ArgumentRequestId
+      - name: selection_id
+        type: loom.run.SelectionId
+
+  - name: loom.run.SelectionAdmitted
+    fields:
+      - name: selection_id
+        type: loom.run.SelectionId
+
+  # Refused: the action id is not among the current frontier's actions. Names the id.
+  - name: loom.run.SelectionNotInFrontier
+    fields:
+      - name: selection_id
+        type: loom.run.SelectionId
+      - name: action
+        type: String
+
+  # Refused: the selection's catalogue was projected at another case revision than the current one.
+  # Names both.
+  - name: loom.run.SelectionStale
+    fields:
+      - name: selection_id
+        type: loom.run.SelectionId
+      - name: catalogue_revision
+        type: Integer
+      - name: case_revision
+        type: Integer
+
+views:
+  # Every selection with its state: what revalidation reads and what it changed.
+  - name: loom.run.Selections
+    source: loom.run.Selection
+    consistency: read_your_writes
+    fields:
+      - name: selection_id
+        type: loom.run.SelectionId
+      - name: catalogue_id
+        type: loom.run.CatalogueId
+      - name: action
+        type: String
+      - name: strategy
+        type: loom.run.SelectionStrategy
+      - name: case_revision
+        type: Integer
+      - name: state
+        type: loom.run.Selection.State
+
+  # Every catalogue with its state: what a second projection of one id is checked against.
+  - name: loom.run.Catalogues
+    source: loom.run.ActionCatalogue
+    consistency: read_your_writes
+    fields:
+      - name: catalogue_id
+        type: loom.run.CatalogueId
+      - name: case_revision
+        type: Integer
+      - name: state
+        type: loom.run.ActionCatalogue.State
