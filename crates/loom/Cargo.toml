@@ -11,3 +11,4 @@ loom = { path = "../../generated/rust/loom" }
 
 [dev-dependencies]
 b10x-commission-testkit = { git = "https://github.com/beyond10x/commission", branch = "main" }
+serde_json = "1"

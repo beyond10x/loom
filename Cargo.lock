@@ -81,6 +81,7 @@ dependencies = [
  "b10x-commission",
  "b10x-commission-testkit",
  "loom",
+ "serde_json",
 ]
 
 [[package]]
