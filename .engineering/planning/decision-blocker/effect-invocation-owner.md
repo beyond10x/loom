@@ -2,12 +2,14 @@
 format: aep.planning-md/3
 id: decision-blocker:effect-invocation-owner
 kind: decision-blocker
-status: open
+status: cleared
 title: Nobody has decided whether Loom or the Commission runtime invokes the effect of a selected consequential action
 relations:
 - blocks: story:connector-action-binding
 - blocks: story:substrate-execution-binding
-revision: 1
+revision: 3
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-04T02:41:03Z", actor: "human:timo", revision: 3}
 ---
 ## Question
 
@@ -51,3 +53,22 @@ reference for attribution all depend on the answer.
 
 An accepted decision (Atlas ADR, or an amendment to ADR 0070/0071) names the component that invokes
 the effect of a selected consequential action.
+
+## Answer
+
+The Commission runtime invokes; Loom does not. Operator decision of 2026-10-04, option A, recorded
+as Atlas ADR 0082 "Commission makes the effect invocation; executors only propose"
+(`architecture/adr/0082-commission-invokes-effects.md`, accepted, amends ADRs 0070 and 0071).
+
+- Every executor (Loom, a human tool, a workflow executor, test fakes) only returns a
+  `ProposedAction`. Loom's side ends there.
+- Immediately before the effect, Commission rechecks the frontier, the case revision and authority,
+  then invokes through the action's binding: Connectors, inside Substrate as
+  `decision-blocker:connector-substrate-containment` settles.
+- Rejected: B, Loom invokes (fewer hops, but every other executor would need its own effect path).
+
+Consequences in this store: `story:connector-action-binding` is reworded to end at the
+`ProposedAction`; `story:substrate-execution-binding` is archived, its effect taken over by
+commission `story:effect-invocation`; `story:selection-revalidation` already ended at the
+`ProposedAction` and is unchanged. The two remaining blockers each say whether their question now
+belongs to Commission.

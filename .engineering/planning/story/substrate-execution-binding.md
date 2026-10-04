@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:substrate-execution-binding
 kind: story
-status: draft
+status: archived
 title: Effects of bound actions run inside Substrate confinement
 summary: Run the effect of a selected consequential action inside Substrate, observed from its operation ledger, with named refusal when a capability is missing (L-015).
 refs:
@@ -14,8 +14,20 @@ relations:
 - serves: vision:O1
 - serves: vision:O3
 - serves: vision:governed-autonomy
-revision: 1
+revision: 3
+transitions:
+- {from: "draft", to: "archived", at: "2026-10-04T02:41:03Z", actor: "human:timo", revision: 3}
 ---
+## Archived: taken over by Commission
+
+Archived on 2026-10-04 after Atlas ADR 0082 (operator decision, option A;
+`decision-blocker:effect-invocation-owner`, cleared): the Commission runtime, not Loom, invokes the
+effect of a selected action, through its binding, Connectors inside Substrate. Nothing Loom-side
+remains: Loom returns a `ProposedAction` and hands nothing to Substrate. The effect running inside
+Substrate is taken over by commission `story:effect-invocation`;
+`decision-blocker:connector-substrate-containment` stays open as a Commission follow-up. The text
+below is the story as drafted for Loom and is kept unchanged as the record.
+
 ## Outcome
 
 The effect of a selected consequential action runs inside Substrate confinement and is observed from
