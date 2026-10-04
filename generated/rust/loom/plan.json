@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "d801974218ef3d92c2eb884a7d4e7c56bb3fb32826e0145126651ace85e0bde9",
-    "contract_digest": "d245142e3f655485701182d044d14de4c925f8e8e31542a01bc3184e331a667a"
+    "source_digest": "1e5c1537dda3b2b7e22b162efd4278fee13385bc49abc57d7ce5100af963d5c1",
+    "contract_digest": "d23e825dcb7bfe03fbe20cea75b62e61bd0a45f586a2de0740780d02d5d2b8a1"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -55,6 +55,13 @@
     {
       "kind": "domain_type",
       "source": "loom.run.CommissionRunId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.run.RunEnding",
       "disposition": {
         "disposition": "generated"
       }
@@ -145,6 +152,34 @@
     },
     {
       "kind": "command_contract",
+      "source": "loom.run.FileSession",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.run.FileSession",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.run.OpenSession",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.run.OpenSession",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
       "source": "loom.run.ProjectCatalogue",
       "disposition": {
         "disposition": "generated"
@@ -153,6 +188,39 @@
     {
       "kind": "command_behavior",
       "source": "loom.run.ProjectCatalogue",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.run.RecordTurn",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.run.RecordTurn",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "`when_related:`, in `session-unknown`"
+        },
+        "contract": "given `loom.run.RecordTurn` input, decide and enact exactly one outcome. Selection precedence: on commands with `when_related:`, check `existing_instance` then `exists: false` before input-guarded refusals; choose the first declared input refusal whose guard holds; then check addressed-row existence (`unknown_instance`, and `existing_instance` on commands without `when_related:`); then the held state (`when_subject_state` and `when_subject`), with `wrong_state` only if the selected branch moves from a state the row does not hold; then accepting and external branches in declaration order. An accepting branch that moves nothing answers in every state. Related-presence predicates do not precede input-guarded refusals. Declared outcomes (declaration order, not selection precedence): `session-unknown` when no `loom.run.Session` carries the identity `input.session_id` names, error `loom.run.SessionNotFound`; `session-not-active` when the `loom.run.Session` that `input.session_id` names satisfies `state != Active`, error `loom.run.SessionNotActive`; `recorded` otherwise, creates `loom.run.Turn`, emits `loom.run.TurnRecorded`"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.run.ReleaseSession",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.run.ReleaseSession",
       "disposition": {
         "disposition": "generated"
       }
@@ -174,6 +242,20 @@
           "construct": "`when_related:`, in `selection-unknown`"
         },
         "contract": "given `loom.run.RequestArguments` input, decide and enact exactly one outcome. Selection precedence: on commands with `when_related:`, check `existing_instance` then `exists: false` before input-guarded refusals; choose the first declared input refusal whose guard holds; then check addressed-row existence (`unknown_instance`, and `existing_instance` on commands without `when_related:`); then the held state (`when_subject_state` and `when_subject`), with `wrong_state` only if the selected branch moves from a state the row does not hold; then accepting and external branches in declaration order. An accepting branch that moves nothing answers in every state. Related-presence predicates do not precede input-guarded refusals. Declared outcomes (declaration order, not selection precedence): `selection-unknown` when no `loom.run.Selection` carries the identity `input.selection_id` names, error `loom.run.SelectionNotFound`; `selection-not-selected` when the `loom.run.Selection` that `input.selection_id` names satisfies `state != Selected`, error `loom.run.SelectionNotSelected`; `requested` otherwise, creates `loom.run.ArgumentRequest`, emits `loom.run.ArgumentsRequested`"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.run.ResumeSession",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.run.ResumeSession",
+      "disposition": {
+        "disposition": "generated"
       }
     },
     {
@@ -252,6 +334,41 @@
       }
     },
     {
+      "kind": "event_type",
+      "source": "loom.run.SessionFiled",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.run.SessionOpened",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.run.SessionReleased",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.run.SessionResumed",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.run.TurnRecorded",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
       "kind": "error_type",
       "source": "loom.run.ActionNotInCatalogue",
       "disposition": {
@@ -301,6 +418,41 @@
       }
     },
     {
+      "kind": "error_type",
+      "source": "loom.run.SessionExists",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.run.SessionNotActive",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.run.SessionNotFound",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.run.SessionStateConflict",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.run.SessionWireMismatch",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
       "kind": "view_type",
       "source": "loom.run.Catalogues",
       "disposition": {
@@ -324,6 +476,20 @@
     {
       "kind": "view_query",
       "source": "loom.run.Selections",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_type",
+      "source": "loom.run.Sessions",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_query",
+      "source": "loom.run.Sessions",
       "disposition": {
         "disposition": "generated"
       }

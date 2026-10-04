@@ -37,6 +37,10 @@ One model session executing a commission's run. Each catalogue is projected from
 
 `loom.run.CommissionRunId` wraps `Uuid` and is not interchangeable with one: the whole value of naming it separately is the crossings the model then refuses.
 
+### `RunEnding`
+
+`loom.run.RunEnding` is one of `Answered`, `Stopped` and `Failed`.
+
 ### `SelectionId`
 
 `loom.run.SelectionId` wraps `Uuid` and is not interchangeable with one: the whole value of naming it separately is the crossings the model then refuses.
@@ -176,26 +180,35 @@ An instance is identified by `session_id`, a `loom.run.SessionId`. The name is p
 It holds:
 
 - `commission_run` — `loom.run.CommissionRunId`
+- `wire` — `String`
 
 It owns any number of [`Turn`](#turn), as `turns`, carried by `Turn.session_id`.
 
 No invariant is declared, so nothing here constrains an instance at rest.
 
-Its state is a `loom.run.Session.State`, one of `Active`. That enum is synthesised from the lifecycle rather than declared beside it, so the states a view's filter compares and the states drawn below cannot disagree.
+Its state is a `loom.run.Session.State`, one of `Active` and `Filed`. That enum is synthesised from the lifecycle rather than declared beside it, so the states a view's filter compares and the states drawn below cannot disagree.
 
-An instance is created in `Active`. `Active` is terminal, so an instance may rest there forever. That is declared rather than inferred from having no way out: an entity that cannot leave a state is either finished or stuck, and only its author knows which.
+An instance is created in `Active`. No state is terminal: nothing in this lifecycle says an instance may stop moving.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Active
-    Active --> [*]
+    Active --> Filed: file (FileSession)
+    Filed --> Active: resume (ResumeSession)
+    Active --> Filed: release (ReleaseSession)
 ```
 
-It declares no moves, so nothing changes its state once it exists.
+Each move is taken by a declared command outcome, and a move nothing takes is refused as `missing_causation` rather than left as a state change nobody can trigger:
 
-It has one state, so there is no move to permit or to forbid.
+- `file` — taken by `loom.run.FileSession` on its `filed` outcome
+- `resume` — taken by `loom.run.ResumeSession` on its `resumed` outcome
+- `release` — taken by `loom.run.ReleaseSession` on its `released` outcome
 
-No view projects it, so nothing outside this context is promised a way to observe one.
+An instance is brought into existence by `loom.run.OpenSession` on its `opened` outcome.
+
+Every ordered pair of these states is connected by some move, so this lifecycle forbids nothing.
+
+One view projects it: [`Sessions`](#sessions).
 
 ### `Turn`
 
@@ -207,6 +220,7 @@ It holds:
 
 - `session_id` — `loom.run.SessionId`
 - `index` — `Integer`
+- `items` — `List<String>`
 
 It owns at most one [`ActionCatalogue`](#actioncatalogue), as `catalogue`, carried by `ActionCatalogue.turn_id`. Its `session_id` is what [`Session`](#session) owns it by, as `turns`.
 
@@ -275,7 +289,59 @@ It declares no order, so the rows come back in whatever order the implementation
 
 A generated scenario asserts it once, immediately after the command: a view promising this and not keeping the promise has to fail the suite rather than be retried until it passes.
 
+### `Sessions`
+
+`loom.run.Sessions`.
+
+It reads [`Session`](#session).
+
+It contains every instance of that entity: no filter narrows it, which is a decision somebody made and not a line somebody omitted.
+
+It exposes:
+
+- `session_id` — `loom.run.SessionId`
+- `commission_run` — `loom.run.CommissionRunId`
+- `wire` — `String`
+- `state` — `loom.run.Session.State`
+
+It declares no order, so the rows come back in whatever order the implementation has, and two reads may disagree.
+
+**Read-your-writes**: it is current the moment the command that changed it returns. A caller that has just created an invoice and cannot see it in here has been told a lie about what it did.
+
+A generated scenario asserts it once, immediately after the command: a view promising this and not keeping the promise has to fail the suite rather than be retried until it passes.
+
 ## Commands
+
+### `FileSession`
+
+`loom.run.FileSession`.
+
+It takes:
+
+- `session_id` — `loom.run.SessionId`
+- `ending` — `loom.run.RunEnding`
+
+It has two outcomes.
+
+**`filed`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.run.Session` from `Active` to `Filed`, along the declared move `file`. The instance is the one named by the input field `session_id`. It emits `loom.run.SessionFiled`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+**`wrong-state`** — Taken when the subject is resting in a state none of this command's moves start from — a `loom.run.Session` in `Filed`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `loom.run.SessionStateConflict`, carrying `state`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
+
+### `OpenSession`
+
+`loom.run.OpenSession`.
+
+It takes:
+
+- `session_id` — `loom.run.SessionId`
+- `commission_run` — `loom.run.CommissionRunId`
+- `wire` — `String`
+
+It has two outcomes.
+
+**`session-exists`** — Taken when a record already carries the identity the command's creating branch would create, and no input-guarded refusal applies. No entity in this specification changes. It reports `loom.run.SessionExists`, carrying `session_id`. It emits nothing. A test reaches it by sending the command twice with one identity: the first call creates the record, the second is answered by this branch.
+
+**`opened`** — The default branch, taken when no other outcome's condition matched. It creates a `loom.run.Session`, which starts in `Active`. The new instance's identity is published as `session_id` on `loom.run.SessionOpened`. It emits `loom.run.SessionOpened`. It sets `commission_run` from `input.commission_run` and `wire` from `input.wire`. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
 ### `ProjectCatalogue`
 
@@ -295,6 +361,39 @@ It has two outcomes.
 
 **`projected`** — The default branch, taken when no other outcome's condition matched. It creates a `loom.run.ActionCatalogue`, which starts in `Projected`. The new instance's identity is published as `catalogue_id` on `loom.run.CatalogueProjected`. It emits `loom.run.CatalogueProjected`. It sets `turn_id` from `input.turn_id`, `frontier` from `input.frontier`, `case_revision` from `input.case_revision` and `entries` from `input.entries`. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
+### `RecordTurn`
+
+`loom.run.RecordTurn`.
+
+It takes:
+
+- `turn_id` — `loom.run.TurnId`
+- `session_id` — `loom.run.SessionId`
+- `index` — `Integer`
+- `items` — `List<String>`
+
+It has three outcomes.
+
+**`session-unknown`** — Taken when no `loom.run.Session` carries the identity `input.session_id` names. No entity in this specification changes. It reports `loom.run.SessionNotFound`, carrying `session_id`. It emits nothing. A test reaches it by arranging the row of the other entity the input names, or its absence, and sending the command for it.
+
+**`session-not-active`** — Taken when the `loom.run.Session` that `input.session_id` names exists and its stored fields satisfy `state != Active`. No entity in this specification changes. It reports `loom.run.SessionNotActive`, carrying `session_id`. It emits nothing. A test reaches it by arranging the row of the other entity the input names, or its absence, and sending the command for it.
+
+**`recorded`** — The default branch, taken when no other outcome's condition matched. It creates a `loom.run.Turn`, which starts in `Taken`. The new instance's identity is published as `turn_id` on `loom.run.TurnRecorded`. It emits `loom.run.TurnRecorded`. It sets `session_id` from `input.session_id`, `index` from `input.index` and `items` from `input.items`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+### `ReleaseSession`
+
+`loom.run.ReleaseSession`.
+
+It takes:
+
+- `session_id` — `loom.run.SessionId`
+
+It has two outcomes.
+
+**`released`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.run.Session` from `Active` to `Filed`, along the declared move `release`. The instance is the one named by the input field `session_id`. It emits `loom.run.SessionReleased`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+**`wrong-state`** — Taken when the subject is resting in a state none of this command's moves start from — a `loom.run.Session` in `Filed`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `loom.run.SessionStateConflict`, carrying `state`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
+
 ### `RequestArguments`
 
 `loom.run.RequestArguments`.
@@ -311,6 +410,23 @@ It has three outcomes.
 **`selection-not-selected`** — Taken when the `loom.run.Selection` that `input.selection_id` names exists and its stored fields satisfy `state != Selected`. No entity in this specification changes. It reports `loom.run.SelectionNotSelected`, carrying `selection_id`. It emits nothing. A test reaches it by arranging the row of the other entity the input names, or its absence, and sending the command for it.
 
 **`requested`** — The default branch, taken when no other outcome's condition matched. It creates a `loom.run.ArgumentRequest`, which starts in `Requested`. The new instance's identity is published as `argument_request_id` on `loom.run.ArgumentsRequested`. It emits `loom.run.ArgumentsRequested`. It sets `selection_id` from `input.selection_id`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+### `ResumeSession`
+
+`loom.run.ResumeSession`.
+
+It takes:
+
+- `session_id` — `loom.run.SessionId`
+- `wire` — `String`
+
+It has three outcomes.
+
+**`cross-wire`** — Taken when the existing subject's stored fields satisfy `wire != input.wire`. No entity in this specification changes. It reports `loom.run.SessionWireMismatch`, carrying `session_id`, `session_wire` and `wire`. It emits nothing. A test establishes and independently observes the subject enum fact before selecting this branch.
+
+**`resumed`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.run.Session` from `Filed` to `Active`, along the declared move `resume`. The instance is the one named by the input field `session_id`. It emits `loom.run.SessionResumed`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+**`wrong-state`** — Taken when the subject is resting in a state none of this command's moves start from — a `loom.run.Session` in `Active`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `loom.run.SessionStateConflict`, carrying `state`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
 
 ### `RevalidateSelection`
 
@@ -437,6 +553,73 @@ Emitted by `loom.run.RevalidateSelection` on its `stale-revision` outcome.
 
 Nothing in this system reacts to it.
 
+### `SessionFiled`
+
+`loom.run.SessionFiled`.
+
+It carries:
+
+- `session_id` — `loom.run.SessionId`
+- `ending` — `loom.run.RunEnding`
+
+Emitted by `loom.run.FileSession` on its `filed` outcome.
+
+Nothing in this system reacts to it.
+
+### `SessionOpened`
+
+`loom.run.SessionOpened`.
+
+It carries:
+
+- `session_id` — `loom.run.SessionId`
+- `commission_run` — `loom.run.CommissionRunId`
+- `wire` — `String`
+
+Emitted by `loom.run.OpenSession` on its `opened` outcome.
+
+Nothing in this system reacts to it.
+
+### `SessionReleased`
+
+`loom.run.SessionReleased`.
+
+It carries:
+
+- `session_id` — `loom.run.SessionId`
+- `ending` — `loom.run.RunEnding`
+
+Emitted by `loom.run.ReleaseSession` on its `released` outcome.
+
+Nothing in this system reacts to it.
+
+### `SessionResumed`
+
+`loom.run.SessionResumed`.
+
+It carries:
+
+- `session_id` — `loom.run.SessionId`
+- `wire` — `String`
+
+Emitted by `loom.run.ResumeSession` on its `resumed` outcome.
+
+Nothing in this system reacts to it.
+
+### `TurnRecorded`
+
+`loom.run.TurnRecorded`.
+
+It carries:
+
+- `turn_id` — `loom.run.TurnId`
+- `session_id` — `loom.run.SessionId`
+- `index` — `Integer`
+
+Emitted by `loom.run.RecordTurn` on its `recorded` outcome.
+
+Nothing in this system reacts to it.
+
 ## Errors
 
 ### `ActionNotInCatalogue`
@@ -497,7 +680,53 @@ It carries:
 
 Reported by `loom.run.RevalidateSelection` on its `wrong-state` outcome.
 
+### `SessionExists`
+
+It carries:
+
+- `session_id` — `loom.run.SessionId`
+
+Reported by `loom.run.OpenSession` on its `session-exists` outcome.
+
+### `SessionNotActive`
+
+It carries:
+
+- `session_id` — `loom.run.SessionId`
+
+Reported by `loom.run.RecordTurn` on its `session-not-active` outcome.
+
+### `SessionNotFound`
+
+It carries:
+
+- `session_id` — `loom.run.SessionId`
+
+Reported by `loom.run.RecordTurn` on its `session-unknown` outcome.
+
+### `SessionStateConflict`
+
+It carries:
+
+- `state` — `loom.run.Session.State`
+
+Reported by `loom.run.FileSession` on its `wrong-state` outcome.
+
+Reported by `loom.run.ReleaseSession` on its `wrong-state` outcome.
+
+Reported by `loom.run.ResumeSession` on its `wrong-state` outcome.
+
+### `SessionWireMismatch`
+
+It carries:
+
+- `session_id` — `loom.run.SessionId`
+- `session_wire` — `String`
+- `wire` — `String`
+
+Reported by `loom.run.ResumeSession` on its `cross-wire` outcome.
+
 
 ---
 
-Generated from loom v1 · model digest `d801974218ef3d92c2eb884a7d4e7c56bb3fb32826e0145126651ace85e0bde9` · contract digest `slice-sha256/2:d245142e3f655485701182d044d14de4c925f8e8e31542a01bc3184e331a667a`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · model digest `1e5c1537dda3b2b7e22b162efd4278fee13385bc49abc57d7ce5100af963d5c1` · contract digest `slice-sha256/2:d23e825dcb7bfe03fbe20cea75b62e61bd0a45f586a2de0740780d02d5d2b8a1`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

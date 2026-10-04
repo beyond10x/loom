@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest d801974218ef3d92c2eb884a7d4e7c56bb3fb32826e0145126651ace85e0bde9
-// contract digest d245142e3f655485701182d044d14de4c925f8e8e31542a01bc3184e331a667a
+// model digest 1e5c1537dda3b2b7e22b162efd4278fee13385bc49abc57d7ce5100af963d5c1
+// contract digest d23e825dcb7bfe03fbe20cea75b62e61bd0a45f586a2de0740780d02d5d2b8a1
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -56,6 +56,24 @@ pub trait SelectionStorage {
     fn list(&self) -> Vec<crate::run::SelectionSnapshot>;
 }
 
+/// Where `loom.run.Session` is stored — a port the implementor provides.
+///
+/// Keyed by the identity `session_id`. ess generates this trait and never an implementation of it.
+pub trait SessionStorage {
+    /// The instance with this identity, or `None` where none is stored.
+    fn get(&self, identity: &crate::run::SessionId) -> Option<crate::run::SessionSnapshot>;
+
+    /// Stores this instance under its identity, replacing what was held.
+    fn put(&mut self, snapshot: crate::run::SessionSnapshot);
+
+    /// Removes the instance with this identity.
+    fn delete(&mut self, identity: &crate::run::SessionId);
+
+    /// Every stored instance, in the order the store keeps them: the order a generated query
+    /// answers an unordered view in.
+    fn list(&self) -> Vec<crate::run::SessionSnapshot>;
+}
+
 /// What the specification leaves to the implementor's context — a port the implementor provides.
 ///
 /// The caller's attributes, the values the model says the implementation assigns, and the answer
@@ -86,6 +104,52 @@ impl<P> Generated<P> {
     }
 }
 
+/// `loom.run.FileSession`, generated: every outcome is one the specification fully determines.
+impl<P> crate::run::obligations::FileSessionBehavior for Generated<P>
+where
+    P: SessionStorage,
+{
+    fn file_session(&mut self, input: crate::run::FileSession) -> Result<crate::run::FileSessionOutcome, UnmetObligation> {
+        let _ = &input;
+        // `filed`: the default.
+        let Some(held) = SessionStorage::get(&self.ports, &input.session_id) else {
+            return Ok(crate::run::FileSessionOutcome::WrongStateUnknownInstance);
+        };
+        let _ = &held;
+        let held_state = held.state;
+        let moved = match held.refine() {
+            crate::run::AnySession::Active(instance) => crate::run::AnySession::Filed(instance.file()),
+            _ => return Ok(crate::run::FileSessionOutcome::WrongState { error: crate::run::SessionStateConflict { state: held_state } }),
+        };
+        let next = moved.snapshot();
+        SessionStorage::put(&mut self.ports, next);
+        return Ok(crate::run::FileSessionOutcome::Filed { session_filed: crate::run::SessionFiled { session_id: input.session_id.clone(), ending: input.ending.clone() } });
+    }
+}
+
+/// `loom.run.OpenSession`, generated: every outcome is one the specification fully determines.
+impl<P> crate::run::obligations::OpenSessionBehavior for Generated<P>
+where
+    P: SessionStorage,
+{
+    fn open_session(&mut self, input: crate::run::OpenSession) -> Result<crate::run::OpenSessionOutcome, UnmetObligation> {
+        let _ = &input;
+        // `session-exists`: an identity a record already carries, before any branch is taken.
+        if SessionStorage::get(&self.ports, &input.session_id).is_some() {
+            return Ok(crate::run::OpenSessionOutcome::SessionExists { error: crate::run::SessionExists { session_id: input.session_id.clone() } });
+        }
+        // `opened`: the default.
+        let identity: crate::run::SessionId = input.session_id.clone();
+        let data = crate::run::SessionData {
+            session_id: identity.clone(),
+            commission_run: input.commission_run.clone(),
+            wire: input.wire.clone(),
+        };
+        SessionStorage::put(&mut self.ports, crate::run::AnySession::Active(crate::run::Session::new(data)).snapshot());
+        return Ok(crate::run::OpenSessionOutcome::Opened { session_opened: crate::run::SessionOpened { session_id: identity.clone(), commission_run: input.commission_run.clone(), wire: input.wire.clone() } });
+    }
+}
+
 /// `loom.run.ProjectCatalogue`, generated: every outcome is one the specification fully determines.
 impl<P> crate::run::obligations::ProjectCatalogueBehavior for Generated<P>
 where
@@ -111,9 +175,70 @@ where
     }
 }
 
+impl<P: crate::run::obligations::RecordTurnBehavior> crate::run::obligations::RecordTurnBehavior for Generated<P> {
+    fn record_turn(&mut self, input: crate::run::RecordTurn) -> Result<crate::run::RecordTurnOutcome, UnmetObligation> {
+        crate::run::obligations::RecordTurnBehavior::record_turn(&mut self.ports, input)
+    }
+}
+
+/// `loom.run.ReleaseSession`, generated: every outcome is one the specification fully determines.
+impl<P> crate::run::obligations::ReleaseSessionBehavior for Generated<P>
+where
+    P: SessionStorage,
+{
+    fn release_session(&mut self, input: crate::run::ReleaseSession) -> Result<crate::run::ReleaseSessionOutcome, UnmetObligation> {
+        let _ = &input;
+        // `released`: the default.
+        let Some(held) = SessionStorage::get(&self.ports, &input.session_id) else {
+            return Ok(crate::run::ReleaseSessionOutcome::WrongStateUnknownInstance);
+        };
+        let _ = &held;
+        let held_state = held.state;
+        let moved = match held.refine() {
+            crate::run::AnySession::Active(instance) => crate::run::AnySession::Filed(instance.release()),
+            _ => return Ok(crate::run::ReleaseSessionOutcome::WrongState { error: crate::run::SessionStateConflict { state: held_state } }),
+        };
+        let next = moved.snapshot();
+        SessionStorage::put(&mut self.ports, next);
+        return Ok(crate::run::ReleaseSessionOutcome::Released { session_released: crate::run::SessionReleased { session_id: input.session_id.clone(), ending: crate::run::RunEnding::Failed } });
+    }
+}
+
 impl<P: crate::run::obligations::RequestArgumentsBehavior> crate::run::obligations::RequestArgumentsBehavior for Generated<P> {
     fn request_arguments(&mut self, input: crate::run::RequestArguments) -> Result<crate::run::RequestArgumentsOutcome, UnmetObligation> {
         crate::run::obligations::RequestArgumentsBehavior::request_arguments(&mut self.ports, input)
+    }
+}
+
+/// `loom.run.ResumeSession`, generated: every outcome is one the specification fully determines.
+impl<P> crate::run::obligations::ResumeSessionBehavior for Generated<P>
+where
+    P: SessionStorage,
+{
+    fn resume_session(&mut self, input: crate::run::ResumeSession) -> Result<crate::run::ResumeSessionOutcome, UnmetObligation> {
+        let _ = &input;
+        // The addressed row, read before the branches that select by it.
+        let Some(held) = SessionStorage::get(&self.ports, &input.session_id) else {
+            return Ok(crate::run::ResumeSessionOutcome::WrongStateUnknownInstance);
+        };
+        let _ = &held;
+        // `cross-wire`: selected by the addressed row.
+        if decided(equal(Some(&held.data.wire).map(|value| value.clone()), Some(&input.wire).map(|value| value.clone())).map(|value| !value), "loom.run.ResumeSession")? {
+            return Ok(crate::run::ResumeSessionOutcome::CrossWire { error: crate::run::SessionWireMismatch { session_id: input.session_id.clone(), session_wire: held.data.wire.clone(), wire: input.wire.clone() } });
+        }
+        // `resumed`: the default.
+        let Some(held) = SessionStorage::get(&self.ports, &input.session_id) else {
+            return Ok(crate::run::ResumeSessionOutcome::WrongStateUnknownInstance);
+        };
+        let _ = &held;
+        let held_state = held.state;
+        let moved = match held.refine() {
+            crate::run::AnySession::Filed(instance) => crate::run::AnySession::Active(instance.resume()),
+            _ => return Ok(crate::run::ResumeSessionOutcome::WrongState { error: crate::run::SessionStateConflict { state: held_state } }),
+        };
+        let next = moved.snapshot();
+        SessionStorage::put(&mut self.ports, next);
+        return Ok(crate::run::ResumeSessionOutcome::Resumed { session_resumed: crate::run::SessionResumed { session_id: input.session_id.clone(), wire: input.wire.clone() } });
     }
 }
 
@@ -222,6 +347,25 @@ where
     }
 }
 
+/// `loom.run.Sessions`, generated: every row is one the specification fully determines from the stored `loom.run.Session`s.
+impl<P> crate::run::obligations::SessionsQuery for Generated<P>
+where
+    P: SessionStorage,
+{
+    fn sessions(&self) -> Result<Vec<crate::run::Sessions>, UnmetObligation> {
+        let admitted = SessionStorage::list(&self.ports);
+        Ok(admitted
+            .into_iter()
+            .map(|held| crate::run::Sessions {
+                session_id: held.data.session_id,
+                commission_run: held.data.commission_run,
+                wire: held.data.wire,
+                state: held.state,
+            })
+            .collect())
+    }
+}
+
 /// The typed refusal of a request the model declares no outcome for.
 fn undeclared(source: &'static str) -> UnmetObligation {
     let capability = "command behaviour";
@@ -231,6 +375,11 @@ fn undeclared(source: &'static str) -> UnmetObligation {
 /// A guard's truth, where it has one: Unknown selects no branch, so the model declares no outcome.
 fn decided(truth: Option<bool>, command: &'static str) -> Result<bool, UnmetObligation> {
     truth.ok_or_else(|| undeclared(command))
+}
+
+/// Equality of two read values; an unread one is Unknown.
+fn equal<T: PartialEq>(left: Option<T>, right: Option<T>) -> Option<bool> {
+    Some(left? == right?)
 }
 
 /// A decimal rendering as its sign, its whole digits and its fraction digits, without the zeros
