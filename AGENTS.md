@@ -36,6 +36,8 @@ must know. The cross-repository architecture is Atlas ADRs 0066–0075 and Atlas
 - A trace is not evidence (Atlas ADR 0074).
 - The model is not trusted context: it never supplies identity, authority, case revision, trusted
   time, approval results or tenant context.
+- When a selector, integration, verifier or authority provider fails, fail toward less authority,
+  less effect and more explicit uncertainty. Never silently broaden capability.
 - Do not make Loom semantically dependent on one selector vendor or model.
 - Anything that runs is Rust; command lines use clap derive.
 

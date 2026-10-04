@@ -101,7 +101,10 @@ fn adversary_commission_reference_pages_are_parsed_as_mdx() {
     let mut pages: Vec<_> = fs::read_dir(&dir)
         .unwrap_or_else(|error| panic!("read {}: {error}", dir.display()))
         .map(|entry| entry.expect("directory entry").path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "md" || ext == "mdx"))
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|ext| ext == "md" || ext == "mdx")
+        })
         .collect();
     pages.sort();
     assert!(
