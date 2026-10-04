@@ -1,0 +1,167 @@
+{
+  "format": "b10x-product-landing/1",
+  "product": {
+    "name": "Loom",
+    "mark": "L",
+    "eyebrow": "Agent harness · bootstrap",
+    "promise": [
+      "A model that acts.",
+      "Only inside its frontier."
+    ],
+    "lede": "Loom is the native agent harness. It makes a model behave like an agent for one bounded run, and the model acts only through actions the current frontier admits. Loom implements Commission's executor contract and stops at proposing an action: the Commission runtime rechecks the proposal and makes the effect call. Today Loom is a bootstrap library, and no model is called yet.",
+    "actions": [
+      {
+        "label": "Read the documentation",
+        "href": "/docs/",
+        "kind": "primary"
+      },
+      {
+        "label": "What exists today",
+        "href": "/docs/status"
+      }
+    ],
+    "meta": "Rust library · implements Commission's AgentExecutor · specified in ESS · Apache-2.0"
+  },
+  "sections": [
+    {
+      "kind": "features",
+      "eyebrow": "What it does",
+      "title": "Governed reach, not a bigger tool list.",
+      "lede": "What a model can do in a run is derived from the frontier, never from what was registered at startup. A selector can be wrong about which admissible action is best. It cannot produce an action the frontier does not contain.",
+      "items": [
+        {
+          "title": "Selections stay inside the frontier",
+          "description": "An unknown or blocked action id fails the run, whatever confidence the selector reports. Confidence never grants authority.",
+          "status": "shipped",
+          "href": "/docs/concepts/action-selection"
+        },
+        {
+          "title": "Approval-gated actions suspend",
+          "description": "An action that needs authority suspends the run with the capability it requires. Loom proposes nothing for it.",
+          "status": "shipped"
+        },
+        {
+          "title": "Loom proposes, Commission invokes",
+          "description": "A run ends at a ProposedAction. The Commission runtime rechecks frontier, case revision and authority, then makes the effect call (Atlas ADR 0082).",
+          "status": "decided",
+          "href": "/docs/concepts/where-loom-ends"
+        },
+        {
+          "title": "Selection apart from arguments",
+          "description": "A fast typed selector picks the action; the reasoning model fills in that action's arguments only. Low confidence falls back to a stronger path.",
+          "status": "planned",
+          "href": "/docs/concepts/fast-selector"
+        }
+      ]
+    },
+    {
+      "kind": "flow",
+      "eyebrow": "One run",
+      "title": "Five steps, two owners.",
+      "lede": "The first three steps are Loom's. The last two belong to the Commission runtime. This is the design; the status below says which parts run today.",
+      "steps": [
+        {
+          "label": "Loom",
+          "title": "Project the catalogue",
+          "description": "The frontier's admissible actions become what the model may see."
+        },
+        {
+          "label": "Loom",
+          "title": "Select one action",
+          "description": "A reasoning model, a rule or a fast typed selector picks from those candidates only."
+        },
+        {
+          "label": "Loom",
+          "title": "Generate its arguments",
+          "description": "For the selected action only, validated against its schema."
+        },
+        {
+          "label": "Commission",
+          "title": "Revalidate",
+          "description": "Against the current frontier, case revision and authority."
+        },
+        {
+          "label": "Commission",
+          "title": "Invoke the effect",
+          "description": "Through a trusted adapter bound to the action."
+        }
+      ]
+    },
+    {
+      "kind": "domain-graph",
+      "eyebrow": "Specification",
+      "title": "What Loom is specified in.",
+      "lede": "The loom.run domain of Loom's ESS specification: a session owns its turns, a turn owns the catalogue projected for it, a selection names one action from that catalogue, and arguments are requested for that selection only. Generated from ess/ by loom-docs.",
+      "data": "data/ess/loom-run.domain-graph.json"
+    },
+    {
+      "kind": "status",
+      "eyebrow": "Status",
+      "title": "Bootstrap. Here is exactly what exists.",
+      "lede": "Shipped means code in the b10x-loom library today. Decided means recorded in an architecture decision. Planned means on the plan only. No model is called yet.",
+      "items": [
+        {
+          "label": "Loom implements Commission's AgentExecutor",
+          "status": "shipped",
+          "detail": "A run selects, checks and returns an executor outcome."
+        },
+        {
+          "label": "Selections outside the frontier are refused",
+          "status": "shipped",
+          "detail": "Unknown or blocked ids fail the run; a unit test holds this."
+        },
+        {
+          "label": "Approval-gated actions suspend the run",
+          "status": "shipped",
+          "detail": "Suspended, naming the capability required."
+        },
+        {
+          "label": "ESS specification and its hard gate",
+          "status": "shipped",
+          "detail": "task check fails unless loom.run validates, compiles and synthesizes."
+        },
+        {
+          "label": "Commission makes the effect call",
+          "status": "decided",
+          "detail": "Atlas ADR 0082. Loom's side holds today: it invokes nothing."
+        },
+        {
+          "label": "Catalogue projection and argument schema validation",
+          "status": "planned"
+        },
+        {
+          "label": "Reasoning, fast typed and hybrid selectors",
+          "status": "planned",
+          "detail": "With confidence fallback and selection telemetry."
+        },
+        {
+          "label": "Harness port",
+          "status": "planned",
+          "detail": "Model wires, turn loop, sessions, streaming, compaction, budgets. The module map is done."
+        }
+      ]
+    },
+    {
+      "kind": "related",
+      "eyebrow": "Related tools",
+      "title": "Where Loom sits.",
+      "tools": [
+        {
+          "name": "Commission",
+          "description": "Build agents you can give responsibility to. Loom is its native executor.",
+          "href": "https://beyond10x.github.io/commission/"
+        },
+        {
+          "name": "ELS",
+          "description": "Engineering protocols: which claims must hold, which evidence counts, which actions need authority.",
+          "href": "https://beyond10x.github.io/els/"
+        },
+        {
+          "name": "ESS",
+          "description": "Executable system specifications: the contract Loom is held to.",
+          "href": "https://beyond10x.github.io/ess/"
+        }
+      ]
+    }
+  ]
+}
