@@ -23,7 +23,7 @@ scope:
   path: crates/loom/src/revalidation.rs
 - confidence: inferred
   path: crates/loom/tests/selection_revalidation.rs
-revision: 9
+revision: 10
 ---
 ## Outcome
 
@@ -113,3 +113,6 @@ execution-boundary clause of `epic:loom-native-harness`; `docs/design/loom-desig
 - No command binds a selection or revalidation to a turn, session or run, and `ProjectCatalogue` checks
   neither that the turn exists nor that it has one catalogue: a selection can be made against another
   session's catalogue.
+- From wave 2026-10-04-w10 (frontier-projection, adversary pass 1): `ActionCatalogue` carries no case
+  id and its `frontier` is an opaque string, so a catalogue projected from another case's frontier
+  cannot be detected; settle it with the turn binding above.

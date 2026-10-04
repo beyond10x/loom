@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:frontier-projection
 kind: story
-status: draft
+status: implemented
 title: Project frontier actions into model-visible tools
 refs:
 - provider: commission
@@ -22,7 +22,11 @@ scope:
   path: crates/loom/src/projection.rs
 - confidence: inferred
   path: crates/loom/tests/frontier_projection.rs
-revision: 9
+revision: 13
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-04T07:28:46Z", actor: "human:timo", revision: 10, decided_on: {"recorded":{"review_outcome":3}}}
+- {from: "proposed", to: "active", at: "2026-10-04T07:28:46Z", actor: "human:timo", revision: 11, decided_on: {"recorded":{"review_outcome":3}}}
+- {from: "active", to: "implemented", at: "2026-10-04T10:54:42Z", actor: "human:timo", revision: 13, decided_on: {"recorded":{"test_result":1,"review_outcome":7,"verification":1}}}
 ---
 ## Outcome
 
@@ -114,3 +118,14 @@ the Commission fake governor serving the software-change frontier, it checks:
 
 TASKBOARD L-003; Atlas ADR 0072; `docs/design/loom-design.md` § Commission integration; the catalogue
 clause of `epic:loom-native-harness`.
+
+## Coordinator and adversary decisions (wave 2026-10-04-w10)
+
+- `project(&Frontier<Issued>, CatalogueId, TurnId)` takes no runtime capability parameter;
+  epic:effect-bindings adds it when something reads it.
+- Pass 1 (fixed): each distinct action is projected once, at its first position, with its status from
+  Commission's `admit` (Admissible, NeedsAuthority as ApprovalRequired, Refused dropped), the same
+  least-authority rule Loom's executor follows (Atlas ADR 0082). A catalogue carries no case id
+  (escalated to story:selection-revalidation).
+- Pass 2: the first-position rule is now tested (fixed); projection is quadratic in distinct actions,
+  measurable only beyond 10k actions (no-op).

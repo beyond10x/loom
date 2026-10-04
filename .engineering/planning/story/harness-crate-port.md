@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:harness-crate-port
 kind: story
-status: draft
+status: implemented
 title: Port Harness's wire, provider adapters and turn loop crates into Loom
 summary: 'The porting half of the former harness-loop-port: five crates per the module map, provider-wire fixtures, relicensed Apache-2.0, Harness unchanged.'
 refs:
@@ -23,10 +23,20 @@ scope:
 - confidence: cited
   path: crates/loom/src/harness/
 - confidence: cited
+  path: crates/loom/tests/adversary2_harness_port.rs
+- confidence: cited
+  path: crates/loom/tests/adversary_harness_port_boundaries.rs
+- confidence: cited
   path: crates/loom/tests/fixtures/provider-wires/
 - confidence: inferred
   path: crates/loom/tests/harness_port.rs
-revision: 3
+- confidence: cited
+  path: crates/loom/tests/harness_port_contract.rs
+revision: 7
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-04T07:28:46Z", actor: "human:timo", revision: 4}
+- {from: "proposed", to: "active", at: "2026-10-04T07:28:46Z", actor: "human:timo", revision: 5}
+- {from: "active", to: "implemented", at: "2026-10-04T10:54:42Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"test_result":1,"review_outcome":4,"verification":1}}}
 ---
 ## Outcome
 
