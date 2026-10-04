@@ -27,7 +27,7 @@ scope:
   path: ess/domains/run.yaml
 - confidence: cited
   path: generated/rust/loom/
-revision: 5
+revision: 6
 ---
 ## Outcome
 
@@ -96,3 +96,12 @@ Commission fakes, it checks:
 ## Source
 
 TASKBOARD L-013; Atlas ADR 0071 and 0072; Harness `harness-loop/src/approval.rs` at `798325f0`.
+
+## From wave 2026-10-04-w9 (run-pipeline-skeleton, adversary pass 2)
+
+`SelectAction` and `RequestArguments` declare no `existing_instance:` refusal, so a retried or
+replayed `SelectAction` with the id of a refused selection resets it to `Selected`, and revalidation can
+admit it. The fix (`existing_instance: true`) makes ESS 0.52.0 refuse the synthesized suite
+(ESS-SYNTH-004: the route through `SelectAction/selected` is reached by no input). Needs an ESS change
+before recovery can rely on selection identity; the adversary case
+`a_refused_selection_is_never_selected_or_admitted_again` is ignored until then.

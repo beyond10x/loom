@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-04T07:28:12Z",
+  "actor": "human:timo",
+  "artifact": "story:run-pipeline-skeleton",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "whole gate on wave/2026-10-04-w9 at 23b8ce9: fmt --check, clippy -D warnings, test (86 passed, 2 ignored for ESS-SYNTH-003/004, 0 failed), ESS validate and synthesize (18 scenarios, 0 refusals), drift, no-hand-model, loom-docs --check; every step exit 0",
+    "reference": "ga-wave-2026-10-04-w9/loom-integration-gate.log"
+  }
+}

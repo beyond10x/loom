@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-04T07:28:12Z",
+  "actor": "human:timo",
+  "artifact": "story:run-pipeline-skeleton",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "drift and run_skeleton: phase-1 commit b358cee vs treatment 7705b76",
+    "reference": "ga-wave-2026-10-04-w9/loom-run-pipeline-skeleton/scratch/phase1-red.log: drift failed (generated tree differs from synthesis of the new spec), run_skeleton did not compile (no CatalogueEntry, no ActionCatalogueData.entries); treatment passes; VERIFIED"
+  }
+}

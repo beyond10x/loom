@@ -23,7 +23,7 @@ scope:
   path: crates/loom/src/revalidation.rs
 - confidence: inferred
   path: crates/loom/tests/selection_revalidation.rs
-revision: 8
+revision: 9
 ---
 ## Outcome
 
@@ -102,3 +102,14 @@ passes. With the Commission fake governor, it checks:
 
 TASKBOARD L-004; Atlas ADR 0072 (revalidate before every effect) and ADR 0073 step 3; the
 execution-boundary clause of `epic:loom-native-harness`; `docs/design/loom-design.md:48-70`.
+
+## From wave 2026-10-04-w9 (run-pipeline-skeleton, adversary pass 1)
+
+- The not-in-frontier refusal is declared `external:` in `ess/domains/run.yaml`: ESS 0.52.0 synthesis
+  refuses a membership predicate over `input.frontier_actions` (ESS-SYNTH-003/004), and the generated
+  `Context::external` receives no command input. This story needs an ESS change (a synthesizable
+  membership guard, or input passed to external outcomes) before it can enforce the refusal; the
+  adversary case `not_in_frontier_follows_the_frontier_actions` is ignored until then.
+- No command binds a selection or revalidation to a turn, session or run, and `ProjectCatalogue` checks
+  neither that the turn exists nor that it has one catalogue: a selection can be made against another
+  session's catalogue.

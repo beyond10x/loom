@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:run-pipeline-skeleton
 kind: story
-status: draft
+status: implemented
 title: Declare the run pipeline's settled ESS nouns up front and create Loom's module files
 summary: 'Spec-first skeleton: catalogue entries, select, argument request and revalidation in ess/, one regeneration, empty module files with their pub mod lines.'
 refs:
@@ -33,13 +33,25 @@ scope:
   path: crates/loom/src/selection.rs
 - confidence: cited
   path: crates/loom/src/session.rs
+- confidence: cited
+  path: crates/loom/tests/adversary2_ess_gate.rs
+- confidence: cited
+  path: crates/loom/tests/adversary_ess_gate.rs
+- confidence: cited
+  path: crates/loom/tests/ess_gate.rs
 - confidence: inferred
   path: crates/loom/tests/run_skeleton.rs
 - confidence: cited
   path: ess/domains/run.yaml
 - confidence: cited
   path: generated/rust/loom/
-revision: 3
+- confidence: cited
+  path: website/data/ess/
+revision: 8
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-04T06:51:23Z", actor: "human:timo", revision: 4}
+- {from: "proposed", to: "active", at: "2026-10-04T06:51:23Z", actor: "human:timo", revision: 5}
+- {from: "active", to: "implemented", at: "2026-10-04T07:28:12Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"test_result":1,"review_outcome":5,"verification":1}}}
 ---
 ## Outcome
 
@@ -148,3 +160,18 @@ and `task no-hand-model`. Every other open story of `epic:loom-native-harness` d
 
 Operator instruction of 2026-10-04 (waves hold several stories; spec-first skeleton story); Atlas
 ADR 0076 and ADR 0080; the `## ESS first` sections of the four stories named in § Declarations.
+
+## Coordinator and adversary decisions (wave 2026-10-04-w9)
+
+- Phase 1: the stale refusal is a real guard over the selection's revision; not-in-frontier stays
+  `external:` (ESS-SYNTH-003); the acceptance test is part of the first commit; three gate tests follow
+  the new spec.
+- Pass 1: `SelectAction` refuses a revision that differs from its catalogue's (`revision-mismatch`, via
+  `input.catalogue_id`), so a stored selection's revision equals its catalogue's (fixed);
+  not-in-frontier deferred to story:selection-revalidation (escalated); module docs say what is not built
+  (fixed); `RequestArguments` refuses an unknown selection (fixed); `confidence` cannot be in a view
+  (ESS cannot replay Decimal; no-op); turn/session binding deferred (escalated).
+- Pass 2: `ProjectCatalogue` refuses an existing catalogue, with a `Catalogues` view (fixed); a reused
+  selection id is deferred to story:interruption-recovery (ESS-SYNTH-004, escalated); `RequestArguments`
+  requires a `Selected` selection (fixed); `CatalogueRevisionMismatch` names the catalogue's own revision
+  (fixed).
