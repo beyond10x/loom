@@ -6,7 +6,7 @@ status: open
 title: Nobody has decided who declares which Connector operations a frontier action binds to, or how many
 relations:
 - blocks: story:connector-action-binding
-revision: 1
+revision: 2
 ---
 ## Question
 
@@ -56,3 +56,14 @@ the `loom.run` domain extension that has to precede it (planning guardrail 7).
 
 An accepted decision names the owner of the action-to-operation binding and its cardinality, and the
 owning repository declares it as a `relations:` entry in its ESS domain.
+
+## After ADR 0082
+
+Atlas ADR 0082 (operator, 2026-10-04) puts the effect invocation in the Commission runtime: it
+rechecks, then invokes through the action's binding. The binding is therefore read by Commission,
+not Loom, and the question moves to Commission as an open follow-up (ADR 0082 § Open). It is filed
+there as commission `decision-blocker:action-operation-binding`, blocking commission
+`story:effect-invocation`. This blocker stays open here because Loom keeps one dependency on the
+answer: whether an unbound action is still offered in the catalogue Loom projects from the frontier
+(Atlas ADR 0072 § Rule, candidates intersected with available integrations), or filtered out before
+Loom sees it. Not decided here.

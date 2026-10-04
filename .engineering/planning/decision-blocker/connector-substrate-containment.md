@@ -6,7 +6,7 @@ status: open
 title: Nobody has decided whether Substrate is the Connector provider an effect invokes or the confinement a Connector invocation runs in
 relations:
 - blocks: story:substrate-execution-binding
-revision: 1
+revision: 2
 ---
 ## Question
 
@@ -44,3 +44,15 @@ operation the Substrate ledger records for the effect.
 
 An accepted decision picks one reading (or a third) and the owners declare the relation in their ESS
 domains.
+
+## After ADR 0082
+
+Atlas ADR 0082 (operator, 2026-10-04) puts the effect invocation in the Commission runtime, "through
+the action's binding: Connectors, inside Substrate as the connector-Substrate containment decision
+settles". Loom hands nothing to Substrate: it returns a `ProposedAction`. The question is no longer
+Loom's; it belongs to Commission as an open follow-up, not answered by ADR 0082. Its consumer is
+commission `story:effect-invocation`, which names this blocker as an unsettled relation; no
+Commission copy of it is filed yet, so this record stays the single open one. It is not cleared by
+this note.
+`story:substrate-execution-binding`, the story it blocked here, is archived (no Loom-side work
+remains); the `blocks` edge is kept as the record of what it stopped.
