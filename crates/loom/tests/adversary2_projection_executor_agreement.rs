@@ -16,8 +16,9 @@ use b10x_commission::model::responsibility::{
 };
 use b10x_commission::ports::executor::AgentExecutor;
 use b10x_loom::model::primitives::Uuid as LoomUuid;
-use b10x_loom::model::run::{CatalogueId, TurnId};
+use b10x_loom::model::run::{CatalogueEntry, CatalogueId, SelectionStrategy, TurnId};
 use b10x_loom::projection::project;
+use b10x_loom::selection::{Choice, SelectionContext};
 use b10x_loom::{ActionSelector, EmptyObjectArguments, Loom, SelectorError};
 
 const CASE: &str = "CHG-1842";
@@ -45,15 +46,27 @@ fn frontier(actions: Vec<FrontierAction>) -> Frontier<frontier_state::Issued> {
     })
 }
 
+/// A selector that names one action, whatever it is handed.
+///
+/// `story:action-selector`: a selector is handed the catalogue projected from the frontier, and
+/// `Loom::run` refuses a name the catalogue does not list. The agreement checked here is unchanged;
+/// the executor now reaches it through that refusal.
 struct Names(String);
 
 impl ActionSelector for Names {
     fn select(
         &self,
-        _frontier: &Frontier<frontier_state::Issued>,
-        _prompt: &str,
-    ) -> Result<String, SelectorError> {
-        Ok(self.0.clone())
+        _context: &SelectionContext,
+        _candidates: &[CatalogueEntry],
+    ) -> Result<Choice, SelectorError> {
+        Ok(Choice {
+            action: self.0.clone(),
+            confidence: None,
+        })
+    }
+
+    fn strategy(&self) -> SelectionStrategy {
+        SelectionStrategy::ReasoningModel
     }
 }
 

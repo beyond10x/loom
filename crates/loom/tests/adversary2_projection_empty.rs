@@ -18,10 +18,11 @@ use b10x_loom::model::behaviour::{ActionCatalogueStorage, Generated};
 use b10x_loom::model::primitives::Uuid as LoomUuid;
 use b10x_loom::model::run::obligations::{CataloguesQuery, ProjectCatalogueBehavior};
 use b10x_loom::model::run::{
-    ActionCatalogueSnapshot, ActionCatalogueState, CatalogueId, CatalogueProjected,
-    ProjectCatalogue, ProjectCatalogueOutcome, TurnId,
+    ActionCatalogueSnapshot, ActionCatalogueState, CatalogueEntry, CatalogueId, CatalogueProjected,
+    ProjectCatalogue, ProjectCatalogueOutcome, SelectionStrategy, TurnId,
 };
 use b10x_loom::projection::project;
+use b10x_loom::selection::{Choice, SelectionContext};
 use b10x_loom::{ActionSelector, EmptyObjectArguments, Loom, SelectorError};
 
 const CASE: &str = "CHG-1842";
@@ -102,16 +103,26 @@ impl ActionCatalogueStorage for Catalogues {
     }
 }
 
-/// A selector that names one action, whatever the frontier lists.
+/// A selector that names one action, whatever it is handed.
+///
+/// `story:action-selector`: a selector is handed the catalogue projected from the frontier, not the
+/// frontier; here that catalogue is empty, and every name is refused as absent from it.
 struct Names(&'static str);
 
 impl ActionSelector for Names {
     fn select(
         &self,
-        _frontier: &Frontier<frontier_state::Issued>,
-        _prompt: &str,
-    ) -> Result<String, SelectorError> {
-        Ok(self.0.to_owned())
+        _context: &SelectionContext,
+        _candidates: &[CatalogueEntry],
+    ) -> Result<Choice, SelectorError> {
+        Ok(Choice {
+            action: self.0.to_owned(),
+            confidence: None,
+        })
+    }
+
+    fn strategy(&self) -> SelectionStrategy {
+        SelectionStrategy::ReasoningModel
     }
 }
 

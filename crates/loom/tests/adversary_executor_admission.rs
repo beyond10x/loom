@@ -21,6 +21,8 @@ use b10x_commission::outcome::{Derived, derive};
 use b10x_commission::ports::executor::AgentExecutor;
 use b10x_commission::ports::governor::Governor;
 use b10x_commission_testkit::fake_governor::{Answer, FakeGovernor};
+use b10x_loom::model::run::{CatalogueEntry, SelectionStrategy};
+use b10x_loom::selection::{Choice, SelectionContext};
 use b10x_loom::{
     ActionSelector, EmptyObjectArguments, FirstAdmissibleSelector, Loom, SelectorError,
 };
@@ -28,15 +30,27 @@ use b10x_loom::{
 const MERGE: &str = "repository.merge";
 
 /// A selector that always names one action, as a model may.
+///
+/// `story:action-selector`: a selector is handed the catalogue projected from the frontier, so an
+/// action Commission refuses is not among its candidates, and Loom refuses it as absent from the
+/// catalogue before Commission's admission is asked. What these cases assert of `Loom::run` is
+/// unchanged.
 struct Pick(&'static str);
 
 impl ActionSelector for Pick {
     fn select(
         &self,
-        _frontier: &Frontier<frontier_state::Issued>,
-        _prompt: &str,
-    ) -> Result<String, SelectorError> {
-        Ok(self.0.to_owned())
+        _context: &SelectionContext,
+        _candidates: &[CatalogueEntry],
+    ) -> Result<Choice, SelectorError> {
+        Ok(Choice {
+            action: self.0.to_owned(),
+            confidence: None,
+        })
+    }
+
+    fn strategy(&self) -> SelectionStrategy {
+        SelectionStrategy::ReasoningModel
     }
 }
 
