@@ -1,0 +1,193 @@
+format: els-fixture/1
+id: chg-1842
+protocol: protocols/software-change/1.yaml
+at: "2026-10-04T12:00:00Z"
+
+case:
+  format: canon-case/1
+  id: CHG-1842
+  protocol: software.change
+  artifacts:
+    intent: {revision: i1}
+    system_specification: {revision: s1}
+    plan: {revision: p1}
+    implementation: {revision: R2}
+    release: {revision: v0}
+    deployment: {revision: d0}
+
+states:
+  - id: initial
+    add_authority: []
+    add_evidence:
+      - observed_at: "2026-10-04T10:00:00Z"
+        record:
+          format: canon-evidence/1
+          id: tests-r1
+          kind: test_result
+          result: pass
+          subject: implementation
+          subject_revision: R1
+      - observed_at: "2026-10-04T10:05:00Z"
+        record:
+          format: canon-evidence/1
+          id: health-d0
+          kind: operational_observation
+          result: healthy
+          subject: deployment
+          subject_revision: d0
+    expect:
+      claims:
+        tests.pass: unknown
+        implementation.reviewed: unknown
+        implementation.verified: unknown
+        release.proven: unknown
+        deployment.healthy: true
+        objective.realized: unknown
+      actions:
+        repository.inspect: admissible
+        repository.edit: admissible
+        tests.run: admissible
+        repository.merge: blocked
+
+  - id: tests-pass-r2
+    add_authority: []
+    add_evidence:
+      - observed_at: "2026-10-04T11:00:00Z"
+        record:
+          format: canon-evidence/1
+          id: tests-r2
+          kind: test_result
+          result: pass
+          subject: implementation
+          subject_revision: R2
+    expect:
+      claims:
+        tests.pass: true
+        implementation.reviewed: unknown
+        implementation.verified: true
+        release.proven: unknown
+        deployment.healthy: true
+        objective.realized: unknown
+      actions:
+        repository.inspect: admissible
+        repository.edit: admissible
+        tests.run: admissible
+        repository.merge: approval-required
+
+  - id: merge-approved
+    add_authority:
+      - {capability: repository.merge, decision: granted}
+    add_evidence: []
+    expect:
+      claims:
+        tests.pass: true
+        implementation.reviewed: unknown
+        implementation.verified: true
+        release.proven: unknown
+        deployment.healthy: true
+        objective.realized: unknown
+      actions:
+        repository.inspect: admissible
+        repository.edit: admissible
+        tests.run: admissible
+        repository.merge: admissible
+
+  - id: review-rejected
+    add_authority: []
+    add_evidence:
+      - observed_at: "2026-10-04T11:10:00Z"
+        record:
+          format: canon-evidence/1
+          id: review-r2
+          kind: code_review
+          result: rejected
+          subject: implementation
+          subject_revision: R2
+    expect:
+      claims:
+        tests.pass: true
+        implementation.reviewed: false
+        implementation.verified: true
+        release.proven: unknown
+        deployment.healthy: true
+        objective.realized: unknown
+      actions:
+        repository.inspect: admissible
+        repository.edit: admissible
+        tests.run: admissible
+        repository.merge: admissible
+
+  - id: objective-unmet
+    add_authority: []
+    add_evidence:
+      - observed_at: "2026-10-04T11:20:00Z"
+        record:
+          format: canon-evidence/1
+          id: objective-i1
+          kind: objective_observation
+          result: unsatisfied
+          subject: intent
+          subject_revision: i1
+    expect:
+      claims:
+        tests.pass: true
+        implementation.reviewed: false
+        implementation.verified: true
+        release.proven: unknown
+        deployment.healthy: true
+        objective.realized: false
+      actions:
+        repository.inspect: admissible
+        repository.edit: admissible
+        tests.run: admissible
+        repository.merge: admissible
+
+  - id: deployment-unhealthy
+    add_authority: []
+    add_evidence:
+      - observed_at: "2026-10-04T11:30:00Z"
+        record:
+          format: canon-evidence/1
+          id: health-d0-unhealthy
+          kind: operational_observation
+          result: unhealthy
+          subject: deployment
+          subject_revision: d0
+    expect:
+      claims:
+        tests.pass: true
+        implementation.reviewed: false
+        implementation.verified: true
+        release.proven: unknown
+        deployment.healthy: unknown
+        objective.realized: false
+      actions:
+        repository.inspect: admissible
+        repository.edit: admissible
+        tests.run: admissible
+        repository.merge: admissible
+
+  - id: tests-fail-r2
+    add_authority: []
+    add_evidence:
+      - observed_at: "2026-10-04T11:40:00Z"
+        record:
+          format: canon-evidence/1
+          id: tests-r2-fail
+          kind: test_result
+          result: fail
+          subject: implementation
+          subject_revision: R2
+    expect:
+      claims:
+        tests.pass: unknown
+        implementation.reviewed: false
+        implementation.verified: unknown
+        release.proven: unknown
+        deployment.healthy: unknown
+        objective.realized: false
+      actions:
+        repository.inspect: admissible
+        repository.edit: admissible
+        tests.run: admissible
+        repository.merge: blocked
