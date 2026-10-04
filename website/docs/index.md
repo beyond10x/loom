@@ -31,7 +31,7 @@ frontier does not contain.
 
 :::caution Bootstrap
 Loom is at the start of its life. No model is called yet. Each page says whether what it describes
-is **shipped**, **decided design** or **planned**; the [status page](./status.md) lists what exists.
+is **shipped**, **decided design** or **planned**; the [status page](./status.mdx) lists what exists.
 :::
 
 ## How a model does useful work right now
@@ -62,11 +62,11 @@ it.
 
 ## Where to go next
 
-- [One run, five steps](./concepts/one-run.md)
+- [One run, five steps](./concepts/one-run.mdx)
 - [Action selection and argument generation](./concepts/action-selection.md), with the safety rules
 - [The fast selector](./concepts/fast-selector.md)
 - [Commission, Harness and Metaharness](./concepts/commission-and-harness.md)
 - [Where Loom ends](./concepts/where-loom-ends.md)
-- [The ESS specification](./reference/ess/index.md), generated from the repository
+- [The ESS specification](./reference/ess/index.mdx), generated from the repository
 
 Loom has no command line of its own: `b10x-loom` is a Rust library that Commission drives.

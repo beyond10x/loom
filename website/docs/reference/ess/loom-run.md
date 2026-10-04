@@ -10,7 +10,7 @@ description: "ESS reference for the Run domain, generated from the specification
 
 One model session executing a commission's run. Each catalogue is projected from one frontier; a selection names one action from that catalogue; arguments are generated for the selected action only. Loom never decides authority or completion.
 
-`loom.run` is one of loom's bounded contexts. [All domains](./index.md).
+`loom.run` is one of loom's bounded contexts. [All domains](./index.mdx).
 
 ## Types
 

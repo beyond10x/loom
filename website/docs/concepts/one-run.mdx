@@ -10,7 +10,15 @@ For each run, the frontier's admissible actions become a catalogue, one action i
 arguments are generated and checked, and only then is anything allowed to happen. The first three
 steps are Loom's. The last two belong to the Commission runtime.
 
-This page describes the design. The [status page](../status.md) says which parts run today.
+This page describes the design. The [status page](../status.mdx) says which parts run today.
+
+<Flow label="One Loom run" steps={[
+  {label: 'Loom', title: 'Project the catalogue', description: "The frontier's admissible actions become what the model may see."},
+  {label: 'Loom', title: 'Select one action', description: 'From those candidates only.'},
+  {label: 'Loom', title: 'Generate its arguments', description: 'For the selected action only, checked against its schema.'},
+  {label: 'Commission', title: 'Revalidate', description: 'Frontier, case revision and authority, now.'},
+  {label: 'Commission', title: 'Invoke the effect', description: 'Through a trusted adapter bound to the action.'},
+]} />
 
 ## 1. Project the catalogue — Loom
 
