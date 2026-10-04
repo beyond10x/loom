@@ -3,9 +3,11 @@ title: Commission, Harness and Metaharness
 sidebar_label: Commission and Harness
 sidebar_position: 4
 description: Where Loom sits between Commission, the Harness it succeeds, and Metaharness.
+status: shipped
+lede: Loom implements Commission's executor contract, carries the Harness it succeeds over by porting it, and is the native executor Metaharness compares against other harnesses.
+source: Atlas ADR 0075 and the Harness to Loom module map, docs/design/harness-map.md
+source_url: https://github.com/beyond10x/loom/blob/main/docs/design/harness-map.md
 ---
-
-# Commission, Harness and Metaharness
 
 ## Commission
 
@@ -28,7 +30,9 @@ Harness. The repository's
 lists them.
 
 :::caution[Planned]
-The module map is done. The port itself has not started.
+The provider wires, messages, responses, HTTP and the turn loop are ported as modules of
+`b10x-loom`. Wiring them to a run, with sessions and transcripts, streaming, compaction and
+budgets, is planned.
 :::
 
 ## Metaharness

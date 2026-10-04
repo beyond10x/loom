@@ -3,14 +3,11 @@ title: Action selection and argument generation
 sidebar_label: Action selection
 sidebar_position: 2
 description: Why Loom separates which action to take from how to fill in its arguments, and the safety rules every selector follows.
+status: shipped
+lede: Choosing which admissible action to take is often a narrow classification problem. Constructing that action's arguments needs the full context and a stronger model. Loom keeps the two apart, so routine routing can use a cheaper, faster decision while argument generation stays with the reasoning model.
+source: docs/contracts/loom-action-selection.md
+source_url: https://github.com/beyond10x/loom/blob/main/docs/contracts/loom-action-selection.md
 ---
-
-# Action selection and argument generation
-
-Choosing which admissible action to take is often a narrow classification problem. Constructing
-that action's arguments needs the full context and a stronger model. Loom keeps the two apart, so
-routine routing can use a cheaper, faster decision while argument generation stays with the
-reasoning model.
 
 ## Two roles
 

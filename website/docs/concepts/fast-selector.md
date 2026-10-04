@@ -2,13 +2,10 @@
 title: The fast selector
 sidebar_position: 3
 description: A fast typed-decision model as one implementation of ActionSelector, gated by confidence.
+status: planned
+lede: A fast typed-decision model as one implementation of ActionSelector, gated by confidence. No fast selector exists yet; this page describes the design.
+source: Atlas ADR 0073 (the rules every selector follows)
 ---
-
-# The fast selector
-
-:::caution[Planned]
-No fast selector exists yet. This page describes the design.
-:::
 
 A fast typed-decision model fits the selector role well: given the candidate actions, it returns one
 of them with a probability. The reasoning model then generates arguments for that action. Where

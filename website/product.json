@@ -20,7 +20,19 @@
         "href": "/docs/status"
       }
     ],
-    "meta": "Rust library · implements Commission's AgentExecutor · specified in ESS · Apache-2.0"
+    "meta": "Rust library · implements Commission's AgentExecutor · specified in ESS · Apache-2.0",
+    "art": {
+      "kind": "domain-graph",
+      "data": "data/ess/loom-run.domain-graph.json",
+      "caption": "The loom.run domain, generated from ess/ by loom-docs."
+    },
+    "kpis": [
+      "entities",
+      "relations",
+      "shipped",
+      "decided",
+      "planned"
+    ]
   },
   "sections": [
     {
@@ -99,53 +111,7 @@
       "eyebrow": "Status",
       "title": "Bootstrap. Here is exactly what exists.",
       "lede": "Shipped means code in the b10x-loom library today. Decided means recorded in an architecture decision. Planned means on the plan only. No model is called yet.",
-      "items": [
-        {
-          "label": "Loom implements Commission's AgentExecutor",
-          "status": "shipped",
-          "detail": "A run selects, checks and returns an executor outcome."
-        },
-        {
-          "label": "Selections Commission refuses are never proposed",
-          "status": "shipped",
-          "detail": "They end the run with NoUsefulAction; a unit test holds this."
-        },
-        {
-          "label": "Actions that need authority go to Commission",
-          "status": "shipped",
-          "detail": "Proposed for Commission to authorize; Loom never suspends for authority."
-        },
-        {
-          "label": "Run model generated from ESS",
-          "status": "shipped",
-          "detail": "Session, Turn, ActionCatalogue, Selection and ArgumentRequest, synthesized from ess/."
-        },
-        {
-          "label": "ESS specification and its hard gate",
-          "status": "shipped",
-          "detail": "task check fails unless loom.run validates, compiles and synthesizes."
-        },
-        {
-          "label": "Commission makes the effect call",
-          "status": "decided",
-          "detail": "Atlas ADR 0082. Loom's side holds today: it invokes nothing."
-        },
-        {
-          "label": "Catalogue projection and argument schema validation",
-          "status": "planned",
-          "detail": "Declared in the specification; not built yet."
-        },
-        {
-          "label": "Reasoning, fast typed and hybrid selectors",
-          "status": "planned",
-          "detail": "With confidence fallback and selection telemetry."
-        },
-        {
-          "label": "Harness port",
-          "status": "planned",
-          "detail": "Model wires, turn loop, sessions, streaming, compaction, budgets. The module map is done."
-        }
-      ]
+      "items": "data/status.json"
     },
     {
       "kind": "related",
@@ -153,19 +119,21 @@
       "title": "Where Loom sits.",
       "tools": [
         {
-          "name": "Commission",
-          "description": "Build agents you can give responsibility to. Loom is its native executor.",
-          "href": "https://beyond10x.github.io/commission/"
+          "id": "commission",
+          "relation": "used-by",
+          "via": "AgentExecutor"
         },
         {
-          "name": "ELS",
-          "description": "Engineering protocols: which claims must hold, which evidence counts, which actions need authority.",
-          "href": "https://beyond10x.github.io/els/"
+          "id": "ess",
+          "relation": "specifies"
         },
         {
-          "name": "ESS",
-          "description": "Executable system specifications: the contract Loom is held to.",
-          "href": "https://beyond10x.github.io/ess/"
+          "id": "els",
+          "relation": "beside"
+        },
+        {
+          "id": "canon",
+          "relation": "beside"
         }
       ]
     }

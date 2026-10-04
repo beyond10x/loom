@@ -2,13 +2,10 @@
 title: Where Loom ends
 sidebar_position: 5
 description: Loom proposes an action; the Commission runtime rechecks and invokes it.
+status: decided
+lede: Loom proposes an action; the Commission runtime rechecks and invokes it.
+source: Atlas ADR 0082, decided 2026-10-04, which amends ADRs 0070 and 0071
 ---
-
-# Where Loom ends
-
-:::info[Decided design]
-Decided on 2026-10-04 and recorded as Atlas ADR 0082, which amends ADRs 0070 and 0071.
-:::
 
 **Loom proposes. Commission invokes.** Every executor, Loom included, ends a step by returning a
 `ProposedAction`: an action id and its arguments. Loom's side ends there. It makes no connector
