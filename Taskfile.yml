@@ -15,6 +15,7 @@ tasks:
       - cargo fmt --all --check
       - cargo clippy --workspace --all-targets --locked -- -D warnings
       - cargo test --workspace --locked
+      - task: docs-check
 
   spec:
     desc: Validate the ESS specification.
@@ -30,3 +31,20 @@ tasks:
     desc: Validate the AEP planning store.
     cmds:
       - aep plan artifact validate
+
+  docs-generate:
+    desc: Regenerate the derived documentation pages under website/docs/reference/.
+    cmds:
+      - cargo run --locked -p loom-docs -- generate
+
+  docs-check:
+    desc: Fail when the generated documentation pages are missing, stale or edited by hand.
+    cmds:
+      - cargo run --locked -p loom-docs -- generate --check
+
+  website:
+    desc: Build the documentation site, as CI's Documentation validation workflow does.
+    dir: website
+    cmds:
+      - npm ci
+      - npm run build

@@ -1,0 +1,42 @@
+---
+title: One run, five steps
+sidebar_position: 1
+description: The five steps of a Loom run, and which of them belong to Loom and which to the Commission runtime.
+---
+
+# One run, five steps
+
+For each run, the frontier's admissible actions become a catalogue, one action is chosen, its
+arguments are generated and checked, and only then is anything allowed to happen. The first three
+steps are Loom's. The last two belong to the Commission runtime.
+
+This page describes the design. The [status page](../status.md) says which parts run today.
+
+## 1. Project the catalogue — Loom
+
+The frontier's admissible actions are projected into the catalogue the model can see. Nothing
+consequential is offered because it was registered at startup; what the model sees comes from the
+current frontier and what the runtime can actually do.
+
+## 2. Select one action — Loom
+
+A selector picks one action from that catalogue. It can be a reasoning model, a deterministic rule,
+or a fast typed selector. It chooses only from the candidates it was given. See
+[action selection](./action-selection.md).
+
+## 3. Generate arguments for that action only — Loom
+
+The model is asked for the arguments of the selected action, and nothing else. The arguments are
+validated against that action's schema.
+
+## 4. Revalidate — Commission runtime
+
+The action goes back for revalidation against the current frontier, case revision and authority.
+Time passes between selection and effect: the case may have moved, and authority may have changed.
+Loom itself refuses any selection that is not in the frontier it was given.
+
+## 5. Execute through a trusted adapter — Commission runtime
+
+Loom returns the action as a `ProposedAction`. Only after revalidation does the Commission runtime
+carry out the effect, through a trusted adapter bound to the action. Loom does not make this call;
+see [where Loom ends](./where-loom-ends.md).
