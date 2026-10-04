@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:action-selector
 kind: story
-status: draft
+status: implemented
 title: Define ActionSelector over the projected catalogue
 refs:
 - provider: commission
@@ -23,7 +23,25 @@ scope:
   path: crates/loom/src/selection.rs
 - confidence: inferred
   path: crates/loom/tests/action_selector.rs
-revision: 9
+- confidence: cited
+  path: crates/loom/tests/adversary2_executor_seams.rs
+- confidence: cited
+  path: crates/loom/tests/adversary2_projection_empty.rs
+- confidence: cited
+  path: crates/loom/tests/adversary2_projection_executor_agreement.rs
+- confidence: cited
+  path: crates/loom/tests/adversary_executor_admission.rs
+- confidence: cited
+  path: crates/loom/tests/agent_executor.rs
+- confidence: cited
+  path: website/docs/concepts/action-selection.md
+- confidence: cited
+  path: website/docs/status.mdx
+revision: 14
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-04T07:44:27Z", actor: "human:timo", revision: 10}
+- {from: "proposed", to: "active", at: "2026-10-04T07:44:27Z", actor: "human:timo", revision: 11}
+- {from: "active", to: "implemented", at: "2026-10-04T10:56:15Z", actor: "human:timo", revision: 14, decided_on: {"recorded":{"test_result":1,"review_outcome":4,"verification":1}}}
 ---
 ## Outcome
 

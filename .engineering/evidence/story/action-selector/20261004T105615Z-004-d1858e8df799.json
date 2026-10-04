@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-04T10:56:15Z",
+  "actor": "human:timo",
+  "artifact": "story:action-selector",
+  "kind": "story",
+  "revision": 13,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "wave 2026-10-04-w11 integration gate: fmt, clippy, ess_gate, ess validate+synthesize (0 refusals), drift, no-hand-model, loom-docs --check, cargo doc -D warnings",
+    "reference": "https://github.com/beyond10x/loom/commit/aece81d"
+  }
+}

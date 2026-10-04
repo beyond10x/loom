@@ -13,7 +13,7 @@ relations:
 - serves: vision:O1
 - serves: vision:O3
 - serves: vision:governed-autonomy
-revision: 1
+revision: 2
 ---
 ## Outcome
 
@@ -66,3 +66,9 @@ when this was drafted. Both composed selectors are scripted, so this story does 
 
 TASKBOARD L-009; Atlas ADR 0073; `docs/integrations/laya-fast-selection.md` § Confidence policy;
 `docs/contracts/loom-action-selection.md` safety rules 3 and 5.
+
+## Carried from story:action-selector (adversary pass 1, 2026-10-04)
+
+`Selection.confidence` is copied from the selector unvalidated (`crates/loom/src/selection.rs`). This
+story is the first whose selector returns a confidence, so it validates the value at the seam: a
+decimal in [0, 1], refused otherwise.
