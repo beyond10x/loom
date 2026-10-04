@@ -18,6 +18,17 @@ One model session executing a commission's run. Each catalogue is projected from
 
 `loom.run.ArgumentRequestId` wraps `Uuid` and is not interchangeable with one: the whole value of naming it separately is the crossings the model then refuses.
 
+### `CatalogueEntry`
+
+`loom.run.CatalogueEntry` is a record of two fields:
+
+- `action` — `String`
+- `status` — `loom.run.CatalogueEntryStatus`
+
+### `CatalogueEntryStatus`
+
+`loom.run.CatalogueEntryStatus` is one of `Admissible` and `ApprovalRequired`.
+
 ### `CatalogueId`
 
 `loom.run.CatalogueId` wraps `Uuid` and is not interchangeable with one: the whole value of naming it separately is the crossings the model then refuses.
@@ -57,6 +68,7 @@ It holds:
 - `turn_id` — `loom.run.TurnId`
 - `frontier` — `String`
 - `case_revision` — `Integer`
+- `entries` — `List<loom.run.CatalogueEntry>`
 
 Its `turn_id` is what [`Turn`](#turn) owns it by, as `catalogue`.
 
@@ -76,7 +88,7 @@ It declares no moves, so nothing changes its state once it exists.
 
 It has one state, so there is no move to permit or to forbid.
 
-No view projects it, so nothing outside this context is promised a way to observe one.
+One view projects it: [`Catalogues`](#catalogues).
 
 ### `ArgumentRequest`
 
@@ -120,26 +132,40 @@ It holds:
 - `action` — `String`
 - `confidence` — `Optional<Decimal>`, which may be absent
 - `strategy` — `loom.run.SelectionStrategy`
+- `case_revision` — `Integer`
 
 It references at most one [`ActionCatalogue`](#actioncatalogue), as `catalogue`, carried by `Selection.catalogue_id`.
 
 No invariant is declared, so nothing here constrains an instance at rest.
 
-Its state is a `loom.run.Selection.State`, one of `Selected`. That enum is synthesised from the lifecycle rather than declared beside it, so the states a view's filter compares and the states drawn below cannot disagree.
+Its state is a `loom.run.Selection.State`, one of `Admitted`, `Refused` and `Selected`. That enum is synthesised from the lifecycle rather than declared beside it, so the states a view's filter compares and the states drawn below cannot disagree.
 
-An instance is created in `Selected`. `Selected` is terminal, so an instance may rest there forever. That is declared rather than inferred from having no way out: an entity that cannot leave a state is either finished or stuck, and only its author knows which.
+An instance is created in `Selected`. `Admitted` and `Refused` are terminal, so an instance may rest there forever. That is declared rather than inferred from having no way out: an entity that cannot leave a state is either finished or stuck, and only its author knows which.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Selected
-    Selected --> [*]
+    Selected --> Admitted: admit (RevalidateSelection)
+    Selected --> Refused: refuse (RevalidateSelection)
+    Admitted --> [*]
+    Refused --> [*]
 ```
 
-It declares no moves, so nothing changes its state once it exists.
+Each move is taken by a declared command outcome, and a move nothing takes is refused as `missing_causation` rather than left as a state change nobody can trigger:
 
-It has one state, so there is no move to permit or to forbid.
+- `admit` — taken by `loom.run.RevalidateSelection` on its `admitted` outcome
+- `refuse` — taken by `loom.run.RevalidateSelection` on its `stale-revision` outcome and `loom.run.RevalidateSelection` on its `not-in-frontier` outcome
 
-No view projects it, so nothing outside this context is promised a way to observe one.
+An instance is brought into existence by `loom.run.SelectAction` on its `selected` outcome.
+
+Illegal transitions are illegal by absence: no rule forbids them, there is simply no arrow, because a rule would be a second place for the same truth to live. A diagram cannot show an absence, so the pairs it does not connect are listed here, derived from the same transitions — anything named below is a move this specification does not permit.
+
+- `Admitted` may not become `Refused`
+- `Admitted` may not become `Selected`
+- `Refused` may not become `Admitted`
+- `Refused` may not become `Selected`
+
+One view projects it: [`Selections`](#selections).
 
 ### `Session`
 
@@ -202,7 +228,276 @@ It has one state, so there is no move to permit or to forbid.
 
 No view projects it, so nothing outside this context is promised a way to observe one.
 
+## Views
+
+A view is what the outside world is promised it can observe. Each one says which instances it contains and how soon it reflects a command that has already returned, because "you can read this" without "how soon" is the promise every flaky suite is built on.
+
+### `Catalogues`
+
+`loom.run.Catalogues`.
+
+It reads [`ActionCatalogue`](#actioncatalogue).
+
+It contains every instance of that entity: no filter narrows it, which is a decision somebody made and not a line somebody omitted.
+
+It exposes:
+
+- `catalogue_id` — `loom.run.CatalogueId`
+- `case_revision` — `Integer`
+- `state` — `loom.run.ActionCatalogue.State`
+
+It declares no order, so the rows come back in whatever order the implementation has, and two reads may disagree.
+
+**Read-your-writes**: it is current the moment the command that changed it returns. A caller that has just created an invoice and cannot see it in here has been told a lie about what it did.
+
+A generated scenario asserts it once, immediately after the command: a view promising this and not keeping the promise has to fail the suite rather than be retried until it passes.
+
+### `Selections`
+
+`loom.run.Selections`.
+
+It reads [`Selection`](#selection).
+
+It contains every instance of that entity: no filter narrows it, which is a decision somebody made and not a line somebody omitted.
+
+It exposes:
+
+- `selection_id` — `loom.run.SelectionId`
+- `catalogue_id` — `loom.run.CatalogueId`
+- `action` — `String`
+- `strategy` — `loom.run.SelectionStrategy`
+- `case_revision` — `Integer`
+- `state` — `loom.run.Selection.State`
+
+It declares no order, so the rows come back in whatever order the implementation has, and two reads may disagree.
+
+**Read-your-writes**: it is current the moment the command that changed it returns. A caller that has just created an invoice and cannot see it in here has been told a lie about what it did.
+
+A generated scenario asserts it once, immediately after the command: a view promising this and not keeping the promise has to fail the suite rather than be retried until it passes.
+
+## Commands
+
+### `ProjectCatalogue`
+
+`loom.run.ProjectCatalogue`.
+
+It takes:
+
+- `catalogue_id` — `loom.run.CatalogueId`
+- `turn_id` — `loom.run.TurnId`
+- `frontier` — `String`
+- `case_revision` — `Integer`
+- `entries` — `List<loom.run.CatalogueEntry>`
+
+It has two outcomes.
+
+**`catalogue-exists`** — Taken when a record already carries the identity the command's creating branch would create, and no input-guarded refusal applies. No entity in this specification changes. It reports `loom.run.CatalogueExists`, carrying `catalogue_id`. It emits nothing. A test reaches it by sending the command twice with one identity: the first call creates the record, the second is answered by this branch.
+
+**`projected`** — The default branch, taken when no other outcome's condition matched. It creates a `loom.run.ActionCatalogue`, which starts in `Projected`. The new instance's identity is published as `catalogue_id` on `loom.run.CatalogueProjected`. It emits `loom.run.CatalogueProjected`. It sets `turn_id` from `input.turn_id`, `frontier` from `input.frontier`, `case_revision` from `input.case_revision` and `entries` from `input.entries`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+### `RequestArguments`
+
+`loom.run.RequestArguments`.
+
+It takes:
+
+- `argument_request_id` — `loom.run.ArgumentRequestId`
+- `selection_id` — `loom.run.SelectionId`
+
+It has three outcomes.
+
+**`selection-unknown`** — Taken when no `loom.run.Selection` carries the identity `input.selection_id` names. No entity in this specification changes. It reports `loom.run.SelectionNotFound`, carrying `selection_id`. It emits nothing. A test reaches it by arranging the row of the other entity the input names, or its absence, and sending the command for it.
+
+**`selection-not-selected`** — Taken when the `loom.run.Selection` that `input.selection_id` names exists and its stored fields satisfy `state != Selected`. No entity in this specification changes. It reports `loom.run.SelectionNotSelected`, carrying `selection_id`. It emits nothing. A test reaches it by arranging the row of the other entity the input names, or its absence, and sending the command for it.
+
+**`requested`** — The default branch, taken when no other outcome's condition matched. It creates a `loom.run.ArgumentRequest`, which starts in `Requested`. The new instance's identity is published as `argument_request_id` on `loom.run.ArgumentsRequested`. It emits `loom.run.ArgumentsRequested`. It sets `selection_id` from `input.selection_id`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+### `RevalidateSelection`
+
+`loom.run.RevalidateSelection`.
+
+It takes:
+
+- `selection_id` — `loom.run.SelectionId`
+- `case_revision` — `Integer`
+- `frontier_actions` — `List<String>`
+
+It has four outcomes.
+
+**`stale-revision`** — Taken when the existing subject's stored fields satisfy `case_revision != input.case_revision`. It moves a `loom.run.Selection` from `Selected` to `Refused`, along the declared move `refuse`. The instance is the one named by the input field `selection_id`. It emits `loom.run.SelectionStale`. A test establishes and independently observes the subject enum fact before selecting this branch.
+
+**`not-in-frontier`** — Decided outside the input: the frontier action ids in the input do not list the selection's action. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. It moves a `loom.run.Selection` from `Selected` to `Refused`, along the declared move `refuse`. The instance is the one named by the input field `selection_id`. It emits `loom.run.SelectionNotInFrontier`. A test reaches it by injecting the declared fault, because no input can.
+
+**`admitted`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.run.Selection` from `Selected` to `Admitted`, along the declared move `admit`. The instance is the one named by the input field `selection_id`. It emits `loom.run.SelectionAdmitted`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+**`wrong-state`** — Taken when the subject is resting in a state none of this command's moves start from — a `loom.run.Selection` in `Admitted` and `Refused`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `loom.run.SelectionStateConflict`, carrying `state`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
+
+### `SelectAction`
+
+`loom.run.SelectAction`.
+
+It takes:
+
+- `selection_id` — `loom.run.SelectionId`
+- `catalogue_id` — `loom.run.CatalogueId`
+- `action` — `String`
+- `confidence` — `Optional<Decimal>`, which may be absent
+- `strategy` — `loom.run.SelectionStrategy`
+- `case_revision` — `Integer`
+
+It has four outcomes.
+
+**`catalogue-unknown`** — Taken when no `loom.run.ActionCatalogue` carries the identity `input.catalogue_id` names. No entity in this specification changes. It reports `loom.run.CatalogueNotFound`, carrying `catalogue_id`. It emits nothing. A test reaches it by arranging the row of the other entity the input names, or its absence, and sending the command for it.
+
+**`not-in-catalogue`** — Taken when the `loom.run.ActionCatalogue` that `input.catalogue_id` names exists and its stored fields satisfy `not (exists entry in entries: (entry.action == input.action))`. No entity in this specification changes. It reports `loom.run.ActionNotInCatalogue`, carrying `action`. It emits nothing. A test reaches it by arranging the row of the other entity the input names, or its absence, and sending the command for it.
+
+**`revision-mismatch`** — Taken when the `loom.run.ActionCatalogue` that `input.catalogue_id` names exists and its stored fields satisfy `case_revision != input.case_revision`. No entity in this specification changes. It reports `loom.run.CatalogueRevisionMismatch`, carrying `catalogue_id`, `case_revision` and `catalogue_revision`. It emits nothing. A test reaches it by arranging the row of the other entity the input names, or its absence, and sending the command for it.
+
+**`selected`** — The default branch, taken when no other outcome's condition matched. It creates a `loom.run.Selection`, which starts in `Selected`. The new instance's identity is published as `selection_id` on `loom.run.ActionSelected`. It emits `loom.run.ActionSelected`. It sets `catalogue_id` from `input.catalogue_id`, `action` from `input.action`, `confidence` from `input.confidence`, `strategy` from `input.strategy` and `case_revision` from `input.case_revision`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+## Events
+
+### `ActionSelected`
+
+`loom.run.ActionSelected`.
+
+It carries:
+
+- `selection_id` — `loom.run.SelectionId`
+- `catalogue_id` — `loom.run.CatalogueId`
+- `action` — `String`
+
+Emitted by `loom.run.SelectAction` on its `selected` outcome.
+
+Nothing in this system reacts to it.
+
+### `ArgumentsRequested`
+
+`loom.run.ArgumentsRequested`.
+
+It carries:
+
+- `argument_request_id` — `loom.run.ArgumentRequestId`
+- `selection_id` — `loom.run.SelectionId`
+
+Emitted by `loom.run.RequestArguments` on its `requested` outcome.
+
+Nothing in this system reacts to it.
+
+### `CatalogueProjected`
+
+`loom.run.CatalogueProjected`.
+
+It carries:
+
+- `catalogue_id` — `loom.run.CatalogueId`
+- `turn_id` — `loom.run.TurnId`
+- `case_revision` — `Integer`
+
+Emitted by `loom.run.ProjectCatalogue` on its `projected` outcome.
+
+Nothing in this system reacts to it.
+
+### `SelectionAdmitted`
+
+`loom.run.SelectionAdmitted`.
+
+It carries:
+
+- `selection_id` — `loom.run.SelectionId`
+
+Emitted by `loom.run.RevalidateSelection` on its `admitted` outcome.
+
+Nothing in this system reacts to it.
+
+### `SelectionNotInFrontier`
+
+`loom.run.SelectionNotInFrontier`.
+
+It carries:
+
+- `selection_id` — `loom.run.SelectionId`
+- `action` — `String`
+
+Emitted by `loom.run.RevalidateSelection` on its `not-in-frontier` outcome.
+
+Nothing in this system reacts to it.
+
+### `SelectionStale`
+
+`loom.run.SelectionStale`.
+
+It carries:
+
+- `selection_id` — `loom.run.SelectionId`
+- `catalogue_revision` — `Integer`
+- `case_revision` — `Integer`
+
+Emitted by `loom.run.RevalidateSelection` on its `stale-revision` outcome.
+
+Nothing in this system reacts to it.
+
+## Errors
+
+### `ActionNotInCatalogue`
+
+It carries:
+
+- `action` — `String`
+
+Reported by `loom.run.SelectAction` on its `not-in-catalogue` outcome.
+
+### `CatalogueExists`
+
+It carries:
+
+- `catalogue_id` — `loom.run.CatalogueId`
+
+Reported by `loom.run.ProjectCatalogue` on its `catalogue-exists` outcome.
+
+### `CatalogueNotFound`
+
+It carries:
+
+- `catalogue_id` — `loom.run.CatalogueId`
+
+Reported by `loom.run.SelectAction` on its `catalogue-unknown` outcome.
+
+### `CatalogueRevisionMismatch`
+
+It carries:
+
+- `catalogue_id` — `loom.run.CatalogueId`
+- `case_revision` — `Integer`
+- `catalogue_revision` — `Integer`
+
+Reported by `loom.run.SelectAction` on its `revision-mismatch` outcome.
+
+### `SelectionNotFound`
+
+It carries:
+
+- `selection_id` — `loom.run.SelectionId`
+
+Reported by `loom.run.RequestArguments` on its `selection-unknown` outcome.
+
+### `SelectionNotSelected`
+
+It carries:
+
+- `selection_id` — `loom.run.SelectionId`
+
+Reported by `loom.run.RequestArguments` on its `selection-not-selected` outcome.
+
+### `SelectionStateConflict`
+
+It carries:
+
+- `state` — `loom.run.Selection.State`
+
+Reported by `loom.run.RevalidateSelection` on its `wrong-state` outcome.
+
 
 ---
 
-Generated from loom v1 · model digest `43dcb22fa4b8b8a3ab9e196467ad3d47be4a63873a6a7b541b59c4567d195883` · contract digest `slice-sha256/2:976fca135fea82818eebad3e94b5d61c4dc9a9754c5ed5bcb1f30531c2984b69`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · model digest `d801974218ef3d92c2eb884a7d4e7c56bb3fb32826e0145126651ace85e0bde9` · contract digest `slice-sha256/2:d245142e3f655485701182d044d14de4c925f8e8e31542a01bc3184e331a667a`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

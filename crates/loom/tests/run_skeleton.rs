@@ -92,7 +92,29 @@ fn run_skeleton_declares_pipeline_nouns() {
     }
 
     // The selection records the case revision of its catalogue, taken from SelectAction's input,
-    // and revalidation refuses a stale one by a guard over that stored revision, not externally.
+    // which SelectAction refuses unless it is that catalogue's; revalidation refuses a stale one
+    // by a guard over the stored revision, not externally.
+    let mismatch = outcome(&compiled, "loom.run.SelectAction", "revision-mismatch");
+    assert_eq!(
+        mismatch.at(&["condition", "kind"]).and_then(Json::as_str),
+        Some("related"),
+        "revision-mismatch is selected by a guard over the catalogue the selection names"
+    );
+    assert_eq!(
+        mismatch.at(&["condition", "entity"]).and_then(Json::as_str),
+        Some("loom.run.ActionCatalogue")
+    );
+    assert_eq!(
+        mismatch
+            .at(&["condition", "test", "holds", "predicate"])
+            .and_then(Json::as_str),
+        Some("case_revision != input.case_revision"),
+        "revision-mismatch compares the catalogue's case_revision with the input's"
+    );
+    assert_eq!(
+        mismatch.at(&["error"]).and_then(Json::as_str),
+        Some("loom.run.CatalogueRevisionMismatch")
+    );
     assert!(
         names(&compiled, &["commands", "loom.run.SelectAction", "input"])
             .contains(&"case_revision"),
@@ -102,17 +124,44 @@ fn run_skeleton_declares_pipeline_nouns() {
         names(&compiled, &["entities", "loom.run.Selection", "fields"]).contains(&"case_revision"),
         "loom.run.Selection stores its case_revision"
     );
-    let stale = compiled
-        .at(&["commands", "loom.run.RevalidateSelection", "outcomes"])
-        .and_then(Json::as_array)
-        .expect("loom.run.RevalidateSelection declares outcomes")
-        .iter()
-        .find(|outcome| outcome.at(&["name"]).and_then(Json::as_str) == Some("stale-revision"))
-        .expect("loom.run.RevalidateSelection declares outcome stale-revision");
+    let stale = outcome(&compiled, "loom.run.RevalidateSelection", "stale-revision");
     assert_eq!(
         stale.at(&["condition", "kind"]).and_then(Json::as_str),
         Some("subject_predicate"),
         "stale-revision is selected by a guard over the stored case_revision"
+    );
+    assert_eq!(
+        stale.at(&["condition", "predicate"]).and_then(Json::as_str),
+        Some("case_revision != input.case_revision"),
+        "stale-revision compares the stored case_revision with the current one"
+    );
+
+    // An action id absent from the catalogue's entries is refused by a guard over that catalogue.
+    let absent = outcome(&compiled, "loom.run.SelectAction", "not-in-catalogue");
+    assert_eq!(
+        absent.at(&["condition", "kind"]).and_then(Json::as_str),
+        Some("related"),
+        "not-in-catalogue is selected by a guard over the catalogue the selection names"
+    );
+    assert_eq!(
+        absent.at(&["condition", "entity"]).and_then(Json::as_str),
+        Some("loom.run.ActionCatalogue")
+    );
+    let membership = absent
+        .at(&["condition", "test", "holds", "predicate", "not", "exists"])
+        .expect("not-in-catalogue holds when no entry of the catalogue matches");
+    assert_eq!(
+        membership.at(&["in"]).and_then(Json::as_str),
+        Some("entries")
+    );
+    assert_eq!(
+        membership.at(&["that"]).and_then(Json::as_str),
+        Some("entry.action == input.action")
+    );
+    assert_eq!(
+        absent.at(&["error"]).and_then(Json::as_str),
+        Some("loom.run.ActionNotInCatalogue"),
+        "not-in-catalogue refuses with the error that names the action id"
     );
 
     // 2. An ActionCatalogue built through the re-export reads its entries back in order.
@@ -157,6 +206,17 @@ fn run_skeleton_declares_pipeline_nouns() {
             "crates/loom/src/lib.rs declares `{declaration}`"
         );
     }
+}
+
+/// The outcome `name` of `command`.
+fn outcome<'a>(compiled: &'a Json, command: &str, name: &str) -> &'a Json {
+    compiled
+        .at(&["commands", command, "outcomes"])
+        .and_then(Json::as_array)
+        .unwrap_or_else(|| panic!("{command} declares outcomes"))
+        .iter()
+        .find(|outcome| outcome.at(&["name"]).and_then(Json::as_str) == Some(name))
+        .unwrap_or_else(|| panic!("{command} declares outcome {name}"))
 }
 
 /// The `name` of each element of the array at `path`.

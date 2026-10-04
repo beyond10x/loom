@@ -20,6 +20,10 @@
         {
           "name": "case_revision",
           "type": "integer"
+        },
+        {
+          "name": "entries",
+          "type": "List<CatalogueEntry>"
         }
       ],
       "id": "loom.run.ActionCatalogue",
@@ -78,6 +82,10 @@
         {
           "name": "strategy",
           "type": "SelectionStrategy"
+        },
+        {
+          "name": "case_revision",
+          "type": "integer"
         }
       ],
       "id": "loom.run.Selection",
@@ -88,10 +96,29 @@
       "lifecycle": {
         "initial": "Selected",
         "states": [
+          "Admitted",
+          "Refused",
           "Selected"
         ],
         "terminal": [
-          "Selected"
+          "Admitted",
+          "Refused"
+        ],
+        "transitions": [
+          {
+            "from": [
+              "Selected"
+            ],
+            "name": "admit",
+            "to": "Admitted"
+          },
+          {
+            "from": [
+              "Selected"
+            ],
+            "name": "refuse",
+            "to": "Refused"
+          }
         ]
       },
       "name": "Selection"

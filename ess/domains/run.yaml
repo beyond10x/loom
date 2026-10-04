@@ -138,8 +138,8 @@ entities:
         type: Optional<Decimal>
       - name: strategy
         type: loom.run.SelectionStrategy
-      # The case revision of the catalogue the selection was made from: revalidation compares it
-      # with the current one.
+      # The case revision of the catalogue the selection was made from, held equal to that
+      # catalogue's by SelectAction: revalidation compares it with the current one.
       - name: case_revision
         type: Integer
     relations:
@@ -183,6 +183,22 @@ errors:
       - name: catalogue_id
         type: loom.run.CatalogueId
 
+  # The case revision a selection claims is not the revision of the catalogue it names.
+  - name: loom.run.CatalogueRevisionMismatch
+    fields:
+      - name: catalogue_id
+        type: loom.run.CatalogueId
+      - name: case_revision
+        type: Integer
+      - name: catalogue_revision
+        type: Integer
+
+  # The selection an argument request names was never made.
+  - name: loom.run.SelectionNotFound
+    fields:
+      - name: selection_id
+        type: loom.run.SelectionId
+
   # The selected action id is not among the catalogue's entries (ADR 0073). Names the id.
   - name: loom.run.ActionNotInCatalogue
     fields:
@@ -194,6 +210,18 @@ errors:
     fields:
       - name: state
         type: loom.run.Selection.State
+
+  # A catalogue is projected once: its id is never projected again.
+  - name: loom.run.CatalogueExists
+    fields:
+      - name: catalogue_id
+        type: loom.run.CatalogueId
+
+  # Arguments are requested only for a selection still Selected.
+  - name: loom.run.SelectionNotSelected
+    fields:
+      - name: selection_id
+        type: loom.run.SelectionId
 
 commands:
   # One catalogue projected from one frontier for one turn: an entry per FrontierAction whose status
@@ -211,6 +239,12 @@ commands:
       - name: entries
         type: List<loom.run.CatalogueEntry>
     outcomes:
+      - name: catalogue-exists
+        existing_instance: true
+        error: loom.run.CatalogueExists
+        payload:
+          loom.run.CatalogueExists:
+            catalogue_id: input.catalogue_id
       - name: projected
         creates: loom.run.ActionCatalogue
         instance: catalogue_id
@@ -263,6 +297,16 @@ commands:
         payload:
           loom.run.ActionNotInCatalogue:
             action: input.action
+      - name: revision-mismatch
+        when_related:
+          via: input.catalogue_id
+          predicate: case_revision != input.case_revision
+        error: loom.run.CatalogueRevisionMismatch
+        payload:
+          loom.run.CatalogueRevisionMismatch:
+            catalogue_id: input.catalogue_id
+            case_revision: input.case_revision
+            catalogue_revision: {related: {via: input.catalogue_id, field: case_revision}}
       - name: selected
         creates: loom.run.Selection
         instance: selection_id
@@ -287,6 +331,20 @@ commands:
       - name: selection_id
         type: loom.run.SelectionId
     outcomes:
+      - name: selection-unknown
+        when_related: {via: input.selection_id, exists: false}
+        error: loom.run.SelectionNotFound
+        payload:
+          loom.run.SelectionNotFound:
+            selection_id: input.selection_id
+      - name: selection-not-selected
+        when_related:
+          via: input.selection_id
+          predicate: state != Selected
+        error: loom.run.SelectionNotSelected
+        payload:
+          loom.run.SelectionNotSelected:
+            selection_id: input.selection_id
       - name: requested
         creates: loom.run.ArgumentRequest
         instance: argument_request_id
@@ -410,3 +468,15 @@ views:
         type: Integer
       - name: state
         type: loom.run.Selection.State
+
+  # Every catalogue with its state: what a second projection of one id is checked against.
+  - name: loom.run.Catalogues
+    source: loom.run.ActionCatalogue
+    consistency: read_your_writes
+    fields:
+      - name: catalogue_id
+        type: loom.run.CatalogueId
+      - name: case_revision
+        type: Integer
+      - name: state
+        type: loom.run.ActionCatalogue.State

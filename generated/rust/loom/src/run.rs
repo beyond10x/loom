@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 43dcb22fa4b8b8a3ab9e196467ad3d47be4a63873a6a7b541b59c4567d195883
-// contract digest 976fca135fea82818eebad3e94b5d61c4dc9a9754c5ed5bcb1f30531c2984b69
+// model digest d801974218ef3d92c2eb884a7d4e7c56bb3fb32826e0145126651ace85e0bde9
+// contract digest d245142e3f655485701182d044d14de4c925f8e8e31542a01bc3184e331a667a
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Run — `loom.run`.
@@ -33,6 +33,24 @@ pub enum ArgumentRequestState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArgumentRequestId(pub crate::primitives::Uuid);
 
+/// CatalogueEntry — `loom.run.CatalogueEntry`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogueEntry {
+    /// `action` — `String`.
+    pub action: String,
+    /// `status` — `loom.run.CatalogueEntryStatus`.
+    pub status: CatalogueEntryStatus,
+}
+
+/// CatalogueEntryStatus — `loom.run.CatalogueEntryStatus`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CatalogueEntryStatus {
+    /// `Admissible`.
+    Admissible,
+    /// `ApprovalRequired`.
+    ApprovalRequired,
+}
+
 /// CatalogueId — `loom.run.CatalogueId`: a distinct wrapper around `Uuid`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogueId(pub crate::primitives::Uuid);
@@ -47,6 +65,10 @@ pub struct CommissionRunId(pub crate::primitives::Uuid);
 /// carried here — it is carried by `Selection<S>`, where an undeclared move does not compile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionState {
+    /// `Admitted`.
+    Admitted,
+    /// `Refused`.
+    Refused,
     /// `Selected`.
     Selected,
 }
@@ -112,6 +134,8 @@ pub struct ActionCatalogueData {
     pub frontier: String,
     /// `case_revision` — `Integer`.
     pub case_revision: i64,
+    /// `entries` — `List<loom.run.CatalogueEntry>`.
+    pub entries: Vec<CatalogueEntry>,
 }
 
 /// The states of `loom.run.ActionCatalogue`, at the type level.
@@ -378,6 +402,8 @@ pub struct SelectionData {
     pub confidence: Option<crate::primitives::Decimal>,
     /// `strategy` — `loom.run.SelectionStrategy`.
     pub strategy: SelectionStrategy,
+    /// `case_revision` — `Integer`.
+    pub case_revision: i64,
 }
 
 /// The states of `loom.run.Selection`, at the type level.
@@ -389,6 +415,8 @@ pub mod selection_state {
     mod sealed {
         /// Implemented only by the marker types beside this module.
         pub trait Sealed {}
+        impl Sealed for super::Admitted {}
+        impl Sealed for super::Refused {}
         impl Sealed for super::Selected {}
     }
 
@@ -396,6 +424,20 @@ pub mod selection_state {
     pub trait Marker: sealed::Sealed {
         /// The same state, as the runtime value.
         const STATE: super::SelectionState;
+    }
+
+    /// `Admitted`. Terminal: an instance may rest here forever.
+    pub struct Admitted;
+
+    impl Marker for Admitted {
+        const STATE: super::SelectionState = super::SelectionState::Admitted;
+    }
+
+    /// `Refused`. Terminal: an instance may rest here forever.
+    pub struct Refused;
+
+    impl Marker for Refused {
+        const STATE: super::SelectionState = super::SelectionState::Refused;
     }
 
     /// `Selected`. Where a new instance starts.
@@ -444,6 +486,24 @@ impl Selection<selection_state::Selected> {
     }
 }
 
+impl Selection<selection_state::Selected> {
+    /// `admit` — `Selected` → `Admitted`. Taken by the `admitted` outcome of `loom.run.RevalidateSelection`.
+    pub fn admit(self) -> Selection<selection_state::Admitted> {
+        Selection {
+            data: self.data,
+            state: core::marker::PhantomData,
+        }
+    }
+
+    /// `refuse` — `Selected` → `Refused`. Taken by the `stale-revision` outcome of `loom.run.RevalidateSelection`, the `not-in-frontier` outcome of `loom.run.RevalidateSelection`.
+    pub fn refuse(self) -> Selection<selection_state::Refused> {
+        Selection {
+            data: self.data,
+            state: core::marker::PhantomData,
+        }
+    }
+}
+
 /// `loom.run.Selection` as it crosses a boundary: the state as a value beside the data.
 ///
 /// Wire and storage know states only at runtime; [`SelectionSnapshot::refine`] is the one door back
@@ -458,6 +518,10 @@ pub struct SelectionSnapshot {
 
 /// An `Selection` in whichever declared state it was found.
 pub enum AnySelection {
+    /// Resting in `Admitted`.
+    Admitted(Selection<selection_state::Admitted>),
+    /// Resting in `Refused`.
+    Refused(Selection<selection_state::Refused>),
     /// Resting in `Selected`.
     Selected(Selection<selection_state::Selected>),
 }
@@ -469,6 +533,14 @@ impl SelectionSnapshot {
     /// `SelectionState` cannot spell one.
     pub fn refine(self) -> AnySelection {
         match self.state {
+            SelectionState::Admitted => AnySelection::Admitted(Selection {
+                data: self.data,
+                state: core::marker::PhantomData,
+            }),
+            SelectionState::Refused => AnySelection::Refused(Selection {
+                data: self.data,
+                state: core::marker::PhantomData,
+            }),
             SelectionState::Selected => AnySelection::Selected(Selection {
                 data: self.data,
                 state: core::marker::PhantomData,
@@ -481,6 +553,8 @@ impl AnySelection {
     /// The state, as the runtime value.
     pub fn state(&self) -> SelectionState {
         match self {
+            Self::Admitted(_) => SelectionState::Admitted,
+            Self::Refused(_) => SelectionState::Refused,
             Self::Selected(_) => SelectionState::Selected,
         }
     }
@@ -488,6 +562,14 @@ impl AnySelection {
     /// Back to the boundary shape.
     pub fn snapshot(self) -> SelectionSnapshot {
         match self {
+            Self::Admitted(instance) => SelectionSnapshot {
+                state: SelectionState::Admitted,
+                data: instance.into_data(),
+            },
+            Self::Refused(instance) => SelectionSnapshot {
+                state: SelectionState::Refused,
+                data: instance.into_data(),
+            },
             Self::Selected(instance) => SelectionSnapshot {
                 state: SelectionState::Selected,
                 data: instance.into_data(),
@@ -752,6 +834,414 @@ impl AnyTurn {
                 state: TurnState::Taken,
                 data: instance.into_data(),
             },
+        }
+    }
+}
+
+/// ProjectCatalogue — the input of `loom.run.ProjectCatalogue`.
+///
+/// Everything it can result in is [`ProjectCatalogueOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectCatalogue {
+    /// `catalogue_id` — `loom.run.CatalogueId`.
+    pub catalogue_id: CatalogueId,
+    /// `turn_id` — `loom.run.TurnId`.
+    pub turn_id: TurnId,
+    /// `frontier` — `String`.
+    pub frontier: String,
+    /// `case_revision` — `Integer`.
+    pub case_revision: i64,
+    /// `entries` — `List<loom.run.CatalogueEntry>`.
+    pub entries: Vec<CatalogueEntry>,
+}
+
+/// Everything `loom.run.ProjectCatalogue` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectCatalogueOutcome {
+    /// `catalogue-exists` — for an identity a record already carries.
+    CatalogueExists {
+        /// Why it was refused: `loom.run.CatalogueExists`.
+        error: CatalogueExists,
+    },
+    /// `projected` — otherwise.
+    Projected {
+        /// The `loom.run.CatalogueProjected` this outcome publishes.
+        catalogue_projected: CatalogueProjected,
+    },
+}
+
+/// RequestArguments — the input of `loom.run.RequestArguments`.
+///
+/// Everything it can result in is [`RequestArgumentsOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestArguments {
+    /// `argument_request_id` — `loom.run.ArgumentRequestId`.
+    pub argument_request_id: ArgumentRequestId,
+    /// `selection_id` — `loom.run.SelectionId`.
+    pub selection_id: SelectionId,
+}
+
+/// Everything `loom.run.RequestArguments` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RequestArgumentsOutcome {
+    /// `selection-unknown` — when no `loom.run.Selection` carries the identity `input.selection_id` names.
+    SelectionUnknown {
+        /// Why it was refused: `loom.run.SelectionNotFound`.
+        error: SelectionNotFound,
+    },
+    /// `selection-not-selected` — when the `loom.run.Selection` that `input.selection_id` names satisfies `state != Selected`.
+    SelectionNotSelected {
+        /// Why it was refused: `loom.run.SelectionNotSelected`.
+        error: SelectionNotSelected,
+    },
+    /// `requested` — otherwise.
+    Requested {
+        /// The `loom.run.ArgumentsRequested` this outcome publishes.
+        arguments_requested: ArgumentsRequested,
+    },
+}
+
+/// RevalidateSelection — the input of `loom.run.RevalidateSelection`.
+///
+/// Everything it can result in is [`RevalidateSelectionOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevalidateSelection {
+    /// `selection_id` — `loom.run.SelectionId`.
+    pub selection_id: SelectionId,
+    /// `case_revision` — `Integer`.
+    pub case_revision: i64,
+    /// `frontier_actions` — `List<String>`.
+    pub frontier_actions: Vec<String>,
+}
+
+/// Everything `loom.run.RevalidateSelection` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RevalidateSelectionOutcome {
+    /// `stale-revision` — when the existing subject's stored fields satisfy `case_revision != input.case_revision`.
+    StaleRevision {
+        /// The `loom.run.SelectionStale` this outcome publishes.
+        selection_stale: SelectionStale,
+    },
+    /// `not-in-frontier` — externally decided (the frontier action ids in the input do not list the selection's action).
+    NotInFrontier {
+        /// The `loom.run.SelectionNotInFrontier` this outcome publishes.
+        selection_not_in_frontier: SelectionNotInFrontier,
+    },
+    /// `admitted` — otherwise.
+    Admitted {
+        /// The `loom.run.SelectionAdmitted` this outcome publishes.
+        selection_admitted: SelectionAdmitted,
+    },
+    /// `wrong-state` — from a state no declared move starts in.
+    WrongState {
+        /// Why it was refused: `loom.run.SelectionStateConflict`.
+        error: SelectionStateConflict,
+    },
+    /// `wrong-state` — for an instance no record carries.
+    ///
+    /// The same declared branch and error as [`Self::WrongState`], without the error's fields: an instance
+    /// that does not exist has nothing for them to describe (`docs/design/unknown-instance-seams.md`).
+    WrongStateUnknownInstance,
+}
+
+/// SelectAction — the input of `loom.run.SelectAction`.
+///
+/// Everything it can result in is [`SelectActionOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectAction {
+    /// `selection_id` — `loom.run.SelectionId`.
+    pub selection_id: SelectionId,
+    /// `catalogue_id` — `loom.run.CatalogueId`.
+    pub catalogue_id: CatalogueId,
+    /// `action` — `String`.
+    pub action: String,
+    /// `confidence` — `Optional<Decimal>`.
+    pub confidence: Option<crate::primitives::Decimal>,
+    /// `strategy` — `loom.run.SelectionStrategy`.
+    pub strategy: SelectionStrategy,
+    /// `case_revision` — `Integer`.
+    pub case_revision: i64,
+}
+
+/// Everything `loom.run.SelectAction` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SelectActionOutcome {
+    /// `catalogue-unknown` — when no `loom.run.ActionCatalogue` carries the identity `input.catalogue_id` names.
+    CatalogueUnknown {
+        /// Why it was refused: `loom.run.CatalogueNotFound`.
+        error: CatalogueNotFound,
+    },
+    /// `not-in-catalogue` — when the `loom.run.ActionCatalogue` that `input.catalogue_id` names satisfies `not (exists entry in entries: (entry.action == input.action))`.
+    NotInCatalogue {
+        /// Why it was refused: `loom.run.ActionNotInCatalogue`.
+        error: ActionNotInCatalogue,
+    },
+    /// `revision-mismatch` — when the `loom.run.ActionCatalogue` that `input.catalogue_id` names satisfies `case_revision != input.case_revision`.
+    RevisionMismatch {
+        /// Why it was refused: `loom.run.CatalogueRevisionMismatch`.
+        error: CatalogueRevisionMismatch,
+    },
+    /// `selected` — otherwise.
+    Selected {
+        /// The `loom.run.ActionSelected` this outcome publishes.
+        action_selected: ActionSelected,
+    },
+}
+
+/// ActionSelected — the event `loom.run.ActionSelected`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionSelected {
+    /// `selection_id` — `loom.run.SelectionId`.
+    pub selection_id: SelectionId,
+    /// `catalogue_id` — `loom.run.CatalogueId`.
+    pub catalogue_id: CatalogueId,
+    /// `action` — `String`.
+    pub action: String,
+}
+
+/// ArgumentsRequested — the event `loom.run.ArgumentsRequested`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArgumentsRequested {
+    /// `argument_request_id` — `loom.run.ArgumentRequestId`.
+    pub argument_request_id: ArgumentRequestId,
+    /// `selection_id` — `loom.run.SelectionId`.
+    pub selection_id: SelectionId,
+}
+
+/// CatalogueProjected — the event `loom.run.CatalogueProjected`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogueProjected {
+    /// `catalogue_id` — `loom.run.CatalogueId`.
+    pub catalogue_id: CatalogueId,
+    /// `turn_id` — `loom.run.TurnId`.
+    pub turn_id: TurnId,
+    /// `case_revision` — `Integer`.
+    pub case_revision: i64,
+}
+
+/// SelectionAdmitted — the event `loom.run.SelectionAdmitted`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectionAdmitted {
+    /// `selection_id` — `loom.run.SelectionId`.
+    pub selection_id: SelectionId,
+}
+
+/// SelectionNotInFrontier — the event `loom.run.SelectionNotInFrontier`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectionNotInFrontier {
+    /// `selection_id` — `loom.run.SelectionId`.
+    pub selection_id: SelectionId,
+    /// `action` — `String`.
+    pub action: String,
+}
+
+/// SelectionStale — the event `loom.run.SelectionStale`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectionStale {
+    /// `selection_id` — `loom.run.SelectionId`.
+    pub selection_id: SelectionId,
+    /// `catalogue_revision` — `Integer`.
+    pub catalogue_revision: i64,
+    /// `case_revision` — `Integer`.
+    pub case_revision: i64,
+}
+
+/// The declared error `loom.run.ActionNotInCatalogue`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionNotInCatalogue {
+    /// `action` — `String`.
+    pub action: String,
+}
+
+/// The declared error `loom.run.CatalogueExists`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogueExists {
+    /// `catalogue_id` — `loom.run.CatalogueId`.
+    pub catalogue_id: CatalogueId,
+}
+
+/// The declared error `loom.run.CatalogueNotFound`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogueNotFound {
+    /// `catalogue_id` — `loom.run.CatalogueId`.
+    pub catalogue_id: CatalogueId,
+}
+
+/// The declared error `loom.run.CatalogueRevisionMismatch`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogueRevisionMismatch {
+    /// `catalogue_id` — `loom.run.CatalogueId`.
+    pub catalogue_id: CatalogueId,
+    /// `case_revision` — `Integer`.
+    pub case_revision: i64,
+    /// `catalogue_revision` — `Integer`.
+    pub catalogue_revision: i64,
+}
+
+/// The declared error `loom.run.SelectionNotFound`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectionNotFound {
+    /// `selection_id` — `loom.run.SelectionId`.
+    pub selection_id: SelectionId,
+}
+
+/// The declared error `loom.run.SelectionNotSelected`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectionNotSelected {
+    /// `selection_id` — `loom.run.SelectionId`.
+    pub selection_id: SelectionId,
+}
+
+/// The declared error `loom.run.SelectionStateConflict`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectionStateConflict {
+    /// `state` — `loom.run.Selection.State`.
+    pub state: SelectionState,
+}
+
+/// Catalogues — one row of the view `loom.run.Catalogues`.
+///
+/// Projects `loom.run.ActionCatalogue` at `read_your_writes` consistency.
+/// The specification fully determines every row, so its query is generated over the storage port —
+/// see the plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Catalogues {
+    /// `catalogue_id` — `loom.run.CatalogueId`.
+    pub catalogue_id: CatalogueId,
+    /// `case_revision` — `Integer`.
+    pub case_revision: i64,
+    /// `state` — `loom.run.ActionCatalogue.State`.
+    pub state: ActionCatalogueState,
+}
+
+/// Selections — one row of the view `loom.run.Selections`.
+///
+/// Projects `loom.run.Selection` at `read_your_writes` consistency.
+/// The specification fully determines every row, so its query is generated over the storage port —
+/// see the plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Selections {
+    /// `selection_id` — `loom.run.SelectionId`.
+    pub selection_id: SelectionId,
+    /// `catalogue_id` — `loom.run.CatalogueId`.
+    pub catalogue_id: CatalogueId,
+    /// `action` — `String`.
+    pub action: String,
+    /// `strategy` — `loom.run.SelectionStrategy`.
+    pub strategy: SelectionStrategy,
+    /// `case_revision` — `Integer`.
+    pub case_revision: i64,
+    /// `state` — `loom.run.Selection.State`.
+    pub state: SelectionState,
+}
+
+/// What this bounded context owes its implementor, and the seams of what is generated.
+///
+/// One trait per obligation in the synthesis plan, each carrying the plan's own contract, and one
+/// per generated behaviour, which [`Generated`](crate::behaviour::Generated) implements.
+/// [`Unimplemented`](obligations::Unimplemented) satisfies every owed trait by refusing in the type system.
+pub mod obligations {
+    /// The behaviour `loom.run.ProjectCatalogue` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait ProjectCatalogueBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.run.ProjectCatalogue`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn project_catalogue(&mut self, input: super::ProjectCatalogue) -> Result<super::ProjectCatalogueOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `loom.run.RequestArguments` — an implementation obligation.
+    ///
+    /// Why it is not generated: kept an obligation by `when_related:`, in `selection-unknown`.
+    ///
+    /// Contract: given `loom.run.RequestArguments` input, decide and enact exactly one outcome. Selection precedence: on commands with `when_related:`, check `existing_instance` then `exists: false` before input-guarded refusals; choose the first declared input refusal whose guard holds; then check addressed-row existence (`unknown_instance`, and `existing_instance` on commands without `when_related:`); then the held state (`when_subject_state` and `when_subject`), with `wrong_state` only if the selected branch moves from a state the row does not hold; then accepting and external branches in declaration order. An accepting branch that moves nothing answers in every state. Related-presence predicates do not precede input-guarded refusals. Declared outcomes (declaration order, not selection precedence): `selection-unknown` when no `loom.run.Selection` carries the identity `input.selection_id` names, error `loom.run.SelectionNotFound`; `selection-not-selected` when the `loom.run.Selection` that `input.selection_id` names satisfies `state != Selected`, error `loom.run.SelectionNotSelected`; `requested` otherwise, creates `loom.run.ArgumentRequest`, emits `loom.run.ArgumentsRequested`.
+    pub trait RequestArgumentsBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.run.RequestArguments`.
+        ///
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
+        fn request_arguments(&mut self, input: super::RequestArguments) -> Result<super::RequestArgumentsOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `loom.run.RevalidateSelection` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait RevalidateSelectionBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.run.RevalidateSelection`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn revalidate_selection(&mut self, input: super::RevalidateSelection) -> Result<super::RevalidateSelectionOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `loom.run.SelectAction` — an implementation obligation.
+    ///
+    /// Why it is not generated: kept an obligation by `when_related:`, in `catalogue-unknown`.
+    ///
+    /// Contract: given `loom.run.SelectAction` input, decide and enact exactly one outcome. Selection precedence: on commands with `when_related:`, check `existing_instance` then `exists: false` before input-guarded refusals; choose the first declared input refusal whose guard holds; then check addressed-row existence (`unknown_instance`, and `existing_instance` on commands without `when_related:`); then the held state (`when_subject_state` and `when_subject`), with `wrong_state` only if the selected branch moves from a state the row does not hold; then accepting and external branches in declaration order. An accepting branch that moves nothing answers in every state. Related-presence predicates do not precede input-guarded refusals. Declared outcomes (declaration order, not selection precedence): `catalogue-unknown` when no `loom.run.ActionCatalogue` carries the identity `input.catalogue_id` names, error `loom.run.CatalogueNotFound`; `not-in-catalogue` when the `loom.run.ActionCatalogue` that `input.catalogue_id` names satisfies `not (exists entry in entries: (entry.action == input.action))`, error `loom.run.ActionNotInCatalogue`; `revision-mismatch` when the `loom.run.ActionCatalogue` that `input.catalogue_id` names satisfies `case_revision != input.case_revision`, error `loom.run.CatalogueRevisionMismatch`; `selected` otherwise, creates `loom.run.Selection`, emits `loom.run.ActionSelected`.
+    pub trait SelectActionBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.run.SelectAction`.
+        ///
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
+        fn select_action(&mut self, input: super::SelectAction) -> Result<super::SelectActionOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The query `loom.run.Catalogues` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage port. Implement it yourself to replace that query.
+    pub trait CataloguesQuery {
+        /// Serves `loom.run.Catalogues` rows at the view's declared consistency.
+        ///
+        /// `Err` is the typed refusal of a row whose declared type cannot hold its value.
+        fn catalogues(&self) -> Result<Vec<super::Catalogues>, crate::obligation::UnmetObligation>;
+    }
+
+    /// The query `loom.run.Selections` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage port. Implement it yourself to replace that query.
+    pub trait SelectionsQuery {
+        /// Serves `loom.run.Selections` rows at the view's declared consistency.
+        ///
+        /// `Err` is the typed refusal of a row whose declared type cannot hold its value.
+        fn selections(&self) -> Result<Vec<super::Selections>, crate::obligation::UnmetObligation>;
+    }
+
+    /// Every obligation of this bounded context, refused in the type system.
+    ///
+    /// Each method returns the typed refusal naming what is owed — never a panic, never a guessed
+    /// value — so a workspace built on this stub compiles and reports its own gaps.
+    pub struct Unimplemented;
+
+    impl RequestArgumentsBehavior for Unimplemented {
+        fn request_arguments(&mut self, _input: super::RequestArguments) -> Result<super::RequestArgumentsOutcome, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "loom.run.RequestArguments" })
+        }
+    }
+
+    impl SelectActionBehavior for Unimplemented {
+        fn select_action(&mut self, _input: super::SelectAction) -> Result<super::SelectActionOutcome, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "loom.run.SelectAction" })
         }
     }
 }

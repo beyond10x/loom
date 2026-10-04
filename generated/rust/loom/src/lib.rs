@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 43dcb22fa4b8b8a3ab9e196467ad3d47be4a63873a6a7b541b59c4567d195883
-// contract digest 976fca135fea82818eebad3e94b5d61c4dc9a9754c5ed5bcb1f30531c2984b69
+// model digest d801974218ef3d92c2eb884a7d4e7c56bb3fb32826e0145126651ace85e0bde9
+// contract digest d245142e3f655485701182d044d14de4c925f8e8e31542a01bc3184e331a667a
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Semantic types synthesised from the `loom` specification, v1.
@@ -17,6 +17,8 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod behaviour;
+pub mod obligation;
 pub mod primitives;
 pub mod run;
 

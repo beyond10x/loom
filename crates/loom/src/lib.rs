@@ -17,6 +17,15 @@
 /// The run model, synthesized from the ESS specification.
 pub use loom as model;
 
+pub mod arguments;
+pub mod compaction;
+pub mod harness;
+pub mod projection;
+pub mod recovery;
+pub mod revalidation;
+pub mod selection;
+pub mod session;
+
 use b10x_commission::admission::admit;
 use b10x_commission::model::json::Value;
 use b10x_commission::model::responsibility::{

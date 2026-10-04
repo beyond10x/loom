@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "43dcb22fa4b8b8a3ab9e196467ad3d47be4a63873a6a7b541b59c4567d195883",
-    "contract_digest": "976fca135fea82818eebad3e94b5d61c4dc9a9754c5ed5bcb1f30531c2984b69"
+    "source_digest": "d801974218ef3d92c2eb884a7d4e7c56bb3fb32826e0145126651ace85e0bde9",
+    "contract_digest": "d245142e3f655485701182d044d14de4c925f8e8e31542a01bc3184e331a667a"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -27,6 +27,20 @@
     {
       "kind": "domain_type",
       "source": "loom.run.ArgumentRequestId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.run.CatalogueEntry",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.run.CatalogueEntryStatus",
       "disposition": {
         "disposition": "generated"
       }
@@ -125,6 +139,191 @@
     {
       "kind": "entity_lifecycle",
       "source": "loom.run.Turn",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.run.ProjectCatalogue",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.run.ProjectCatalogue",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.run.RequestArguments",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.run.RequestArguments",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "`when_related:`, in `selection-unknown`"
+        },
+        "contract": "given `loom.run.RequestArguments` input, decide and enact exactly one outcome. Selection precedence: on commands with `when_related:`, check `existing_instance` then `exists: false` before input-guarded refusals; choose the first declared input refusal whose guard holds; then check addressed-row existence (`unknown_instance`, and `existing_instance` on commands without `when_related:`); then the held state (`when_subject_state` and `when_subject`), with `wrong_state` only if the selected branch moves from a state the row does not hold; then accepting and external branches in declaration order. An accepting branch that moves nothing answers in every state. Related-presence predicates do not precede input-guarded refusals. Declared outcomes (declaration order, not selection precedence): `selection-unknown` when no `loom.run.Selection` carries the identity `input.selection_id` names, error `loom.run.SelectionNotFound`; `selection-not-selected` when the `loom.run.Selection` that `input.selection_id` names satisfies `state != Selected`, error `loom.run.SelectionNotSelected`; `requested` otherwise, creates `loom.run.ArgumentRequest`, emits `loom.run.ArgumentsRequested`"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.run.RevalidateSelection",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.run.RevalidateSelection",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.run.SelectAction",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.run.SelectAction",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "`when_related:`, in `catalogue-unknown`"
+        },
+        "contract": "given `loom.run.SelectAction` input, decide and enact exactly one outcome. Selection precedence: on commands with `when_related:`, check `existing_instance` then `exists: false` before input-guarded refusals; choose the first declared input refusal whose guard holds; then check addressed-row existence (`unknown_instance`, and `existing_instance` on commands without `when_related:`); then the held state (`when_subject_state` and `when_subject`), with `wrong_state` only if the selected branch moves from a state the row does not hold; then accepting and external branches in declaration order. An accepting branch that moves nothing answers in every state. Related-presence predicates do not precede input-guarded refusals. Declared outcomes (declaration order, not selection precedence): `catalogue-unknown` when no `loom.run.ActionCatalogue` carries the identity `input.catalogue_id` names, error `loom.run.CatalogueNotFound`; `not-in-catalogue` when the `loom.run.ActionCatalogue` that `input.catalogue_id` names satisfies `not (exists entry in entries: (entry.action == input.action))`, error `loom.run.ActionNotInCatalogue`; `revision-mismatch` when the `loom.run.ActionCatalogue` that `input.catalogue_id` names satisfies `case_revision != input.case_revision`, error `loom.run.CatalogueRevisionMismatch`; `selected` otherwise, creates `loom.run.Selection`, emits `loom.run.ActionSelected`"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.run.ActionSelected",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.run.ArgumentsRequested",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.run.CatalogueProjected",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.run.SelectionAdmitted",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.run.SelectionNotInFrontier",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.run.SelectionStale",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.run.ActionNotInCatalogue",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.run.CatalogueExists",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.run.CatalogueNotFound",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.run.CatalogueRevisionMismatch",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.run.SelectionNotFound",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.run.SelectionNotSelected",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.run.SelectionStateConflict",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_type",
+      "source": "loom.run.Catalogues",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_query",
+      "source": "loom.run.Catalogues",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_type",
+      "source": "loom.run.Selections",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_query",
+      "source": "loom.run.Selections",
       "disposition": {
         "disposition": "generated"
       }
