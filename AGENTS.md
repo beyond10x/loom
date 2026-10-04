@@ -22,7 +22,9 @@ must know. The cross-repository architecture is Atlas ADRs 0066–0075 and Atlas
 - Loom depends on Commission's core contracts and implements `AgentExecutor`. Commission core never
   depends on Loom (Atlas ADR 0075).
 - `beyond10x/harness` is the predecessor. Port its implementation; do not rewrite from zero, and do
-  not break its current consumers while they still depend on it.
+  not break its current consumers while they still depend on it. Harness is
+  `LicenseRef-B10x-Proprietary`; code ported from it into Loom is relicensed Apache-2.0 (operator,
+  2026-10-04). Harness itself keeps its licence.
 
 ## Rules
 
