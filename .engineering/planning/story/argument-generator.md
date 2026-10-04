@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:argument-generator
 kind: story
-status: draft
+status: implemented
 title: Define ArgumentGenerator for the selected action only
 refs:
 - provider: commission
@@ -17,13 +17,39 @@ relations:
 - serves: vision:governed-autonomy
 - depends_on: story:run-pipeline-skeleton
 scope:
-- confidence: inferred
+- confidence: cited
   path: crates/loom/src/arguments.rs
 - confidence: cited
   path: crates/loom/src/lib.rs
+- confidence: cited
+  path: crates/loom/tests/
+- confidence: cited
+  path: crates/loom/tests/action_selector.rs
+- confidence: cited
+  path: crates/loom/tests/adversary2_action_selector.rs
+- confidence: cited
+  path: crates/loom/tests/adversary2_argument_generator.rs
+- confidence: cited
+  path: crates/loom/tests/adversary2_executor_seams.rs
+- confidence: cited
+  path: crates/loom/tests/adversary2_projection_executor_agreement.rs
+- confidence: cited
+  path: crates/loom/tests/adversary_action_selector.rs
+- confidence: cited
+  path: crates/loom/tests/adversary_argument_generator.rs
 - confidence: inferred
   path: crates/loom/tests/argument_generator.rs
-revision: 8
+- confidence: cited
+  path: docs/contracts/loom-action-selection.md
+- confidence: cited
+  path: website/docs/concepts/action-selection.md
+- confidence: cited
+  path: website/docs/status.mdx
+revision: 15
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-04T10:57:19Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":1}}}
+- {from: "proposed", to: "active", at: "2026-10-04T10:57:19Z", actor: "human:timo", revision: 10, decided_on: {"recorded":{"review_outcome":1}}}
+- {from: "active", to: "implemented", at: "2026-10-04T12:03:34Z", actor: "human:timo", revision: 15, decided_on: {"recorded":{"test_result":1,"review_outcome":5,"verification":1}}}
 ---
 ## Outcome
 
@@ -91,3 +117,11 @@ With a three-entry catalogue and a selector that picks the second entry, it chec
 
 TASKBOARD L-006; Atlas ADR 0073; `docs/contracts/loom-action-selection.md`;
 `docs/examples/laya-fast-selection.md`.
+
+## Coordinator decisions (wave 2026-10-04-w15)
+
+- The seam is `ArgumentGenerator::generate(&ArgumentContext, &CatalogueEntry) -> Result<Value, _>`,
+  mirroring `ActionSelector`; `Loom` records each selection and each `RequestArguments` request.
+- Scope widened to the existing tests that implement or import the generator (adapted to the new
+  signature only, assertions kept) and `docs/contracts/loom-action-selection.md`; `lib.rs` changes in
+  `run()` are this story's.

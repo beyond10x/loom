@@ -27,7 +27,7 @@ scope:
   path: ess/domains/run.yaml
 - confidence: cited
   path: generated/rust/loom/
-revision: 6
+revision: 7
 ---
 ## Outcome
 
@@ -105,3 +105,11 @@ admit it. The fix (`existing_instance: true`) makes ESS 0.52.0 refuse the synthe
 (ESS-SYNTH-004: the route through `SelectAction/selected` is reached by no input). Needs an ESS change
 before recovery can rely on selection identity; the adversary case
 `a_refused_selection_is_never_selected_or_admitted_again` is ignored until then.
+
+## Carried from story:argument-generator (wave 2026-10-04-w15)
+
+Selection and argument-request ids are derived from the frontier id and a per-`Loom` run counter
+(`run_id` in `crates/loom/src/lib.rs`), so they are unique only within one `Loom`. A recovered
+`Loom` restarts the counter at 0: recovery must not reuse a run id an earlier `Loom` gave, for
+example by adding a per-`Loom` namespace to the hash. The adversary case that shows the collision
+is `two_looms_give_their_different_selections_on_one_frontier_different_ids`.
