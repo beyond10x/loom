@@ -6,7 +6,7 @@ description: Loom proposes an action; the Commission runtime rechecks and invoke
 
 # Where Loom ends
 
-:::info Decided design
+:::info[Decided design]
 Decided on 2026-10-04 and recorded as Atlas ADR 0082, which amends ADRs 0070 and 0071.
 :::
 

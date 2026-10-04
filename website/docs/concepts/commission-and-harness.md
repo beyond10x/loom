@@ -27,7 +27,7 @@ Harness. The repository's
 [Harness to Loom module map](https://github.com/beyond10x/loom/blob/main/docs/design/harness-map.md)
 lists them.
 
-:::caution Planned
+:::caution[Planned]
 The module map is done. The port itself has not started.
 :::
 
