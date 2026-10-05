@@ -35,6 +35,11 @@ const PRODUCER: &str = "intake-slice-adversary-verifier";
 /// installs) gets an edit of `check.txt`. The commit fails after the file is written and staged;
 /// the edit reports an error, and the work tree is left with an uncommitted change, so every later
 /// `tests.run` is about no revision until the model happens to rewrite that same file.
+///
+/// Since story `host-git-hardening` the executor's git runs no workspace hook
+/// (`core.hooksPath` points at an empty directory), so this hook never runs, the commit succeeds
+/// and the case no longer reaches the rollback path. The NUL-message and git-refuses cases below
+/// still cover rollback.
 #[cfg(unix)]
 #[test]
 fn adversary_an_edit_its_pre_commit_hook_rejects_leaves_the_work_tree_untouched() {

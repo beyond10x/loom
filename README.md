@@ -59,8 +59,8 @@ It prints each step with its effect and evidence and ends on a line such as
 3 another stop, 1 a failure, 2 an invalid command line.
 
 Two things before you point it at a work tree. It needs a Codex login (`codex login`). And there is
-no sandbox: the test command and the work tree's git hooks run model-edited code with your rights,
-so use it only where you would run that test command yourself.
+no sandbox: the test command runs model-edited code with your rights, so use it only where you
+would run that test command yourself. Loom's own git calls run none of the work tree's hooks.
 [Run an intent](https://beyond10x.github.io/loom/docs/guides/run-an-intent) explains every line of
 the output; the [CLI reference](https://beyond10x.github.io/loom/docs/reference/cli) lists every
 flag.

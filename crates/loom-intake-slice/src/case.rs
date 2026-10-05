@@ -22,12 +22,19 @@
 //! `HEAD`'s object name must be UTF-8. Every git call runs in the
 //! workspace without the inherited variables that redirect git to another repository
 //! ([`REDIRECTING_GIT_VARIABLES`]), so a slice started from a git hook or under a tool that sets
-//! them still reads the workspace. Git otherwise runs with the operator's normal configuration.
+//! them still reads the workspace.
+//!
+//! Every git call is host git ([`crate::git`]): no hook, no fsmonitor and no signing program runs.
+//! [`open`] records the workspace's git configuration files once it has read `HEAD`;
+//! [`report_head`] is refused as [`CaseError::HostGit`] when they changed since, or when no case
+//! opened on the workspace in this process. Git otherwise runs with the operator's normal
+//! configuration.
 
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+
+use crate::git::HostGitRefusal;
 
 use b10x_loom_commission::model::responsibility::CaseId;
 use loom_governor::{CanonGovernor, CaseStore, OpenError, UpdateError};
@@ -51,6 +58,9 @@ pub enum CaseError {
     Open(OpenError),
     /// The governor refused the new revision.
     Update(UpdateError),
+    /// Host git was refused: the workspace's git configuration changed since the case opened, or
+    /// no case opened on it in this process.
+    HostGit(HostGitRefusal),
 }
 
 impl fmt::Display for CaseError {
@@ -66,6 +76,7 @@ impl fmt::Display for CaseError {
             Self::Update(error) => {
                 write!(f, "the governor did not record the new HEAD: {error}")
             }
+            Self::HostGit(refusal) => refusal.fmt(f),
         }
     }
 }
@@ -81,7 +92,8 @@ pub fn open<S: CaseStore>(
     workspace: &Path,
 ) -> Result<CaseId, CaseError> {
     let declared = declared_artifacts(pick)?;
-    let head = head(workspace)?;
+    let head = head(workspace, Calls::Opening)?;
+    crate::git::record(workspace).map_err(CaseError::HostGit)?;
     let revisions: BTreeMap<String, String> = declared
         .into_iter()
         .map(|artifact| {
@@ -103,7 +115,7 @@ pub fn report_head<S: CaseStore>(
     case: &CaseId,
     workspace: &Path,
 ) -> Result<i64, CaseError> {
-    let head = head(workspace)?;
+    let head = head(workspace, Calls::Recorded)?;
     governor
         .update_revision(case, IMPLEMENTATION, &head)
         .map_err(CaseError::Update)
@@ -147,7 +159,7 @@ fn declared_artifacts(pick: &str) -> Result<Vec<String>, CaseError> {
 /// The full object name of the workspace's `HEAD` commit.
 ///
 /// Refused unless `workspace` is the root of a non-bare work tree (see the module documentation).
-fn head(workspace: &Path) -> Result<String, CaseError> {
+fn head(workspace: &Path, calls: Calls) -> Result<String, CaseError> {
     let refused = |problem: String| CaseError::Workspace { problem };
     let root = workspace.canonicalize().map_err(|error| {
         refused(format!(
@@ -155,7 +167,7 @@ fn head(workspace: &Path) -> Result<String, CaseError> {
             workspace.display()
         ))
     })?;
-    let printed = git_bytes(&root, &["rev-parse", "--show-toplevel"])?;
+    let printed = git_bytes(&root, &["rev-parse", "--show-toplevel"], calls)?;
     let printed = printed.strip_suffix(b"\n").unwrap_or(&printed);
     let toplevel = path_from_bytes(printed)?;
     let toplevel = toplevel.canonicalize().map_err(|error| {
@@ -171,7 +183,7 @@ fn head(workspace: &Path) -> Result<String, CaseError> {
             toplevel.display()
         )));
     }
-    let head = git(&root, &["rev-parse", "--verify", "HEAD^{commit}"])?;
+    let head = git(&root, &["rev-parse", "--verify", "HEAD^{commit}"], calls)?;
     if head.is_empty() {
         return Err(refused("git printed no HEAD".to_owned()));
     }
@@ -205,26 +217,38 @@ fn path_from_bytes(bytes: &[u8]) -> Result<PathBuf, CaseError> {
         })
 }
 
+/// Whether a git call opens the case (before its configuration is recorded) or follows it.
+#[derive(Debug, Clone, Copy)]
+enum Calls {
+    Opening,
+    Recorded,
+}
+
 /// Runs git as [`git_bytes`] does and returns its standard output as UTF-8, trimmed.
-fn git(dir: &Path, args: &[&str]) -> Result<String, CaseError> {
-    String::from_utf8(git_bytes(dir, args)?)
+fn git(dir: &Path, args: &[&str], calls: Calls) -> Result<String, CaseError> {
+    String::from_utf8(git_bytes(dir, args, calls)?)
         .map(|stdout| stdout.trim().to_owned())
         .map_err(|_| CaseError::Workspace {
             problem: format!("git {args:?} printed output that is not UTF-8"),
         })
 }
 
-/// Runs git with `args` in `dir`, without [`REDIRECTING_GIT_VARIABLES`], and returns its standard
-/// output as printed; a git that does not run or fails is a [`CaseError::Workspace`].
-fn git_bytes(dir: &Path, args: &[&str]) -> Result<Vec<u8>, CaseError> {
-    let mut command = Command::new("git");
-    command.args(args).current_dir(dir);
-    for variable in REDIRECTING_GIT_VARIABLES {
-        command.env_remove(variable);
+/// Runs host git ([`crate::git`]) with `args` in `dir` and returns its standard output as printed;
+/// a git that does not run or fails is a [`CaseError::Workspace`], a refused one a
+/// [`CaseError::HostGit`].
+fn git_bytes(dir: &Path, args: &[&str], calls: Calls) -> Result<Vec<u8>, CaseError> {
+    let mut git = match calls {
+        Calls::Opening => crate::git::opening(dir),
+        Calls::Recorded => crate::git::recorded(dir),
     }
-    let output = command.output().map_err(|error| CaseError::Workspace {
-        problem: format!("git did not run: {error}"),
-    })?;
+    .map_err(CaseError::HostGit)?;
+    let output = git
+        .command()
+        .args(args)
+        .output()
+        .map_err(|error| CaseError::Workspace {
+            problem: format!("git did not run: {error}"),
+        })?;
     if !output.status.success() {
         return Err(CaseError::Workspace {
             problem: String::from_utf8_lossy(&output.stderr).trim().to_owned(),

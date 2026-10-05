@@ -195,9 +195,12 @@ crate that adds Canon uses the same reference.
 - `b10x-loom-cli` is `b10x-loom`. Its clap definition is the library (`src/lib.rs`, `Cli`), which
   `loom-docs` renders.
 
-There is no sandbox. `tests.run` and the workspace's git hooks run model-edited code with the
-operator's rights and environment; the path checks bound what the executor writes, not what that
-code does.
+There is no sandbox. `tests.run` runs model-edited code with the operator's rights and environment;
+the path checks bound what the executor writes, not what that code does. The slice's own git calls
+go through one helper, `crates/loom-intake-slice/src/git.rs`: no workspace hook, `core.fsmonitor`
+command or signing program runs, and a call is refused once the workspace's git configuration
+changed since the case opened. `tests/host_git_hardening.rs` fails on any `Command::new` of git
+outside that helper. Gates still run when the operator or the bot commits and pushes.
 
 Model calls go through llm's crates at a pinned tag (`b10x-llm-tool-call` and `b10x-llm-core`,
 `0.1.7`), never a hand-written HTTP client. The Codex preset and the forced tool call are

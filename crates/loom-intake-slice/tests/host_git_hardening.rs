@@ -36,7 +36,8 @@ use b10x_loom_commission::model::responsibility::{
     ExecutorOutcomeProposedAction, ProposedActionArguments,
 };
 use b10x_loom_intake_slice::case;
-use b10x_loom_intake_slice::executor::{LocalExecutor, Report, TestCommand};
+use b10x_loom_intake_slice::executor::{ExecuteError, LocalExecutor, Report, TestCommand};
+use b10x_loom_intake_slice::git::HostGitRefusal;
 use loom_governor::{CanonGovernor, MemoryCaseStore};
 use serde_json::json;
 
@@ -55,6 +56,12 @@ const HOOKS: [&str; 6] = [
 
 /// The marker the planted `core.fsmonitor` command writes.
 const FSMONITOR: &str = "fsmonitor";
+
+/// The marker of a planted `filter.x.clean` command.
+const FILTER: &str = "filter-clean";
+
+/// The marker of a planted `gpg.program`.
+const GPG: &str = "gpg-program";
 
 /// The one file allowed to start git on the host.
 const HELPER: &str = "crates/loom-intake-slice/src/git.rs";
@@ -116,6 +123,152 @@ fn a_run_that_edits_and_commits_runs_no_workspace_hook_and_no_fsmonitor() {
              {control:?}"
         );
     }
+}
+
+#[test]
+fn a_filter_driver_a_test_plants_never_runs() {
+    let fixture = Fixture::unplanted();
+    let clean = fixture.planted(FILTER, "cat");
+    let plant = format!(
+        "git config --local filter.x.clean '{}' && echo 'check.txt filter=x' > .gitattributes",
+        clean.display()
+    );
+    let refused = planted_by_the_test_command(&fixture, &plant);
+    assert_eq!(refused, fixture.markers(), "nothing else fired");
+
+    // The control: plain git runs the planted clean filter when it adds the file.
+    std::fs::write(fixture.workspace().join("check.txt"), "fixed\n").expect("write check.txt");
+    fixture.git(&["add", "check.txt"]);
+    assert_eq!(
+        fixture.markers(),
+        [FILTER],
+        "the planted filter does not run under plain git, so this case proves nothing"
+    );
+}
+
+#[test]
+fn a_gpg_program_a_test_plants_never_runs() {
+    let fixture = Fixture::unplanted();
+    let gpg = fixture.planted(GPG, "exit 1");
+    let plant = format!(
+        "git config --local commit.gpgsign true && git config --local gpg.program '{}'",
+        gpg.display()
+    );
+    let refused = planted_by_the_test_command(&fixture, &plant);
+    assert_eq!(refused, fixture.markers(), "nothing else fired");
+
+    // The control: plain git runs the planted signing program when it commits.
+    let control = fixture.git_raw(&["commit", "--quiet", "--allow-empty", "--message", "c"]);
+    assert!(
+        !control.status.success(),
+        "the planted program refuses to sign"
+    );
+    assert_eq!(
+        fixture.markers(),
+        [GPG],
+        "the planted signing program does not run under plain git, so this case proves nothing"
+    );
+}
+
+/// Opens a case on `fixture`, lets `tests.run` run `plant` with `sh -c` (a test that writes into
+/// `.git/config`, as a confined command could), then asks for the edit that fixes the check. The
+/// edit and a second `tests.run` must be refused before git runs, with nothing written, nothing
+/// committed and no marker; returns the markers (none).
+fn planted_by_the_test_command(fixture: &Fixture, plant: &str) -> Vec<String> {
+    let first = fixture.head();
+    let governor = CanonGovernor::new(MemoryCaseStore::default());
+    let case = case::open(&governor, PICK, INTENT, fixture.workspace()).expect("the case opens");
+    let executor = LocalExecutor::new(
+        &governor,
+        case.clone(),
+        fixture.workspace(),
+        TestCommand::new("sh", ["-c", plant]),
+    );
+    let run = executor
+        .execute(&proposal("tests.run", &json!({})))
+        .expect("tests.run is performed");
+    let Report::TestsRun(run) = &run else {
+        panic!("tests.run reports a run: {run:?}");
+    };
+    assert_eq!(run.exit_code(), Some(0), "the plant ran: {run:?}");
+    assert!(fixture.markers().is_empty(), "planting fired a marker");
+
+    let edited = executor.execute(&proposal(
+        "repository.edit",
+        &json!({
+            "files": [{"path": "check.txt", "contents": "fixed\n"}],
+            "message": "fix the check"
+        }),
+    ));
+    let fired = fixture.markers();
+    assert!(
+        fired.is_empty(),
+        "Loom's host-side git ran what the test planted in `.git/config`: {fired:?} \
+         (edit: {edited:?})"
+    );
+    assert!(
+        matches!(
+            edited,
+            Err(ExecuteError::HostGit(HostGitRefusal::ConfigChanged { .. }))
+        ),
+        "the edit is refused as a changed configuration: {edited:?}"
+    );
+    assert_eq!(fixture.head(), first, "a refused edit committed");
+    assert_eq!(
+        fixture.read("check.txt"),
+        "broken\n",
+        "a refused edit wrote"
+    );
+    let rerun = executor.execute(&proposal("tests.run", &json!({})));
+    assert!(
+        matches!(
+            rerun,
+            Err(ExecuteError::HostGit(HostGitRefusal::ConfigChanged { .. }))
+        ),
+        "a later tests.run is refused as a changed configuration: {rerun:?}"
+    );
+    assert!(fixture.markers().is_empty(), "{:?}", fixture.markers());
+    fixture.markers()
+}
+
+/// An executor on a workspace no case opened in this process has no recording to check against,
+/// so every action that runs git is refused rather than run unchecked.
+#[test]
+fn a_workspace_no_case_opened_is_refused_host_git() {
+    let opened = Fixture::unplanted();
+    let unopened = Fixture::unplanted();
+    let first = unopened.head();
+    let governor = CanonGovernor::new(MemoryCaseStore::default());
+    let case = case::open(&governor, PICK, INTENT, opened.workspace()).expect("the case opens");
+    let executor = LocalExecutor::new(
+        &governor,
+        case,
+        unopened.workspace(),
+        TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
+    );
+    for (action, arguments) in [
+        ("repository.inspect", json!({"paths": ["check.txt"]})),
+        (
+            "repository.edit",
+            json!({"files": [{"path": "check.txt", "contents": "fixed\n"}]}),
+        ),
+        ("tests.run", json!({})),
+    ] {
+        let result = executor.execute(&proposal(action, &arguments));
+        assert!(
+            matches!(
+                result,
+                Err(ExecuteError::HostGit(HostGitRefusal::Unrecorded { .. }))
+            ),
+            "`{action}` on an unopened workspace is refused: {result:?}"
+        );
+    }
+    assert_eq!(unopened.head(), first, "a refused edit committed");
+    assert_eq!(
+        unopened.read("check.txt"),
+        "broken\n",
+        "a refused edit wrote"
+    );
 }
 
 #[test]
@@ -265,9 +418,49 @@ struct Fixture {
 }
 
 impl Fixture {
+    /// The fixture with every hook and the `core.fsmonitor` command planted before the case opens.
     fn new() -> Self {
+        let fixture = Self::unplanted();
+        let hooks = fixture.workspace.join(".git").join("hooks");
+        std::fs::create_dir_all(&hooks).expect("create .git/hooks");
+        for hook in HOOKS {
+            fixture.script(&hooks.join(hook), hook, "exit 0");
+        }
+        let fsmonitor = fixture.workspace.join(".git").join("fsmonitor-planted");
+        fixture.script(&fsmonitor, FSMONITOR, "exit 0");
+        fixture.git(&["config", "core.hooksPath", &hooks.to_string_lossy()]);
+        fixture.git(&["config", "core.fsmonitor", &fsmonitor.to_string_lossy()]);
+        assert!(
+            fixture.markers().is_empty(),
+            "planting fired a marker: {:?}",
+            fixture.markers()
+        );
+        fixture
+    }
+
+    /// Writes an executable shell script at `path` that records `marker` (with its arguments) and
+    /// then runs `tail`.
+    fn script(&self, path: &Path, marker: &str, tail: &str) {
         use std::os::unix::fs::PermissionsExt as _;
 
+        let script = format!(
+            "#!/bin/sh\necho \"$@\" > '{}'\n{tail}\n",
+            self.markers.join(marker).display()
+        );
+        std::fs::write(path, script).expect("write a planted command");
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+            .expect("make a planted command executable");
+    }
+
+    /// A planted command outside the work tree, named after its marker.
+    fn planted(&self, marker: &str, tail: &str) -> PathBuf {
+        let path = self.root.join(format!("{marker}-planted"));
+        self.script(&path, marker, tail);
+        path
+    }
+
+    /// The workspace with one commit and nothing planted.
+    fn unplanted() -> Self {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|elapsed| elapsed.as_nanos())
@@ -290,31 +483,11 @@ impl Fixture {
         std::fs::write(fixture.workspace.join("check.txt"), "broken\n").expect("write check.txt");
         fixture.git(&["add", "--all"]);
         fixture.git(&["commit", "--quiet", "--message", "a failing check"]);
-
-        let executable = |path: &Path, marker: &str| {
-            let script = format!(
-                "#!/bin/sh\necho \"$@\" > '{}'\nexit 0\n",
-                fixture.markers.join(marker).display()
-            );
-            std::fs::write(path, script).expect("write a planted command");
-            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
-                .expect("make a planted command executable");
-        };
-        let hooks = fixture.workspace.join(".git").join("hooks");
-        std::fs::create_dir_all(&hooks).expect("create .git/hooks");
-        for hook in HOOKS {
-            executable(&hooks.join(hook), hook);
-        }
-        let fsmonitor = fixture.workspace.join(".git").join("fsmonitor-planted");
-        executable(&fsmonitor, FSMONITOR);
-        fixture.git(&["config", "core.hooksPath", &hooks.to_string_lossy()]);
-        fixture.git(&["config", "core.fsmonitor", &fsmonitor.to_string_lossy()]);
-        assert!(
-            fixture.markers().is_empty(),
-            "planting fired a marker: {:?}",
-            fixture.markers()
-        );
         fixture
+    }
+
+    fn read(&self, file: &str) -> String {
+        std::fs::read_to_string(self.workspace.join(file)).expect("read a workspace file")
     }
 
     fn workspace(&self) -> &Path {

@@ -43,6 +43,10 @@ in with their history, and their repositories are archived with a pointer here.
 - The `intake.routing` ESS domain in `ess/intake/`, validated by `task check`.
 - JSON from a model or a provider nested deeper than 128 levels is refused with a typed error, in
   every build of the workspace.
+- The slice's own git calls run no workspace hook, no `core.fsmonitor` command and no signing
+  program, and are refused (`ExecuteError::HostGit`) once the workspace's git configuration changed
+  since the case opened, so a test command that writes `.git/hooks` or `.git/config` cannot make
+  the slice's git run its code.
 - Documentation: a getting-started page, guides, and generated CLI and crate references on the
   site.
 
