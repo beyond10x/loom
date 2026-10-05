@@ -2,13 +2,30 @@
 format: aep.planning-md/3
 id: story:runtime-merge
 kind: story
-status: draft
+status: active
 title: 'One run loop: Commission''s runtime and intake''s slice loop are one crate'
 relations:
 - decomposes: epic:runtime-consolidation
 - depends_on: story:import-commission
 - depends_on: story:import-intake
-revision: 1
+- serves: vision:governed-autonomy
+scope:
+- confidence: inferred
+  path: crates/commission/src/ports
+- confidence: inferred
+  path: crates/commission/src/runtime.rs
+- confidence: inferred
+  path: crates/intake-cli
+- confidence: inferred
+  path: crates/intake-slice
+- confidence: inferred
+  path: ess/commission
+- confidence: inferred
+  path: generated/rust/commission
+revision: 9
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-05T00:24:13Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-10-05T00:24:13Z", actor: "human:timo", revision: 3}
 ---
 ## Outcome
 
