@@ -20,6 +20,9 @@
 //! names are those `ess specify compile` reports, so a type a later story declares in `ess/` is
 //! covered before it is generated, together with every type the generated crate declares
 //! (`SessionData`, `AnySession`, `SessionSnapshot`, …), as Commission's check reserves.
+//!
+//! `release-check --tag <tag>` fails unless the tag is the workspace version and `CHANGELOG.md`
+//! has its entry; `.github/workflows/release.yml` runs it on every pushed tag (see `release`).
 
 use clap::{Parser, Subcommand};
 use std::collections::BTreeSet;
@@ -30,6 +33,8 @@ use std::process::{Command as Process, ExitCode};
 use std::time::{SystemTime, UNIX_EPOCH};
 use syn::ext::IdentExt;
 use syn::visit::Visit;
+
+mod release;
 
 /// Where the generated crate is committed, relative to the repository root.
 const GENERATED: &str = "generated/rust/loom";
@@ -86,6 +91,13 @@ enum Command {
         #[arg(long)]
         generated: Option<PathBuf>,
     },
+    /// Fail unless a release tag is a bare version equal to `[workspace.package] version` in
+    /// `<root>/Cargo.toml`, and `<root>/CHANGELOG.md` has a `## [<tag>]` entry.
+    ReleaseCheck {
+        /// The release tag, e.g. `0.1.0`.
+        #[arg(long)]
+        tag: String,
+    },
 }
 
 #[derive(Debug, clap::Args)]
@@ -133,6 +145,7 @@ fn run(cli: Cli) -> Result<(), String> {
             },
             &generated.unwrap_or_else(|| root.join(GENERATED)),
         ),
+        Command::ReleaseCheck { tag } => release::release_check(&root, &tag),
     }
 }
 
