@@ -1,0 +1,27 @@
+[package]
+name = "b10x-intake-cli"
+description = "The b10x-intake command line (story S5)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "intake_cli"
+
+[[bin]]
+name = "b10x-intake"
+path = "src/main.rs"
+
+[dependencies]
+b10x-governor = { path = "../governor" }
+b10x-intake-model = { path = "../intake-model" }
+b10x-intake-slice = { path = "../intake-slice" }
+clap = { version = "4.6", features = ["derive"] }
+
+[dev-dependencies]
+b10x-commission = { path = "../commission" }
+b10x-intake-references = { path = "../intake-references" }
+b10x-llm-core = { git = "https://github.com/beyond10x/llm", tag = "0.1.6" }
+serde_json = "1"

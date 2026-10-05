@@ -120,3 +120,40 @@ protocols with Canon today. It depends on Commission by path, never the reverse.
   `Evidence`, `CompletionDetermination`) and Canon's (case snapshot, decision; Canon opts out in
   favour of its own conformance). A noun it introduces gets an `ess/` domain before a story is
   written around it.
+
+## Intake
+
+Intake's history was merged from `beyond10x/intake`; it routes an intent to a proposed protocol and
+runs a small vertical slice over it. It builds against Loom's own `b10x-commission`,
+`b10x-governor` and `b10x-loom` by path. ESS: the `intake.routing` domain under `ess/intake/`
+(`task intake-spec`, which `task check` runs). Docs: `docs/intake/`.
+
+- `crates/intake-router` (`b10x-intake-router`): classifies an intent against the ELS protocol
+  registry; a pick outside the registry or below the confidence threshold is refused.
+- `crates/intake-references` (`b10x-intake-references`): extracts tracker keys, chat permalinks,
+  merge and pull requests and URLs from an intent, deterministically.
+- `crates/intake-model` (`b10x-intake-model`): the Codex preset and one forced tool call. It moves
+  to llm under llm `story:call-tool-helper`.
+- `crates/intake-slice` (`b10x-intake-slice`): the run loop and local executor. Temporary until
+  `story:runtime-merge`: keep it small and do not grow it into a runtime.
+- `crates/intake-cli` (`b10x-intake-cli`): the `b10x-intake` command line, until `story:loom-cli`.
+
+Rules that still hold:
+
+- A routing proposal is never authority; whoever opens the case checks it.
+- Intake reads the ELS registry and calls Canon, Commission, the governor and Loom; it
+  re-implements none of them, and never evaluates Canon itself.
+- The slice executes `software.change/1` actions inside the given workspace only. It never merges,
+  pushes or deploys, and never supplies authority on the operator's behalf.
+- There is no sandbox. `tests.run` and the workspace's git hooks run model-edited code with the
+  operator's rights and environment; the path checks bound what the executor writes, not what that
+  code does. Run the slice only on a workspace whose test command you would run yourself.
+- Evidence comes from a trusted verifier (the slice runs the test command itself), never from what a
+  model says happened (Atlas ADR 0074).
+- Model calls go through the `llm` crates (`b10x-llm-*` at a pinned tag), never a hand-written HTTP
+  client. The credential is the operator's Codex subscription (`~/.codex/auth.json`, refreshed
+  through `auth.openai.com`), read and renewed by llm's credential, never by intake code; tests
+  read no credential file.
+- A model's choice is checked against the list it was given; a pick outside it is refused.
+- Tests make no model or network call: they use recorded responses and local fixtures.
+- No `/home/<name>/` path literals anywhere: common Gates personal-paths has no allowance.

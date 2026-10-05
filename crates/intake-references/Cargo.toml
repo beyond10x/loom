@@ -1,0 +1,14 @@
+[package]
+name = "b10x-intake-references"
+description = "Deterministic extraction of an intent's key references: tracker keys, chat permalinks, merge requests, pull requests and URLs (story intent-references)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "intake_references"
+
+[dependencies]
+regex = { version = "1", default-features = false, features = ["std", "unicode-gencat", "unicode-perl"] }
