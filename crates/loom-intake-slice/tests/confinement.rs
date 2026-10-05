@@ -208,6 +208,24 @@ fn real_confinement_rust_system_tools_and_cleanup() {
         .unwrap();
     assert_eq!(cargo.exit_code, Some(0), "{}", cargo.output);
     assert!(cargo.output.contains("1 passed"), "{}", cargo.output);
+    // This dependency is already fetched to build this test binary. Its checkout
+    // and registry dependencies must remain usable through read-only cache mounts.
+    std::fs::write(workspace.join("Cargo.toml"), "[package]\nname='confined-fixture'\nversion='0.1.0'\nedition='2024'\n[dependencies]\nitoa='1'\nb10x-llm-core={git='https://github.com/beyond10x/llm',tag='0.1.7'}\n").unwrap();
+    assert!(
+        std::process::Command::new("cargo")
+            .args(["generate-lockfile", "--offline"])
+            .current_dir(&workspace)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let git_cached = runner
+        .run(
+            &TestCommand::new("cargo", ["test", "--offline"]),
+            &workspace,
+        )
+        .unwrap();
+    assert_eq!(git_cached.exit_code, Some(0), "{}", git_cached.output);
     std::fs::write(workspace.join("Cargo.toml"), "[package]\nname='confined-fixture'\nversion='0.1.0'\nedition='2024'\n[dependencies]\nloom-deliberately-unavailable-dependency='=99.0.0'\n").unwrap();
     let missing = runner
         .run(
