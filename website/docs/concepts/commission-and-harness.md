@@ -31,7 +31,7 @@ lists them.
 
 :::caution[Planned]
 The provider wires, messages, responses, HTTP and the turn loop are ported as modules of
-`b10x-loom`. Wiring them to a run, with sessions and transcripts, streaming, compaction and
+`b10x-loom-executor`. Wiring them to a run, with sessions and transcripts, streaming, compaction and
 budgets, is planned.
 :::
 

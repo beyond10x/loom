@@ -3,7 +3,7 @@
 //! `website/docs/reference/`, checks it for drift, and binds a built site to its source commit.
 //! The site build itself is Docusaurus.
 //!
-//! Loom has no command line of its own (`b10x-loom` is a library), so the only generated
+//! Loom has no command line of its own (`b10x-loom-executor` is a library), so the only generated
 //! reference is the ESS domain reference: Markdown pages from `ess generate --kind docs`, and one
 //! `b10x-domain-graph/1` document per domain from `ess specify compile`.
 mod graph;

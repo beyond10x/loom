@@ -1,7 +1,7 @@
 # Loom — Native Agent Harness
 
 **Proposed repo:** `beyond10x/loom`  
-**Rust crate:** `b10x-loom`  
+**Rust crate:** `b10x-loom-executor`  
 **Predecessor:** current Beyond10x Harness  
 **Relationship:** native/default executor for Commission
 

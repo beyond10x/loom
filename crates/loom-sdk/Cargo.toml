@@ -11,8 +11,8 @@ publish = false
 name = "loom_sdk"
 
 [dependencies]
-b10x-commission = { path = "../commission" }
-b10x-governor = { path = "../governor" }
-b10x-intake-router = { path = "../intake-router" }
-b10x-intake-slice = { path = "../intake-slice" }
-b10x-loom = { path = "../loom" }
+b10x-loom-commission = { path = "../loom-commission" }
+b10x-loom-governor = { path = "../loom-governor" }
+b10x-loom-intake-router = { path = "../loom-intake-router" }
+b10x-loom-intake-slice = { path = "../loom-intake-slice" }
+b10x-loom-executor = { path = "../loom-executor" }

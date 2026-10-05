@@ -90,7 +90,7 @@ fn the_example_depends_on_the_sdk_alone() {
     let source = read(&manifest.join("examples/software_change.rs"));
     let crates = workspace_crate_names(&manifest.join("../.."));
     assert!(
-        crates.contains("b10x_commission") && crates.contains("governor"),
+        crates.contains("b10x_loom_commission") && crates.contains("loom_governor"),
         "the workspace's crate names were read: {crates:?}"
     );
 
@@ -127,22 +127,22 @@ fn the_dependency_check_catches_a_direct_import() {
     let source = read(&manifest.join("examples/software_change.rs"));
     let crates = workspace_crate_names(&manifest.join("../.."));
 
-    let imported = format!("{source}\nuse b10x_commission::runtime::run_until_blocked;\n");
+    let imported = format!("{source}\nuse b10x_loom_commission::runtime::run_until_blocked;\n");
     assert!(
-        path_roots(&imported).uses.contains("b10x_commission"),
+        path_roots(&imported).uses.contains("b10x_loom_commission"),
         "a direct import is seen"
     );
 
     let pathed =
-        format!("{source}\nfn direct() {{ let _ = governor::MemoryCaseStore::default(); }}\n");
+        format!("{source}\nfn direct() {{ let _ = loom_governor::MemoryCaseStore::default(); }}\n");
     let roots = path_roots(&pathed);
     assert!(
-        roots.paths.contains("governor") && crates.contains("governor"),
+        roots.paths.contains("loom_governor") && crates.contains("loom_governor"),
         "a direct path is seen: {:?}",
         roots.paths
     );
     assert!(
-        !path_roots(&source).paths.contains("governor"),
+        !path_roots(&source).paths.contains("loom_governor"),
         "`loom_sdk::governor` is not a direct path"
     );
 }

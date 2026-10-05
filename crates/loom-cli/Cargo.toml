@@ -1,0 +1,27 @@
+[package]
+name = "b10x-loom-cli"
+description = "The b10x-loom command line (story loom-cli)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "b10x_loom_cli"
+
+[[bin]]
+name = "b10x-loom"
+path = "src/main.rs"
+
+[dependencies]
+b10x-loom-governor = { path = "../loom-governor" }
+b10x-loom-intake-model = { path = "../loom-intake-model" }
+b10x-loom-intake-slice = { path = "../loom-intake-slice" }
+clap = { version = "4.6", features = ["derive"] }
+
+[dev-dependencies]
+b10x-loom-commission = { path = "../loom-commission" }
+b10x-loom-intake-references = { path = "../loom-intake-references" }
+b10x-llm-core = { git = "https://github.com/beyond10x/llm", tag = "0.1.6" }
+serde_json = "1"

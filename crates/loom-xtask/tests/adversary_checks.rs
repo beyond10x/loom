@@ -43,7 +43,7 @@ fn copy_tree(from: &Path, to: &Path) {
 fn copy_of_repository(name: &str) -> PathBuf {
     let from = repository();
     let to = workspace(name);
-    for part in ["ess", "generated/rust/loom", "crates/loom/src"] {
+    for part in ["ess", "generated/rust/loom", "crates/loom-executor/src"] {
         copy_tree(&from.join(part), &to.join(part));
     }
     to
@@ -78,11 +78,11 @@ fn append(file: &Path, text: &str) -> usize {
 /// The generated crate declares `SessionData`, `SessionSnapshot`, `AnySession` and the state
 /// markers beside `Session`; they are model types as much as `Session` is (Commission's own
 /// `no-hand-model` reserves every type its generated crate declares). A hand-written one in
-/// `crates/loom/src` must be refused.
+/// `crates/loom-executor/src` must be refused.
 #[test]
 fn no_hand_model_refuses_derived_model_types() {
     let root = copy_of_repository("derived");
-    let lib = root.join("crates/loom/src/lib.rs");
+    let lib = root.join("crates/loom-executor/src/lib.rs");
     let mut missed = Vec::new();
     for item in [
         "pub struct SessionData { pub commission_run: String }",

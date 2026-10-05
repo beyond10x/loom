@@ -3,7 +3,7 @@
 //! * `drift` fails, naming the file, when one byte of a file under `generated/rust/loom/src/`
 //!   changes, and passes on an unchanged copy.
 //! * `no-hand-model` fails, naming file and line, when `pub struct Selection { pub action: String }`
-//!   is added to `crates/loom/src/lib.rs`, and passes on an unchanged copy.
+//!   is added to `crates/loom-executor/src/lib.rs`, and passes on an unchanged copy.
 //!
 //! The repository is read from `CARGO_MANIFEST_DIR` at run time; copies land under
 //! `CARGO_TARGET_TMPDIR`. Both checks need the `ess` binary on `PATH`.
@@ -48,11 +48,11 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
-/// A copy of `ess/`, `generated/rust/loom/` and `crates/loom/src/` under a fresh directory.
+/// A copy of `ess/`, `generated/rust/loom/` and `crates/loom-executor/src/` under a fresh directory.
 fn copy_of_repository(name: &str) -> PathBuf {
     let from = repository();
     let to = workspace(name);
-    for part in ["ess", "generated/rust/loom", "crates/loom/src"] {
+    for part in ["ess", "generated/rust/loom", "crates/loom-executor/src"] {
         copy_tree(&from.join(part), &to.join(part));
     }
     to
@@ -123,7 +123,7 @@ fn no_hand_model_names_file_and_line_of_a_hand_written_selection() {
         stderr(&clean)
     );
 
-    let lib = root.join("crates/loom/src/lib.rs");
+    let lib = root.join("crates/loom-executor/src/lib.rs");
     let mut text =
         fs::read_to_string(&lib).unwrap_or_else(|e| panic!("read {}: {e}", lib.display()));
     if !text.ends_with('\n') {
