@@ -111,10 +111,10 @@ a Loom crate under Atlas ADR 0090. It decides and never acts: it evaluates a cas
 reports the frontier and completion, and executes nothing. It is the only crate here that evaluates
 protocols with Canon today. It depends on Commission by path, never the reverse.
 
-- Canon is named by the reference ELS uses (`branch = "main"`), pinned by `Cargo.lock`: a different
-  reference builds a second Canon whose types do not match ELS's. Move Canon with
-  `cargo update -p b10x-canon` together with the ELS pin. Any other Loom crate that adds Canon uses
-  the same reference.
+- Canon is named by the reference `b10x-canon-engineering` uses (`branch = "main"`), pinned by
+  `Cargo.lock`: a different reference builds a second Canon whose types do not match its. Move
+  Canon with `cargo update -p b10x-canon` together with the `b10x-canon-engineering` tag
+  (beyond10x/engineering-protocols). Any other Loom crate that adds Canon uses the same reference.
 - The governor adds no clock, network or model call to an evaluation.
 - ESS: the governor has no domain of its own. Its nouns are Commission's (`CaseId`, `Frontier`,
   `Evidence`, `CompletionDetermination`) and Canon's (case snapshot, decision; Canon opts out in
@@ -132,8 +132,6 @@ runs a small vertical slice over it. It builds against Loom's own `b10x-loom-com
   registry; a pick outside the registry or below the confidence threshold is refused.
 - `crates/loom-intake-references` (`b10x-loom-intake-references`): extracts tracker keys, chat permalinks,
   merge and pull requests and URLs from an intent, deterministically.
-- `crates/loom-intake-model` (`b10x-loom-intake-model`): the Codex preset and one forced tool call. It moves
-  to llm under llm `story:call-tool-helper`.
 - `crates/loom-intake-slice` (`b10x-loom-intake-slice`): the local effect adapter (`LocalEffects` over the
   local executor) and a thin caller of Commission's runtime (`run_until_blocked`); it has no loop
   of its own (`story:runtime-merge`). Keep it small and do not grow it into a runtime.
@@ -154,7 +152,8 @@ Rules that still hold:
 - Evidence comes from a trusted verifier (the slice runs the test command itself), never from what a
   model says happened (Atlas ADR 0074).
 - Model calls go through the `llm` crates (`b10x-llm-*` at a pinned tag), never a hand-written HTTP
-  client. The credential is the operator's Codex subscription (`~/.codex/auth.json`, refreshed
+  client. The Codex preset and the one forced tool call are llm's `b10x-llm-tool-call`
+  (`codex_model`, `call_tool`); the router and the CLI call it directly. The credential is the operator's Codex subscription (`~/.codex/auth.json`, refreshed
   through `auth.openai.com`), read and renewed by llm's credential, never by intake code; tests
   read no credential file.
 - A model's choice is checked against the list it was given; a pick outside it is refused.

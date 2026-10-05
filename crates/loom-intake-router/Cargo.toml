@@ -11,9 +11,9 @@ publish = false
 name = "b10x_loom_intake_router"
 
 [dependencies]
-els = { package = "b10x-els", git = "https://github.com/beyond10x/els", rev = "ac7dd03" }
-b10x-loom-intake-model = { path = "../loom-intake-model" }
-llm-core = { package = "b10x-llm-core", git = "https://github.com/beyond10x/llm", tag = "0.1.6" }
+b10x-canon-engineering = { git = "https://github.com/beyond10x/engineering-protocols", tag = "0.1.0" }
+b10x-llm-tool-call = { git = "https://github.com/beyond10x/llm", tag = "0.1.7" }
+llm-core = { package = "b10x-llm-core", git = "https://github.com/beyond10x/llm", tag = "0.1.7" }
 serde_json = "1"
 
 [dev-dependencies]

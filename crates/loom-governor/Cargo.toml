@@ -13,7 +13,7 @@ name = "loom_governor"
 [dependencies]
 b10x-canon = { git = "https://github.com/beyond10x/canon", branch = "main" }
 b10x-loom-commission = { path = "../loom-commission" }
-b10x-els = { git = "https://github.com/beyond10x/els", rev = "ac7dd03" }
+b10x-canon-engineering = { git = "https://github.com/beyond10x/engineering-protocols", tag = "0.1.0" }
 serde_yaml_ng = "0.10"
 
 [dev-dependencies]

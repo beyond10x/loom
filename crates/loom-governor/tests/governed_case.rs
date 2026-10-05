@@ -5,8 +5,9 @@
 //! same protocol, case snapshot and evidence, evaluated here directly, beside the governor.
 //!
 //! `tests/fixtures/chg-1842.fixture.yaml` is a byte-for-byte copy of
-//! `fixtures/software-change/chg-1842.fixture.yaml` in beyond10x/els at commit `ac7dd03`, the
-//! revision this crate depends on; the `els` crate does not expose its fixtures.
+//! `fixtures/software-change/chg-1842.fixture.yaml` in beyond10x/engineering-protocols at tag
+//! `0.1.0`, the release this crate depends on; `b10x-canon-engineering` does not expose its
+//! fixtures.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -388,7 +389,8 @@ fn by_name(actions: &[FrontierAction]) -> BTreeMap<&str, &FrontierAction> {
 
 /// `software.change/1` from the ELS registry, compiled by Canon.
 fn software_change_ir() -> Ir {
-    let builtin = b10x_els::registry::get("software-change", 1).expect("ELS holds the protocol");
+    let builtin =
+        canon_engineering::registry::get("software-change", 1).expect("ELS holds the protocol");
     let protocol = b10x_canon::model::parse(builtin.yaml).expect("Canon parses it");
     compile(&protocol).expect("Canon compiles it")
 }

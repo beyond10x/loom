@@ -134,8 +134,8 @@ fn declared_artifacts(pick: &str) -> Result<Vec<String>, CaseError> {
         .ok()
         .filter(|parsed: &u32| parsed.to_string() == major)
         .ok_or_else(|| refused("its major is not a number"))?;
-    let builtin =
-        b10x_els::registry::get(name, major).map_err(|error| refused(&error.to_string()))?;
+    let builtin = canon_engineering::registry::get(name, major)
+        .map_err(|error| refused(&error.to_string()))?;
     Ok(builtin
         .model
         .artifacts

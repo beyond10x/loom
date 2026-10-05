@@ -554,7 +554,7 @@ fn artifact_names_match_exactly() {
 // ---------------------------------------------------------------------------------------------
 
 fn ir_of(name: &str, major: u32) -> Ir {
-    let builtin = b10x_els::registry::get(name, major).expect("ELS holds it");
+    let builtin = canon_engineering::registry::get(name, major).expect("ELS holds it");
     compile(&builtin.model).expect("compiles")
 }
 

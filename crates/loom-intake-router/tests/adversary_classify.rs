@@ -4,7 +4,7 @@
 //! call, other items, or a failure) and keeps the requests it saw. No case reaches a model, the
 //! network or a credential.
 
-use b10x_loom_intake_model::ModelError;
+use b10x_llm_tool_call::ModelError;
 use b10x_loom_intake_router::{RouterError, classify};
 use llm_core::{
     BoxFuture, CallId, Cancel, Capabilities, Error, ErrorCode, Id, Item, Model, Protocol,
@@ -117,7 +117,7 @@ impl Model for Fake {
 }
 
 fn registry() -> Vec<String> {
-    els::registry::list()
+    canon_engineering::registry::list()
         .into_iter()
         .map(|(name, major)| format!("{name}@{major}"))
         .collect()
@@ -477,8 +477,8 @@ async fn the_request_is_deterministic_and_keeps_the_intent_out_of_the_instructio
     );
 
     let mut last = 0;
-    for (name, major) in els::registry::list() {
-        let builtin = els::registry::get(name, major).expect("a valid built-in");
+    for (name, major) in canon_engineering::registry::list() {
+        let builtin = canon_engineering::registry::get(name, major).expect("a valid built-in");
         let description = builtin
             .model
             .protocol

@@ -112,9 +112,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "b10x-els"
-version = "0.0.0"
-source = "git+https://github.com/beyond10x/els?rev=ac7dd03#ac7dd03ee304778ffcbe6aba5cbf2047ec686cd3"
+name = "b10x-canon-engineering"
+version = "0.1.0"
+source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.1.0#a7d02b4ff6982875cc6cb87ca30f083d18efbdba"
 dependencies = [
  "b10x-canon",
  "clap",
@@ -124,8 +124,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-core"
-version = "0.1.6"
-source = "git+https://github.com/beyond10x/llm?tag=0.1.6#10a083c3de762538c0139e62d42002fcde6fc2ab"
+version = "0.1.7"
+source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
 dependencies = [
  "serde",
  "serde_json",
@@ -135,8 +135,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-credentials"
-version = "0.1.6"
-source = "git+https://github.com/beyond10x/llm?tag=0.1.6#10a083c3de762538c0139e62d42002fcde6fc2ab"
+version = "0.1.7"
+source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
 dependencies = [
  "b10x-llm-core",
  "base64 0.22.1",
@@ -151,20 +151,22 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-http"
-version = "0.1.6"
-source = "git+https://github.com/beyond10x/llm?tag=0.1.6#10a083c3de762538c0139e62d42002fcde6fc2ab"
+version = "0.1.7"
+source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
 dependencies = [
  "b10x-llm-core",
+ "bytes",
  "httpdate",
  "reqwest",
  "serde_json",
  "tokio",
+ "zeroize",
 ]
 
 [[package]]
 name = "b10x-llm-providers"
-version = "0.1.6"
-source = "git+https://github.com/beyond10x/llm?tag=0.1.6#10a083c3de762538c0139e62d42002fcde6fc2ab"
+version = "0.1.7"
+source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -179,8 +181,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-responses"
-version = "0.1.6"
-source = "git+https://github.com/beyond10x/llm?tag=0.1.6#10a083c3de762538c0139e62d42002fcde6fc2ab"
+version = "0.1.7"
+source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -191,13 +193,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "b10x-llm-tool-call"
+version = "0.1.7"
+source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+dependencies = [
+ "b10x-llm-core",
+ "b10x-llm-credentials",
+ "b10x-llm-http",
+ "b10x-llm-providers",
+ "b10x-llm-responses",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "b10x-loom-cli"
 version = "0.0.0"
 dependencies = [
  "b10x-llm-core",
+ "b10x-llm-tool-call",
  "b10x-loom-commission",
  "b10x-loom-governor",
- "b10x-loom-intake-model",
  "b10x-loom-intake-references",
  "b10x-loom-intake-slice",
  "clap",
@@ -252,24 +268,11 @@ name = "b10x-loom-governor"
 version = "0.0.0"
 dependencies = [
  "b10x-canon",
- "b10x-els",
+ "b10x-canon-engineering",
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
  "serde_json",
  "serde_yaml_ng",
-]
-
-[[package]]
-name = "b10x-loom-intake-model"
-version = "0.0.0"
-dependencies = [
- "b10x-llm-core",
- "b10x-llm-credentials",
- "b10x-llm-http",
- "b10x-llm-providers",
- "b10x-llm-responses",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -283,9 +286,9 @@ dependencies = [
 name = "b10x-loom-intake-router"
 version = "0.0.0"
 dependencies = [
- "b10x-els",
+ "b10x-canon-engineering",
  "b10x-llm-core",
- "b10x-loom-intake-model",
+ "b10x-llm-tool-call",
  "serde_json",
  "tokio",
 ]
@@ -294,7 +297,7 @@ dependencies = [
 name = "b10x-loom-intake-slice"
 version = "0.0.0"
 dependencies = [
- "b10x-els",
+ "b10x-canon-engineering",
  "b10x-llm-core",
  "b10x-loom-commission",
  "b10x-loom-executor",
