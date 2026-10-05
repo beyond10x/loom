@@ -105,7 +105,7 @@ changing `ess/`. Every story names that change and that test in its `## ESS firs
 change with no behaviour change is exempt, and its story says so.
 
 `ess_gate.rs` (both copies) reads this section and fails when a phrase it checks is gone; reword
-with the tests open. CI installs `ess` 0.52.0 (`.github/workflows/check.yml`); move that pin when a
+with the tests open. CI installs `ess` 0.53.0 (`.github/workflows/check.yml`); move that pin when a
 newer ESS ships.
 
 ## Gate
@@ -176,6 +176,13 @@ governor and evidence ports Commission defines (ADR 0089). It decides and never 
 a case's protocol, reports the frontier and completion, and executes nothing. It is the only crate
 that evaluates protocols with Canon, and it adds no clock, network or model call to an evaluation.
 It depends on Commission by path, never the reverse.
+
+Host-reviewed protocols enter through `CanonGovernor::with_protocol`; compile and frontier
+representability checks remain in the governor. `EvaluationTime` is a trusted host callback,
+never a model argument. Durable stores implement `FallibleCaseStore` atomically and report
+failures explicitly; the legacy `CaseStore` bridge is only for infallible adapters. The host
+restores the same admitted protocol definitions on recovery and authenticates evidence before
+`submit_evidence`. The governor supplies no authority decision.
 
 Canon is named by the reference `b10x-canon-engineering` uses (`branch = "main"`), pinned by
 `Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon with

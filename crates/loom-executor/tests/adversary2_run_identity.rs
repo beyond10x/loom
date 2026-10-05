@@ -15,7 +15,7 @@
 //! `Refused` terminal.
 
 use b10x_loom_executor::model::behaviour::{
-    ActionCatalogueStorage, Context, Generated, SelectionStorage,
+    ActionCatalogueStorage, Context, ExternalCommand, Generated, SelectionStorage,
 };
 use b10x_loom_executor::model::obligation::UnmetObligation;
 use b10x_loom_executor::model::primitives::Uuid;
@@ -85,7 +85,7 @@ impl SelectionStorage for SpecPorts {
 }
 
 impl Context for SpecPorts {
-    fn external(&mut self, _command: &'static str, _outcome: &'static str) -> bool {
+    fn external(&mut self, _command: ExternalCommand<'_>, _outcome: &'static str) -> bool {
         false
     }
 }

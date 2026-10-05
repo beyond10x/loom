@@ -75,6 +75,11 @@ An application depends on one crate, `b10x-loom-sdk` (library `loom_sdk`). It re
 Commission's contracts and runtime, the executor, the governor and intake. The application supplies
 the selector, the argument generator, the authority provider and the effect port.
 
+On the development branch, `CanonGovernor::with_protocol` admits host-reviewed Canon protocols;
+`with_evaluation_time` supplies trusted freshness time. Durable hosts implement
+`governor::FallibleCaseStore`, while existing `CaseStore` users remain compatible. Protocol
+admission, durable storage and authenticated evidence remain the embedding application's duties.
+
 ```toml
 [dependencies]
 b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.1.0" }

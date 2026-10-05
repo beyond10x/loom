@@ -7,7 +7,7 @@
 //! lists as generated, written against ports the implementor supplies.
 //!
 //! Storage is a port: one trait per entity, get, put and delete of a snapshot by identity. ess
-//! generates the trait and never a store. `Context` is the other port: the caller's attributes,
+//! preserves the trait; generated network entries supply an ephemeral store. `Context` carries the caller's attributes,
 //! every identity and value the model says the implementation assigns, and the answer to each
 //! `external:` branch. [`Generated`] implements every generated `…Behavior` trait over those ports
 //! and forwards every behaviour and query the plan still owes to them, so it is a complete bundle
@@ -22,7 +22,7 @@ use crate::obligation::UnmetObligation;
 
 /// Where `loom.run.ActionCatalogue` is stored — a port the implementor provides.
 ///
-/// Keyed by the identity `catalogue_id`. ess generates this trait and never an implementation of it.
+/// Keyed by the identity `catalogue_id`. Generated network entries supply an ephemeral implementation; durable storage remains a port.
 pub trait ActionCatalogueStorage {
     /// The instance with this identity, or `None` where none is stored.
     fn get(&self, identity: &crate::run::CatalogueId) -> Option<crate::run::ActionCatalogueSnapshot>;
@@ -38,9 +38,23 @@ pub trait ActionCatalogueStorage {
     fn list(&self) -> Vec<crate::run::ActionCatalogueSnapshot>;
 }
 
+/// Where `loom.run.ArgumentRequest` is stored — a port the implementor provides.
+///
+/// Keyed by the identity `argument_request_id`. Generated network entries supply an ephemeral implementation; durable storage remains a port.
+pub trait ArgumentRequestStorage {
+    /// The instance with this identity, or `None` where none is stored.
+    fn get(&self, identity: &crate::run::ArgumentRequestId) -> Option<crate::run::ArgumentRequestSnapshot>;
+
+    /// Stores this instance under its identity, replacing what was held.
+    fn put(&mut self, snapshot: crate::run::ArgumentRequestSnapshot);
+
+    /// Removes the instance with this identity.
+    fn delete(&mut self, identity: &crate::run::ArgumentRequestId);
+}
+
 /// Where `loom.run.Selection` is stored — a port the implementor provides.
 ///
-/// Keyed by the identity `selection_id`. ess generates this trait and never an implementation of it.
+/// Keyed by the identity `selection_id`. Generated network entries supply an ephemeral implementation; durable storage remains a port.
 pub trait SelectionStorage {
     /// The instance with this identity, or `None` where none is stored.
     fn get(&self, identity: &crate::run::SelectionId) -> Option<crate::run::SelectionSnapshot>;
@@ -58,7 +72,7 @@ pub trait SelectionStorage {
 
 /// Where `loom.run.Session` is stored — a port the implementor provides.
 ///
-/// Keyed by the identity `session_id`. ess generates this trait and never an implementation of it.
+/// Keyed by the identity `session_id`. Generated network entries supply an ephemeral implementation; durable storage remains a port.
 pub trait SessionStorage {
     /// The instance with this identity, or `None` where none is stored.
     fn get(&self, identity: &crate::run::SessionId) -> Option<crate::run::SessionSnapshot>;
@@ -74,6 +88,38 @@ pub trait SessionStorage {
     fn list(&self) -> Vec<crate::run::SessionSnapshot>;
 }
 
+/// Where `loom.run.Turn` is stored — a port the implementor provides.
+///
+/// Keyed by the identity `turn_id`. Generated network entries supply an ephemeral implementation; durable storage remains a port.
+pub trait TurnStorage {
+    /// The instance with this identity, or `None` where none is stored.
+    fn get(&self, identity: &crate::run::TurnId) -> Option<crate::run::TurnSnapshot>;
+
+    /// Stores this instance under its identity, replacing what was held.
+    fn put(&mut self, snapshot: crate::run::TurnSnapshot);
+
+    /// Removes the instance with this identity.
+    fn delete(&mut self, identity: &crate::run::TurnId);
+}
+
+/// The exact executing command input supplied to an external decision.
+///
+/// This supplies facts, not authority: the context must verify its request-bound proof.
+#[derive(Debug, Clone, Copy)]
+pub enum ExternalCommand<'a> {
+    /// The executing `loom.run.RevalidateSelection` input.
+    LoomRunRevalidateSelection(&'a crate::run::RevalidateSelection),
+}
+
+impl ExternalCommand<'_> {
+    /// The canonical qualified identity of this command.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::LoomRunRevalidateSelection(_) => "loom.run.RevalidateSelection",
+        }
+    }
+}
+
 /// What the specification leaves to the implementor's context — a port the implementor provides.
 ///
 /// The caller's attributes, the values the model says the implementation assigns, and the answer
@@ -84,13 +130,27 @@ pub trait Context {
     /// Asked in declaration order, before the branch's input guard is read; the first branch
     /// answered `true` whose guard holds is taken. A test forces a branch by answering `true`
     /// for it alone; a deployment asks whatever decides it.
-    fn external(&mut self, command: &'static str, outcome: &'static str) -> bool;
+    fn external(&mut self, command: ExternalCommand<'_>, outcome: &'static str) -> bool;
 }
+
+/// Context answers that may be unavailable, without fabricated values.
+/// Existing `Context` implementations receive the blanket adapter.
+pub trait TryContext {
+/// Decides the named external branch, or names the unavailable answer.
+fn try_external(&mut self, command: ExternalCommand<'_>, outcome: &'static str) -> Result<bool, UnmetObligation>;
+}
+
+impl<T: Context + ?Sized> TryContext for T {
+fn try_external(&mut self, command: ExternalCommand<'_>, outcome: &'static str) -> Result<bool, UnmetObligation> { Ok(Context::external(self, command, outcome)) }
+}
+
+/// An unavailable runtime context answer, rather than a new planned capability.
+pub fn unmet_context(source: &'static str) -> UnmetObligation { UnmetObligation { capability: "context answer", source } }
 
 /// Every generated behaviour of this workspace, over the ports `P` supplies.
 ///
 /// `P` implements the storage trait of each entity a generated behaviour reads or writes,
-/// `Context` where one asks it anything, and every `…Behavior` and `…Query` trait the plan still
+/// `TryContext` (or its legacy `Context` blanket adapter) where one asks it anything, and every `…Behavior` and `…Query` trait the plan still
 /// owes; `Generated<P>` forwards those to it.
 pub struct Generated<P> {
     /// The storage and context ports, and every behaviour or query still owed.
@@ -122,8 +182,9 @@ where
             _ => return Ok(crate::run::FileSessionOutcome::WrongState { error: crate::run::SessionStateConflict { state: held_state } }),
         };
         let next = moved.snapshot();
+        let answer = crate::run::FileSessionOutcome::Filed { session_filed: crate::run::SessionFiled { session_id: input.session_id.clone(), ending: input.ending.clone() } };
         SessionStorage::put(&mut self.ports, next);
-        return Ok(crate::run::FileSessionOutcome::Filed { session_filed: crate::run::SessionFiled { session_id: input.session_id.clone(), ending: input.ending.clone() } });
+        return Ok(answer);
     }
 }
 
@@ -145,8 +206,9 @@ where
             commission_run: input.commission_run.clone(),
             wire: input.wire.clone(),
         };
+        let answer = crate::run::OpenSessionOutcome::Opened { session_opened: crate::run::SessionOpened { session_id: identity.clone(), commission_run: input.commission_run.clone(), wire: input.wire.clone() } };
         SessionStorage::put(&mut self.ports, crate::run::AnySession::Active(crate::run::Session::new(data)).snapshot());
-        return Ok(crate::run::OpenSessionOutcome::Opened { session_opened: crate::run::SessionOpened { session_id: identity.clone(), commission_run: input.commission_run.clone(), wire: input.wire.clone() } });
+        return Ok(answer);
     }
 }
 
@@ -170,14 +232,45 @@ where
             case_revision: input.case_revision.clone(),
             entries: input.entries.clone(),
         };
+        let answer = crate::run::ProjectCatalogueOutcome::Projected { catalogue_projected: crate::run::CatalogueProjected { catalogue_id: identity.clone(), turn_id: input.turn_id.clone(), case_revision: input.case_revision.clone() } };
         ActionCatalogueStorage::put(&mut self.ports, crate::run::AnyActionCatalogue::Projected(crate::run::ActionCatalogue::new(data)).snapshot());
-        return Ok(crate::run::ProjectCatalogueOutcome::Projected { catalogue_projected: crate::run::CatalogueProjected { catalogue_id: identity.clone(), turn_id: input.turn_id.clone(), case_revision: input.case_revision.clone() } });
+        return Ok(answer);
     }
 }
 
-impl<P: crate::run::obligations::RecordTurnBehavior> crate::run::obligations::RecordTurnBehavior for Generated<P> {
+/// `loom.run.RecordTurn`, generated: every outcome is one the specification fully determines.
+impl<P> crate::run::obligations::RecordTurnBehavior for Generated<P>
+where
+    P: SessionStorage + TurnStorage,
+{
     fn record_turn(&mut self, input: crate::run::RecordTurn) -> Result<crate::run::RecordTurnOutcome, UnmetObligation> {
-        crate::run::obligations::RecordTurnBehavior::record_turn(&mut self.ports, input)
+        let _ = &input;
+        // `when_related:` reads the `loom.run.Session` row `input.session_id` names, through its storage port; an absent
+        // reference reads no row and selects no related branch.
+        let reference = Some(&input.session_id);
+        let related = reference.and_then(|identity| SessionStorage::get(&self.ports, identity));
+        // `session-unknown`: the reference names an identity no row carries.
+        if reference.is_some() && related.is_none() {
+            return Ok(crate::run::RecordTurnOutcome::SessionUnknown { error: crate::run::SessionNotFound { session_id: input.session_id.clone() } });
+        }
+        let _ = &related;
+        // `session-not-active`: selected by the present related row, in declaration order.
+        if let Some(related) = &related {
+        if decided(equal(Some(&related.state).map(|value| match value { crate::run::SessionState::Active => "Active", crate::run::SessionState::Filed => "Filed" }.to_owned()), Some("Active".to_owned())).map(|value| !value), "loom.run.RecordTurn")? {
+            return Ok(crate::run::RecordTurnOutcome::SessionNotActive { error: crate::run::SessionNotActive { session_id: input.session_id.clone() } });
+        }
+        }
+        // `recorded`: the default.
+        let identity: crate::run::TurnId = input.turn_id.clone();
+        let data = crate::run::TurnData {
+            turn_id: identity.clone(),
+            session_id: input.session_id.clone(),
+            index: input.index.clone(),
+            items: input.items.clone(),
+        };
+        let answer = crate::run::RecordTurnOutcome::Recorded { turn_recorded: crate::run::TurnRecorded { turn_id: identity.clone(), session_id: input.session_id.clone(), index: input.index.clone() } };
+        TurnStorage::put(&mut self.ports, crate::run::AnyTurn::Taken(crate::run::Turn::new(data)).snapshot());
+        return Ok(answer);
     }
 }
 
@@ -199,14 +292,43 @@ where
             _ => return Ok(crate::run::ReleaseSessionOutcome::WrongState { error: crate::run::SessionStateConflict { state: held_state } }),
         };
         let next = moved.snapshot();
+        let answer = crate::run::ReleaseSessionOutcome::Released { session_released: crate::run::SessionReleased { session_id: input.session_id.clone(), ending: crate::run::RunEnding::Failed } };
         SessionStorage::put(&mut self.ports, next);
-        return Ok(crate::run::ReleaseSessionOutcome::Released { session_released: crate::run::SessionReleased { session_id: input.session_id.clone(), ending: crate::run::RunEnding::Failed } });
+        return Ok(answer);
     }
 }
 
-impl<P: crate::run::obligations::RequestArgumentsBehavior> crate::run::obligations::RequestArgumentsBehavior for Generated<P> {
+/// `loom.run.RequestArguments`, generated: every outcome is one the specification fully determines.
+impl<P> crate::run::obligations::RequestArgumentsBehavior for Generated<P>
+where
+    P: ArgumentRequestStorage + SelectionStorage,
+{
     fn request_arguments(&mut self, input: crate::run::RequestArguments) -> Result<crate::run::RequestArgumentsOutcome, UnmetObligation> {
-        crate::run::obligations::RequestArgumentsBehavior::request_arguments(&mut self.ports, input)
+        let _ = &input;
+        // `when_related:` reads the `loom.run.Selection` row `input.selection_id` names, through its storage port; an absent
+        // reference reads no row and selects no related branch.
+        let reference = Some(&input.selection_id);
+        let related = reference.and_then(|identity| SelectionStorage::get(&self.ports, identity));
+        // `selection-unknown`: the reference names an identity no row carries.
+        if reference.is_some() && related.is_none() {
+            return Ok(crate::run::RequestArgumentsOutcome::SelectionUnknown { error: crate::run::SelectionNotFound { selection_id: input.selection_id.clone() } });
+        }
+        let _ = &related;
+        // `selection-not-selected`: selected by the present related row, in declaration order.
+        if let Some(related) = &related {
+        if decided(equal(Some(&related.state).map(|value| match value { crate::run::SelectionState::Admitted => "Admitted", crate::run::SelectionState::Refused => "Refused", crate::run::SelectionState::Selected => "Selected" }.to_owned()), Some("Selected".to_owned())).map(|value| !value), "loom.run.RequestArguments")? {
+            return Ok(crate::run::RequestArgumentsOutcome::SelectionNotSelected { error: crate::run::SelectionNotSelected { selection_id: input.selection_id.clone() } });
+        }
+        }
+        // `requested`: the default.
+        let identity: crate::run::ArgumentRequestId = input.argument_request_id.clone();
+        let data = crate::run::ArgumentRequestData {
+            argument_request_id: identity.clone(),
+            selection_id: input.selection_id.clone(),
+        };
+        let answer = crate::run::RequestArgumentsOutcome::Requested { arguments_requested: crate::run::ArgumentsRequested { argument_request_id: identity.clone(), selection_id: input.selection_id.clone() } };
+        ArgumentRequestStorage::put(&mut self.ports, crate::run::AnyArgumentRequest::Requested(crate::run::ArgumentRequest::new(data)).snapshot());
+        return Ok(answer);
     }
 }
 
@@ -237,15 +359,16 @@ where
             _ => return Ok(crate::run::ResumeSessionOutcome::WrongState { error: crate::run::SessionStateConflict { state: held_state } }),
         };
         let next = moved.snapshot();
+        let answer = crate::run::ResumeSessionOutcome::Resumed { session_resumed: crate::run::SessionResumed { session_id: input.session_id.clone(), wire: input.wire.clone() } };
         SessionStorage::put(&mut self.ports, next);
-        return Ok(crate::run::ResumeSessionOutcome::Resumed { session_resumed: crate::run::SessionResumed { session_id: input.session_id.clone(), wire: input.wire.clone() } });
+        return Ok(answer);
     }
 }
 
 /// `loom.run.RevalidateSelection`, generated: every outcome is one the specification fully determines.
 impl<P> crate::run::obligations::RevalidateSelectionBehavior for Generated<P>
 where
-    P: Context + SelectionStorage,
+    P: TryContext + SelectionStorage,
 {
     fn revalidate_selection(&mut self, input: crate::run::RevalidateSelection) -> Result<crate::run::RevalidateSelectionOutcome, UnmetObligation> {
         let _ = &input;
@@ -267,11 +390,12 @@ where
                 _ => return Ok(crate::run::RevalidateSelectionOutcome::WrongState { error: crate::run::SelectionStateConflict { state: held_state } }),
             };
             let next = moved.snapshot();
+            let answer = crate::run::RevalidateSelectionOutcome::StaleRevision { selection_stale: crate::run::SelectionStale { selection_id: input.selection_id.clone(), catalogue_revision: before.case_revision.clone(), case_revision: input.case_revision.clone() } };
             SelectionStorage::put(&mut self.ports, next);
-            return Ok(crate::run::RevalidateSelectionOutcome::StaleRevision { selection_stale: crate::run::SelectionStale { selection_id: input.selection_id.clone(), catalogue_revision: before.case_revision.clone(), case_revision: input.case_revision.clone() } });
+            return Ok(answer);
         }
         // `not-in-frontier`: an external branch, where the context takes it.
-        if self.ports.external("loom.run.RevalidateSelection", "not-in-frontier") {
+        if self.ports.try_external(ExternalCommand::LoomRunRevalidateSelection(&input), "not-in-frontier")? {
             let Some(held) = SelectionStorage::get(&self.ports, &input.selection_id) else {
                 return Ok(crate::run::RevalidateSelectionOutcome::WrongStateUnknownInstance);
             };
@@ -283,8 +407,9 @@ where
                 _ => return Ok(crate::run::RevalidateSelectionOutcome::WrongState { error: crate::run::SelectionStateConflict { state: held_state } }),
             };
             let next = moved.snapshot();
+            let answer = crate::run::RevalidateSelectionOutcome::NotInFrontier { selection_not_in_frontier: crate::run::SelectionNotInFrontier { selection_id: input.selection_id.clone(), action: before.action.clone() } };
             SelectionStorage::put(&mut self.ports, next);
-            return Ok(crate::run::RevalidateSelectionOutcome::NotInFrontier { selection_not_in_frontier: crate::run::SelectionNotInFrontier { selection_id: input.selection_id.clone(), action: before.action.clone() } });
+            return Ok(answer);
         }
         // `admitted`: the default.
         let Some(held) = SelectionStorage::get(&self.ports, &input.selection_id) else {
@@ -297,8 +422,9 @@ where
             _ => return Ok(crate::run::RevalidateSelectionOutcome::WrongState { error: crate::run::SelectionStateConflict { state: held_state } }),
         };
         let next = moved.snapshot();
+        let answer = crate::run::RevalidateSelectionOutcome::Admitted { selection_admitted: crate::run::SelectionAdmitted { selection_id: input.selection_id.clone() } };
         SelectionStorage::put(&mut self.ports, next);
-        return Ok(crate::run::RevalidateSelectionOutcome::Admitted { selection_admitted: crate::run::SelectionAdmitted { selection_id: input.selection_id.clone() } });
+        return Ok(answer);
     }
 }
 

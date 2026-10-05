@@ -1,6 +1,6 @@
 {
   "format": "b10x-status/1",
-  "asOf": "2026-10-05",
+  "asOf": "2026-10-06",
   "source": "Loom's status record, maintained in the repository and checked against main",
   "items": [
     {"label": "b10x-loom run", "status": "shipped", "area": "Use it", "detail": "Routes an intent to a protocol, opens a governed case and runs it until it is blocked, printing each step and the stop reason. Exit 0 at the human gate, 3 for another stop. Completed a live run against a hosted model on 2026-10-05.", "href": "/docs/guides/run-an-intent"},
@@ -19,6 +19,7 @@
     {"label": "Schema validation of arguments", "status": "planned", "area": "Selection", "detail": "Where an action schema comes from is not decided."},
     {"label": "Fast typed and hybrid selectors; confidence fallback; selection telemetry", "status": "planned", "area": "Selection", "href": "/docs/concepts/fast-selector"},
     {"label": "Canon governor", "status": "shipped", "area": "Governor", "detail": "CanonGovernor evaluates a case's engineering protocol with Canon on every frontier and completion; no clock, network or model call, and no invented authority.", "href": "/docs/concepts/governor-and-intake"},
+    {"label": "Hosted governor contracts", "status": "decided", "area": "Governor", "detail": "Implemented on the development branch: host-admitted Canon protocols, trusted freshness callback and fallible case storage. No database backend or automatic protocol adoption.", "href": "/docs/concepts/governor-and-intake"},
     {"label": "Intent references", "status": "shipped", "area": "Intake", "detail": "Tracker keys, chat permalinks, merge and pull requests and URLs, extracted in order without a model."},
     {"label": "Protocol router", "status": "shipped", "area": "Intake", "detail": "A model picks one protocol of the engineering protocol registry; a pick outside it or below the threshold is refused."},
     {"label": "Local slice for software-change@1", "status": "shipped", "area": "Intake", "detail": "Edits, inspects and tests a git work tree; evidence only from the test command's exit status; never merges, pushes or deploys. No sandbox.", "href": "/docs/concepts/governor-and-intake"},

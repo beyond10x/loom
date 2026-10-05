@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T23:22:26Z",
+  "actor": "human:timo",
+  "artifact": "story:hosted-governor",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test -p b10x-loom-governor --test hosted_protocol --locked: four tests passed; full gate pending",
+    "reference": ".scratch/hosted-green.log"
+  }
+}
