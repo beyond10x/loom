@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:crate-names
 kind: story
-status: active
+status: implemented
 title: Loom's crates carry loom- names; no commission, governor or intake packages remain
 relations:
 - decomposes: epic:runtime-consolidation
@@ -33,10 +33,11 @@ scope:
   path: generated
 - confidence: inferred
   path: website
-revision: 14
+revision: 15
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-05T01:56:23Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-05T01:56:23Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-05T02:12:30Z", actor: "human:timo", revision: 15, decided_on: {"recorded":{"test_result":1,"verification":1}}}
 ---
 ## Outcome
 

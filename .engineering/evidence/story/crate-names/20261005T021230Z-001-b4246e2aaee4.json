@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T02:12:30Z",
+  "actor": "human:timo",
+  "artifact": "story:crate-names",
+  "kind": "story",
+  "revision": 14,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "gate with the docs patch: all ess/drift/no-hand-model/docs steps 0, fmt 0, clippy 0, cargo test --workspace --no-fail-fast 1015 passed 0 failed 4 ignored (--list 1019), cargo doc --workspace --no-deps 0",
+    "reference": "wave/2026-10-05-w30 3659dd0"
+  }
+}
