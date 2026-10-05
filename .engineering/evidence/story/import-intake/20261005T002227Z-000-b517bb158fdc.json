@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T00:22:27Z",
+  "actor": "human:timo",
+  "artifact": "story:import-intake",
+  "kind": "story",
+  "revision": 15,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "base 2186a6a: intake_import red 2 (git commission/governor/loom deps, two copies of each in the lock); treatment: intake_import 4 passed; cargo tree -i one copy each; git log --follow reaches intake commits f9f0e7e, 7dc84ef; slice_run.rs:119 still asserts stopped: ApprovalRequired (repository.merge)",
+    "reference": "phase1-red.log vs scratch/gate/"
+  }
+}

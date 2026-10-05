@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T00:22:27Z",
+  "actor": "human:timo",
+  "artifact": "story:import-intake",
+  "kind": "story",
+  "revision": 15,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "19 gate steps exit 0 (ess validate x3, intake-slice, intake-cli, governor, ess_gate x2, drift x2, no-hand-model x2, conform, executor_port, docs --check x2, fmt, clippy, cargo test --workspace --no-fail-fast 984 passed 0 failed 4 ignored); integration tree equals the unit tree outside .engineering",
+    "reference": "wave/2026-10-05-w25"
+  }
+}

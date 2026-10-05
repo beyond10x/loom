@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:import-intake
 kind: story
-status: active
+status: implemented
 title: Intake's router, references, slice and CLI live in Loom; its model helper in llm
 relations:
 - decomposes: epic:runtime-consolidation
@@ -32,10 +32,11 @@ scope:
   path: docs/intake
 - confidence: inferred
   path: ess/intake
-revision: 15
+revision: 16
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-05T00:09:55Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-05T00:09:55Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-05T00:22:27Z", actor: "human:timo", revision: 16, decided_on: {"recorded":{"test_result":1,"verification":1}}}
 ---
 ## Outcome
 
