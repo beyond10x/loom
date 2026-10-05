@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T01:24:59Z",
+  "actor": "human:timo",
+  "artifact": "story:runtime-merge",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "19 gate steps exit 0 (clippy rerun after the adversary-file patch); cargo test --workspace --no-fail-fast 1005 passed 0 failed 4 ignored; integration tree equals the unit tree outside .engineering",
+    "reference": "wave/2026-10-05-w26"
+  }
+}

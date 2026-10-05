@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T01:24:59Z",
+  "actor": "human:timo",
+  "artifact": "story:runtime-merge",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "base 9f06e0b: Commission's loop ends at admission with nothing executed, intake-slice runs its own loop; treatment: runtime_effect 16 passed, slice_run 8 passed incl. the_slice_runs_on_commissions_runtime and the gate-before-budget case; 5 mutants each killed",
+    "reference": "phase1-red.log vs gate2.log, mutants2.log"
+  }
+}

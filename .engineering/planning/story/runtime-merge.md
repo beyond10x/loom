@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:runtime-merge
 kind: story
-status: active
+status: implemented
 title: 'One run loop: Commission''s runtime and intake''s slice loop are one crate'
 relations:
 - decomposes: epic:runtime-consolidation
@@ -22,10 +22,11 @@ scope:
   path: ess/commission
 - confidence: inferred
   path: generated/rust/commission
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-05T00:24:13Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-05T00:24:13Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-05T01:24:59Z", actor: "human:timo", revision: 10, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}}
 ---
 ## Outcome
 
