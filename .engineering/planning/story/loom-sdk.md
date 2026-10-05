@@ -2,12 +2,25 @@
 format: aep.planning-md/3
 id: story:loom-sdk
 kind: story
-status: draft
+status: active
 title: One SDK crate embeds the governed runtime, shown by one example
 relations:
 - decomposes: epic:runtime-consolidation
 - depends_on: story:runtime-merge
-revision: 1
+- serves: vision:governed-autonomy
+scope:
+- confidence: inferred
+  path: Cargo.lock
+- confidence: inferred
+  path: Cargo.toml
+- confidence: inferred
+  path: README.md
+- confidence: inferred
+  path: crates/loom-sdk
+revision: 7
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-05T01:38:43Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-10-05T01:38:43Z", actor: "human:timo", revision: 3}
 ---
 ## Outcome
 
