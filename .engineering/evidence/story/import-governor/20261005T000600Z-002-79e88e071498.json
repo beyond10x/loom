@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T00:06:00Z",
+  "actor": "human:timo",
+  "artifact": "story:import-governor",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "base 29e3a26: governor_import red 2 (git commission deps, two b10x-commission in lock); treatment 502db3f: governor_import 3 passed, cargo tree -i b10x-commission and -i b10x-canon one copy each, governor 22 tests same per-test results as governor 81fcc1e",
+    "reference": "phase1-red.log vs int-gate.log"
+  }
+}

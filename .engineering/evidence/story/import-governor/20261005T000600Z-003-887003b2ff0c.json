@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T00:06:00Z",
+  "actor": "human:timo",
+  "artifact": "story:import-governor",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "integration gate: 16 steps exit 0; cargo test --workspace --no-fail-fast 860 passed, 0 failed",
+    "reference": "wave/2026-10-05-w24 502db3f"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T00:06:00Z",
+  "actor": "human:timo",
+  "artifact": "story:canon-governor",
+  "kind": "story",
+  "revision": 1,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "re-filed from beyond10x/governor (implemented there); cargo test -p b10x-governor in Loom: 22 passed",
+    "reference": "wave/2026-10-05-w24 502db3f"
+  }
+}

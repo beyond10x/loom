@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:import-governor
 kind: story
-status: active
+status: implemented
 title: The governor crate lives in Loom with history over one Commission
 relations:
 - decomposes: epic:runtime-consolidation
@@ -17,10 +17,11 @@ scope:
   path: Cargo.toml
 - confidence: inferred
   path: crates/governor
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-04T23:48:13Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-04T23:48:13Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-05T00:06:01Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}}
 ---
 ## Outcome
 
