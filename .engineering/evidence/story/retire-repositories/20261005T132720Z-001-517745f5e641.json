@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T13:27:20Z",
+  "actor": "human:timo",
+  "artifact": "story:retire-repositories",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "Atlas main a84fe57b Gate: typed catalog, markdown, public portal, live Pages delivery all success",
+    "reference": "wave/2026-10-05-w39"
+  }
+}

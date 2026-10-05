@@ -66,6 +66,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | Ported Harness modules keep the import limits their crates had | `crates/loom-executor/tests/adversary_harness_port_boundaries.rs` (`the_boundaries_harness_enforced_by_crate_still_hold_between_modules`) |
 | Package and library names are the `loom-` names | `crates/loom-executor/tests/crate_names.rs` |
 | No manifest names an archived Commission, governor or intake repository | `crates/loom-executor/tests/governor_import.rs`, `intake_import.rs`, `commission_import.rs` |
+| A release tag equals the workspace version and has a CHANGELOG entry | `loom-xtask release-check`, run by `release.yml` (`crates/loom-xtask/tests/release_check.rs`) |
 
 ## ESS
 
@@ -229,10 +230,29 @@ Every commit and push is `b10x-bot[bot]`'s through `b10x-gates bot`. Every other
 
 ## Releases
 
-Loom is unreleased: workspace version `0.0.0`, no tag, no release workflow, nothing on a registry.
-Consumers pin a Git revision, and `CHANGELOG.md` collects under **Unreleased**. A first release
-starts with a release workflow; do not push a tag before one exists, because nothing would build or
-verify it.
+Loom releases from source at bare-version tags (`0.1.0`, no `v`); every crate inherits the
+workspace version and nothing is on a registry. Consumers pin `tag = "<version>"`, and
+`CHANGELOG.md` collects under **Unreleased** between releases. A release is:
+
+1. A release commit on `main` (through a wave or a bot pull request): `[workspace.package] version`
+   in `Cargo.toml`, `Cargo.lock`, and **Unreleased** turned into `## [<version>] - <date>` under an
+   empty **Unreleased**, opening with a one-paragraph summary fit for the release notes. README,
+   AGENTS.md and the site pages that name the version or a dependency line move with it.
+   `cargo run -q --locked -p loom-xtask -- release-check --tag <version>` passes on it.
+2. `check` and `Shared source gates` green on that commit.
+3. An annotated tag by `b10x-bot[bot]` on that commit: `b10x-gates bot … -- tag -a <version> -m
+   "Loom <version>" <commit>`, then `-- push origin <version>`.
+4. `release` (`.github/workflows/release.yml`) green on the tag. It runs `loom-xtask release-check`
+   (the tag equals the workspace version and `CHANGELOG.md` has its entry) and then `check.yml` on
+   the tagged commit. It is read-only, needs no secret and creates no release.
+5. The GitHub Release for the tag, created by the bot (`b10x-gates api --method POST --path
+   /repos/beyond10x/loom/releases`), named `<version>`, its notes the version's CHANGELOG entry.
+
+A release is finished when the tag, the green `release` run and the bot's GitHub Release with its
+notes are verified. A pushed tag whose `release` run is not green is queued, not released; never
+move or delete a pushed tag, fix forward with the next version.
+`crates/loom-xtask/tests/release_check.rs` holds the check, the workflow's shape, and that the
+README and site pin the workspace version as a tag.
 
 ## Documentation
 

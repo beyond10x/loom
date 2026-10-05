@@ -14,11 +14,11 @@ page walks through it. [Getting started](../getting-started.md) shows its output
 
 ## Depend on the SDK
 
-Nothing is on a registry. Depend on a Git revision:
+Nothing is on a registry. Depend on the release tag:
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", rev = "<commit>" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.1.0" }
 ```
 
 Rust code uses it as `loom_sdk`. It re-exports, under stable module names:

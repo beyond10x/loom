@@ -1,15 +1,34 @@
 # Changelog
 
-All notable changes to Loom are recorded here. Loom has no release yet: the workspace is at
-version `0.0.0`, nothing is on a registry, and consumers depend on it by Git revision. Entries
-accumulate under **Unreleased** until the first release tag.
+All notable changes to Loom are recorded here. Loom releases from source at bare-version tags such
+as `0.1.0`; nothing is on a registry, and consumers pin a tag (`tag = "0.1.0"`). Changes collect
+under **Unreleased** until the next release.
 
 ## [Unreleased]
 
-Loom became the one runtime repository (Atlas ADR 0090): Commission, the governor and intake moved
-in with their history, and their repositories are archived with a pointer here.
+### Security
+
+- The slice's own git calls run no workspace hook, no `core.fsmonitor` command and no signing
+  program. A case does not open on a workspace whose own git configuration names a program (a
+  filter driver, a credential helper, an SSH command and the like), and a later call is refused
+  (`ExecuteError::HostGit`) once that configuration, its includes or the git directory changed,
+  so a test command that writes `.git/hooks`, `.git/config` or `.git/commondir`, or an edit of
+  an included work-tree file, cannot make the slice's git run its code.
+
+## [0.1.0] - 2026-10-05
+
+The first release of Loom, the runtime for governed agents. `b10x-loom run` routes an intent to an
+engineering protocol, opens a governed case and runs it until it is blocked, and `b10x-loom-sdk`
+embeds the same runtime in an application. Loom became the one runtime repository (Atlas ADR 0090):
+Commission's contracts and runtime, the governor and intake moved in with their history, under
+`loom-` package names, and their repositories are archived with a pointer here. Depend on it with
+`tag = "0.1.0"`; nothing is on a registry.
 
 ### Added
+
+- Releases at bare-version tags: `.github/workflows/release.yml` runs on each pushed tag, fails
+  unless `loom-xtask release-check` finds the tag equal to the workspace version and a
+  `CHANGELOG.md` entry for it, and runs Loom's check on the tagged commit.
 
 - `b10x-loom run` (package `b10x-loom-cli`): routes an intent to an engineering protocol, opens a
   governed case on it and runs Loom until the run is blocked, printing each step and a last line
@@ -43,12 +62,6 @@ in with their history, and their repositories are archived with a pointer here.
 - The `intake.routing` ESS domain in `ess/intake/`, validated by `task check`.
 - JSON from a model or a provider nested deeper than 128 levels is refused with a typed error, in
   every build of the workspace.
-- The slice's own git calls run no workspace hook, no `core.fsmonitor` command and no signing
-  program. A case does not open on a workspace whose own git configuration names a program (a
-  filter driver, a credential helper, an SSH command and the like), and a later call is refused
-  (`ExecuteError::HostGit`) once that configuration, its includes or the git directory changed,
-  so a test command that writes `.git/hooks`, `.git/config` or `.git/commondir`, or an edit of
-  an included work-tree file, cannot make the slice's git run its code.
 - Documentation: a getting-started page, guides, and generated CLI and crate references on the
   site.
 
