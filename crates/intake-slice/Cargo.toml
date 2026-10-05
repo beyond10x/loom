@@ -1,0 +1,23 @@
+[package]
+name = "b10x-intake-slice"
+description = "The vertical slice: open a case on the picked protocol through the governor, run Loom over it and execute local actions until blocked (stories S3-S5). Temporary: Commission's local runtime loop replaces it."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "intake_slice"
+
+[dependencies]
+b10x-commission = { git = "https://github.com/beyond10x/commission", branch = "main" }
+b10x-els = { git = "https://github.com/beyond10x/els", rev = "ac7dd03" }
+b10x-governor = { git = "https://github.com/beyond10x/governor", rev = "81fcc1e" }
+b10x-intake-references = { path = "../intake-references" }
+b10x-intake-router = { path = "../intake-router" }
+b10x-llm-core = { git = "https://github.com/beyond10x/llm", tag = "0.1.6" }
+b10x-loom = { git = "https://github.com/beyond10x/loom", rev = "346cf43" }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1.53", features = ["rt"] }

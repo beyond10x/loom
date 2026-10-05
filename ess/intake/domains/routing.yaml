@@ -1,0 +1,106 @@
+domain: intake.routing
+
+types:
+  - name: intake.routing.IntentId
+    kind: newtype
+    of: Uuid
+
+  - name: intake.routing.ReferenceKind
+    kind: enum
+    # What a first-level extractor recognises in an intent. Story intent-references ships these
+    # kinds.
+    variants: [JiraIssue, SlackMessage, GitlabIssue, GitlabMergeRequest, GithubIssue, GithubPullRequest, Url]
+
+  - name: intake.routing.StopReason
+    kind: enum
+    # Why a slice run ended: the only useful action needs authority, nothing is admissible, the
+    # step budget ran out, the picked protocol has no local executor, or the router refused.
+    variants: [ApprovalRequired, NothingAdmissible, StepBudget, NoLocalExecutor, Refused]
+
+entities:
+  # What someone asked for, as given: a prompt, a request or a question.
+  - name: intake.routing.Intent
+    identity:
+      name: intent_id
+      type: intake.routing.IntentId
+    fields:
+      - name: text
+        type: String
+    relations:
+      - name: references
+        kind: owns
+        target: intake.routing.ExtractedReference
+        cardinality: many
+        via: intent_id
+      - name: pick
+        kind: owns
+        target: intake.routing.ProtocolPick
+        cardinality: one
+        via: intent_id
+    lifecycle:
+      initial: Received
+      states: [Received]
+      terminal: [Received]
+
+  # A key element found in the intent's text: a tracker key, a chat permalink, a merge request.
+  # It carries the canonical value only; fetching what it points at is the next node's work.
+  - name: intake.routing.ExtractedReference
+    identity:
+      name: reference_id
+      type: Uuid
+    fields:
+      - name: intent_id
+        type: intake.routing.IntentId
+      - name: kind
+        type: intake.routing.ReferenceKind
+      - name: value
+        type: String
+    lifecycle:
+      initial: Extracted
+      states: [Extracted]
+      terminal: [Extracted]
+
+  # The router's proposal: one protocol of the ELS registry, with its confidence and reasons.
+  # A proposal, never authority: whoever opens the case checks it.
+  - name: intake.routing.ProtocolPick
+    identity:
+      name: pick_id
+      type: Uuid
+    fields:
+      - name: intent_id
+        type: intake.routing.IntentId
+      - name: protocol
+        type: String
+      - name: confidence
+        type: Decimal
+      - name: reasons
+        type: List<String>
+    lifecycle:
+      initial: Proposed
+      states: [Proposed]
+      terminal: [Proposed]
+
+  # One run of the vertical slice over a picked protocol, ended for a stated reason.
+  - name: intake.routing.SliceRun
+    identity:
+      name: run_id
+      type: Uuid
+    fields:
+      - name: intent_id
+        type: intake.routing.IntentId
+      - name: protocol
+        type: String
+      - name: steps
+        type: Integer
+      - name: stop_reason
+        type: intake.routing.StopReason
+    relations:
+      - name: intent
+        kind: references
+        target: intake.routing.Intent
+        cardinality: one
+        via: intent_id
+    lifecycle:
+      initial: Ended
+      states: [Ended]
+      terminal: [Ended]
