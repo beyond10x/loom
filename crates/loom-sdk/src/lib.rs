@@ -42,4 +42,8 @@ pub mod intake {
 pub use b10x_loom_commission::ports::effect::EffectPort;
 pub use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked};
 pub use b10x_loom_executor::{ActionSelector, ArgumentGenerator, Loom};
+pub use b10x_loom_intake_slice::confinement::{
+    ConfinementError, SubstrateRunner, TestExecution, TestRunner,
+};
+pub use b10x_loom_intake_slice::executor::UnconfinedRunner;
 pub use loom_governor::{CanonGovernor, CaseStore, MemoryCaseStore};

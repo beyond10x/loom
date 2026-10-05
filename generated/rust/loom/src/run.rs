@@ -1538,16 +1538,14 @@ pub mod obligations {
         fn project_catalogue(&mut self, input: super::ProjectCatalogue) -> Result<super::ProjectCatalogueOutcome, crate::obligation::UnmetObligation>;
     }
 
-    /// The behaviour `loom.run.RecordTurn` — an implementation obligation.
+    /// The behaviour `loom.run.RecordTurn` — generated.
     ///
-    /// Why it is not generated: kept an obligation by `when_related:`, in `session-unknown`.
-    ///
-    /// Contract: given `loom.run.RecordTurn` input, decide and enact exactly one outcome. Selection precedence: on commands with `when_related:`, check `existing_instance` then `exists: false` before input-guarded refusals; choose the first declared input refusal whose guard holds; then check addressed-row existence (`unknown_instance`, and `existing_instance` on commands without `when_related:`); then the held state (`when_subject_state` and `when_subject`), with `wrong_state` only if the selected branch moves from a state the row does not hold; then accepting and external branches in declaration order. An accepting branch that moves nothing answers in every state. Related-presence predicates do not precede input-guarded refusals. Declared outcomes (declaration order, not selection precedence): `session-unknown` when no `loom.run.Session` carries the identity `input.session_id` names, error `loom.run.SessionNotFound`; `session-not-active` when the `loom.run.Session` that `input.session_id` names satisfies `state != Active`, error `loom.run.SessionNotActive`; `recorded` otherwise, creates `loom.run.Turn`, emits `loom.run.TurnRecorded`.
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
     pub trait RecordTurnBehavior {
         /// Decides and enacts exactly one declared outcome of `loom.run.RecordTurn`.
         ///
-        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
-        /// implementation never returns it.
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
         fn record_turn(&mut self, input: super::RecordTurn) -> Result<super::RecordTurnOutcome, crate::obligation::UnmetObligation>;
     }
 
@@ -1562,16 +1560,14 @@ pub mod obligations {
         fn release_session(&mut self, input: super::ReleaseSession) -> Result<super::ReleaseSessionOutcome, crate::obligation::UnmetObligation>;
     }
 
-    /// The behaviour `loom.run.RequestArguments` — an implementation obligation.
+    /// The behaviour `loom.run.RequestArguments` — generated.
     ///
-    /// Why it is not generated: kept an obligation by `when_related:`, in `selection-unknown`.
-    ///
-    /// Contract: given `loom.run.RequestArguments` input, decide and enact exactly one outcome. Selection precedence: on commands with `when_related:`, check `existing_instance` then `exists: false` before input-guarded refusals; choose the first declared input refusal whose guard holds; then check addressed-row existence (`unknown_instance`, and `existing_instance` on commands without `when_related:`); then the held state (`when_subject_state` and `when_subject`), with `wrong_state` only if the selected branch moves from a state the row does not hold; then accepting and external branches in declaration order. An accepting branch that moves nothing answers in every state. Related-presence predicates do not precede input-guarded refusals. Declared outcomes (declaration order, not selection precedence): `selection-unknown` when no `loom.run.Selection` carries the identity `input.selection_id` names, error `loom.run.SelectionNotFound`; `selection-not-selected` when the `loom.run.Selection` that `input.selection_id` names satisfies `state != Selected`, error `loom.run.SelectionNotSelected`; `requested` otherwise, creates `loom.run.ArgumentRequest`, emits `loom.run.ArgumentsRequested`.
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
     pub trait RequestArgumentsBehavior {
         /// Decides and enacts exactly one declared outcome of `loom.run.RequestArguments`.
         ///
-        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
-        /// implementation never returns it.
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
         fn request_arguments(&mut self, input: super::RequestArguments) -> Result<super::RequestArgumentsOutcome, crate::obligation::UnmetObligation>;
     }
 
@@ -1599,7 +1595,7 @@ pub mod obligations {
 
     /// The behaviour `loom.run.SelectAction` — an implementation obligation.
     ///
-    /// Why it is not generated: kept an obligation by `when_related:`, in `catalogue-unknown`.
+    /// Why it is not generated: kept an obligation by the guard `exists entry in entries: (entry.action == input.action)`, in `not-in-catalogue`.
     ///
     /// Contract: given `loom.run.SelectAction` input, decide and enact exactly one outcome. Selection precedence: on commands with `when_related:`, check `existing_instance` then `exists: false` before input-guarded refusals; choose the first declared input refusal whose guard holds; then check addressed-row existence (`unknown_instance`, and `existing_instance` on commands without `when_related:`); then the held state (`when_subject_state` and `when_subject`), with `wrong_state` only if the selected branch moves from a state the row does not hold; then accepting and external branches in declaration order. An accepting branch that moves nothing answers in every state. Related-presence predicates do not precede input-guarded refusals. Declared outcomes (declaration order, not selection precedence): `catalogue-unknown` when no `loom.run.ActionCatalogue` carries the identity `input.catalogue_id` names, error `loom.run.CatalogueNotFound`; `not-in-catalogue` when the `loom.run.ActionCatalogue` that `input.catalogue_id` names satisfies `not (exists entry in entries: (entry.action == input.action))`, error `loom.run.ActionNotInCatalogue`; `revision-mismatch` when the `loom.run.ActionCatalogue` that `input.catalogue_id` names satisfies `case_revision != input.case_revision`, error `loom.run.CatalogueRevisionMismatch`; `selected` otherwise, creates `loom.run.Selection`, emits `loom.run.ActionSelected`.
     pub trait SelectActionBehavior {
@@ -1648,18 +1644,6 @@ pub mod obligations {
     /// Each method returns the typed refusal naming what is owed — never a panic, never a guessed
     /// value — so a workspace built on this stub compiles and reports its own gaps.
     pub struct Unimplemented;
-
-    impl RecordTurnBehavior for Unimplemented {
-        fn record_turn(&mut self, _input: super::RecordTurn) -> Result<super::RecordTurnOutcome, crate::obligation::UnmetObligation> {
-            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "loom.run.RecordTurn" })
-        }
-    }
-
-    impl RequestArgumentsBehavior for Unimplemented {
-        fn request_arguments(&mut self, _input: super::RequestArguments) -> Result<super::RequestArgumentsOutcome, crate::obligation::UnmetObligation> {
-            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "loom.run.RequestArguments" })
-        }
-    }
 
     impl SelectActionBehavior for Unimplemented {
         fn select_action(&mut self, _input: super::SelectAction) -> Result<super::SelectActionOutcome, crate::obligation::UnmetObligation> {

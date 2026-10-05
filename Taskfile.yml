@@ -20,6 +20,7 @@ tasks:
       - task: commission:ess-gate
       - task: drift
       - task: commission:drift
+      - task: intake-drift
       - task: no-hand-model
       - task: commission:no-hand-model
       - task: commission:conform
@@ -38,7 +39,17 @@ tasks:
   intake-spec:
     desc: Validate intake's ESS specification.
     cmds:
-      - ess specify validate --path ess/intake
+      - ess specify validate --path ess/intake --strict-requires
+
+  intake-generate:
+    desc: Regenerate intake's Rust types.
+    cmds:
+      - cargo run -q --locked -p loom-xtask -- intake-generate
+
+  intake-drift:
+    desc: Fail on drift in intake's generated Rust model.
+    cmds:
+      - cargo run -q --locked -p loom-xtask -- intake-drift
 
   ess-gate:
     desc: ESS hard gate (Atlas ADR 0076) — validate, compile, synthesize with 0 refusals, no open question.

@@ -260,7 +260,9 @@ impl Fixture {
         case: &CaseId,
         test: TestCommand,
     ) -> LocalExecutor<'g, MemoryCaseStore> {
-        LocalExecutor::new(governor, case.clone(), &self.workspace, test)
+        LocalExecutor::new(governor, case.clone(), &self.workspace, test).with_runner(
+            std::sync::Arc::new(b10x_loom_intake_slice::executor::UnconfinedRunner),
+        )
     }
 
     /// After an edit: whatever the executor answered, the work tree holds no uncommitted change;

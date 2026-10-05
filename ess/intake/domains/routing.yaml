@@ -24,7 +24,7 @@ types:
     kind: enum
     # Why a slice run ended: the only useful action needs authority, nothing is admissible, the
     # step budget ran out, the picked protocol has no local executor, or the router refused.
-    variants: [ApprovalRequired, NothingAdmissible, StepBudget, NoLocalExecutor, Refused]
+    variants: [ApprovalRequired, NothingAdmissible, StepBudget, NoLocalExecutor, Refused, ConfinementUnavailable]
 
 entities:
   # What someone asked for, as given: a prompt, a request or a question.

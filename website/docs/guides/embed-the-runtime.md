@@ -33,6 +33,17 @@ Rust code uses it as `loom_sdk`. It re-exports, under stable module names:
 `run_until_blocked`, `LoopContext`, `LoopEnd`, `EffectPort`, `Loom`, `ActionSelector`,
 `ArgumentGenerator`, `CanonGovernor`, `CaseStore` and `MemoryCaseStore` are also at the top.
 
+Current source, after release 0.1.0, also exports `TestRunner`, `SubstrateRunner`,
+`UnconfinedRunner`, `TestExecution` and `ConfinementError`. `LocalExecutor::new` requires
+Substrate by default; `with_runner` accepts an explicit `Arc<dyn TestRunner>`.
+`SliceRequest.runner` selects the runner for the higher-level slice call. A runner is a trusted
+host port: its results become observations from which the verifier can submit evidence.
+
+An embedded host supplies an already delegated cgroup root to `SubstrateRunner::new`, or allows
+discovery of the current delegated root. Automatic systemd re-exec belongs to the CLI.
+The scripted SDK example explicitly uses `UnconfinedRunner` for its fixed local fixture;
+its output and test observations say `confinement: none`.
+
 ## What you supply, and what you get
 
 | You supply | Trait or type | In the example |

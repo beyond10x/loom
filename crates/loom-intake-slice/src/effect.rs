@@ -14,8 +14,8 @@
 //!
 //! It performs `repository.inspect`, `repository.edit` and `tests.run`, and only when the case's
 //! protocol is `software-change@1`: for any other protocol it performs nothing, so Commission's
-//! runtime ends the run with `NoPerformableAction` before the agent is asked. There is no sandbox
-//! (see [`crate::executor`]).
+//! runtime ends the run with `NoPerformableAction` before the agent is asked. The injected test
+//! runner confines executed tests (see [`crate::executor`]).
 //!
 //! The slice builds one in [`crate::run`]; an embedder builds one with [`LocalEffects::new`] over a
 //! [`Console`] of its own.
@@ -83,6 +83,10 @@ impl<'o> Console<'o> {
     pub fn take_failure(&self) -> Option<SliceError> {
         self.failure.borrow_mut().take()
     }
+
+    pub(crate) fn steps(&self) -> usize {
+        self.steps.get()
+    }
 }
 
 /// The local effect adapter (see the module documentation).
@@ -137,6 +141,11 @@ impl<'a, 'o, S: CaseStore> LocalEffects<'a, 'o, S> {
         })?;
         let report = match self.executor.execute(&proposal) {
             Ok(report) => report,
+            Err(ExecuteError::Confinement(refusal)) => {
+                self.console
+                    .write(|out| refuse(out, &self.briefing, action, &refusal.to_string()))?;
+                return Err(SliceError::Execute(ExecuteError::Confinement(refusal)));
+            }
             Err(
                 refused @ (ExecuteError::NotExecuted { .. }
                 | ExecuteError::OutsideWorkspace { .. }

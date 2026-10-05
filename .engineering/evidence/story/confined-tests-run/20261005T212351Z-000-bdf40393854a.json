@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T21:23:51Z",
+  "actor": "human:timo",
+  "artifact": "story:confined-tests-run",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "GREEN: task check; task plan (100 artifacts valid); task website; delegated confinement 1 passed, 0 failed, 0 ignored; live default Codex fixture ApprovalRequired",
+    "reference": "docs/qualification/2026-10-05-confined-tests.md"
+  }
+}

@@ -79,7 +79,10 @@ fn a_run_that_edits_and_commits_runs_no_workspace_hook_and_no_fsmonitor() {
         case.clone(),
         fixture.workspace(),
         TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
-    );
+    )
+    .with_runner(std::sync::Arc::new(
+        b10x_loom_intake_slice::executor::UnconfinedRunner,
+    ));
 
     let inspected = executor
         .execute(&proposal(
@@ -184,7 +187,10 @@ fn planted_by_the_test_command(fixture: &Fixture, plant: &str) -> Vec<String> {
         case.clone(),
         fixture.workspace(),
         TestCommand::new("sh", ["-c", plant]),
-    );
+    )
+    .with_runner(std::sync::Arc::new(
+        b10x_loom_intake_slice::executor::UnconfinedRunner,
+    ));
     let run = executor
         .execute(&proposal("tests.run", &json!({})))
         .expect("tests.run is performed");
@@ -246,7 +252,10 @@ fn a_workspace_no_case_opened_is_refused_host_git() {
         case,
         unopened.workspace(),
         TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
-    );
+    )
+    .with_runner(std::sync::Arc::new(
+        b10x_loom_intake_slice::executor::UnconfinedRunner,
+    ));
     for (action, arguments) in [
         ("repository.inspect", json!({"paths": ["check.txt"]})),
         (
@@ -318,7 +327,10 @@ fn a_commondir_a_test_plants_is_refused() {
         case,
         fixture.workspace(),
         TestCommand::new("sh", ["-c", plant.as_str()]),
-    );
+    )
+    .with_runner(std::sync::Arc::new(
+        b10x_loom_intake_slice::executor::UnconfinedRunner,
+    ));
     let run = executor
         .execute(&proposal("tests.run", &json!({})))
         .expect("tests.run is performed");
@@ -370,7 +382,10 @@ fn a_linked_worktree_opens_and_commits() {
         case,
         &linked,
         TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
-    );
+    )
+    .with_runner(std::sync::Arc::new(
+        b10x_loom_intake_slice::executor::UnconfinedRunner,
+    ));
     let edited = executor
         .execute(&proposal(
             "repository.edit",
@@ -433,7 +448,57 @@ fn every_host_git_command_goes_through_the_one_helper() {
         assert!(helper.contains(flag), "`{HELPER}` does not set `{flag}`");
     }
 
-    let mut manifests = vec![root.join("Cargo.toml"), root.join("Cargo.lock")];
+    // Substrate's pinned host driver implements its own Git source service. Loom never
+    // enables that service. Every dependency path outside that exact foundation still
+    // must be free of a Git library, including renamed and transitive dependencies.
+    let metadata = Command::new(env!("CARGO"))
+        .args(["metadata", "--format-version", "1", "--locked", "--offline"])
+        .current_dir(&root)
+        .output()
+        .expect("cargo metadata");
+    assert!(
+        metadata.status.success(),
+        "{}",
+        String::from_utf8_lossy(&metadata.stderr)
+    );
+    let metadata: serde_json::Value = serde_json::from_slice(&metadata.stdout).unwrap();
+    let packages = metadata["packages"].as_array().unwrap();
+    let nodes = metadata["resolve"]["nodes"].as_array().unwrap();
+    let mut pending: Vec<String> = metadata["workspace_members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|id| id.as_str().unwrap().to_owned())
+        .collect();
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        let package = packages.iter().find(|package| package["id"] == id).unwrap();
+        let name = package["name"].as_str().unwrap();
+        if name == "b10x-substrate-host" {
+            assert_eq!(package["version"], "0.7.10");
+            assert_eq!(
+                package["source"],
+                "git+https://github.com/beyond10x/substrate?rev=65304edf6ebdf4a95f9c2c6138b0c20ea47d157e#65304edf6ebdf4a95f9c2c6138b0c20ea47d157e"
+            );
+            continue;
+        }
+        assert!(
+            git_library(&format!("name = \"{name}\"")).is_none(),
+            "{name} is reachable outside the pinned Substrate host"
+        );
+        let node = nodes.iter().find(|node| node["id"] == id).unwrap();
+        pending.extend(
+            node["dependencies"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|id| id.as_str().unwrap().to_owned()),
+        );
+    }
+    let mut manifests = vec![root.join("Cargo.toml")];
     for entry in std::fs::read_dir(root.join("crates")).expect("read crates/") {
         let manifest = entry.expect("a crates/ entry").path().join("Cargo.toml");
         if manifest.is_file() {

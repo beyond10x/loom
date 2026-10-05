@@ -203,12 +203,7 @@
       "kind": "command_behavior",
       "source": "loom.run.RecordTurn",
       "disposition": {
-        "disposition": "obligation",
-        "reason": {
-          "class": "undetermined",
-          "construct": "`when_related:`, in `session-unknown`"
-        },
-        "contract": "given `loom.run.RecordTurn` input, decide and enact exactly one outcome. Selection precedence: on commands with `when_related:`, check `existing_instance` then `exists: false` before input-guarded refusals; choose the first declared input refusal whose guard holds; then check addressed-row existence (`unknown_instance`, and `existing_instance` on commands without `when_related:`); then the held state (`when_subject_state` and `when_subject`), with `wrong_state` only if the selected branch moves from a state the row does not hold; then accepting and external branches in declaration order. An accepting branch that moves nothing answers in every state. Related-presence predicates do not precede input-guarded refusals. Declared outcomes (declaration order, not selection precedence): `session-unknown` when no `loom.run.Session` carries the identity `input.session_id` names, error `loom.run.SessionNotFound`; `session-not-active` when the `loom.run.Session` that `input.session_id` names satisfies `state != Active`, error `loom.run.SessionNotActive`; `recorded` otherwise, creates `loom.run.Turn`, emits `loom.run.TurnRecorded`"
+        "disposition": "generated"
       }
     },
     {
@@ -236,12 +231,7 @@
       "kind": "command_behavior",
       "source": "loom.run.RequestArguments",
       "disposition": {
-        "disposition": "obligation",
-        "reason": {
-          "class": "undetermined",
-          "construct": "`when_related:`, in `selection-unknown`"
-        },
-        "contract": "given `loom.run.RequestArguments` input, decide and enact exactly one outcome. Selection precedence: on commands with `when_related:`, check `existing_instance` then `exists: false` before input-guarded refusals; choose the first declared input refusal whose guard holds; then check addressed-row existence (`unknown_instance`, and `existing_instance` on commands without `when_related:`); then the held state (`when_subject_state` and `when_subject`), with `wrong_state` only if the selected branch moves from a state the row does not hold; then accepting and external branches in declaration order. An accepting branch that moves nothing answers in every state. Related-presence predicates do not precede input-guarded refusals. Declared outcomes (declaration order, not selection precedence): `selection-unknown` when no `loom.run.Selection` carries the identity `input.selection_id` names, error `loom.run.SelectionNotFound`; `selection-not-selected` when the `loom.run.Selection` that `input.selection_id` names satisfies `state != Selected`, error `loom.run.SelectionNotSelected`; `requested` otherwise, creates `loom.run.ArgumentRequest`, emits `loom.run.ArgumentsRequested`"
+        "disposition": "generated"
       }
     },
     {
@@ -286,7 +276,7 @@
         "disposition": "obligation",
         "reason": {
           "class": "undetermined",
-          "construct": "`when_related:`, in `catalogue-unknown`"
+          "construct": "the guard `exists entry in entries: (entry.action == input.action)`, in `not-in-catalogue`"
         },
         "contract": "given `loom.run.SelectAction` input, decide and enact exactly one outcome. Selection precedence: on commands with `when_related:`, check `existing_instance` then `exists: false` before input-guarded refusals; choose the first declared input refusal whose guard holds; then check addressed-row existence (`unknown_instance`, and `existing_instance` on commands without `when_related:`); then the held state (`when_subject_state` and `when_subject`), with `wrong_state` only if the selected branch moves from a state the row does not hold; then accepting and external branches in declaration order. An accepting branch that moves nothing answers in every state. Related-presence predicates do not precede input-guarded refusals. Declared outcomes (declaration order, not selection precedence): `catalogue-unknown` when no `loom.run.ActionCatalogue` carries the identity `input.catalogue_id` names, error `loom.run.CatalogueNotFound`; `not-in-catalogue` when the `loom.run.ActionCatalogue` that `input.catalogue_id` names satisfies `not (exists entry in entries: (entry.action == input.action))`, error `loom.run.ActionNotInCatalogue`; `revision-mismatch` when the `loom.run.ActionCatalogue` that `input.catalogue_id` names satisfies `case_revision != input.case_revision`, error `loom.run.CatalogueRevisionMismatch`; `selected` otherwise, creates `loom.run.Selection`, emits `loom.run.ActionSelected`"
       }

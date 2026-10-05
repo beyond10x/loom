@@ -66,6 +66,16 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Regenerate intake's Rust model, including the confinement contract.
+    IntakeGenerate {
+        #[command(flatten)]
+        scratch: Scratch,
+    },
+    /// Check intake's generated Rust model against its specification.
+    IntakeDrift {
+        #[command(flatten)]
+        scratch: Scratch,
+    },
     /// Rewrite `generated/rust/loom/` from a fresh synthesis of `ess/`.
     Generate {
         #[command(flatten)]
@@ -125,12 +135,29 @@ fn run(cli: Cli) -> Result<(), String> {
         None => find_root()?,
     };
     match cli.command {
-        Command::Generate { scratch } => generate(&root, &cli.ess, &scratch),
+        Command::Generate { scratch } => {
+            generate(&root, &cli.ess, &scratch, SPECIFICATION, GENERATED)
+        }
+        Command::IntakeGenerate { scratch } => generate(
+            &root,
+            &cli.ess,
+            &scratch,
+            "ess/intake",
+            "generated/rust/intake",
+        ),
+        Command::IntakeDrift { scratch } => drift(
+            &root,
+            &cli.ess,
+            &scratch,
+            &root.join("generated/rust/intake"),
+            "ess/intake",
+        ),
         Command::Drift { scratch, generated } => drift(
             &root,
             &cli.ess,
             &scratch,
             &generated.unwrap_or_else(|| root.join(GENERATED)),
+            SPECIFICATION,
         ),
         Command::NoHandModel { src, generated } => no_hand_model(
             &root,
@@ -164,9 +191,15 @@ fn find_root() -> Result<PathBuf, String> {
 
 /// Synthesizes into scratch, stages the complete tree beside the target, then swaps it in by
 /// rename. The committed tree is never removed before its replacement is complete.
-fn generate(root: &Path, ess: &Path, scratch: &Scratch) -> Result<(), String> {
-    let fresh = Regeneration::synthesize(root, ess, scratch)?;
-    let target = root.join(GENERATED);
+fn generate(
+    root: &Path,
+    ess: &Path,
+    scratch: &Scratch,
+    specification: &str,
+    generated: &str,
+) -> Result<(), String> {
+    let fresh = Regeneration::synthesize(root, ess, scratch, specification)?;
+    let target = root.join(generated);
     let parent = target
         .parent()
         .ok_or_else(|| format!("{} has no parent", target.display()))?;
@@ -204,12 +237,12 @@ fn generate(root: &Path, ess: &Path, scratch: &Scratch) -> Result<(), String> {
         }
         fs::remove_dir_all(&old).map_err(|e| {
             format!(
-                "{GENERATED} regenerated, but the previous tree at {} could not be removed: {e}",
+                "{generated} regenerated, but the previous tree at {} could not be removed: {e}",
                 old.display()
             )
         })?;
     }
-    println!("{GENERATED}: regenerated from {SPECIFICATION}/");
+    println!("{generated}: regenerated from {specification}/");
     Ok(())
 }
 
@@ -235,15 +268,21 @@ impl Drop for Staging {
     }
 }
 
-fn drift(root: &Path, ess: &Path, scratch: &Scratch, committed: &Path) -> Result<(), String> {
-    let fresh = Regeneration::synthesize(root, ess, scratch)?;
+fn drift(
+    root: &Path,
+    ess: &Path,
+    scratch: &Scratch,
+    committed: &Path,
+    specification: &str,
+) -> Result<(), String> {
+    let fresh = Regeneration::synthesize(root, ess, scratch, specification)?;
     let differences = compare_trees(&fresh.dir, committed)?;
     if differences.is_empty() {
-        println!("{}: no drift from {SPECIFICATION}/", committed.display());
+        println!("{}: no drift from {specification}/", committed.display());
         return Ok(());
     }
     let mut message = format!(
-        "{} drifted from a fresh synthesis of {SPECIFICATION}/ (run `task generate`):",
+        "{} drifted from a fresh synthesis of {specification}/ (regenerate this model):",
         committed.display()
     );
     for difference in &differences {
@@ -259,7 +298,12 @@ struct Regeneration {
 }
 
 impl Regeneration {
-    fn synthesize(root: &Path, ess: &Path, scratch: &Scratch) -> Result<Self, String> {
+    fn synthesize(
+        root: &Path,
+        ess: &Path,
+        scratch: &Scratch,
+        specification: &str,
+    ) -> Result<Self, String> {
         let scratch = match &scratch.scratch {
             Some(dir) => dir.clone(),
             None => default_scratch(root),
@@ -275,7 +319,7 @@ impl Regeneration {
         };
         let output = Process::new(ess)
             .args(["generate", "synthesize", "--path"])
-            .arg(root.join(SPECIFICATION))
+            .arg(root.join(specification))
             .args(["--target", "rust", "--layout", "crate", "--out"])
             .arg(&regeneration.dir)
             .output()

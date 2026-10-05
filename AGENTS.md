@@ -105,14 +105,17 @@ changing `ess/`. Every story names that change and that test in its `## ESS firs
 change with no behaviour change is exempt, and its story says so.
 
 `ess_gate.rs` (both copies) reads this section and fails when a phrase it checks is gone; reword
-with the tests open. CI installs `ess` 0.52.0 (`.github/workflows/check.yml`); move that pin when a
+with the tests open. CI installs `ess` 0.53.0 (`.github/workflows/check.yml`); move that pin when a
 newer ESS ships.
 
 ## Gate
 
-Needs Rust, Task and `ess`. Before a change is reported done, in this order:
+Needs Rust, Task, `ess` and bubblewrap (`/usr/bin/bwrap`). CI installs the backend before
+running the delegation-refusal tests. Run `cargo fetch --locked` before the gate, as CI does:
+the offline dependency guard inspects the full graph, including platform-specific crates.
+Before a change is reported done, in this order:
 
-1. `task check`: the three specification validations, both ESS gates, both drift checks, both
+1. `task check`: the three specification validations, both ESS gates, all three drift checks, both
    no-hand-model checks, Commission's conformance suite, the dependency guard,
    `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
    `cargo test --workspace --locked`, then `task docs-check` and `task commission:docs-drift`.
@@ -141,6 +144,7 @@ environment wins, so a worktree that must not share that build directory sets it
 |---|---|---|---|
 | `generated/rust/loom/` | `ess generate synthesize` over `ess/`, via `loom-xtask` | `task generate` | `task drift` |
 | `generated/rust/commission/` | the same over `ess/commission/`, via `loom-commission-xtask` | `task commission:generate` | `task commission:drift` |
+| `generated/rust/intake/` | synthesis over `ess/intake/`, via `loom-xtask` | `task intake-generate` | `task intake-drift` |
 | `website/docs/reference/cli.md` | `loom-docs`, from `b10x_loom_cli::Cli` (`crates/loom-cli/src/lib.rs`) | `task docs-generate` | `task docs-check` |
 | `website/docs/reference/crates.md` | `loom-docs`, from `cargo metadata` | `task docs-generate` | `task docs-check` |
 | `website/docs/reference/ess/`, `website/data/ess/` | `loom-docs`, from `ess/` and `ess/intake/` | `task docs-generate` | `task docs-check` |
@@ -196,8 +200,18 @@ crate that adds Canon uses the same reference.
 - `b10x-loom-cli` is `b10x-loom`. Its clap definition is the library (`src/lib.rs`, `Cli`), which
   `loom-docs` renders.
 
-There is no sandbox. `tests.run` runs model-edited code with the operator's rights and environment;
-the path checks bound what the executor writes, not what that code does. The slice's own git calls
+The injected `TestRunner` defaults to Substrate 0.7.10, with host and wire pinned together.
+Tests get no network, a cleared environment, read-only source and Rust toolchain, writes only
+under `target/`, and resource bounds. Mount dependency-cache subdirectories only; never Cargo's
+credential/config files or the operator's home. Dependencies are prefetched explicitly by the
+operator; the private Cargo home is offline. A missing guarantee stops with a typed refusal;
+never silently switch to `UnconfinedRunner`. Test fixtures opt out explicitly.
+Validate writable artifacts before every launch: external hardlink aliases and special files
+are invalid scopes; internal Cargo hardlinks remain supported.
+The CLI attempts one delegated user systemd scope and guards against re-exec loops.
+Every executed test observation includes the actual applied confinement; refused launches produce
+no test observation or passing evidence. Real delegated tests must run to qualify confinement;
+a skip with a named missing prerequisite establishes no qualification. The slice's own git calls
 go through one helper, `crates/loom-intake-slice/src/git.rs`: no workspace hook, `core.fsmonitor`
 command or signing program runs, a case does not open on a workspace whose own configuration
 names a program, and a call is refused once that configuration, its includes or the git directory

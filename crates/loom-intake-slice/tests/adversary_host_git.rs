@@ -58,7 +58,10 @@ fn adversary_a_second_run_on_a_workspace_a_test_planted_runs_none_of_the_plant()
             case,
             fixture.workspace(),
             TestCommand::new("sh", ["-c", plant.as_str()]),
-        );
+        )
+        .with_runner(std::sync::Arc::new(
+            b10x_loom_intake_slice::executor::UnconfinedRunner,
+        ));
         let run = executor
             .execute(&proposal("tests.run", &json!({})))
             .expect("run 1's tests.run is performed");
@@ -84,6 +87,9 @@ fn adversary_a_second_run_on_a_workspace_a_test_planted_runs_none_of_the_plant()
             fixture.workspace(),
             TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
         )
+        .with_runner(std::sync::Arc::new(
+            b10x_loom_intake_slice::executor::UnconfinedRunner,
+        ))
         .execute(&edit())
     });
     assert_eq!(
@@ -121,7 +127,10 @@ fn adversary_a_commondir_a_test_plants_moves_the_config_past_the_digest() {
         case,
         fixture.workspace(),
         TestCommand::new("sh", ["-c", plant.as_str()]),
-    );
+    )
+    .with_runner(std::sync::Arc::new(
+        b10x_loom_intake_slice::executor::UnconfinedRunner,
+    ));
     let run = executor
         .execute(&proposal("tests.run", &json!({})))
         .expect("tests.run is performed");
@@ -166,7 +175,10 @@ fn adversary_an_included_work_tree_config_the_model_edits_runs_nothing() {
         case,
         fixture.workspace(),
         TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
-    );
+    )
+    .with_runner(std::sync::Arc::new(
+        b10x_loom_intake_slice::executor::UnconfinedRunner,
+    ));
     let edited = executor.execute(&proposal(
         "repository.edit",
         &json!({

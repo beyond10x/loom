@@ -50,11 +50,10 @@
 //! now names a program (a work-tree file it includes, rewritten by an edit), or when no case
 //! opened on the workspace in this process. An edit refused so writes nothing and commits nothing.
 //!
-//! # Known limit: no sandbox
+//! # Test confinement
 //!
-//! The test command runs model-edited code with the operator's rights, the operator's environment
-//! and network access. The slice has no sandbox; run it only on workspaces and models trusted with
-//! that.
+//! Test commands use the injected runner, defaulting to Substrate. Only an explicitly supplied
+//! unconfined runner uses the operator's environment and rights.
 //!
 //! # Trust
 //!
@@ -84,7 +83,9 @@ use loom_governor::{CanonGovernor, CaseStore};
 use sha2::{Digest, Sha256};
 
 use crate::case::{self, CaseError, REDIRECTING_GIT_VARIABLES};
+use crate::confinement::{ConfinementError, SubstrateRunner, TestExecution, TestRunner};
 use crate::git::{self, HostGitRefusal};
+use intake_model::confinement::{AppliedConfinement, Backend, ConfinementRefusal};
 
 /// `repository.inspect`.
 pub const INSPECT: &str = "repository.inspect";
@@ -128,6 +129,21 @@ impl TestCommand {
         Self { timeout, ..self }
     }
 
+    /// The executable selected by the operator.
+    pub fn program(&self) -> &OsStr {
+        &self.program
+    }
+
+    /// The operator's arguments, without shell expansion.
+    pub fn args(&self) -> &[OsString] {
+        &self.args
+    }
+
+    /// The maximum duration of one execution.
+    pub fn timeout(&self) -> Duration {
+        self.timeout
+    }
+
     /// The command as text, for observations and reports.
     fn describe(&self) -> Vec<String> {
         std::iter::once(&self.program)
@@ -157,6 +173,7 @@ pub struct TestRun {
     timed_out: bool,
     timeout: Duration,
     output: String,
+    applied: Box<AppliedConfinement>,
 }
 
 impl TestRun {
@@ -189,6 +206,11 @@ impl TestRun {
     /// Whether the command was killed at its timeout.
     pub fn timed_out(&self) -> bool {
         self.timed_out
+    }
+
+    /// The confinement actually applied to this execution.
+    pub fn applied_confinement(&self) -> &AppliedConfinement {
+        &self.applied
     }
 }
 
@@ -227,7 +249,12 @@ impl fmt::Display for Report {
                 if run.implementation.is_none() {
                     f.write_str(" on a work tree with uncommitted changes")?;
                 }
-                write!(f, "\n{}", run.output)
+                write!(
+                    f,
+                    "\nconfinement: {}\n{}",
+                    backend_name(run.applied.backend),
+                    run.output
+                )
             }
         }
     }
@@ -236,6 +263,8 @@ impl fmt::Display for Report {
 /// Why an action was not performed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExecuteError {
+    /// No test was launched under the requested confinement.
+    Confinement(ConfinementError),
     /// The slice never executes `action`.
     NotExecuted { action: String },
     /// `path` does not name a file inside the workspace.
@@ -258,6 +287,7 @@ pub enum ExecuteError {
 impl fmt::Display for ExecuteError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Confinement(error) => error.fmt(f),
             Self::NotExecuted { action } => write!(f, "the slice never executes `{action}`"),
             Self::OutsideWorkspace { path } => write!(f, "`{path}` is outside the workspace"),
             Self::Ignored { path } => write!(f, "`{path}` is ignored by the workspace's git"),
@@ -316,6 +346,7 @@ pub struct LocalExecutor<'g, S> {
     case: CaseId,
     workspace: PathBuf,
     test: TestCommand,
+    runner: Arc<dyn TestRunner>,
 }
 
 impl<'g, S: CaseStore> LocalExecutor<'g, S> {
@@ -331,7 +362,14 @@ impl<'g, S: CaseStore> LocalExecutor<'g, S> {
             case,
             workspace: workspace.into(),
             test,
+            runner: Arc::new(SubstrateRunner::new(None)),
         }
+    }
+
+    /// Select an explicit test runner. The default constructor requires Substrate.
+    pub fn with_runner(mut self, runner: Arc<dyn TestRunner>) -> Self {
+        self.runner = runner;
+        self
     }
 
     /// Performs `proposal`, or refuses it (see the module documentation).
@@ -445,7 +483,10 @@ impl<'g, S: CaseStore> LocalExecutor<'g, S> {
             .governor
             .current_revision(&self.case)
             .map_err(ExecuteError::Governor)?;
-        let finished = run_bounded(&self.test, root)?;
+        let finished = self
+            .runner
+            .run(&self.test, root)
+            .map_err(ExecuteError::Confinement)?;
         let exit_code = finished.exit_code;
         let observation = ObservationId(fresh_uuid("observation", &self.case.0));
         let mut payload = vec![
@@ -467,6 +508,7 @@ impl<'g, S: CaseStore> LocalExecutor<'g, S> {
             implementation.clone().map_or(Value::Null, Value::Text),
         ));
         payload.push(("timed_out".to_owned(), Value::Bool(finished.timed_out)));
+        payload.push(("confinement".to_owned(), observation_confinement(&finished)));
         self.governor
             .observe(Observation::new(ObservationData {
                 observation_id: observation.clone(),
@@ -485,6 +527,7 @@ impl<'g, S: CaseStore> LocalExecutor<'g, S> {
             timed_out: finished.timed_out,
             timeout: self.test.timeout,
             output: finished.output,
+            applied: Box::new(finished.applied),
         }))
     }
 }
@@ -646,6 +689,84 @@ fn refuse_ignored(root: &Path, relatives: &[&OsStr]) -> Result<(), ExecuteError>
 
 /// How long the readers of a finished command's output are waited for.
 const OUTPUT_GRACE: Duration = Duration::from_secs(2);
+
+/// Explicit opt-out for trusted test commands; never selected as a fallback.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UnconfinedRunner;
+
+impl TestRunner for UnconfinedRunner {
+    fn backend(&self) -> Backend {
+        Backend::None
+    }
+
+    fn run(&self, command: &TestCommand, root: &Path) -> Result<TestExecution, ConfinementError> {
+        let finished = run_bounded(command, root).map_err(|error| ConfinementError {
+            reason: ConfinementRefusal::CapabilityUnserved,
+            detail: error.to_string(),
+        })?;
+        Ok(TestExecution {
+            exit_code: finished.exit_code,
+            timed_out: finished.timed_out,
+            output: finished.output,
+            applied: AppliedConfinement {
+                backend: Backend::None,
+                profile_digest: String::new(),
+                capability_snapshot: String::new(),
+                cgroup: String::new(),
+                filesystem: "unconfined".to_owned(),
+                network: "unconfined".to_owned(),
+                profile: "none".to_owned(),
+                writable_scopes: Vec::new(),
+                read_only_roots: Vec::new(),
+            },
+            driver_record: None,
+        })
+    }
+}
+
+/// Stable spelling for user output and observation payloads.
+pub fn backend_name(backend: Backend) -> &'static str {
+    match backend {
+        Backend::Substrate => "substrate",
+        Backend::None => "none",
+    }
+}
+
+fn observation_confinement(execution: &TestExecution) -> Value {
+    let applied = &execution.applied;
+    let record = serde_json::json!({
+        "backend": backend_name(applied.backend),
+        "profile_digest": applied.profile_digest,
+        "capability_snapshot": applied.capability_snapshot,
+        "cgroup": applied.cgroup,
+        "filesystem": applied.filesystem,
+        "network": applied.network,
+        "profile": applied.profile,
+        "writable_scopes": applied.writable_scopes,
+        "read_only_roots": applied.read_only_roots.iter().map(|root|
+            serde_json::json!({"host_path": root.host_path, "mount": root.mount})
+        ).collect::<Vec<_>>(),
+        "driver_record": execution.driver_record,
+    });
+    fn convert(value: serde_json::Value) -> Value {
+        match value {
+            serde_json::Value::Null => Value::Null,
+            serde_json::Value::Bool(value) => Value::Bool(value),
+            serde_json::Value::Number(value) => Value::Number(value.to_string()),
+            serde_json::Value::String(value) => Value::Text(value),
+            serde_json::Value::Array(values) => {
+                Value::Array(values.into_iter().map(convert).collect())
+            }
+            serde_json::Value::Object(values) => Value::Object(
+                values
+                    .into_iter()
+                    .map(|(key, value)| (key, convert(value)))
+                    .collect(),
+            ),
+        }
+    }
+    convert(record)
+}
 
 /// A test command that ended, by itself or at its timeout.
 struct Finished {
