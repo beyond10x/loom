@@ -25,9 +25,11 @@
 //! them still reads the workspace.
 //!
 //! Every git call is host git ([`crate::git`]): no hook, no fsmonitor and no signing program runs.
-//! [`open`] records the workspace's git configuration files once it has read `HEAD`;
-//! [`report_head`] is refused as [`CaseError::HostGit`] when they changed since, or when no case
-//! opened on the workspace in this process. Git otherwise runs with the operator's normal
+//! [`open`] is refused as [`CaseError::HostGit`] when the workspace's own git configuration names a
+//! program (a filter driver, a credential helper, an SSH command and the like); otherwise it
+//! records the workspace's git directories and configuration files once it has read `HEAD`.
+//! [`report_head`] is refused the same way when they changed since, or when no case opened on the
+//! workspace in this process. Git otherwise runs with the operator's normal
 //! configuration.
 
 use std::collections::BTreeMap;
@@ -239,11 +241,9 @@ fn git(dir: &Path, args: &[&str], calls: Calls) -> Result<String, CaseError> {
 fn git_bytes(dir: &Path, args: &[&str], calls: Calls) -> Result<Vec<u8>, CaseError> {
     let mut git = match calls {
         Calls::Opening => crate::git::opening(dir),
-        Calls::Recorded => crate::git::recorded(dir),
-    }
-    .map_err(CaseError::HostGit)?;
+        Calls::Recorded => crate::git::recorded(dir).map_err(CaseError::HostGit)?,
+    };
     let output = git
-        .command()
         .args(args)
         .output()
         .map_err(|error| CaseError::Workspace {

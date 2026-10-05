@@ -44,9 +44,11 @@ in with their history, and their repositories are archived with a pointer here.
 - JSON from a model or a provider nested deeper than 128 levels is refused with a typed error, in
   every build of the workspace.
 - The slice's own git calls run no workspace hook, no `core.fsmonitor` command and no signing
-  program, and are refused (`ExecuteError::HostGit`) once the workspace's git configuration changed
-  since the case opened, so a test command that writes `.git/hooks` or `.git/config` cannot make
-  the slice's git run its code.
+  program. A case does not open on a workspace whose own git configuration names a program (a
+  filter driver, a credential helper, an SSH command and the like), and a later call is refused
+  (`ExecuteError::HostGit`) once that configuration, its includes or the git directory changed,
+  so a test command that writes `.git/hooks`, `.git/config` or `.git/commondir`, or an edit of
+  an included work-tree file, cannot make the slice's git run its code.
 - Documentation: a getting-started page, guides, and generated CLI and crate references on the
   site.
 

@@ -4,10 +4,11 @@
 //! `.git` sits inside the work tree a test command may write, so the code a model edited can plant
 //! a hook in `.git/hooks` or a `core.fsmonitor` command in `.git/config`, and the next git call
 //! Loom makes on the host would run it as the operator. Every git command Loom runs for a run
-//! therefore carries `-c core.hooksPath=<an empty directory Loom owns> -c core.fsmonitor=false`,
-//! through one helper.
+//! therefore carries `-c core.hooksPath=/dev/null -c core.fsmonitor=false` and the other
+//! overrides in `crate::git`, through one helper, which also refuses a workspace whose own
+//! configuration names a program or changed since the case opened.
 //!
-//! Two cases hold that:
+//! The two cases the story started with; the others below each name what they plant:
 //!
 //! - [`a_run_that_edits_and_commits_runs_no_workspace_hook_and_no_fsmonitor`]: a fixture workspace
 //!   whose local configuration points `core.hooksPath` at `.git/hooks` (so the operator's global
@@ -269,6 +270,114 @@ fn a_workspace_no_case_opened_is_refused_host_git() {
         "broken\n",
         "a refused edit wrote"
     );
+}
+
+/// A workspace whose own configuration already names a program when the case opens is refused at
+/// open, naming the key; keys the slice overrides on its command line (`core.hooksPath`,
+/// `core.fsmonitor`) are not, as the first case shows.
+#[test]
+fn a_program_key_in_the_workspace_config_refuses_the_open() {
+    for (key, listed) in [
+        ("core.sshCommand", "core.sshcommand"),
+        ("filter.lfs.smudge", "filter.lfs.smudge"),
+        ("credential.helper", "credential.helper"),
+    ] {
+        let fixture = Fixture::unplanted();
+        let program = fixture.planted("planted", "exit 0");
+        fixture.git(&["config", key, &program.to_string_lossy()]);
+        let governor = CanonGovernor::new(MemoryCaseStore::default());
+        let opened = case::open(&governor, PICK, INTENT, fixture.workspace());
+        assert!(
+            matches!(
+                &opened,
+                Err(case::CaseError::HostGit(HostGitRefusal::ProgramKey { key, scope, .. }))
+                    if key == listed && scope == "local"
+            ),
+            "a local `{key}` refuses the open: {opened:?}"
+        );
+        assert!(fixture.markers().is_empty(), "{:?}", fixture.markers());
+    }
+}
+
+/// A test that writes `.git/commondir` moves git's common directory (its configuration, objects and
+/// refs) without changing a byte of `.git/config`. Here the new common directory is a plain copy,
+/// with no program key for the configuration scan to find: the move alone refuses the next call.
+#[test]
+fn a_commondir_a_test_plants_is_refused() {
+    let fixture = Fixture::unplanted();
+    let first = fixture.head();
+    let common = fixture.root.join("common");
+    let plant = format!(
+        "cp -R .git '{common}' && echo '{common}' > .git/commondir",
+        common = common.display()
+    );
+    let governor = CanonGovernor::new(MemoryCaseStore::default());
+    let case = case::open(&governor, PICK, INTENT, fixture.workspace()).expect("the case opens");
+    let executor = LocalExecutor::new(
+        &governor,
+        case,
+        fixture.workspace(),
+        TestCommand::new("sh", ["-c", plant.as_str()]),
+    );
+    let run = executor
+        .execute(&proposal("tests.run", &json!({})))
+        .expect("tests.run is performed");
+    let Report::TestsRun(run) = &run else {
+        panic!("tests.run reports a run: {run:?}");
+    };
+    assert_eq!(run.exit_code(), Some(0), "the plant ran: {run:?}");
+    let edited = executor.execute(&proposal(
+        "repository.edit",
+        &json!({"files": [{"path": "check.txt", "contents": "fixed\n"}]}),
+    ));
+    assert!(
+        matches!(
+            &edited,
+            Err(ExecuteError::HostGit(
+                HostGitRefusal::GitDirChanged { .. } | HostGitRefusal::ConfigChanged { .. }
+            ))
+        ),
+        "an edit after a planted `commondir` is refused: {edited:?}"
+    );
+    std::fs::remove_file(fixture.workspace().join(".git").join("commondir"))
+        .expect("remove the planted commondir");
+    assert_eq!(fixture.head(), first, "a refused edit committed");
+    assert_eq!(
+        fixture.read("check.txt"),
+        "broken\n",
+        "a refused edit wrote"
+    );
+}
+
+/// A linked worktree keeps its git directory under the main repository's, with a `commondir` file;
+/// recorded when the case opens, it is the workspace's own and an edit commits.
+#[test]
+fn a_linked_worktree_opens_and_commits() {
+    let fixture = Fixture::unplanted();
+    let linked = fixture.root.join("linked");
+    fixture.git(&[
+        "worktree",
+        "add",
+        "--quiet",
+        "-b",
+        "linked",
+        &linked.to_string_lossy(),
+    ]);
+    let governor = CanonGovernor::new(MemoryCaseStore::default());
+    let case = case::open(&governor, PICK, INTENT, &linked).expect("a linked worktree opens");
+    let executor = LocalExecutor::new(
+        &governor,
+        case,
+        &linked,
+        TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
+    );
+    let edited = executor
+        .execute(&proposal(
+            "repository.edit",
+            &json!({"files": [{"path": "check.txt", "contents": "fixed\n"}]}),
+        ))
+        .expect("the edit commits in the linked worktree");
+    assert!(matches!(edited, Report::Edited { .. }), "{edited:?}");
 }
 
 #[test]

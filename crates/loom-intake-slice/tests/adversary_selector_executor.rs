@@ -37,7 +37,7 @@ const PRODUCER: &str = "intake-slice-adversary-verifier";
 /// `tests.run` is about no revision until the model happens to rewrite that same file.
 ///
 /// Since story `host-git-hardening` the executor's git runs no workspace hook
-/// (`core.hooksPath` points at an empty directory), so this hook never runs, the commit succeeds
+/// (`core.hooksPath=/dev/null`), so this hook never runs, the commit succeeds
 /// and the case no longer reaches the rollback path. The NUL-message and git-refuses cases below
 /// still cover rollback.
 #[cfg(unix)]

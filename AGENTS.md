@@ -198,7 +198,8 @@ crate that adds Canon uses the same reference.
 There is no sandbox. `tests.run` runs model-edited code with the operator's rights and environment;
 the path checks bound what the executor writes, not what that code does. The slice's own git calls
 go through one helper, `crates/loom-intake-slice/src/git.rs`: no workspace hook, `core.fsmonitor`
-command or signing program runs, and a call is refused once the workspace's git configuration
+command or signing program runs, a case does not open on a workspace whose own configuration
+names a program, and a call is refused once that configuration, its includes or the git directory
 changed since the case opened. `tests/host_git_hardening.rs` fails on any `Command::new` of git
 outside that helper. Gates still run when the operator or the bot commits and pushes.
 

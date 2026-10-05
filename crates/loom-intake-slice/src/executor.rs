@@ -46,7 +46,9 @@
 //! `core.fsmonitor` command and no signing program, and it is refused with
 //! [`ExecuteError::HostGit`] before git starts when the workspace's git configuration files changed
 //! since the case opened (a test that wrote a filter driver or a `gpg.program` into `.git/config`),
-//! or when no case opened on the workspace in this process. An edit refused so writes nothing.
+//! when its git or common directory moved (a planted `commondir`), when its own configuration
+//! now names a program (a work-tree file it includes, rewritten by an edit), or when no case
+//! opened on the workspace in this process. An edit refused so writes nothing and commits nothing.
 //!
 //! # Known limit: no sandbox
 //!
@@ -506,7 +508,17 @@ fn write_and_commit(
     git(root, &with_paths(&["add", "--"], relatives))?;
     let unchanged = git_status(
         root,
-        &with_paths(&["diff", "--cached", "--quiet", "--"], relatives),
+        &with_paths(
+            &[
+                "diff",
+                "--cached",
+                "--quiet",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--",
+            ],
+            relatives,
+        ),
     )?;
     if !unchanged {
         git(
@@ -602,7 +614,6 @@ fn refuse_ignored(root: &Path, relatives: &[&OsStr]) -> Result<(), ExecuteError>
     }
     let mut git = git::recorded(root).map_err(ExecuteError::HostGit)?;
     let mut child = git
-        .command()
         .args(["check-ignore", "-z", "--stdin", "--no-index"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -919,8 +930,7 @@ fn git_status(root: &Path, args: &[&OsStr]) -> Result<bool, ExecuteError> {
 
 fn git_command(root: &Path, args: &[&OsStr]) -> Result<Output, ExecuteError> {
     let mut git = git::recorded(root).map_err(ExecuteError::HostGit)?;
-    git.command()
-        .arg("--literal-pathspecs")
+    git.arg("--literal-pathspecs")
         .args(args)
         .stdin(Stdio::null())
         .output()

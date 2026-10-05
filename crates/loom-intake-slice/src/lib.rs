@@ -11,7 +11,8 @@
 //! - [`executor`] performs a proposed `software.change/1` action inside the workspace; it never
 //!   merges, pushes or deploys.
 //! - [`git`] builds every git command the slice runs on the host: no hook, fsmonitor or signing
-//!   program runs, and a call is refused once the workspace's git configuration changed.
+//!   program runs, and a call is refused when the workspace's own configuration names a program or
+//!   changed since the case opened.
 //! - [`effect`] is Commission's effect port over the executor: the local effect adapter.
 //! - [`verifier`] is the only part that submits evidence, and only from the exit status of the test
 //!   command the executor ran (Atlas ADR 0074). Nothing a model says becomes evidence.
