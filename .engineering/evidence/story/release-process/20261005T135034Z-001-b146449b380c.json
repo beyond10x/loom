@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T13:50:34Z",
+  "actor": "human:timo",
+  "artifact": "story:release-process",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "unit gate: fmt, clippy, cargo test --workspace 1025 passed, docs generate --check x2, site build, actionlint all exit 0; main 9d602d9 check, docs, shared gates success",
+    "reference": "wave/2026-10-05-w49"
+  }
+}
