@@ -53,15 +53,17 @@ use b10x_commission::model::responsibility::{
     AuthorityVerdict, AuthorityVerdictApprovalRequired, AuthorityVerdictDeny, CaseId, Commission,
     CommissionData, CommissionId, EffectOutcome, EffectOutcomePerformed, EffectOutcomeRefused,
     ExecutorOutcome, ExecutorOutcomeProposedAction, Frontier, FrontierAction, FrontierId,
-    FrontierObligation, ObservationId, PrincipalId, ProposedActionArguments, RunId, RunOutcome,
-    RunOutcomeAwaitingApproval, RunOutcomeCompleted, RunOutcomeNeedsAuthority,
-    RunOutcomeNeedsExternalEvidence, RunOutcomeSuspended, RunState, SuspensionReason, Unit,
-    commission_state, frontier_state,
+    FrontierObligation, ObservationId, PrincipalId, ProposedActionArguments,
+    RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeAwaitingApproval,
+    RunOutcomeCompleted, RunOutcomeNeedsAuthority, RunOutcomeNeedsExternalEvidence,
+    RunOutcomeSuspended, RunState, SuspensionReason, Unit, commission_state, frontier_state,
 };
 use b10x_commission::outcome::RunStore;
 use b10x_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use b10x_commission::ports::executor::AgentExecutor;
-use b10x_commission::runtime::{LoopContext, LoopEnd, LoopError, LoopFailure, run_until_blocked};
+use b10x_commission::runtime::{
+    LoopContext, LoopEnd, LoopError, LoopFailure, UNBUDGETED_STEP_LIMIT, run_until_blocked,
+};
 use b10x_commission_testkit::fake_authority::StaticAuthorityProvider;
 use b10x_commission_testkit::fake_executor::ScriptedExecutor;
 use b10x_commission_testkit::fake_governor::{Answer, FakeGovernor, GovernorCall};
@@ -1216,4 +1218,172 @@ fn a_denied_action_is_not_awaited() {
             actions: vec!["merge".to_owned()],
         })
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Adversary pass 1 corrections.
+
+/// The approval gate is checked before the step budget: the last budgeted step leaving the gate
+/// unchanged ends `AwaitingApproval`, after the case and frontier are read once more. Control: when
+/// that step moved the frontier, the run is suspended for its budget, after the same reads.
+#[test]
+fn the_approval_gate_is_checked_before_the_step_budget() {
+    let gate = || {
+        listing(
+            4,
+            vec![admissible("inspect"), gated("merge", "repository.merge")],
+        )
+    };
+
+    let name = "gate at the budget";
+    let case = CaseId("case-gate-budget".to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(case.clone(), [gate()]);
+    let executor = ScriptedExecutor::new([proposal("inspect")]);
+    let effects = Effects::new(&governor);
+    let (result, _) = run(
+        &governor,
+        &executor,
+        &StaticAuthorityProvider::new(),
+        &effects,
+        &case,
+        Context::with_budget(1),
+    );
+    let end = ended(name, result);
+    assert_eq!(
+        governor.calls(),
+        [iteration(&case), revalidation(&case), iteration(&case)].concat(),
+        "{name}: the gate's frontier is read after the last step"
+    );
+    assert_eq!(end.steps, 1, "{name}");
+    assert_eq!(
+        end.outcome,
+        RunOutcome::AwaitingApproval(RunOutcomeAwaitingApproval {
+            actions: vec!["merge".to_owned()],
+        }),
+        "{name}: outcome"
+    );
+
+    let name = "gate moved at the budget";
+    let case = CaseId("case-gate-budget-moved".to_owned());
+    let governor = FakeGovernor::new();
+    let moved = listing(
+        4,
+        vec![
+            admissible("inspect"),
+            FrontierAction {
+                reasons: vec!["evidence is stale".to_owned()],
+                ..gated("merge", "repository.merge")
+            },
+        ],
+    );
+    governor.script(case.clone(), repeat_n(gate(), 5).chain([moved]));
+    let executor = ScriptedExecutor::new([proposal("inspect")]);
+    let effects = Effects::new(&governor);
+    let (result, _) = run(
+        &governor,
+        &executor,
+        &StaticAuthorityProvider::new(),
+        &effects,
+        &case,
+        Context::with_budget(1),
+    );
+    let end = ended(name, result);
+    assert_eq!(
+        governor.calls(),
+        [iteration(&case), revalidation(&case), iteration(&case)].concat(),
+        "{name}"
+    );
+    assert_eq!(
+        end.outcome,
+        RunOutcome::Suspended(RunOutcomeSuspended { reason: budget(1) }),
+        "{name}: outcome"
+    );
+}
+
+/// A request admitted for an action the effect port does not perform ends the run with
+/// `NoPerformableAction`: it stays in `requests` with its revalidation, is not admitted, and the
+/// port is never handed it.
+#[test]
+fn an_admitted_action_the_port_does_not_perform_ends_no_performable_action() {
+    let case = CaseId("case-unperformed".to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(
+        case.clone(),
+        [listing(5, vec![admissible("edit"), admissible("deploy")])],
+    );
+    let executor = ScriptedExecutor::new([proposal("deploy")]);
+    let effects = Effects::new(&governor).performing(vec!["edit"]);
+    let (result, _) = run(
+        &governor,
+        &executor,
+        &StaticAuthorityProvider::new(),
+        &effects,
+        &case,
+        Context::default(),
+    );
+    let end = ended("unperformed", result);
+    assert!(effects.invoked().is_empty(), "the port was handed it");
+    assert_eq!(end.requests.len(), 1);
+    assert_eq!(
+        end.requests[0].outcome,
+        RevalidateActionRequestOutcome::Admitted
+    );
+    assert!(end.admitted.is_empty(), "{:?}", end.admitted);
+    assert!(end.effects.is_empty());
+    assert_eq!(end.steps, 0);
+    assert_eq!(end.outcome, RunOutcome::NoPerformableAction(Unit(true)));
+}
+
+/// An executor proposing `edit` with new arguments on every call: each admission is progress.
+#[derive(Default)]
+struct NewEdits {
+    calls: Mutex<usize>,
+}
+
+impl AgentExecutor for NewEdits {
+    fn run(
+        &self,
+        _commission: &Commission<commission_state::Assigned>,
+        _frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorOutcome {
+        let mut calls = self.calls.lock().unwrap_or_else(PoisonError::into_inner);
+        *calls += 1;
+        assert!(*calls <= UNBUDGETED_STEP_LIMIT, "past the limit: {calls}");
+        proposal_with("edit", Value::Number(calls.to_string()))
+    }
+}
+
+/// Without a step budget a loop that keeps making progress still ends: at
+/// `UNBUDGETED_STEP_LIMIT` steps the Run is suspended for `Budget` with that limit.
+#[test]
+fn without_a_budget_the_default_limit_ends_a_loop_that_keeps_progressing() {
+    let case = CaseId("case-progressing".to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(case.clone(), [listing(2, vec![admissible("edit")])]);
+    let executor = NewEdits::default();
+    let effects = Effects::new(&governor);
+    let (result, runs) = run(
+        &governor,
+        &executor,
+        &StaticAuthorityProvider::new(),
+        &effects,
+        &case,
+        Context::default(),
+    );
+    let end = ended("progressing", result);
+    let calls = *executor
+        .calls
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    assert_eq!(calls, UNBUDGETED_STEP_LIMIT);
+    assert_eq!(end.steps, UNBUDGETED_STEP_LIMIT);
+    assert_eq!(effects.invoked().len(), UNBUDGETED_STEP_LIMIT);
+    assert_eq!(
+        end.outcome,
+        RunOutcome::Suspended(RunOutcomeSuspended {
+            reason: budget(UNBUDGETED_STEP_LIMIT),
+        })
+    );
+    assert_eq!(stored(&runs, &end.run_id).1, RunState::Suspended);
 }

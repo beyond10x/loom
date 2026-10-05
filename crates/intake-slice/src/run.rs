@@ -1,29 +1,38 @@
-//! The slice's loop: from an intent to a stop reason (story `slice-loop-cli`).
+//! The slice's run: from an intent to a stop reason (story `slice-loop-cli`), on Commission's
+//! runtime (`story:runtime-merge`, Atlas ADR 0082).
 //!
-//! [`run`] does what Commission's runtime loop will do, in this order:
+//! [`run`], in this order:
 //!
 //! 1. extracts the intent's references ([`intake_references::references`]);
 //! 2. classifies the intent ([`intake_router::classify`]) on a current-thread Tokio runtime made
 //!    for that call and dropped before the loop starts, because the selector and the argument
 //!    generator make their own runtime and must not run inside one;
 //! 3. opens the governed case ([`crate::case::open`]);
-//! 4. loops: the frontier, Loom's run over it, the local executor performing the proposed action,
-//!    the verifier submitting evidence, and the completion.
+//! 4. runs Commission's loop, [`run_until_blocked`], over the case: Loom proposes on each frontier,
+//!    the runtime revalidates each proposal and hands what it admits to the local effect adapter
+//!    ([`crate::effect::LocalEffects`]), which performs it and lets the verifier submit evidence.
+//!    The slice has no loop of its own.
+//!
+//! The runtime runs under a commission for the operator with no authority, and an authority
+//! provider that answers every capability with approval required: the slice never supplies
+//! authority on the operator's behalf. Its step budget is the request's `max_steps`.
 //!
 //! It ends with a [`SliceRun`] and its [`StopReason`] (`intake.routing.SliceRun` and
-//! `intake.routing.StopReason` in `ess/intake/domains/routing.yaml`):
+//! `intake.routing.StopReason` in `ess/intake/domains/routing.yaml`), read from the runtime's
+//! outcome:
 //!
-//! | Stop reason | When |
-//! | --- | --- |
-//! | [`StopReason::ApprovalRequired`] | Loom proposes an action the frontier lists as needing approval, or a step leaves a frontier that lists one unchanged (every action's status and reasons); the detail names those actions in frontier order |
-//! | [`StopReason::NothingAdmissible`] | Loom proposes nothing and the frontier lists no admissible action |
-//! | [`StopReason::StepBudget`] | the steps taken reach the request's `max_steps` |
-//! | [`StopReason::NoLocalExecutor`] | the pick is not `software-change@1`; the case opens and one frontier is read |
-//! | [`StopReason::Refused`] | the router refuses the pick: outside the registry, or unsure |
+//! | Stop reason | Runtime outcome | When |
+//! | --- | --- | --- |
+//! | [`StopReason::ApprovalRequired`] | `NeedsAuthority`, `AwaitingApproval` | Loom proposes an action the frontier lists as needing approval, or a step leaves a frontier that lists one unchanged (every action's status and reasons); the detail names the proposed action, or the awaited actions in frontier order |
+//! | [`StopReason::NothingAdmissible`] | `NoAdmissibleAction`, `NeedsExternalEvidence` | Loom proposes nothing and the frontier lists no admissible action |
+//! | [`StopReason::StepBudget`] | `Suspended` for `Budget` | the steps taken reach the request's `max_steps` |
+//! | [`StopReason::NoLocalExecutor`] | `NoPerformableAction` | the pick is not `software-change@1`; the case opens and one frontier is read |
+//! | [`StopReason::Refused`] | none: no case is opened | the router refuses the pick: outside the registry, or unsure |
 //!
-//! Any other failure is a [`SliceError`]: a model that gives no usable pick, a workspace the case
-//! cannot open on, a governor that refuses, an executor or verifier failing on the workspace, or
-//! Loom suspended because the agent model could not be reached.
+//! Any other end is a [`SliceError`]: a model that gives no usable pick, a workspace the case
+//! cannot open on, a governor that refuses, an executor or verifier failing on the workspace, Loom
+//! suspended because the agent model could not be reached, or the governor holding the case
+//! complete.
 //!
 //! # Refused steps
 //!
@@ -46,11 +55,10 @@
 //!
 //! One line per reference (`reference: <kind> <value>`), the pick (`picked <protocol> (confidence
 //! <c>)`, then one indented `reason:` line each) or the refusal (`refused: <why>`), the frontier
-//! before each Loom run and the one a step left unchanged at an approval gate (`frontier: <action>
-//! (<status>), ...`), each step (`step <n>: <action>
-//! <arguments>`, then indented `effect:` and `evidence:` lines; further lines of an effect are
-//! indented and start with `|`), and last `stopped: <reason>`, with its detail in parentheses where
-//! it has one.
+//! before each Loom run and the one the run stopped on at an approval gate or for want of a local
+//! executor (`frontier: <action> (<status>), ...`), each step (`step <n>: <action> <arguments>`,
+//! then indented `effect:` and `evidence:` lines; further lines of an effect are indented and
+//! start with `|`), and last `stopped: <reason>`, with its detail in parentheses where it has one.
 //!
 //! # Identity
 //!
@@ -62,14 +70,22 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use b10x_commission::model::behaviour::Generated;
 use b10x_commission::model::json;
+use b10x_commission::model::primitives::Timestamp;
 use b10x_commission::model::responsibility::{
-    ActionStatus, AgentRevisionId, AuthorityContext, CaseId, Commission, CommissionData,
-    CommissionId, CompletionDetermination, ExecutorOutcome, ExecutorOutcomeProposedAction,
-    Frontier, GovernorError, PrincipalId, commission_state, frontier_state,
+    ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, AuthorityVerdict,
+    AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData, CommissionId,
+    CompletionDetermination, ExecutorOutcome, Frontier, FrontierData, GovernorError, Observation,
+    ObservationId, PrincipalId, RevalidateActionRequestOutcome, RunId, RunOutcome,
+    SuspensionReason, Unit, commission_state, frontier_state, observation_state,
 };
-use b10x_commission::ports::executor::AgentExecutor as _;
+use b10x_commission::outcome::RunStore;
+use b10x_commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
+use b10x_commission::ports::evidence::ObservationPort;
+use b10x_commission::ports::executor::AgentExecutor;
 use b10x_commission::ports::governor::Governor;
+use b10x_commission::runtime::{LoopContext, LoopEnd, LoopError, LoopFailure, run_until_blocked};
 use b10x_loom::model::run::{CatalogueEntry, SelectionStrategy};
 use b10x_loom::selection::{Choice, SelectionContext, SelectorError};
 use b10x_loom::{ActionSelector, Loom};
@@ -79,7 +95,8 @@ use intake_router::{ProtocolPick, RouterError, classify};
 use llm_core::Model;
 
 use crate::case::{self, CaseError};
-use crate::executor::{ExecuteError, INSPECT, LocalExecutor, Report, TestCommand, fresh_uuid};
+use crate::effect::{Console, LocalEffects, refuse};
+use crate::executor::{ExecuteError, LocalExecutor, TestCommand, fresh_uuid, now};
 use crate::selector::{Briefing, ModelArguments, ModelSelector, NO_ACTION};
 use crate::verifier::{TestResultVerifier, VerifyError};
 
@@ -162,6 +179,8 @@ pub enum SliceError {
     /// The governor holds the case complete. `software-change@1` completes only with evidence the
     /// slice never produces, so this is not a stop reason.
     Complete(String),
+    /// Commission's runtime stopped for a failure of its own: a run command that refused.
+    Loop(LoopError),
 }
 
 impl fmt::Display for SliceError {
@@ -177,6 +196,7 @@ impl fmt::Display for SliceError {
             Self::Suspended(why) => write!(f, "the agent was suspended: {why}"),
             Self::Unexpected(outcome) => write!(f, "Loom answered {outcome}"),
             Self::Complete(outcome) => write!(f, "the case completed as `{outcome}`"),
+            Self::Loop(error) => write!(f, "the runtime stopped: {error}"),
         }
     }
 }
@@ -197,10 +217,10 @@ impl From<GovernorError> for SliceError {
 
 /// Runs the slice for `request` until it stops, printing what it does to `out`.
 ///
-/// `governor` holds the case: the case is opened on it, and the executor and verifier report to
-/// it. The loop reads every frontier and the completion from `frontiers`; in use that is
-/// `governor` itself. `classifier` picks the protocol, `agent` selects actions and writes their
-/// arguments. Must not be called inside a Tokio runtime.
+/// `governor` holds the case: the case is opened on it, and the executor, the verifier and the
+/// runtime report to it. The runtime reads every revision, frontier and completion from
+/// `frontiers`; in use that is `governor` itself. `classifier` picks the protocol, `agent` selects
+/// actions and writes their arguments. Must not be called inside a Tokio runtime.
 ///
 /// # Errors
 /// A [`SliceError`] for every failure that is not a [`StopReason`] (see the module
@@ -247,147 +267,275 @@ pub fn run<S: CaseStore>(
         &request.workspace,
     )
     .map_err(SliceError::Case)?;
-    if pick.protocol != LOCAL_PROTOCOL {
-        let frontier = frontiers.frontier(&case)?;
-        print_frontier(out, &frontier)?;
-        return stop(out, pick.protocol, 0, StopReason::NoLocalExecutor, None);
-    }
 
     let briefing = Briefing::new(request.intent.clone(), found);
     let chosen = Arc::new(Mutex::new(None));
-    let loom = Loom::new(
-        Recording {
-            inner: ModelSelector::new(agent, briefing.clone()),
-            chosen: Arc::clone(&chosen),
-        },
-        ModelArguments::new(agent, briefing.clone()),
-        request.intent.clone(),
-    );
-    let executor = LocalExecutor::new(
+    let console = Console::new(out);
+    let step = LoomStep {
+        loom: Loom::new(
+            Recording {
+                inner: ModelSelector::new(agent, briefing.clone()),
+                chosen: Arc::clone(&chosen),
+            },
+            ModelArguments::new(agent, briefing.clone()),
+            request.intent.clone(),
+        ),
+        chosen,
+        briefing: briefing.clone(),
+        console: &console,
+    };
+    let effects = LocalEffects::new(
+        LocalExecutor::new(
+            governor,
+            case.clone(),
+            request.workspace.clone(),
+            request.test.clone(),
+        ),
+        TestResultVerifier::new(governor, case.clone(), PRODUCER),
         governor,
         case.clone(),
-        request.workspace.clone(),
-        request.test.clone(),
+        &pick.protocol,
+        briefing,
+        &console,
     );
-    let verifier = TestResultVerifier::new(governor, case.clone(), PRODUCER);
-    let commission = commission(&case);
+    let reads = Reads {
+        frontiers,
+        governor,
+    };
+    let seed = case.0.clone();
+    let mut runs = Generated::new(RunStore::new(move || RunId(fresh_uuid("run", &seed))));
+    let mut context = SliceContext {
+        case: case.0.clone(),
+        budget: request.max_steps,
+    };
+    let result = run_until_blocked(
+        &reads,
+        &step,
+        &NoDelegatedAuthority,
+        &effects,
+        &commission(&case),
+        &mut runs,
+        &mut context,
+    );
+    drop(effects);
+    drop(step);
+    if let Some(failure) = console.take_failure() {
+        return Err(failure);
+    }
+    drop(console);
 
-    let mut steps = 0;
-    // The frontier read after the last step, when it was read to compare with the one before.
-    let mut next = None;
-    loop {
-        if steps >= request.max_steps {
-            return stop(out, pick.protocol, steps, StopReason::StepBudget, None);
-        }
-        let frontier = match next.take() {
-            Some(frontier) => frontier,
-            None => frontiers.frontier(&case)?,
-        };
-        print_frontier(out, &frontier)?;
-        *lock(&chosen) = None;
-        let outcome = loom.run(&commission, &frontier);
-        let chose = lock(&chosen).take();
-        match outcome {
-            ExecutorOutcome::ProposedAction(proposal) => {
-                let needs_approval = frontier.data().actions.iter().any(|listed| {
-                    listed.action == proposal.action
-                        && listed.status == ActionStatus::ApprovalRequired
+    let end = match result {
+        Ok(end) => end,
+        Err(LoopError {
+            failure: LoopFailure::Governor(error),
+            ..
+        }) => return Err(SliceError::Governor(error)),
+        Err(error) => return Err(SliceError::Loop(error)),
+    };
+    finish(out, pick.protocol, end)
+}
+
+/// The stop reason the runtime's `end` stands for, as the module documents, printed.
+fn finish(out: &mut dyn Write, protocol: String, end: LoopEnd) -> Result<SliceRun, SliceError> {
+    let steps = end.steps;
+    match end.outcome {
+        RunOutcome::Completed(complete) => Err(SliceError::Complete(complete.outcome)),
+        RunOutcome::Suspended(suspended) => match suspended.reason {
+            SuspensionReason::Budget(_) => stop(out, protocol, steps, StopReason::StepBudget, None),
+            reason => Err(SliceError::Suspended(format!("{reason:?}"))),
+        },
+        RunOutcome::NeedsAuthority(_) => {
+            let action = end
+                .requests
+                .iter()
+                .rev()
+                .find_map(|made| match &made.outcome {
+                    RevalidateActionRequestOutcome::NeedsAuthority { error } => {
+                        Some(error.action.clone())
+                    }
+                    _ => None,
                 });
-                if needs_approval {
-                    let action = proposal.action;
-                    return stop(
-                        out,
-                        pick.protocol,
-                        steps,
-                        StopReason::ApprovalRequired,
-                        Some(action),
-                    );
-                }
-
-                steps += 1;
-                writeln!(
-                    out,
-                    "step {steps}: {} {}",
-                    printable(&proposal.action),
-                    printable(&json_text(&proposal.arguments.0))
-                )?;
-                perform(
-                    out, &executor, &verifier, governor, &case, &briefing, &proposal,
-                )?;
-
-                if let CompletionDetermination::Complete(complete) = frontiers.completion(&case)? {
-                    return Err(SliceError::Complete(complete.outcome));
-                }
+            stop(out, protocol, steps, StopReason::ApprovalRequired, action)
+        }
+        RunOutcome::AwaitingApproval(awaiting) => {
+            if let Some(frontier) = &end.last_frontier {
+                print_frontier(out, frontier)?;
             }
+            let detail = Some(awaiting.actions.join(", "));
+            stop(out, protocol, steps, StopReason::ApprovalRequired, detail)
+        }
+        RunOutcome::NoAdmissibleAction(_) | RunOutcome::NeedsExternalEvidence(_) => {
+            stop(out, protocol, steps, StopReason::NothingAdmissible, None)
+        }
+        RunOutcome::NoPerformableAction(_) => {
+            if let Some(frontier) = &end.last_frontier {
+                print_frontier(out, frontier)?;
+            }
+            stop(out, protocol, steps, StopReason::NoLocalExecutor, None)
+        }
+        RunOutcome::NeedsHumanJudgment(needs) => Err(SliceError::Unexpected(format!(
+            "NeedsHumanJudgment {needs:?}"
+        ))),
+    }
+}
+
+/// The governor as the runtime reads it: revisions, frontiers and completions from `frontiers`,
+/// observations to the governor that holds the case.
+struct Reads<'a, S> {
+    frontiers: &'a dyn Governor,
+    governor: &'a CanonGovernor<S>,
+}
+
+impl<S> Governor for Reads<'_, S> {
+    fn current_revision(&self, case: &CaseId) -> Result<i64, GovernorError> {
+        self.frontiers.current_revision(case)
+    }
+
+    fn frontier(&self, case: &CaseId) -> Result<Frontier<frontier_state::Issued>, GovernorError> {
+        self.frontiers.frontier(case)
+    }
+
+    fn completion(&self, case: &CaseId) -> Result<CompletionDetermination, GovernorError> {
+        self.frontiers.completion(case)
+    }
+}
+
+impl<S: CaseStore> ObservationPort for Reads<'_, S> {
+    fn observe(
+        &self,
+        observation: Observation<observation_state::Reported>,
+    ) -> Result<(), GovernorError> {
+        self.governor.observe(observation)
+    }
+}
+
+/// The slice's authority provider: the operator delegated no authority to the slice, so every
+/// capability needs approval.
+struct NoDelegatedAuthority;
+
+impl AuthorityProvider for NoDelegatedAuthority {
+    fn decide(
+        &self,
+        _commission: &CommissionData,
+        capability: &str,
+    ) -> Result<AuthorityVerdict, AuthorityProviderError> {
+        Ok(AuthorityVerdict::ApprovalRequired(
+            AuthorityVerdictApprovalRequired {
+                request: format!("approval for `{capability}`"),
+            },
+        ))
+    }
+}
+
+/// New ids, the machine's clock and the request's step budget.
+struct SliceContext {
+    case: String,
+    budget: usize,
+}
+
+impl LoopContext for SliceContext {
+    fn action_request_id(&mut self) -> ActionRequestId {
+        ActionRequestId(fresh_uuid("action-request", &self.case))
+    }
+
+    fn observation_id(&mut self) -> ObservationId {
+        ObservationId(fresh_uuid("observation", &self.case))
+    }
+
+    fn now(&mut self) -> Timestamp {
+        now()
+    }
+
+    fn step_budget(&self) -> Option<usize> {
+        Some(self.budget)
+    }
+}
+
+/// One Loom run on a frontier, as the runtime's executor: the frontier printed before it, and a
+/// selection Loom does not turn into a proposal printed and recorded as a refused step.
+struct LoomStep<'a, 'o, 'm> {
+    loom: Loom<Recording<'m>, ModelArguments<'m>>,
+    chosen: Arc<Mutex<Option<Chosen>>>,
+    briefing: Briefing,
+    console: &'a Console<'o>,
+}
+
+impl AgentExecutor for LoomStep<'_, '_, '_> {
+    fn run(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorOutcome {
+        match self.step(commission, frontier) {
+            Ok(outcome) => outcome,
+            Err(failure) => {
+                let why = failure.to_string();
+                self.console.fail(failure);
+                ExecutorOutcome::Suspended(
+                    b10x_commission::model::responsibility::ExecutorOutcomeSuspended {
+                        reason: SuspensionReason::ExternalAvailability(json::Value::Text(why)),
+                    },
+                )
+            }
+        }
+    }
+}
+
+impl LoomStep<'_, '_, '_> {
+    fn step(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
+    ) -> Result<ExecutorOutcome, SliceError> {
+        self.console
+            .write(|out| print_frontier(out, frontier.data()))?;
+        *lock(&self.chosen) = None;
+        let outcome = self.loom.run(commission, frontier);
+        let chose = lock(&self.chosen).take();
+        match outcome {
             ExecutorOutcome::NoUsefulAction(_) => {
                 let admissible = frontier
                     .data()
                     .actions
                     .iter()
                     .any(|listed| listed.status == ActionStatus::Admissible);
-                if !admissible {
-                    return stop(
-                        out,
-                        pick.protocol,
-                        steps,
-                        StopReason::NothingAdmissible,
-                        None,
-                    );
+                if admissible {
+                    self.refuse_selection(frontier, chose)?;
                 }
-                steps += 1;
-                refuse_selection(out, &briefing, &frontier, chose, steps)?;
+                Ok(outcome)
             }
             ExecutorOutcome::Suspended(_) if matches!(chose, Some(Chosen::NoAction)) => {
-                steps += 1;
-                refuse_selection(out, &briefing, &frontier, chose, steps)?;
+                self.refuse_selection(frontier, chose)?;
+                Ok(ExecutorOutcome::NoUsefulAction(Unit(true)))
             }
-            ExecutorOutcome::Suspended(suspended) => {
-                return Err(SliceError::Suspended(format!("{:?}", suspended.reason)));
-            }
-            other => return Err(SliceError::Unexpected(format!("{other:?}"))),
-        }
-
-        // A step, performed or refused, that leaves a frontier with an action needing approval
-        // exactly as it was: the only useful action left needs authority.
-        let gated = approval_required(&frontier);
-        if !gated.is_empty() {
-            let after = frontiers.frontier(&case)?;
-            if unchanged(&frontier, &after) {
-                print_frontier(out, &after)?;
-                return stop(
-                    out,
-                    pick.protocol,
-                    steps,
-                    StopReason::ApprovalRequired,
-                    Some(gated.join(", ")),
-                );
-            }
-            next = Some(after);
+            other => Ok(other),
         }
     }
-}
 
-/// The actions `frontier` lists as needing approval, in its order.
-fn approval_required(frontier: &Frontier<frontier_state::Issued>) -> Vec<String> {
-    frontier
-        .data()
-        .actions
-        .iter()
-        .filter(|listed| listed.status == ActionStatus::ApprovalRequired)
-        .map(|listed| listed.action.clone())
-        .collect()
-}
-
-/// Whether `after` lists the same actions as `before`, each with the same status and reasons.
-fn unchanged(
-    before: &Frontier<frontier_state::Issued>,
-    after: &Frontier<frontier_state::Issued>,
-) -> bool {
-    let (before, after) = (&before.data().actions, &after.data().actions);
-    before.len() == after.len()
-        && before.iter().zip(after).all(|(was, is)| {
-            was.action == is.action && was.status == is.status && was.reasons == is.reasons
+    /// Prints the next step, a selection Loom did not turn into a proposal, as refused, and tells
+    /// the model why.
+    fn refuse_selection(
+        &self,
+        frontier: &Frontier<frontier_state::Issued>,
+        chose: Option<Chosen>,
+    ) -> Result<(), SliceError> {
+        let (action, reason) = match chose {
+            Some(Chosen::Action(action)) => {
+                let reason = selection_refusal(frontier, &action);
+                (action, reason)
+            }
+            Some(Chosen::NoAction) => (NO_SELECTION.to_owned(), NO_ACTION.to_owned()),
+            None => (
+                NO_SELECTION.to_owned(),
+                "Loom proposed no action".to_owned(),
+            ),
+        };
+        let step = self.console.next_step();
+        self.console.write(|out| {
+            writeln!(out, "step {step}: {} (not proposed)", printable(&action))?;
+            refuse(out, &self.briefing, &action, &reason)
         })
+    }
 }
 
 /// The router's pick, or a refusal as the protocol it refused, the stop detail and the reason.
@@ -413,53 +561,6 @@ fn pick(request: &SliceRequest, classifier: &dyn Model) -> Result<Pick, SliceErr
     Ok(Err((protocol, detail.to_owned(), error.to_string())))
 }
 
-/// Performs one proposal, verifies what it reported and records it in the briefing.
-fn perform<S: CaseStore>(
-    out: &mut dyn Write,
-    executor: &LocalExecutor<'_, S>,
-    verifier: &TestResultVerifier<'_, S>,
-    governor: &CanonGovernor<S>,
-    case: &CaseId,
-    briefing: &Briefing,
-    proposal: &ExecutorOutcomeProposedAction,
-) -> Result<(), SliceError> {
-    let report = match executor.execute(proposal) {
-        Ok(report) => report,
-        Err(
-            refused @ (ExecuteError::NotExecuted { .. }
-            | ExecuteError::OutsideWorkspace { .. }
-            | ExecuteError::Ignored { .. }
-            | ExecuteError::InvalidArguments { .. }),
-        ) => return refuse(out, briefing, &proposal.action, &refused.to_string()),
-        // An inspect that cannot read a path (most often one that does not exist) changed nothing.
-        Err(refused @ ExecuteError::Workspace { .. }) if proposal.action == INSPECT => {
-            return refuse(out, briefing, &proposal.action, &refused.to_string());
-        }
-        Err(error) => return Err(SliceError::Execute(error)),
-    };
-    print_effect(out, &report)?;
-    match verifier.verify(&report) {
-        Ok(Some(evidence)) => {
-            // What the governor holds, not what the report says.
-            let held = governor.evidence(case)?;
-            let record = held.iter().find(|record| record.evidence_id == evidence);
-            let kind = record.map_or("unknown", |record| record.kind.as_str());
-            let result = match record.and_then(|record| record.facts.member("result")) {
-                Some(json::Value::Text(result)) => result.as_str(),
-                _ => "unknown",
-            };
-            writeln!(out, "  evidence: {} {}", printable(kind), printable(result))?;
-        }
-        Ok(None) => writeln!(out, "  evidence: none")?,
-        Err(VerifyError::NoRevision) => {
-            writeln!(out, "  evidence: none ({})", VerifyError::NoRevision)?;
-        }
-        Err(error) => return Err(SliceError::Verify(error)),
-    }
-    briefing.record(proposal, &report);
-    Ok(())
-}
-
 /// Prints the stop line and returns the run.
 fn stop(
     out: &mut dyn Write,
@@ -479,12 +580,8 @@ fn stop(
     })
 }
 
-fn print_frontier(
-    out: &mut dyn Write,
-    frontier: &Frontier<frontier_state::Issued>,
-) -> Result<(), SliceError> {
+fn print_frontier(out: &mut dyn Write, frontier: &FrontierData) -> Result<(), SliceError> {
     let actions: Vec<String> = frontier
-        .data()
         .actions
         .iter()
         .map(|listed| {
@@ -498,59 +595,6 @@ fn print_frontier(
         .collect();
     writeln!(out, "frontier: {}", actions.join(", "))?;
     Ok(())
-}
-
-/// The report's first line as the effect, every further line indented and marked with `|`, so no
-/// line of a report can pass for a line of the run's own output.
-fn print_effect(out: &mut dyn Write, report: &Report) -> Result<(), SliceError> {
-    let text = report.to_string();
-    let mut lines = text.lines();
-    writeln!(
-        out,
-        "  effect: {}",
-        printable(lines.next().unwrap_or_default())
-    )?;
-    for line in lines {
-        writeln!(out, "    | {}", printable(line))?;
-    }
-    Ok(())
-}
-
-/// Prints a step that was not performed, for `reason`, and tells the model so.
-fn refuse(
-    out: &mut dyn Write,
-    briefing: &Briefing,
-    action: &str,
-    reason: &str,
-) -> Result<(), SliceError> {
-    writeln!(out, "  effect: refused: {}", printable(reason))?;
-    writeln!(out, "  evidence: none")?;
-    briefing.record_refusal(action, reason);
-    Ok(())
-}
-
-/// Prints step `step`, a selection Loom did not turn into a proposal, as refused, and tells the
-/// model why.
-fn refuse_selection(
-    out: &mut dyn Write,
-    briefing: &Briefing,
-    frontier: &Frontier<frontier_state::Issued>,
-    chose: Option<Chosen>,
-    step: usize,
-) -> Result<(), SliceError> {
-    let (action, reason) = match chose {
-        Some(Chosen::Action(action)) => {
-            let reason = selection_refusal(frontier, &action);
-            (action, reason)
-        }
-        Some(Chosen::NoAction) => (NO_SELECTION.to_owned(), NO_ACTION.to_owned()),
-        None => (
-            NO_SELECTION.to_owned(),
-            "Loom proposed no action".to_owned(),
-        ),
-    };
-    writeln!(out, "step {step}: {} (not proposed)", printable(&action))?;
-    refuse(out, briefing, &action, &reason)
 }
 
 /// What a selection that names no action is shown as.
@@ -643,7 +687,7 @@ fn commission(case: &CaseId) -> Commission<commission_state::Assigned> {
 }
 
 /// `value` as compact JSON text.
-fn json_text(value: &json::Value) -> String {
+pub(crate) fn json_text(value: &json::Value) -> String {
     let mut text = String::new();
     push_json(&mut text, value);
     text

@@ -869,3 +869,49 @@ impl Drop for Fixture {
         let _ = std::fs::remove_dir_all(&self.root);
     }
 }
+
+/// Adversary pass 1 on `story:runtime-merge`: the gate-stop rule (`7dc84ef`) at the step budget.
+/// The slice's own loop checked the gate right after the step, before the budget: a last step that
+/// leaves the approval gate unchanged stopped `ApprovalRequired` (exit 0, the human gate) even when
+/// that step used up `max_steps`. The same run as
+/// `the_run_stops_at_the_approval_gate_when_the_model_idles`, with `max_steps` equal to its four
+/// steps, must stop the same way.
+#[test]
+fn adversary_the_gate_stops_before_the_budget_on_the_last_step() {
+    let fixture = Fixture::new("gate-at-budget");
+    let (run, output, _) = drive(
+        &fixture,
+        Row {
+            name: "the approval gate reached on the last budgeted step",
+            pick: pick(SOFTWARE_CHANGE, 0.9),
+            agent: vec![
+                json!({"action": "repository.inspect"}),
+                json!({"paths": ["check.txt"]}),
+                json!({"action": "repository.edit"}),
+                json!({
+                    "files": [{"path": "check.txt", "contents": "fixed\n"}],
+                    "message": "fix the check"
+                }),
+                json!({"action": "tests.run"}),
+                json!({}),
+                json!({"action": "tests.run"}),
+                json!({}),
+            ],
+            max_steps: 4,
+            nothing_admissible: false,
+        },
+    );
+    assert_eq!(
+        steps(&output),
+        [
+            "repository.inspect",
+            "repository.edit",
+            "tests.run",
+            "tests.run"
+        ],
+        "{output}"
+    );
+    assert_stopped(&output, "stopped: ApprovalRequired (repository.merge)");
+    assert_eq!(run.stop_reason, StopReason::ApprovalRequired, "{output}");
+    assert_eq!(run.steps, 4);
+}
