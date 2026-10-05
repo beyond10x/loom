@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T07:17:18Z",
+  "actor": "human:timo",
+  "artifact": "story:json-depth-bound",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "base 53cea8a: 12 depth cases pass (premise false); mutant disabling the recursion limit at 5 parse sites: 12 fail",
+    "reference": "scratch/phase1-red.log vs scratch/mutant-red.log"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T07:17:18Z",
+  "actor": "human:timo",
+  "artifact": "story:json-depth-bound",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test --workspace --test json_depth 12 passed; fmt 0; clippy --workspace --test json_depth -D warnings 0; full suite left to CI on main",
+    "reference": "wave/2026-10-05-w32"
+  }
+}
