@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T13:50:51Z",
+  "actor": "human:timo",
+  "artifact": "story:host-git-hardening",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "phase 1 red: all seven planted hook and fsmonitor commands ran on the base; filter and gpg cases red before phase 2; mutants M1-M3 and MF1, MF2b, MF4 each red; adversary pass 1: two blockers (planted config re-recorded on reopen, commondir) fixed by refusing program keys from workspace config on open and every call, recording git dir and common dir, hooksPath=/dev/null",
+    "reference": "wave/2026-10-05-w47"
+  }
+}

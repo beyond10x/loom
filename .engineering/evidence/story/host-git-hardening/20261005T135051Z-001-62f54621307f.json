@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T13:50:51Z",
+  "actor": "human:timo",
+  "artifact": "story:host-git-hardening",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "unit gate 22 steps: cargo test --workspace 1025 passed 0 failed, clippy and fmt 0, ess and drift checks 0; wave branch after merging main (0.1.0): fmt, clippy, intake-slice and xtask tests 63 passed, release-check 0.1.0 passes",
+    "reference": "wave/2026-10-05-w47"
+  }
+}

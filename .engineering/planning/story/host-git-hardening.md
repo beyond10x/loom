@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:host-git-hardening
 kind: story
-status: active
+status: implemented
 title: Loom's host-side git runs no hooks and no fsmonitor
 relations:
 - decomposes: epic:effect-bindings
@@ -10,13 +10,22 @@ relations:
 - serves: vision:O1
 scope:
 - confidence: inferred
+  path: AGENTS.md
+- confidence: inferred
+  path: CHANGELOG.md
+- confidence: inferred
+  path: README.md
+- confidence: inferred
   path: crates/loom-cli
 - confidence: inferred
   path: crates/loom-intake-slice
-revision: 5
+- confidence: inferred
+  path: website
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-05T13:03:32Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-05T13:03:32Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-05T13:50:51Z", actor: "human:timo", revision: 10, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}}
 ---
 ## Outcome
 
