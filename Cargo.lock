@@ -100,6 +100,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "b10x-canon"
+version = "0.0.0"
+source = "git+https://github.com/beyond10x/canon?branch=main#d2e09aeeb3126dad820585785db608d1737dc643"
+dependencies = [
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "unicode-normalization",
+ "unicode-properties",
+]
+
+[[package]]
 name = "b10x-commission"
 version = "0.0.0"
 dependencies = [
@@ -122,6 +134,29 @@ version = "0.0.0"
 dependencies = [
  "b10x-commission",
  "syn 3.0.6",
+]
+
+[[package]]
+name = "b10x-els"
+version = "0.0.0"
+source = "git+https://github.com/beyond10x/els?rev=ac7dd03#ac7dd03ee304778ffcbe6aba5cbf2047ec686cd3"
+dependencies = [
+ "b10x-canon",
+ "clap",
+ "serde",
+ "serde_yaml_ng",
+]
+
+[[package]]
+name = "b10x-governor"
+version = "0.0.0"
+dependencies = [
+ "b10x-canon",
+ "b10x-commission",
+ "b10x-commission-testkit",
+ "b10x-els",
+ "serde_json",
+ "serde_yaml_ng",
 ]
 
 [[package]]
@@ -1581,6 +1616,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_yaml_ng"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b4db627b98b36d4203a7b458cf3573730f2bb591b28871d916dfa9efabfd41f"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
+]
+
+[[package]]
 name = "sha2"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1906,6 +1954,21 @@ name = "unicode-ident"
 version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954"
+
+[[package]]
+name = "unicode-normalization"
+version = "0.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8"
+dependencies = [
+ "tinyvec",
+]
+
+[[package]]
+name = "unicode-properties"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7df058c713841ad818f1dc5d3fd88063241cc61f49f5fbea4b951e8cf5a8d71d"
 
 [[package]]
 name = "unsafe-libyaml"
