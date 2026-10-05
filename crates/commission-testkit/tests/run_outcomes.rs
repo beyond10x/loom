@@ -378,7 +378,9 @@ fn resume_continues_the_same_run() {
 }
 
 /// Expectation 8: `RunOutcome` is declared in the specification as a union of the six variants
-/// and reaches this crate generated, through `b10x-commission`'s re-export.
+/// and reaches this crate generated, through `b10x-commission`'s re-export. `story:runtime-merge`
+/// adds two: `AwaitingApproval` and `NoPerformableAction` (the slice's approval gate and its
+/// `NoLocalExecutor`, in Commission's terms).
 fn run_outcome_is_the_generated_type() {
     let path = root().join("ess/commission/domains/responsibility.yaml");
     let source = std::fs::read_to_string(&path)
@@ -421,11 +423,13 @@ fn run_outcome_is_the_generated_type() {
     assert_eq!(
         variants,
         [
+            "AwaitingApproval",
             "Completed",
             "NeedsAuthority",
             "NeedsExternalEvidence",
             "NeedsHumanJudgment",
             "NoAdmissibleAction",
+            "NoPerformableAction",
             "Suspended",
         ],
         "RunOutcome variants"

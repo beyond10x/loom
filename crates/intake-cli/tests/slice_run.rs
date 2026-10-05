@@ -11,6 +11,10 @@
 //! [`Frontiers`], which passes them on unchanged and counts the frontiers issued, except in the
 //! nothing-admissible case, where it records every action of the frontier as blocked.
 //!
+//! Since `story:runtime-merge` the loop is Commission's runtime (`run_until_blocked`, Atlas ADR
+//! 0082): it reads the frontier before each Loom run and again to revalidate each proposal, so
+//! the frontier counts below count both reads.
+//!
 //! The fixture workspace is a git repository under `CARGO_TARGET_TMPDIR` with one failing test: the
 //! test command is `grep -qx fixed check.txt` (no shell; `grep` is on every Linux runner) and
 //! `check.txt` holds `broken`. The fixture's own git calls run with no system or global
@@ -32,7 +36,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use b10x_commission::model::responsibility::{
-    ActionStatus, CaseId, CompletionDetermination, Frontier, GovernorError, frontier_state,
+    ActionStatus, CaseId, CompletionDetermination, Frontier, GovernorError, ObservationData,
+    frontier_state,
 };
 use b10x_commission::ports::governor::Governor;
 use governor::{CanonGovernor, MemoryCaseStore};
@@ -120,7 +125,12 @@ fn the_slice_stops_for_each_reason() {
     assert_eq!(run.stop_reason, StopReason::ApprovalRequired);
     assert_eq!(run.protocol, SOFTWARE_CHANGE);
     assert_eq!(run.steps, 2);
-    assert_eq!(frontiers, 3, "one frontier before each Loom run");
+    // Was 3 (one before each Loom run); Commission's runtime also reads one to revalidate each of
+    // the three proposals (story:runtime-merge).
+    assert_eq!(
+        frontiers, 6,
+        "one frontier before each Loom run, one per revalidation"
+    );
     assert_ne!(fixture.head(), first, "the edit was committed");
     assert_eq!(fixture.git(&["show", "HEAD:check.txt"]), "fixed\n");
     assert_eq!(fixture.git(&["rev-parse", "HEAD^"]).trim(), first);
@@ -155,7 +165,11 @@ fn the_slice_stops_for_each_reason() {
     assert_stopped(&output, "stopped: StepBudget");
     assert_eq!(run.stop_reason, StopReason::StepBudget);
     assert_eq!(run.steps, 1);
-    assert_eq!(frontiers, 1, "no frontier after the budget is used up");
+    // Was 1; the one proposal's revalidation reads the frontier again (story:runtime-merge).
+    assert_eq!(
+        frontiers, 2,
+        "the step's frontier and its revalidation, none after the budget is used up"
+    );
     assert_ne!(fixture.head(), first, "the one step was performed");
 
     // A pick of incident-response@1: the case opens and its frontier is issued, but the slice
@@ -368,6 +382,65 @@ fn a_refused_selection_at_the_gate_stops_for_approval() {
     assert_eq!(run.steps, 3);
 }
 
+/// `story:runtime-merge`: the slice runs on Commission's runtime, not a loop of its own. The
+/// governor receives what only that runtime delivers: one `executor` observation per Loom run and
+/// one `effect` observation per performed action, after the action (here after the test run's own
+/// observation, which the local effect adapter delivers while it performs `tests.run`).
+#[test]
+fn the_slice_runs_on_commissions_runtime() {
+    let fixture = Fixture::new("runtime");
+    let (run, output, _, observations) = drive_observed(
+        &fixture,
+        Row {
+            name: "main path on the runtime",
+            pick: pick(SOFTWARE_CHANGE, 0.9),
+            agent: vec![
+                json!({"action": "repository.edit"}),
+                json!({
+                    "files": [{"path": "check.txt", "contents": "fixed\n"}],
+                    "message": "fix the check"
+                }),
+                json!({"action": "tests.run"}),
+                json!({}),
+                json!({"action": "repository.merge"}),
+                json!({}),
+            ],
+            max_steps: 10,
+            nothing_admissible: false,
+        },
+    );
+    assert_stopped(&output, "stopped: ApprovalRequired (repository.merge)");
+    assert_eq!(run.steps, 2);
+    let sources: Vec<&str> = observations.iter().map(|o| o.source.as_str()).collect();
+    assert_eq!(
+        sources,
+        [
+            "executor",
+            "effect",
+            "executor",
+            intake_slice::executor::TEST_RUN_SOURCE,
+            "effect",
+            "executor",
+        ],
+        "{output}"
+    );
+    let edit = &observations[1];
+    assert_eq!(
+        edit.payload.member("outcome"),
+        Some(&b10x_commission::model::json::Value::Text(
+            "Performed".to_owned()
+        )),
+        "{edit:?}"
+    );
+    assert_eq!(
+        edit.payload.member("action"),
+        Some(&b10x_commission::model::json::Value::Text(
+            "repository.edit".to_owned()
+        )),
+        "{edit:?}"
+    );
+}
+
 /// `b10x-intake run --help` lists every flag the story names, the intent, and the default model.
 #[test]
 fn the_run_command_lists_its_flags() {
@@ -477,6 +550,20 @@ fn the_exit_status_says_how_the_run_ended() {
 
 /// Runs the slice for `row` on `fixture`; returns the run, its output and the frontiers issued.
 fn drive(fixture: &Fixture, row: Row) -> (intake_slice::run::SliceRun, String, usize) {
+    let (slice, output, frontiers, _) = drive_observed(fixture, row);
+    (slice, output, frontiers)
+}
+
+/// [`drive`], also returning every observation the governor received, in order.
+fn drive_observed(
+    fixture: &Fixture,
+    row: Row,
+) -> (
+    intake_slice::run::SliceRun,
+    String,
+    usize,
+    Vec<ObservationData>,
+) {
     let classifier = Recorded::new("recorded-classifier", vec![row.pick]);
     let agent = Recorded::new("recorded-agent", row.agent);
     let governor = CanonGovernor::new(MemoryCaseStore::default());
@@ -517,7 +604,8 @@ fn drive(fixture: &Fixture, row: Row) -> (intake_slice::run::SliceRun, String, u
         row.name
     );
     assert_references(&output, row.name);
-    (slice, output, frontiers.issued.load(Ordering::SeqCst))
+    let issued = frontiers.issued.load(Ordering::SeqCst);
+    (slice, output, issued, governor.observations())
 }
 
 /// The references the intent holds are printed first, in order, one line each.

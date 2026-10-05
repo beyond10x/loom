@@ -175,7 +175,9 @@ types:
       - name: request
         type: String
 
-  # story:run-outcomes: how a run ended or paused.
+  # story:run-outcomes: how a run ended or paused. story:runtime-merge adds AwaitingApproval (a
+  # step left a frontier listing actions that need approval unchanged) and NoPerformableAction
+  # (the frontier lists no action the effect port performs, so no executor is run).
   - name: commission.responsibility.RunOutcome
     kind: union
     tag: kind
@@ -186,6 +188,8 @@ types:
       NeedsHumanJudgment: commission.responsibility.RunOutcomeNeedsHumanJudgment
       NeedsExternalEvidence: commission.responsibility.RunOutcomeNeedsExternalEvidence
       NoAdmissibleAction: commission.responsibility.Unit
+      AwaitingApproval: commission.responsibility.RunOutcomeAwaitingApproval
+      NoPerformableAction: commission.responsibility.Unit
 
   # The governor's outcome identifier, as the governor reports it.
   - name: commission.responsibility.RunOutcomeCompleted
@@ -217,6 +221,38 @@ types:
     fields:
       - name: requirements
         type: List<String>
+
+  # story:runtime-merge: the actions that need approval, in frontier order, on a frontier a step
+  # left unchanged; none of them was denied by an authority verdict in the run.
+  - name: commission.responsibility.RunOutcomeAwaitingApproval
+    kind: struct
+    fields:
+      - name: actions
+        type: List<String>
+
+  # story:runtime-merge (Atlas ADR 0082): what the effect port reports for one admitted action
+  # request it was handed. The runtime delivers it to the governor as an observation, never as
+  # evidence.
+  - name: commission.responsibility.EffectOutcome
+    kind: union
+    tag: kind
+    variants:
+      Performed: commission.responsibility.EffectOutcomePerformed
+      Refused: commission.responsibility.EffectOutcomeRefused
+
+  # What the effect did, as the effect port reports it. Commission declares no structure for it.
+  - name: commission.responsibility.EffectOutcomePerformed
+    kind: struct
+    fields:
+      - name: report
+        type: Json
+
+  # The effect port did not perform the request, and changed nothing; why.
+  - name: commission.responsibility.EffectOutcomeRefused
+    kind: struct
+    fields:
+      - name: reason
+        type: String
 
   # docs/contracts/protocol-core.md: three-valued truth.
   - name: commission.responsibility.Truth
@@ -383,12 +419,14 @@ entities:
     fields:
       - name: commission_id
         type: commission.responsibility.CommissionId
-      # The case revision the run started against; a proposal made on another revision is stale.
+      # The case revision the run started against. A proposal made on another revision is stale,
+      # except a revision the run's own effect moved the case to (story:runtime-merge).
       - name: case_revision
         type: Integer
     relations:
-      # A request is made inside one run, against that run's case revision, and never outlives it
-      # (decision-blocker:action-request-commission). The commission is reached through the run.
+      # A request is made inside one run, against that run's case revision or one its own effect
+      # moved the case to, and never outlives it (decision-blocker:action-request-commission). The
+      # commission is reached through the run.
       - name: requests
         kind: owns
         target: commission.responsibility.ActionRequest

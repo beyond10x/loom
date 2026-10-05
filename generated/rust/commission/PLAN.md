@@ -1,14 +1,14 @@
 <!--
   generated from commission v1
-  model digest 8baad8a2a232f1823d8fce586ddd35c901af8923715a1eb1fbc3f62817da8e4f
-  contract digest c27daebab1de8a70c1c4985e2a48176db7d5700784cedf99b11902b83a5dea7a
+  model digest 9bed27fd6e65172f1e7b60f9fe93551bb1ce785145cc4c15fd0ec1f1ad08c598
+  contract digest cc3143220ec00a04b6a7164c58d293ad930be8a93afd9ac03ed872a0f7b85db6
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — commission v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-77 capabilities: **76 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+81 capabilities: **80 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -36,6 +36,9 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `commission.responsibility.CommissionId` |
 | domain type | `commission.responsibility.CompletionDetermination` |
 | domain type | `commission.responsibility.CompletionDeterminationComplete` |
+| domain type | `commission.responsibility.EffectOutcome` |
+| domain type | `commission.responsibility.EffectOutcomePerformed` |
+| domain type | `commission.responsibility.EffectOutcomeRefused` |
 | domain type | `commission.responsibility.Evidence.State` |
 | domain type | `commission.responsibility.EvidenceId` |
 | domain type | `commission.responsibility.ExecutorOutcome` |
@@ -56,6 +59,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `commission.responsibility.Run.State` |
 | domain type | `commission.responsibility.RunId` |
 | domain type | `commission.responsibility.RunOutcome` |
+| domain type | `commission.responsibility.RunOutcomeAwaitingApproval` |
 | domain type | `commission.responsibility.RunOutcomeCompleted` |
 | domain type | `commission.responsibility.RunOutcomeNeedsAuthority` |
 | domain type | `commission.responsibility.RunOutcomeNeedsExternalEvidence` |

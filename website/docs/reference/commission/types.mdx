@@ -46,6 +46,15 @@ Tagged by `kind`.
 | `Complete` | [`CompletionDeterminationComplete`](#completiondeterminationcomplete) |
 | `Open` | none |
 
+### EffectOutcome
+
+Tagged by `kind`.
+
+| Variant | Payload |
+|---|---|
+| `Performed` | [`EffectOutcomePerformed`](#effectoutcomeperformed) |
+| `Refused` | [`EffectOutcomeRefused`](#effectoutcomerefused) |
+
 ### ExecutorOutcome
 
 Tagged by `kind`.
@@ -64,11 +73,13 @@ Tagged by `kind`.
 
 | Variant | Payload |
 |---|---|
+| `AwaitingApproval` | [`RunOutcomeAwaitingApproval`](#runoutcomeawaitingapproval) |
 | `Completed` | [`RunOutcomeCompleted`](#runoutcomecompleted) |
 | `NeedsAuthority` | [`RunOutcomeNeedsAuthority`](#runoutcomeneedsauthority) |
 | `NeedsExternalEvidence` | [`RunOutcomeNeedsExternalEvidence`](#runoutcomeneedsexternalevidence) |
 | `NeedsHumanJudgment` | [`RunOutcomeNeedsHumanJudgment`](#runoutcomeneedshumanjudgment) |
 | `NoAdmissibleAction` | none |
+| `NoPerformableAction` | none |
 | `Suspended` | [`RunOutcomeSuspended`](#runoutcomesuspended) |
 
 ### SuspensionReason
@@ -118,6 +129,18 @@ Tagged by `kind`.
 |---|---|
 | `outcome` | `string` |
 
+### EffectOutcomePerformed
+
+| Field | Type |
+|---|---|
+| `report` | `json` |
+
+### EffectOutcomeRefused
+
+| Field | Type |
+|---|---|
+| `reason` | `string` |
+
 ### ExecutorOutcomeNeedsHumanJudgment
 
 | Field | Type |
@@ -159,6 +182,12 @@ Tagged by `kind`.
 |---|---|
 | `obligation` | `string` |
 | `open` | `boolean` |
+
+### RunOutcomeAwaitingApproval
+
+| Field | Type |
+|---|---|
+| `actions` | list of `string` |
 
 ### RunOutcomeCompleted
 

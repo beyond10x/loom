@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 8baad8a2a232f1823d8fce586ddd35c901af8923715a1eb1fbc3f62817da8e4f
-// contract digest c27daebab1de8a70c1c4985e2a48176db7d5700784cedf99b11902b83a5dea7a
+// model digest 9bed27fd6e65172f1e7b60f9fe93551bb1ce785145cc4c15fd0ec1f1ad08c598
+// contract digest cc3143220ec00a04b6a7164c58d293ad930be8a93afd9ac03ed872a0f7b85db6
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Responsibility — `commission.responsibility`.
@@ -176,6 +176,29 @@ pub struct CompletionDeterminationComplete {
     pub outcome: String,
 }
 
+/// EffectOutcome — `commission.responsibility.EffectOutcome`: one of a fixed set of shapes, tagged on the wire by `kind`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EffectOutcome {
+    /// Tagged `Performed` — `commission.responsibility.EffectOutcomePerformed`.
+    Performed(EffectOutcomePerformed),
+    /// Tagged `Refused` — `commission.responsibility.EffectOutcomeRefused`.
+    Refused(EffectOutcomeRefused),
+}
+
+/// EffectOutcomePerformed — `commission.responsibility.EffectOutcomePerformed`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectOutcomePerformed {
+    /// `report` — `Json`.
+    pub report: crate::json::Value,
+}
+
+/// EffectOutcomeRefused — `commission.responsibility.EffectOutcomeRefused`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectOutcomeRefused {
+    /// `reason` — `String`.
+    pub reason: String,
+}
+
 /// The states of `commission.responsibility.Evidence`, as runtime values.
 ///
 /// Synthesised from the lifecycle, so the two cannot disagree. Which *moves* are legal is not
@@ -327,6 +350,8 @@ pub struct RunId(pub crate::primitives::Uuid);
 /// RunOutcome — `commission.responsibility.RunOutcome`: one of a fixed set of shapes, tagged on the wire by `kind`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunOutcome {
+    /// Tagged `AwaitingApproval` — `commission.responsibility.RunOutcomeAwaitingApproval`.
+    AwaitingApproval(RunOutcomeAwaitingApproval),
     /// Tagged `Completed` — `commission.responsibility.RunOutcomeCompleted`.
     Completed(RunOutcomeCompleted),
     /// Tagged `NeedsAuthority` — `commission.responsibility.RunOutcomeNeedsAuthority`.
@@ -337,8 +362,17 @@ pub enum RunOutcome {
     NeedsHumanJudgment(RunOutcomeNeedsHumanJudgment),
     /// Tagged `NoAdmissibleAction` — `commission.responsibility.Unit`.
     NoAdmissibleAction(Unit),
+    /// Tagged `NoPerformableAction` — `commission.responsibility.Unit`.
+    NoPerformableAction(Unit),
     /// Tagged `Suspended` — `commission.responsibility.RunOutcomeSuspended`.
     Suspended(RunOutcomeSuspended),
+}
+
+/// RunOutcomeAwaitingApproval — `commission.responsibility.RunOutcomeAwaitingApproval`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunOutcomeAwaitingApproval {
+    /// `actions` — `List<String>`.
+    pub actions: Vec<String>,
 }
 
 /// RunOutcomeCompleted — `commission.responsibility.RunOutcomeCompleted`.
