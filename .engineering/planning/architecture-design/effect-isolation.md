@@ -2,14 +2,15 @@
 format: aep.planning-md/3
 id: architecture-design:effect-isolation
 kind: architecture-design
-status: in_review
+status: approved
 title: 'Confining Loom''s effects: Sandbox, Substrate or Mantle'
 relations:
 - serves: vision:O1
 - informed_by: epic:effect-bindings
-revision: 2
+revision: 4
 transitions:
 - {from: "draft", to: "in_review", at: "2026-10-05T12:24:00Z", actor: "human:timo", revision: 2}
+- {from: "in_review", to: "approved", at: "2026-10-05T12:34:20Z", actor: "human:timo", revision: 4}
 ---
 
 Design only, 2026-10-05. No code, no commits. Sources were read at these `origin/main` heads: loom
@@ -293,21 +294,28 @@ The applied record travels in the observation payload, not in Commission's types
 
 Not run: any Loom run, any Substrate exec, any Mantle session.
 
-## 8. Open questions for the operator
+## 8. Decisions (operator, 2026-10-05)
 
-1. **The crossing.** Accept Harness's crossing (embed `substrate-host` and `substrate-wire` at a
-   pinned revision) in Loom? Or require the SDK, plus a Substrate "adopt host directory" workspace
-   source (A′)?
-2. **Default posture.** Should `b10x-loom run` refuse `tests.run` when confinement is unavailable,
-   unless `--confinement none` is given? Today the default is unconfined.
-3. **Git hooks.** Disable hooks on Loom's own commits (`core.hooksPath` to an empty directory), or
-   keep the operator's hooks running unconfined on the host? They run model-edited code.
-4. **Network for tests.** None, with dependencies fetched before the run? Or Substrate egress
-   apertures to named registries?
-5. **Sandbox in Loom.** Is an explicit `--confinement sandbox` (B) wanted at all, given ADR 0052
-   places the seam with Substrate?
-6. **Delegation.** Does `b10x-loom` re-exec itself under `systemd-run --user -p Delegate=yes --scope`,
-   or does the operator provide a cgroup root?
-7. **Protocol.** Should `software-change@1` require "tests ran confined" (the applied-confinement
-   fact) before test evidence counts? That would be an engineering-protocols change.
-8. **Mantle.** Is remote placement of Loom runs wanted? It needs a Mantle agent kind for Loom.
+The eight open questions were put to the operator in an interview on 2026-10-05; each answer below
+is the option the operator chose.
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | The crossing | **Embed like Harness**: Loom depends on `substrate-host` and `substrate-wire` at a pinned release, as `crates/harness-substrate` does; Loom keeps the authority over what runs. |
+| 2 | Default posture | **Refuse, opt out by flag**: `tests.run` stops with a named `ConfinementRefusal` when confinement is unavailable, unless the run passes `--confinement none`, which the run record names. |
+| 3 | Git hooks | **Disable hooks on Loom's own git calls**: `core.hooksPath` set to an empty directory and `core.fsmonitor=false`. Gates still run when the operator or the bot pushes. |
+| 4 | Network for tests | **None, prefetch first**: dependencies are fetched on the host before the run and mounted read-only; confined tests get no network. |
+| 5 | Sandbox in Loom | **No**: Substrate is the only backend (`--confinement substrate` or `none`). |
+| 6 | Delegation | **Loom re-execs itself** under `systemd-run --user -p Delegate=yes --scope` when no delegated cgroup is present. |
+| 7 | Protocol | **Not yet, record only**: every `tests.run` observation carries the `AppliedConfinement` record; `software-change@1` does not require it until confinement is the default and proven. |
+| 8 | Mantle | **Later**: remote placement of whole Loom runs is filed as a draft story, outside this design's work. |
+
+## Stories this design leads to
+
+- `story:confined-tests-run`: the `intake.confinement` ESS domain (§ 6), `tests.run` confined by the
+  embedded Substrate host driver with no network and writes only to `target/`, the refusal by
+  default, `--confinement none`, the `systemd-run` re-exec, and `AppliedConfinement` in the
+  observation (decisions 1, 2, 4, 5, 6, 7).
+- `story:host-git-hardening`: Loom's host-side git calls run with hooks and fsmonitor disabled
+  (decision 3).
+- `story:mantle-placement`: draft only (decision 8).
