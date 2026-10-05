@@ -2,12 +2,20 @@
 format: aep.planning-md/3
 id: story:json-depth-bound
 kind: story
-status: draft
+status: active
 title: No Loom build parses model JSON without a nesting limit
 relations:
 - decomposes: epic:runtime-consolidation
 - serves: vision:governed-autonomy
-revision: 1
+scope:
+- confidence: inferred
+  path: Cargo.toml
+- confidence: inferred
+  path: crates/loom-executor
+revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-05T07:10:02Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-10-05T07:10:02Z", actor: "human:timo", revision: 3}
 ---
 ## Outcome
 
