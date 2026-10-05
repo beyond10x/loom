@@ -2,12 +2,23 @@
 format: aep.planning-md/3
 id: story:loom-cli
 kind: story
-status: draft
+status: active
 title: b10x-loom run replaces b10x-intake run with the same flags and exit codes
 relations:
 - decomposes: epic:runtime-consolidation
 - depends_on: story:runtime-merge
-revision: 1
+- serves: vision:governed-autonomy
+scope:
+- confidence: inferred
+  path: AGENTS.md
+- confidence: inferred
+  path: README.md
+- confidence: inferred
+  path: crates/intake-cli
+revision: 6
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-05T01:26:17Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-10-05T01:26:17Z", actor: "human:timo", revision: 3}
 ---
 ## Outcome
 
