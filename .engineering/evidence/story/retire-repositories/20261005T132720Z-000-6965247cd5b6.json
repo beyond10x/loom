@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T13:27:20Z",
+  "actor": "human:timo",
+  "artifact": "story:retire-repositories",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "commission#6, governor#1, intake#1 merged (READMEs point at Loom); all three archived (archived=true); gates-policy 3e6545f unenrolls them, org and ess secrets refreshed; Atlas main a84fe57b retires commission in the catalog and drops it from docs.rs and workspace.rs rosters (governor and intake never had catalog entries); no beyond10x Cargo.toml depends on the three except themselves; commission's Pages redirect to Loom",
+    "reference": "wave/2026-10-05-w39"
+  }
+}
