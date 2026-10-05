@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T11:24:13Z",
+  "actor": "human:timo",
+  "artifact": "story:docs-current",
+  "kind": "story",
+  "revision": 12,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "loom-docs and loom-commission-docs generate --check 0, fmt 0, loom-docs tests 12 passed, loom-cli/sdk/xtask/executor tests 0, clippy loom-docs/loom-cli 0, site build 0, provenance 0; main e136bbe Documentation validation and site success, check red on a pre-existing suite.json race fixed in 1ec6ec1",
+    "reference": "beyond10x/loom@1ec6ec1"
+  }
+}

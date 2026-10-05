@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:docs-current
 kind: story
-status: active
+status: implemented
 title: Loom's site, README and AGENTS.md describe the one runtime repository
 relations:
 - decomposes: epic:runtime-consolidation
@@ -15,17 +15,22 @@ scope:
 - confidence: inferred
   path: README.md
 - confidence: inferred
+  path: crates/loom-cli
+- confidence: inferred
   path: crates/loom-commission-docs
 - confidence: inferred
   path: crates/loom-docs
 - confidence: inferred
   path: docs
 - confidence: inferred
+  path: ess/intake
+- confidence: inferred
   path: website
-revision: 10
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-05T10:57:32Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-05T10:57:32Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-05T11:24:13Z", actor: "human:timo", revision: 13, decided_on: {"recorded":{"test_result":1,"verification":1}}}
 ---
 ## Outcome
 
