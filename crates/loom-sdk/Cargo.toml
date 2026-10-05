@@ -1,0 +1,11 @@
+[package]
+name = "b10x-loom-sdk"
+description = "One crate an application depends on to embed a governed agent: Commission's contracts and runtime, the Loom executor, the governor and intake, re-exported."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "loom_sdk"

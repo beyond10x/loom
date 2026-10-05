@@ -307,6 +307,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "b10x-loom-sdk"
+version = "0.0.0"
+
+[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
