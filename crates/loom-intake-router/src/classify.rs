@@ -2,7 +2,7 @@
 
 use std::fmt::{self, Write as _};
 
-use b10x_loom_intake_model::{ModelError, call_tool};
+use b10x_llm_tool_call::{ModelError, call_tool};
 use llm_core::{Item, Model, ToolName, ToolSpec};
 use serde_json::{Map, Value, json};
 
@@ -28,7 +28,7 @@ pub enum RouterError {
     InvalidThreshold(f64),
     /// A built-in protocol of the registry cannot be read: Canon cannot parse it or finds it
     /// invalid.
-    Registry(els::registry::Error),
+    Registry(canon_engineering::registry::Error),
     /// The forced call gave no usable answer.
     Model(ModelError),
     /// The call's arguments are not a pick: a field is missing or of the wrong type, or the
@@ -129,8 +129,9 @@ impl Registry {
              pick_protocol. Give your confidence from 0 to 1 and your reasons. Pick only a \
              listed protocol; when none fits, say so with a low confidence.\n\nProtocols:\n",
         );
-        for (name, major) in els::registry::list() {
-            let builtin = els::registry::get(name, major).map_err(RouterError::Registry)?;
+        for (name, major) in canon_engineering::registry::list() {
+            let builtin =
+                canon_engineering::registry::get(name, major).map_err(RouterError::Registry)?;
             let entry = format!("{name}@{major}");
             let header = &builtin.model.protocol;
             let description = header.description.as_deref().unwrap_or("(no description)");

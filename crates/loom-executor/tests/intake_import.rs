@@ -7,9 +7,10 @@
 //!    `/loom` or `/intake` (the root manifest's own `repository = ".../loom"` field excepted:
 //!    it names this repository, not a dependency);
 //! 2. `Cargo.lock` resolves exactly one copy each of `b10x-loom-commission`, `b10x-loom-governor`,
-//!    `b10x-loom-executor`, `b10x-canon` and `b10x-els`; the Commission, governor and Loom copies are the
-//!    path ones (no `source`), and no package comes from one of the four repositories above;
-//! 3. `cargo metadata --format-version 1 --no-deps` on the root manifest lists the five intake
+//!    `b10x-loom-executor`, `b10x-canon` and `b10x-canon-engineering`; the Commission, governor
+//!    and Loom copies are the path ones (no `source`), and no package comes from one of the four
+//!    repositories above;
+//! 3. `cargo metadata --format-version 1 --no-deps` on the root manifest lists the four intake
 //!    packages as workspace members, each built from its `crates/loom-intake-*` directory.
 
 use std::fs;
@@ -27,17 +28,16 @@ const SINGLE_COPY: [(&str, bool); 5] = [
     ("b10x-loom-governor", true),
     ("b10x-loom-executor", true),
     ("b10x-canon", false),
-    ("b10x-els", false),
+    ("b10x-canon-engineering", false),
 ];
 
 /// The intake packages and the directory each must be built from.
-const INTAKE_PACKAGES: [(&str, &str); 5] = [
+const INTAKE_PACKAGES: [(&str, &str); 4] = [
     ("b10x-loom-intake-router", "crates/loom-intake-router"),
     (
         "b10x-loom-intake-references",
         "crates/loom-intake-references",
     ),
-    ("b10x-loom-intake-model", "crates/loom-intake-model"),
     ("b10x-loom-intake-slice", "crates/loom-intake-slice"),
     ("b10x-loom-cli", "crates/loom-cli"),
 ];
@@ -215,7 +215,7 @@ fn lock_resolves_one_path_copy_of_each_absorbed_crate() {
 }
 
 #[test]
-fn cargo_metadata_lists_the_five_intake_packages_as_members() {
+fn cargo_metadata_lists_the_four_intake_packages_as_members() {
     let root = repo_root();
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let output = Command::new(cargo)

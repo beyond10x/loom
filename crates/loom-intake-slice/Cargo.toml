@@ -12,11 +12,11 @@ name = "b10x_loom_intake_slice"
 
 [dependencies]
 b10x-loom-commission = { path = "../loom-commission" }
-b10x-els = { git = "https://github.com/beyond10x/els", rev = "ac7dd03" }
+b10x-canon-engineering = { git = "https://github.com/beyond10x/engineering-protocols", tag = "0.1.0" }
 b10x-loom-governor = { path = "../loom-governor" }
 b10x-loom-intake-references = { path = "../loom-intake-references" }
 b10x-loom-intake-router = { path = "../loom-intake-router" }
-b10x-llm-core = { git = "https://github.com/beyond10x/llm", tag = "0.1.6" }
+b10x-llm-core = { git = "https://github.com/beyond10x/llm", tag = "0.1.7" }
 b10x-loom-executor = { path = "../loom-executor" }
 serde_json = "1"
 sha2 = "0.10"

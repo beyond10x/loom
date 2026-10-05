@@ -205,11 +205,11 @@ fn adversary_every_registry_protocol_opens_on_a_git_workspace() {
     workspace.commit("README.md", "first\n");
     let head = workspace.head();
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let builtins = b10x_els::registry::list();
+    let builtins = canon_engineering::registry::list();
     assert!(builtins.len() >= 2, "the registry holds {builtins:?}");
     for (name, major) in builtins {
         let pick = format!("{name}@{major}");
-        let declared = b10x_els::registry::get(name, major).expect("a valid built-in");
+        let declared = canon_engineering::registry::get(name, major).expect("a valid built-in");
         let expected: BTreeMap<String, String> = declared
             .model
             .artifacts

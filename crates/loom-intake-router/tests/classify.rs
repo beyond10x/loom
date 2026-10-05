@@ -92,7 +92,7 @@ impl Model for Recorded {
 
 /// Every registry entry as `name@major`, in registry order.
 fn registry() -> Vec<String> {
-    els::registry::list()
+    canon_engineering::registry::list()
         .into_iter()
         .map(|(name, major)| format!("{name}@{major}"))
         .collect()
@@ -146,8 +146,8 @@ fn assert_request(model: &Recorded, intent: &str) {
     assert!(properties.get("confidence").is_some(), "{properties}");
     assert!(properties.get("reasons").is_some(), "{properties}");
 
-    for (name, major) in els::registry::list() {
-        let builtin = els::registry::get(name, major).expect("a valid built-in");
+    for (name, major) in canon_engineering::registry::list() {
+        let builtin = canon_engineering::registry::get(name, major).expect("a valid built-in");
         let description = builtin
             .model
             .protocol

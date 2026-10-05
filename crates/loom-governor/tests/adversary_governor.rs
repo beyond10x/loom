@@ -1004,7 +1004,7 @@ fn truth(value: &Truth) -> &'static str {
 }
 
 fn ir_of(name: &str, major: u32) -> Ir {
-    let builtin = b10x_els::registry::get(name, major).expect("ELS holds it");
+    let builtin = canon_engineering::registry::get(name, major).expect("ELS holds it");
     compile(&b10x_canon::model::parse(builtin.yaml).expect("parses")).expect("compiles")
 }
 

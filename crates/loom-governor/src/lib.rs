@@ -48,9 +48,10 @@
 //!
 //! # Dependencies
 //!
-//! Canon is the library ELS uses, `branch = "main"`, pinned by `Cargo.lock` to commit `d2e09ae`
-//! (`66c8d4b` plus a documentation merge), so the protocol model ELS returns is the one this crate
-//! compiles. Commission is pinned to `e61e4f0`, ELS to `ac7dd03`.
+//! Canon is the library `b10x-canon-engineering` uses, `branch = "main"`, pinned by `Cargo.lock`
+//! to commit `d2e09ae` (`66c8d4b` plus a documentation merge), so the protocol model the ELS
+//! registry returns is the one this crate compiles. Commission is pinned to `e61e4f0`, and
+//! `b10x-canon-engineering` to tag `0.1.0` of beyond10x/engineering-protocols.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -527,9 +528,9 @@ fn protocol_ir(protocol: &str) -> Result<Ir, OpenError> {
         .ok()
         .filter(|parsed: &u32| parsed.to_string() == major)
         .ok_or_else(unknown)?;
-    let builtin = b10x_els::registry::get(name, major).map_err(|error| match error {
-        b10x_els::registry::Error::UnknownName { .. }
-        | b10x_els::registry::Error::UnknownMajor { .. } => unknown(),
+    let builtin = canon_engineering::registry::get(name, major).map_err(|error| match error {
+        canon_engineering::registry::Error::UnknownName { .. }
+        | canon_engineering::registry::Error::UnknownMajor { .. } => unknown(),
         other => OpenError::InvalidProtocol {
             protocol: protocol.to_owned(),
             problem: other.to_string(),

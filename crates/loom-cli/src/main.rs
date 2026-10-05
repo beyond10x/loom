@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use b10x_loom_intake_model::codex_model;
+use b10x_llm_tool_call::codex_model;
 use b10x_loom_intake_slice::executor::TestCommand;
 use b10x_loom_intake_slice::run::{SliceRequest, SliceRun, StopReason, printable, run};
 use clap::{Args, Parser, Subcommand};
