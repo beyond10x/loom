@@ -112,31 +112,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "b10x-commission"
-version = "0.0.0"
-dependencies = [
- "commission",
-]
-
-[[package]]
-name = "b10x-commission-conformance"
-version = "0.0.0"
-dependencies = [
- "b10x-commission",
- "ess-conformance",
- "ess-primitives",
- "serde_json",
-]
-
-[[package]]
-name = "b10x-commission-testkit"
-version = "0.0.0"
-dependencies = [
- "b10x-commission",
- "syn 3.0.6",
-]
-
-[[package]]
 name = "b10x-els"
 version = "0.0.0"
 source = "git+https://github.com/beyond10x/els?rev=ac7dd03#ac7dd03ee304778ffcbe6aba5cbf2047ec686cd3"
@@ -145,79 +120,6 @@ dependencies = [
  "clap",
  "serde",
  "serde_yaml_ng",
-]
-
-[[package]]
-name = "b10x-governor"
-version = "0.0.0"
-dependencies = [
- "b10x-canon",
- "b10x-commission",
- "b10x-commission-testkit",
- "b10x-els",
- "serde_json",
- "serde_yaml_ng",
-]
-
-[[package]]
-name = "b10x-intake-cli"
-version = "0.0.0"
-dependencies = [
- "b10x-commission",
- "b10x-governor",
- "b10x-intake-model",
- "b10x-intake-references",
- "b10x-intake-slice",
- "b10x-llm-core",
- "clap",
- "serde_json",
-]
-
-[[package]]
-name = "b10x-intake-model"
-version = "0.0.0"
-dependencies = [
- "b10x-llm-core",
- "b10x-llm-credentials",
- "b10x-llm-http",
- "b10x-llm-providers",
- "b10x-llm-responses",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "b10x-intake-references"
-version = "0.0.0"
-dependencies = [
- "regex",
-]
-
-[[package]]
-name = "b10x-intake-router"
-version = "0.0.0"
-dependencies = [
- "b10x-els",
- "b10x-intake-model",
- "b10x-llm-core",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "b10x-intake-slice"
-version = "0.0.0"
-dependencies = [
- "b10x-commission",
- "b10x-els",
- "b10x-governor",
- "b10x-intake-references",
- "b10x-intake-router",
- "b10x-llm-core",
- "b10x-loom",
- "serde_json",
- "sha2 0.10.9",
- "tokio",
 ]
 
 [[package]]
@@ -289,11 +191,50 @@ dependencies = [
 ]
 
 [[package]]
-name = "b10x-loom"
+name = "b10x-loom-cli"
 version = "0.0.0"
 dependencies = [
- "b10x-commission",
- "b10x-commission-testkit",
+ "b10x-llm-core",
+ "b10x-loom-commission",
+ "b10x-loom-governor",
+ "b10x-loom-intake-model",
+ "b10x-loom-intake-references",
+ "b10x-loom-intake-slice",
+ "clap",
+ "serde_json",
+]
+
+[[package]]
+name = "b10x-loom-commission"
+version = "0.0.0"
+dependencies = [
+ "commission",
+]
+
+[[package]]
+name = "b10x-loom-commission-conformance"
+version = "0.0.0"
+dependencies = [
+ "b10x-loom-commission",
+ "ess-conformance",
+ "ess-primitives",
+ "serde_json",
+]
+
+[[package]]
+name = "b10x-loom-commission-testkit"
+version = "0.0.0"
+dependencies = [
+ "b10x-loom-commission",
+ "syn 3.0.6",
+]
+
+[[package]]
+name = "b10x-loom-executor"
+version = "0.0.0"
+dependencies = [
+ "b10x-loom-commission",
+ "b10x-loom-commission-testkit",
  "httpdate",
  "jsonschema",
  "loom",
@@ -307,14 +248,73 @@ dependencies = [
 ]
 
 [[package]]
+name = "b10x-loom-governor"
+version = "0.0.0"
+dependencies = [
+ "b10x-canon",
+ "b10x-els",
+ "b10x-loom-commission",
+ "b10x-loom-commission-testkit",
+ "serde_json",
+ "serde_yaml_ng",
+]
+
+[[package]]
+name = "b10x-loom-intake-model"
+version = "0.0.0"
+dependencies = [
+ "b10x-llm-core",
+ "b10x-llm-credentials",
+ "b10x-llm-http",
+ "b10x-llm-providers",
+ "b10x-llm-responses",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "b10x-loom-intake-references"
+version = "0.0.0"
+dependencies = [
+ "regex",
+]
+
+[[package]]
+name = "b10x-loom-intake-router"
+version = "0.0.0"
+dependencies = [
+ "b10x-els",
+ "b10x-llm-core",
+ "b10x-loom-intake-model",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "b10x-loom-intake-slice"
+version = "0.0.0"
+dependencies = [
+ "b10x-els",
+ "b10x-llm-core",
+ "b10x-loom-commission",
+ "b10x-loom-executor",
+ "b10x-loom-governor",
+ "b10x-loom-intake-references",
+ "b10x-loom-intake-router",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+]
+
+[[package]]
 name = "b10x-loom-sdk"
 version = "0.0.0"
 dependencies = [
- "b10x-commission",
- "b10x-governor",
- "b10x-intake-router",
- "b10x-intake-slice",
- "b10x-loom",
+ "b10x-loom-commission",
+ "b10x-loom-executor",
+ "b10x-loom-governor",
+ "b10x-loom-intake-router",
+ "b10x-loom-intake-slice",
 ]
 
 [[package]]
@@ -474,24 +474,6 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 [[package]]
 name = "commission"
 version = "1.0.0"
-
-[[package]]
-name = "commission-docs"
-version = "0.0.0"
-dependencies = [
- "clap",
- "serde_json",
-]
-
-[[package]]
-name = "commission-xtask"
-version = "0.0.0"
-dependencies = [
- "clap",
- "proc-macro2",
- "syn 3.0.6",
- "toml",
-]
 
 [[package]]
 name = "const-oid"
@@ -1212,6 +1194,24 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 [[package]]
 name = "loom"
 version = "1.0.0"
+
+[[package]]
+name = "loom-commission-docs"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "serde_json",
+]
+
+[[package]]
+name = "loom-commission-xtask"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "proc-macro2",
+ "syn 3.0.6",
+ "toml",
+]
 
 [[package]]
 name = "loom-docs"

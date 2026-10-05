@@ -1,7 +1,7 @@
 # Commission — Governed Agent SDK
 
 **Proposed repo:** `beyond10x/commission`  
-**Rust façade:** `b10x-commission`
+**Rust façade:** `b10x-loom-commission`
 
 Commission is the product name for the governed-agent SDK described earlier as the "Beyond10x Agent SDK."
 

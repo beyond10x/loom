@@ -10,7 +10,7 @@ A generic executor contract should be able to support:
 - human executors;
 - test fakes.
 
-The port as built (`crates/commission/src/ports/executor.rs`):
+The port as built (`crates/loom-commission/src/ports/executor.rs`):
 
 ```rust
 pub trait AgentExecutor {

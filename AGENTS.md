@@ -48,7 +48,7 @@ introduces a noun, and `task check` runs its conformance suite once synthesized.
 specification first.
 
 The specification is a hard gate (Atlas ADR 0076). `task check` enforces it through
-`task ess-gate`, which runs `crates/loom/tests/ess_gate.rs`; a failure of any of the four
+`task ess-gate`, which runs `crates/loom-executor/tests/ess_gate.rs`; a failure of any of the four
 conditions fails `task check`:
 
 1. `ess specify validate --path ess --strict-requires` exits 0;
@@ -62,7 +62,7 @@ the ESS release that refuses open entries (beyond10x/ess `epic:typed-open-questi
 
 Commission's specification is its own ESS system under `ess/commission/` (`system.yaml`,
 `ess-inputs.yaml`), held to the same four conditions with `--path ess/commission` by
-`task commission:ess-gate` (`crates/commission/tests/ess_gate.rs`), which `task check` also runs.
+`task commission:ess-gate` (`crates/loom-commission/tests/ess_gate.rs`), which `task check` also runs.
 
 An open question is settled before the specification changes — in a story, or in a
 `decision-blocker` when nobody has decided it — and is never written into `ess/` as an
@@ -83,8 +83,8 @@ change with no behaviour change is exempt, and its story says so.
   `generated/rustfmt.toml` sets `disable_all_formatting`, so `cargo fmt --all` (which reaches the
   path dependency) leaves it alone. Do not add a `rustfmt.toml` inside the generated tree: `task
   drift` would report it and `task generate` would delete it.
-- `b10x-commission` (and, for tests, `b10x-commission-testkit`) is a path dependency on
-  `crates/commission` (`crates/commission-testkit`) in this workspace. The frontier Loom reads is
+- `b10x-loom-commission` (and, for tests, `b10x-loom-commission-testkit`) is a path dependency on
+  `crates/loom-commission` (`crates/loom-commission-testkit`) in this workspace. The frontier Loom reads is
   Commission's generated `Frontier`; Loom may use `b10x-canon`, the Commission contracts crate may
   not.
 - Every commit and push is `b10x-bot[bot]`'s through `b10x-gates bot`; every GitHub write goes
@@ -94,10 +94,10 @@ change with no behaviour change is exempt, and its story says so.
 ## Commission
 
 Commission's history was merged into Loom; its files keep their Commission paths so `git log
---follow` reaches it. Crates: `crates/commission` (`b10x-commission`, the contracts; its dependency
-tree names no `b10x-canon`, `b10x-loom` or model-provider crate, enforced by `task
-commission:deps-guard` and `crates/commission-testkit/tests/skeleton.rs`), `crates/commission-testkit`,
-`crates/commission-conformance`, `crates/commission-docs` and `crates/commission-xtask`. ESS:
+--follow` reaches it. Crates: `crates/loom-commission` (`b10x-loom-commission`, the contracts; its dependency
+tree names no `b10x-canon`, `b10x-loom-executor` or model-provider crate, enforced by `task
+commission:deps-guard` and `crates/loom-commission-testkit/tests/skeleton.rs`), `crates/loom-commission-testkit`,
+`crates/loom-commission-conformance`, `crates/loom-commission-docs` and `crates/loom-commission-xtask`. ESS:
 `ess/commission/`, generated into `generated/rust/commission/` (`task commission:generate`, pinned by
 `task commission:drift`). Docs: `docs/commission/`, reference pages in
 `website/docs/reference/commission/` (`task commission:docs`). Its tasks live in
@@ -105,7 +105,7 @@ commission:deps-guard` and `crates/commission-testkit/tests/skeleton.rs`), `crat
 
 ## Governor
 
-`crates/governor` (`b10x-governor`, lib `governor`) puts Canon behind the governor and evidence
+`crates/loom-governor` (`b10x-loom-governor`, lib `loom_governor`) puts Canon behind the governor and evidence
 ports Commission defines (Atlas ADR 0089); its history was merged from `beyond10x/governor` and it is
 a Loom crate under Atlas ADR 0090. It decides and never acts: it evaluates a case's protocol and
 reports the frontier and completion, and executes nothing. It is the only crate here that evaluates
@@ -124,21 +124,21 @@ protocols with Canon today. It depends on Commission by path, never the reverse.
 ## Intake
 
 Intake's history was merged from `beyond10x/intake`; it routes an intent to a proposed protocol and
-runs a small vertical slice over it. It builds against Loom's own `b10x-commission`,
-`b10x-governor` and `b10x-loom` by path. ESS: the `intake.routing` domain under `ess/intake/`
+runs a small vertical slice over it. It builds against Loom's own `b10x-loom-commission`,
+`b10x-loom-governor` and `b10x-loom-executor` by path. ESS: the `intake.routing` domain under `ess/intake/`
 (`task intake-spec`, which `task check` runs). Docs: `docs/intake/`.
 
-- `crates/intake-router` (`b10x-intake-router`): classifies an intent against the ELS protocol
+- `crates/loom-intake-router` (`b10x-loom-intake-router`): classifies an intent against the ELS protocol
   registry; a pick outside the registry or below the confidence threshold is refused.
-- `crates/intake-references` (`b10x-intake-references`): extracts tracker keys, chat permalinks,
+- `crates/loom-intake-references` (`b10x-loom-intake-references`): extracts tracker keys, chat permalinks,
   merge and pull requests and URLs from an intent, deterministically.
-- `crates/intake-model` (`b10x-intake-model`): the Codex preset and one forced tool call. It moves
+- `crates/loom-intake-model` (`b10x-loom-intake-model`): the Codex preset and one forced tool call. It moves
   to llm under llm `story:call-tool-helper`.
-- `crates/intake-slice` (`b10x-intake-slice`): the local effect adapter (`LocalEffects` over the
+- `crates/loom-intake-slice` (`b10x-loom-intake-slice`): the local effect adapter (`LocalEffects` over the
   local executor) and a thin caller of Commission's runtime (`run_until_blocked`); it has no loop
   of its own (`story:runtime-merge`). Keep it small and do not grow it into a runtime.
-- `crates/intake-cli` (`b10x-intake-cli`): the `b10x-loom` command line (`b10x-loom run`, which
-  replaced `b10x-intake run` in `story:loom-cli`). The package and directory keep their names until
+- `crates/loom-cli` (`b10x-loom-cli`): the `b10x-loom` command line (`b10x-loom run`, which
+  replaced `b10x-intake run` in `story:loom-cli`). It took its `loom-` name in
   `story:crate-names`.
 
 Rules that still hold:

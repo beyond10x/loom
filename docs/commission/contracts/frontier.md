@@ -51,7 +51,7 @@ actions:
 
 An executor may not invoke an action absent from the current frontier/admissible set.
 
-Commission's admission check (`crates/commission/src/admission.rs`) sorts a proposed action into
+Commission's admission check (`crates/loom-commission/src/admission.rs`) sorts a proposed action into
 the generated `Admission` union:
 
 - `Admissible` when the frontier lists it `Admissible`;

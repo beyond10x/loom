@@ -1,9 +1,0 @@
-[package]
-name = "b10x-commission"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-repository.workspace = true
-
-[dependencies]
-commission = { path = "../../generated/rust/commission" }

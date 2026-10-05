@@ -69,4 +69,4 @@ it.
 - [Where Loom ends](./concepts/where-loom-ends.md)
 - [The ESS specification](./reference/ess/index.mdx), generated from the repository
 
-Loom has no command line of its own: `b10x-loom` is a Rust library that Commission drives.
+Loom has no command line of its own: `b10x-loom-executor` is a Rust library that Commission drives.

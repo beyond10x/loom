@@ -44,7 +44,7 @@ fn copy_tree(from: &Path, to: &Path) {
 fn copy_of_repository(name: &str) -> PathBuf {
     let from = repository();
     let to = workspace(name);
-    for part in ["ess", "generated/rust/loom", "crates/loom/src"] {
+    for part in ["ess", "generated/rust/loom", "crates/loom-executor/src"] {
         copy_tree(&from.join(part), &to.join(part));
     }
     to
@@ -78,13 +78,13 @@ fn append(file: &Path, text: &str) -> usize {
 
 /// A `macro_rules!` that takes the type's name as a parameter defines `Selection` as surely as
 /// `pub struct Selection` does, and the story's acceptance 5 is that exact type. The module doc of
-/// `loom-xtask` says `no-hand-model` fails when a source file under `crates/loom/src` defines a
+/// `loom-xtask` says `no-hand-model` fails when a source file under `crates/loom-executor/src` defines a
 /// specified type; the macro scan reads only a type keyword directly followed by a name, and here
 /// the keyword is followed by `$name`.
 #[test]
 fn no_hand_model_refuses_a_model_type_defined_through_a_macro_parameter() {
     let root = copy_of_repository("macro-param");
-    let lib = root.join("crates/loom/src/lib.rs");
+    let lib = root.join("crates/loom-executor/src/lib.rs");
     append(
         &lib,
         "macro_rules! model {\n    ($name:ident) => {\n        pub struct $name {\n            pub action: String,\n        }\n    };\n}",
@@ -108,9 +108,9 @@ fn no_hand_model_refuses_a_model_type_defined_through_a_macro_parameter() {
 #[test]
 fn no_hand_model_refuses_cfg_gated_and_nested_module_types() {
     let root = copy_of_repository("cfg-nested");
-    let lib = root.join("crates/loom/src/lib.rs");
+    let lib = root.join("crates/loom-executor/src/lib.rs");
     let cfg_line = append(&lib, "#[cfg(any())]\npub struct Session;") + 1;
-    let nested = root.join("crates/loom/src/hidden/deeper.rs");
+    let nested = root.join("crates/loom-executor/src/hidden/deeper.rs");
     fs::create_dir_all(nested.parent().unwrap_or(&root)).unwrap_or_else(|e| panic!("create: {e}"));
     fs::write(&nested, "pub mod inner {\n    pub enum Turn { A }\n}\n")
         .unwrap_or_else(|e| panic!("write {}: {e}", nested.display()));

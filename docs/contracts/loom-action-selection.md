@@ -33,7 +33,7 @@ pub trait ArgumentGenerator {
 }
 ```
 
-As built (`crates/loom/src/arguments.rs`), the generator is handed the argument context and the one
+As built (`crates/loom-executor/src/arguments.rs`), the generator is handed the argument context and the one
 catalogue entry the selection names, never the rest of the catalogue, and returns Commission's JSON
 `Value`, which becomes the proposed action's `ProposedActionArguments`; an `Err` carries the reason
 the generator could not answer. Before it is called, Loom records the `loom.run.ArgumentRequest`

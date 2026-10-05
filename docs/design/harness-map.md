@@ -25,12 +25,12 @@ crate (see § Why the rows fall this way).
 
 | crate | package | owns today | serves | disposition | Loom target | licence | owner instead |
 |---|---|---|---|---|---|---|---|
-| `harness-wire` | `b10x-harness-wire` | neutral values plus `ModelPort`, `ToolPort` and `BearerSource`; no I/O, no clock, no vendor field name | model API invocation; tool round trips; streaming; interruption/recovery | port | `crates/loom/src/harness/wire/` | `LicenseRef-B10x-Proprietary` → `Apache-2.0` | — |
-| `harness-http` | `b10x-harness-http` | the transport half of a wire: bounded SSE framing, the retry rule and its back-off, the witnessed sink, the status mapping and the one blocking `POST` | model API invocation; streaming | port | `crates/loom/src/harness/http/` | `LicenseRef-B10x-Proprietary` → `Apache-2.0` | — |
-| `harness-responses` | `b10x-harness-responses` | the Responses projection: its request body, its stream decoder, its three conversation headers | model API invocation; streaming | port | `crates/loom/src/harness/responses/` | `LicenseRef-B10x-Proprietary` → `Apache-2.0` | — |
-| `harness-messages` | `b10x-harness-messages` | the Messages projection: its request body, its content-block decoder, and the two header names one secret travels under | model API invocation; streaming | port | `crates/loom/src/harness/messages/` | `LicenseRef-B10x-Proprietary` → `Apache-2.0` | — |
-| `harness-loop` | `b10x-harness-loop` | the loop: turn assembly, tool round trips, approvals, budgets, cancellation; the four tools it owns itself (`answer`, `delegate`, `skill`, `recall`) and the hook port | prompt/context construction; model turn loop; tool round trips; compaction; turn/token/time/cost budgets; interruption/recovery; model-facing approval/suspension mechanics | port | `crates/loom/src/harness/turn_loop/` | `LicenseRef-B10x-Proprietary` → `Apache-2.0` | — |
-| `harness-cli` | `b10x-harness-cli` | the `b10x-harness` binary, the terminal approver, the hook runner, session transcripts and the environment block. Carried: `src/transcript.rs`, the cross-wire refusal of `open_session` (`src/lib.rs:2540-2550`) and `close_session` with `persist` (`src/lib.rs:2573-2614`) | session/transcript state | port | `crates/loom/src/session.rs` | `LicenseRef-B10x-Proprietary` → `Apache-2.0` | — |
+| `harness-wire` | `b10x-harness-wire` | neutral values plus `ModelPort`, `ToolPort` and `BearerSource`; no I/O, no clock, no vendor field name | model API invocation; tool round trips; streaming; interruption/recovery | port | `crates/loom-executor/src/harness/wire/` | `LicenseRef-B10x-Proprietary` → `Apache-2.0` | — |
+| `harness-http` | `b10x-harness-http` | the transport half of a wire: bounded SSE framing, the retry rule and its back-off, the witnessed sink, the status mapping and the one blocking `POST` | model API invocation; streaming | port | `crates/loom-executor/src/harness/http/` | `LicenseRef-B10x-Proprietary` → `Apache-2.0` | — |
+| `harness-responses` | `b10x-harness-responses` | the Responses projection: its request body, its stream decoder, its three conversation headers | model API invocation; streaming | port | `crates/loom-executor/src/harness/responses/` | `LicenseRef-B10x-Proprietary` → `Apache-2.0` | — |
+| `harness-messages` | `b10x-harness-messages` | the Messages projection: its request body, its content-block decoder, and the two header names one secret travels under | model API invocation; streaming | port | `crates/loom-executor/src/harness/messages/` | `LicenseRef-B10x-Proprietary` → `Apache-2.0` | — |
+| `harness-loop` | `b10x-harness-loop` | the loop: turn assembly, tool round trips, approvals, budgets, cancellation; the four tools it owns itself (`answer`, `delegate`, `skill`, `recall`) and the hook port | prompt/context construction; model turn loop; tool round trips; compaction; turn/token/time/cost budgets; interruption/recovery; model-facing approval/suspension mechanics | port | `crates/loom-executor/src/harness/turn_loop/` | `LicenseRef-B10x-Proprietary` → `Apache-2.0` | — |
+| `harness-cli` | `b10x-harness-cli` | the `b10x-harness` binary, the terminal approver, the hook runner, session transcripts and the environment block. Carried: `src/transcript.rs`, the cross-wire refusal of `open_session` (`src/lib.rs:2540-2550`) and `close_session` with `persist` (`src/lib.rs:2573-2614`) | session/transcript state | port | `crates/loom-executor/src/session.rs` | `LicenseRef-B10x-Proprietary` → `Apache-2.0` | — |
 | `harness-credential` | `b10x-harness-credential` | credential sources that read exactly what a caller pointed them at; how a credential is presented belongs to the wire | model API invocation | not carried | — | — | `beyond10x/harness` |
 | `harness-flow` | `b10x-harness-flow` | the workflow notation `workflow run` walks: a DAG of sub-trees, validated before anything runs, a group as a context scope, and a boundary a caller can refuse | none | not carried | — | — | `beyond10x/harness` |
 | `harness-substrate` | `b10x-harness-substrate` | a client of the substrate wire: what this machine can confine, and the tools that answer | none | not carried | — | — | `beyond10x/harness` |
@@ -45,9 +45,9 @@ crate (see § Why the rows fall this way).
 - **No `depend` row.** Every Harness crate except `harness-toolchain` reaches `harness-wire`
   (each crate's `Cargo.toml` at `798325f0`): `harness-xtask` through `harness-cli`, every other one
   directly. Once `harness-wire` is ported, depending on any of them would put Harness's
-  `ModelPort`, `ToolPort` and `Item` into `b10x-loom` beside Loom's own copies: two incompatible
+  `ModelPort`, `ToolPort` and `Item` into `b10x-loom-executor` beside Loom's own copies: two incompatible
   sets of the same types. `story:harness-loop-port` acceptance 5 forbids it, since
-  `cargo tree -p b10x-loom` may name no package this map marks `port`. `harness-toolchain` has no
+  `cargo tree -p b10x-loom-executor` may name no package this map marks `port`. `harness-toolchain` has no
   such dependency but serves no § Owns responsibility.
 - **The ported set is closed.** `harness-http`, `harness-responses` and `harness-messages` depend
   only on `harness-wire` and `harness-http`; `harness-loop` only on `harness-wire`;
@@ -59,7 +59,7 @@ crate (see § Why the rows fall this way).
   would need a raw identifier at every use.
 - **`harness-cli` is ported in part.** Loom is driven through Commission's `AgentExecutor`, not a
   command line, so the binary, the terminal approver, the hook runner and the workspace environment
-  block stay in `beyond10x/harness`. Three pieces are carried into `crates/loom/src/session.rs`,
+  block stay in `beyond10x/harness`. Three pieces are carried into `crates/loom-executor/src/session.rs`,
   the file `story:session-transcript-streaming` names, because that story keeps their behaviour
   (all at `798325f0`):
   - session filing and resume by id: `src/transcript.rs` (`Session` line 47, `save` line 184, `load` line 219);

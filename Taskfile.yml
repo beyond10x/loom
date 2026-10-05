@@ -43,7 +43,7 @@ tasks:
   ess-gate:
     desc: ESS hard gate (Atlas ADR 0076) — validate, compile, synthesize with 0 refusals, no open question.
     cmds:
-      - cargo test -p b10x-loom --test ess_gate --locked
+      - cargo test -p b10x-loom-executor --test ess_gate --locked
 
   generate:
     desc: Rewrite generated/rust/loom/ from a fresh synthesis of ess/.
@@ -65,7 +65,7 @@ tasks:
       - cargo run -q --locked -p loom-xtask -- drift
 
   no-hand-model:
-    desc: Fail when crates/loom/src defines, or renames something to, a type ess/ declares.
+    desc: Fail when crates/loom-executor/src defines, or renames something to, a type ess/ declares.
     cmds:
       - cargo run -q --locked -p loom-xtask -- no-hand-model
 

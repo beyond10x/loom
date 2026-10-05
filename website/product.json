@@ -110,7 +110,7 @@
       "kind": "status",
       "eyebrow": "Status",
       "title": "Bootstrap. Here is exactly what exists.",
-      "lede": "Shipped means code in the b10x-loom library today. Decided means recorded in an architecture decision. Planned means on the plan only. No model is called yet.",
+      "lede": "Shipped means code in the b10x-loom-executor library today. Decided means recorded in an architecture decision. Planned means on the plan only. No model is called yet.",
       "items": "data/status.json"
     },
     {

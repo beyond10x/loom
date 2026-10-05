@@ -29,7 +29,7 @@ Bootstrap. Design: [`docs/design/loom-design.md`](docs/design/loom-design.md); a
 ## Run it
 
 ```console
-cargo install --path crates/intake-cli
+cargo install --path crates/loom-cli
 b10x-loom run --workspace <git work tree> --test-cmd "cargo test" "make the failing test pass"
 ```
 
