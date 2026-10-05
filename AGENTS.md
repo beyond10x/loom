@@ -134,8 +134,9 @@ runs a small vertical slice over it. It builds against Loom's own `b10x-commissi
   merge and pull requests and URLs from an intent, deterministically.
 - `crates/intake-model` (`b10x-intake-model`): the Codex preset and one forced tool call. It moves
   to llm under llm `story:call-tool-helper`.
-- `crates/intake-slice` (`b10x-intake-slice`): the run loop and local executor. Temporary until
-  `story:runtime-merge`: keep it small and do not grow it into a runtime.
+- `crates/intake-slice` (`b10x-intake-slice`): the local effect adapter (`LocalEffects` over the
+  local executor) and a thin caller of Commission's runtime (`run_until_blocked`); it has no loop
+  of its own (`story:runtime-merge`). Keep it small and do not grow it into a runtime.
 - `crates/intake-cli` (`b10x-intake-cli`): the `b10x-intake` command line, until `story:loom-cli`.
 
 Rules that still hold:

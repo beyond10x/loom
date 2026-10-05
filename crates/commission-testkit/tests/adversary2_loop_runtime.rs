@@ -33,7 +33,9 @@ use b10x_commission::model::responsibility::{
     RunOutcome, RunOutcomeCompleted, RunState, StartRun, StartRunOutcome, SuspendRun,
     SuspendRunOutcome, SuspensionReason, Unit, commission_state, frontier_state, observation_state,
 };
+use b10x_commission::model::responsibility::{EffectOutcome, EffectOutcomePerformed};
 use b10x_commission::outcome::RunStore;
+use b10x_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use b10x_commission::ports::evidence::ObservationPort;
 use b10x_commission::ports::executor::AgentExecutor;
 use b10x_commission::ports::governor::Governor;
@@ -95,6 +97,29 @@ impl LoopContext for Context {
 
     fn now(&mut self) -> Timestamp {
         Timestamp("2026-10-04T12:00:00Z".to_owned())
+    }
+
+    fn step_budget(&self) -> Option<usize> {
+        None
+    }
+}
+
+/// An effect port that performs every action and changes nothing (story:runtime-merge).
+struct Performs;
+
+impl EffectPort for Performs {
+    fn performs(&self, _action: &str) -> bool {
+        true
+    }
+
+    fn invoke(
+        &self,
+        _commission: &Commission<commission_state::Assigned>,
+        _request: &AdmittedRequest,
+    ) -> Result<EffectOutcome, EffectError> {
+        Ok(EffectOutcome::Performed(EffectOutcomePerformed {
+            report: Value::Null,
+        }))
     }
 }
 
@@ -187,6 +212,7 @@ where
         governor,
         executor,
         &StaticAuthorityProvider::new(),
+        &Performs,
         &commission(case),
         &mut runs,
         &mut Context::default(),
@@ -284,8 +310,8 @@ impl AgentExecutor for Repeats {
 }
 
 /// RED. The case stays at 5, open, its frontier admitting `inspect`, and the executor proposes
-/// `inspect` every time. No effect executes, so nothing moves the case: the loop asks the same
-/// executor on the same frontier until the test stops it.
+/// `inspect` every time. The effect port moves nothing (story:runtime-merge; before it no effect
+/// executed): the loop asks the same executor on the same frontier until the test stops it.
 #[test]
 fn admitted_proposal_on_an_unchanged_frontier_is_bounded() {
     let case = CaseId("case-never-moves".to_owned());
@@ -371,6 +397,7 @@ fn observation_failure_suspends_and_names_the_run() {
         &governor,
         &executor,
         &StaticAuthorityProvider::new(),
+        &Performs,
         &commission(&case),
         &mut runs,
         &mut Context::default(),
@@ -411,6 +438,7 @@ fn refused_suspension_is_carried_beside_the_failure() {
         &governor,
         &executor,
         &StaticAuthorityProvider::new(),
+        &Performs,
         &commission(&case),
         &mut runs,
         &mut Context::default(),
@@ -465,6 +493,7 @@ fn executor_suspension_reason_survives_an_observation_failure() {
         &governor,
         &executor,
         &StaticAuthorityProvider::new(),
+        &Performs,
         &commission(&case),
         &mut runs,
         &mut Context::default(),

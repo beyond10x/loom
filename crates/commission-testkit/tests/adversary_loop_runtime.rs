@@ -29,7 +29,9 @@ use b10x_commission::model::responsibility::{
     RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeCompleted,
     RunOutcomeNeedsHumanJudgment, RunState, Unit, commission_state, frontier_state,
 };
+use b10x_commission::model::responsibility::{EffectOutcome, EffectOutcomePerformed};
 use b10x_commission::outcome::RunStore;
+use b10x_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use b10x_commission::ports::executor::AgentExecutor;
 use b10x_commission::runtime::{LoopContext, LoopEnd, LoopError, run_until_blocked};
 use b10x_commission_testkit::fake_authority::StaticAuthorityProvider;
@@ -107,6 +109,29 @@ impl LoopContext for Context {
     fn now(&mut self) -> Timestamp {
         Timestamp("2026-10-04T12:00:00Z".to_owned())
     }
+
+    fn step_budget(&self) -> Option<usize> {
+        None
+    }
+}
+
+/// An effect port that performs every action and changes nothing (story:runtime-merge).
+struct Performs;
+
+impl EffectPort for Performs {
+    fn performs(&self, _action: &str) -> bool {
+        true
+    }
+
+    fn invoke(
+        &self,
+        _commission: &Commission<commission_state::Assigned>,
+        _request: &AdmittedRequest,
+    ) -> Result<EffectOutcome, EffectError> {
+        Ok(EffectOutcome::Performed(EffectOutcomePerformed {
+            report: Value::Null,
+        }))
+    }
 }
 
 fn store() -> Generated<RunStore> {
@@ -128,6 +153,7 @@ fn run<E: AgentExecutor>(
         governor,
         executor,
         authority,
+        &Performs,
         commission,
         runs,
         &mut Context::default(),

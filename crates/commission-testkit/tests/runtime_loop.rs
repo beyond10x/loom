@@ -23,8 +23,11 @@
 //!    the frontier names. Otherwise the run outcome is derived (`outcome::derive`);
 //! 7. otherwise the run outcome is derived.
 //!
-//! Every request is recorded with its revalidation outcome, admitted or not; no request is
-//! executed. Commission has no effect port yet (commission `story:effect-invocation`).
+//! Every request is recorded with its revalidation outcome, admitted or not. Since
+//! `story:runtime-merge` (Atlas ADR 0082) every admitted request is handed to the effect port once,
+//! in order, and its outcome is delivered as one more observation (`runtime_effect.rs` holds that
+//! story's acceptance); before it, no request was executed. The fake effect port here performs
+//! every action and changes nothing.
 //!
 //! The loop is bounded where the frontier does not change (wave 2026-10-04-w5, run-outcomes F4):
 //! two iterations in a row that admit no request end the run with no admissible action, and an
@@ -56,7 +59,9 @@ use b10x_commission::model::responsibility::{
     RunOutcomeNeedsAuthority, RunOutcomeSuspended, RunState, RunStates, SuspensionReason, Unit,
     commission_state, frontier_state,
 };
+use b10x_commission::model::responsibility::{EffectOutcome, EffectOutcomePerformed};
 use b10x_commission::outcome::RunStore;
+use b10x_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use b10x_commission::ports::executor::AgentExecutor;
 use b10x_commission::runtime::{LoopContext, LoopEnd, Revalidated, run_until_blocked};
 use b10x_commission_testkit::fake_authority::{AuthorityQuery, StaticAuthorityProvider};
@@ -219,6 +224,47 @@ impl LoopContext for Context {
     fn now(&mut self) -> Timestamp {
         Timestamp(NOW.to_owned())
     }
+
+    /// No step budget: these loops are bounded by the idle bound.
+    fn step_budget(&self) -> Option<usize> {
+        None
+    }
+}
+
+/// An effect port that performs every action, changes nothing, reports `null`, and records each
+/// request it is handed.
+#[derive(Debug, Default)]
+struct Effects {
+    invoked: Mutex<Vec<ActionRequestData>>,
+}
+
+impl Effects {
+    fn invoked(&self) -> Vec<ActionRequestData> {
+        self.invoked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+impl EffectPort for Effects {
+    fn performs(&self, _action: &str) -> bool {
+        true
+    }
+
+    fn invoke(
+        &self,
+        _commission: &Commission<commission_state::Assigned>,
+        request: &AdmittedRequest,
+    ) -> Result<EffectOutcome, EffectError> {
+        self.invoked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(request.data().clone());
+        Ok(EffectOutcome::Performed(EffectOutcomePerformed {
+            report: Value::Null,
+        }))
+    }
 }
 
 fn rows(runs: &Generated<RunStore>) -> Vec<RunStates> {
@@ -226,8 +272,10 @@ fn rows(runs: &Generated<RunStore>) -> Vec<RunStates> {
         .unwrap_or_else(|unmet| panic!("RunStates: {unmet}"))
 }
 
-/// Runs one loop with a fresh context, and checks expectation 8 for it: the loop starts exactly
-/// one Run, of this commission, at `started_at`, and leaves every earlier Run as it was.
+/// Runs one loop with a fresh context and a fresh effect port, and checks expectation 8 for it:
+/// the loop starts exactly one Run, of this commission, at `started_at`, and leaves every earlier
+/// Run as it was. It also checks, for every loop, that the effect port was handed exactly the
+/// admitted requests, in order (`story:runtime-merge`).
 fn drive(
     runs: &mut Generated<RunStore>,
     name: &str,
@@ -239,15 +287,22 @@ fn drive(
 ) -> LoopEnd {
     let before = rows(runs);
     let mut context = Context::default();
+    let effects = Effects::default();
     let end = run_until_blocked(
         governor,
         executor,
         authority,
+        &effects,
         commission,
         runs,
         &mut context,
     )
     .unwrap_or_else(|error| panic!("{name}: the loop failed: {error:?}"));
+    assert_eq!(
+        effects.invoked(),
+        end.admitted,
+        "{name}: every admitted request is handed to the effect port once, in order"
+    );
     let after = rows(runs);
 
     assert!(
@@ -346,10 +401,17 @@ fn order_refusal_admission_completion(runs: &mut Generated<RunStore>) {
         "{name}: 2. the executor runs on the frontier read again"
     );
 
-    // 4. `inspect` is admitted and recorded, and nothing executes it: the loop holds no effect
-    //    port, the governor received only the reads above and no evidence, and the provider was
-    //    not asked.
+    // 4. `inspect` is admitted and recorded, and handed to the effect port once (checked by
+    //    `drive`; story:runtime-merge, which replaced "nothing executes it"): the governor
+    //    received only the reads above and no evidence, and the provider was not asked.
     assert_eq!(end.admitted, vec![inspect], "{name}: 4. admitted");
+    assert_eq!(
+        end.effects,
+        vec![EffectOutcome::Performed(EffectOutcomePerformed {
+            report: Value::Null,
+        })],
+        "{name}: 4. the one effect"
+    );
     assert!(
         governor.evidence().is_empty(),
         "{name}: 4. evidence reached the governor: {:?}",
@@ -360,10 +422,16 @@ fn order_refusal_admission_completion(runs: &mut Generated<RunStore>) {
         "{name}: 4. the provider was asked: {:?}",
         authority.asked()
     );
+    // Was 2 (one per executor step); story:runtime-merge adds one per effect.
+    let sources: Vec<String> = governor
+        .observations()
+        .into_iter()
+        .map(|observation| observation.source)
+        .collect();
     assert_eq!(
-        governor.observations().len(),
-        2,
-        "{name}: one observation per executor step"
+        sources,
+        ["executor", "executor", "effect"],
+        "{name}: one observation per executor step and one per effect"
     );
 
     // 5. Completed, carrying the governor's outcome.
@@ -592,12 +660,15 @@ fn observation_delivered(runs: &mut Generated<RunStore>) {
 
     let end = drive(runs, name, &commission, &governor, &executor, &authority, 3);
 
+    // Was one observation; story:runtime-merge adds the admitted request's effect after it.
     let observations = governor.observations();
     assert_eq!(
         observations.len(),
-        1,
-        "{name}: 10. one observation from the one step: {observations:?}"
+        2,
+        "{name}: 10. one observation from the one step, then one from its effect: \
+         {observations:?}"
     );
+    assert_eq!(observations[1].source, "effect", "{name}: the effect's");
     let observed = &observations[0];
     assert_eq!(
         observed.observation_id,

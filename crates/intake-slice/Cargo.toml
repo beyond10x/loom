@@ -1,6 +1,6 @@
 [package]
 name = "b10x-intake-slice"
-description = "The vertical slice: open a case on the picked protocol through the governor, run Loom over it and execute local actions until blocked (stories S3-S5). Temporary: Commission's local runtime loop replaces it."
+description = "The vertical slice: open a case on the picked protocol through the governor and run Commission's runtime over it, with Loom proposing and a local effect adapter performing (stories S3-S5)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

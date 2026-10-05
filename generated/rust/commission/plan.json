@@ -2,8 +2,8 @@
   "provenance": {
     "system": "commission",
     "specification_version": "v1",
-    "source_digest": "8baad8a2a232f1823d8fce586ddd35c901af8923715a1eb1fbc3f62817da8e4f",
-    "contract_digest": "c27daebab1de8a70c1c4985e2a48176db7d5700784cedf99b11902b83a5dea7a"
+    "source_digest": "9bed27fd6e65172f1e7b60f9fe93551bb1ce785145cc4c15fd0ec1f1ad08c598",
+    "contract_digest": "cc3143220ec00a04b6a7164c58d293ad930be8a93afd9ac03ed872a0f7b85db6"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -166,6 +166,27 @@
     },
     {
       "kind": "domain_type",
+      "source": "commission.responsibility.EffectOutcome",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "commission.responsibility.EffectOutcomePerformed",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "commission.responsibility.EffectOutcomeRefused",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "commission.responsibility.Evidence.State",
       "disposition": {
         "disposition": "generated"
@@ -300,6 +321,13 @@
     {
       "kind": "domain_type",
       "source": "commission.responsibility.RunOutcome",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "commission.responsibility.RunOutcomeAwaitingApproval",
       "disposition": {
         "disposition": "generated"
       }

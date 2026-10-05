@@ -948,7 +948,7 @@ pub(crate) fn fresh_uuid(kind: &str, seed: &str) -> Uuid {
 }
 
 /// The current UTC time, RFC 3339, to the second.
-fn now() -> Timestamp {
+pub(crate) fn now() -> Timestamp {
     let seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())

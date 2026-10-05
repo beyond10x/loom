@@ -53,11 +53,17 @@ struct Drive {
 }
 
 /// The governor as the loop reads it: frontiers passed on and counted; the completion passed on,
-/// or reported `Complete` when `complete` is set.
+/// or, when `complete` is set, reported `Complete` once the case has moved past the revision of the
+/// first frontier read, so after a step.
+///
+/// Before `story:runtime-merge` it reported `Complete` on every call, which the slice's own loop
+/// read only after a step. Commission's runtime reads the completion before every step, so the
+/// fixture now reports it complete where the case is: after the edit moved it.
 struct Frontiers<'g> {
     governor: &'g CanonGovernor<MemoryCaseStore>,
     complete: bool,
     issued: AtomicUsize,
+    first: Mutex<Option<i64>>,
 }
 
 impl Governor for Frontiers<'_> {
@@ -67,11 +73,25 @@ impl Governor for Frontiers<'_> {
 
     fn frontier(&self, case: &CaseId) -> Result<Frontier<frontier_state::Issued>, GovernorError> {
         self.issued.fetch_add(1, Ordering::SeqCst);
-        self.governor.frontier(case)
+        let frontier = self.governor.frontier(case)?;
+        self.first
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_or_insert(frontier.data().case_revision);
+        Ok(frontier)
     }
 
     fn completion(&self, case: &CaseId) -> Result<CompletionDetermination, GovernorError> {
-        if self.complete {
+        let first = *self
+            .first
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let moved = first.is_some_and(|first| {
+            self.governor
+                .current_revision(case)
+                .is_ok_and(|now| now != first)
+        });
+        if self.complete && moved {
             return Ok(CompletionDetermination::Complete(
                 CompletionDeterminationComplete {
                     outcome: "recorded-complete".to_owned(),
@@ -96,6 +116,7 @@ fn drive_at(
         governor: &governor,
         complete,
         issued: AtomicUsize::new(0),
+        first: Mutex::new(None),
     };
     let request = SliceRequest {
         intent: INTENT.to_owned(),

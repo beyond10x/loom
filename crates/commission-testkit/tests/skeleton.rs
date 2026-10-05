@@ -343,7 +343,15 @@ fn skeleton_lands_port_vocabulary_and_modules() {
             ("NeedsHumanJudgment", "RunOutcomeNeedsHumanJudgment"),
             ("NeedsExternalEvidence", "RunOutcomeNeedsExternalEvidence"),
             ("NoAdmissibleAction", "Unit"),
+            // story:runtime-merge: the slice's approval gate and its NoLocalExecutor.
+            ("AwaitingApproval", "RunOutcomeAwaitingApproval"),
+            ("NoPerformableAction", "Unit"),
         ],
+    );
+    assert_struct(
+        &model,
+        "RunOutcomeAwaitingApproval",
+        &[("actions", "List<String>")],
     );
     assert_struct(&model, "RunOutcomeCompleted", &[("outcome", "String")]);
     assert_struct(
