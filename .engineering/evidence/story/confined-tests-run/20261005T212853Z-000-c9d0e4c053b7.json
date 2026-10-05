@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-05T21:28:53Z",
+  "actor": "human:timo",
+  "artifact": "story:confined-tests-run",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:confined-tests-run-adversary-1",
+    "reference": "docs/qualification/2026-10-05-confined-tests.md",
+    "review": "review-result:confined-tests-run-adversary-1",
+    "outcome": "fixed"
+  }
+}

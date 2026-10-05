@@ -203,6 +203,8 @@ under `target/`, and resource bounds. Mount dependency-cache subdirectories only
 credential/config files or the operator's home. Dependencies are prefetched explicitly by the
 operator; the private Cargo home is offline. A missing guarantee stops with a typed refusal;
 never silently switch to `UnconfinedRunner`. Test fixtures opt out explicitly.
+Validate writable artifacts before every launch: external hardlink aliases and special files
+are invalid scopes; internal Cargo hardlinks remain supported.
 The CLI attempts one delegated user systemd scope and guards against re-exec loops.
 Every executed test observation includes the actual applied confinement; refused launches produce
 no test observation or passing evidence. Real delegated tests must run to qualify confinement;

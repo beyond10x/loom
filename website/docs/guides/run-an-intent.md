@@ -20,6 +20,9 @@ source: crates/loom-cli/src/lib.rs, crates/loom-intake-slice/src/run.rs, ess/int
   network and use an offline private Cargo home with read-only dependency caches. Source and
   toolchain are read-only; workspace writes are restricted to `target/`. A missing cached
   dependency fails the test with a prefetch instruction; Loom never fetches automatically.
+  A symlinked `target/`, a hardlink from it to an outside file, or a socket/device inside it
+  is refused as `ScopeInvalid`. Remove that entry before retrying. Hardlinks entirely inside
+  `target/` remain supported for Cargo's incremental cache.
   Loom's own git calls run none of the work tree's
   hooks. A run does not start on a work tree whose own git configuration names a program (a
   filter driver, a credential helper, an SSH command and the like), and stops when the test

@@ -2,9 +2,9 @@
 /bin/sh: line 1: root-probe: Read-only file system
 confinement: substrate
 picked software-change@1 (confidence 0.99)
-  reason: The user requests a narrowly scoped code change to the add function.
-  reason: They require verification by running the existing failing test first and recording passing test evidence.
-  reason: They explicitly require preserving specified files and stopping at repository.merge approval, which matches a software change workflow.
+  reason: The user requests a narrowly scoped source-code change to the add function.
+  reason: They require verification by reproducing the failing test first and recording passing test evidence.
+  reason: They require preserving specified files byte-for-byte and stopping at repository.merge approval, which maps directly to implementation, verification, and merge-control stages.
 frontier: repository.edit (admissible), repository.inspect (admissible), repository.merge (blocked), tests.run (admissible)
 step 1: tests.run {}
 /bin/sh: line 1: blocked/probe: Read-only file system
@@ -68,8 +68,8 @@ step 2: repository.inspect {"paths":["src/lib.rs","Cargo.toml","Cargo.lock"]}
     | 
   evidence: none
 frontier: repository.edit (admissible), repository.inspect (admissible), repository.merge (blocked), tests.run (admissible)
-step 3: repository.edit {"files":[{"contents":"/// Adds two numbers.\npub fn add(a: i64, b: i64) -> i64 {\n    a + b\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn two_plus_two_is_four() {\n        assert_eq!(add(2, 2), 4);\n    }\n}\n","path":"src/lib.rs"}],"message":"Fix only the add implementation by returning the sum of its two arguments; leave the existing test and Cargo files unchanged."}
-  effect: committed; HEAD is 5c9cad69a3a6449dd47bf4990122d194469c27fa
+step 3: repository.edit {"files":[{"contents":"/// Adds two numbers.\npub fn add(a: i64, b: i64) -> i64 {\n    a + b\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn two_plus_two_is_four() {\n        assert_eq!(add(2, 2), 4);\n    }\n}\n","path":"src/lib.rs"}],"message":"Fix only the add implementation by changing subtraction to addition; leave the existing test and Cargo files unchanged."}
+  effect: committed; HEAD is 94f72aa968794962dd8f1d43a237de6bbd4214fc
   evidence: none
 frontier: repository.edit (admissible), repository.inspect (admissible), repository.merge (blocked), tests.run (admissible)
 step 4: tests.run {}

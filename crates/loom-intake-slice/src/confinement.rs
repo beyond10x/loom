@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::os::unix::fs::PermissionsExt as _;
+use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -314,7 +314,50 @@ fn validate_workspace(root: &Path) -> Result<PathBuf, ConfinementError> {
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && target.is_dir() => {}
         Err(e) => return Err(scope_error(format!("target/ must be a directory: {e}"))),
     }
+    validate_writable_artifacts(&target)?;
     Ok(root)
+}
+
+/// Read-only mounts do not protect an inode also reachable through a writable
+/// hardlink. Count every in-scope name and refuse aliases outside the scope.
+/// Internal hardlinks are normal in Cargo's incremental cache and remain valid.
+/// Do not follow symlinks: the sandbox resolves those through its own mounts.
+fn validate_writable_artifacts(target: &Path) -> Result<(), ConfinementError> {
+    let mut directories = vec![target.to_owned()];
+    let mut links = BTreeMap::<(u64, u64), (u64, u64, PathBuf)>::new();
+    while let Some(directory) = directories.pop() {
+        for entry in std::fs::read_dir(directory).map_err(scope_error)? {
+            let path = entry.map_err(scope_error)?.path();
+            let metadata = std::fs::symlink_metadata(&path).map_err(scope_error)?;
+            if metadata.is_dir() {
+                directories.push(path);
+            } else if metadata.is_file() {
+                if metadata.nlink() > 1 {
+                    let (expected, seen, _) = links
+                        .entry((metadata.dev(), metadata.ino()))
+                        .or_insert((metadata.nlink(), 0, path));
+                    if *expected != metadata.nlink() {
+                        return Err(scope_error("target/ hardlinks changed during validation"));
+                    }
+                    *seen += 1;
+                }
+            } else if !metadata.file_type().is_symlink() {
+                return Err(scope_error(format!(
+                    "target/ contains a socket, device or other non-artifact: {}",
+                    path.display()
+                )));
+            }
+        }
+    }
+    for (_, (expected, seen, path)) in links {
+        if expected != seen {
+            return Err(scope_error(format!(
+                "target/ file has hardlinks outside its writable scope: {}; remove the alias before retrying",
+                path.display()
+            )));
+        }
+    }
+    Ok(())
 }
 fn reject_links(path: &Path) -> Result<(), ConfinementError> {
     let mut current = PathBuf::new();
@@ -671,6 +714,36 @@ mod tests {
         std::os::unix::fs::symlink(root.path().join("src"), root.path().join("index")).unwrap();
         assert_eq!(
             validate_registry(root.path()).unwrap_err().reason,
+            ConfinementRefusal::ScopeInvalid
+        );
+    }
+
+    #[test]
+    fn writable_aliases_must_stay_wholly_inside_target() {
+        let fixture = tempfile::tempdir().unwrap();
+        let workspace = fixture.path().join("workspace");
+        let target = workspace.join("target");
+        std::fs::create_dir_all(target.join("nested")).unwrap();
+        let file = target.join("artifact");
+        std::fs::write(&file, "artifact").unwrap();
+        std::fs::hard_link(&file, target.join("nested/internal")).unwrap();
+        validate_workspace(&workspace).expect("internal Cargo-style hardlinks are safe");
+        std::fs::hard_link(&file, workspace.join("source")).unwrap();
+        assert_eq!(
+            validate_workspace(&workspace).unwrap_err().reason,
+            ConfinementRefusal::ScopeInvalid
+        );
+    }
+
+    #[test]
+    fn writable_host_socket_is_not_an_artifact() {
+        let fixture = tempfile::tempdir().unwrap();
+        let workspace = fixture.path().join("workspace");
+        std::fs::create_dir_all(workspace.join("target")).unwrap();
+        let _socket =
+            std::os::unix::net::UnixListener::bind(workspace.join("target/host.sock")).unwrap();
+        assert_eq!(
+            validate_workspace(&workspace).unwrap_err().reason,
             ConfinementRefusal::ScopeInvalid
         );
     }
