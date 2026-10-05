@@ -38,10 +38,10 @@ A selector can be wrong about which admissible action is best. It cannot produce
 frontier does not contain, and nothing it says becomes evidence.
 
 :::caution[Early]
-Loom has no release yet; consumers depend on it by Git revision. `b10x-loom run` has completed a
-live run against a hosted model ([qualification record][live]); the SDK example runs on scripted
-fake models. Each page says whether what it describes is **shipped**, **decided** or **planned**,
-and the [status page](/docs/status) lists every capability.
+Loom's first release is `0.1.0`, from source at that tag; consumers pin `tag = "0.1.0"`.
+`b10x-loom run` has completed a live run against a hosted model ([qualification record][live]); the
+SDK example runs on scripted fake models. Each page says whether what it describes is
+**shipped**, **decided** or **planned**, and the [status page](/docs/status) lists every capability.
 :::
 
 [live]: https://github.com/beyond10x/loom/blob/main/docs/qualification/2026-10-05-b10x-loom-live-run.md

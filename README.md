@@ -26,8 +26,10 @@ the whole boundary.
 
 ## Status
 
-Version `0.0.0`, unreleased: no tag, nothing on a registry, so you build from source or depend on a
-Git revision. `b10x-loom run` completed a live run against a hosted model on 2026-10-05
+Version `0.1.0`, released from source at the tag `0.1.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.1.0)). Nothing is on a registry: you
+install from the tag or depend on it with `tag = "0.1.0"`. `b10x-loom run` completed a live run
+against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
 decided or planned; [CHANGELOG.md](CHANGELOG.md) lists the changes.
@@ -37,14 +39,14 @@ decided or planned; [CHANGELOG.md](CHANGELOG.md) lists the changes.
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone https://github.com/beyond10x/loom.git
+git clone --branch 0.1.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.0.0
+b10x-loom 0.1.0
 ```
 
 `b10x-loom run` routes an intent to a protocol, opens a governed case and runs until the run is
@@ -73,10 +75,10 @@ the selector, the argument generator, the authority provider and the effect port
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", rev = "558ce0ba6a921c0458d53afcbe06edf6f30f392e" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.1.0" }
 ```
 
-That `rev` is `main` on 2026-10-05; pin the commit you built and tested against. The example below
+The example below
 is a whole embedding: it opens a case on `software-change@1` over a scratch git repository, drives
 it with scripted fake models (no network, no login) and stops before the merge. The commit id in
 its output changes on every run.

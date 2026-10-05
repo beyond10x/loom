@@ -1,6 +1,6 @@
 [package]
 name = "loom-xtask"
-description = "Repository checks for Loom: generated-model drift and hand-written model types."
+description = "Repository checks for Loom: generated-model drift, hand-written model types and release tags."
 publish = false
 version.workspace = true
 edition.workspace = true
@@ -12,3 +12,7 @@ clap = { version = "4", features = ["derive"] }
 proc-macro2 = { version = "1", default-features = false, features = ["span-locations"] }
 serde_json = "1"
 syn = { version = "3", default-features = false, features = ["full", "parsing", "visit"] }
+toml = "0.8"
+
+[dev-dependencies]
+serde_yaml_ng = "0.10"
