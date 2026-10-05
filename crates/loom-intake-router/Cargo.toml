@@ -1,6 +1,6 @@
 [package]
 name = "b10x-loom-intake-router"
-description = "Propose the ELS registry protocol an intent should run under, refusing a pick outside the registry or below a confidence threshold (story router-classifier)."
+description = "Propose the engineering protocol an intent should run under, refusing a pick outside the registry or below a confidence threshold."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

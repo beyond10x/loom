@@ -1,5 +1,14 @@
 domain: intake.routing
 
+summary: >-
+  An intent as given, the references extracted from its text, the protocol the router proposes
+  for it, and the slice run that works the intent until it is blocked. A pick is a proposal, never
+  authority.
+
+naming:
+  wire: routing
+  display: Routing
+
 types:
   - name: intake.routing.IntentId
     kind: newtype

@@ -1,35 +1,36 @@
 # Loom
 
-The native agent harness: it makes a model behave like an agent for one bounded run, inside a
-governed frontier.
+The runtime for governed agents: it makes a model behave like an agent for one bounded run, inside
+a governed frontier, and it never lets the model act outside it.
 
-Loom implements [Commission](https://github.com/beyond10x/commission)'s executor contract. For each
-run it:
+For each step of a run Loom:
 
 1. projects the frontier's admissible actions into the model-visible catalogue;
-2. selects one action (a reasoning model, a deterministic rule, or a fast typed selector);
-3. asks the model for arguments to that action only, and validates them against its schema;
-4. hands the action back for revalidation against the current case revision and authority;
-5. returns it as a `ProposedAction`. The Commission runtime rechecks frontier, case revision and
-   authority, then invokes it through a trusted adapter (Atlas ADR 0082).
+2. selects one action (a model, a deterministic rule, or later a fast typed selector);
+3. asks for arguments to that action only;
+4. returns it as a `ProposedAction`. Commission's runtime rechecks frontier, case revision and
+   authority, then hands it to an effect port (Atlas ADR 0082).
 
 A selector can be wrong about which admissible action is best. It cannot produce an action the
 frontier does not contain.
 
-Loom succeeds the Beyond10x Harness. Harness's turns, sessions, providers, tool loop, streaming,
-compaction, budgets and records are ported here step by step; Harness stays in service until its
-consumers have moved.
+Commission's contracts and runtime, the Canon governor and intake live in this repository too
+(Atlas ADR 0090); their former repositories are archived. Loom succeeds the Beyond10x Harness,
+whose model wires, turn loop and sessions are ported here step by step.
+
+Documentation: <https://beyond10x.github.io/loom/>. Changes: [CHANGELOG.md](CHANGELOG.md).
 
 ## Status
 
-Bootstrap. Design: [`docs/design/loom-design.md`](docs/design/loom-design.md); action selection:
-[`docs/contracts/loom-action-selection.md`](docs/contracts/loom-action-selection.md); fast selection:
-[`docs/integrations/laya-fast-selection.md`](docs/integrations/laya-fast-selection.md).
+Early. No release yet: depend on a Git revision. `b10x-loom run` has completed a live run against
+a hosted model ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)); the
+[status page](https://beyond10x.github.io/loom/docs/status) lists what is shipped and what is
+planned.
 
 ## Run it
 
 ```console
-cargo install --path crates/loom-cli
+cargo install --locked --path crates/loom-cli
 b10x-loom run --workspace <git work tree> --test-cmd "cargo test" "make the failing test pass"
 ```
 
@@ -51,18 +52,20 @@ for another reason, 1 when it failed and 2 for a command line that is not valid.
 
 An application embeds the governed runtime through one crate, `b10x-loom-sdk`
 ([`crates/loom-sdk`](crates/loom-sdk)). It re-exports Commission's contracts and runtime, the Loom
-executor, the governor and intake; the application supplies the selector, the argument generator
-and the authority provider.
+executor, the governor and intake; the application supplies the selector, the argument generator,
+the authority provider and the effect port.
 
 [`crates/loom-sdk/examples/software_change.rs`](crates/loom-sdk/examples/software_change.rs) is a
 whole embedding: it opens a case on `software-change@1` over a scratch git repository, runs the loop
 over scripted fake models (no network, no login) and stops at `ApprovalRequired (repository.merge)`.
 
 ```console
-cargo run -p b10x-loom-sdk --example software_change
+cargo run --locked -p b10x-loom-sdk --example software_change
 ```
 
 ## Build
+
+Needs Rust, [Task](https://taskfile.dev/) and the `ess` command line.
 
 ```console
 task check

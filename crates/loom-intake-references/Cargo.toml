@@ -1,6 +1,6 @@
 [package]
 name = "b10x-loom-intake-references"
-description = "Deterministic extraction of an intent's key references: tracker keys, chat permalinks, merge requests, pull requests and URLs (story intent-references)."
+description = "Deterministic extraction of an intent's key references: tracker keys, chat permalinks, merge requests, pull requests and URLs."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

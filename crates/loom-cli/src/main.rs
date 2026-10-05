@@ -2,70 +2,18 @@
 //!
 //! `b10x-loom run --workspace <dir> "<intent>"` extracts the intent's references, classifies it,
 //! opens the governed case and runs the slice until it stops, printing each step and the stop
-//! reason. Everything it does is `b10x_loom_intake_slice::run::run`; this binary parses the arguments, builds
-//! the two models over the operator's Codex login and an in-memory governor, and calls it.
+//! reason. Everything it does is `b10x_loom_intake_slice::run::run`; this binary parses the
+//! arguments (defined in the library, `b10x_loom_cli::Cli`), builds the two models over the
+//! operator's Codex login and an in-memory governor, and calls it.
 
-use std::path::PathBuf;
 use std::process::ExitCode;
 
 use b10x_llm_tool_call::codex_model;
+use b10x_loom_cli::{Cli, Command, RunArgs};
 use b10x_loom_intake_slice::executor::TestCommand;
 use b10x_loom_intake_slice::run::{SliceRequest, SliceRun, StopReason, printable, run};
-use clap::{Args, Parser, Subcommand};
+use clap::Parser;
 use loom_governor::{CanonGovernor, MemoryCaseStore};
-
-/// The model both the agent and the classifier use unless told otherwise.
-const DEFAULT_MODEL: &str = "gpt-5.6-sol";
-
-/// What `run --help` says about the exit status; [`exit_status`] decides it.
-const EXIT_STATUS: &str = "Exit status:
-  0  the run stopped at its human gate (ApprovalRequired)
-  3  the run stopped for another reason (NothingAdmissible, StepBudget, NoLocalExecutor, Refused)
-  1  the run failed
-  2  the command line is not valid";
-
-#[derive(Debug, Parser)]
-#[command(
-    name = "b10x-loom",
-    version,
-    about = "Loom: route an intent and run it until it is blocked"
-)]
-struct Cli {
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Debug, Subcommand)]
-enum Command {
-    /// Run the slice on an intent until it is blocked, and say why it stopped.
-    #[command(after_help = EXIT_STATUS)]
-    Run(RunArgs),
-}
-
-#[derive(Debug, Args)]
-struct RunArgs {
-    /// The root of the git work tree the change is made in.
-    #[arg(long, value_name = "DIR")]
-    workspace: PathBuf,
-    /// The test command, run in the workspace without a shell: a program and its arguments,
-    /// split at white space.
-    #[arg(long, value_name = "CMD", default_value = "cargo test")]
-    test_cmd: String,
-    /// The most actions performed before the run stops.
-    #[arg(long, value_name = "N", default_value_t = 20)]
-    max_steps: usize,
-    /// The model that selects actions and writes their arguments.
-    #[arg(long, value_name = "ID", default_value = DEFAULT_MODEL)]
-    model: String,
-    /// The model that classifies the intent.
-    #[arg(long, value_name = "ID", default_value = DEFAULT_MODEL)]
-    classifier_model: String,
-    /// The confidence, from 0 to 1, below which the router refuses its pick.
-    #[arg(long, value_name = "X", default_value_t = 0.5)]
-    threshold: f64,
-    /// What to do, as given.
-    intent: String,
-}
 
 fn main() -> ExitCode {
     let Command::Run(arguments) = Cli::parse().command;

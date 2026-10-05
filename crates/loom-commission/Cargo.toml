@@ -1,5 +1,6 @@
 [package]
 name = "b10x-loom-commission"
+description = "Commission's contracts and runtime: the responsibility model generated from ESS, the ports an embedder implements, admission and revalidation, and the loop that drives a commission until it is blocked."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -1221,6 +1221,7 @@ name = "loom-docs"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "b10x-loom-cli",
  "clap",
  "serde_json",
 ]
