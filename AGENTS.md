@@ -137,7 +137,9 @@ runs a small vertical slice over it. It builds against Loom's own `b10x-commissi
 - `crates/intake-slice` (`b10x-intake-slice`): the local effect adapter (`LocalEffects` over the
   local executor) and a thin caller of Commission's runtime (`run_until_blocked`); it has no loop
   of its own (`story:runtime-merge`). Keep it small and do not grow it into a runtime.
-- `crates/intake-cli` (`b10x-intake-cli`): the `b10x-intake` command line, until `story:loom-cli`.
+- `crates/intake-cli` (`b10x-intake-cli`): the `b10x-loom` command line (`b10x-loom run`, which
+  replaced `b10x-intake run` in `story:loom-cli`). The package and directory keep their names until
+  `story:crate-names`.
 
 Rules that still hold:
 

@@ -1,6 +1,6 @@
 [package]
 name = "b10x-intake-cli"
-description = "The b10x-intake command line (story S5)."
+description = "The b10x-loom command line (story loom-cli)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,7 +11,7 @@ publish = false
 name = "intake_cli"
 
 [[bin]]
-name = "b10x-intake"
+name = "b10x-loom"
 path = "src/main.rs"
 
 [dependencies]

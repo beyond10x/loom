@@ -1,9 +1,9 @@
 //! Adversary cases for story `slice-loop-cli` (wave 2026-10-04-w17, pass 1).
 //!
-//! Each case drives the library entry point `b10x-intake run` calls, [`intake_slice::run::run`],
+//! Each case drives the library entry point `b10x-loom run` calls, [`intake_slice::run::run`],
 //! with recorded fake models (never the network or a credential), on a fixture git repository
 //! under `CARGO_TARGET_TMPDIR` whose own git calls run with no system or global configuration. The
-//! binary-level cases run `CARGO_BIN_EXE_b10x-intake` with `HOME` and `CODEX_HOME` pointed at an
+//! binary-level cases run `CARGO_BIN_EXE_b10x-loom` with `HOME` and `CODEX_HOME` pointed at an
 //! empty directory under `CARGO_TARGET_TMPDIR`, so no login is ever read.
 
 use std::collections::VecDeque;
@@ -544,7 +544,7 @@ fn bin(label: &str, args: &[&str]) -> std::process::Output {
     let home = scratch(label).join("home");
     std::fs::create_dir_all(&home).expect("create home");
     let workspace = Fixture::new(label);
-    let mut command = Command::new(env!("CARGO_BIN_EXE_b10x-intake"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_b10x-loom"));
     command
         .arg("run")
         .arg("--workspace")
@@ -553,7 +553,7 @@ fn bin(label: &str, args: &[&str]) -> std::process::Output {
         .env("HOME", &home)
         .env("CODEX_HOME", &home)
         .env_remove("RUST_LOG");
-    let output = command.output().expect("run b10x-intake");
+    let output = command.output().expect("run b10x-loom");
     drop(workspace);
     let _ = std::fs::remove_dir_all(home.parent().expect("scratch"));
     output

@@ -1,7 +1,7 @@
 //! Acceptance for story `slice-loop-cli`: the slice runs from an intent until it is blocked, and
 //! says why it stopped (`intake.routing.SliceRun`, `intake.routing.StopReason`).
 //!
-//! Every case drives the library entry point the `b10x-intake run` binary calls,
+//! Every case drives the library entry point the `b10x-loom run` binary calls,
 //! [`intake_slice::run::run`], with two recorded fake models: the classifier, which answers one
 //! forced `pick_protocol` call, and the agent, which answers Loom's selections and argument requests
 //! in order. A model asked more often than recorded panics, so a case that should never reach the
@@ -441,13 +441,13 @@ fn the_slice_runs_on_commissions_runtime() {
     );
 }
 
-/// `b10x-intake run --help` lists every flag the story names, the intent, and the default model.
+/// `b10x-loom run --help` lists every flag the story names, the intent, and the default model.
 #[test]
 fn the_run_command_lists_its_flags() {
-    let output = Command::new(env!("CARGO_BIN_EXE_b10x-intake"))
+    let output = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
         .args(["run", "--help"])
         .output()
-        .expect("run b10x-intake");
+        .expect("run b10x-loom");
     assert!(
         output.status.success(),
         "`run --help` succeeds: {}",
@@ -485,10 +485,10 @@ fn the_run_command_lists_its_flags() {
 /// here with no Codex login (`HOME` and `CODEX_HOME` an empty directory), so no login is read.
 #[test]
 fn the_exit_status_says_how_the_run_ended() {
-    let output = Command::new(env!("CARGO_BIN_EXE_b10x-intake"))
+    let output = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
         .args(["run", "--help"])
         .output()
-        .expect("run b10x-intake");
+        .expect("run b10x-loom");
     let help = String::from_utf8(output.stdout).expect("help is UTF-8");
     let status_line = |code: &str| -> String {
         help.lines()
@@ -514,7 +514,7 @@ fn the_exit_status_says_how_the_run_ended() {
     let fixture = Fixture::new("exit-status");
     let home = fixture.root.join("home");
     std::fs::create_dir_all(&home).expect("create an empty home");
-    let failed = Command::new(env!("CARGO_BIN_EXE_b10x-intake"))
+    let failed = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
         .arg("run")
         .arg("--workspace")
         .arg(fixture.workspace())
@@ -522,7 +522,7 @@ fn the_exit_status_says_how_the_run_ended() {
         .env("HOME", &home)
         .env("CODEX_HOME", &home)
         .output()
-        .expect("run b10x-intake");
+        .expect("run b10x-loom");
     let stderr = String::from_utf8_lossy(&failed.stderr);
     assert_eq!(
         failed.status.code(),
@@ -534,12 +534,12 @@ fn the_exit_status_says_how_the_run_ended() {
         "the failure says to log in: {stderr}"
     );
 
-    let usage = Command::new(env!("CARGO_BIN_EXE_b10x-intake"))
+    let usage = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
         .args(["run", INTENT])
         .env("HOME", &home)
         .env("CODEX_HOME", &home)
         .output()
-        .expect("run b10x-intake");
+        .expect("run b10x-loom");
     assert_eq!(
         usage.status.code(),
         Some(2),

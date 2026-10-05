@@ -1,6 +1,6 @@
-//! `b10x-intake`: run the intake slice from the command line (story `slice-loop-cli`).
+//! `b10x-loom`: run an intent through Loom from the command line (story `loom-cli`).
 //!
-//! `b10x-intake run --workspace <dir> "<intent>"` extracts the intent's references, classifies it,
+//! `b10x-loom run --workspace <dir> "<intent>"` extracts the intent's references, classifies it,
 //! opens the governed case and runs the slice until it stops, printing each step and the stop
 //! reason. Everything it does is `intake_slice::run::run`; this binary parses the arguments, builds
 //! the two models over the operator's Codex login and an in-memory governor, and calls it.
@@ -26,9 +26,9 @@ const EXIT_STATUS: &str = "Exit status:
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "b10x-intake",
+    name = "b10x-loom",
     version,
-    about = "Route an intent and run the intake slice"
+    about = "Loom: route an intent and run it until it is blocked"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -72,7 +72,7 @@ fn main() -> ExitCode {
     match run_slice(arguments) {
         Ok(slice) => ExitCode::from(exit_status(slice.stop_reason)),
         Err(error) => {
-            eprintln!("b10x-intake: {}", printable(&error));
+            eprintln!("b10x-loom: {}", printable(&error));
             ExitCode::FAILURE
         }
     }
