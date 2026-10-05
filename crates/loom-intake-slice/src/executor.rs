@@ -6,9 +6,9 @@
 //! - `repository.inspect`, `{"paths": [<path>, ...]}`: returns each file's contents
 //!   ([`Report::Inspected`]).
 //! - `repository.edit`, `{"files": [{"path": <path>, "contents": <text>}, ...], "message": <text>}`
-//!   (`message` optional): writes the files, commits exactly those paths with the workspace's own
-//!   git configuration, and reports the new `HEAD` to the governor as the case's `implementation`
-//!   revision ([`Report::Edited`]).
+//!   (`message` optional): writes the files, commits exactly those paths with the workspace's
+//!   identity and no hook or signing program, and reports the new `HEAD` to the governor as the
+//!   case's `implementation` revision ([`Report::Edited`]).
 //! - `tests.run`, `{}`: runs the configured [`TestCommand`] in the workspace, without a shell, and
 //!   delivers what it observed to the governor as an observation ([`Report::TestsRun`]). The
 //!   command is killed at its timeout ([`TestCommand::DEFAULT_TIMEOUT`] unless
@@ -33,18 +33,28 @@
 //!
 //! An edit is checked whole before any file is written: one refused path refuses the edit, and
 //! nothing is written. Once writing starts the edit is atomic: if a write, `git add` or `git commit`
-//! fails (a hook that rejects the commit, a path git refuses), every written path is put back to its
+//! fails (a NUL in the message, a path git refuses), every written path is put back to its
 //! previous bytes or removed, the directories made for it are removed and the git index is restored,
 //! so the work tree is as it was. Putting back is best effort; a path that cannot be put back is
 //! left as it is, and the next `tests.run` then finds an unclean work tree, which yields no
 //! evidence. An edit whose commit succeeded but whose new `HEAD` the governor did not record keeps
 //! its commit and returns [`ExecuteError::Case`].
 //!
+//! # Host git
+//!
+//! Every git call is host git ([`crate::git`]): it runs no hook of the workspace's, no
+//! `core.fsmonitor` command and no signing program, and it is refused with
+//! [`ExecuteError::HostGit`] before git starts when the workspace's git configuration files changed
+//! since the case opened (a test that wrote a filter driver or a `gpg.program` into `.git/config`),
+//! when its git or common directory moved (a planted `commondir`), when its own configuration
+//! now names a program (a work-tree file it includes, rewritten by an edit), or when no case
+//! opened on the workspace in this process. An edit refused so writes nothing and commits nothing.
+//!
 //! # Known limit: no sandbox
 //!
-//! The test command and the workspace's git hooks run model-edited code with the operator's rights,
-//! the operator's environment and network access. The slice has no sandbox; run it only on
-//! workspaces and models trusted with that.
+//! The test command runs model-edited code with the operator's rights, the operator's environment
+//! and network access. The slice has no sandbox; run it only on workspaces and models trusted with
+//! that.
 //!
 //! # Trust
 //!
@@ -74,6 +84,7 @@ use loom_governor::{CanonGovernor, CaseStore};
 use sha2::{Digest, Sha256};
 
 use crate::case::{self, CaseError, REDIRECTING_GIT_VARIABLES};
+use crate::git::{self, HostGitRefusal};
 
 /// `repository.inspect`.
 pub const INSPECT: &str = "repository.inspect";
@@ -239,6 +250,9 @@ pub enum ExecuteError {
     Case(CaseError),
     /// The governor did not take the test run's observation.
     Governor(GovernorError),
+    /// Host git was refused before it ran: the workspace's git configuration changed since the
+    /// case opened, or no case opened on the workspace in this process.
+    HostGit(HostGitRefusal),
 }
 
 impl fmt::Display for ExecuteError {
@@ -253,6 +267,7 @@ impl fmt::Display for ExecuteError {
             Self::Workspace { problem } => write!(f, "the workspace failed: {problem}"),
             Self::Case(error) => error.fmt(f),
             Self::Governor(error) => write!(f, "the governor refused the observation: {error:?}"),
+            Self::HostGit(refusal) => refusal.fmt(f),
         }
     }
 }
@@ -493,7 +508,17 @@ fn write_and_commit(
     git(root, &with_paths(&["add", "--"], relatives))?;
     let unchanged = git_status(
         root,
-        &with_paths(&["diff", "--cached", "--quiet", "--"], relatives),
+        &with_paths(
+            &[
+                "diff",
+                "--cached",
+                "--quiet",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--",
+            ],
+            relatives,
+        ),
     )?;
     if !unchanged {
         git(
@@ -587,19 +612,16 @@ fn refuse_ignored(root: &Path, relatives: &[&OsStr]) -> Result<(), ExecuteError>
         input.extend_from_slice(relative.to_string_lossy().as_bytes());
         input.push(0);
     }
-    let mut command = Command::new("git");
-    command
+    let mut git = git::recorded(root).map_err(ExecuteError::HostGit)?;
+    let mut child = git
         .args(["check-ignore", "-z", "--stdin", "--no-index"])
-        .current_dir(root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    for variable in REDIRECTING_GIT_VARIABLES {
-        command.env_remove(variable);
-    }
-    let mut child = command.spawn().map_err(|error| ExecuteError::Workspace {
-        problem: format!("git did not run: {error}"),
-    })?;
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| ExecuteError::Workspace {
+            problem: format!("git did not run: {error}"),
+        })?;
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(&input).map_err(io)?;
     }
@@ -877,8 +899,8 @@ fn with_paths<'a>(fixed: &[&'a str], paths: &[&'a OsStr]) -> Vec<&'a OsStr> {
         .collect()
 }
 
-/// Runs git with literal pathspecs in `root`, without the variables that redirect it; a git that
-/// fails is an error.
+/// Runs host git ([`crate::git`]) with literal pathspecs in `root`; a git that fails is an error, a
+/// refused one [`ExecuteError::HostGit`].
 fn git(root: &Path, args: &[&OsStr]) -> Result<(), ExecuteError> {
     git_output(root, args).map(drop)
 }
@@ -907,18 +929,14 @@ fn git_status(root: &Path, args: &[&OsStr]) -> Result<bool, ExecuteError> {
 }
 
 fn git_command(root: &Path, args: &[&OsStr]) -> Result<Output, ExecuteError> {
-    let mut command = Command::new("git");
-    command
-        .arg("--literal-pathspecs")
+    let mut git = git::recorded(root).map_err(ExecuteError::HostGit)?;
+    git.arg("--literal-pathspecs")
         .args(args)
-        .current_dir(root)
-        .stdin(Stdio::null());
-    for variable in REDIRECTING_GIT_VARIABLES {
-        command.env_remove(variable);
-    }
-    command.output().map_err(|error| ExecuteError::Workspace {
-        problem: format!("git did not run: {error}"),
-    })
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| ExecuteError::Workspace {
+            problem: format!("git did not run: {error}"),
+        })
 }
 
 /// A fresh version-8 UUID: the SHA-256 of `kind`, `seed`, the process, the clock and a counter.

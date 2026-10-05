@@ -49,8 +49,11 @@ executor ran (Atlas ADR 0074). A transcript line that a model-written file imita
 next choice; it cannot become evidence.
 
 :::warning[No sandbox]
-The test command and the work tree's git hooks run model-edited code with the operator's rights and
-environment. The slice's path checks bound what it writes, not what that code does.
+The test command runs model-edited code with the operator's rights and environment. The slice's
+path checks bound what it writes, not what that code does. The slice's own git calls run none of
+the work tree's hooks, no `core.fsmonitor` command and no signing program, a case does not open
+on a work tree whose own git configuration names a program, and a call is refused once the test
+command changed that configuration or the git directory.
 :::
 
 The `intake.routing` domain specifies these nouns; its [reference](/docs/reference/ess/intake-routing)

@@ -14,8 +14,11 @@ source: crates/loom-cli/src/lib.rs, crates/loom-intake-slice/src/run.rs, ess/int
   renewed when it is close to expiry, by [llm](https://beyond10x.github.io/llm/)
   ([GitHub](https://github.com/beyond10x/llm)), never by Loom's own code.
 - **A git work tree whose test command you would run yourself.** There is no sandbox. The test
-  command and the work tree's git hooks run model-edited code with your rights and your
-  environment. The path checks bound what Loom writes, not what that code does.
+  command runs model-edited code with your rights and your environment. The path checks bound
+  what Loom writes, not what that code does. Loom's own git calls run none of the work tree's
+  hooks. A run does not start on a work tree whose own git configuration names a program (a
+  filter driver, a credential helper, an SSH command and the like), and stops when the test
+  command changed that configuration or the git directory.
 - **A test command without shell syntax.** `--test-cmd` is split at white space and run without a
   shell: `cargo test --quiet` works, `cd x && make` does not.
 
