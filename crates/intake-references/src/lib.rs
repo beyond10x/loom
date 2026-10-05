@@ -28,7 +28,7 @@
 //! is found whole.
 //!
 //! The types mirror `intake.routing.ReferenceKind` and `intake.routing.ExtractedReference` in
-//! `ess/domains/routing.yaml`. An [`ExtractedReference`] here carries only the specification's
+//! `ess/intake/domains/routing.yaml`. An [`ExtractedReference`] here carries only the specification's
 //! `kind` and `value`. Its `reference_id` and `intent_id` are not assigned by this crate: an
 //! extraction is a pure function of the text, and the identity is given where the intent and its
 //! references are recorded.

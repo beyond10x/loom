@@ -11,7 +11,7 @@
 //!    the verifier submitting evidence, and the completion.
 //!
 //! It ends with a [`SliceRun`] and its [`StopReason`] (`intake.routing.SliceRun` and
-//! `intake.routing.StopReason` in `ess/domains/routing.yaml`):
+//! `intake.routing.StopReason` in `ess/intake/domains/routing.yaml`):
 //!
 //! | Stop reason | When |
 //! | --- | --- |

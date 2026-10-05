@@ -11,10 +11,11 @@ tasks:
     cmds: [{task: check}]
 
   check:
-    desc: Format, lint, test; Loom's steps and every Commission step.
+    desc: Format, lint, test; Loom's steps, every Commission step and intake's specification.
     cmds:
       - task: spec
       - task: commission:spec
+      - task: intake-spec
       - task: ess-gate
       - task: commission:ess-gate
       - task: drift
@@ -33,6 +34,11 @@ tasks:
     desc: Validate the ESS specification.
     cmds:
       - ess specify validate --path ess
+
+  intake-spec:
+    desc: Validate intake's ESS specification.
+    cmds:
+      - ess specify validate --path ess/intake
 
   ess-gate:
     desc: ESS hard gate (Atlas ADR 0076) — validate, compile, synthesize with 0 refusals, no open question.
