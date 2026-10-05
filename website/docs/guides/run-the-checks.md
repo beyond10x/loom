@@ -8,9 +8,11 @@ source: Taskfile.yml, Taskfile.commission.yml, .github/workflows/pages.yml
 
 # Run the checks
 
-You need Rust, the [Task runner](https://taskfile.dev/) and the `ess` command line of
-[ESS](https://beyond10x.github.io/ess/) ([GitHub](https://github.com/beyond10x/ess)). From the
-repository root:
+You need Rust, the [Task runner](https://taskfile.dev/), the `ess` command line of
+[ESS](https://beyond10x.github.io/ess/) ([GitHub](https://github.com/beyond10x/ess)), and
+bubblewrap at `/usr/bin/bwrap`. CI installs bubblewrap before testing delegation refusals.
+The dedicated confinement qualification additionally needs delegated cgroup v2 controllers;
+its explicit skip in the ordinary suite establishes no qualification. From the repository root:
 
 ```console
 task check
@@ -36,8 +38,8 @@ task intake-spec
 ```
 
 ```text
-task: [intake-spec] ess specify validate --path ess/intake
-intake v1 — 2 file(s), valid
+task: [intake-spec] ess specify validate --path ess/intake --strict-requires
+intake v1 — 3 file(s), valid
 ```
 
 ## Documentation

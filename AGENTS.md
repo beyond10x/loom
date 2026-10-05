@@ -110,7 +110,8 @@ newer ESS ships.
 
 ## Gate
 
-Needs Rust, Task and `ess`. Before a change is reported done, in this order:
+Needs Rust, Task, `ess` and bubblewrap (`/usr/bin/bwrap`). CI installs the backend before
+running the delegation-refusal tests. Before a change is reported done, in this order:
 
 1. `task check`: the three specification validations, both ESS gates, all three drift checks, both
    no-hand-model checks, Commission's conformance suite, the dependency guard,
