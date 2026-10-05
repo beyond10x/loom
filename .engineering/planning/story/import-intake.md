@@ -32,32 +32,36 @@ scope:
   path: docs/intake
 - confidence: inferred
   path: ess/intake
-revision: 14
+revision: 15
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-05T00:09:55Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-05T00:09:55Z", actor: "human:timo", revision: 3}
 ---
 ## Outcome
 
-Intake's router, references, slice and CLI live in Loom with their history, built against Loom's
-own executor, Commission and governor crates by path. Intake's model helper lives in llm.
+Intake's router, references, model helper, slice and CLI live in Loom with their history, built
+against Loom's own executor, Commission and governor crates by path.
 
 ## Acceptance
 
-- `crates/intake-router`, `crates/intake-references`, `crates/intake-slice`, `crates/intake-cli`
-  in Loom, with history from `beyond10x/intake`.
-- `intake-model`'s `call_tool` and Codex preset are in an llm client crate, released by tag; Loom's
-  intake crates use that tag.
+- `crates/intake-router`, `crates/intake-references`, `crates/intake-model`, `crates/intake-slice`,
+  `crates/intake-cli` in Loom, with history from `beyond10x/intake` (`git log --follow` reaches
+  intake's commits for a moved `ess/` file and a crate file).
+- No `Cargo.toml` in Loom names `github.com/beyond10x/commission`, `/governor`, `/loom` or
+  `/intake`; `cargo tree -i` shows one copy each of `b10x-commission`, `b10x-governor`,
+  `b10x-loom` and `b10x-canon`.
 - Intake's offline slice test passes in Loom and still ends `ApprovalRequired (repository.merge)`.
-- Intake's `ess/` domain is part of Loom's ESS input; `ess specify validate` passes.
-- `docs/qualification/2026-10-04-live-run.md` is in Loom's `docs/`.
-- `task check` exits 0.
+- Intake's `ess/` domain is part of Loom's ESS input at `ess/intake/`; `ess specify validate`
+  passes.
+- `docs/qualification/2026-10-04-live-run.md` is in Loom at `docs/intake/qualification/`.
+- `task check` passes (every step, run one at a time).
+
+## Changed at wave open (2026-10-05, wave w25)
+
+Moving `intake-model` (`call_tool`, Codex preset) into llm is split out to llm
+`story:call-tool-helper`: it needs an llm release before Loom can pin it. Until then
+`intake-model` is a Loom crate.
 
 ## Depends on
 
-`story:import-commission`, `story:import-governor`.
-
-## Scope (inferred)
-
-loom: `crates/intake-*`, `ess/`, `docs/qualification/`, `Cargo.toml`, `Cargo.lock`. llm: one client
-crate, a release.
+`story:import-commission`, `story:import-governor` (both implemented).
