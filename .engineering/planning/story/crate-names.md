@@ -2,14 +2,41 @@
 format: aep.planning-md/3
 id: story:crate-names
 kind: story
-status: draft
+status: active
 title: Loom's crates carry loom- names; no commission, governor or intake packages remain
 relations:
 - decomposes: epic:runtime-consolidation
 - depends_on: story:runtime-merge
 - depends_on: story:loom-cli
 - depends_on: story:loom-sdk
-revision: 1
+- serves: vision:governed-autonomy
+scope:
+- confidence: inferred
+  path: .github/workflows
+- confidence: inferred
+  path: AGENTS.md
+- confidence: inferred
+  path: Cargo.lock
+- confidence: inferred
+  path: Cargo.toml
+- confidence: inferred
+  path: README.md
+- confidence: inferred
+  path: Taskfile.commission.yml
+- confidence: inferred
+  path: Taskfile.yml
+- confidence: inferred
+  path: crates
+- confidence: inferred
+  path: ess
+- confidence: inferred
+  path: generated
+- confidence: inferred
+  path: website
+revision: 14
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-05T01:56:23Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-10-05T01:56:23Z", actor: "human:timo", revision: 3}
 ---
 ## Outcome
 
