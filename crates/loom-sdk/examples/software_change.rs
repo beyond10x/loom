@@ -5,9 +5,10 @@
 //! through the governor, and runs Commission's runtime over it with Loom as the executor.
 //!
 //! Loom's selector and argument generator are scripted fakes: no model, no network. The script
-//! edits the check, runs the test and then selects the merge. The effect port performs the edit
-//! and the test run in the scratch repository, and the verifier submits the passing test result as
-//! evidence, which leaves the merge needing approval. The authority provider never grants a
+//! edits the check, runs the test and then selects the merge. The slice's local effect adapter
+//! performs the edit and the test run in the scratch repository, prints each step to standard
+//! output, and lets the verifier submit the passing test result as evidence, which leaves the merge
+//! needing approval. The authority provider never grants a
 //! capability, so the run stops at `ApprovalRequired (repository.merge)`: nothing is merged.
 //!
 //! Run it with `cargo run -p b10x-loom-sdk --example software_change`. The scratch repository is
@@ -18,6 +19,7 @@
 use std::collections::VecDeque;
 use std::error::Error;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -29,21 +31,22 @@ use loom_sdk::commission::model::primitives::{Timestamp, Uuid};
 use loom_sdk::commission::model::responsibility::{
     ActionRequestId, AgentRevisionId, AuthorityContext, AuthorityVerdict,
     AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData, CommissionId,
-    EffectOutcome, EffectOutcomePerformed, ExecutorOutcomeProposedAction, ObservationId,
-    PrincipalId, RevalidateActionRequestOutcome, RunId, RunOutcome, commission_state,
+    ObservationId, PrincipalId, RevalidateActionRequestOutcome, RunId, RunOutcome,
+    commission_state,
 };
 use loom_sdk::commission::outcome::RunStore;
 use loom_sdk::commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
-use loom_sdk::commission::ports::effect::{AdmittedRequest, EffectError};
 use loom_sdk::intake::slice::case;
-use loom_sdk::intake::slice::executor::{EDIT, INSPECT, LocalExecutor, TESTS_RUN, TestCommand};
+use loom_sdk::intake::slice::effect::{Console, LocalEffects};
+use loom_sdk::intake::slice::executor::{LocalExecutor, TestCommand};
+use loom_sdk::intake::slice::selector::Briefing;
 use loom_sdk::intake::slice::verifier::TestResultVerifier;
 use loom_sdk::loom::arguments::ArgumentContext;
 use loom_sdk::loom::model::run::{CatalogueEntry, SelectionStrategy};
 use loom_sdk::loom::selection::{Choice, SelectionContext, SelectorError};
 use loom_sdk::{
-    ActionSelector, ArgumentGenerator, CanonGovernor, EffectPort, Loom, LoopContext, LoopEnd,
-    MemoryCaseStore, run_until_blocked,
+    ActionSelector, ArgumentGenerator, CanonGovernor, Loom, LoopContext, LoopEnd, MemoryCaseStore,
+    run_until_blocked,
 };
 
 /// The protocol the case is opened on.
@@ -74,28 +77,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     if workspace.exists() {
         fs::remove_dir_all(&workspace)?;
     }
-    let end = run(&workspace)?;
     println!("workspace: {}", workspace.display());
-    for (request, effect) in end.admitted.iter().zip(&end.effects) {
-        let effect = match effect {
-            EffectOutcome::Performed(performed) => match &performed.report {
-                Value::Text(report) => report.lines().next().unwrap_or_default().to_owned(),
-                other => format!("{other:?}"),
-            },
-            EffectOutcome::Refused(refused) => format!("refused: {}", refused.reason),
-        };
-        println!("step: {} -> {effect}", request.action);
-    }
+    let end = run(&workspace)?;
     println!("stopped: {}", stop_reason(&end));
     Ok(())
 }
 
 /// Creates the scratch repository at `workspace`, opens a `software-change@1` case on it and runs
-/// Commission's runtime over the case until it stops, returning how the loop ended.
+/// Commission's runtime over the case until it stops, returning how the loop ended. Each step is
+/// printed to standard output.
 ///
 /// # Errors
-/// When the repository cannot be made, the case cannot be opened, or the runtime fails without a
-/// run outcome.
+/// When the repository cannot be made, the case cannot be opened, an effect fails, or the runtime
+/// fails without a run outcome.
 pub fn run(workspace: &Path) -> Result<LoopEnd, Box<dyn Error>> {
     let workspace = scratch_repository(workspace)?;
 
@@ -105,17 +99,25 @@ pub fn run(workspace: &Path) -> Result<LoopEnd, Box<dyn Error>> {
     let case = case::open(&governor, PROTOCOL, INTENT, &workspace)?;
 
     // Loom proposes; the runtime revalidates each proposal against the frontier and the authority
-    // provider, and hands what it admits to the effect port.
+    // provider, and hands what it admits to the slice's local effect adapter, which performs it in
+    // the workspace and prints it on the console.
     let loom = Loom::new(ScriptedSelector::new(), ScriptedArguments, INTENT);
-    let effects = WorkspaceEffects {
-        executor: LocalExecutor::new(
+    let mut stdout = io::stdout();
+    let console = Console::new(&mut stdout);
+    let effects = LocalEffects::new(
+        LocalExecutor::new(
             &governor,
             case.clone(),
             workspace.clone(),
             TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
         ),
-        verifier: TestResultVerifier::new(&governor, case.clone(), PRODUCER),
-    };
+        TestResultVerifier::new(&governor, case.clone(), PRODUCER),
+        &governor,
+        case.clone(),
+        PROTOCOL,
+        Briefing::new(INTENT, Vec::new()),
+        &console,
+    );
     let mut runs = Generated::new(RunStore::new(|| RunId(fresh(Kind::Run))));
     let end = run_until_blocked(
         &governor,
@@ -125,8 +127,14 @@ pub fn run(workspace: &Path) -> Result<LoopEnd, Box<dyn Error>> {
         &commission(&case),
         &mut runs,
         &mut Clock,
-    )?;
-    Ok(end)
+    );
+    drop(effects);
+    // An effect that failed is reported through the port as an error and kept, typed, on the
+    // console.
+    if let Some(failure) = console.take_failure() {
+        return Err(failure.into());
+    }
+    Ok(end?)
 }
 
 /// Why the run stopped, as `ApprovalRequired (<action>)` when it waits for approval of an action,
@@ -244,40 +252,6 @@ impl ArgumentGenerator for ScriptedArguments {
             .find(|(action, _)| *action == entry.action)
             .ok_or_else(|| format!("the script has no arguments for `{}`", entry.action))?;
         json::parse(arguments).map_err(|error| format!("{error:?}"))
-    }
-}
-
-/// The effect port: performs an admitted `repository.inspect`, `repository.edit` or `tests.run`
-/// in the scratch repository, and lets the verifier submit a test run's result as evidence.
-struct WorkspaceEffects<'g> {
-    executor: LocalExecutor<'g, MemoryCaseStore>,
-    verifier: TestResultVerifier<'g, MemoryCaseStore>,
-}
-
-impl EffectPort for WorkspaceEffects<'_> {
-    fn performs(&self, action: &str) -> bool {
-        [INSPECT, EDIT, TESTS_RUN].contains(&action)
-    }
-
-    fn invoke(
-        &self,
-        _commission: &Commission<commission_state::Assigned>,
-        request: &AdmittedRequest,
-    ) -> Result<EffectOutcome, EffectError> {
-        let proposal = ExecutorOutcomeProposedAction {
-            action: request.data().action.clone(),
-            arguments: request.data().arguments.clone(),
-        };
-        let report = self
-            .executor
-            .execute(&proposal)
-            .map_err(|error| EffectError::new(error.to_string()))?;
-        self.verifier
-            .verify(&report)
-            .map_err(|error| EffectError::new(error.to_string()))?;
-        Ok(EffectOutcome::Performed(EffectOutcomePerformed {
-            report: Value::Text(report.to_string()),
-        }))
     }
 }
 

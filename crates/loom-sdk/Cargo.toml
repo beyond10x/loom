@@ -9,3 +9,10 @@ publish = false
 
 [lib]
 name = "loom_sdk"
+
+[dependencies]
+b10x-commission = { path = "../commission" }
+b10x-governor = { path = "../governor" }
+b10x-intake-router = { path = "../intake-router" }
+b10x-intake-slice = { path = "../intake-slice" }
+b10x-loom = { path = "../loom" }

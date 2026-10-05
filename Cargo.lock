@@ -309,6 +309,13 @@ dependencies = [
 [[package]]
 name = "b10x-loom-sdk"
 version = "0.0.0"
+dependencies = [
+ "b10x-commission",
+ "b10x-governor",
+ "b10x-intake-router",
+ "b10x-intake-slice",
+ "b10x-loom",
+]
 
 [[package]]
 name = "base64"
