@@ -1,5 +1,6 @@
 [package]
 name = "b10x-loom-executor"
+description = "The Loom executor: Commission's AgentExecutor over a projected catalogue, with action selection kept apart from argument generation, and the ported Harness model wires, turn loop and sessions."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

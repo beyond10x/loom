@@ -34,10 +34,12 @@ fn root() -> PathBuf {
 }
 
 /// The suite, synthesized from this tree's `ess/` now.
-fn suite() -> Value {
+/// Each caller names its own file: the tests of this binary run in parallel, and a shared file was
+/// read by one test while the other truncated it ("suite is not JSON").
+fn suite(caller: &str) -> Value {
     let out_dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("adversary2_run_conformance");
     std::fs::create_dir_all(&out_dir).expect("create suite dir");
-    let out = out_dir.join("suite.json");
+    let out = out_dir.join(format!("{caller}.json"));
     let run = Command::new("ess")
         .args(["verify", "conform", "synthesize", "--path"])
         .arg(root().join("ess/commission"))
@@ -587,7 +589,7 @@ fn run_suite<P: RunStorage + Context>(
 
 #[test]
 fn adversary2_run_the_synthesized_run_scenarios_pass_against_run_store() {
-    let (count, failures) = run_suite(&suite(), store);
+    let (count, failures) = run_suite(&suite("synthesized_run_scenarios_pass"), store);
     assert_eq!(count, 9, "the brief names 9 synthesized scenarios");
     assert!(
         failures.is_empty(),
@@ -650,7 +652,7 @@ impl Context for ListsNothing {
 
 #[test]
 fn adversary2_run_the_runner_fails_a_store_that_breaks_the_scenarios() {
-    let suite = suite();
+    let suite = suite("runner_fails_a_broken_store");
     let (_, forgets) = run_suite(&suite, || ForgetsSuspension(store()));
     assert!(
         forgets.len() >= 5,

@@ -1,45 +1,72 @@
 # AGENTS.md — loom
 
-What Loom is and how to build it is in [README.md](README.md); this file is what an agent changing it
-must know. The cross-repository architecture is Atlas ADRs 0066–0075 and Atlas
-`docs/design/governed-autonomy/`.
-
-## Serves
-
-- **O1 — governed reach.** The model only sees and can only execute actions the current frontier
-  admits; authority is rechecked before every effect.
-- **O3 — any harness, observed and compared.** Loom is the native executor Metaharness compares
-  against other harnesses on the same case.
+This file is for an agent changing the repository. What Loom is, how to install it and how to embed
+it are in [README.md](README.md) and on the site, <https://beyond10x.github.io/loom/>; neither is
+repeated here. The architecture behind it is in Atlas (private): ADRs 0066–0076, 0080, 0082, 0089
+and 0090 under `architecture/adr/`, and `docs/design/governed-autonomy/`. ADR 0090 made Loom the
+one runtime repository, with Commission, the governor and intake moved in.
 
 ## Boundary
 
-- Loom owns the model/tool loop (Atlas ADR 0071): prompt and context assembly, model turns, the
-  projected action catalogue, action selection, argument generation, tool round trips, streaming,
-  compaction, sessions and transcripts, budgets, interruption and recovery, model-facing approval
-  suspension.
-- Loom does not own protocol semantics, engineering semantics, case truth, organizational authority,
-  connector credentials, final completion or system conformance semantics.
-- Loom depends on Commission's core contracts and implements `AgentExecutor`. Commission core never
-  depends on Loom (Atlas ADR 0075).
-- `beyond10x/harness` is the predecessor. Port its implementation; do not rewrite from zero, and do
-  not break its current consumers while they still depend on it. Harness is
-  `LicenseRef-B10x-Proprietary`; code ported from it into Loom is relicensed Apache-2.0 (operator,
-  2026-10-04). Harness itself keeps its licence.
+Loom serves two outcomes of the governed-autonomy vision. **O1, governed reach:** the model sees
+and can execute only what the current frontier admits, and authority is rechecked before every
+effect. **O3, any harness, observed and compared:** Loom is the native executor Metaharness compares
+against other harnesses on the same case.
+
+Loom owns the model/tool loop (ADR 0071): prompt and context assembly, model turns, the projected
+action catalogue, action selection, argument generation, tool round trips, streaming, compaction,
+sessions and transcripts, budgets, interruption and recovery, and model-facing approval suspension.
+Since ADR 0090 it also holds Commission's contracts and runtime, the governor and intake (sections
+below).
+
+It does not own protocol semantics (Canon), engineering protocol definitions
+(`b10x-canon-engineering`, beyond10x/engineering-protocols), case truth, organizational authority,
+connector credentials, final completion, provider wires or credentials (llm), or the engineering
+record of a case (AEP).
+
+`beyond10x/harness` is the predecessor. Port its implementation instead of rewriting from zero, and
+do not break its consumers while they still depend on it. Code ported from Harness into Loom is
+Apache-2.0 (operator, 2026-10-04); Harness keeps its own `LicenseRef-B10x-Proprietary` licence.
 
 ## Rules
 
-- Model-visible actions are derived from the current frontier and runtime capability; nothing
-  consequential is granted because it was registered at startup (Atlas ADR 0072).
-- A selector picks only from the candidate set it was given; unknown action ids are rejected;
-  confidence never grants authority; low confidence falls back to a stronger path (Atlas ADR 0073).
-- Revalidate every selected action against case revision, frontier and authority before execution.
-- A trace is not evidence (Atlas ADR 0074).
+- Model-visible actions derive from the current frontier and runtime capability. Nothing
+  consequential is granted because it was registered at startup (ADR 0072).
+- A selector picks only from the candidate set it was given. Unknown action ids are rejected,
+  confidence never grants authority, and low confidence falls back to a stronger path (ADR 0073).
+- Revalidate every selected action against case revision, frontier and authority before
+  execution. A proposal carries no case revision of its own; the runtime reads the current one.
+- A trace is not evidence (ADR 0074). Evidence comes from a trusted verifier, never from what a
+  model says happened.
 - The model is not trusted context: it never supplies identity, authority, case revision, trusted
   time, approval results or tenant context.
 - When a selector, integration, verifier or authority provider fails, fail toward less authority,
   less effect and more explicit uncertainty. Never silently broaden capability.
 - Do not make Loom semantically dependent on one selector vendor or model.
+- Commission core never depends on Loom's executor, on Canon or on a model-provider crate
+  (ADR 0075). Loom depends on Commission and implements its `AgentExecutor`.
 - Anything that runs is Rust; command lines use clap derive.
+
+Commission's code and tests cite this section (`AGENTS.md` § Rules). Keep the heading and the
+phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails without them.
+
+## Checks that hold the rules
+
+| Claim | Held by |
+|---|---|
+| The catalogue follows the frontier | `crates/loom-executor/tests/frontier_projection.rs` (`projection_follows_frontier`) |
+| A selector cannot leave the catalogue | `crates/loom-executor/tests/action_selector.rs` (`selector_cannot_leave_catalogue`) |
+| A blocked or merge-seeking pick is never proposed | `crates/loom-executor/tests/adversary_executor_admission.rs` |
+| A stale or unlisted request is refused at revalidation | `crates/loom-commission-testkit/tests/action_request.rs`, `crates/loom-executor/tests/adversary_run_revalidation.rs` |
+| Unknown capabilities and panicking authority providers yield no grant | `crates/loom-commission-testkit/tests/adversary_authority_fail_closed.rs` |
+| Commission names no executor, Canon or `model-provider-deny.txt` crate | `task commission:deps-guard` (`crates/loom-commission-testkit/tests/executor_port.rs`) |
+| The router refuses a pick outside the registry or below the threshold | `crates/loom-intake-router/tests/adversary_classify.rs` |
+| Model or provider JSON nested past 128 levels is refused | `crates/loom-executor/tests/json_depth.rs` |
+| No hand-written type shadows an ESS-declared one | `task no-hand-model`, `task commission:no-hand-model` |
+| Ported Harness modules keep the import limits their crates had | `crates/loom-executor/tests/adversary_harness_port_boundaries.rs` (`the_boundaries_harness_enforced_by_crate_still_hold_between_modules`) |
+| Package and library names are the `loom-` names | `crates/loom-executor/tests/crate_names.rs` |
+| No manifest names an archived Commission, governor or intake repository | `crates/loom-executor/tests/governor_import.rs`, `intake_import.rs`, `commission_import.rs` |
+| A release tag equals the workspace version and has a CHANGELOG entry | `loom-xtask release-check`, run by `release.yml` (`crates/loom-xtask/tests/release_check.rs`) |
 
 ## ESS
 
@@ -54,19 +81,22 @@ conditions fails `task check`:
 1. `ess specify validate --path ess --strict-requires` exits 0;
 2. `ess specify compile --path ess --format json` exits 0;
 3. `ess verify conform synthesize` exits 0 with 0 refusals;
-4. no file under `ess/` contains `UNMAPPED:` — the specification carries no open question.
+4. no file under `ess/` contains `UNMAPPED:`, so the specification carries no open question.
 
 No story is implemented while the gate is red, whether or not it edits `ess/`. The `UNMAPPED:`
 scan stands in for ESS until ESS refuses open entries itself: the `UNMAPPED:` scan is removed when
 the ESS release that refuses open entries (beyond10x/ess `epic:typed-open-questions`) is pinned.
 
-Commission's specification is its own ESS system under `ess/commission/` (`system.yaml`,
-`ess-inputs.yaml`), held to the same four conditions with `--path ess/commission` by
-`task commission:ess-gate` (`crates/loom-commission/tests/ess_gate.rs`), which `task check` also runs.
+Commission's specification is its own ESS system under `ess/commission/`, held to the same four
+conditions with `--path ess/commission` by `task commission:ess-gate`
+(`crates/loom-commission/tests/ess_gate.rs`), which `task check` also runs. Intake's
+`intake.routing` domain is `ess/intake/`, validated by `task intake-spec`. The governor has no domain of its own:
+its nouns are Commission's and Canon's, and a noun it introduces gets one before a story is written
+around it.
 
-An open question is settled before the specification changes — in a story, or in a
-`decision-blocker` when nobody has decided it — and is never written into `ess/` as an
-`UNMAPPED:` marker.
+An open question is settled before the specification changes, in a story or in a
+`decision-blocker` when nobody has decided it, and is never written into `ess/` as an `UNMAPPED:`
+marker.
 
 Spec first, then red, then implement (Atlas ADR 0080). A unit's first commit changes only `ess/`;
 on it a named test fails (a conformance scenario, `task drift`, or the story's own new test when
@@ -74,88 +104,172 @@ its declarations already landed), and the run is recorded; later commits make it
 changing `ess/`. Every story names that change and that test in its `## ESS first` section. Only a
 change with no behaviour change is exempt, and its story says so.
 
-## Work
+`ess_gate.rs` (both copies) reads this section and fails when a phrase it checks is gone; reword
+with the tests open. CI installs `ess` 0.52.0 (`.github/workflows/check.yml`); move that pin when a
+newer ESS ships.
 
-- Planned in the AEP store under `.engineering/`, written only through `aep plan artifact`. Body
-  drafts go in `.engineering/drafts/` (ignored).
-- Build with `CARGO_TARGET_DIR=$HOME/.cache/b10x-target/loom` (the Taskfile sets it).
-- `generated/rust/loom/` is ess output, byte-pinned by `task drift`; it is never formatted.
-  `generated/rustfmt.toml` sets `disable_all_formatting`, so `cargo fmt --all` (which reaches the
-  path dependency) leaves it alone. Do not add a `rustfmt.toml` inside the generated tree: `task
-  drift` would report it and `task generate` would delete it.
-- `b10x-loom-commission` (and, for tests, `b10x-loom-commission-testkit`) is a path dependency on
-  `crates/loom-commission` (`crates/loom-commission-testkit`) in this workspace. The frontier Loom reads is
-  Commission's generated `Frontier`; Loom may use `b10x-canon`, the Commission contracts crate may
-  not.
-- Every commit and push is `b10x-bot[bot]`'s through `b10x-gates bot`; every GitHub write goes
-  through `b10x-gates api`.
-- Use a managed worktree (`worktree create --repo loom --purpose …`) for changes.
+## Gate
+
+Needs Rust, Task and `ess`. Before a change is reported done, in this order:
+
+1. `task check`: the three specification validations, both ESS gates, both drift checks, both
+   no-hand-model checks, Commission's conformance suite, the dependency guard,
+   `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
+   `cargo test --workspace --locked`, then `task docs-check` and `task commission:docs-drift`.
+   CI runs exactly this (`check.yml`, job `loom / task check`).
+2. `task plan` (`aep plan artifact validate`) when the planning store changed. `task check` does
+   not run it.
+3. `task website` when anything under `website/` changed, or a generated page did. CI's
+   `Documentation validation` (`pages.yml`) builds the site and runs the `loom-docs` and
+   `loom-commission-docs` tests.
+
+There is no `rust-toolchain.toml`: CI builds on `stable` (`dtolnay/rust-toolchain`), and a local
+toolchain newer than CI's `stable` can add Clippy lints CI does not have. Run the gate on CI's
+version (`RUSTUP_TOOLCHAIN=<version> task check`) when Clippy disagrees.
+
+`task --list` names every step, and each runs alone (`task drift`, `task commission:conform`, …).
+`task commission:check` is Commission's own gate, limited to its crates. While iterating, prefer
+`cargo test -p <package> --locked` on the crate you touched.
+
+The Taskfiles set `CARGO_TARGET_DIR=~/.cache/b10x-target/loom`. A `CARGO_TARGET_DIR` already in the
+environment wins, so a worktree that must not share that build directory sets its own. Check
+`df -h /` before a full gate and delete a worktree's build directory once its work is reported.
+
+## Generated files
+
+| Path | Generator | Regenerate | Drift check |
+|---|---|---|---|
+| `generated/rust/loom/` | `ess generate synthesize` over `ess/`, via `loom-xtask` | `task generate` | `task drift` |
+| `generated/rust/commission/` | the same over `ess/commission/`, via `loom-commission-xtask` | `task commission:generate` | `task commission:drift` |
+| `website/docs/reference/cli.md` | `loom-docs`, from `b10x_loom_cli::Cli` (`crates/loom-cli/src/lib.rs`) | `task docs-generate` | `task docs-check` |
+| `website/docs/reference/crates.md` | `loom-docs`, from `cargo metadata` | `task docs-generate` | `task docs-check` |
+| `website/docs/reference/ess/`, `website/data/ess/` | `loom-docs`, from `ess/` and `ess/intake/` | `task docs-generate` | `task docs-check` |
+| `website/docs/reference/commission/` | `loom-commission-docs`, from `ess/commission/` | `task commission:docs` | `task commission:docs-drift` |
+
+Never edit these by hand; change the source and regenerate. The generated Rust is never formatted:
+`generated/rustfmt.toml` sets `disable_all_formatting`, so `cargo fmt --all` leaves it alone. Do not
+add a `rustfmt.toml` inside a generated tree; `task drift` reports it and `task generate` deletes
+it. A flag change in `b10x-loom-cli` regenerates the CLI reference. Every package needs a Cargo
+`description`, and the crate page publishes it, so it names no story id or internal name.
+
+`website/data/status.json` is maintained by hand. A change that ships, decides or drops a
+capability updates it, the page that describes it and `CHANGELOG.md` (**Unreleased**) in the same
+commit. A change to a command, a crate or a rule updates README.md and this file in that commit too.
 
 ## Commission
 
-Commission's history was merged into Loom; its files keep their Commission paths so `git log
---follow` reaches it. Crates: `crates/loom-commission` (`b10x-loom-commission`, the contracts; its dependency
-tree names no `b10x-canon`, `b10x-loom-executor` or model-provider crate, enforced by `task
-commission:deps-guard` and `crates/loom-commission-testkit/tests/skeleton.rs`), `crates/loom-commission-testkit`,
-`crates/loom-commission-conformance`, `crates/loom-commission-docs` and `crates/loom-commission-xtask`. ESS:
-`ess/commission/`, generated into `generated/rust/commission/` (`task commission:generate`, pinned by
-`task commission:drift`). Docs: `docs/commission/`, reference pages in
-`website/docs/reference/commission/` (`task commission:docs`). Its tasks live in
-`Taskfile.commission.yml`, included under the `commission:` namespace.
+Commission's history was merged into Loom, and its files keep their Commission paths so
+`git log --follow` reaches it. Packages: `b10x-loom-commission` (the contracts and runtime, with
+`run_until_blocked`), `b10x-loom-commission-testkit` (port fakes and adapter kits),
+`b10x-loom-commission-conformance` (holds the contracts crate to its synthesized suite),
+`loom-commission-docs` and `loom-commission-xtask`. Design and contract notes are under
+`docs/commission/`. Its tasks are in `Taskfile.commission.yml`, included under the `commission:`
+namespace.
+
+The frontier Loom reads is Commission's generated `Frontier`. Loom crates may depend on
+`b10x-canon`; the Commission contracts crate may not.
 
 ## Governor
 
-`crates/loom-governor` (`b10x-loom-governor`, lib `loom_governor`) puts Canon behind the governor and evidence
-ports Commission defines (Atlas ADR 0089); its history was merged from `beyond10x/governor` and it is
-a Loom crate under Atlas ADR 0090. It decides and never acts: it evaluates a case's protocol and
-reports the frontier and completion, and executes nothing. It is the only crate here that evaluates
-protocols with Canon today. It depends on Commission by path, never the reverse.
+`b10x-loom-governor` (`crates/loom-governor`, library `loom_governor`) puts Canon behind the
+governor and evidence ports Commission defines (ADR 0089). It decides and never acts: it evaluates
+a case's protocol, reports the frontier and completion, and executes nothing. It is the only crate
+that evaluates protocols with Canon, and it adds no clock, network or model call to an evaluation.
+It depends on Commission by path, never the reverse.
 
-- Canon is named by the reference `b10x-canon-engineering` uses (`branch = "main"`), pinned by
-  `Cargo.lock`: a different reference builds a second Canon whose types do not match its. Move
-  Canon with `cargo update -p b10x-canon` together with the `b10x-canon-engineering` tag
-  (beyond10x/engineering-protocols). Any other Loom crate that adds Canon uses the same reference.
-- The governor adds no clock, network or model call to an evaluation.
-- ESS: the governor has no domain of its own. Its nouns are Commission's (`CaseId`, `Frontier`,
-  `Evidence`, `CompletionDetermination`) and Canon's (case snapshot, decision; Canon opts out in
-  favour of its own conformance). A noun it introduces gets an `ess/` domain before a story is
-  written around it.
+Canon is named by the reference `b10x-canon-engineering` uses (`branch = "main"`), pinned by
+`Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon with
+`cargo update -p b10x-canon` together with the `b10x-canon-engineering` tag (now `0.1.0`); any other
+crate that adds Canon uses the same reference.
 
-## Intake
+## Intake and the command line
 
-Intake's history was merged from `beyond10x/intake`; it routes an intent to a proposed protocol and
-runs a small vertical slice over it. It builds against Loom's own `b10x-loom-commission`,
-`b10x-loom-governor` and `b10x-loom-executor` by path. ESS: the `intake.routing` domain under `ess/intake/`
-(`task intake-spec`, which `task check` runs). Docs: `docs/intake/`.
+- `b10x-loom-intake-router` classifies an intent against the engineering protocol registry and
+  refuses a pick outside it or below the confidence threshold. A routing proposal is never
+  authority; whoever opens the case checks it.
+- `b10x-loom-intake-references` extracts tracker keys, chat permalinks, merge and pull requests and
+  URLs from an intent, deterministically.
+- `b10x-loom-intake-slice` is the local effect adapter (`LocalEffects`) and a thin caller of
+  `run_until_blocked`. It has no loop of its own; keep it small. It executes `software.change/1`
+  actions inside the given workspace only, never merges, pushes or deploys, and never supplies
+  authority on the operator's behalf. It submits evidence from the test command it runs itself.
+- `b10x-loom-cli` is `b10x-loom`. Its clap definition is the library (`src/lib.rs`, `Cli`), which
+  `loom-docs` renders.
 
-- `crates/loom-intake-router` (`b10x-loom-intake-router`): classifies an intent against the ELS protocol
-  registry; a pick outside the registry or below the confidence threshold is refused.
-- `crates/loom-intake-references` (`b10x-loom-intake-references`): extracts tracker keys, chat permalinks,
-  merge and pull requests and URLs from an intent, deterministically.
-- `crates/loom-intake-slice` (`b10x-loom-intake-slice`): the local effect adapter (`LocalEffects` over the
-  local executor) and a thin caller of Commission's runtime (`run_until_blocked`); it has no loop
-  of its own (`story:runtime-merge`). Keep it small and do not grow it into a runtime.
-- `crates/loom-cli` (`b10x-loom-cli`): the `b10x-loom` command line (`b10x-loom run`, which
-  replaced `b10x-intake run` in `story:loom-cli`). It took its `loom-` name in
-  `story:crate-names`.
+There is no sandbox. `tests.run` and the workspace's git hooks run model-edited code with the
+operator's rights and environment; the path checks bound what the executor writes, not what that
+code does.
 
-Rules that still hold:
+Model calls go through llm's crates at a pinned tag (`b10x-llm-tool-call` and `b10x-llm-core`,
+`0.1.7`), never a hand-written HTTP client. The Codex preset and the forced tool call are
+`codex_model` (the CLI builds its model with it) and `call_tool` (the router calls it). The
+credential is the operator's Codex login (`~/.codex/auth.json`), read and renewed by llm, never by
+Loom code.
 
-- A routing proposal is never authority; whoever opens the case checks it.
-- Intake reads the ELS registry and calls Canon, Commission, the governor and Loom; it
-  re-implements none of them, and never evaluates Canon itself.
-- The slice executes `software.change/1` actions inside the given workspace only. It never merges,
-  pushes or deploys, and never supplies authority on the operator's behalf.
-- There is no sandbox. `tests.run` and the workspace's git hooks run model-edited code with the
-  operator's rights and environment; the path checks bound what the executor writes, not what that
-  code does. Run the slice only on a workspace whose test command you would run yourself.
-- Evidence comes from a trusted verifier (the slice runs the test command itself), never from what a
-  model says happened (Atlas ADR 0074).
-- Model calls go through the `llm` crates (`b10x-llm-*` at a pinned tag), never a hand-written HTTP
-  client. The Codex preset and the one forced tool call are llm's `b10x-llm-tool-call`
-  (`codex_model`, `call_tool`); the router and the CLI call it directly. The credential is the operator's Codex subscription (`~/.codex/auth.json`, refreshed
-  through `auth.openai.com`), read and renewed by llm's credential, never by intake code; tests
-  read no credential file.
-- A model's choice is checked against the list it was given; a pick outside it is refused.
-- Tests make no model or network call: they use recorded responses and local fixtures.
-- No `/home/<name>/` path literals anywhere: common Gates personal-paths has no allowance.
+## Planning and waves
+
+- The plan is the AEP store under `.engineering/`, written only through `aep plan artifact`. Body
+  drafts go in `.engineering/drafts/` (git-ignored). Draft stories are planned, never shipped.
+- A wave runs on `wave/<date>-w<n>`: `plan: open wave … (story:…)`, one `impl/<story>` branch per
+  story merged into the wave branch, then `plan: close wave …`, and `main` fast-forwards to the
+  wave head. Work outside a wave lands as a bot pull request.
+- Use a managed worktree (`worktree create --repo ~/beyond10x/loom --purpose …`); keep the primary
+  checkout clean.
+
+## Commits, pushes and GitHub writes
+
+Every commit and push is `b10x-bot[bot]`'s through `b10x-gates bot`. Every other GitHub write
+(pull request, comment, issue, release, workflow dispatch, re-run) goes through `b10x-gates api`.
+`gh` is read-only here. Loom is enrolled in common Gates (`shared-gates.yml`); its
+`common / Security and privacy` check scans every commit since the policy baseline, so a
+`/home/<name>/` path literal in any commit fails it and admits no exception.
+
+## Releases
+
+Loom releases from source at bare-version tags (`0.1.0`, no `v`); every crate inherits the
+workspace version and nothing is on a registry. Consumers pin `tag = "<version>"`, and
+`CHANGELOG.md` collects under **Unreleased** between releases. A release is:
+
+1. A release commit on `main` (through a wave or a bot pull request): `[workspace.package] version`
+   in `Cargo.toml`, `Cargo.lock`, and **Unreleased** turned into `## [<version>] - <date>` under an
+   empty **Unreleased**, opening with a one-paragraph summary fit for the release notes. README,
+   AGENTS.md and the site pages that name the version or a dependency line move with it.
+   `cargo run -q --locked -p loom-xtask -- release-check --tag <version>` passes on it.
+2. `check` and `Shared source gates` green on that commit.
+3. An annotated tag by `b10x-bot[bot]` on that commit: `b10x-gates bot … -- tag -a <version> -m
+   "Loom <version>" <commit>`, then `-- push origin <version>`.
+4. `release` (`.github/workflows/release.yml`) green on the tag. It runs `loom-xtask release-check`
+   (the tag equals the workspace version and `CHANGELOG.md` has its entry) and then `check.yml` on
+   the tagged commit. It is read-only, needs no secret and creates no release.
+5. The GitHub Release for the tag, created by the bot (`b10x-gates api --method POST --path
+   /repos/beyond10x/loom/releases`), named `<version>`, its notes the version's CHANGELOG entry.
+
+A release is finished when the tag, the green `release` run and the bot's GitHub Release with its
+notes are verified. A pushed tag whose `release` run is not green is queued, not released; never
+move or delete a pushed tag, fix forward with the next version.
+`crates/loom-xtask/tests/release_check.rs` holds the check, the workflow's shape, and that the
+README and site pin the workspace version as a tag.
+
+## Documentation
+
+The site (`website/`, Docusaurus on `@beyond10x/docs-system`) is written with the workspace `docs`
+skill (`~/beyond10x/.agents/skills/docs/SKILL.md`). It is independent of the unified site:
+`pages.yml` (`Documentation validation`) builds it and binds it to its commit
+(`loom-docs provenance`), and on a bot push to `main` `b10x-docs-site.yml` (`Documentation site`)
+deploys it to <https://beyond10x.github.io/loom/> through Website's `project-site.yml`.
+
+Every command on a page is run in the tree before it is written, with its output pasted from that
+run. Never make a live model call for a page; cite a record under `docs/qualification/`.
+
+## Never
+
+- Never make a model or network call in a test (tests use recorded responses and local fixtures),
+  and never for a documentation page.
+- Never read a credential file in Loom code or tests.
+- Never edit a generated file by hand, and never write an `UNMAPPED:` marker into `ess/`.
+- Never implement a story while either ESS gate is red.
+- Never add a dependency from `b10x-loom-commission` to the executor, Canon or a model-provider
+  crate.
+- Never let the slice or the command line merge, push or deploy.
+- Never commit or push as anything but the bot, and never use a `gh` write.
+- Never write a `/home/<name>/` path literal anywhere; write `~/`.

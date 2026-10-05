@@ -1,6 +1,6 @@
 [package]
 name = "loom-commission-docs"
-description = "Generates the reference pages of the Commission documentation site and checks them for drift."
+description = "Generates the Commission reference pages of the Loom documentation site and checks them for drift."
 publish = false
 version.workspace = true
 edition.workspace = true

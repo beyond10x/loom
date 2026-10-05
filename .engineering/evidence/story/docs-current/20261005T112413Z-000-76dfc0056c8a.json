@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T11:24:13Z",
+  "actor": "human:timo",
+  "artifact": "story:docs-current",
+  "kind": "story",
+  "revision": 12,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "docs skill checklist done (Stage A; B by coordinator; C/D not applicable to an independent site); every CHANGELOG entry mapped to a page or named not consumer-relevant; live: https://beyond10x.github.io/loom/docs/guides/run-an-intent/ title 'Run an intent | Loom' after Documentation site run 37302201208 success",
+    "reference": "https://beyond10x.github.io/loom/"
+  }
+}

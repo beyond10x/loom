@@ -3,24 +3,28 @@
   "product": {
     "name": "Loom",
     "mark": "L",
-    "eyebrow": "Agent harness · bootstrap",
+    "eyebrow": "Governed agent runtime · early",
     "promise": [
       "A model that acts.",
       "Only inside its frontier."
     ],
-    "lede": "Loom is the native agent harness. It makes a model behave like an agent for one bounded run, and the model acts only through actions the current frontier admits. Loom implements Commission's executor contract and stops at proposing an action: the Commission runtime rechecks the proposal and makes the effect call. Today Loom is a bootstrap library, and no model is called yet.",
+    "lede": "Loom is the runtime for governed agents. It makes a model behave like an agent for one bounded run, and the model acts only through actions the current frontier admits. Commission's runtime, the Canon governor and intake live here too: b10x-loom run takes an intent to a governed run that stops at the merge, and b10x-loom-sdk embeds the same runtime in an application.",
     "actions": [
       {
-        "label": "Read the documentation",
-        "href": "/docs/",
+        "label": "Get started",
+        "href": "/docs/getting-started",
         "kind": "primary"
+      },
+      {
+        "label": "Read the documentation",
+        "href": "/docs/"
       },
       {
         "label": "What exists today",
         "href": "/docs/status"
       }
     ],
-    "meta": "Rust library · implements Commission's AgentExecutor · specified in ESS · Apache-2.0",
+    "meta": "Rust workspace · b10x-loom CLI and b10x-loom-sdk · specified in ESS · Apache-2.0",
     "art": {
       "kind": "domain-graph",
       "data": "data/ess/loom-run.domain-graph.json",
@@ -48,15 +52,16 @@
           "href": "/docs/concepts/action-selection"
         },
         {
-          "title": "Authority stays with Commission",
-          "description": "An action that needs authority is proposed, not suspended: Commission rechecks it and asks its authority provider. Loom holds no admission rule of its own.",
-          "status": "shipped"
+          "title": "Loom proposes, Commission invokes",
+          "description": "A step ends at a ProposedAction. The Commission runtime rechecks frontier, case revision and authority, then hands it to an effect port (Atlas ADR 0082).",
+          "status": "shipped",
+          "href": "/docs/concepts/where-loom-ends"
         },
         {
-          "title": "Loom proposes, Commission invokes",
-          "description": "A run ends at a ProposedAction. The Commission runtime rechecks frontier, case revision and authority, then makes the effect call (Atlas ADR 0082).",
-          "status": "decided",
-          "href": "/docs/concepts/where-loom-ends"
+          "title": "Evidence from a verifier, never a model",
+          "description": "The slice submits evidence only from the exit status of the test command it ran itself. Nothing a model says becomes evidence.",
+          "status": "shipped",
+          "href": "/docs/concepts/governor-and-intake"
         },
         {
           "title": "Selection apart from arguments",
@@ -70,7 +75,7 @@
       "kind": "flow",
       "eyebrow": "One run",
       "title": "Five steps, two owners.",
-      "lede": "The first three steps are Loom's. The last two belong to the Commission runtime. This is the design; the status below says which parts run today.",
+      "lede": "The first three steps are Loom's. The last two belong to the Commission runtime. All five run today; the status below says what is still planned.",
       "steps": [
         {
           "label": "Loom",
@@ -95,7 +100,7 @@
         {
           "label": "Commission",
           "title": "Invoke the effect",
-          "description": "Through a trusted adapter bound to the action."
+          "description": "Through the effect port the embedder supplies."
         }
       ]
     },
@@ -109,8 +114,8 @@
     {
       "kind": "status",
       "eyebrow": "Status",
-      "title": "Bootstrap. Here is exactly what exists.",
-      "lede": "Shipped means code in the b10x-loom-executor library today. Decided means recorded in an architecture decision. Planned means on the plan only. No model is called yet.",
+      "title": "Early. Here is exactly what exists.",
+      "lede": "Shipped means code on main today. Decided means recorded in an architecture decision. Planned means on the plan only. Nothing is released yet.",
       "items": "data/status.json"
     },
     {
@@ -119,21 +124,24 @@
       "title": "Where Loom sits.",
       "tools": [
         {
-          "id": "commission",
+          "id": "canon",
           "relation": "used-by",
-          "via": "AgentExecutor"
+          "via": "CanonGovernor"
+        },
+        {
+          "id": "els",
+          "relation": "used-by",
+          "via": "software-change@1"
         },
         {
           "id": "ess",
           "relation": "specifies"
         },
         {
-          "id": "els",
-          "relation": "beside"
-        },
-        {
-          "id": "canon",
-          "relation": "beside"
+          "name": "llm",
+          "description": "One neutral turn for calling language models; Loom's model calls and the Codex credential go through it.",
+          "href": "https://beyond10x.github.io/llm/",
+          "mark": "L"
         }
       ]
     }
