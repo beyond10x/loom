@@ -1,47 +1,61 @@
 ---
 title: One run, five steps
 sidebar_position: 1
-description: The five steps of a Loom run, and which of them belong to Loom and which to the Commission runtime.
-status: decided
-lede: For each run, the frontier's admissible actions become a catalogue, one action is chosen, its arguments are generated and checked, and only then is anything allowed to happen. The first three steps are Loom's. The last two belong to the Commission runtime.
-source: Atlas ADR 0071 (Loom owns the model/tool loop) and ADR 0082 (Commission invokes)
+description: The five steps of a governed run, which of them are Loom's and which the Commission runtime's, and what runs today.
+status: shipped
+lede: For each step, the frontier's admissible actions become a catalogue, one action is chosen, its arguments are generated, and only then does the Commission runtime recheck it and hand it to an effect port. The first three steps are Loom's. The last two are the runtime's.
+source: Atlas ADR 0071 (Loom owns the model/tool loop) and ADR 0082 (Commission invokes); crates/loom-executor, crates/loom-commission/src/runtime.rs
 ---
 
-This page describes the design. The [status page](../status.mdx) says which parts run today.
-
-<Flow label="One Loom run" steps={[
+<Flow label="One Loom step" steps={[
   {label: 'Loom', title: 'Project the catalogue', description: "The frontier's admissible actions become what the model may see."},
   {label: 'Loom', title: 'Select one action', description: 'From those candidates only.'},
-  {label: 'Loom', title: 'Generate its arguments', description: 'For the selected action only, checked against its schema.'},
+  {label: 'Loom', title: 'Generate its arguments', description: 'For the selected action only.'},
   {label: 'Commission', title: 'Revalidate', description: 'Frontier, case revision and authority, now.'},
-  {label: 'Commission', title: 'Invoke the effect', description: 'Through a trusted adapter bound to the action.'},
+  {label: 'Commission', title: 'Invoke the effect', description: 'Through the effect port the embedder supplies.'},
 ]} />
+
+<StatusStrip label="The five steps today" items={[
+  {label: 'Catalogue projection', status: 'shipped', detail: 'One entry per distinct frontier action, its status decided by Commission admission.'},
+  {label: 'Selection inside the catalogue', status: 'shipped', detail: 'A selection outside the catalogue is refused, whatever its confidence.'},
+  {label: 'Arguments for the selected action only', status: 'shipped', detail: 'The generator sees one catalogue entry.'},
+  {label: 'Arguments checked against the action schema', status: 'planned', detail: 'Where an action schema comes from is not decided yet.'},
+  {label: 'Revalidation by the Commission runtime', status: 'shipped', detail: 'Against the current frontier, case revision and authority provider.'},
+  {label: 'Effects through an effect port', status: 'shipped', detail: 'The slice performs software.change/1 actions in a git work tree.'},
+  {label: 'Connector and Substrate effect bindings', status: 'planned', detail: 'Not decided.'},
+]} />
+
+A run repeats these steps until it is blocked: by an approval gate, by nothing admissible, by its
+step budget, or by an action no effect port performs. `run_until_blocked` in
+`b10x-loom-commission` is that loop.
 
 ## 1. Project the catalogue — Loom
 
 The frontier's admissible actions are projected into the catalogue the model can see. Nothing
 consequential is offered because it was registered at startup; what the model sees comes from the
-current frontier and what the runtime can actually do.
+current frontier, which the governor computes with Canon for the case's current revision.
 
 ## 2. Select one action — Loom
 
-A selector picks one action from that catalogue. It can be a reasoning model, a deterministic rule,
-or a fast typed selector. It chooses only from the candidates it was given. See
-[action selection](./action-selection.md).
+A selector picks one action from that catalogue. It can be a model (the slice's `ModelSelector`, one
+forced tool call), a deterministic rule, or, later, a fast typed selector. It chooses only from the
+candidates it was given; Loom refuses any other. See [action selection](./action-selection.md).
 
 ## 3. Generate arguments for that action only — Loom
 
-The model is asked for the arguments of the selected action, and nothing else. The arguments are
-validated against that action's schema.
+The argument generator is handed the selected catalogue entry and nothing else. Loom records the
+request for arguments against the selection it serves, then returns the action as a
+`ProposedAction`.
 
 ## 4. Revalidate — Commission runtime
 
-The action goes back for revalidation against the current frontier, case revision and authority.
 Time passes between selection and effect: the case may have moved, and authority may have changed.
-Loom itself refuses any selection that is not in the frontier it was given.
+The runtime turns the proposal into an action request bound to the frontier's revision and
+revalidates it against the current frontier, case revision and authority provider. An action that
+needs approval the provider does not give stops the run.
 
-## 5. Execute through a trusted adapter — Commission runtime
+## 5. Invoke the effect — Commission runtime
 
-Loom returns the action as a `ProposedAction`. Only after revalidation does the Commission runtime
-carry out the effect, through a trusted adapter bound to the action. Loom does not make this call;
-see [where Loom ends](./where-loom-ends.md).
+The runtime hands the admitted request to the `EffectPort` once and records what happened as an
+observation, never as evidence. The case moves to a new revision only after an effect the port
+reports as `Performed`. Loom does not make this call; see [where Loom ends](./where-loom-ends.md).

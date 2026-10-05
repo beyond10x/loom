@@ -12,8 +12,9 @@ source_url: https://github.com/beyond10x/loom/blob/main/docs/contracts/loom-acti
 ## Two roles
 
 **`ActionSelector` picks one action.** Given the run's context and the candidate actions, it returns
-one action id and, optionally, a confidence. Planned strategies: a reasoning-model selector, a fast
-typed selector, a rule selector, and a hybrid.
+one action id and, optionally, a confidence. Two strategies exist: the slice's `ModelSelector`, a
+model asked for one forced `select_action` tool call, and scripted rule selectors in tests and the
+SDK example. A fast typed selector and a hybrid are planned.
 
 **`ArgumentGenerator` fills in one action.** Given the selected action, it returns that action's
 arguments as JSON. It never sees the choice between actions; it only completes the one already
@@ -43,9 +44,10 @@ action-selection contract,
    action** within it.
 7. Selection telemetry should be available to **Metaharness** for evaluation.
 
-Rule 2 is enforced today: Loom puts every selection to Commission's admission check, and
-one it refuses, such as an action outside the frontier, ends the run with `NoUsefulAction`
-whatever the selector reported. The others are design.
+Rules 1 to 4 hold today. The catalogue is projected from the frontier of each step; Loom puts every
+selection to Commission's admission check, and one it refuses, such as an action outside the
+frontier, is never proposed, whatever confidence the selector reported; the Commission runtime
+revalidates every proposal before the effect port sees it. Rules 5 to 7 are design.
 
 ## Beyond tool selection
 

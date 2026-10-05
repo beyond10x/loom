@@ -1,7 +1,8 @@
 # AGENTS.md — loom
 
 What Loom is and how to build it is in [README.md](README.md); this file is what an agent changing it
-must know. The cross-repository architecture is Atlas ADRs 0066–0075 and Atlas
+must know. The cross-repository architecture is Atlas ADRs 0066–0075 (0090 made Loom the one runtime
+repository, with Commission, the governor and intake) and Atlas
 `docs/design/governed-autonomy/`.
 
 ## Serves
@@ -78,7 +79,8 @@ change with no behaviour change is exempt, and its story says so.
 
 - Planned in the AEP store under `.engineering/`, written only through `aep plan artifact`. Body
   drafts go in `.engineering/drafts/` (ignored).
-- Build with `CARGO_TARGET_DIR=$HOME/.cache/b10x-target/loom` (the Taskfile sets it).
+- Build with `CARGO_TARGET_DIR=$HOME/.cache/b10x-target/loom` (the Taskfile sets it; a
+  `CARGO_TARGET_DIR` already in the environment wins, so a worktree can keep its own).
 - `generated/rust/loom/` is ess output, byte-pinned by `task drift`; it is never formatted.
   `generated/rustfmt.toml` sets `disable_all_formatting`, so `cargo fmt --all` (which reaches the
   path dependency) leaves it alone. Do not add a `rustfmt.toml` inside the generated tree: `task
@@ -90,6 +92,26 @@ change with no behaviour change is exempt, and its story says so.
 - Every commit and push is `b10x-bot[bot]`'s through `b10x-gates bot`; every GitHub write goes
   through `b10x-gates api`.
 - Use a managed worktree (`worktree create --repo loom --purpose …`) for changes.
+
+## Documentation
+
+The site (`website/`, Docusaurus on `@beyond10x/docs-system`) is written with the workspace `docs`
+skill (`~/beyond10x/.agents/skills/docs/SKILL.md`). It is independent: `pages.yml` (`Documentation
+validation`) builds it and `b10x-docs-site.yml` (`Documentation site`) deploys it to
+<https://beyond10x.github.io/loom/>.
+
+- Generated, never edited by hand: `website/docs/reference/cli.md` (from `b10x_loom_cli::Cli` in
+  `crates/loom-cli/src/lib.rs`), `website/docs/reference/crates.md` (from `cargo metadata`; every
+  package needs a `description`, and it is public text, so no story ids), and
+  `website/docs/reference/ess/` with `website/data/ess/` (from `ess/` and `ess/intake/`), all by
+  `loom-docs` (`task docs-generate`, checked by `task docs-check`); `website/docs/reference/commission/`
+  by `loom-commission-docs` (`task commission:docs`, checked by `task commission:docs-drift`).
+- `website/data/status.json` is maintained by hand. A change that ships, decides or drops a
+  capability updates it, the page that describes it and `CHANGELOG.md` (**Unreleased**) in the same
+  commit; a change to a command, a crate or a rule updates `README.md` and this file too.
+- Every command on a page is run in the tree before it is written, and its output is pasted from
+  that run. Never make a live model call for a page: cite a record under `docs/qualification/`.
+- `task website` builds the site as CI does (broken links and anchors throw).
 
 ## Commission
 
@@ -128,8 +150,9 @@ runs a small vertical slice over it. It builds against Loom's own `b10x-loom-com
 `b10x-loom-governor` and `b10x-loom-executor` by path. ESS: the `intake.routing` domain under `ess/intake/`
 (`task intake-spec`, which `task check` runs). Docs: `docs/intake/`.
 
-- `crates/loom-intake-router` (`b10x-loom-intake-router`): classifies an intent against the ELS protocol
-  registry; a pick outside the registry or below the confidence threshold is refused.
+- `crates/loom-intake-router` (`b10x-loom-intake-router`): classifies an intent against the
+  engineering protocol registry (`b10x-canon-engineering`, beyond10x/engineering-protocols); a
+  pick outside the registry or below the confidence threshold is refused.
 - `crates/loom-intake-references` (`b10x-loom-intake-references`): extracts tracker keys, chat permalinks,
   merge and pull requests and URLs from an intent, deterministically.
 - `crates/loom-intake-slice` (`b10x-loom-intake-slice`): the local effect adapter (`LocalEffects` over the
@@ -137,13 +160,14 @@ runs a small vertical slice over it. It builds against Loom's own `b10x-loom-com
   of its own (`story:runtime-merge`). Keep it small and do not grow it into a runtime.
 - `crates/loom-cli` (`b10x-loom-cli`): the `b10x-loom` command line (`b10x-loom run`, which
   replaced `b10x-intake run` in `story:loom-cli`). It took its `loom-` name in
-  `story:crate-names`.
+  `story:crate-names`. Its clap definition is the library (`src/lib.rs`, `Cli`), which `loom-docs`
+  renders into the CLI reference; a flag change regenerates it (`task docs-generate`).
 
 Rules that still hold:
 
 - A routing proposal is never authority; whoever opens the case checks it.
-- Intake reads the ELS registry and calls Canon, Commission, the governor and Loom; it
-  re-implements none of them, and never evaluates Canon itself.
+- Intake reads the engineering protocol registry and calls Canon, Commission, the governor and
+  Loom; it re-implements none of them, and never evaluates Canon itself.
 - The slice executes `software.change/1` actions inside the given workspace only. It never merges,
   pushes or deploys, and never supplies authority on the operator's behalf.
 - There is no sandbox. `tests.run` and the workspace's git hooks run model-edited code with the

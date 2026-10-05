@@ -1,6 +1,6 @@
 [package]
 name = "b10x-loom-cli"
-description = "The b10x-loom command line (story loom-cli)."
+description = "The b10x-loom command line: route an intent to a protocol and run it until it is blocked."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

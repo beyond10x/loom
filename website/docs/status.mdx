@@ -2,31 +2,19 @@
 title: Status
 sidebar_position: 3
 description: What Loom implements today and what is planned.
-lede: Loom is at the bootstrap stage. Every capability below carries its status; the landing page's status strip reads the same file, so the two cannot disagree.
+lede: Every capability below carries its status; the landing page's status strip reads the same file, so the two cannot disagree.
 source: website/data/status.json, a b10x-status/1 document
 source_url: https://github.com/beyond10x/loom/blob/main/website/data/status.json
 ---
 
 import status from '@site/data/status.json';
 
-One crate, `b10x-loom-executor`, holds the executor, a deterministic
-bootstrap selector and the run model generated from the specification. No model is called yet.
-**Shipped** means code in the library today, **decided** means recorded in an architecture
-decision, and **planned** means on the plan only.
+Loom has no release yet. `b10x-loom run` and the SDK are usable from a Git revision; the
+[changelog](https://github.com/beyond10x/loom/blob/main/CHANGELOG.md) records every consumer-visible
+change. **Shipped** means code on `main` today, **decided** means recorded in an
+architecture decision, and **planned** means on the plan only.
 
 <StatusTable data={status} />
 
-Where Loom stops is [decided design](./concepts/where-loom-ends.md). The
-[ESS reference](./reference/ess/index.mdx) is generated from the specification.
-
-## Build from source
-
-```bash
-git clone https://github.com/beyond10x/loom.git
-cd loom
-task check
-```
-
-`task check` needs Rust, the [Task runner](https://taskfile.dev/) and the `ess` CLI. It includes
-`task docs-check`, which fails when the generated reference pages have fallen behind the
-specification. `task website` builds this site.
+The [crate list](/docs/reference/crates) names every package. The
+[ESS reference](/docs/reference/ess) is generated from the specification.
