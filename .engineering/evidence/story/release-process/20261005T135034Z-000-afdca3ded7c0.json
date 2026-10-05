@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T13:50:34Z",
+  "actor": "human:timo",
+  "artifact": "story:release-process",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "release.yml verifies each version tag with loom-xtask release-check (9 tests, negatives killed by mutants) and runs check.yml on the tagged commit; tag 0.1.0 annotated by b10x-bot[bot] on 9d602d9 (main, all checks green); release run 37318522121 success (verify tag, task check); GitHub Release https://github.com/beyond10x/loom/releases/tag/0.1.0 by b10x-bot[bot] with the CHANGELOG [0.1.0] entry as notes",
+    "reference": "wave/2026-10-05-w49"
+  }
+}
