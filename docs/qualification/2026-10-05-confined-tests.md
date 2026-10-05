@@ -95,7 +95,8 @@ one-line function fix. The transcript above is that final run.
 `task check`, `task plan`, and `task website` pass. The gate covers strict ESS validation,
 both synthesized suites, Commission conformance execution, all three Rust projection drift
 checks, model/dependency guards, formatting, workspace Clippy with warnings denied, workspace
-tests, and documentation drift. Final planning validation reports 101 artifacts, valid.
+tests, and documentation drift. Planning validation after recording and clearing the publication
+blocker reports 102 artifacts, valid.
 
 Before the adversary additions the ordinary intake-slice lane reported 45 passed and two ignored:
 the host-Git child-process helper (executed by its parent test) and the dedicated confinement lane.
