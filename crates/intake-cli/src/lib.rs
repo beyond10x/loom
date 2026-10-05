@@ -1,3 +1,3 @@
-//! The b10x-intake command line (story S5).
+//! The b10x-loom command line (story `loom-cli`).
 //!
-//! Not built yet: the story named above fills this crate.
+//! The command is the `b10x-loom` binary (`src/main.rs`); this library exports nothing.
