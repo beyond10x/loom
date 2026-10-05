@@ -102,3 +102,21 @@ commission:deps-guard` and `crates/commission-testkit/tests/skeleton.rs`), `crat
 `task commission:drift`). Docs: `docs/commission/`, reference pages in
 `website/docs/reference/commission/` (`task commission:docs`). Its tasks live in
 `Taskfile.commission.yml`, included under the `commission:` namespace.
+
+## Governor
+
+`crates/governor` (`b10x-governor`, lib `governor`) puts Canon behind the governor and evidence
+ports Commission defines (Atlas ADR 0089); its history was merged from `beyond10x/governor` and it is
+a Loom crate under Atlas ADR 0090. It decides and never acts: it evaluates a case's protocol and
+reports the frontier and completion, and executes nothing. It is the only crate here that evaluates
+protocols with Canon today. It depends on Commission by path, never the reverse.
+
+- Canon is named by the reference ELS uses (`branch = "main"`), pinned by `Cargo.lock`: a different
+  reference builds a second Canon whose types do not match ELS's. Move Canon with
+  `cargo update -p b10x-canon` together with the ELS pin. Any other Loom crate that adds Canon uses
+  the same reference.
+- The governor adds no clock, network or model call to an evaluation.
+- ESS: the governor has no domain of its own. Its nouns are Commission's (`CaseId`, `Frontier`,
+  `Evidence`, `CompletionDetermination`) and Canon's (case snapshot, decision; Canon opts out in
+  favour of its own conformance). A noun it introduces gets an `ess/` domain before a story is
+  written around it.
