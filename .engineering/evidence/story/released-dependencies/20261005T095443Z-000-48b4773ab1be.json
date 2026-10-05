@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T09:54:43Z",
+  "actor": "human:timo",
+  "artifact": "story:released-dependencies",
+  "kind": "story",
+  "revision": 14,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "no phase 1 (no behaviour change); base workspace 1027 passed 4 ignored; after 1010 passed 3 ignored: the 18 removed tests are loom-intake-model's own, carried by llm 0.1.7 b10x-llm-tool-call under the same names; cargo tree -i b10x-els does not match; one copy each of canon-engineering 0.1.0 and llm-core 0.1.7",
+    "reference": "loom-released-dependencies/scratch/base-workspace.log, gate/summary.txt"
+  }
+}

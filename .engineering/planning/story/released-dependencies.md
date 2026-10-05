@@ -2,12 +2,14 @@
 format: aep.planning-md/3
 id: story:released-dependencies
 kind: story
-status: active
+status: implemented
 title: Loom builds on llm 0.1.7, canon-engineering 0.1.0 and the newest ESS; intake-model goes to llm
 relations:
 - decomposes: epic:runtime-consolidation
 - serves: vision:governed-autonomy
 scope:
+- confidence: inferred
+  path: AGENTS.md
 - confidence: inferred
   path: Cargo.lock
 - confidence: inferred
@@ -19,6 +21,8 @@ scope:
 - confidence: inferred
   path: crates/loom-commission-conformance
 - confidence: inferred
+  path: crates/loom-executor/tests
+- confidence: inferred
   path: crates/loom-governor
 - confidence: inferred
   path: crates/loom-intake-model
@@ -26,10 +30,11 @@ scope:
   path: crates/loom-intake-router
 - confidence: inferred
   path: crates/loom-intake-slice
-revision: 12
+revision: 15
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-05T09:36:02Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-05T09:36:02Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-05T09:54:43Z", actor: "human:timo", revision: 15, decided_on: {"recorded":{"test_result":1,"verification":1}}}
 ---
 ## Outcome
 

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T09:54:43Z",
+  "actor": "human:timo",
+  "artifact": "story:released-dependencies",
+  "kind": "story",
+  "revision": 14,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "w37 unit gate, 23 steps, each its own exit code: ess validate x3 0, intake-slice/cli/governor tests 0, ess_gate x2 0, drift and no-hand-model x4 0, conform 0, executor_port 0, docs generate --check x2 0, fmt 0, clippy -D warnings 0, cargo test --workspace 1010 passed 0 failed; wave branch tree equals the unit tree (main unchanged at c4e7252); no adversary pass (dependency move, code identical to llm's)",
+    "reference": "wave/2026-10-05-w37"
+  }
+}
