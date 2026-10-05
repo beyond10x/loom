@@ -1,0 +1,18 @@
+[package]
+name = "b10x-loom-sdk"
+description = "One crate an application depends on to embed a governed agent: Commission's contracts and runtime, the Loom executor, the governor and intake, re-exported."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "loom_sdk"
+
+[dependencies]
+b10x-commission = { path = "../commission" }
+b10x-governor = { path = "../governor" }
+b10x-intake-router = { path = "../intake-router" }
+b10x-intake-slice = { path = "../intake-slice" }
+b10x-loom = { path = "../loom" }

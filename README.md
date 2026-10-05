@@ -47,6 +47,21 @@ The exit status is 0 when the run stopped at its human gate (`ApprovalRequired`)
 for another reason, 1 when it failed and 2 for a command line that is not valid.
 `b10x-loom run --help` lists the flags.
 
+## Embed it
+
+An application embeds the governed runtime through one crate, `b10x-loom-sdk`
+([`crates/loom-sdk`](crates/loom-sdk)). It re-exports Commission's contracts and runtime, the Loom
+executor, the governor and intake; the application supplies the selector, the argument generator
+and the authority provider.
+
+[`crates/loom-sdk/examples/software_change.rs`](crates/loom-sdk/examples/software_change.rs) is a
+whole embedding: it opens a case on `software-change@1` over a scratch git repository, runs the loop
+over scripted fake models (no network, no login) and stops at `ApprovalRequired (repository.merge)`.
+
+```console
+cargo run -p b10x-loom-sdk --example software_change
+```
+
 ## Build
 
 ```console

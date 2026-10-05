@@ -16,6 +16,9 @@
 //! protocol is `software-change@1`: for any other protocol it performs nothing, so Commission's
 //! runtime ends the run with `NoPerformableAction` before the agent is asked. There is no sandbox
 //! (see [`crate::executor`]).
+//!
+//! The slice builds one in [`crate::run`]; an embedder builds one with [`LocalEffects::new`] over a
+//! [`Console`] of its own.
 
 use std::cell::{Cell, RefCell};
 use std::io::Write;
@@ -35,14 +38,19 @@ use crate::verifier::{TestResultVerifier, VerifyError};
 
 /// The slice's output, shared by the agent step and the effect adapter: where lines go, the
 /// number of the last step printed, and the first failure neither could return through its port.
-pub(crate) struct Console<'o> {
+///
+/// An embedder that builds [`LocalEffects`] itself makes one over its own output and, after the
+/// run, reads the failure an effect could not return through the port with
+/// [`Console::take_failure`].
+pub struct Console<'o> {
     out: RefCell<&'o mut dyn Write>,
     steps: Cell<usize>,
     failure: RefCell<Option<SliceError>>,
 }
 
 impl<'o> Console<'o> {
-    pub(crate) fn new(out: &'o mut dyn Write) -> Self {
+    /// A console printing to `out`, at step 0, with no failure kept.
+    pub fn new(out: &'o mut dyn Write) -> Self {
         Self {
             out: RefCell::new(out),
             steps: Cell::new(0),
@@ -72,7 +80,7 @@ impl<'o> Console<'o> {
     }
 
     /// The failure kept, if any.
-    pub(crate) fn take_failure(&self) -> Option<SliceError> {
+    pub fn take_failure(&self) -> Option<SliceError> {
         self.failure.borrow_mut().take()
     }
 }
@@ -90,7 +98,7 @@ pub struct LocalEffects<'a, 'o, S> {
 
 impl<'a, 'o, S: CaseStore> LocalEffects<'a, 'o, S> {
     /// An adapter for `case`, opened on `protocol`, performing through `executor`.
-    pub(crate) fn new(
+    pub fn new(
         executor: LocalExecutor<'a, S>,
         verifier: TestResultVerifier<'a, S>,
         governor: &'a CanonGovernor<S>,
