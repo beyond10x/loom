@@ -48,9 +48,13 @@ Evidence comes only from the slice's verifier, from the exit status of the test 
 executor ran (Atlas ADR 0074). A transcript line that a model-written file imitates can mislead the
 next choice; it cannot become evidence.
 
-:::warning[No sandbox]
-The test command runs model-edited code with the operator's rights and environment. The slice's
-path checks bound what it writes, not what that code does. The slice's own git calls run none of
+:::note[Test confinement in current source]
+Tests use [Substrate](https://beyond10x.github.io/substrate/)
+([GitHub](https://github.com/beyond10x/substrate)) with no network, read-only source and toolchain,
+and workspace writes only to `target/`. Dependencies are prefetched explicitly. A missing
+confinement guarantee stops the run; only `--confinement none` opts out. Every executed test
+observation names its actual confinement. These changes follow release 0.1.0.
+The slice's own git calls run none of
 the work tree's hooks, no `core.fsmonitor` command and no signing program, a case does not open
 on a work tree whose own git configuration names a program, and a call is refused once the test
 command changed that configuration or the git directory.

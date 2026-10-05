@@ -22,7 +22,7 @@ It runs, in order:
 |---|---|
 | `task spec`, `task commission:spec`, `task intake-spec` | The three ESS systems (`ess/`, `ess/commission/`, `ess/intake/`) validate |
 | `task ess-gate`, `task commission:ess-gate` | The hard gate: validate strictly, compile, synthesize with no refusal, no open question |
-| `task drift`, `task commission:drift` | The generated Rust model equals a fresh synthesis of the specification |
+| `task drift`, `task commission:drift`, `task intake-drift` | Each generated Rust model equals a fresh synthesis of its specification |
 | `task no-hand-model`, `task commission:no-hand-model` | No hand-written type shadows one the specification declares |
 | `task commission:conform` | Commission passes its synthesized ESS conformance suite |
 | `task commission:deps-guard` | Commission's contracts depend on no Loom executor, no Canon and no model-provider crate |

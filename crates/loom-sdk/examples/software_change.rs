@@ -110,7 +110,8 @@ pub fn run(workspace: &Path) -> Result<LoopEnd, Box<dyn Error>> {
             case.clone(),
             workspace.clone(),
             TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
-        ),
+        )
+        .with_runner(std::sync::Arc::new(loom_sdk::UnconfinedRunner)),
         TestResultVerifier::new(&governor, case.clone(), PRODUCER),
         &governor,
         case.clone(),

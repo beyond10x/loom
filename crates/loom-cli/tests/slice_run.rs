@@ -68,6 +68,52 @@ struct Row {
 }
 
 #[test]
+fn confinement_refusal_stops_the_loop_without_test_evidence() {
+    use b10x_loom_intake_slice::confinement::{
+        Backend, ConfinementError, ConfinementRefusal, TestExecution, TestRunner,
+    };
+    struct Refused;
+    impl TestRunner for Refused {
+        fn backend(&self) -> Backend {
+            Backend::Substrate
+        }
+        fn run(
+            &self,
+            _: &TestCommand,
+            _: &std::path::Path,
+        ) -> Result<TestExecution, ConfinementError> {
+            Err(ConfinementError {
+                reason: ConfinementRefusal::BackendMissing,
+                detail: "fixture".into(),
+            })
+        }
+    }
+    let fixture = Fixture::new("confined-refusal");
+    let (run, output, _, observations) = drive_with_runner(
+        &fixture,
+        Row {
+            name: "confined-refusal",
+            pick: pick(SOFTWARE_CHANGE, 0.9),
+            agent: vec![json!({"action": "tests.run"}), json!({})],
+            max_steps: 10,
+            nothing_admissible: false,
+        },
+        std::sync::Arc::new(Refused),
+    );
+    assert_eq!(run.stop_reason, StopReason::ConfinementUnavailable);
+    assert_eq!(run.steps, 1);
+    assert!(output.contains("confinement: substrate"));
+    assert!(output.contains("BackendMissing"));
+    assert!(output.contains("evidence: none"));
+    assert!(!output.contains("test_result pass"));
+    assert!(
+        !observations
+            .iter()
+            .any(|o| o.source == b10x_loom_intake_slice::executor::TEST_RUN_SOURCE)
+    );
+}
+
+#[test]
 fn the_slice_stops_for_each_reason() {
     // Main path: the edit fixes the failing test, the run passes, and the only useful action left
     // is the merge, which needs authority.
@@ -564,6 +610,23 @@ fn drive_observed(
     usize,
     Vec<ObservationData>,
 ) {
+    drive_with_runner(
+        fixture,
+        row,
+        std::sync::Arc::new(b10x_loom_intake_slice::executor::UnconfinedRunner),
+    )
+}
+
+fn drive_with_runner(
+    fixture: &Fixture,
+    row: Row,
+    runner: std::sync::Arc<dyn b10x_loom_intake_slice::confinement::TestRunner>,
+) -> (
+    b10x_loom_intake_slice::run::SliceRun,
+    String,
+    usize,
+    Vec<ObservationData>,
+) {
     let classifier = Recorded::new("recorded-classifier", vec![row.pick]);
     let agent = Recorded::new("recorded-agent", row.agent);
     let governor = CanonGovernor::new(MemoryCaseStore::default());
@@ -573,6 +636,7 @@ fn drive_observed(
         issued: AtomicUsize::new(0),
     };
     let request = SliceRequest {
+        runner,
         intent: INTENT.to_owned(),
         workspace: fixture.workspace().to_path_buf(),
         test: TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),

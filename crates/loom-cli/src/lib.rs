@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 /// The model both the agent and the classifier use unless told otherwise.
 pub const DEFAULT_MODEL: &str = "gpt-5.6-sol";
@@ -13,7 +13,7 @@ pub const DEFAULT_MODEL: &str = "gpt-5.6-sol";
 /// What `run --help` says about the exit status; the binary's `exit_status` decides it.
 pub const EXIT_STATUS: &str = "Exit status:
   0  the run stopped at its human gate (ApprovalRequired)
-  3  the run stopped for another reason (NothingAdmissible, StepBudget, NoLocalExecutor, Refused)
+  3  the run stopped for another reason (NothingAdmissible, StepBudget, NoLocalExecutor, Refused, ConfinementUnavailable)
   1  the run failed
   2  the command line is not valid";
 
@@ -41,6 +41,12 @@ pub enum Command {
 /// The arguments of `b10x-loom run`.
 #[derive(Debug, Args)]
 pub struct RunArgs {
+    /// Confine tests with Substrate, or explicitly run with the operator's rights.
+    #[arg(long, value_enum, default_value_t = Confinement::Substrate)]
+    pub confinement: Confinement,
+    /// An explicitly delegated cgroup v2 root for confined tests.
+    #[arg(long, value_name = "DIR")]
+    pub cgroup_root: Option<PathBuf>,
     /// The root of the git work tree the change is made in.
     #[arg(long, value_name = "DIR")]
     pub workspace: PathBuf,
@@ -62,4 +68,13 @@ pub struct RunArgs {
     pub threshold: f64,
     /// What to do, as given.
     pub intent: String,
+}
+
+/// The operator's requested test execution policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Confinement {
+    /// Require Substrate and refuse when unavailable.
+    Substrate,
+    /// Run unconfined. This opt-out is reported in every test observation.
+    None,
 }

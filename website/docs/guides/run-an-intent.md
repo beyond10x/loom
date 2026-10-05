@@ -13,9 +13,14 @@ source: crates/loom-cli/src/lib.rs, crates/loom-intake-slice/src/run.rs, ess/int
 - **A Codex login.** Run `codex login` once. The credential in `~/.codex/auth.json` is read, and
   renewed when it is close to expiry, by [llm](https://beyond10x.github.io/llm/)
   ([GitHub](https://github.com/beyond10x/llm)), never by Loom's own code.
-- **A git work tree whose test command you would run yourself.** There is no sandbox. The test
-  command runs model-edited code with your rights and your environment. The path checks bound
-  what Loom writes, not what that code does. Loom's own git calls run none of the work tree's
+- **Linux, bubblewrap and delegated cgroup v2 controllers.** Current source (after tag 0.1.0)
+  confines tests with Substrate. When delegation is absent, Loom attempts one user systemd scope.
+  A remaining failure stops with a named refusal and exit 3.
+- **Dependencies fetched before the run.** Rust and system tools are supported. Tests have no
+  network and use an offline private Cargo home with read-only dependency caches. Source and
+  toolchain are read-only; workspace writes are restricted to `target/`. A missing cached
+  dependency fails the test with a prefetch instruction; Loom never fetches automatically.
+  Loom's own git calls run none of the work tree's
   hooks. A run does not start on a work tree whose own git configuration names a program (a
   filter driver, a credential helper, an SSH command and the like), and stops when the test
   command changed that configuration or the git directory.
@@ -31,6 +36,11 @@ b10x-loom run --workspace <git work tree> --test-cmd "cargo test" "make the fail
 Every flag and its default is on the [CLI reference](../reference/cli.md). `--max-steps` (default
 20) bounds the actions performed, refused ones included. `--model` and `--classifier-model` name the
 models that choose actions and classify the intent.
+
+`--confinement substrate` is the default. `--cgroup-root` selects an explicit delegated
+root. Tests retain their 300-second timeout, with 8 GiB memory and 2,048-process limits.
+Only `--confinement none` runs with your rights and environment; the run output and every test
+observation name this choice. Confined observations include the actual Substrate applied record.
 
 ## Read the output
 
@@ -57,6 +67,7 @@ The lines below are from the [live run of 2026-10-05][live], abbreviated.
 | `StepBudget` | `--max-steps` actions were taken | 3 |
 | `NoLocalExecutor` | The router picked a protocol other than `software-change@1`, which is the only one the slice can perform | 3 |
 | `Refused` | The router refused its pick | 3 |
+| `ConfinementUnavailable` | The requested confinement could not be provided; no passing evidence is submitted | 3 |
 
 A failure (no usable answer from the model, a work tree the case cannot open on, the model out of
 reach) prints `b10x-loom: <error>` and exits 1. A command line that is not valid exits 2:

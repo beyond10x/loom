@@ -7,6 +7,37 @@
 
 use std::process::Command;
 
+#[test]
+fn confinement_defaults_to_substrate_and_requires_explicit_opt_out() {
+    let help = help(&["run", "--help"]);
+    assert!(help.contains("--confinement"), "{help}");
+    assert!(help.contains("[default: substrate]"), "{help}");
+    assert!(help.contains("--cgroup-root"), "{help}");
+    assert!(help.contains("ConfinementUnavailable"), "{help}");
+}
+
+#[test]
+fn unavailable_delegation_after_reexec_stops_three_before_model_access() {
+    let output = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+        .args([
+            "run",
+            "--workspace",
+            ".",
+            "--cgroup-root",
+            "/loom-nonexistent-cgroup",
+            "fix tests",
+        ])
+        .env("B10X_LOOM_CONFINEMENT_REEXEC", "1")
+        .env("HOME", "/loom-no-credentials")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(3));
+    let error = String::from_utf8(output.stderr).unwrap();
+    assert!(error.contains("ConfinementUnavailable"), "{error}");
+    assert!(error.contains("CgroupUndelegated"), "{error}");
+    assert!(!error.contains("picked "), "{error}");
+}
+
 /// Runs `b10x-loom` with `args` and returns its standard output, asserting it succeeded.
 fn help(args: &[&str]) -> String {
     let output = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))

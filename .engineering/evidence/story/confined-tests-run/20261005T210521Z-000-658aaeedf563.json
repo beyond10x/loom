@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T21:05:21Z",
+  "actor": "human:timo",
+  "artifact": "story:confined-tests-run",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "RED: cargo test -p b10x-loom-cli --test loom_cli confinement_defaults: 0 passed, 1 failed, exit 101",
+    "reference": "docs/qualification/2026-10-05-confined-tests.md"
+  }
+}

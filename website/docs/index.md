@@ -58,8 +58,8 @@ SDK example runs on scripted fake models. Each page says whether what it describ
   credential is the operator's, read by llm.
 - It does not grant authority. A capability an action needs comes from an authority provider the
   embedder supplies; the command line's provider grants none, so a run stops at the merge.
-- It does not merge, push or deploy, and it has no sandbox: the slice's test command runs with the
-  operator's rights.
+- It does not merge, push or deploy. Current source confines tests with Substrate; an explicit
+  `--confinement none` opts out.
 - It does not keep the engineering record of a case or compare harnesses. Both are neighbours'
   work: [AEP](https://beyond10x.github.io/ecosystem/aep/) ([GitHub](https://github.com/beyond10x/aep)) keeps
   the record, and [Metaharness](https://beyond10x.github.io/metaharness/)

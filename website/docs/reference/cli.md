@@ -31,6 +31,8 @@ Usage: b10x-loom run [OPTIONS] --workspace <DIR> <INTENT>
 
 | Argument | Required | Default | Meaning |
 |---|---|---|---|
+| `--confinement <CONFINEMENT>` | no | `substrate` | Confine tests with Substrate, or explicitly run with the operator's rights |
+| `--cgroup-root <DIR>` | no | none | An explicitly delegated cgroup v2 root for confined tests |
 | `--workspace <DIR>` | yes | none | The root of the git work tree the change is made in |
 | `--test-cmd <CMD>` | no | `cargo test` | The test command, run in the workspace without a shell: a program and its arguments, split at white space |
 | `--max-steps <N>` | no | `20` | The most actions performed before the run stops |
@@ -42,7 +44,7 @@ Usage: b10x-loom run [OPTIONS] --workspace <DIR> <INTENT>
 ```text
 Exit status:
   0  the run stopped at its human gate (ApprovalRequired)
-  3  the run stopped for another reason (NothingAdmissible, StepBudget, NoLocalExecutor, Refused)
+  3  the run stopped for another reason (NothingAdmissible, StepBudget, NoLocalExecutor, Refused, ConfinementUnavailable)
   1  the run failed
   2  the command line is not valid
 ```

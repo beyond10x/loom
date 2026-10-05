@@ -119,6 +119,7 @@ fn drive_at(
         first: Mutex::new(None),
     };
     let request = SliceRequest {
+        runner: std::sync::Arc::new(b10x_loom_intake_slice::executor::UnconfinedRunner),
         intent: INTENT.to_owned(),
         workspace: workspace.to_path_buf(),
         test: TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
