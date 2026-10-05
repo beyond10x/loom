@@ -5,7 +5,7 @@
 It is not merely a tool list.
 
 The frontier is the generated `commission.responsibility.Frontier`, declared in
-`ess/domains/responsibility.yaml`; this file follows that specification. A frontier is issued for
+`ess/commission/domains/responsibility.yaml`; this file follows that specification. A frontier is issued for
 one case revision and answers:
 
 - which claims are currently true, false or unknown;

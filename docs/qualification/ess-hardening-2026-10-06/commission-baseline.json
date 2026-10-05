@@ -1,0 +1,48 @@
+{
+  "completed_at": 1700000003800,
+  "conformance_status": "inconclusive",
+  "counts": {
+    "error": 0,
+    "failed": 0,
+    "passed": 13,
+    "skipped": 0,
+    "total": 13,
+    "unsupported": 0
+  },
+  "coverage": {
+    "knowledge": "unknown"
+  },
+  "execution_status": "passed",
+  "format": "ess-conformance-report/2",
+  "implementation": "b10x-loom-commission 0.1.0",
+  "outcomes": {
+    "error": [],
+    "failed": [],
+    "passed": [
+      "commission.responsibility.ResumeRun/outcome/resumed",
+      "commission.responsibility.ResumeRun/outcome/wrong-state",
+      "commission.responsibility.RevalidateActionRequest/outcome/admitted",
+      "commission.responsibility.RevalidateActionRequest/outcome/needs-authority",
+      "commission.responsibility.RevalidateActionRequest/outcome/not-admitted",
+      "commission.responsibility.RevalidateActionRequest/outcome/stale",
+      "commission.responsibility.Run/state/Running/refuses/commission.responsibility.ResumeRun",
+      "commission.responsibility.Run/state/Suspended/refuses/commission.responsibility.SuspendRun",
+      "commission.responsibility.Run/transition/resume/by/commission.responsibility.ResumeRun/resumed",
+      "commission.responsibility.Run/transition/suspend/by/commission.responsibility.SuspendRun/suspended",
+      "commission.responsibility.StartRun/outcome/started",
+      "commission.responsibility.SuspendRun/outcome/suspended",
+      "commission.responsibility.SuspendRun/outcome/wrong-state"
+    ],
+    "skipped": [],
+    "unsupported": []
+  },
+  "policy": "complete-selection/1",
+  "producer_profile": "rust-scenario-status/1",
+  "spec_digest": "9bed27fd6e65172f1e7b60f9fe93551bb1ce785145cc4c15fd0ec1f1ad08c598",
+  "specification": "commission/v1",
+  "suite": {
+    "digest": "sha256:302ab0a675cc0960e2aafbd91ab0daeaef27282cc1ae25190573b0259b217e6d",
+    "digest_profile": "sha256-json-bytes/1",
+    "version": "ess-conformance/34"
+  }
+}

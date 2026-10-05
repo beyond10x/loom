@@ -1,5 +1,5 @@
 # Draft domain for Commission (story M-001). Nouns and relations are read from
-# docs/design/commission-design.md, docs/contracts/{commission-executor,frontier,evidence}.md and
+# docs/commission/design/commission-design.md, docs/commission/contracts/{commission-executor,frontier,evidence}.md and
 # Atlas ADR 0070. A relation the sources do not settle stays out of the model until a story decides
 # it; its open question is a decision-blocker in the planning store, not a note here (Atlas ADR
 # 0076). One lifecycle state per entity until a command outcome moves it.
@@ -94,7 +94,7 @@ types:
       - name: outcome
         type: String
 
-  # docs/contracts/commission-executor.md: the arguments of a proposed action, as the model wrote them.
+  # docs/commission/contracts/commission-executor.md: the arguments of a proposed action, as the model wrote them.
   - name: commission.responsibility.ProposedActionArguments
     kind: newtype
     of: Json
@@ -119,7 +119,7 @@ types:
       Budget: Json
       ExternalAvailability: Json
 
-  # docs/contracts/commission-executor.md: what an executor may hand back. It proposes; it never
+  # docs/commission/contracts/commission-executor.md: what an executor may hand back. It proposes; it never
   # completes a case.
   - name: commission.responsibility.ExecutorOutcome
     kind: union
@@ -261,12 +261,12 @@ types:
     kind: enum
     variants: ["True", "False", "Unknown"]
 
-  # docs/contracts/frontier.md: what the frontier says about one action.
+  # docs/commission/contracts/frontier.md: what the frontier says about one action.
   - name: commission.responsibility.ActionStatus
     kind: enum
     variants: [Admissible, ApprovalRequired, Blocked]
 
-  # docs/contracts/frontier.md: one claim of a frontier and its three-valued value.
+  # docs/commission/contracts/frontier.md: one claim of a frontier and its three-valued value.
   - name: commission.responsibility.FrontierClaim
     kind: struct
     fields:
@@ -275,7 +275,7 @@ types:
       - name: value
         type: commission.responsibility.Truth
 
-  # docs/contracts/frontier.md: one obligation of a frontier, open or discharged.
+  # docs/commission/contracts/frontier.md: one obligation of a frontier, open or discharged.
   - name: commission.responsibility.FrontierObligation
     kind: struct
     fields:
@@ -284,7 +284,7 @@ types:
       - name: open
         type: Boolean
 
-  # docs/contracts/frontier.md: one action of a frontier, the capability an approval needs and the
+  # docs/commission/contracts/frontier.md: one action of a frontier, the capability an approval needs and the
   # reasons a block names.
   - name: commission.responsibility.FrontierAction
     kind: struct
@@ -444,7 +444,7 @@ entities:
         - {name: suspend, from: [Running], to: Suspended}
         - {name: resume, from: [Suspended], to: Running}
 
-  # docs/contracts/frontier.md: the bridge between governance and execution, for one case revision.
+  # docs/commission/contracts/frontier.md: the bridge between governance and execution, for one case revision.
   # Its claims, obligations and actions are Commission's own value types (story M-002): none has an
   # identity or a lifecycle of its own outside the frontier issued for one case revision.
   - name: commission.responsibility.Frontier
@@ -473,7 +473,7 @@ entities:
       states: [Issued]
       terminal: [Issued]
 
-  # docs/contracts/evidence.md: a raw report from a runtime, integration or verifier.
+  # docs/commission/contracts/evidence.md: a raw report from a runtime, integration or verifier.
   - name: commission.responsibility.Observation
     identity:
       name: observation_id
@@ -518,7 +518,7 @@ entities:
         target: commission.responsibility.Case
         cardinality: one
         via: case_id
-      # An evidence record interprets one or more observations (docs/contracts/evidence.md;
+      # An evidence record interprets one or more observations (docs/commission/contracts/evidence.md;
       # operator, 2026-10-04).
       - name: observations
         kind: references

@@ -1,0 +1,161 @@
+{
+  "format": "ess-diff/14",
+  "before": {
+    "system": "intake",
+    "specification_version": 1,
+    "spec_digest": "154f9a4350ab096a493ea2db20134dacc7050a25d84a1a939f2764c8e248ac6c"
+  },
+  "after": {
+    "system": "intake",
+    "specification_version": 1,
+    "spec_digest": "17553021bee1981ed9aa67801148981e347a82b89ccf4c4d86645268a2d3d140"
+  },
+  "changes": [
+    {
+      "id": "system/intake/unclassified-changed",
+      "relation": "changed",
+      "compatibility": {
+        "verdict": "unknown",
+        "callers": "unknown",
+        "readers": "unknown",
+        "history": "unknown"
+      },
+      "change": {
+        "category": "system",
+        "subject": "intake",
+        "changed": {
+          "kind": "unclassified-changed"
+        }
+      }
+    },
+    {
+      "id": "type/intake.confinement.AppliedConfinement/added",
+      "relation": "changed",
+      "compatibility": {
+        "verdict": "compatible",
+        "callers": "compatible",
+        "readers": "compatible",
+        "history": "compatible",
+        "uses": []
+      },
+      "change": {
+        "category": "type",
+        "subject": "intake.confinement.AppliedConfinement",
+        "changed": {
+          "kind": "added"
+        }
+      }
+    },
+    {
+      "id": "type/intake.confinement.Backend/added",
+      "relation": "changed",
+      "compatibility": {
+        "verdict": "compatible",
+        "callers": "compatible",
+        "readers": "compatible",
+        "history": "compatible",
+        "uses": []
+      },
+      "change": {
+        "category": "type",
+        "subject": "intake.confinement.Backend",
+        "changed": {
+          "kind": "added"
+        }
+      }
+    },
+    {
+      "id": "type/intake.confinement.ConfinementProfile/added",
+      "relation": "changed",
+      "compatibility": {
+        "verdict": "compatible",
+        "callers": "compatible",
+        "readers": "compatible",
+        "history": "compatible",
+        "uses": []
+      },
+      "change": {
+        "category": "type",
+        "subject": "intake.confinement.ConfinementProfile",
+        "changed": {
+          "kind": "added"
+        }
+      }
+    },
+    {
+      "id": "type/intake.confinement.ConfinementRefusal/added",
+      "relation": "changed",
+      "compatibility": {
+        "verdict": "compatible",
+        "callers": "compatible",
+        "readers": "compatible",
+        "history": "compatible",
+        "uses": []
+      },
+      "change": {
+        "category": "type",
+        "subject": "intake.confinement.ConfinementRefusal",
+        "changed": {
+          "kind": "added"
+        }
+      }
+    },
+    {
+      "id": "type/intake.confinement.EnvironmentEntry/added",
+      "relation": "changed",
+      "compatibility": {
+        "verdict": "compatible",
+        "callers": "compatible",
+        "readers": "compatible",
+        "history": "compatible",
+        "uses": []
+      },
+      "change": {
+        "category": "type",
+        "subject": "intake.confinement.EnvironmentEntry",
+        "changed": {
+          "kind": "added"
+        }
+      }
+    },
+    {
+      "id": "type/intake.confinement.ToolchainRoot/added",
+      "relation": "changed",
+      "compatibility": {
+        "verdict": "compatible",
+        "callers": "compatible",
+        "readers": "compatible",
+        "history": "compatible",
+        "uses": []
+      },
+      "change": {
+        "category": "type",
+        "subject": "intake.confinement.ToolchainRoot",
+        "changed": {
+          "kind": "added"
+        }
+      }
+    },
+    {
+      "id": "type/intake.routing.StopReason/variant-added/ConfinementUnavailable",
+      "relation": "expanded",
+      "compatibility": {
+        "verdict": "compatible",
+        "callers": "compatible",
+        "readers": "compatible",
+        "history": "compatible",
+        "uses": [
+          "stored"
+        ]
+      },
+      "change": {
+        "category": "type",
+        "subject": "intake.routing.StopReason",
+        "changed": {
+          "kind": "variant-added",
+          "variant": "ConfinementUnavailable"
+        }
+      }
+    }
+  ]
+}
