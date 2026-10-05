@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T01:37:13Z",
+  "actor": "human:timo",
+  "artifact": "story:loom-cli",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "live: b10x-loom run against the Codex backend, 5 steps, stopped: ApprovalRequired (repository.merge), exit 0; base d07f8b1: loom_cli does not compile (no b10x-loom binary)",
+    "reference": "docs/qualification/2026-10-05-b10x-loom-live-run.md"
+  }
+}

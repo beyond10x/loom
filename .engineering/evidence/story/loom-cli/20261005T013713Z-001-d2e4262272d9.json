@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T01:37:13Z",
+  "actor": "human:timo",
+  "artifact": "story:loom-cli",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "20 gate steps exit 0; cargo test --workspace --no-fail-fast 1007 passed 0 failed 4 ignored; integration tree equals the unit tree outside .engineering and docs/qualification",
+    "reference": "wave/2026-10-05-w28 44ffb7f"
+  }
+}

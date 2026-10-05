@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:loom-cli
 kind: story
-status: active
+status: implemented
 title: b10x-loom run replaces b10x-intake run with the same flags and exit codes
 relations:
 - decomposes: epic:runtime-consolidation
@@ -15,10 +15,11 @@ scope:
   path: README.md
 - confidence: inferred
   path: crates/intake-cli
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-05T01:26:17Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-05T01:26:17Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-05T01:37:13Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"test_result":1,"verification":1}}}
 ---
 ## Outcome
 
