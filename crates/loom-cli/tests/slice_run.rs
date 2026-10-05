@@ -529,6 +529,7 @@ fn the_run_command_lists_its_flags() {
 /// 2 for a command line that is not valid. Which stop reason maps to 0 or 3 is pinned by the
 /// binary's unit test; a stop reason needs a model, which no test here reaches. A failure is driven
 /// here with no Codex login (`HOME` and `CODEX_HOME` an empty directory), so no login is read.
+/// Explicit unconfined mode lets this login fixture reach that failure without host delegation.
 #[test]
 fn the_exit_status_says_how_the_run_ended() {
     let output = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
@@ -562,6 +563,7 @@ fn the_exit_status_says_how_the_run_ended() {
     std::fs::create_dir_all(&home).expect("create an empty home");
     let failed = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
         .arg("run")
+        .args(["--confinement", "none"])
         .arg("--workspace")
         .arg(fixture.workspace())
         .arg(INTENT)
