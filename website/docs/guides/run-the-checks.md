@@ -15,10 +15,12 @@ The dedicated confinement qualification additionally needs delegated cgroup v2 c
 its explicit skip in the ordinary suite establishes no qualification. From the repository root:
 
 ```console
+cargo fetch --locked
 task check
 ```
 
-It runs, in order:
+The explicit fetch prepares every locked platform dependency for offline metadata inspection.
+CI performs the same setup. `task check` runs, in order:
 
 | Step | Holds |
 |---|---|

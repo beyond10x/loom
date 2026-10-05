@@ -130,7 +130,8 @@ names to the new ones.
 
 Changes go through `task check`, which needs Rust, [Task](https://taskfile.dev/), bubblewrap
 (`/usr/bin/bwrap`) and the `ess` command line of [ESS](https://beyond10x.github.io/ess/)
-([GitHub](https://github.com/beyond10x/ess)).
+([GitHub](https://github.com/beyond10x/ess)). Run `cargo fetch --locked` first to prepare the
+full dependency graph for offline checks.
 [Run the checks](https://beyond10x.github.io/loom/docs/guides/run-the-checks) explains each step.
 Agents read [AGENTS.md](AGENTS.md).
 
