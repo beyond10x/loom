@@ -2,12 +2,16 @@
 format: aep.planning-md/3
 id: story:retire-repositories
 kind: story
-status: draft
+status: active
 title: commission, governor and intake are archived and every registry points at Loom
 relations:
 - decomposes: epic:runtime-consolidation
 - depends_on: story:crate-names
-revision: 1
+- serves: vision:governed-autonomy
+revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-05T10:06:50Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-10-05T10:06:50Z", actor: "human:timo", revision: 3}
 ---
 ## Outcome
 
