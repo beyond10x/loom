@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T01:55:16Z",
+  "actor": "human:timo",
+  "artifact": "story:loom-sdk",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "base 674197d: example_runs does not compile (15 unresolved loom_sdk paths); treatment: example_runs 3 passed, cargo run --example software_change prints stopped: ApprovalRequired (repository.merge), cargo doc -D warnings exit 0",
+    "reference": "phase1-red.log vs scratch/gate/"
+  }
+}

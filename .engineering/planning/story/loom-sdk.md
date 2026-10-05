@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:loom-sdk
 kind: story
-status: active
+status: implemented
 title: One SDK crate embeds the governed runtime, shown by one example
 relations:
 - decomposes: epic:runtime-consolidation
@@ -17,10 +17,11 @@ scope:
   path: README.md
 - confidence: inferred
   path: crates/loom-sdk
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-05T01:38:43Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-05T01:38:43Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-05T01:55:16Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"test_result":1,"verification":1}}}
 ---
 ## Outcome
 
