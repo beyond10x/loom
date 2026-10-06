@@ -68,6 +68,8 @@ under **Unreleased** until the next release.
   Commission conformance target builds on the 0.54.0 `ess-conformance` and `ess-primitives`, and
   CI installs the 0.54.0 `ess`. The source formats are unchanged, and the generated Rust is the
   same as under 0.53.0.
+- The Taskfiles no longer set `CARGO_TARGET_DIR`: `task check` and every other task build into the
+  work tree's own `target/`, so two work trees never share test binaries.
 
 ## [0.2.0] - 2026-10-06
 

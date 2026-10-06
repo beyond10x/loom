@@ -134,9 +134,15 @@ version (`RUSTUP_TOOLCHAIN=<version> task check`) when Clippy disagrees.
 `task commission:check` is Commission's own gate, limited to its crates. While iterating, prefer
 `cargo test -p <package> --locked` on the crate you touched.
 
-The Taskfiles set `CARGO_TARGET_DIR=~/.cache/b10x-target/loom`. A `CARGO_TARGET_DIR` already in the
-environment wins, so a worktree that must not share that build directory sets its own. Check
-`df -h /` before a full gate and delete a worktree's build directory once its work is reported.
+Every work tree builds into its own `target/`. The Taskfiles set no `CARGO_TARGET_DIR`; do not set
+one. Two trees that share a build directory can run each other's test binaries: cargo judges the
+other tree's binary fresh, and the gate exits 0 on code it did not build
+(`gate_checks_the_tree_it_runs_in_when_worktrees_share_a_build_directory` in
+`crates/loom-executor/tests/adversary_ess_gate.rs`). Before a gate's result counts as evidence,
+check with `cargo test --workspace --locked -- --list` in the gated tree that the tests the run
+printed exist there. Check `df -h /` before a full gate and run one full gate at a time. End a
+managed worktree with `worktree finish --discard-cache --archive <tree>`, which removes its build
+cache; never delete a `target/` by hand.
 
 ## Generated files
 

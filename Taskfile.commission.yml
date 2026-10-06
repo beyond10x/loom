@@ -1,8 +1,5 @@
 version: '3'
 
-env:
-  CARGO_TARGET_DIR: '{{.HOME}}/.cache/b10x-target/loom'
-
 tasks:
   check:
     desc: Commission's own gate; its build, lint and test steps cover only the Commission crates.

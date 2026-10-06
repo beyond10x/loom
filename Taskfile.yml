@@ -1,8 +1,5 @@
 version: '3'
 
-env:
-  CARGO_TARGET_DIR: '{{.HOME}}/.cache/b10x-target/loom'
-
 includes:
   commission: ./Taskfile.commission.yml
 
