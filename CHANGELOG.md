@@ -14,13 +14,17 @@ under **Unreleased** until the next release.
   tool list is exactly that catalogue, each action under its published name
   (`harness::governed::tool_name`: `repository.merge` is published as `repository_merge`); the
   loop's own tools (an answer schema, delegation, skills, memories) are not published, whatever
-  the caller's configuration says, so no delegate runs. A
-  model's call of a catalogue action is the selection, by the reasoning model, and carries its
+  the caller's configuration says, so no delegate runs, and a narrowing in it (`admits`) keeps
+  only the catalogue entries it names, turn by turn. A model's call of a catalogue action is the
+  selection, by the reasoning model, and carries its
   arguments: Loom records the selection and the argument request, revalidates the selection
   against the governor's current frontier, and returns it as a `ProposedAction`, stopping the loop
   at an approval checkpoint before the effect. A call of anything outside the catalogue is refused
   to the model by name and proposes nothing. Each completed turn is recorded once into the run's
-  session with the provider items it added (`loom.run.RecordTurn`, `Loom::turns`). Compaction,
+  session with the provider items it added (`loom.run.RecordTurn`, `Loom::turns`); one run holds
+  a session at a time, a second run proposes nothing, and the session is filed when its run ends
+  (`Loom::sessions`). Arguments the model wrote that Commission's JSON cannot carry end the run
+  with `NoUsefulAction`. Compaction,
   budgets as a Commission suspension, and resuming a run once Commission has acted are not wired
   yet, and `b10x-loom run` does not use the loop yet.
 

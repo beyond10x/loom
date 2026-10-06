@@ -12,8 +12,9 @@
 //!   the run was handed. It is projected ([`crate::projection`]), and each catalogue entry is
 //!   published as one tool under [`tool_name`], in the catalogue's order and with nothing else
 //!   beside it: the loop's own tools (an answer schema, delegation, skills, memories) are cleared
-//!   from the run's configuration, so no delegate runs. A call naming anything else is refused to
-//!   the model by the loop's own narrowing, naming it, and never reaches the selector.
+//!   from the run's configuration, so no delegate runs, and a narrowing in it only removes entries.
+//!   A call naming anything else is refused to the model by the loop's own narrowing, naming it,
+//!   and never reaches the selector.
 //! - **A tool call** ([`ApprovalPort`]). Every published tool asks before it runs, and Loom is what
 //!   answers. The model's call is the selection, by the reasoning model, from that turn's
 //!   catalogue; its arguments are the call's; and the pipeline [`AgentExecutor::run`] runs with a
@@ -25,7 +26,8 @@
 //!   [`ToolPort::call`] refuses one, should a call ever reach it.
 //! - **A completed turn** ([`ModelPort`]). Each conversation turn the provider completes is recorded
 //!   once into the run's session with the provider items it added, verbatim
-//!   (`loom.run.RecordTurn`, [`Loom::turns`]). A turn the endpoint broke off is not recorded.
+//!   (`loom.run.RecordTurn`, [`Loom::turns`]). A turn the endpoint broke off is not recorded. One
+//!   run holds a session at a time, and files it when it ends ([`Loom::sessions`]).
 //!
 //! Not wired yet: compaction (a summary turn is not recorded as a turn of the session); budgets as
 //! a Commission suspension (a budget that binds is `NoUsefulAction`); interruption and recovery
@@ -34,6 +36,7 @@
 
 use std::cell::{Cell, OnceCell};
 use std::ops::Deref;
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::sync::{Mutex, PoisonError};
 
 use b10x_loom_commission::model::json;
@@ -56,11 +59,14 @@ use crate::harness::wire::{
     WireId,
 };
 use crate::model::behaviour::SessionStorage;
-use crate::model::run::obligations::{OpenSessionBehavior, RecordTurnBehavior};
+use crate::model::run::obligations::{
+    FileSessionBehavior, OpenSessionBehavior, RecordTurnBehavior, ResumeSessionBehavior,
+};
 use crate::model::run::{
     ActionCatalogue, ArgumentRequestId, CatalogueEntry, CatalogueEntryStatus, CatalogueId,
-    OpenSession, OpenSessionOutcome, RecordTurn, SelectionId, SelectionStrategy, SessionData,
-    SessionId, SessionState, TurnId, action_catalogue_state,
+    FileSession, OpenSession, OpenSessionOutcome, RecordTurn, ResumeSession, ResumeSessionOutcome,
+    RunEnding, SelectionId, SelectionStrategy, SessionData, SessionId, SessionSnapshot,
+    SessionState, TurnId, action_catalogue_state,
 };
 use crate::selection::{ActionSelector, Choice, SelectionContext, SelectorError};
 use crate::{Loom, admits_nothing, no_useful_action, outage, projection, run_id};
@@ -94,8 +100,10 @@ pub struct LoopPorts<'p> {
     /// The model the loop turns.
     pub model: &'p mut dyn ModelPort,
     /// The run's model name, standing instructions, budget and sampling. Its tools are the
-    /// catalogue's, whatever it says: every field that would publish one of the loop's own tools
-    /// (an answer schema, delegation, skills, memories) is cleared before the loop starts.
+    /// catalogue's and never more, whatever it says: every field that would publish one of the
+    /// loop's own tools (an answer schema, delegation, skills, memories) is cleared before the loop
+    /// starts, and a narrowing (`admits`) publishes, each turn, only the catalogue entries whose
+    /// tool names it lists, so a turn whose catalogue lists none of them publishes no tool.
     pub config: LoopConfig,
     /// Where the loop's events go, as they happen.
     pub sink: &'p mut dyn LoopSink,
@@ -120,18 +128,22 @@ where
     /// turns into `session`, and answers what Loom proposes (see the module docs).
     ///
     /// The model's call of a catalogue action is the selection, by the reasoning model, and its
-    /// arguments are the call's: this Loom's own selector and generator are not asked. The outcome
+    /// arguments are the call's: this Loom's own selector and generator are not asked.
+    ///
+    /// One run holds `session` at a time: it is opened, or resumed when this Loom holds it
+    /// `Filed`, before the loop starts, and filed when the run ends, however it ends. The outcome
     /// is:
     ///
     /// - `ProposedAction`, when the loop stopped at the checkpoint of a selection the pipeline
     ///   admitted;
     /// - `Suspended` with `ExternalAvailability`, when the pipeline suspended at a call, when the
     ///   loop failed (a wire that could not answer, a governor that could not, a run that could not
-    ///   be described), or when the session cannot take this run's turns (it is recorded on
-    ///   another wire, or held with other data or no longer `Active`);
+    ///   be described), or when the session is recorded on another wire or held with other data
+    ///   (no request is sent);
     /// - `CompletedLocalReasoning`, when the model answered without a call that was proposed;
-    /// - `NoUsefulAction`, for a frontier of another case or one that admits nothing (no model is
-    ///   asked), and for any other stop.
+    /// - `NoUsefulAction`, for a frontier of another case or one that admits nothing, and for a
+    ///   session another run holds `Active` (no model is asked); when the model's arguments cannot
+    ///   be carried as Commission's JSON (the run ends there); and for any other stop.
     pub fn run_loop(
         &self,
         session: &SessionData,
@@ -148,11 +160,16 @@ where
         // published, whatever the caller asked: these four fields are all that adds one
         // (`AgentLoop::owned_specs`). A delegate in particular could not hold the checkpoint a
         // proposal stops at, so an action it selected would be admitted and never proposed.
+        // A narrowing is applied to each turn's catalogue here, as an intersection: the loop's
+        // own rule for it was written for a port whose names do not change, and admits every
+        // published name once the grant names one the port no longer publishes.
+        let admits = config.admits.clone();
         let config = config
             .with_output_schema(None)
             .with_delegation(None)
             .with_skills(None)
-            .with_memories(None);
+            .with_memories(None)
+            .with_admitted(None);
         let case = &commission.data().case_id;
         if frontier.data().case_id != *case || admits_nothing(frontier) {
             return LoopRun {
@@ -160,9 +177,9 @@ where
                 run: None,
             };
         }
-        if let Err(refusal) = self.open_session(session, model.wire()) {
+        if let Err(refused) = self.claim_session(session, model.wire()) {
             return LoopRun {
-                outcome: outage(refusal),
+                outcome: refused,
                 run: None,
             };
         }
@@ -173,6 +190,7 @@ where
             case,
             handed: frontier,
             session: &session.session_id,
+            admits: admits.as_deref(),
             offers: &offers,
         };
         let mut tools = CatalogueTools { offers: &offers };
@@ -189,9 +207,26 @@ where
             session: &session.session_id,
             offers: &offers,
         };
-        let run = AgentLoop::new(&mut model, &mut tools, &mut approvals, config)
-            .with_environment(&mut environment)
-            .run(self.prompt.clone(), sink);
+        // The session is filed however the run ends, a panic included, so a later run resumes it.
+        let run = match catch_unwind(AssertUnwindSafe(|| {
+            AgentLoop::new(&mut model, &mut tools, &mut approvals, config)
+                .with_environment(&mut environment)
+                .run(self.prompt.clone(), sink)
+        })) {
+            Ok(run) => run,
+            Err(panic) => {
+                self.file_session(&session.session_id, RunEnding::Failed);
+                resume_unwind(panic);
+            }
+        };
+        self.file_session(
+            &session.session_id,
+            match &run {
+                Ok(answered) if answered.stop.is_completed() => RunEnding::Answered,
+                Ok(_) => RunEnding::Stopped,
+                Err(_) => RunEnding::Failed,
+            },
+        );
         let outcome = match &run {
             Ok(answered) => ended(&answered.stop, approvals.ended.take()),
             Err(error) => outage(error.to_string()),
@@ -231,15 +266,23 @@ where
 }
 
 impl<S, G, V> Loom<S, G, V> {
-    /// Opens `session` for a run on `wire` (`loom.run.OpenSession`), or continues it when this Loom
-    /// already holds it `Active` with the same data.
-    fn open_session(&self, session: &SessionData, wire: &WireId) -> Result<(), String> {
+    /// Every session [`Loom::run_loop`] opened, in the state it is in: `Active` while a run holds
+    /// it, `Filed` once that run ended.
+    pub fn sessions(&self) -> Vec<SessionSnapshot> {
+        self.turn_record().sessions().to_vec()
+    }
+
+    /// Takes `session` for a run on `wire`: opens it (`loom.run.OpenSession`), or resumes it when
+    /// this Loom holds it `Filed` with the same data (`loom.run.ResumeSession`). A session another
+    /// run holds `Active` is `session-exists`, and the run proposes nothing (`NoUsefulAction`); one
+    /// on another wire, or held with other data, is refused as an outage.
+    fn claim_session(&self, session: &SessionData, wire: &WireId) -> Result<(), ExecutorOutcome> {
         let id = &session.session_id.0.0;
         if session.wire != wire.as_str() {
-            return Err(format!(
+            return Err(outage(format!(
                 "session `{id}` is recorded on wire `{}` and the run's model is on `{wire}`",
                 session.wire
-            ));
+            )));
         }
         let mut record = self.turn_record();
         match record.open_session(OpenSession {
@@ -250,16 +293,34 @@ impl<S, G, V> Loom<S, G, V> {
             Ok(OpenSessionOutcome::Opened { .. }) => Ok(()),
             Ok(OpenSessionOutcome::SessionExists { .. }) => {
                 match SessionStorage::get(&*record, &session.session_id) {
-                    Some(held) if held.state == SessionState::Active && held.data == *session => {
-                        Ok(())
+                    Some(held) if held.state == SessionState::Active => Err(no_useful_action()),
+                    Some(held) if held.data == *session => {
+                        match record.resume_session(ResumeSession {
+                            session_id: session.session_id.clone(),
+                            wire: session.wire.clone(),
+                        }) {
+                            Ok(ResumeSessionOutcome::Resumed { .. }) => Ok(()),
+                            resumed => Err(outage(format!(
+                                "session `{id}` could not be resumed: {resumed:?}"
+                            ))),
+                        }
                     }
-                    _ => Err(format!(
-                        "session `{id}` is held with other data or is no longer active"
-                    )),
+                    _ => Err(outage(format!("session `{id}` is held with other data"))),
                 }
             }
-            Err(unmet) => Err(format!("session `{id}` could not be opened: {unmet:?}")),
+            Err(unmet) => Err(outage(format!(
+                "session `{id}` could not be opened: {unmet:?}"
+            ))),
         }
+    }
+
+    /// Files `session` after a run that ended as `ending` (`loom.run.FileSession`). The run took it
+    /// `Active` and nothing else files it, so it is `filed`.
+    fn file_session(&self, session: &SessionId, ending: RunEnding) {
+        let _ = self.turn_record().file_session(FileSession {
+            session_id: session.clone(),
+            ending,
+        });
     }
 }
 
@@ -282,7 +343,7 @@ struct Offered {
     /// The frontier the catalogue was projected from.
     frontier: Frontier<frontier_state::Issued>,
     catalogue: ActionCatalogue<action_catalogue_state::Projected>,
-    /// One tool per catalogue entry, in its order.
+    /// One tool per catalogue entry the run may see, in the catalogue's order.
     specs: Vec<ToolSpec>,
     /// The turn the catalogue was projected for, and its index in the session.
     turn: TurnId,
@@ -293,12 +354,16 @@ struct Offered {
 }
 
 impl Offered {
-    /// The entry published as `name`.
+    /// The entry published as `name` this turn.
     fn entry(&self, name: &ToolName) -> Option<&CatalogueEntry> {
-        self.specs
+        if !self.specs.iter().any(|spec| &spec.name == name) {
+            return None;
+        }
+        self.catalogue
+            .data()
+            .entries
             .iter()
-            .position(|spec| &spec.name == name)
-            .and_then(|at| self.catalogue.data().entries.get(at))
+            .find(|entry| tool_name(&entry.action).is_ok_and(|published| &published == name))
     }
 }
 
@@ -337,6 +402,8 @@ struct CurrentCatalogue<'r, S, G, V> {
     case: &'r CaseId,
     handed: &'r Frontier<frontier_state::Issued>,
     session: &'r SessionId,
+    /// The caller's narrowing: when there is one, only the entries it names are published.
+    admits: Option<&'r [ToolName]>,
     offers: &'r Offers,
 }
 
@@ -365,7 +432,10 @@ where
             CatalogueId(run_id("catalogue", session, index)),
             turn.clone(),
         );
-        let specs = published(&catalogue.data().entries)?;
+        let mut specs = published(&catalogue.data().entries)?;
+        if let Some(admits) = self.admits {
+            specs.retain(|spec| admits.contains(&spec.name));
+        }
         let revision = frontier.data().frontier_id.0.0.clone();
         self.offers.offer(Offered {
             frontier,
@@ -479,8 +549,9 @@ where
     V::Target: Governor,
 {
     /// Selects the entry the call names from the latest turn's catalogue, generates its arguments
-    /// from the call, and revalidates the selection. A proposal, or a suspension, ends the run at
-    /// a checkpoint named by the selection's id; a refusal is denied to the model.
+    /// from the call, and revalidates the selection. A proposal, a suspension, or arguments
+    /// Commission's JSON cannot carry end the run at a checkpoint named by the selection's id; a
+    /// refusal is denied to the model.
     fn decide(&mut self, call: &ToolCall, spec: &ToolSpec) -> ApprovalDecision {
         let Some(offered) = self.offers.latest() else {
             return ApprovalDecision::denied("no catalogue was offered for this turn");
@@ -496,13 +567,15 @@ where
         let scope = &offered.catalogue.data().catalogue_id.0.0;
         let selection_id = SelectionId(run_id("selection", scope, attempt));
         let checkpoint = selection_id.0.0.clone();
+        let arguments = ModelArguments {
+            arguments: &call.arguments,
+            uncarried: Cell::new(false),
+        };
         let outcome = self.loom.propose(
             &ModelSelection {
                 action: entry.action.clone(),
             },
-            &ModelArguments {
-                arguments: &call.arguments,
-            },
+            &arguments,
             self.case,
             (&offered.frontier, &offered.catalogue),
             (
@@ -510,6 +583,12 @@ where
                 ArgumentRequestId(run_id("argument-request", scope, attempt)),
             ),
         );
+        if arguments.uncarried.get() {
+            // Arguments the model wrote that Commission cannot carry end the run with no proposal:
+            // not an outage, and not a denial the model would retry.
+            self.ended = Some((checkpoint.clone(), no_useful_action()));
+            return ApprovalDecision::deferred(checkpoint);
+        }
         if matches!(outcome, ExecutorOutcome::NoUsefulAction(_)) {
             return ApprovalDecision::denied(format!(
                 "`{}` was not proposed: the case's current frontier does not admit it as it was \
@@ -548,6 +627,9 @@ impl ActionSelector for ModelSelection {
 /// The model's call as the argument generator: its arguments, as Commission's JSON.
 struct ModelArguments<'c> {
     arguments: &'c serde_json::Value,
+    /// Whether Commission's JSON could not carry them: what the model wrote, not an unavailable
+    /// dependency.
+    uncarried: Cell<bool>,
 }
 
 impl ArgumentGenerator for ModelArguments<'_> {
@@ -557,6 +639,7 @@ impl ArgumentGenerator for ModelArguments<'_> {
         _entry: &CatalogueEntry,
     ) -> Result<json::Value, String> {
         json::parse(&self.arguments.to_string()).map_err(|error| {
+            self.uncarried.set(true);
             format!("the model's arguments cannot be carried as Commission's JSON: {error}")
         })
     }

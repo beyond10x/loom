@@ -44,7 +44,8 @@
 //! # Turns
 //!
 //! [`TurnRecord`] is Loom's own, not ported: the sessions a governed run records its turns into
-//! and those turns, in memory (`loom.run.OpenSession`, `loom.run.RecordTurn`, generated). It is the
+//! and those turns, in memory (`loom.run.OpenSession`, `loom.run.ResumeSession`,
+//! `loom.run.FileSession`, `loom.run.RecordTurn`, generated). It is the
 //! run's record of what each completed turn added, not a transcript a following run replays; the
 //! session file above is that.
 //!
@@ -94,11 +95,14 @@ use crate::harness::wire::{Item, ModelPort, ToolPort, Usage, WireId};
 use crate::model::behaviour::{Generated, SessionStorage, TurnStorage};
 use crate::model::obligation::UnmetObligation;
 use crate::model::primitives::Uuid;
-use crate::model::run::obligations::{OpenSessionBehavior, RecordTurnBehavior};
+use crate::model::run::obligations::{
+    FileSessionBehavior, OpenSessionBehavior, RecordTurnBehavior, ResumeSessionBehavior,
+};
 use crate::model::run::{
-    CommissionRunId, OpenSession, OpenSessionOutcome, RecordTurn, RecordTurnOutcome, RunEnding,
-    SessionData, SessionExists, SessionId, SessionSnapshot, SessionState, SessionStateConflict,
-    SessionWireMismatch, TurnId, TurnSnapshot,
+    CommissionRunId, FileSession, FileSessionOutcome, OpenSession, OpenSessionOutcome, RecordTurn,
+    RecordTurnOutcome, ResumeSession, ResumeSessionOutcome, RunEnding, SessionData, SessionExists,
+    SessionId, SessionSnapshot, SessionState, SessionStateConflict, SessionWireMismatch, TurnId,
+    TurnSnapshot,
 };
 
 /// The shape this module writes and the only one it reads.
@@ -619,10 +623,11 @@ impl Drop for Claim {
 
 /// The sessions a governed run records its turns into, and those turns, in the order recorded.
 ///
-/// `loom.run.OpenSession` and `loom.run.RecordTurn` are the generated behaviour over this record:
-/// a session opened under an identity it already holds is refused `session-exists`, and a turn is
-/// refused for a session it does not hold or one no longer `Active`. A session or a turn stored
-/// under an identity already held replaces it.
+/// `loom.run.OpenSession`, `loom.run.ResumeSession`, `loom.run.FileSession` and
+/// `loom.run.RecordTurn` are the generated behaviour over this record: a session opened under an
+/// identity it already holds is refused `session-exists`, only a `Filed` session resumes and only
+/// an `Active` one is filed, and a turn is refused for a session it does not hold or one no longer
+/// `Active`. A session or a turn stored under an identity already held replaces it.
 #[derive(Debug, Default)]
 pub struct TurnRecord {
     sessions: Vec<SessionSnapshot>,
@@ -724,6 +729,23 @@ impl OpenSessionBehavior for TurnRecord {
 impl RecordTurnBehavior for TurnRecord {
     fn record_turn(&mut self, input: RecordTurn) -> Result<RecordTurnOutcome, UnmetObligation> {
         self.generated(|generated| generated.record_turn(input))
+    }
+}
+
+/// `loom.run.ResumeSession`, generated, over this record: only a `Filed` session resumes.
+impl ResumeSessionBehavior for TurnRecord {
+    fn resume_session(
+        &mut self,
+        input: ResumeSession,
+    ) -> Result<ResumeSessionOutcome, UnmetObligation> {
+        self.generated(|generated| generated.resume_session(input))
+    }
+}
+
+/// `loom.run.FileSession`, generated, over this record: only an `Active` session is filed.
+impl FileSessionBehavior for TurnRecord {
+    fn file_session(&mut self, input: FileSession) -> Result<FileSessionOutcome, UnmetObligation> {
+        self.generated(|generated| generated.file_session(input))
     }
 }
 
