@@ -13,6 +13,10 @@
 //! Loom keeps no admission rule of its own: whether a selected action may be proposed is
 //! Commission's [`admit`]. An action that needs authority is proposed, and Commission rechecks it
 //! and asks its authority provider (Atlas ADR 0082); Loom never suspends for authority.
+//!
+//! Given a governor ([`Loom::with_governor`]), Loom revalidates each selection against the case's
+//! current frontier before proposing it ([`revalidation`]); Commission still rechecks every
+//! proposal before any effect.
 
 /// The run model, synthesized from the ESS specification.
 pub use loom as model;
@@ -26,6 +30,7 @@ pub mod revalidation;
 pub mod selection;
 pub mod session;
 
+use std::ops::Deref;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -34,43 +39,69 @@ use sha2::{Digest, Sha256};
 use b10x_loom_commission::admission::admit;
 use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::responsibility::{
-    ActionStatus, Admission, Commission, ExecutorOutcome, ExecutorOutcomeProposedAction,
-    ExecutorOutcomeSuspended, Frontier, ProposedActionArguments, SuspensionReason, Unit,
-    commission_state, frontier_state,
+    ActionStatus, Admission, CaseId, Commission, CompletionDetermination, ExecutorOutcome,
+    ExecutorOutcomeProposedAction, ExecutorOutcomeSuspended, Frontier, GovernorError,
+    ProposedActionArguments, SuspensionReason, Unit, commission_state, frontier_state,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
+use b10x_loom_commission::ports::governor::Governor;
 
 pub use arguments::{ArgumentContext, ArgumentGenerator, EmptyObjectArguments};
 pub use selection::{ActionSelector, FirstAdmissibleSelector, SelectorError};
 
 use arguments::RequestRecord;
 use model::behaviour::SelectionStorage;
-use model::run::obligations::RequestArgumentsBehavior;
+use model::run::obligations::{RequestArgumentsBehavior, RevalidateSelectionBehavior};
 use model::run::{
     ActionCatalogue, AnySelection, ArgumentRequestId, ArgumentRequestSnapshot, CatalogueId,
-    RequestArguments, RequestArgumentsOutcome, Selection, SelectionId, SelectionSnapshot, TurnId,
-    action_catalogue_state, selection_state,
+    RequestArguments, RequestArgumentsOutcome, RevalidateSelection, RevalidateSelectionOutcome,
+    Selection, SelectionId, SelectionSnapshot, TurnId, action_catalogue_state, selection_state,
 };
 use selection::{SelectionContext, SelectionRefusal};
 
 /// Loom as Commission's agent executor: a selector, an argument generator and the run's prompt,
-/// with the record of every selection it has made and every argument request that serves one.
+/// with the record of every selection it has made, every argument request that serves one and
+/// every revalidation of one.
 ///
 /// Each call of [`AgentExecutor::run`] is one run, numbered from 0 per Loom. A run's catalogue is
 /// identified by its frontier's id; its selection and its argument request get ids of their own,
 /// derived from the frontier's id and the run's number. Two runs on one frontier
 /// therefore keep two selections and two requests apart.
-pub struct Loom<S, G> {
+///
+/// `V` is how Loom holds the governor it revalidates selections against: a reference, `Box`, `Rc`
+/// or `Arc` of a [`Governor`], given by [`Loom::with_governor`]. A Loom made by [`Loom::new`] holds
+/// none ([`NoGovernor`]) and proposes its selections unrevalidated.
+pub struct Loom<S, G, V = &'static NoGovernor> {
     selector: S,
     arguments: G,
     prompt: String,
     record: Mutex<RequestRecord>,
     runs: AtomicU64,
+    governor: Option<V>,
+}
+
+/// The governor of a Loom made by [`Loom::new`]: there is none. It has no value, so no call to it
+/// is ever made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoGovernor {}
+
+impl Governor for NoGovernor {
+    fn current_revision(&self, _case: &CaseId) -> Result<i64, GovernorError> {
+        match *self {}
+    }
+
+    fn frontier(&self, _case: &CaseId) -> Result<Frontier<frontier_state::Issued>, GovernorError> {
+        match *self {}
+    }
+
+    fn completion(&self, _case: &CaseId) -> Result<CompletionDetermination, GovernorError> {
+        match *self {}
+    }
 }
 
 impl<S, G> Loom<S, G> {
     /// A Loom that selects with `selector`, generates arguments with `arguments` and works on
-    /// `prompt`, with an empty record and no runs yet.
+    /// `prompt`, with an empty record, no runs yet and no governor.
     pub fn new(selector: S, arguments: G, prompt: impl Into<String>) -> Self {
         Self {
             selector,
@@ -78,9 +109,31 @@ impl<S, G> Loom<S, G> {
             prompt: prompt.into(),
             record: Mutex::default(),
             runs: AtomicU64::new(0),
+            governor: None,
         }
     }
 
+    /// This Loom, revalidating every selection against the case's current frontier before it
+    /// proposes it. The frontier, its case revision and its action ids are read from `governor`
+    /// once per run, after the selection; never from the model, and never from the frontier the run
+    /// was handed.
+    pub fn with_governor<V>(self, governor: V) -> Loom<S, G, V>
+    where
+        V: Deref,
+        V::Target: Governor,
+    {
+        Loom {
+            selector: self.selector,
+            arguments: self.arguments,
+            prompt: self.prompt,
+            record: self.record,
+            runs: self.runs,
+            governor: Some(governor),
+        }
+    }
+}
+
+impl<S, G, V> Loom<S, G, V> {
     /// Every selection this Loom has made, one per run that selected, in the order it made them.
     pub fn selections(&self) -> Vec<SelectionSnapshot> {
         self.record().selections().to_vec()
@@ -92,13 +145,20 @@ impl<S, G> Loom<S, G> {
         self.record().argument_requests().to_vec()
     }
 
+    /// The outcome of every revalidation this Loom has made, one per run that reached it, in the
+    /// order it made them. A refusal names the selection and why: the action the current frontier
+    /// does not list, or the selection's case revision and the current one.
+    pub fn revalidations(&self) -> Vec<RevalidateSelectionOutcome> {
+        self.record().revalidations().to_vec()
+    }
+
     /// The record, whatever a panicking holder left: each write to it is one whole snapshot.
     fn record(&self) -> MutexGuard<'_, RequestRecord> {
         self.record.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
-impl<S: ActionSelector, G> Loom<S, G> {
+impl<S: ActionSelector, G, V> Loom<S, G, V> {
     /// The selector's choice from `catalogue`, as the selection `selection_id`. An action the
     /// catalogue does not list is refused and named, whatever the selector's confidence.
     pub fn select(
@@ -179,10 +239,12 @@ fn outage(error: String) -> ExecutorOutcome {
     })
 }
 
-impl<S, G> AgentExecutor for Loom<S, G>
+impl<S, G, V> AgentExecutor for Loom<S, G, V>
 where
     S: ActionSelector,
     G: ArgumentGenerator,
+    V: Deref,
+    V::Target: Governor,
 {
     /// The port has no error channel. A frontier for another case than the commission's, a
     /// frontier that admits nothing, a selector that finds nothing admissible, a selection the
@@ -191,6 +253,12 @@ where
     ///
     /// Every selection made is recorded; for one Commission does not refuse, the argument request
     /// is recorded against it before the generator is handed the selected catalogue entry.
+    ///
+    /// With a governor ([`Loom::with_governor`]), the selection is then revalidated against the
+    /// case's current frontier, read from the governor once, before it is proposed: a selection
+    /// made at another case revision, or of an action that frontier's catalogue does not list, is
+    /// `NoUsefulAction`; a governor that cannot answer is `Suspended` with `ExternalAvailability`
+    /// carrying its error.
     fn run(
         &self,
         commission: &Commission<commission_state::Assigned>,
@@ -247,7 +315,7 @@ where
         };
         let requested = self.record().request_arguments(RequestArguments {
             argument_request_id: ArgumentRequestId(run_id("argument-request", &identity(), run)),
-            selection_id,
+            selection_id: selection_id.clone(),
         });
         if !matches!(requested, Ok(RequestArgumentsOutcome::Requested { .. })) {
             return no_useful_action();
@@ -256,12 +324,67 @@ where
         let context = ArgumentContext {
             prompt: self.prompt.clone(),
         };
-        match self.arguments.generate(&context, entry) {
-            Ok(arguments) => ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
-                action: selected,
-                arguments: ProposedActionArguments(arguments),
-            }),
-            Err(error) => outage(error),
+        let arguments = match self.arguments.generate(&context, entry) {
+            Ok(arguments) => arguments,
+            Err(error) => return outage(error),
+        };
+        // Revalidation is the last step before the proposal (Atlas ADR 0072): it moves the
+        // selection out of `Selected`, which the argument request above requires.
+        if let Err(refused) = self.revalidate(&commission.data().case_id, selection_id) {
+            return refused;
+        }
+        ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
+            action: selected,
+            arguments: ProposedActionArguments(arguments),
+        })
+    }
+}
+
+impl<S, G, V> Loom<S, G, V>
+where
+    V: Deref,
+    V::Target: Governor,
+{
+    /// `loom.run.RevalidateSelection` of `selection_id` against the current frontier of `case`,
+    /// asked of the governor once: its case revision, and the action ids of the catalogue
+    /// projected from it, so an action it lists but no longer admits is not in it. `Ok` when the
+    /// selection is admitted, or when this Loom has no governor; otherwise what the run returns
+    /// instead of a proposal. A governor that cannot answer, or answers with another case's
+    /// frontier, is an outage; a refused selection, or any outcome but `admitted`, is
+    /// `NoUsefulAction`, the refusal recorded on the selection and in [`Loom::revalidations`].
+    fn revalidate(&self, case: &CaseId, selection_id: SelectionId) -> Result<(), ExecutorOutcome> {
+        let Some(governor) = &self.governor else {
+            return Ok(());
+        };
+        let governor: &V::Target = governor;
+        let current = governor.frontier(case).map_err(|error| {
+            outage(format!(
+                "the governor issued no current frontier for case `{}`: {error:?}",
+                case.0
+            ))
+        })?;
+        let issued = current.data();
+        if issued.case_id != *case {
+            return Err(outage(format!(
+                "the governor issued a frontier for case `{}` as the current frontier of case `{}`",
+                issued.case_id.0, case.0
+            )));
+        }
+        let identity = || model::primitives::Uuid(issued.frontier_id.0.0.clone());
+        let catalogue = projection::project(&current, CatalogueId(identity()), TurnId(identity()));
+        let revalidated = self.record().revalidate_selection(RevalidateSelection {
+            selection_id,
+            case_revision: issued.case_revision,
+            frontier_actions: catalogue
+                .data()
+                .entries
+                .iter()
+                .map(|entry| entry.action.clone())
+                .collect(),
+        });
+        match revalidated {
+            Ok(RevalidateSelectionOutcome::Admitted { .. }) => Ok(()),
+            _ => Err(no_useful_action()),
         }
     }
 }

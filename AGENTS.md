@@ -57,7 +57,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | The catalogue follows the frontier | `crates/loom-executor/tests/frontier_projection.rs` (`projection_follows_frontier`) |
 | A selector cannot leave the catalogue | `crates/loom-executor/tests/action_selector.rs` (`selector_cannot_leave_catalogue`) |
 | A blocked or merge-seeking pick is never proposed | `crates/loom-executor/tests/adversary_executor_admission.rs` |
-| A stale or unlisted request is refused at revalidation | `crates/loom-commission-testkit/tests/action_request.rs`, `crates/loom-executor/tests/adversary_run_revalidation.rs` |
+| A stale or unlisted request is refused at revalidation | `crates/loom-commission-testkit/tests/action_request.rs`, `crates/loom-executor/tests/adversary_run_revalidation.rs`, `crates/loom-executor/tests/selection_revalidation.rs` |
 | Unknown capabilities and panicking authority providers yield no grant | `crates/loom-commission-testkit/tests/adversary_authority_fail_closed.rs` |
 | Commission names no executor, Canon or `model-provider-deny.txt` crate | `task commission:deps-guard` (`crates/loom-commission-testkit/tests/executor_port.rs`) |
 | The router refuses a pick outside the registry or below the threshold | `crates/loom-intake-router/tests/adversary_classify.rs` |

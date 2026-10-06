@@ -17,8 +17,9 @@ use crate::model::obligation::UnmetObligation;
 use crate::model::run::obligations::RequestArgumentsBehavior;
 use crate::model::run::{
     AnyArgumentRequest, ArgumentRequest, ArgumentRequestData, ArgumentRequestSnapshot,
-    ArgumentsRequested, CatalogueEntry, RequestArguments, RequestArgumentsOutcome, SelectionId,
-    SelectionNotFound, SelectionNotSelected, SelectionSnapshot, SelectionState,
+    ArgumentsRequested, CatalogueEntry, RequestArguments, RequestArgumentsOutcome,
+    RevalidateSelectionOutcome, SelectionId, SelectionNotFound, SelectionNotSelected,
+    SelectionSnapshot, SelectionState,
 };
 
 /// What a generator is told besides the selected entry.
@@ -50,12 +51,14 @@ impl ArgumentGenerator for EmptyObjectArguments {
     }
 }
 
-/// The selections Loom made and the argument requests that serve them, in the order they were
-/// recorded. A record stored under an identity already held replaces it.
+/// The selections Loom made, the argument requests that serve them and the outcome of every
+/// revalidation of them ([`crate::revalidation`]), in the order they were recorded. A selection or
+/// argument request stored under an identity already held replaces it.
 #[derive(Debug, Default)]
 pub struct RequestRecord {
     selections: Vec<SelectionSnapshot>,
     argument_requests: Vec<ArgumentRequestSnapshot>,
+    revalidations: Vec<RevalidateSelectionOutcome>,
 }
 
 impl RequestRecord {
@@ -69,6 +72,17 @@ impl RequestRecord {
     #[must_use]
     pub fn argument_requests(&self) -> &[ArgumentRequestSnapshot] {
         &self.argument_requests
+    }
+
+    /// The outcome of every revalidation, in the order they were made.
+    #[must_use]
+    pub fn revalidations(&self) -> &[RevalidateSelectionOutcome] {
+        &self.revalidations
+    }
+
+    /// Records the outcome of one revalidation.
+    pub(crate) fn record_revalidation(&mut self, outcome: RevalidateSelectionOutcome) {
+        self.revalidations.push(outcome);
     }
 }
 
