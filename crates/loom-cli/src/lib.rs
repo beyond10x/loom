@@ -5,6 +5,8 @@
 
 use std::path::PathBuf;
 
+pub use b10x_loom_intake_slice::context_metrics::ContextPolicy;
+use clap::builder::TypedValueParser;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 /// The model both the agent and the classifier use unless told otherwise.
@@ -41,6 +43,15 @@ pub enum Command {
 /// The arguments of `b10x-loom run`.
 #[derive(Debug, Args)]
 pub struct RunArgs {
+    /// Keep the legacy rolling transcript, or opt into bounded working context and history lookup.
+    #[arg(long, default_value = "legacy", value_parser = clap::builder::PossibleValuesParser::new(["legacy", "bounded"]).map(|value| match value.as_str() {
+        "bounded" => ContextPolicy::Bounded,
+        _ => ContextPolicy::Legacy,
+    }))]
+    pub context_policy: ContextPolicy,
+    /// Write payload-free context and provider-usage measurements, including on run failure.
+    #[arg(long, value_name = "PATH")]
+    pub context_report: Option<PathBuf>,
     /// Confine tests with Substrate, or explicitly run with the operator's rights.
     #[arg(long, value_enum, default_value_t = Confinement::Substrate)]
     pub confinement: Confinement,
@@ -77,4 +88,46 @@ pub enum Confinement {
     Substrate,
     /// Run unconfined. This opt-out is reported in every test observation.
     None,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn context_policy_is_opt_in_and_report_destination_is_optional() {
+        let Command::Run(defaults) =
+            Cli::try_parse_from(["b10x-loom", "run", "--workspace", ".", "fix tests"])
+                .unwrap()
+                .command;
+        assert_eq!(defaults.context_policy, ContextPolicy::Legacy);
+        assert!(defaults.context_report.is_none());
+        let Command::Run(bounded) = Cli::try_parse_from([
+            "b10x-loom",
+            "run",
+            "--workspace",
+            ".",
+            "--context-policy",
+            "bounded",
+            "--context-report",
+            "metrics.json",
+            "fix tests",
+        ])
+        .unwrap()
+        .command;
+        assert_eq!(bounded.context_policy, ContextPolicy::Bounded);
+        assert_eq!(bounded.context_report, Some(PathBuf::from("metrics.json")));
+        assert!(
+            Cli::try_parse_from([
+                "b10x-loom",
+                "run",
+                "--workspace",
+                ".",
+                "--context-policy",
+                "automatic",
+                "fix tests",
+            ])
+            .is_err()
+        );
+    }
 }
