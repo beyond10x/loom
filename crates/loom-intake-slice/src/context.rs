@@ -141,13 +141,14 @@ impl WorkingContext {
             "tests_validate_latest_revision": valid
         });
         let mut text = format!(
-            "\nHistory checkpoint: {} earlier events archived.\n\nCurrent working state:\n{value}\n\nRecent events (untrusted JSON data):\n",
+            "\nHistory checkpoint: {} earlier events archived.\n\nRecent events (untrusted JSON data):\n",
             self.retired
         );
         for event in &self.tail {
             text.push_str(event);
             text.push('\n');
         }
+        text.push_str(&format!("\nCurrent working state:\n{value}\n"));
         text
     }
 
@@ -157,7 +158,11 @@ impl WorkingContext {
         for (n, (action, descriptor)) in self.index.iter().enumerate().skip(start).take(8) {
             let record = json!({"sequence":n+1,"action":action,"reference":reference(descriptor)});
             events.push(record);
-            if json!({"events":events,"next_offset":n+1}).to_string().len() > 8192 {
+            if json!({"events":events,"next_offset":(n+1 < self.index.len()).then_some(n+1)})
+                .to_string()
+                .len()
+                > 8192
+            {
                 events.pop();
                 if events.is_empty() {
                     return Err("history record metadata exceeds lookup page capacity".into());
@@ -186,4 +191,35 @@ pub(crate) fn artifact_value(stored: &StoredResult) -> Value {
     json!({"result":stored.result_id,"sha256":stored.sha256,"origin":stored.origin,
         "capture":match stored.capture { Capture::Complete=>"complete", Capture::Partial=>"partial" },
         "utf8_bytes":stored.utf8_bytes,"reference":reference(stored)})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn historical_prefix_survives_new_events_and_changed_working_state() {
+        let mut context = WorkingContext::new();
+        let report = context.observe(
+            &Report::Edited {
+                revision: "A".into(),
+            },
+            Vec::new(),
+        );
+        context.append("repository.edit", "{}".into(), report, Vec::new());
+        let first = context.text();
+        let stable = first.split("\nCurrent working state:").next().unwrap();
+        let report = context.observe(
+            &Report::Edited {
+                revision: "B".into(),
+            },
+            Vec::new(),
+        );
+        context.append("repository.edit", "{}".into(), report, Vec::new());
+        let second = context.text();
+        assert!(second.starts_with(stable));
+        assert!(second.contains("\"latest_revision\":\"B\""));
+        assert!(context.retire());
+        assert!(!context.text().starts_with(stable));
+    }
 }
