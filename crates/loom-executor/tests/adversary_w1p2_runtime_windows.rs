@@ -3,11 +3,12 @@
 //! pass 1 measured (`adversary_w1_runtime_stale.rs`, the case moving while arguments are generated).
 //!
 //! `CHANGELOG.md` (Unreleased) and the site's status row (`website/data/status.json`) state the
-//! limitation as: "a case that moves while arguments are generated is judged on the frontier it
-//! left". The selection comes first and is a model call as well (the slice's `ModelSelector`). The
-//! first two cases move the case while the selector selects, and check that the arguments were
-//! generated after the move, so the move falls outside the window the limitation names. Their
-//! governed half asserts the outcome reached today, as `adversary_w1_runtime_stale.rs` does while
+//! limitation for the whole window between Commission reading the frontier and Loom's
+//! revalidation: while the selector selects or while arguments are generated. The selection comes
+//! first and is a model call as well (the slice's `ModelSelector`). The first two cases move the
+//! case while the selector selects, and check that the arguments were generated after the move, so
+//! the move falls in the selector's half of that window. Their governed half asserts the outcome
+//! reached today, as `adversary_w1_runtime_stale.rs` does while
 //! `decision-blocker:run-stale-outcome` is open.
 //!
 //! The last two cases are the converse: when nobody else moves the case, a governed Loom ends a
@@ -342,8 +343,8 @@ impl ArgumentGenerator for &NotesTheMove<'_> {
 
 /// Somebody completes the case while the selector selects; the arguments are generated after the
 /// move. The runtime documents the run as ending completed, and the ungoverned run does. The
-/// governed run ends with no admissible action: judged on the frontier the case left, outside the
-/// window the CHANGELOG and the status row name ("while arguments are generated").
+/// governed run ends with no admissible action: judged on the frontier the case left, in the
+/// selector's half of the window the CHANGELOG and the status row name.
 #[test]
 fn a_case_completed_while_the_selector_selects_is_judged_on_the_left_frontier() {
     let (ungoverned, governed) = moved_while_selecting(true, Vec::new());
@@ -369,8 +370,8 @@ fn a_case_completed_while_the_selector_selects_is_judged_on_the_left_frontier() 
     if governed.outcome != today {
         failures.push(format!(
             "with a governor: {:?}, expected {today:?}, the outcome reached while \
-             decision-blocker:run-stale-outcome is open, for a move outside the window \
-             CHANGELOG.md and website/data/status.json name",
+             decision-blocker:run-stale-outcome is open, for a move in the selector's half of \
+             the window CHANGELOG.md and website/data/status.json name",
             governed.outcome
         ));
     }
@@ -380,8 +381,8 @@ fn a_case_completed_while_the_selector_selects_is_judged_on_the_left_frontier() 
 /// Somebody moves the case while the selector selects; the revision it left had an open
 /// obligation. The runtime documents the run as ending with no admissible action, and the
 /// ungoverned run does. The governed run ends asking for evidence for the left revision's
-/// obligation: judged on the frontier the case left, outside the window the CHANGELOG and the
-/// status row name.
+/// obligation: judged on the frontier the case left, in the selector's half of the window the
+/// CHANGELOG and the status row name.
 #[test]
 fn a_case_moved_while_the_selector_selects_is_judged_on_the_left_frontier() {
     let (ungoverned, governed) = moved_while_selecting(false, vec![obligation(true)]);
@@ -406,8 +407,8 @@ fn a_case_moved_while_the_selector_selects_is_judged_on_the_left_frontier() {
     if governed.outcome != today {
         failures.push(format!(
             "with a governor: {:?}, expected {today:?}, the outcome reached while \
-             decision-blocker:run-stale-outcome is open, for a move outside the window \
-             CHANGELOG.md and website/data/status.json name",
+             decision-blocker:run-stale-outcome is open, for a move in the selector's half of \
+             the window CHANGELOG.md and website/data/status.json name",
             governed.outcome
         ));
     }
