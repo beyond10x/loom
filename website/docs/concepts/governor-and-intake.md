@@ -29,7 +29,7 @@ A case is opened on a protocol of the
 
 The case store is a port (`CaseStore`); `MemoryCaseStore` keeps cases in memory.
 
-On the development branch, a host can register a reviewed Canon model through
+Since 0.2.0, a host can register a reviewed Canon model through
 `CanonGovernor::with_protocol(name, &model)`. Canon validates it; duplicate registrations,
 built-in replacements and actions requiring more capabilities than Commission can represent are
 refused. Protocol adoption is the host's decision, never a model proposal accepted as authority.

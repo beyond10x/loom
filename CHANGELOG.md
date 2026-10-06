@@ -6,6 +6,16 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-07
+
+Loom 0.3.0 runs the ported Harness loop over a governed run: each turn's tools are the catalogue
+projected from the governor's current frontier, a model's call of an action is revalidated before
+Loom proposes it, and every turn and compaction is recorded on the run's session. A governed run
+can be interrupted and resumed from its approval checkpoint. The local slice keeps inspected file
+contents as run-local results that the model reads through bounded previews and reuses in edits
+through exact references. Loom requires ESS 0.54.0. Depend on it with `tag = "0.3.0"`; nothing is
+on a registry.
+
 ### Added
 
 - `Loom::run_loop` runs the ported Harness loop over one frontier of a commission, and
