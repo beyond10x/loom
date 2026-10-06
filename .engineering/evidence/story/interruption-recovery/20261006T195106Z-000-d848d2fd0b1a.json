@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-06T19:51:06Z",
+  "actor": "human:timo",
+  "artifact": "story:interruption-recovery",
+  "kind": "story",
+  "revision": 23,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-executor --locked --test interruption_recovery",
+    "reference": "VERIFIED: ~/.cache/loom-waves-2026-10-06/w4/interruption-recovery/red-interruption.log at 4376c83 (E0599: catalogues, resume_loop, interrupt absent) vs gate-c2.log at cb6c534 (ok 3 passed; adversary pass-2 threaded cases 20/20)"
+  }
+}

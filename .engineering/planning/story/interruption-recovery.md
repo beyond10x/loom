@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:interruption-recovery
 kind: story
-status: active
+status: implemented
 title: Define interruption and recovery
 refs:
 - provider: taskboard
@@ -20,10 +20,12 @@ scope:
 - confidence: cited
   path: CHANGELOG.md
 - confidence: cited
+  path: crates/loom-executor/src/harness/governed.rs
+- confidence: cited
   path: crates/loom-executor/src/lib.rs
 - confidence: cited
   path: crates/loom-executor/src/recovery.rs
-- confidence: inferred
+- confidence: cited
   path: crates/loom-executor/src/session.rs
 - confidence: cited
   path: crates/loom-executor/tests/adversary2_run_identity.rs
@@ -33,18 +35,19 @@ scope:
   path: ess/domains/run.yaml
 - confidence: cited
   path: generated/rust/loom/
-- confidence: inferred
+- confidence: cited
   path: website/data/ess/loom-run.domain-graph.json
 - confidence: cited
   path: website/data/status.json
-- confidence: inferred
+- confidence: cited
   path: website/docs/concepts/commission-and-harness.md
 - confidence: cited
   path: website/docs/reference/ess/loom-run.md
-revision: 23
+revision: 32
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-06T18:37:47Z", actor: "human:timo", revision: 22, decided_on: {"recorded":{"review_outcome":1}}}
 - {from: "proposed", to: "active", at: "2026-10-06T18:37:47Z", actor: "human:timo", revision: 23, decided_on: {"recorded":{"review_outcome":1}}}
+- {from: "active", to: "implemented", at: "2026-10-06T19:57:23Z", actor: "human:timo", revision: 32, decided_on: {"recorded":{"test_result":1,"review_outcome":9,"verification":1}}}
 ---
 ## Outcome
 
@@ -119,6 +122,18 @@ Not established while scoping, to settle before the story is proposed:
 - The shape of interrupt: `run.yaml` has no interrupt or cancel command, and Session has only `[Active, Filed]`.
 - Whether recovery needs the Run to survive a process restart: Commission's `RunStore` is in memory only (`outcome.rs:9-11`).
 - The adversary case `two_looms_give_their_different_selections_on_one_frontier_different_ids` is not in the tree.
+
+Confirmed by the implementor in wave 2026-10-06-w4 (the lines above are kept as scoped):
+
+| scoped line | result |
+|---|---|
+| `session.rs` gets the cancel and checkpoint through `run_and_file` | **wrong mechanism**: `session.rs` changed only for `InterruptSession` and a catalogue record; cancel and checkpoint live in `harness/governed.rs` and `recovery.rs`; `run_and_file` untouched |
+| `loom-run.domain-graph.json` changes with Session's states | confirmed |
+| the concepts page calls interruption planned | confirmed, at lines 43-44 (not 41); edited |
+| collides with `story:approval-suspend-resume-slice` | not checkable in this unit |
+| safety fact: `run_id` private to `lib.rs`, `harness/` names no `SelectionId` | **wrong** at `18d96dd`: `governed.rs` (:441, :444, :580, :595) and `compaction.rs:80` call `run_id`, and `governed.rs` names `SelectionId` |
+
+Settled in the wave: `Interrupted` is a new `loom.run.Session` state entered by `loom.run.InterruptSession`; `ResumeSession` accepts `Filed` or `Interrupted`; recovery is within one process; catalogue, selection and argument-request ids are numbered by one counter per `Loom` under a per-`Loom` random namespace (`Loom::with_instance` fixes it); a run acts only on the session it holds and trusts its own cancel token. `existing_instance: true` on `SelectAction`/`RequestArguments` is still refused by ess 0.54.0 (ESS-SYNTH-001/004); the case stays ignored. `LoopExecutor` still starts a new conversation per run; resume is `Loom::resume_loop`.
 
 ## Acceptance
 
