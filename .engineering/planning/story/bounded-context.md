@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:bounded-context
 kind: story
-status: active
+status: implemented
 title: Bound CLI working context with retrievable history
 relations:
 - decomposes: epic:vertical-slices
@@ -15,10 +15,11 @@ scope:
   path: crates/loom-intake-slice/src
 - confidence: cited
   path: ess/intake/domains/context.yaml
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-06T20:46:03Z", actor: "human:timo", revision: 5}
 - {from: "proposed", to: "active", at: "2026-10-06T20:46:03Z", actor: "human:timo", revision: 6}
+- {from: "active", to: "implemented", at: "2026-10-06T20:59:20Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"test_result":3}}}
 ---
 ## Outcome
 Implement the operator-approved bounded working context plan for single-intent CLI runs, opt-in with legacy unchanged. Briefing owns state and history, results retain bulk payloads; governed-loop compaction is excluded.

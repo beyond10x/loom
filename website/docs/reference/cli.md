@@ -31,6 +31,8 @@ Usage: b10x-loom run [OPTIONS] --workspace <DIR> <INTENT>
 
 | Argument | Required | Default | Meaning |
 |---|---|---|---|
+| `--context-policy <CONTEXT_POLICY>` | no | `legacy` | Keep the legacy rolling transcript, or opt into bounded working context and history lookup |
+| `--context-report <PATH>` | no | none | Write payload-free measurements, including failures after the slice starts |
 | `--confinement <CONFINEMENT>` | no | `substrate` | Confine tests with Substrate, or explicitly run with the operator's rights |
 | `--cgroup-root <DIR>` | no | none | An explicitly delegated cgroup v2 root for confined tests |
 | `--workspace <DIR>` | yes | none | The root of the git work tree the change is made in |

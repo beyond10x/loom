@@ -2,11 +2,15 @@
 format: aep.planning-md/3
 id: architecture-design:bounded-context
 kind: architecture-design
-status: draft
+status: implemented
 title: Current working state, recent events, retrievable history
 relations:
 - designs: story:bounded-context
-revision: 1
+revision: 4
+transitions:
+- {from: "draft", to: "in_review", at: "2026-10-06T20:56:39Z", actor: "human:timo", revision: 2, decided_on: {"recorded":{"approval":1}}}
+- {from: "in_review", to: "approved", at: "2026-10-06T20:56:39Z", actor: "human:timo", revision: 3, decided_on: {"recorded":{"approval":1}}}
+- {from: "approved", to: "implemented", at: "2026-10-06T20:59:20Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"approval":1}}}
 ---
 ## Decision
 Extend Briefing rather than the separate governed-loop compactor. Preserve exact intent and instructions in a stable prefix. Put typed current state, recent events and current candidates after it. Revision-bound test state never validates a later edit. Artifact text is quoted data and never updates typed state.

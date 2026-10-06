@@ -31,6 +31,9 @@ The store holds at most 16 MiB per result, 64 MiB per briefing and 1,024 results
 rolling transcript within the run, but expires with the briefing and is not a persistent session
 archive. Argument generation allows eight lookups of at most 8 KiB each, and up to 16 MiB of expanded
 edit content. Lookup calls have overhead and must be counted in an efficiency comparison.
+These rolling-transcript rules describe the default legacy policy. The opt-in
+[bounded working context](working-context.md) gives both stages history and result lookups,
+keeps compact descriptors instead of previews, and fails on capacity exhaustion.
 The data all lookups return together is capped at 64 KiB after JSON escaping; a lookup that fails
 or would pass that total is answered as a lookup error and still counts, and a ninth lookup or edit
 contents that do not resolve refuse the step, which the model is told. If an inspection's

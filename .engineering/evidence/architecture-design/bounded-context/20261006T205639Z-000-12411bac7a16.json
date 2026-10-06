@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-06T20:56:39Z",
+  "actor": "human:timo",
+  "artifact": "architecture-design:bounded-context",
+  "kind": "architecture-design",
+  "revision": 1,
+  "change": {
+    "change": "evidence",
+    "kind": "approval",
+    "source": "Operator supplied the bounded-working-context plan and explicitly requested implementation in this session"
+  }
+}
