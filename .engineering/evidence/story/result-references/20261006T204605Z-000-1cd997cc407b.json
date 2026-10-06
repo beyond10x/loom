@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-06T20:46:05Z",
+  "actor": "human:timo",
+  "artifact": "story:result-references",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check; task plan; task website on land/result-references de55978, ess 0.54.0 (1181 passed, 0 failed, 8 ignored)",
+    "reference": "de5597871f7debb8255213c6b338ce27f1c03094"
+  }
+}

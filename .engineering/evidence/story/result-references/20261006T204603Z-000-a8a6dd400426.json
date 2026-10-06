@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-06T20:46:03Z",
+  "actor": "human:timo",
+  "artifact": "story:result-references",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adversary-pr16-result-references-pass-1",
+    "review": "review-result:adversary-pr16-result-references-pass-1",
+    "outcome": "fixed"
+  }
+}
