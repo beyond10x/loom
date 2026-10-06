@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:compaction-contract
 kind: story
-status: active
+status: implemented
 title: Define the compaction contract
 refs:
 - provider: taskboard
@@ -18,12 +18,16 @@ relations:
 - depends_on: story:harness-loop-port
 scope:
 - confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
   path: crates/loom-executor/src/compaction.rs
-- confidence: inferred
+- confidence: cited
+  path: crates/loom-executor/src/harness/governed.rs
+- confidence: cited
   path: crates/loom-executor/src/harness/turn_loop/
 - confidence: cited
   path: crates/loom-executor/src/lib.rs
-- confidence: inferred
+- confidence: cited
   path: crates/loom-executor/src/session.rs
 - confidence: cited
   path: crates/loom-executor/tests/compaction_contract.rs
@@ -33,12 +37,17 @@ scope:
   path: generated/rust/loom/
 - confidence: inferred
   path: website/data/ess/loom-run.domain-graph.json
+- confidence: cited
+  path: website/data/status.json
+- confidence: cited
+  path: website/docs/concepts/commission-and-harness.md
 - confidence: inferred
   path: website/docs/reference/ess/loom-run.md
-revision: 18
+revision: 28
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-06T17:23:10Z", actor: "human:timo", revision: 17, decided_on: {"recorded":{"review_outcome":3}}}
 - {from: "proposed", to: "active", at: "2026-10-06T17:23:10Z", actor: "human:timo", revision: 18, decided_on: {"recorded":{"review_outcome":3}}}
+- {from: "active", to: "implemented", at: "2026-10-06T18:28:58Z", actor: "human:timo", revision: 28, decided_on: {"recorded":{"test_result":1,"review_outcome":4,"verification":1}}}
 ---
 ## Outcome
 
@@ -100,6 +109,20 @@ Derived 2026-10-06 by `story-scoper` at `04a1a73`. Every line is **cited** (read
 - **Safety fact:** filed sessions keep resuming only if the compaction record goes into `SessionFile` as a `#[serde(default)]` field, or the change bumps `SESSION_VERSION`. The file is `deny_unknown_fields` at version 2 (`session.rs:98-102`) and any other version is refused by name (`session.rs:490-500`). A build that writes the field also makes its files unreadable to an older build — inferred, step 2, unproven
 
 Not established while scoping: whether the fresh catalogue is wired in `lib.rs`, `turn_loop/` or both (`lib.rs:207` projects once per run and never calls the turn loop; `story:harness-loop-port` does that wiring); the usage shape (`run.yaml` declares none; the only `Usage` is `crates/loom-executor/src/harness/wire/turn.rs:304`); whether the compaction record bumps `SESSION_VERSION` (a design decision); whether the provider-emulated endpoint in `tests/session_transcript_streaming.rs:632` is shared or copied.
+
+Confirmed by the implementor in wave 2026-10-06-w3 (the lines above are kept as scoped):
+
+| scoped line | result |
+|---|---|
+| `compact_run` at `mod.rs:2925`, called at `:2551`; `Compacted` at `event.rs:254` carries no usage | confirmed; `Compacted` now carries the summary request's reported usage |
+| `SessionFile` (`session.rs:103`) has no compaction field | confirmed (the struct is at `:118`), but **wrong as the target**: the record lives on `loom.run.Session` in `TurnRecord`; `SessionFile` and `SESSION_VERSION` are unchanged |
+| `turn_loop/` must change; summary usage only reached `absorb_usage` | confirmed |
+| `session.rs`: "recorded on the session" means `SessionFile` | **wrong**: it is `loom.run.Session` in `TurnRecord` |
+| the two `loom-run` pages are regenerated | confirmed: exactly those two changed |
+| `FakeGovernor` needs no testkit change | confirmed |
+| safety fact on `deny_unknown_fields` / version refusal | moot: `SessionFile` is unchanged (lines are `:117` and `:505-518`) |
+
+ESS: `loom.run.Compaction` owned by `loom.run.Session` (one session, many compactions), with optional `loom.run.ReportedUsage`; written for every compaction, usage absent when the summary request reported none or only tool results were elided. The summary stays a marked `user`-role conversation item (coordinator decision); instruction text is unchanged.
 
 ## Acceptance
 

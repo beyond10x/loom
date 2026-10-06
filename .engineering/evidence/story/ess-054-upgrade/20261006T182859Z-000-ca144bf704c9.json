@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-06T18:28:59Z",
+  "actor": "human:timo",
+  "artifact": "story:ess-054-upgrade",
+  "kind": "story",
+  "revision": 18,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check; task plan; task website on wave/2026-10-06-w3 503fa0f, ess 0.54.0 (1133 passed, 0 failed, 8 ignored)",
+    "reference": "503fa0fd47580343f9f8b4f65d6a17481b7367e0"
+  }
+}

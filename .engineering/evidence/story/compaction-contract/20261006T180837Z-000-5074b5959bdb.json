@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-06T18:08:37Z",
+  "actor": "human:timo",
+  "artifact": "story:compaction-contract",
+  "kind": "story",
+  "revision": 18,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-executor --locked --test compaction_contract",
+    "reference": "VERIFIED: ~/.cache/loom-waves-2026-10-06/w3/compaction-contract/red-test.log at 0ccf75a (E0599 compactions absent; measured variant without usage fails at compaction_contract.rs:219) vs gate.log at d141ce3 (ok 1 passed)"
+  }
+}
