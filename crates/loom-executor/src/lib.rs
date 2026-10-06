@@ -230,8 +230,8 @@ impl<S, G, V> Loom<S, G, V> {
         self.recovery.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// The next number of this Loom's governed catalogues and selections: from 0, across every
-    /// run, resumed runs included, so no two get one number.
+    /// The next number of this Loom's governed runs, catalogues and selections: from 0, across
+    /// every run, resumed runs included, so no two get one number.
     fn next_number(&self) -> u64 {
         self.numbered.fetch_add(1, Ordering::Relaxed)
     }

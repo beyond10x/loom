@@ -203,7 +203,10 @@ fn a_run_resumed_while_the_interrupted_run_still_reads_its_model_can_be_interrup
     // is no run C to observe, and only run A's outcome below is asserted.
     if let Some(seen) = seen {
         assert!(
-            matches!(seen.interrupt, Ok(InterruptSessionOutcome::Interrupted { .. })),
+            matches!(
+                seen.interrupt,
+                Ok(InterruptSessionOutcome::Interrupted { .. })
+            ),
             "run C holds session S, so the operator's interrupt of S reaches it; S was {:?} after \
              the interrupted run A ended, and the interrupt answered {:?}",
             seen.state,
@@ -666,7 +669,11 @@ fn issued(governor: &FakeGovernor, case: &CaseId) -> Frontier<frontier_state::Is
 }
 
 /// The frontier a run is handed, for a Loom with no governor to ask.
-fn handed(revision: i64, id: &str, actions: Vec<FrontierAction>) -> Frontier<frontier_state::Issued> {
+fn handed(
+    revision: i64,
+    id: &str,
+    actions: Vec<FrontierAction>,
+) -> Frontier<frontier_state::Issued> {
     Frontier::new(FrontierData {
         frontier_id: FrontierId(CommissionUuid(id.to_owned())),
         case_id: CaseId(CASE.to_owned()),

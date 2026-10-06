@@ -10,6 +10,11 @@
 //! in flight, and is not proposed. The run ends `NoUsefulAction`, and its session stays
 //! `Interrupted`; it is not filed.
 //!
+//! Whether a run was interrupted is its own cancel's answer, never the session's state, which a
+//! later run may have changed. A run acts on its session only while it holds it: once another run
+//! resumed the session, the interrupted run records no turn into it, and when it ends it neither
+//! files the session nor holds or drops a checkpoint for it.
+//!
 //! # Checkpoints
 //!
 //! A governed run that stops at the approval checkpoint of a call ([`crate::harness::governed`])
@@ -68,11 +73,11 @@ use crate::model::run::obligations::InterruptSessionBehavior;
 use crate::model::run::{InterruptSession, InterruptSessionOutcome, SelectionId, SessionId};
 use crate::{Loom, outage};
 
-/// What a Loom holds to interrupt and recover its runs: the cancel of each run holding a session,
-/// and the checkpoint each session's last run stopped at.
+/// What a Loom holds to interrupt and recover its runs: the run holding each session, by its run
+/// number, with its cancel, and the checkpoint each session's last run stopped at.
 #[derive(Debug, Default)]
 pub(crate) struct Recovery {
-    running: Vec<(SessionId, LoopCancel)>,
+    running: Vec<(SessionId, u64, LoopCancel)>,
     held: Vec<Held>,
 }
 
@@ -122,22 +127,37 @@ pub(crate) struct Pending {
 }
 
 impl Recovery {
-    /// Notes that a run holds `session` and is cancelled by `cancel`.
-    pub(crate) fn start(&mut self, session: SessionId, cancel: LoopCancel) {
-        self.running.push((session, cancel));
+    /// Notes that run `run` holds `session` and is cancelled by `cancel`, in place of any run that
+    /// held it before: an interrupted run that has not ended yet no longer holds a session another
+    /// run resumed.
+    pub(crate) fn start(&mut self, session: SessionId, run: u64, cancel: LoopCancel) {
+        self.running.retain(|(held, _, _)| *held != session);
+        self.running.push((session, run, cancel));
     }
 
-    /// Notes that the run holding `session` ended.
-    pub(crate) fn stop(&mut self, session: &SessionId) {
-        self.running.retain(|(held, _)| held != session);
+    /// Whether run `run` holds `session`.
+    pub(crate) fn holds(&self, session: &SessionId, run: u64) -> bool {
+        self.running
+            .iter()
+            .any(|(held, holder, _)| held == session && *holder == run)
+    }
+
+    /// Notes that run `run` ended, and answers whether it still held `session`; a run that no
+    /// longer held it changes nothing.
+    pub(crate) fn stop(&mut self, session: &SessionId, run: u64) -> bool {
+        let held = self.holds(session, run);
+        if held {
+            self.running.retain(|(holding, _, _)| holding != session);
+        }
+        held
     }
 
     /// Cancels the run holding `session`, if one does.
     fn cancel(&self, session: &SessionId) {
         self.running
             .iter()
-            .filter(|(held, _)| held == session)
-            .for_each(|(_, cancel)| cancel.cancel());
+            .filter(|(held, _, _)| held == session)
+            .for_each(|(_, _, cancel)| cancel.cancel());
     }
 
     /// Holds `held` for its session, in place of any checkpoint held for it.
@@ -180,11 +200,6 @@ impl<S, G, V> Loom<S, G, V> {
             recovery.cancel(session);
         }
         outcome
-    }
-
-    /// Whether `session` is `Interrupted`.
-    pub(crate) fn is_interrupted(&self, session: &SessionId) -> bool {
-        self.turn_record().state_of(session) == Some(crate::model::run::SessionState::Interrupted)
     }
 }
 

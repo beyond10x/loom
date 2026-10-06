@@ -220,8 +220,8 @@ where
                 run: None,
             };
         }
-        let cancel = match self.claim_session(session, model.wire()) {
-            Ok(cancel) => cancel,
+        let holder = match self.claim_session(session, model.wire()) {
+            Ok(holder) => holder,
             Err(refused) => {
                 return LoopRun {
                     outcome: refused,
@@ -235,7 +235,7 @@ where
             .as_ref()
             .and_then(|held| held.refuses(case, admits.as_deref()))
         {
-            return self.refused_resume(id, taken, changed);
+            return self.refused_resume(id, &holder, taken, changed);
         }
         let (checkpoint, resuming) = taken
             .clone()
@@ -258,8 +258,8 @@ where
         let mut approvals = Proposer {
             loom: self,
             case,
-            session: id,
             offers: &offers,
+            cancel: holder.cancel.clone(),
             resuming,
             ended: None,
         };
@@ -268,6 +268,7 @@ where
             loom: self,
             session: id,
             offers: &offers,
+            run: holder.run,
             asked: false,
         };
         let mut sink = CompactionRecorder {
@@ -280,7 +281,7 @@ where
         let run = match catch_unwind(AssertUnwindSafe(|| {
             let mut run = AgentLoop::new(&mut model, &mut tools, &mut approvals, config)
                 .with_environment(&mut environment)
-                .with_cancel(cancel);
+                .with_cancel(holder.cancel.clone());
             match checkpoint {
                 Some(checkpoint) => run.resume_asking(checkpoint, &mut sink),
                 None => run.run(self.prompt.clone(), &mut sink),
@@ -289,7 +290,7 @@ where
             Ok(run) => run,
             Err(panic) => {
                 let kept = taken.filter(|_| unanswered(&approvals, &model));
-                self.end_session(id, RunEnding::Failed, kept);
+                self.end_session(id, &holder, RunEnding::Failed, kept);
                 resume_unwind(panic);
             }
         };
@@ -300,7 +301,7 @@ where
             Ok(answered) => stopped(answered, approvals.ended.take(), (id, case, admits)),
             Err(error) => (outage(error.to_string()), None),
         };
-        self.ended_run(id, run, stopped_at, kept)
+        self.ended_run(id, &holder, run, stopped_at, kept)
     }
 
     /// What a run that ended with `run` answers: `outcome`, unless the run was interrupted. The
@@ -308,6 +309,7 @@ where
     fn ended_run(
         &self,
         session: &SessionId,
+        holder: &Holder,
         run: Result<LoopOutcome, LoopError>,
         (outcome, held): (ExecutorOutcome, Option<Held>),
         kept: Option<Held>,
@@ -319,7 +321,7 @@ where
         };
         // An interrupted run proposes nothing, whatever it stopped at: nothing it had in flight
         // has left Loom, and its checkpoint is held for the run that resumes the session.
-        let interrupted = self.end_session(session, ending, held.or(kept));
+        let interrupted = self.end_session(session, holder, ending, held.or(kept));
         LoopRun {
             outcome: if interrupted {
                 no_useful_action()
@@ -332,12 +334,18 @@ where
 
     /// A resume refused before its loop is built, because `changed` (`Held::refuses`): a changed
     /// configuration. The session is filed as failed and `held` is held again.
-    fn refused_resume(&self, session: &SessionId, held: Option<Held>, changed: &str) -> LoopRun {
+    fn refused_resume(
+        &self,
+        session: &SessionId,
+        holder: &Holder,
+        held: Option<Held>,
+        changed: &str,
+    ) -> LoopRun {
         let error = LoopError::Config(format!(
             "the run configuration changed after the approval checkpoint: {changed}"
         ));
         let outcome = outage(error.to_string());
-        self.ended_run(session, Err(error), (outcome, None), held)
+        self.ended_run(session, holder, Err(error), (outcome, None), held)
     }
 
     /// The case's current frontier: the governor's, or `handed` for a Loom without one. A governor
@@ -379,13 +387,14 @@ impl<S, G, V> Loom<S, G, V> {
     /// this Loom holds it `Filed` or `Interrupted` with the same data (`loom.run.ResumeSession`). A
     /// session another run holds `Active` is `session-exists`, and the run proposes nothing
     /// (`NoUsefulAction`); one on another wire, or held with other data, is refused as an outage.
-    /// Answers the cancel of the run that took it, noted under the same lock [`Loom::interrupt`]
-    /// takes, so an interrupt reaches the run from the moment the session is `Active`.
+    /// Answers the run that took it, noted as the session's holder under the same lock
+    /// [`Loom::interrupt`] takes, so an interrupt reaches the run from the moment the session is
+    /// `Active`.
     fn claim_session(
         &self,
         session: &SessionData,
         wire: &WireId,
-    ) -> Result<LoopCancel, ExecutorOutcome> {
+    ) -> Result<Holder, ExecutorOutcome> {
         let id = &session.session_id.0.0;
         if session.wire != wire.as_str() {
             return Err(outage(format!(
@@ -429,9 +438,16 @@ impl<S, G, V> Loom<S, G, V> {
             }
         }
         drop(record);
-        let cancel = LoopCancel::new();
-        recovery.start(session.session_id.clone(), cancel.clone());
-        Ok(cancel)
+        let holder = Holder {
+            run: self.next_number(),
+            cancel: LoopCancel::new(),
+        };
+        recovery.start(
+            session.session_id.clone(),
+            holder.run,
+            holder.cancel.clone(),
+        );
+        Ok(holder)
     }
 
     /// Where the run that just took `session` starts: the checkpoint held for it, taken
@@ -448,27 +464,45 @@ impl<S, G, V> Loom<S, G, V> {
         }
     }
 
-    /// Ends the run holding `session`, which ended as `ending`: holds `held` for the session, or
-    /// nothing, and files the session (`loom.run.FileSession`) unless it was interrupted. Answers
-    /// whether it was. The run took the session `Active` and only an interrupt moves it, so it is
-    /// `filed` otherwise.
-    fn end_session(&self, session: &SessionId, ending: RunEnding, held: Option<Held>) -> bool {
+    /// Ends the run `holder`, which ended as `ending`, and answers whether it was interrupted: its
+    /// own cancel says, never the session's state, which a later run may have changed. Only while
+    /// the run still holds `session` does it hold `held` for the session, or nothing, and file the
+    /// session (`loom.run.FileSession`) unless it was interrupted; a run whose session another run
+    /// resumed changes nothing. The holder took the session `Active` and only an interrupt, which
+    /// cancels it, moves it, so it is `filed` otherwise.
+    fn end_session(
+        &self,
+        session: &SessionId,
+        holder: &Holder,
+        ending: RunEnding,
+        held: Option<Held>,
+    ) -> bool {
+        // Read under the lock `Loom::interrupt` cancels under, so an interrupt is wholly before or
+        // wholly after this ending.
         let mut recovery = self.recovery();
-        recovery.stop(session);
+        let interrupted = holder.cancel.is_cancelled();
+        if !recovery.stop(session, holder.run) {
+            return interrupted;
+        }
         match held {
             Some(held) => recovery.hold(held),
             None => recovery.release(session),
         }
-        let mut record = self.turn_record();
-        if record.state_of(session) == Some(SessionState::Interrupted) {
-            return true;
+        if !interrupted {
+            let _ = self.turn_record().file_session(FileSession {
+                session_id: session.clone(),
+                ending,
+            });
         }
-        let _ = record.file_session(FileSession {
-            session_id: session.clone(),
-            ending,
-        });
-        false
+        interrupted
     }
+}
+
+/// The run that took a session: its number, which says whether it still holds the session, and the
+/// cancel [`Loom::interrupt`] raises, which says whether it was interrupted.
+struct Holder {
+    run: u64,
+    cancel: LoopCancel,
 }
 
 /// Whether a resumed run has not answered the call it resumed from: the call was never put to the
@@ -720,8 +754,9 @@ impl ToolPort for CatalogueTools<'_> {
 struct Proposer<'r, S, G, V> {
     loom: &'r Loom<S, G, V>,
     case: &'r CaseId,
-    session: &'r SessionId,
     offers: &'r Offers,
+    /// The run's cancel: once [`Loom::interrupt`] raised it, nothing leaves the pipeline.
+    cancel: LoopCancel,
     /// The call a resumed run continues from, exactly as the model made it, and what the pipeline
     /// left of it, until the port is first asked about a call.
     resuming: Option<(ToolCall, Pending)>,
@@ -807,7 +842,7 @@ where
             proposal: prepared.proposal(),
             in_flight: true,
         };
-        if self.loom.is_interrupted(self.session) {
+        if self.cancel.is_cancelled() {
             // The cancel reached the run while the call was selected: the selection does not
             // leave Loom. The run that resumes the session revalidates it.
             return self.defer(checkpoint, no_useful_action(), Some(pending));
@@ -860,12 +895,16 @@ where
 
     /// The call a resumed run continues from, against `offered`, the catalogue projected at resume
     /// from the case's current frontier. It is not selected again (`crate::recovery`): a selection
-    /// in flight is revalidated, and one already admitted is proposed again only while the case is
-    /// at the revision it was selected at and the frontier still admits its action. A refusal is
-    /// denied to the model, naming why; an outage of the governor ends the run at the checkpoint,
-    /// still held.
+    /// in flight is revalidated first, and either is proposed again only while the case is at the
+    /// revision it was selected at and the frontier still admits its action. A refusal is denied to
+    /// the model, naming why; an outage of the governor ends the run at the checkpoint, still held.
+    /// A run interrupted before this ends at the checkpoint with the call as it found it, a
+    /// selection in flight left unrevalidated.
     fn resolve(&mut self, pending: Pending, offered: &Offered) -> ApprovalDecision {
         let checkpoint = pending.selection.0.0.clone();
+        if self.cancel.is_cancelled() {
+            return self.defer(checkpoint, no_useful_action(), Some(pending));
+        }
         let action = pending.proposal.action.clone();
         let selected = SelectionStorage::get(&*self.loom.record(), &pending.selection);
         let Some(selected) = selected else {
@@ -882,22 +921,19 @@ where
                 }
                 Err(unanswered) => return self.defer(checkpoint, unanswered, Some(pending)),
             }
-        } else {
-            let frontier = &offered.frontier;
-            let current = frontier.data().case_revision;
-            if current != selected.data.case_revision {
-                return ApprovalDecision::denied(stale(
-                    &action,
-                    selected.data.case_revision,
-                    current,
-                ));
-            }
-            let admission = admit(frontier, &action);
-            if matches!(admission, Admission::Refused(_))
-                || !has_deciding_entry(frontier, &action, &admission)
-            {
-                return ApprovalDecision::denied(not_admitted(&action));
-            }
+        }
+        // Whatever revalidation answered, or when a Loom with no governor made none: a selection in
+        // flight gets every check an admitted one does.
+        let frontier = &offered.frontier;
+        let current = frontier.data().case_revision;
+        if current != selected.data.case_revision {
+            return ApprovalDecision::denied(stale(&action, selected.data.case_revision, current));
+        }
+        let admission = admit(frontier, &action);
+        if matches!(admission, Admission::Refused(_))
+            || !has_deciding_entry(frontier, &action, &admission)
+        {
+            return ApprovalDecision::denied(not_admitted(&action));
         }
         let outcome = ExecutorOutcome::ProposedAction(pending.proposal.clone());
         self.defer(
@@ -1000,6 +1036,8 @@ struct Recording<'m, 'r, S, G, V> {
     loom: &'r Loom<S, G, V>,
     session: &'r SessionId,
     offers: &'r Offers,
+    /// The run's number, which says whether it still holds `session`.
+    run: u64,
     /// Whether the loop asked the model for a turn in this run.
     asked: bool,
 }
@@ -1019,11 +1057,14 @@ impl<S, G, V> ModelPort for Recording<'_, '_, S, G, V> {
     ) -> Result<TurnOutcome, WireError> {
         self.asked = true;
         let outcome = self.model.turn(request, sink)?;
+        // Only into a session this run still holds: an interrupted run whose session another run
+        // resumed records nothing there. While it holds it, the session is `Active` unless an
+        // interrupt moved it, so the turn is `recorded` or refused `session-not-active`.
+        let recovery = self.loom.recovery();
         if let Some(offered) = self.offers.latest()
             && !offered.recorded.replace(true)
+            && recovery.holds(self.session, self.run)
         {
-            // The session was opened `Active` for this run and nothing files it here, so the
-            // turn is `recorded`.
             let _ = self.loom.turn_record().record_turn(RecordTurn {
                 turn_id: offered.turn.clone(),
                 session_id: self.session.clone(),
@@ -1031,6 +1072,7 @@ impl<S, G, V> ModelPort for Recording<'_, '_, S, G, V> {
                 items: outcome.items.iter().map(encoded).collect(),
             });
         }
+        drop(recovery);
         Ok(outcome)
     }
 }
