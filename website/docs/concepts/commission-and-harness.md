@@ -37,8 +37,11 @@ lists them.
 
 :::caution[Planned]
 The provider wires, messages, responses, HTTP, the turn loop, sessions, transcripts and streaming
-are ported as modules of `b10x-loom-executor`. Running a governed run through them, with
-compaction, budgets, interruption and recovery, is planned. Today the slice's model calls go through
+are ported as modules of `b10x-loom-executor`, and `Loom::run_loop` runs a governed run through
+them: each turn's tools are the catalogue projected from the case's current frontier, and a model's
+tool call is selected, given its arguments and revalidated before Loom proposes it. Compaction,
+budgets, interruption and recovery are planned, and `b10x-loom run` does not use the loop yet:
+today the slice's model calls go through
 [llm](https://beyond10x.github.io/llm/) ([GitHub](https://github.com/beyond10x/llm)).
 :::
 

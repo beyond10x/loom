@@ -2,7 +2,7 @@
 
 //! The model/tool loop ported from `beyond10x/harness` (`docs/design/harness-map.md`, `port` rows).
 //!
-//! Each submodule is one Harness crate at `798325f03cf5a18df8fadb346d31b314826136ec` (release
+//! Each submodule but [`governed`] is one Harness crate at `798325f03cf5a18df8fadb346d31b314826136ec` (release
 //! 0.13.3), carried with its source unchanged except for these:
 //!
 //! - paths: a reference to the crate itself or to a sibling crate is now a path below this module;
@@ -18,6 +18,10 @@
 //!   are rewrapped, with no other word changed.
 //!
 //! The ported source is Apache-2.0 (`AGENTS.md` § Boundary); Harness keeps its own licence.
+//!
+//! One submodule is Loom's own and was not ported: [`governed`] runs the ported loop over a
+//! commission's frontier through the loop's seams, with Loom's projection, selection and
+//! revalidation behind them.
 //!
 //! The provider adapters are held to the provider-wire contracts copied into
 //! `crates/loom-executor/tests/fixtures/provider-wires/` by `crates/loom-executor/tests/harness_port.rs` and by
@@ -38,6 +42,7 @@
     reason = "allowed by Harness's workspace lints at 798325f0"
 )]
 
+pub mod governed;
 pub mod http;
 pub mod messages;
 pub mod responses;
