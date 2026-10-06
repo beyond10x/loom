@@ -16,16 +16,18 @@ result_reference_workflow -- --nocapture`:
 | Measurement | Observed |
 | --- | ---: |
 | Original full file | 134,439 bytes |
-| Generated composition arguments | 534 bytes |
-| Largest serialized model request in the fixture | 6,402 bytes |
+| Generated composition arguments | 536 bytes |
+| Largest serialized model request in the fixture | 6,718 bytes |
 | Recorded agent turns | 7 |
-| Passing acceptance tests | 6 |
+| Passing acceptance tests | 9 |
 
 The generated composition is about 252 times smaller than this fixture's file. That comparison is
 bytes, not tokenizer output, and not an aggregate before/after API bill. One optional lookup adds
 one argument-generation turn. Small results can cost more when descriptor overhead dominates.
 
-The remaining acceptance cases establish that forged digests cannot write, references cannot
+The remaining acceptance cases establish that a forged digest or a ninth lookup refuses the step
+without a write and the next selection is told why, a malformed lookup or one past the 64 KiB
+escaped data total is answered as a lookup error, references cannot
 bypass a changed approval requirement, literal arguments still work, captures remain accessible
 within their run after transcript trimming, and process output references contain only the existing
 runner's captured tail. The latter may include framing beyond its raw output budget; bounded

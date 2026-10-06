@@ -56,7 +56,7 @@ fn an_unresolvable_reference_is_not_reported_as_an_unreachable_model() {
             intent: INTENT.into(),
             workspace: workspace.path().to_path_buf(),
             test: TestCommand::new("grep", ["-q", "status=fixed", "check.txt"]),
-            max_steps: 2,
+            max_steps: 1,
             threshold: 0.5,
         },
         &governor,
