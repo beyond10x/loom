@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 148794ff1143dcb09d0fe880c0974054e23fcd97efe7a45a4d4f53970fceb9d0
-// contract digest acd561280daea7248420b3a1815dcb9a7991f0d16278e9f7575d7077c98a0da3
+// model digest 10e0941a85d43e690422930dd8850593cb2bee08d738ac2a6e7ffda9505f4b60
+// contract digest 0ebc9eb4e00a223ecca76b7fa83d021e0888f6c4084ae57ce52801a0b027c73c
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Run — `loom.run`.
@@ -140,6 +140,8 @@ pub enum SessionState {
     Active,
     /// `Filed`.
     Filed,
+    /// `Interrupted`.
+    Interrupted,
 }
 
 /// SessionId — `loom.run.SessionId`: a distinct wrapper around `Uuid`.
@@ -777,6 +779,7 @@ pub mod session_state {
         pub trait Sealed {}
         impl Sealed for super::Active {}
         impl Sealed for super::Filed {}
+        impl Sealed for super::Interrupted {}
     }
 
     /// A declared state of `Session`, as a type.
@@ -797,6 +800,13 @@ pub mod session_state {
 
     impl Marker for Filed {
         const STATE: super::SessionState = super::SessionState::Filed;
+    }
+
+    /// `Interrupted`.
+    pub struct Interrupted;
+
+    impl Marker for Interrupted {
+        const STATE: super::SessionState = super::SessionState::Interrupted;
     }
 }
 
@@ -854,10 +864,28 @@ impl Session<session_state::Active> {
             state: core::marker::PhantomData,
         }
     }
+
+    /// `interrupt` — `Active` → `Interrupted`. Taken by the `interrupted` outcome of `loom.run.InterruptSession`.
+    pub fn interrupt(self) -> Session<session_state::Interrupted> {
+        Session {
+            data: self.data,
+            state: core::marker::PhantomData,
+        }
+    }
 }
 
 impl Session<session_state::Filed> {
     /// `resume` — `Filed` → `Active`. Taken by the `resumed` outcome of `loom.run.ResumeSession`.
+    pub fn resume(self) -> Session<session_state::Active> {
+        Session {
+            data: self.data,
+            state: core::marker::PhantomData,
+        }
+    }
+}
+
+impl Session<session_state::Interrupted> {
+    /// `resume` — `Interrupted` → `Active`. Taken by the `resumed` outcome of `loom.run.ResumeSession`.
     pub fn resume(self) -> Session<session_state::Active> {
         Session {
             data: self.data,
@@ -884,6 +912,8 @@ pub enum AnySession {
     Active(Session<session_state::Active>),
     /// Resting in `Filed`.
     Filed(Session<session_state::Filed>),
+    /// Resting in `Interrupted`.
+    Interrupted(Session<session_state::Interrupted>),
 }
 
 impl SessionSnapshot {
@@ -901,6 +931,10 @@ impl SessionSnapshot {
                 data: self.data,
                 state: core::marker::PhantomData,
             }),
+            SessionState::Interrupted => AnySession::Interrupted(Session {
+                data: self.data,
+                state: core::marker::PhantomData,
+            }),
         }
     }
 }
@@ -911,6 +945,7 @@ impl AnySession {
         match self {
             Self::Active(_) => SessionState::Active,
             Self::Filed(_) => SessionState::Filed,
+            Self::Interrupted(_) => SessionState::Interrupted,
         }
     }
 
@@ -923,6 +958,10 @@ impl AnySession {
             },
             Self::Filed(instance) => SessionSnapshot {
                 state: SessionState::Filed,
+                data: instance.into_data(),
+            },
+            Self::Interrupted(instance) => SessionSnapshot {
+                state: SessionState::Interrupted,
                 data: instance.into_data(),
             },
         }
@@ -1085,6 +1124,39 @@ pub enum FileSessionOutcome {
     Filed {
         /// The `loom.run.SessionFiled` this outcome publishes.
         session_filed: SessionFiled,
+    },
+    /// `wrong-state` — from a state no declared move starts in.
+    WrongState {
+        /// Why it was refused: `loom.run.SessionStateConflict`.
+        error: SessionStateConflict,
+    },
+    /// `wrong-state` — for an instance no record carries.
+    ///
+    /// The same declared branch and error as [`Self::WrongState`], without the error's fields: an instance
+    /// that does not exist has nothing for them to describe (`docs/design/unknown-instance-seams.md`).
+    WrongStateUnknownInstance,
+}
+
+/// InterruptSession — the input of `loom.run.InterruptSession`.
+///
+/// Everything it can result in is [`InterruptSessionOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterruptSession {
+    /// `session_id` — `loom.run.SessionId`.
+    pub session_id: SessionId,
+}
+
+/// Everything `loom.run.InterruptSession` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InterruptSessionOutcome {
+    /// `interrupted` — otherwise.
+    Interrupted {
+        /// The `loom.run.SessionInterrupted` this outcome publishes.
+        session_interrupted: SessionInterrupted,
     },
     /// `wrong-state` — from a state no declared move starts in.
     WrongState {
@@ -1523,6 +1595,13 @@ pub struct SessionFiled {
     pub ending: RunEnding,
 }
 
+/// SessionInterrupted — the event `loom.run.SessionInterrupted`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionInterrupted {
+    /// `session_id` — `loom.run.SessionId`.
+    pub session_id: SessionId,
+}
+
 /// SessionOpened — the event `loom.run.SessionOpened`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionOpened {
@@ -1723,6 +1802,17 @@ pub mod obligations {
         ///
         /// `Err` is the typed refusal of a request the model declares no outcome for.
         fn file_session(&mut self, input: super::FileSession) -> Result<super::FileSessionOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `loom.run.InterruptSession` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait InterruptSessionBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.run.InterruptSession`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn interrupt_session(&mut self, input: super::InterruptSession) -> Result<super::InterruptSessionOutcome, crate::obligation::UnmetObligation>;
     }
 
     /// The behaviour `loom.run.OpenSession` — generated.

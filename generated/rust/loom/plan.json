@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "148794ff1143dcb09d0fe880c0974054e23fcd97efe7a45a4d4f53970fceb9d0",
-    "contract_digest": "acd561280daea7248420b3a1815dcb9a7991f0d16278e9f7575d7077c98a0da3"
+    "source_digest": "10e0941a85d43e690422930dd8850593cb2bee08d738ac2a6e7ffda9505f4b60",
+    "contract_digest": "0ebc9eb4e00a223ecca76b7fa83d021e0888f6c4084ae57ce52801a0b027c73c"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -194,6 +194,20 @@
     },
     {
       "kind": "command_contract",
+      "source": "loom.run.InterruptSession",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.run.InterruptSession",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
       "source": "loom.run.OpenSession",
       "disposition": {
         "disposition": "generated"
@@ -375,6 +389,13 @@
     {
       "kind": "event_type",
       "source": "loom.run.SessionFiled",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.run.SessionInterrupted",
       "disposition": {
         "disposition": "generated"
       }

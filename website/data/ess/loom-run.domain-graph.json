@@ -170,7 +170,8 @@
         "initial": "Active",
         "states": [
           "Active",
-          "Filed"
+          "Filed",
+          "Interrupted"
         ],
         "transitions": [
           {
@@ -182,7 +183,8 @@
           },
           {
             "from": [
-              "Filed"
+              "Filed",
+              "Interrupted"
             ],
             "name": "resume",
             "to": "Active"
@@ -193,6 +195,13 @@
             ],
             "name": "release",
             "to": "Filed"
+          },
+          {
+            "from": [
+              "Active"
+            ],
+            "name": "interrupt",
+            "to": "Interrupted"
           }
         ]
       },

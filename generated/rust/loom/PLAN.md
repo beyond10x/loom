@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest 148794ff1143dcb09d0fe880c0974054e23fcd97efe7a45a4d4f53970fceb9d0
-  contract digest acd561280daea7248420b3a1815dcb9a7991f0d16278e9f7575d7077c98a0da3
+  model digest 10e0941a85d43e690422930dd8850593cb2bee08d738ac2a6e7ffda9505f4b60
+  contract digest 0ebc9eb4e00a223ecca76b7fa83d021e0888f6c4084ae57ce52801a0b027c73c
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-74 capabilities: **73 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+77 capabilities: **76 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -40,6 +40,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | entity lifecycle | `loom.run.Turn` |
 | command contract | `loom.run.FileSession` |
 | command behaviour | `loom.run.FileSession` |
+| command contract | `loom.run.InterruptSession` |
+| command behaviour | `loom.run.InterruptSession` |
 | command contract | `loom.run.OpenSession` |
 | command behaviour | `loom.run.OpenSession` |
 | command contract | `loom.run.ProjectCatalogue` |
@@ -65,6 +67,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | event type | `loom.run.SelectionStale` |
 | event type | `loom.run.SessionCompacted` |
 | event type | `loom.run.SessionFiled` |
+| event type | `loom.run.SessionInterrupted` |
 | event type | `loom.run.SessionOpened` |
 | event type | `loom.run.SessionReleased` |
 | event type | `loom.run.SessionResumed` |
