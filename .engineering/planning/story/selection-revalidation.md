@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:selection-revalidation
 kind: story
-status: active
+status: implemented
 title: Revalidate a selected action at the execution boundary
 refs:
 - provider: commission
@@ -17,6 +17,8 @@ relations:
 - serves: vision:governed-autonomy
 - depends_on: story:run-pipeline-skeleton
 scope:
+- confidence: cited
+  path: CHANGELOG.md
 - confidence: inferred
   path: crates/loom-executor/src/arguments.rs
 - confidence: cited
@@ -27,12 +29,15 @@ scope:
   path: crates/loom-executor/tests/adversary_run_revalidation.rs
 - confidence: cited
   path: crates/loom-executor/tests/selection_revalidation.rs
-- confidence: inferred
+- confidence: cited
   path: ess/domains/run.yaml
-revision: 22
+- confidence: cited
+  path: website/data/status.json
+revision: 28
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-06T10:10:28Z", actor: "human:timo", revision: 21, decided_on: {"recorded":{"review_outcome":2}}}
 - {from: "proposed", to: "active", at: "2026-10-06T10:10:28Z", actor: "human:timo", revision: 22, decided_on: {"recorded":{"review_outcome":2}}}
+- {from: "active", to: "implemented", at: "2026-10-06T11:13:03Z", actor: "human:timo", revision: 28, decided_on: {"recorded":{"test_result":1,"review_outcome":8,"verification":1}}}
 ---
 ## Outcome
 
@@ -156,6 +161,21 @@ Stale statements in the sections above, found while scoping (2026-10-06):
 - Not established: whether ESS 0.53.0 synthesizes `not-in-frontier` as a membership guard over
   `input.frontier_actions`; how `Loom` gets a `Governor` (`Loom::new` has 44 call sites in 14 files);
   where the wave-9/w10 turn and session binding gap lives.
+
+Confirmed by the implementor in wave 2026-10-06-w1 (the lines above are kept as scoped):
+
+| scoped line | result |
+|---|---|
+| Placement after `request_arguments`; revalidation moves the selection out of `Selected` | confirmed (`run.yaml:545-548`, `arguments.rs:119`); measured: revalidating before `request_arguments` fails `revalidation_refuses_before_proposing` |
+| `arguments.rs`: `RequestRecord` (:56) is the only `SelectionStorage` (:75) | confirmed |
+| `ess/domains/run.yaml:564-596` | **range wrong**: `RevalidateSelection` spans `:568-606`; only the comment at :566 changed, nothing was regenerated |
+| Collision with `feat/hosted-governor-contract` at the adversary test's `Context::external` | **wrong**: that branch merged before the wave (`743e7c0`), and the executor's answer lives in `src/revalidation.rs`, so the test's `SpecPorts` is untouched; the ignored case sat at `:255-256`, not `:259` |
+
+Settled in the wave: ESS 0.53.0 does not synthesize the guard (3 refusals, so `not-in-frontier` stays
+`external:` and the executor answers it from `frontier_actions`); the governor arrives through
+`Loom::with_governor`, so `Loom::new` callers are unchanged. Landed in `crates/loom-executor/src/`
+`lib.rs`, `revalidation.rs`, `arguments.rs`, five test files, `CHANGELOG.md`, `AGENTS.md` and
+`website/data/status.json`.
 
 ## Acceptance
 

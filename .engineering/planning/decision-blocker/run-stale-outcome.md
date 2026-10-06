@@ -9,7 +9,7 @@ refs:
   reference: decision-blocker:run-stale-outcome
 relations:
 - blocks: story:effect-invocation
-revision: 1
+revision: 3
 ---
 > Re-filed from `beyond10x/commission` `decision-blocker:run-stale-outcome` at `e61e4f0` (status there: `open`) under Atlas ADR 0090
 > (loom `story:import-commission`). Paths below are Commission's: `ess/` is now `ess/commission/`,
@@ -35,3 +35,28 @@ empty frontier, and no `SuspensionReason` names a revision change.
 Either is a specification change, made first in its own commit (Atlas ADR 0080). Together with the
 missing terminal Run state (story:local-runtime-loop, J2), it decides how an effect-invoking loop
 reports a case that moved under it.
+
+## From wave 2026-10-06-w1
+
+Adversary pass 1 of wave 2026-10-06-w1 (`review-result:adversary-w1-loom-selection-revalidation-pass-1`,
+finding F1) measured a second route to the same gap. A Loom built with `Loom::with_governor` refuses
+a selection made at a revision the case has since left (`stale-revision`) and returns
+`NoUsefulAction`, since no `ExecutorOutcome` says the case moved. Commission's `run_until_blocked`
+then derives the run outcome from the frontier the case left (`crates/loom-commission/src/runtime.rs`,
+the derive after a non-proposal) instead of reloading as it does for a stale proposal (item 8 of its
+module documentation). Measured in `crates/loom-executor/tests/adversary_w1_runtime_stale.rs` and
+`adversary_w1p2_runtime_windows.rs`: a case completed while the selector selects or while arguments
+are generated ends `NoAdmissibleAction` instead of `Completed`, and a case that moved past an open
+obligation ends `NeedsExternalEvidence(["tests-pass"])` for the superseded obligation. The cases
+assert today's outcome and name this blocker. No caller in this repository composes
+`with_governor` with `run_until_blocked` yet; the SDK re-exports both.
+
+Pass 2 (`review-result:adversary-w1-loom-selection-revalidation-pass-2`, D2) found, by reading the
+code, that neither option above ends this route on its own: A fires only where the runtime itself
+sees the move, which it does not after an executor's `NoUsefulAction` (`runtime.rs:549`); B helps
+only if Loom maps `stale-revision` to `Suspended`, and a completed case would still end `Suspended`,
+since `Suspended` returns (`runtime.rs:461`) before completion is consulted. A third option follows:
+
+- C: an `ExecutorOutcome` variant by which an executor reports that the case moved, on which the
+  runtime reloads as it does for a stale proposal. A specification change in Commission's
+  `ExecutorOutcome` union.

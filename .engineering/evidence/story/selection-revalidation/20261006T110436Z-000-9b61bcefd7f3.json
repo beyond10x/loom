@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-06T11:04:36Z",
+  "actor": "human:timo",
+  "artifact": "story:selection-revalidation",
+  "kind": "story",
+  "revision": 22,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-executor --locked --test selection_revalidation",
+    "reference": "VERIFIED: ~/.cache/loom-wave-2026-10-06-w1/selection-revalidation/red-assert.log (API present, not called from run: FAILED 1 passed 4 failed) vs c2-gate.log at 84a70c5 (ok 5 passed)"
+  }
+}
