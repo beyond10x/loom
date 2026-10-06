@@ -74,6 +74,10 @@ types:
     of: Boolean
 
   # story:governor-port: why a governor could not answer.
+  # story:hosted-governor: unavailable includes failed case-store reads/writes and failed
+  # trusted evaluation-time lookup. Neither may be reported as an unknown case, a successful
+  # evidence/observation write, or an instruction to retry case-id allocation. Protocols are
+  # host-admitted Canon definitions; models cannot replace them or supply evaluation time.
   - name: commission.responsibility.GovernorError
     kind: enum
     variants: [UnknownCase, GovernorUnavailable]

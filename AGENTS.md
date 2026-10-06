@@ -181,6 +181,13 @@ a case's protocol, reports the frontier and completion, and executes nothing. It
 that evaluates protocols with Canon, and it adds no clock, network or model call to an evaluation.
 It depends on Commission by path, never the reverse.
 
+Host-reviewed protocols enter through `CanonGovernor::with_protocol`; compile and frontier
+representability checks remain in the governor. `EvaluationTime` is a trusted host callback,
+never a model argument. Durable stores implement `FallibleCaseStore` atomically and report
+failures explicitly; the legacy `CaseStore` bridge is only for infallible adapters. The host
+restores the same admitted protocol definitions on recovery and authenticates evidence before
+`submit_evidence`. The governor supplies no authority decision.
+
 Canon is named by the reference `b10x-canon-engineering` uses (`branch = "main"`), pinned by
 `Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon with
 `cargo update -p b10x-canon` together with the `b10x-canon-engineering` tag (now `0.1.0`); any other

@@ -4,18 +4,18 @@
 //! defines.
 //!
 //! [`CanonGovernor`] implements Commission's [`Governor`], [`EvidencePort`] and [`ObservationPort`]
-//! over Canon. A case is opened on an ELS built-in protocol, named `<name>@<major>`
+//! over Canon. A case is opened on a built-in or host-registered protocol, named `<name>@<major>`
 //! (`software-change@1`), with the caller's revision of every artifact the protocol declares
 //! ([`CanonGovernor::open`]). Its only other writes are a new artifact revision
 //! ([`CanonGovernor::update_revision`]), evidence and observations.
 //!
 //! # Evaluation
 //!
-//! Every `frontier` and `completion` call evaluates afresh: the protocol is taken from the ELS
-//! registry, compiled with `b10x_canon::ir::compile` and evaluated with
+//! Every `frontier` and `completion` call evaluates afresh: the protocol is taken from the built-in
+//! registry or registered by [`CanonGovernor::with_protocol`], compiled with Canon and evaluated with
 //! `b10x_canon::eval::evaluate_with` over the case's `canon-case/1` snapshot and the evidence that
-//! applies. Nothing else is supplied: no evaluation instant (the governor reads no clock), no
-//! explicit decision and no authority decision. The governor never invents authority, so an action
+//! applies. A trusted host may supply [`EvaluationTime`] for freshness; the governor reads no clock
+//! itself and supplies no explicit decision or authority decision. It never invents authority, so an action
 //! that requires a capability is at best `approval-required`; Commission asks its authority
 //! provider for it.
 //!
@@ -78,7 +78,7 @@ use b10x_loom_commission::ports::governor::Governor;
 pub struct CaseState {
     /// The case id.
     pub id: CaseId,
-    /// The ELS built-in that governs it, `<name>@<major>`.
+    /// The registered protocol that governs it, `<name>@<major>`.
     pub protocol: String,
     /// The case revision: 1 when opened, one more with each artifact revision recorded.
     pub revision: i64,
@@ -97,13 +97,13 @@ pub struct HeldEvidence {
     pub applies: bool,
 }
 
-/// Where the governor keeps cases and observations. In memory for now ([`MemoryCaseStore`]).
+/// Infallible compatibility port. Durable adapters use [`FallibleCaseStore`] instead.
 pub trait CaseStore {
     /// Holds `state` under its id; `false`, holding nothing new, when that id is already held.
     ///
     /// `false` means exactly that the id is already held, and nothing else. A store that cannot
     /// write must not return `false`: [`CanonGovernor::open`] takes `false` as "try the next id"
-    /// and would never stop. The trait has no error channel yet.
+    /// and would never stop. Fallible implementations must use [`FallibleCaseStore`].
     fn insert(&self, state: CaseState) -> bool;
 
     /// A copy of the case's state, or `None` when it is not held.
@@ -118,6 +118,69 @@ pub trait CaseStore {
 
     /// Every observation kept, in the order received.
     fn observations(&self) -> Vec<ObservationData>;
+}
+
+/// A host-owned store whose failures are explicit. Writes must be atomic: an error must leave
+/// the previous state intact, including when the update callback already ran. No callback may
+/// perform external effects. Persistence implementations own their transaction and recovery.
+pub trait FallibleCaseStore {
+    type Error: fmt::Display;
+    fn insert(&self, state: CaseState) -> Result<bool, Self::Error>;
+    fn get(&self, case: &CaseId) -> Result<Option<CaseState>, Self::Error>;
+    fn update<T>(
+        &self,
+        case: &CaseId,
+        change: impl FnOnce(&mut CaseState) -> T,
+    ) -> Result<Option<T>, Self::Error>;
+    fn observe(&self, observation: ObservationData) -> Result<(), Self::Error>;
+    fn observations(&self) -> Result<Vec<ObservationData>, Self::Error>;
+}
+
+impl<S: CaseStore> FallibleCaseStore for S {
+    type Error = std::convert::Infallible;
+    fn insert(&self, state: CaseState) -> Result<bool, Self::Error> {
+        Ok(CaseStore::insert(self, state))
+    }
+    fn get(&self, case: &CaseId) -> Result<Option<CaseState>, Self::Error> {
+        Ok(CaseStore::get(self, case))
+    }
+    fn update<T>(
+        &self,
+        case: &CaseId,
+        change: impl FnOnce(&mut CaseState) -> T,
+    ) -> Result<Option<T>, Self::Error> {
+        Ok(CaseStore::update(self, case, change))
+    }
+    fn observe(&self, observation: ObservationData) -> Result<(), Self::Error> {
+        CaseStore::observe(self, observation);
+        Ok(())
+    }
+    fn observations(&self) -> Result<Vec<ObservationData>, Self::Error> {
+        Ok(CaseStore::observations(self))
+    }
+}
+
+/// Trusted evaluation time, refreshed for every evaluation. This is a host port, never model
+/// context. It grants no authority and contributes no evidence or explicit decisions.
+pub trait EvaluationTime {
+    fn at(&self, case: &CaseId) -> Result<Option<String>, GovernorError>;
+}
+
+/// Preserve the default governor's clock-free behavior.
+#[derive(Debug, Default)]
+pub struct NoEvaluationTime;
+impl EvaluationTime for NoEvaluationTime {
+    fn at(&self, _: &CaseId) -> Result<Option<String>, GovernorError> {
+        Ok(None)
+    }
+}
+impl<F> EvaluationTime for F
+where
+    F: Fn(&CaseId) -> Result<Option<String>, GovernorError>,
+{
+    fn at(&self, case: &CaseId) -> Result<Option<String>, GovernorError> {
+        self(case)
+    }
 }
 
 /// A [`CaseStore`] in memory, behind one lock.
@@ -168,9 +231,11 @@ impl CaseStore for MemoryCaseStore {
 /// Why a case was not opened.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpenError {
-    /// The ELS registry holds no built-in `protocol`, or it is not `<name>@<major>`.
+    /// A host store failed; this is not an id collision and must not be retried as one.
+    StoreUnavailable { problem: String },
+    /// No host registration or built-in matches `protocol`.
     UnknownProtocol { protocol: String },
-    /// The built-in does not parse, validate or compile with Canon.
+    /// The protocol does not parse, validate, compile or fit Commission's frontier.
     InvalidProtocol { protocol: String, problem: String },
     /// The protocol declares `artifact`, and the revisions give none for it.
     MissingRevision { artifact: String },
@@ -187,8 +252,9 @@ pub enum OpenError {
 impl fmt::Display for OpenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::StoreUnavailable { problem } => write!(f, "case store unavailable: {problem}"),
             Self::UnknownProtocol { protocol } => {
-                write!(f, "the ELS registry holds no protocol `{protocol}`")
+                write!(f, "no registered protocol `{protocol}`")
             }
             Self::InvalidProtocol { protocol, problem } => {
                 write!(f, "protocol `{protocol}` does not compile: {problem}")
@@ -216,6 +282,8 @@ impl std::error::Error for OpenError {}
 /// Why an artifact revision was not recorded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateError {
+    /// The store could not record the revision.
+    StoreUnavailable { problem: String },
     /// The governor does not hold the case.
     UnknownCase,
     /// The case's protocol does not declare `artifact`.
@@ -227,6 +295,7 @@ pub enum UpdateError {
 impl fmt::Display for UpdateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::StoreUnavailable { problem } => write!(f, "case store unavailable: {problem}"),
             Self::UnknownCase => f.write_str("the governor does not hold the case"),
             Self::UndeclaredArtifact { artifact } => {
                 write!(f, "artifact `{artifact}` is not declared by the protocol")
@@ -245,28 +314,110 @@ impl std::error::Error for UpdateError {}
 
 /// A governor that decides with Canon, over cases kept in `S`.
 #[derive(Debug, Default)]
-pub struct CanonGovernor<S> {
+pub struct CanonGovernor<S, T = NoEvaluationTime> {
     store: S,
+    protocols: BTreeMap<String, Ir>,
+    time: T,
 }
 
-impl<S: CaseStore> CanonGovernor<S> {
+impl<S: FallibleCaseStore> CanonGovernor<S> {
     /// A governor over `store`.
     pub fn new(store: S) -> Self {
-        Self { store }
+        Self {
+            store,
+            protocols: BTreeMap::new(),
+            time: NoEvaluationTime,
+        }
+    }
+}
+
+impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
+    /// Parse and register a host-admitted protocol with the governor's pinned Canon. This keeps
+    /// embedders independent of Canon crate identity; all registration checks still apply.
+    pub fn with_protocol_yaml(self, name: &str, yaml: &str) -> Result<Self, OpenError> {
+        let model = b10x_canon::model::parse(yaml).map_err(|error| OpenError::InvalidProtocol {
+            protocol: name.to_owned(),
+            problem: error.to_string(),
+        })?;
+        self.with_protocol(name, &model)
     }
 
-    /// Opens a case on the ELS built-in `protocol` (`<name>@<major>`) with `revisions`, the
+    /// Register a protocol admitted by the trusted host. Canon validates and compiles the model;
+    /// registration is not protocol-adoption authority. Models must never call this method.
+    /// Existing registrations and built-ins cannot be replaced, even before a case is opened.
+    /// Hosts restoring a persistent store must restore the same admitted protocol definitions
+    /// under the same names; the store does not persist or authenticate protocol definitions.
+    pub fn with_protocol(
+        mut self,
+        name: &str,
+        model: &b10x_canon::model::Protocol,
+    ) -> Result<Self, OpenError> {
+        let invalid = |problem: String| OpenError::InvalidProtocol {
+            protocol: name.to_owned(),
+            problem,
+        };
+        if name.is_empty()
+            || name.trim() != name
+            || name.chars().any(char::is_control)
+            || self.protocols.contains_key(name)
+            || !matches!(protocol_ir(name), Err(OpenError::UnknownProtocol { .. }))
+        {
+            return Err(invalid(
+                "protocol name is empty or already registered".into(),
+            ));
+        }
+        let ir = compile(model).map_err(|problems| {
+            invalid(
+                problems
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            )
+        })?;
+        representable(name, &ir)?;
+        self.protocols.insert(name.to_owned(), ir);
+        Ok(self)
+    }
+
+    /// Use a trusted host callback for Canon freshness checks; no clock is read by the governor.
+    pub fn with_evaluation_time<U: EvaluationTime>(self, time: U) -> CanonGovernor<S, U> {
+        CanonGovernor {
+            store: self.store,
+            protocols: self.protocols,
+            time,
+        }
+    }
+
+    fn protocol_ir(&self, protocol: &str) -> Result<Ir, OpenError> {
+        match self.protocols.get(protocol) {
+            Some(ir) => Ok(ir.clone()),
+            None => {
+                let ir = protocol_ir(protocol)?;
+                representable(protocol, &ir)?;
+                Ok(ir)
+            }
+        }
+    }
+
+    /// Opens a case on registered `protocol` (`<name>@<major>`) with `revisions`, the
     /// revision of every artifact the protocol declares, under the first free id `case-<n>`.
     pub fn open(
         &self,
         protocol: &str,
         revisions: BTreeMap<String, String>,
     ) -> Result<CaseId, OpenError> {
-        checked(protocol, &revisions)?;
+        checked(self.protocol_ir(protocol)?, &revisions)?;
         let mut n = 1u64;
         loop {
             let case = CaseId(format!("case-{n}"));
-            if self.store.insert(opened(&case, protocol, &revisions)) {
+            if self
+                .store
+                .insert(opened(&case, protocol, &revisions))
+                .map_err(|e| OpenError::StoreUnavailable {
+                    problem: e.to_string(),
+                })?
+            {
                 return Ok(case);
             }
             n += 1;
@@ -283,8 +434,14 @@ impl<S: CaseStore> CanonGovernor<S> {
         if !is_identifier(&case.0) {
             return Err(OpenError::InvalidCaseId { case: case.0 });
         }
-        checked(protocol, &revisions)?;
-        if self.store.insert(opened(&case, protocol, &revisions)) {
+        checked(self.protocol_ir(protocol)?, &revisions)?;
+        if self
+            .store
+            .insert(opened(&case, protocol, &revisions))
+            .map_err(|e| OpenError::StoreUnavailable {
+                problem: e.to_string(),
+            })?
+        {
             Ok(())
         } else {
             Err(OpenError::CaseExists { case: case.0 })
@@ -319,6 +476,9 @@ impl<S: CaseStore> CanonGovernor<S> {
                 state.revision += 1;
                 Ok(state.revision)
             })
+            .map_err(|e| UpdateError::StoreUnavailable {
+                problem: e.to_string(),
+            })?
             .unwrap_or(Err(UpdateError::UnknownCase))
     }
 
@@ -338,31 +498,57 @@ impl<S: CaseStore> CanonGovernor<S> {
     }
 
     /// Every observation received, in the order received.
-    pub fn observations(&self) -> Vec<ObservationData> {
-        self.store.observations()
+    pub fn try_observations(&self) -> Result<Vec<ObservationData>, GovernorError> {
+        self.store
+            .observations()
+            .map_err(|_| GovernorError::GovernorUnavailable)
     }
 
     fn held(&self, case: &CaseId) -> Result<CaseState, GovernorError> {
-        self.store.get(case).ok_or(GovernorError::UnknownCase)
+        self.store
+            .get(case)
+            .map_err(|_| GovernorError::GovernorUnavailable)?
+            .ok_or(GovernorError::UnknownCase)
     }
 
     /// Canon's decision for the case as held now, and the compiled protocol it was made under.
     fn decide(&self, case: &CaseId) -> Result<(CaseState, Ir, Decision), GovernorError> {
         let state = self.held(case)?;
-        let ir = protocol_ir(&state.protocol).map_err(|_| GovernorError::GovernorUnavailable)?;
+        let ir = self
+            .protocol_ir(&state.protocol)
+            .map_err(|_| GovernorError::GovernorUnavailable)?;
         let records: Vec<EvidenceRecord> = state
             .evidence
             .iter()
             .filter(|held| held.applies)
             .filter_map(|held| canon_record(&held.data))
             .collect();
-        let decision = evaluate_with(&ir, &snapshot(&ir, &state), &records, Supplied::default())
+        let at = self
+            .time
+            .at(case)
             .map_err(|_| GovernorError::GovernorUnavailable)?;
+        let decision = evaluate_with(
+            &ir,
+            &snapshot(&ir, &state),
+            &records,
+            Supplied {
+                at: at.as_deref(),
+                ..Supplied::default()
+            },
+        )
+        .map_err(|_| GovernorError::GovernorUnavailable)?;
         Ok((state, ir, decision))
     }
 }
 
-impl<S: CaseStore> Governor for CanonGovernor<S> {
+impl<S: CaseStore, T> CanonGovernor<S, T> {
+    /// Infallible compatibility accessor. Fallible stores use [`Self::try_observations`].
+    pub fn observations(&self) -> Vec<ObservationData> {
+        CaseStore::observations(&self.store)
+    }
+}
+
+impl<S: FallibleCaseStore, T: EvaluationTime> Governor for CanonGovernor<S, T> {
     fn current_revision(&self, case: &CaseId) -> Result<i64, GovernorError> {
         Ok(self.held(case)?.revision)
     }
@@ -451,34 +637,41 @@ impl<S: CaseStore> Governor for CanonGovernor<S> {
     }
 }
 
-impl<S: CaseStore> EvidencePort for CanonGovernor<S> {
+impl<S: FallibleCaseStore, T: EvaluationTime> EvidencePort for CanonGovernor<S, T> {
     fn receive(&self, evidence: AttributedEvidence) -> Result<(), GovernorError> {
         let data = evidence.into_evidence().into_data();
         let state = self.held(&data.case_id)?;
-        let ir = protocol_ir(&state.protocol).map_err(|_| GovernorError::GovernorUnavailable)?;
+        let ir = self
+            .protocol_ir(&state.protocol)
+            .map_err(|_| GovernorError::GovernorUnavailable)?;
         let case = data.case_id.clone();
+        let at = self
+            .time
+            .at(&case)
+            .map_err(|_| GovernorError::GovernorUnavailable)?;
         self.store
             .update(&case, |state| {
-                let applies = applies(&ir, state, &data);
+                let applies = applies(&ir, state, &data, at.as_deref());
                 state.evidence.push(HeldEvidence { data, applies });
             })
+            .map_err(|_| GovernorError::GovernorUnavailable)?
             .ok_or(GovernorError::UnknownCase)
     }
 }
 
-impl<S: CaseStore> ObservationPort for CanonGovernor<S> {
+impl<S: FallibleCaseStore, T: EvaluationTime> ObservationPort for CanonGovernor<S, T> {
     fn observe(
         &self,
         observation: Observation<observation_state::Reported>,
     ) -> Result<(), GovernorError> {
-        self.store.observe(observation.into_data());
-        Ok(())
+        self.store
+            .observe(observation.into_data())
+            .map_err(|_| GovernorError::GovernorUnavailable)
     }
 }
 
 /// The compiled protocol, after checking `revisions` against what it declares.
-fn checked(protocol: &str, revisions: &BTreeMap<String, String>) -> Result<Ir, OpenError> {
-    let ir = protocol_ir(protocol)?;
+fn checked(ir: Ir, revisions: &BTreeMap<String, String>) -> Result<Ir, OpenError> {
     if let Some(artifact) = ir
         .artifacts
         .keys()
@@ -504,6 +697,16 @@ fn checked(protocol: &str, revisions: &BTreeMap<String, String>) -> Result<Ir, O
         }
     }
     Ok(ir)
+}
+
+fn representable(protocol: &str, ir: &Ir) -> Result<(), OpenError> {
+    if ir.actions.values().any(|action| action.requires.len() > 1) {
+        return Err(OpenError::InvalidProtocol {
+            protocol: protocol.into(),
+            problem: "Commission frontier supports at most one capability per action".into(),
+        });
+    }
+    Ok(())
 }
 
 /// A case just opened: revision 1, no evidence.
@@ -605,7 +808,7 @@ fn canon_value(value: &json::Value) -> Option<serde_yaml_ng::Value> {
 
 /// Whether `data` applies to the case: its facts carry a record of its kind, and Canon evaluates
 /// the case with it and the records that already apply.
-fn applies(ir: &Ir, state: &CaseState, data: &EvidenceData) -> bool {
+fn applies(ir: &Ir, state: &CaseState, data: &EvidenceData, at: Option<&str>) -> bool {
     let Some(record) = canon_record(data) else {
         return false;
     };
@@ -616,7 +819,16 @@ fn applies(ir: &Ir, state: &CaseState, data: &EvidenceData) -> bool {
         .filter_map(|held| canon_record(&held.data))
         .collect();
     records.push(record);
-    evaluate_with(ir, &snapshot(ir, state), &records, Supplied::default()).is_ok()
+    evaluate_with(
+        ir,
+        &snapshot(ir, state),
+        &records,
+        Supplied {
+            at,
+            ..Supplied::default()
+        },
+    )
+    .is_ok()
 }
 
 /// A UUID (version 8) derived from the case, its revision and Canon's decision bytes.

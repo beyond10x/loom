@@ -6,6 +6,14 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- `CanonGovernor::with_protocol` compiles host-admitted protocols without replacing built-ins.
+  `with_evaluation_time` accepts trusted freshness time, and `FallibleCaseStore` makes durable
+  adapter failures explicit while preserving existing infallible `CaseStore` callers.
+  Protocols with multiple capabilities on one action are refused because Commission's frontier
+  can represent only one; capability requirements are never silently truncated.
+
 ### Security
 
 - Tests use embedded Substrate 0.7.10 by default: no network, cleared environment, read-only source

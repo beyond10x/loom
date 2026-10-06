@@ -29,6 +29,24 @@ A case is opened on a protocol of the
 
 The case store is a port (`CaseStore`); `MemoryCaseStore` keeps cases in memory.
 
+On the development branch, a host can register a reviewed Canon model through
+`CanonGovernor::with_protocol(name, &model)`. Canon validates it; duplicate registrations,
+built-in replacements and actions requiring more capabilities than Commission can represent are
+refused. Protocol adoption is the host's decision, never a model proposal accepted as authority.
+`with_protocol_yaml(name, yaml)` parses through Loom's pinned Canon so the host does not need a
+matching Canon dependency merely to register a definition.
+
+`with_evaluation_time` supplies a trusted callback for freshness evaluation. Failure to obtain
+time makes the governor unavailable. No authority or explicit decision enters through that port.
+Evidence producers authenticate their observations before calling `submit_evidence`, including
+any product requirement for independent reviewer execution contexts.
+
+Durable hosts implement `FallibleCaseStore`. Reads and writes return errors; an insert error
+stops opening the case rather than retrying another identifier. Updates are atomic, so a failed
+write preserves previous state. `try_observations` reports read failures. Existing infallible
+`CaseStore` implementations retain their API through a compatibility adapter. Loom supplies no
+database backend: hosts restore their cases and the same admitted protocol definitions.
+
 ## Intake
 
 Intake takes what someone asked for, as given, and runs it.

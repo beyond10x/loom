@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T23:28:00Z",
+  "actor": "human:timo",
+  "artifact": "story:hosted-governor",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check exited 0: full repository gate including hosted governor tests and ESS0.53 conformance",
+    "reference": ".scratch/check.log"
+  }
+}

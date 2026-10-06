@@ -708,3 +708,40 @@ fn adversary2_run_the_runner_fails_a_store_that_breaks_the_scenarios() {
         "a store that lists nothing passed a scenario that expects a row: {lists:?}"
     );
 }
+
+#[test]
+fn event_value_checks_reject_the_wrong_captured_instance() {
+    let mut runner = Runner::new(store());
+    let expected = text("00000000-0000-4000-8000-000000000001");
+    runner.instances.insert("run".into(), expected.clone());
+    runner.last = Some(Executed {
+        command: format!("{NS}ResumeRun"),
+        outcome: "resumed".into(),
+        events: vec![Event {
+            name: format!("{NS}RunResumed"),
+            payload: object(vec![(
+                "run_id",
+                text("00000000-0000-4000-8000-000000000002"),
+            )]),
+        }],
+        error: None,
+        before: Some(RunState::Suspended),
+    });
+    let check = object(vec![
+        ("step", text("expect_event_values")),
+        ("event", text(&format!("{NS}RunResumed"))),
+        (
+            "payload",
+            object(vec![(
+                "run_id",
+                object(vec![("kind", text("instance")), ("instance", text("run"))]),
+            )]),
+        ),
+    ]);
+    assert!(
+        runner.step(&check).is_err(),
+        "wrong event identity must fail"
+    );
+    runner.last.as_mut().unwrap().events[0].payload = object(vec![("run_id", expected)]);
+    assert!(runner.step(&check).is_ok());
+}
