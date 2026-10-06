@@ -41,6 +41,16 @@
 //! none of them; a run that needs one builds its own [`AgentLoop`] and files the session with
 //! [`SessionFile::extend`], [`SessionFile::spent`] and [`SessionFile::file`].
 //!
+//! # Turns
+//!
+//! [`TurnRecord`] is Loom's own, not ported: the sessions a governed run records its turns into,
+//! those turns, the catalogue each turn was offered and the compactions made in them, in memory
+//! (`loom.run.OpenSession`, `loom.run.ResumeSession`, `loom.run.FileSession`,
+//! `loom.run.InterruptSession`, `loom.run.RecordTurn`, `loom.run.RecordCompaction`, generated). It
+//! is the run's record of what each completed turn added and what each compaction cost, not a
+//! transcript a following run replays; the session file above is that, and its format does not
+//! carry compactions or the `Interrupted` state.
+//!
 //! # Recovering a session by hand
 //!
 //! Three files can outlive a run that died without unwinding (killed, out of memory, power lost),
@@ -84,10 +94,19 @@ use crate::harness::turn_loop::{
     AgentLoop, ApprovalPort, LoopConfig, LoopError, LoopEvent, LoopOutcome, LoopSink, RunLedger,
 };
 use crate::harness::wire::{Item, ModelPort, ToolPort, Usage, WireId};
+use crate::model::behaviour::{CompactionStorage, Generated, SessionStorage, TurnStorage};
+use crate::model::obligation::UnmetObligation;
 use crate::model::primitives::Uuid;
+use crate::model::run::obligations::{
+    FileSessionBehavior, InterruptSessionBehavior, OpenSessionBehavior, RecordCompactionBehavior,
+    RecordTurnBehavior, ResumeSessionBehavior,
+};
 use crate::model::run::{
-    CommissionRunId, RunEnding, SessionData, SessionExists, SessionId, SessionState,
-    SessionStateConflict, SessionWireMismatch,
+    ActionCatalogueSnapshot, CommissionRunId, CompactionId, CompactionSnapshot, FileSession,
+    FileSessionOutcome, InterruptSession, InterruptSessionOutcome, OpenSession, OpenSessionOutcome,
+    RecordCompaction, RecordCompactionOutcome, RecordTurn, RecordTurnOutcome, ResumeSession,
+    ResumeSessionOutcome, RunEnding, SessionData, SessionExists, SessionId, SessionSnapshot,
+    SessionState, SessionStateConflict, SessionWireMismatch, TurnId, TurnSnapshot,
 };
 
 /// The shape this module writes and the only one it reads.
@@ -603,6 +622,221 @@ impl Claim {
 impl Drop for Claim {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
+    }
+}
+
+/// The sessions a governed run records its turns into, those turns, the catalogue offered for each
+/// turn and the compactions made in them, each in the order recorded.
+///
+/// `loom.run.OpenSession`, `loom.run.ResumeSession`, `loom.run.FileSession`,
+/// `loom.run.InterruptSession`, `loom.run.RecordTurn` and `loom.run.RecordCompaction` are the
+/// generated behaviour over this record: a session opened under an identity it already holds is
+/// refused `session-exists`, only a `Filed` or `Interrupted` session resumes, only an `Active` one
+/// is filed or interrupted, and a turn or a compaction is refused for a session it does not hold or
+/// one no longer `Active`. A session, a turn or a compaction stored under an identity already held
+/// replaces it. Catalogues are kept as they were offered, one per offer, never replaced.
+#[derive(Debug, Default)]
+pub struct TurnRecord {
+    sessions: Vec<SessionSnapshot>,
+    turns: Vec<TurnSnapshot>,
+    catalogues: Vec<ActionCatalogueSnapshot>,
+    compactions: Vec<CompactionSnapshot>,
+}
+
+impl TurnRecord {
+    /// Every session opened here.
+    #[must_use]
+    pub fn sessions(&self) -> &[SessionSnapshot] {
+        &self.sessions
+    }
+
+    /// The state `session` is in, or [`None`] for a session never opened here.
+    #[must_use]
+    pub fn state_of(&self, session: &SessionId) -> Option<SessionState> {
+        self.sessions
+            .iter()
+            .find(|held| &held.data.session_id == session)
+            .map(|held| held.state)
+    }
+
+    /// Every catalogue a turn was offered, in the order offered.
+    #[must_use]
+    pub fn catalogues(&self) -> &[ActionCatalogueSnapshot] {
+        &self.catalogues
+    }
+
+    /// Keeps `catalogue` as the one offered for its turn.
+    pub(crate) fn offered(&mut self, catalogue: ActionCatalogueSnapshot) {
+        self.catalogues.push(catalogue);
+    }
+
+    /// Every recorded turn, in the order recorded.
+    #[must_use]
+    pub fn turns(&self) -> &[TurnSnapshot] {
+        &self.turns
+    }
+
+    /// How many turns `session` holds.
+    #[must_use]
+    pub fn turns_of(&self, session: &SessionId) -> usize {
+        self.turns
+            .iter()
+            .filter(|turn| &turn.data.session_id == session)
+            .count()
+    }
+
+    /// Every recorded compaction, in the order recorded.
+    #[must_use]
+    pub fn compactions(&self) -> &[CompactionSnapshot] {
+        &self.compactions
+    }
+
+    /// How many compactions `session` holds.
+    #[must_use]
+    pub fn compactions_of(&self, session: &SessionId) -> usize {
+        self.compactions
+            .iter()
+            .filter(|compaction| &compaction.data.session_id == session)
+            .count()
+    }
+
+    /// Runs one generated behaviour over this record, which it holds for the call.
+    fn generated<T>(&mut self, behaviour: impl FnOnce(&mut Generated<Self>) -> T) -> T {
+        let mut generated = Generated::new(std::mem::take(self));
+        let answer = behaviour(&mut generated);
+        *self = generated.ports;
+        answer
+    }
+}
+
+impl SessionStorage for TurnRecord {
+    fn get(&self, identity: &SessionId) -> Option<SessionSnapshot> {
+        self.sessions
+            .iter()
+            .find(|held| &held.data.session_id == identity)
+            .cloned()
+    }
+
+    fn put(&mut self, snapshot: SessionSnapshot) {
+        match self
+            .sessions
+            .iter_mut()
+            .find(|held| held.data.session_id == snapshot.data.session_id)
+        {
+            Some(held) => *held = snapshot,
+            None => self.sessions.push(snapshot),
+        }
+    }
+
+    fn delete(&mut self, identity: &SessionId) {
+        self.sessions
+            .retain(|held| &held.data.session_id != identity);
+    }
+
+    fn list(&self) -> Vec<SessionSnapshot> {
+        self.sessions.clone()
+    }
+}
+
+impl TurnStorage for TurnRecord {
+    fn get(&self, identity: &TurnId) -> Option<TurnSnapshot> {
+        self.turns
+            .iter()
+            .find(|held| &held.data.turn_id == identity)
+            .cloned()
+    }
+
+    fn put(&mut self, snapshot: TurnSnapshot) {
+        match self
+            .turns
+            .iter_mut()
+            .find(|held| held.data.turn_id == snapshot.data.turn_id)
+        {
+            Some(held) => *held = snapshot,
+            None => self.turns.push(snapshot),
+        }
+    }
+
+    fn delete(&mut self, identity: &TurnId) {
+        self.turns.retain(|held| &held.data.turn_id != identity);
+    }
+}
+
+impl CompactionStorage for TurnRecord {
+    fn get(&self, identity: &CompactionId) -> Option<CompactionSnapshot> {
+        self.compactions
+            .iter()
+            .find(|held| &held.data.compaction_id == identity)
+            .cloned()
+    }
+
+    fn put(&mut self, snapshot: CompactionSnapshot) {
+        match self
+            .compactions
+            .iter_mut()
+            .find(|held| held.data.compaction_id == snapshot.data.compaction_id)
+        {
+            Some(held) => *held = snapshot,
+            None => self.compactions.push(snapshot),
+        }
+    }
+
+    fn delete(&mut self, identity: &CompactionId) {
+        self.compactions
+            .retain(|held| &held.data.compaction_id != identity);
+    }
+}
+
+/// `loom.run.OpenSession`, generated, over this record.
+impl OpenSessionBehavior for TurnRecord {
+    fn open_session(&mut self, input: OpenSession) -> Result<OpenSessionOutcome, UnmetObligation> {
+        self.generated(|generated| generated.open_session(input))
+    }
+}
+
+/// `loom.run.RecordTurn`, generated, over this record.
+impl RecordTurnBehavior for TurnRecord {
+    fn record_turn(&mut self, input: RecordTurn) -> Result<RecordTurnOutcome, UnmetObligation> {
+        self.generated(|generated| generated.record_turn(input))
+    }
+}
+
+/// `loom.run.RecordCompaction`, generated, over this record: only into an `Active` session.
+impl RecordCompactionBehavior for TurnRecord {
+    fn record_compaction(
+        &mut self,
+        input: RecordCompaction,
+    ) -> Result<RecordCompactionOutcome, UnmetObligation> {
+        self.generated(|generated| generated.record_compaction(input))
+    }
+}
+
+/// `loom.run.InterruptSession`, generated, over this record: only an `Active` session is
+/// interrupted.
+impl InterruptSessionBehavior for TurnRecord {
+    fn interrupt_session(
+        &mut self,
+        input: InterruptSession,
+    ) -> Result<InterruptSessionOutcome, UnmetObligation> {
+        self.generated(|generated| generated.interrupt_session(input))
+    }
+}
+
+/// `loom.run.ResumeSession`, generated, over this record: only a `Filed` or `Interrupted` session
+/// resumes.
+impl ResumeSessionBehavior for TurnRecord {
+    fn resume_session(
+        &mut self,
+        input: ResumeSession,
+    ) -> Result<ResumeSessionOutcome, UnmetObligation> {
+        self.generated(|generated| generated.resume_session(input))
+    }
+}
+
+/// `loom.run.FileSession`, generated, over this record: only an `Active` session is filed.
+impl FileSessionBehavior for TurnRecord {
+    fn file_session(&mut self, input: FileSession) -> Result<FileSessionOutcome, UnmetObligation> {
+        self.generated(|generated| generated.file_session(input))
     }
 }
 

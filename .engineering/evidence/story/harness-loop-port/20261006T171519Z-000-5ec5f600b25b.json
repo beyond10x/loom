@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-06T17:15:19Z",
+  "actor": "human:timo",
+  "artifact": "story:harness-loop-port",
+  "kind": "story",
+  "revision": 31,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check; task plan; task website on wave/2026-10-06-w2 7f0456f (1119 passed, 0 failed, 8 ignored)",
+    "reference": "7f0456ff78658f75a6f165857086f3b6d585aa4d"
+  }
+}

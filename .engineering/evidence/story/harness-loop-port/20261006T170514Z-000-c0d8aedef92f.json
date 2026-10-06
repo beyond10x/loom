@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-06T17:05:14Z",
+  "actor": "human:timo",
+  "artifact": "story:harness-loop-port",
+  "kind": "story",
+  "revision": 20,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-executor --locked --test harness_loop_port",
+    "reference": "VERIFIED: ~/.cache/loom-waves-2026-10-06/w2/harness-loop-port/red.log at 8b05859 (run_loop absent: 3 compile errors; measured variant with the handed frontier fails at harness_loop_port.rs:142) vs c2-gate.log at ed13b55 (ok 2 passed)"
+  }
+}

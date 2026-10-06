@@ -262,6 +262,12 @@ pub enum LoopEvent {
         /// Whether a model turn was spent on a summary. True even when that turn failed, because
         /// it was still paid for.
         summary_turn: bool,
+        /// What the provider reported for the summary request, verbatim: the price of this
+        /// compaction. [`None`] when no summary request was made, when it failed before the
+        /// provider answered, or when the provider reported nothing; never estimated, for the
+        /// reason [`Usage`] gives. The same report is also counted in the run's totals.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        usage: Option<Usage>,
     },
     TextDelta {
         text: String,

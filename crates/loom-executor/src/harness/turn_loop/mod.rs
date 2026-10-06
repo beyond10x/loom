@@ -1182,6 +1182,7 @@ fn compact(items: &mut [Item], sink: &mut dyn LoopSink) {
         bytes_before: before,
         bytes_after: after,
         summary_turn: false,
+        usage: None,
     });
 }
 
@@ -1367,14 +1368,14 @@ fn fold_end(items: &[Item], protect: usize) -> Option<usize> {
     (end > FIRST_KEPT_ITEM).then_some(end)
 }
 
-/// What a summary attempt did.
+/// What a summary attempt did. A spent turn carries what the provider reported for it.
 enum Summarised {
     /// Nothing was folded: too little to be worth a turn, or all of it protected.
     Skipped,
     /// The prefix is now one summary item, in place of this many.
-    Folded(usize),
+    Folded(usize, Option<Usage>),
     /// A turn was spent and produced nothing usable. The elided conversation stands.
-    Failed,
+    Failed(Option<Usage>),
     /// The caller cancelled. The run is over.
     Cancelled,
 }
@@ -2203,6 +2204,38 @@ impl<'a> AgentLoop<'a> {
         decision: ApprovalDecision,
         sink: &mut dyn LoopSink,
     ) -> Result<LoopOutcome, LoopError> {
+        self.resume_checkpoint(checkpoint, Some(decision), sink)
+    }
+
+    /// Continues a run suspended by an exact approval checkpoint, asking the attached approval
+    /// port again about the exact pending call.
+    ///
+    /// For an embedder whose approval port decides from current state rather than relaying a
+    /// decision made while the run was suspended. The dynamic inventory is refreshed first, then the
+    /// pending call meets the whole gate again, the approver included: the port may approve it,
+    /// deny it, or defer it again, which stops the run at a new checkpoint. Everything else is as
+    /// [`resume_approval`](Self::resume_approval).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LoopError::Config`] for a malformed checkpoint, and the ordinary budget,
+    /// environment, or wire errors for resumed execution.
+    pub fn resume_asking(
+        &mut self,
+        checkpoint: ApprovalCheckpoint,
+        sink: &mut dyn LoopSink,
+    ) -> Result<LoopOutcome, LoopError> {
+        self.resume_checkpoint(checkpoint, None, sink)
+    }
+
+    /// [`resume_approval`](Self::resume_approval) with `decision` as the resolution of the pending
+    /// call, and [`resume_asking`](Self::resume_asking) without one.
+    fn resume_checkpoint(
+        &mut self,
+        checkpoint: ApprovalCheckpoint,
+        decision: Option<ApprovalDecision>,
+        sink: &mut dyn LoopSink,
+    ) -> Result<LoopOutcome, LoopError> {
         if checkpoint.format != "harness.approval-checkpoint/1"
             || checkpoint.checkpoint_id.trim().is_empty()
         {
@@ -2215,7 +2248,7 @@ impl<'a> AgentLoop<'a> {
                 "the run configuration changed after the approval checkpoint".to_owned(),
             ));
         }
-        if matches!(decision, ApprovalDecision::Deferred { .. }) {
+        if matches!(decision, Some(ApprovalDecision::Deferred { .. })) {
             return Err(LoopError::Config(
                 "a checkpoint must be resumed with an approval or denial".to_owned(),
             ));
@@ -2240,7 +2273,7 @@ impl<'a> AgentLoop<'a> {
             .map(Duration::from_millis)
             .map(|remaining| Instant::now() + remaining);
         self.refresh_environment(state.turns.saturating_add(1), sink)?;
-        self.resumed_decision = Some((call.call_id.clone(), invoked, decision));
+        self.resumed_decision = decision.map(|decision| (call.call_id.clone(), invoked, decision));
         let mut calls = Vec::with_capacity(remaining_calls.len().saturating_add(1));
         calls.push(call);
         calls.extend(remaining_calls);
@@ -2952,17 +2985,22 @@ impl<'a> AgentLoop<'a> {
 
         let mut summarised = 0_usize;
         let mut summary_turn = false;
+        let mut usage = None;
         if measure(&state.items) > target {
             if let Some(stop) = self.stop_before_turn(state, deadline) {
                 return Some(stop);
             }
             match self.summarise(state, target, sink) {
                 Summarised::Cancelled => return Some(cancelled()),
-                Summarised::Folded(count) => {
+                Summarised::Folded(count, reported) => {
                     summarised = count;
                     summary_turn = true;
+                    usage = reported;
                 }
-                Summarised::Failed => summary_turn = true,
+                Summarised::Failed(reported) => {
+                    summary_turn = true;
+                    usage = reported;
+                }
                 Summarised::Skipped => {}
             }
         }
@@ -2989,6 +3027,7 @@ impl<'a> AgentLoop<'a> {
             bytes_before: before,
             bytes_after: after,
             summary_turn,
+            usage,
         });
         None
     }
@@ -3064,10 +3103,11 @@ impl<'a> AgentLoop<'a> {
                              elided form and the run goes on"
                         ),
                     });
-                    return Summarised::Failed;
+                    return Summarised::Failed(None);
                 }
             }
         };
+        let reported = outcome.usage.clone();
         state.absorb_usage(outcome.usage, self.config.prices.as_ref(), sink);
         if self.cancel.is_cancelled() {
             return Summarised::Cancelled;
@@ -3088,7 +3128,7 @@ impl<'a> AgentLoop<'a> {
                           conversation it was asked to fold"
                     .to_owned(),
             });
-            return Summarised::Failed;
+            return Summarised::Failed(reported);
         }
 
         let opaque: Vec<Item> = state.items[FIRST_KEPT_ITEM..end]
@@ -3103,7 +3143,7 @@ impl<'a> AgentLoop<'a> {
             .push(Item::user(format!("{SUMMARY_MARKER}\n{summary}")));
         state.items.extend(opaque);
         state.items.extend(tail);
-        Summarised::Folded(end - FIRST_KEPT_ITEM)
+        Summarised::Folded(end - FIRST_KEPT_ITEM, reported)
     }
 
     /// What a run that would stop with `stop` actually does: ends with it, or turns again.

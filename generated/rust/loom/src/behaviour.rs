@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 1e5c1537dda3b2b7e22b162efd4278fee13385bc49abc57d7ce5100af963d5c1
-// contract digest d23e825dcb7bfe03fbe20cea75b62e61bd0a45f586a2de0740780d02d5d2b8a1
+// model digest 10e0941a85d43e690422930dd8850593cb2bee08d738ac2a6e7ffda9505f4b60
+// contract digest 0ebc9eb4e00a223ecca76b7fa83d021e0888f6c4084ae57ce52801a0b027c73c
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -50,6 +50,20 @@ pub trait ArgumentRequestStorage {
 
     /// Removes the instance with this identity.
     fn delete(&mut self, identity: &crate::run::ArgumentRequestId);
+}
+
+/// Where `loom.run.Compaction` is stored — a port the implementor provides.
+///
+/// Keyed by the identity `compaction_id`. Generated network entries supply an ephemeral implementation; durable storage remains a port.
+pub trait CompactionStorage {
+    /// The instance with this identity, or `None` where none is stored.
+    fn get(&self, identity: &crate::run::CompactionId) -> Option<crate::run::CompactionSnapshot>;
+
+    /// Stores this instance under its identity, replacing what was held.
+    fn put(&mut self, snapshot: crate::run::CompactionSnapshot);
+
+    /// Removes the instance with this identity.
+    fn delete(&mut self, identity: &crate::run::CompactionId);
 }
 
 /// Where `loom.run.Selection` is stored — a port the implementor provides.
@@ -188,6 +202,30 @@ where
     }
 }
 
+/// `loom.run.InterruptSession`, generated: every outcome is one the specification fully determines.
+impl<P> crate::run::obligations::InterruptSessionBehavior for Generated<P>
+where
+    P: SessionStorage,
+{
+    fn interrupt_session(&mut self, input: crate::run::InterruptSession) -> Result<crate::run::InterruptSessionOutcome, UnmetObligation> {
+        let _ = &input;
+        // `interrupted`: the default.
+        let Some(held) = SessionStorage::get(&self.ports, &input.session_id) else {
+            return Ok(crate::run::InterruptSessionOutcome::WrongStateUnknownInstance);
+        };
+        let _ = &held;
+        let held_state = held.state;
+        let moved = match held.refine() {
+            crate::run::AnySession::Active(instance) => crate::run::AnySession::Interrupted(instance.interrupt()),
+            _ => return Ok(crate::run::InterruptSessionOutcome::WrongState { error: crate::run::SessionStateConflict { state: held_state } }),
+        };
+        let next = moved.snapshot();
+        let answer = crate::run::InterruptSessionOutcome::Interrupted { session_interrupted: crate::run::SessionInterrupted { session_id: input.session_id.clone() } };
+        SessionStorage::put(&mut self.ports, next);
+        return Ok(answer);
+    }
+}
+
 /// `loom.run.OpenSession`, generated: every outcome is one the specification fully determines.
 impl<P> crate::run::obligations::OpenSessionBehavior for Generated<P>
 where
@@ -238,6 +276,41 @@ where
     }
 }
 
+/// `loom.run.RecordCompaction`, generated: every outcome is one the specification fully determines.
+impl<P> crate::run::obligations::RecordCompactionBehavior for Generated<P>
+where
+    P: CompactionStorage + SessionStorage,
+{
+    fn record_compaction(&mut self, input: crate::run::RecordCompaction) -> Result<crate::run::RecordCompactionOutcome, UnmetObligation> {
+        let _ = &input;
+        // `when_related:` reads the `loom.run.Session` row `input.session_id` names, through its storage port; an absent
+        // reference reads no row and selects no related branch.
+        let reference = Some(&input.session_id);
+        let related = reference.and_then(|identity| SessionStorage::get(&self.ports, identity));
+        // `session-unknown`: the reference names an identity no row carries.
+        if reference.is_some() && related.is_none() {
+            return Ok(crate::run::RecordCompactionOutcome::SessionUnknown { error: crate::run::SessionNotFound { session_id: input.session_id.clone() } });
+        }
+        let _ = &related;
+        // `session-not-active`: selected by the present related row, in declaration order.
+        if let Some(related) = &related {
+        if decided(equal(Some(&related.state).map(|value| match value { crate::run::SessionState::Active => "Active", crate::run::SessionState::Filed => "Filed", crate::run::SessionState::Interrupted => "Interrupted" }.to_owned()), Some("Active".to_owned())).map(|value| !value), "loom.run.RecordCompaction")? {
+            return Ok(crate::run::RecordCompactionOutcome::SessionNotActive { error: crate::run::SessionNotActive { session_id: input.session_id.clone() } });
+        }
+        }
+        // `recorded`: the default.
+        let identity: crate::run::CompactionId = input.compaction_id.clone();
+        let data = crate::run::CompactionData {
+            compaction_id: identity.clone(),
+            session_id: input.session_id.clone(),
+            usage: input.usage.clone(),
+        };
+        let answer = crate::run::RecordCompactionOutcome::Recorded { session_compacted: crate::run::SessionCompacted { compaction_id: identity.clone(), session_id: input.session_id.clone(), usage: input.usage.clone() } };
+        CompactionStorage::put(&mut self.ports, crate::run::AnyCompaction::Recorded(crate::run::Compaction::new(data)).snapshot());
+        return Ok(answer);
+    }
+}
+
 /// `loom.run.RecordTurn`, generated: every outcome is one the specification fully determines.
 impl<P> crate::run::obligations::RecordTurnBehavior for Generated<P>
 where
@@ -256,7 +329,7 @@ where
         let _ = &related;
         // `session-not-active`: selected by the present related row, in declaration order.
         if let Some(related) = &related {
-        if decided(equal(Some(&related.state).map(|value| match value { crate::run::SessionState::Active => "Active", crate::run::SessionState::Filed => "Filed" }.to_owned()), Some("Active".to_owned())).map(|value| !value), "loom.run.RecordTurn")? {
+        if decided(equal(Some(&related.state).map(|value| match value { crate::run::SessionState::Active => "Active", crate::run::SessionState::Filed => "Filed", crate::run::SessionState::Interrupted => "Interrupted" }.to_owned()), Some("Active".to_owned())).map(|value| !value), "loom.run.RecordTurn")? {
             return Ok(crate::run::RecordTurnOutcome::SessionNotActive { error: crate::run::SessionNotActive { session_id: input.session_id.clone() } });
         }
         }
@@ -356,6 +429,7 @@ where
         let held_state = held.state;
         let moved = match held.refine() {
             crate::run::AnySession::Filed(instance) => crate::run::AnySession::Active(instance.resume()),
+            crate::run::AnySession::Interrupted(instance) => crate::run::AnySession::Active(instance.resume()),
             _ => return Ok(crate::run::ResumeSessionOutcome::WrongState { error: crate::run::SessionStateConflict { state: held_state } }),
         };
         let next = moved.snapshot();

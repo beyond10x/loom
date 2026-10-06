@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-06T19:57:23Z",
+  "actor": "human:timo",
+  "artifact": "story:interruption-recovery",
+  "kind": "story",
+  "revision": 31,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check; task plan; task website on wave/2026-10-06-w4 eb5b6ee, ess 0.54.0 (1147 passed, 0 failed, 8 ignored)",
+    "reference": "eb5b6eec46ee8a8447a1b879238ec42d9ee0f570"
+  }
+}

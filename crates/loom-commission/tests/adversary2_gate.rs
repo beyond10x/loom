@@ -135,13 +135,13 @@ fn add_to_section(text: &str, section: &str, item: &str) -> String {
     }
 }
 
-/// An invariant ESS cannot witness (no view publishes `case_id`), whose own text — which ess 0.53.0
+/// An invariant ESS cannot witness (no view publishes `case_id`), whose own text — which ess 0.54.0
 /// quotes verbatim on the `refused:` detail line, before its summary — reads `0 refusal(s)`.
 const INVARIANT_QUOTING_A_ZERO_COUNT: &str =
     "    invariants:\n      - 'case_id != \"see 0 refusal(s) here\"'\n";
 
 /// Expectation 3 / ADR 0076 item 3: synthesis "with 0 refusals". The specification below makes
-/// ess 0.53.0 report `1 refusal(s)` on its summary line and exit 0; the refused detail line, printed
+/// ess 0.54.0 report `1 refusal(s)` on its summary line and exit 0; the refused detail line, printed
 /// first, quotes the author's invariant, which says `0 refusal(s)`. The gate must fail at step 3.
 #[test]
 fn adversary2_gate_reads_the_summary_count_not_a_quoted_one() {
@@ -198,13 +198,13 @@ fn adversary2_gate_refuses_an_older_required_ess() {
     let inputs = scratch.dir.join("ess/commission/ess-inputs.yaml");
     let text = fs::read_to_string(&inputs).unwrap();
     assert_eq!(
-        text.matches("requires: ess 0.53.0").count(),
+        text.matches("requires: ess 0.54.0").count(),
         1,
         "ess-inputs"
     );
     fs::write(
         &inputs,
-        text.replace("requires: ess 0.53.0", "requires: ess 0.51.0"),
+        text.replace("requires: ess 0.54.0", "requires: ess 0.51.0"),
     )
     .unwrap();
 

@@ -8,6 +8,49 @@ under **Unreleased** until the next release.
 
 ### Added
 
+- `Loom::run_loop` runs the ported Harness loop over one frontier of a commission, and
+  `harness::governed::LoopExecutor` runs it behind Commission's `AgentExecutor` port. Before every
+  turn Loom reads the case's current frontier from the governor and projects it, and the turn's
+  tool list is exactly that catalogue, each action under its published name
+  (`harness::governed::tool_name`: `repository.merge` is published as `repository_merge`); the
+  loop's own tools (an answer schema, delegation, skills, memories) are not published, whatever
+  the caller's configuration says, so no delegate runs, and a narrowing in it (`admits`) keeps
+  only the catalogue entries it names, turn by turn. A model's call of a catalogue action is the
+  selection, by the reasoning model, and carries its
+  arguments: Loom records the selection and the argument request, revalidates the selection
+  against the governor's current frontier, and returns it as a `ProposedAction`, stopping the loop
+  at an approval checkpoint before the effect. A call of anything outside the catalogue is refused
+  to the model by name and proposes nothing. Each completed turn is recorded once into the run's
+  session with the provider items it added (`loom.run.RecordTurn`, `Loom::turns`); one run holds
+  a session at a time, a second run proposes nothing, and the session is filed when its run ends
+  (`Loom::sessions`). Arguments the model wrote that Commission's JSON cannot carry end the run
+  with `NoUsefulAction`. Budgets as a Commission suspension are not wired yet, and `b10x-loom run`
+  does not use the loop yet.
+- A governed run can be interrupted and recovered. `Loom::interrupt` cancels the run holding a
+  session: the session becomes `Interrupted` (`loom.run.InterruptSession`), nothing more is
+  recorded into it, the run proposes nothing, and a call it was selecting when the cancel came is
+  stopped before revalidation, its selection left `Selected`. A run that stops at the approval
+  checkpoint of a call leaves that checkpoint held for its session, in memory.
+  `Loom::resume_loop` resumes a session by id, from `Filed` or `Interrupted`
+  (`loom.run.ResumeSession`), and continues from its held checkpoint: the catalogue is projected
+  from the frontier current at resume first, a selection in flight is revalidated, and a proposal
+  already returned (a merge awaiting its approval) is returned again without asking the model
+  while the case is at the revision it was selected at; otherwise the model is told the held call
+  is stale, naming both revisions, and chooses again. A resume that ends before its held call is
+  answered (a governor that cannot answer, an interrupt, a panic) keeps the checkpoint for
+  the next; a resume whose narrowing admits a tool the stopped run's did not, or whose commission
+  is for another case, fails as a changed configuration. `Loom::run_loop` still starts a
+  conversation of its own and drops a held checkpoint. `Loom::catalogues` lists the catalogue
+  each governed turn was offered, and the ported loop gains `AgentLoop::resume_asking`, which
+  resumes a checkpoint by asking the approval port again.
+- A governed run records each compaction of its session. The ported loop compacts before a
+  request once the conversation passes 80 % of a declared context window, aiming at 50 % (the
+  byte rule without a window); `Loom::run_loop` records each compaction on the run's session
+  (`loom.run.RecordCompaction`, `Loom::compactions`) with the usage the endpoint reported for its
+  summary request (`loom.run.ReportedUsage`), never an estimate, and `LoopEvent::Compacted` now
+  carries that usage. The request after a compaction carries the run's standing instruction
+  unchanged and the catalogue projected from the frontier current then; the model's summary stays
+  conversation content and is not recorded as a turn. The session file format is unchanged.
 - The local software-change slice keeps inspected file contents in a bounded run-local result
   store and sends previews with immutable references to the model. Argument generation can read
   selected ranges or JSON values and compose edit contents from references and literals. The
@@ -15,6 +58,16 @@ under **Unreleased** until the next release.
 - Edit bodies are represented by size and digest in later briefings. Test-result artifacts retain
   the runner's existing output tail and explicitly report partial capture. References expire with
   the briefing; there is no cross-run sharing or claimed task-quality/token-price improvement.
+
+### Changed
+
+- Each `Loom` derives its turn, catalogue, selection and argument-request ids in a namespace of
+  its own, random by default and fixed with `Loom::with_instance`, so two Looms, a Loom built to
+  recover a run among them, never give one id to two different selections on one frontier.
+- Loom requires ESS 0.54.0: the Loom, Commission and intake specifications require it, the
+  Commission conformance target builds on the 0.54.0 `ess-conformance` and `ess-primitives`, and
+  CI installs the 0.54.0 `ess`. The source formats are unchanged, and the generated Rust is the
+  same as under 0.53.0.
 
 ## [0.2.0] - 2026-10-06
 

@@ -68,6 +68,33 @@
     {
       "fields": [
         {
+          "name": "session_id",
+          "type": "SessionId"
+        },
+        {
+          "name": "usage",
+          "type": "Optional<ReportedUsage>"
+        }
+      ],
+      "id": "loom.run.Compaction",
+      "identity": {
+        "name": "compaction_id",
+        "type": "CompactionId"
+      },
+      "lifecycle": {
+        "initial": "Recorded",
+        "states": [
+          "Recorded"
+        ],
+        "terminal": [
+          "Recorded"
+        ]
+      },
+      "name": "Compaction"
+    },
+    {
+      "fields": [
+        {
           "name": "catalogue_id",
           "type": "CatalogueId"
         },
@@ -143,7 +170,8 @@
         "initial": "Active",
         "states": [
           "Active",
-          "Filed"
+          "Filed",
+          "Interrupted"
         ],
         "transitions": [
           {
@@ -155,7 +183,8 @@
           },
           {
             "from": [
-              "Filed"
+              "Filed",
+              "Interrupted"
             ],
             "name": "resume",
             "to": "Active"
@@ -166,6 +195,13 @@
             ],
             "name": "release",
             "to": "Filed"
+          },
+          {
+            "from": [
+              "Active"
+            ],
+            "name": "interrupt",
+            "to": "Interrupted"
           }
         ]
       },
@@ -227,6 +263,14 @@
       "kind": "owns",
       "name": "turns",
       "to": "loom.run.Turn",
+      "via": "session_id"
+    },
+    {
+      "cardinality": "many",
+      "from": "loom.run.Session",
+      "kind": "owns",
+      "name": "compactions",
+      "to": "loom.run.Compaction",
       "via": "session_id"
     },
     {

@@ -17,6 +17,18 @@
 //! Given a governor ([`Loom::with_governor`]), Loom revalidates each selection against the case's
 //! current frontier before proposing it ([`revalidation`]); Commission still rechecks every
 //! proposal before any effect.
+//!
+//! [`Loom::run_loop`] runs the ported Harness loop over a commission's frontier instead
+//! ([`harness::governed`]): each turn's tool list is the catalogue projected from the current
+//! frontier, the model's tool call is the selection and carries its arguments, and the same
+//! pipeline revalidates it before Loom proposes it. Each completed turn is recorded
+//! ([`Loom::turns`]), with the catalogue it was offered ([`Loom::catalogues`]), and so is each
+//! compaction of the run's session, with the usage the endpoint reported for it
+//! ([`Loom::compactions`], [`compaction`]).
+//!
+//! A governed run is interrupted by [`Loom::interrupt`] and its session resumed by id with
+//! [`Loom::resume_loop`], which continues from the approval checkpoint the run stopped at and
+//! revalidates against the frontier current at resume before it proposes anything ([`recovery`]).
 
 /// The run model, synthesized from the ESS specification.
 pub use loom as model;
@@ -30,9 +42,12 @@ pub mod revalidation;
 pub mod selection;
 pub mod session;
 
+use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hasher};
 use std::ops::Deref;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
 
@@ -53,11 +68,14 @@ use arguments::RequestRecord;
 use model::behaviour::SelectionStorage;
 use model::run::obligations::{RequestArgumentsBehavior, RevalidateSelectionBehavior};
 use model::run::{
-    ActionCatalogue, AnySelection, ArgumentRequestId, ArgumentRequestSnapshot, CatalogueId,
-    RequestArguments, RequestArgumentsOutcome, RevalidateSelection, RevalidateSelectionOutcome,
-    Selection, SelectionId, SelectionSnapshot, TurnId, action_catalogue_state, selection_state,
+    ActionCatalogue, ActionCatalogueSnapshot, AnySelection, ArgumentRequestId,
+    ArgumentRequestSnapshot, CatalogueId, CompactionSnapshot, RequestArguments,
+    RequestArgumentsOutcome, RevalidateSelection, RevalidateSelectionOutcome, Selection,
+    SelectionId, SelectionSnapshot, TurnId, TurnSnapshot, action_catalogue_state, selection_state,
 };
+use recovery::Recovery;
 use selection::{SelectionContext, SelectionRefusal};
+use session::TurnRecord;
 
 /// Loom as Commission's agent executor: a selector, an argument generator and the run's prompt,
 /// with the record of every selection it has made, every argument request that serves one and
@@ -65,8 +83,12 @@ use selection::{SelectionContext, SelectionRefusal};
 ///
 /// Each call of [`AgentExecutor::run`] is one run, numbered from 0 per Loom. A run's catalogue is
 /// identified by its frontier's id; its selection and its argument request get ids of their own,
-/// derived from the frontier's id and the run's number. Two runs on one frontier
-/// therefore keep two selections and two requests apart.
+/// derived from this Loom's namespace, the frontier's id and the run's number. Two runs on one
+/// frontier therefore keep two selections and two requests apart, and so do two Looms: each has a
+/// namespace of its own, random unless [`Loom::with_instance`] fixes it, so a Loom built to recover
+/// a run never gives an id an earlier one gave. The catalogues and selections of the governed loop
+/// ([`Loom::run_loop`], [`Loom::resume_loop`]) are numbered by one count of this Loom's, across all
+/// of its runs, so a resumed run never repeats an id an earlier run of the same Loom gave.
 ///
 /// `V` is how Loom holds the governor it revalidates selections against: a reference, `Box`, `Rc`
 /// or `Arc` of a [`Governor`], given by [`Loom::with_governor`]. A Loom made by [`Loom::new`] holds
@@ -75,8 +97,12 @@ pub struct Loom<S, G, V = &'static NoGovernor> {
     selector: S,
     arguments: G,
     prompt: String,
+    instance: String,
     record: Mutex<RequestRecord>,
+    turns: Mutex<TurnRecord>,
+    recovery: Mutex<Recovery>,
     runs: AtomicU64,
+    numbered: AtomicU64,
     governor: Option<V>,
 }
 
@@ -101,14 +127,19 @@ impl Governor for NoGovernor {
 
 impl<S, G> Loom<S, G> {
     /// A Loom that selects with `selector`, generates arguments with `arguments` and works on
-    /// `prompt`, with an empty record, no runs yet and no governor.
+    /// `prompt`, with an empty record, no runs yet, no governor and a random namespace for its run
+    /// ids.
     pub fn new(selector: S, arguments: G, prompt: impl Into<String>) -> Self {
         Self {
             selector,
             arguments,
             prompt: prompt.into(),
+            instance: fresh_instance(),
             record: Mutex::default(),
+            turns: Mutex::default(),
+            recovery: Mutex::default(),
             runs: AtomicU64::new(0),
+            numbered: AtomicU64::new(0),
             governor: None,
         }
     }
@@ -126,14 +157,32 @@ impl<S, G> Loom<S, G> {
             selector: self.selector,
             arguments: self.arguments,
             prompt: self.prompt,
+            instance: self.instance,
             record: self.record,
+            turns: self.turns,
+            recovery: self.recovery,
             runs: self.runs,
+            numbered: self.numbered,
             governor: Some(governor),
         }
     }
 }
 
 impl<S, G, V> Loom<S, G, V> {
+    /// This Loom, deriving its run ids in the namespace `instance` instead of a random one. Two
+    /// Looms in one namespace give the same id to the same run, so fix it only where ids must be
+    /// reproduced, as in a test, and never share one between Looms that run side by side.
+    #[must_use]
+    pub fn with_instance(mut self, instance: impl Into<String>) -> Self {
+        self.instance = instance.into();
+        self
+    }
+
+    /// Every catalogue [`Loom::run_loop`] offered a turn, in the order offered: one per turn, the
+    /// catalogue projected from the case's current frontier for it.
+    pub fn catalogues(&self) -> Vec<ActionCatalogueSnapshot> {
+        self.turn_record().catalogues().to_vec()
+    }
     /// Every selection this Loom has made, one per run that selected, in the order it made them.
     pub fn selections(&self) -> Vec<SelectionSnapshot> {
         self.record().selections().to_vec()
@@ -152,9 +201,39 @@ impl<S, G, V> Loom<S, G, V> {
         self.record().revalidations().to_vec()
     }
 
+    /// Every turn [`Loom::run_loop`] recorded (`loom.run.RecordTurn`), in the order recorded: one
+    /// per turn a provider completed, with the items it added.
+    pub fn turns(&self) -> Vec<TurnSnapshot> {
+        self.turn_record().turns().to_vec()
+    }
+
+    /// Every compaction [`Loom::run_loop`] recorded (`loom.run.RecordCompaction`), in the order
+    /// recorded: one per compaction the loop made, on the session it was made in, with the usage
+    /// the endpoint reported for its summary request ([`compaction`]).
+    pub fn compactions(&self) -> Vec<CompactionSnapshot> {
+        self.turn_record().compactions().to_vec()
+    }
+
     /// The record, whatever a panicking holder left: each write to it is one whole snapshot.
     fn record(&self) -> MutexGuard<'_, RequestRecord> {
         self.record.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The sessions and turns, whatever a panicking holder left: each write is one whole snapshot.
+    fn turn_record(&self) -> MutexGuard<'_, TurnRecord> {
+        self.turns.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The running runs and held checkpoints, whatever a panicking holder left. Taken before the
+    /// turn record whenever both are held, never after it.
+    fn recovery(&self) -> MutexGuard<'_, Recovery> {
+        self.recovery.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The next number of this Loom's governed runs, catalogues and selections: from 0, across
+    /// every run, resumed runs included, so no two get one number.
+    fn next_number(&self) -> u64 {
+        self.numbered.fetch_add(1, Ordering::Relaxed)
     }
 }
 
@@ -205,12 +284,54 @@ fn has_deciding_entry(
         })
 }
 
-/// The `kind` id of run number `run` on the frontier `frontier_id`: a name-based UUID (RFC 9562
-/// version 8) over the SHA-256 of the three. Within one `Loom`, two runs, two frontiers or two kinds
-/// get different ids, up to a SHA-256 collision; a second `Loom` (or one restarted) numbers its runs
-/// from 0 again, so its ids are unique only within itself (story:interruption-recovery).
-fn run_id(kind: &str, frontier_id: &str, run: u64) -> model::primitives::Uuid {
-    let digest = Sha256::digest(format!("{kind}\n{frontier_id}\n{run}").as_bytes());
+/// A namespace no other Loom is given: SHA-256 over the process, the time, a count of the
+/// namespaces this process made, and two randomly keyed hashes of that count.
+fn fresh_instance() -> String {
+    static MADE: AtomicU64 = AtomicU64::new(0);
+    let made = MADE.fetch_add(1, Ordering::Relaxed);
+    let keyed = || {
+        let mut hasher = RandomState::new().build_hasher();
+        hasher.write_u64(made);
+        hasher.finish()
+    };
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos());
+    let digest = Sha256::digest(
+        format!(
+            "{}\n{nanos}\n{made}\n{:016x}{:016x}",
+            std::process::id(),
+            keyed(),
+            keyed()
+        )
+        .as_bytes(),
+    );
+    digest[..16]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// The `kind` id of number `run` in `scope` (a frontier, a session or a catalogue), in the Loom
+/// namespace `instance`: a name-based UUID (RFC 9562 version 8) over the SHA-256 of the four.
+/// Within one namespace, two runs, two scopes or two kinds get different ids, up to a SHA-256
+/// collision; two Looms get different ids because each has its own namespace, so a Loom built to
+/// recover a run, which numbers its runs from 0 again, never repeats an earlier Loom's ids. Every
+/// turn, catalogue, selection and argument-request id is one. A turn is numbered by its index in
+/// its session; the others by a count of their Loom's that no run restarts, so none repeats.
+fn loom_id(instance: &str, kind: &str, scope: &str, run: u64) -> model::primitives::Uuid {
+    name_uuid(&format!("{instance}\n{kind}\n{scope}\n{run}"))
+}
+
+/// The `kind` id of number `run` in `scope`, in no Loom's namespace: the same in every Loom. Only
+/// a compaction's id is one ([`compaction`]); it is unique within its session.
+fn run_id(kind: &str, scope: &str, run: u64) -> model::primitives::Uuid {
+    name_uuid(&format!("{kind}\n{scope}\n{run}"))
+}
+
+/// The name-based UUID (RFC 9562 version 8) over the SHA-256 of `name`.
+fn name_uuid(name: &str) -> model::primitives::Uuid {
+    let digest = Sha256::digest(name.as_bytes());
     let mut bytes = [0u8; 16];
     bytes.copy_from_slice(&digest[..16]);
     bytes[6] = (bytes[6] & 0x0f) | 0x80;
@@ -277,17 +398,76 @@ where
             CatalogueId(model::primitives::Uuid(identity())),
             TurnId(model::primitives::Uuid(identity())),
         );
-        let selection = match self.select(
-            &catalogue,
-            SelectionId(run_id("selection", &identity(), run)),
-        ) {
+        let prepared = self.prepare(
+            &self.selector,
+            &self.arguments,
+            (frontier, &catalogue),
+            (
+                SelectionId(loom_id(&self.instance, "selection", &identity(), run)),
+                ArgumentRequestId(loom_id(
+                    &self.instance,
+                    "argument-request",
+                    &identity(),
+                    run,
+                )),
+            ),
+        );
+        match prepared {
+            Ok(prepared) => self.finish(&commission.data().case_id, prepared),
+            Err(outcome) => outcome,
+        }
+    }
+}
+
+/// A selection the pipeline has recorded and generated arguments for, not yet revalidated: what
+/// [`Loom::prepare`] hands [`Loom::finish`].
+struct Prepared {
+    selection_id: SelectionId,
+    action: String,
+    arguments: Value,
+}
+
+impl Prepared {
+    /// The proposal this selection becomes once it is revalidated.
+    fn proposal(&self) -> ExecutorOutcomeProposedAction {
+        ExecutorOutcomeProposedAction {
+            action: self.action.clone(),
+            arguments: ProposedActionArguments(self.arguments.clone()),
+        }
+    }
+}
+
+impl<S, G, V> Loom<S, G, V> {
+    /// From a selector's choice to the arguments of the selected action, on `frontier` and the
+    /// catalogue projected from it, under the ids given: the selection, Commission's admission,
+    /// the argument request, then the generator. [`Loom::finish`] revalidates what it prepared;
+    /// the two are one pipeline, which [`AgentExecutor::run`] runs with this Loom's own selector
+    /// and generator, and [`Loom::run_loop`] with the model's tool call.
+    ///
+    /// Every selection made is recorded; for one Commission does not refuse, the argument request
+    /// is recorded against it before the generator is handed the selected catalogue entry. What it
+    /// returns instead of a prepared selection is what [`AgentExecutor::run`] documents.
+    fn prepare(
+        &self,
+        selector: &impl ActionSelector,
+        arguments: &impl ArgumentGenerator,
+        (frontier, catalogue): (
+            &Frontier<frontier_state::Issued>,
+            &ActionCatalogue<action_catalogue_state::Projected>,
+        ),
+        (selection_id, argument_request_id): (SelectionId, ArgumentRequestId),
+    ) -> Result<Prepared, ExecutorOutcome> {
+        let context = SelectionContext {
+            prompt: self.prompt.clone(),
+        };
+        let selection = match selection::select(selector, &context, catalogue, selection_id) {
             Ok(selection) => selection,
             Err(SelectionRefusal::NotInCatalogue(_))
             | Err(SelectionRefusal::Selector(SelectorError::NothingAdmissible)) => {
-                return no_useful_action();
+                return Err(no_useful_action());
             }
             Err(SelectionRefusal::Selector(SelectorError::Unavailable(error))) => {
-                return outage(error);
+                return Err(outage(error));
             }
         };
         let selection_id = selection.data().selection_id.clone();
@@ -301,7 +481,7 @@ where
         if matches!(admission, Admission::Refused(_))
             || !has_deciding_entry(frontier, &selected, &admission)
         {
-            return no_useful_action();
+            return Err(no_useful_action());
         }
         // The generator is handed the one entry the selection names, never the rest of the
         // catalogue (Atlas ADR 0073, step 1); the selection was checked against the catalogue.
@@ -311,32 +491,42 @@ where
             .iter()
             .find(|entry| entry.action == selected)
         else {
-            return no_useful_action();
+            return Err(no_useful_action());
         };
         let requested = self.record().request_arguments(RequestArguments {
-            argument_request_id: ArgumentRequestId(run_id("argument-request", &identity(), run)),
+            argument_request_id,
             selection_id: selection_id.clone(),
         });
         if !matches!(requested, Ok(RequestArgumentsOutcome::Requested { .. })) {
-            return no_useful_action();
+            return Err(no_useful_action());
         }
 
         let context = ArgumentContext {
             prompt: self.prompt.clone(),
         };
-        let arguments = match self.arguments.generate(&context, entry) {
-            Ok(arguments) => arguments,
-            Err(error) => return outage(error),
-        };
+        let arguments = arguments.generate(&context, entry).map_err(outage)?;
+        Ok(Prepared {
+            selection_id,
+            action: selected,
+            arguments,
+        })
+    }
+}
+
+impl<S, G, V> Loom<S, G, V>
+where
+    V: Deref,
+    V::Target: Governor,
+{
+    /// The proposal of what [`Loom::prepare`] prepared, once revalidated against the governor's
+    /// current frontier of `case`; what [`Loom::revalidate`] returns instead when it is refused.
+    fn finish(&self, case: &CaseId, prepared: Prepared) -> ExecutorOutcome {
         // Revalidation is the last step before the proposal (Atlas ADR 0072): it moves the
         // selection out of `Selected`, which the argument request above requires.
-        if let Err(refused) = self.revalidate(&commission.data().case_id, selection_id) {
+        if let Err(refused) = self.revalidate(case, prepared.selection_id.clone()) {
             return refused;
         }
-        ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
-            action: selected,
-            arguments: ProposedActionArguments(arguments),
-        })
+        ExecutorOutcome::ProposedAction(prepared.proposal())
     }
 }
 
@@ -536,12 +726,13 @@ mod tests {
         assert_eq!(outcome, ExecutorOutcome::NoUsefulAction(Unit(true)));
     }
 
-    /// A run id is a version-8 UUID, the same for the same inputs, and different when the kind,
-    /// the frontier or the run number differs.
+    /// A run id is a version-8 UUID, the same for the same inputs, and different when the Loom's
+    /// namespace, the kind, the frontier or the run number differs.
     #[test]
-    fn run_ids_are_uuids_of_their_kind_frontier_and_run() {
+    fn run_ids_are_uuids_of_their_namespace_kind_frontier_and_run() {
         const FRONTIER: &str = "00000000-0000-4000-8000-000000000003";
-        let id = run_id("selection", FRONTIER, 0).0;
+        const LOOM: &str = "loom-a";
+        let id = loom_id(LOOM, "selection", FRONTIER, 0).0;
         let groups: Vec<&str> = id.split('-').collect();
         assert_eq!(
             groups.iter().map(|group| group.len()).collect::<Vec<_>>(),
@@ -558,14 +749,31 @@ mod tests {
             matches!(groups[3].as_bytes()[0], b'8' | b'9' | b'a' | b'b'),
             "RFC 9562 variant: {id}"
         );
-        assert_eq!(run_id("selection", FRONTIER, 0).0, id);
+        assert_eq!(loom_id(LOOM, "selection", FRONTIER, 0).0, id);
         for other in [
-            run_id("argument-request", FRONTIER, 0),
-            run_id("selection", FRONTIER, 1),
-            run_id("selection", "00000000-0000-4000-8000-000000000004", 0),
+            loom_id("loom-b", "selection", FRONTIER, 0),
+            loom_id(LOOM, "argument-request", FRONTIER, 0),
+            loom_id(LOOM, "selection", FRONTIER, 1),
+            loom_id(LOOM, "selection", "00000000-0000-4000-8000-000000000004", 0),
             model::primitives::Uuid(FRONTIER.to_owned()),
         ] {
             assert_ne!(other.0, id);
         }
+    }
+
+    /// Each Loom gets a namespace no other Loom has, unless one is fixed for it.
+    #[test]
+    fn each_loom_has_its_own_namespace_unless_one_is_fixed() {
+        let new = || {
+            Loom::new(
+                Scripted(Ok("metrics.inspect")),
+                EmptyObjectArguments,
+                "inspect",
+            )
+        };
+        let (first, second) = (new(), new());
+        assert_ne!(first.instance, second.instance);
+        assert_eq!(first.instance.len(), 32, "{}", first.instance);
+        assert_eq!(new().with_instance("loom-a").instance, "loom-a");
     }
 }
