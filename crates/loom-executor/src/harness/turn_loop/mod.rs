@@ -2204,6 +2204,38 @@ impl<'a> AgentLoop<'a> {
         decision: ApprovalDecision,
         sink: &mut dyn LoopSink,
     ) -> Result<LoopOutcome, LoopError> {
+        self.resume_checkpoint(checkpoint, Some(decision), sink)
+    }
+
+    /// Continues a run suspended by an exact approval checkpoint, asking the attached approval
+    /// port again about the exact pending call.
+    ///
+    /// For an embedder whose approval port decides from current state rather than relaying a
+    /// decision made while the run was suspended. The dynamic inventory is refreshed first, then the
+    /// pending call meets the whole gate again, the approver included: the port may approve it,
+    /// deny it, or defer it again, which stops the run at a new checkpoint. Everything else is as
+    /// [`resume_approval`](Self::resume_approval).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LoopError::Config`] for a malformed checkpoint, and the ordinary budget,
+    /// environment, or wire errors for resumed execution.
+    pub fn resume_asking(
+        &mut self,
+        checkpoint: ApprovalCheckpoint,
+        sink: &mut dyn LoopSink,
+    ) -> Result<LoopOutcome, LoopError> {
+        self.resume_checkpoint(checkpoint, None, sink)
+    }
+
+    /// [`resume_approval`](Self::resume_approval) with `decision` as the resolution of the pending
+    /// call, and [`resume_asking`](Self::resume_asking) without one.
+    fn resume_checkpoint(
+        &mut self,
+        checkpoint: ApprovalCheckpoint,
+        decision: Option<ApprovalDecision>,
+        sink: &mut dyn LoopSink,
+    ) -> Result<LoopOutcome, LoopError> {
         if checkpoint.format != "harness.approval-checkpoint/1"
             || checkpoint.checkpoint_id.trim().is_empty()
         {
@@ -2216,7 +2248,7 @@ impl<'a> AgentLoop<'a> {
                 "the run configuration changed after the approval checkpoint".to_owned(),
             ));
         }
-        if matches!(decision, ApprovalDecision::Deferred { .. }) {
+        if matches!(decision, Some(ApprovalDecision::Deferred { .. })) {
             return Err(LoopError::Config(
                 "a checkpoint must be resumed with an approval or denial".to_owned(),
             ));
@@ -2241,7 +2273,7 @@ impl<'a> AgentLoop<'a> {
             .map(Duration::from_millis)
             .map(|remaining| Instant::now() + remaining);
         self.refresh_environment(state.turns.saturating_add(1), sink)?;
-        self.resumed_decision = Some((call.call_id.clone(), invoked, decision));
+        self.resumed_decision = decision.map(|decision| (call.call_id.clone(), invoked, decision));
         let mut calls = Vec::with_capacity(remaining_calls.len().saturating_add(1));
         calls.push(call);
         calls.extend(remaining_calls);

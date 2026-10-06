@@ -11,8 +11,8 @@ use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::{
     ActionStatus, AgentRevisionId, AuthorityContext, CaseId, Commission, CommissionData,
-    CommissionId, ExecutorOutcome, Frontier, FrontierAction, FrontierData, FrontierId,
-    PrincipalId, commission_state, frontier_state,
+    CommissionId, ExecutorOutcome, Frontier, FrontierAction, FrontierData, FrontierId, PrincipalId,
+    commission_state, frontier_state,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_executor::model::run::CatalogueEntry;

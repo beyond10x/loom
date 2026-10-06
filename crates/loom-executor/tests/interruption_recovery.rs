@@ -81,7 +81,11 @@ fn cancelled_after_a_selection_and_resumed_on_a_moved_case() {
     let session = session("00000000-0000-4000-8000-00000000d001");
     let commission = commission(&case);
     let (mut model, requests) = Scripted::new(vec![
-        calls(vec![call("call_merge", "repository_merge", json!({"strategy": "squash"}))]),
+        calls(vec![call(
+            "call_merge",
+            "repository_merge",
+            json!({"strategy": "squash"}),
+        )]),
         prose("NOTHING-LEFT-TO-PROPOSE"),
     ]);
 
@@ -155,7 +159,11 @@ fn cancelled_after_a_selection_and_resumed_on_a_moved_case() {
         "1. the resumed run's first catalogue: {first_after:?}"
     );
     let sent = requests.lock().expect("lock").clone();
-    assert_eq!(sent.len(), 2, "one request before the interruption, one after");
+    assert_eq!(
+        sent.len(),
+        2,
+        "one request before the interruption, one after"
+    );
     assert_eq!(
         tool_names(&sent[1]),
         published(2, &moved_actions()),
@@ -243,8 +251,7 @@ fn suspended_at_the_merge_approval_and_resumed_once_granted() {
     assert_eq!(selections_at_suspension.len(), 1);
 
     // The fakes grant the approval; the frontier is otherwise unchanged.
-    let granted =
-        StaticAuthorityProvider::new().answer(WRITE, AuthorityVerdict::Allow(Unit(true)));
+    let granted = StaticAuthorityProvider::new().answer(WRITE, AuthorityVerdict::Allow(Unit(true)));
     let resumed = loom.resume_loop(
         &session.session_id,
         LoopPorts {
@@ -282,12 +289,21 @@ fn suspended_at_the_merge_approval_and_resumed_on_a_moved_case() {
     let case = CaseId(CASE.to_owned());
     let governor = FakeGovernor::new();
     governor.script(case.clone(), [answer(1, ready_actions())]);
-    let loom = Loom::new(Counting::default(), EmptyObjectArguments, PROMPT).with_governor(&governor);
+    let loom =
+        Loom::new(Counting::default(), EmptyObjectArguments, PROMPT).with_governor(&governor);
     let session = session("00000000-0000-4000-8000-00000000d004");
     let commission = commission(&case);
     let (mut model, requests) = Scripted::new(vec![
-        calls(vec![call("call_merge", "repository_merge", json!({"strategy": "squash"}))]),
-        calls(vec![call("call_merge_again", "repository_merge", json!({"strategy": "rebase"}))]),
+        calls(vec![call(
+            "call_merge",
+            "repository_merge",
+            json!({"strategy": "squash"}),
+        )]),
+        calls(vec![call(
+            "call_merge_again",
+            "repository_merge",
+            json!({"strategy": "rebase"}),
+        )]),
     ]);
 
     let first = loom.run_loop(
@@ -338,7 +354,10 @@ fn suspended_at_the_merge_approval_and_resumed_on_a_moved_case() {
         selections[1].data.catalogue_id, first_after.data.catalogue_id,
         "4. the proposal was selected from the catalogue projected at resume"
     );
-    assert_eq!(selections[1].data.strategy, SelectionStrategy::ReasoningModel);
+    assert_eq!(
+        selections[1].data.strategy,
+        SelectionStrategy::ReasoningModel
+    );
     assert_eq!(selections[1].state, SelectionState::Admitted);
     let sent = requests.lock().expect("lock").clone();
     assert_eq!(sent.len(), 2, "{sent:?}");
@@ -358,10 +377,7 @@ struct InterruptAt<'l, S, G, V> {
     session: SessionId,
     at: &'static str,
     interrupted: Option<
-        Result<
-            InterruptSessionOutcome,
-            b10x_loom_executor::model::obligation::UnmetObligation,
-        >,
+        Result<InterruptSessionOutcome, b10x_loom_executor::model::obligation::UnmetObligation>,
     >,
 }
 

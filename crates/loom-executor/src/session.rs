@@ -44,11 +44,12 @@
 //! # Turns
 //!
 //! [`TurnRecord`] is Loom's own, not ported: the sessions a governed run records its turns into,
-//! those turns and the compactions made in them, in memory (`loom.run.OpenSession`,
-//! `loom.run.ResumeSession`, `loom.run.FileSession`, `loom.run.RecordTurn`,
-//! `loom.run.RecordCompaction`, generated). It is the run's record of what each completed turn
-//! added and what each compaction cost, not a transcript a following run replays; the session file
-//! above is that, and its format does not carry compactions.
+//! those turns, the catalogue each turn was offered and the compactions made in them, in memory
+//! (`loom.run.OpenSession`, `loom.run.ResumeSession`, `loom.run.FileSession`,
+//! `loom.run.InterruptSession`, `loom.run.RecordTurn`, `loom.run.RecordCompaction`, generated). It
+//! is the run's record of what each completed turn added and what each compaction cost, not a
+//! transcript a following run replays; the session file above is that, and its format does not
+//! carry compactions or the `Interrupted` state.
 //!
 //! # Recovering a session by hand
 //!
@@ -97,15 +98,15 @@ use crate::model::behaviour::{CompactionStorage, Generated, SessionStorage, Turn
 use crate::model::obligation::UnmetObligation;
 use crate::model::primitives::Uuid;
 use crate::model::run::obligations::{
-    FileSessionBehavior, OpenSessionBehavior, RecordCompactionBehavior, RecordTurnBehavior,
-    ResumeSessionBehavior,
+    FileSessionBehavior, InterruptSessionBehavior, OpenSessionBehavior, RecordCompactionBehavior,
+    RecordTurnBehavior, ResumeSessionBehavior,
 };
 use crate::model::run::{
-    CommissionRunId, CompactionId, CompactionSnapshot, FileSession, FileSessionOutcome,
-    OpenSession, OpenSessionOutcome, RecordCompaction, RecordCompactionOutcome, RecordTurn,
-    RecordTurnOutcome, ResumeSession, ResumeSessionOutcome, RunEnding, SessionData, SessionExists,
-    SessionId, SessionSnapshot, SessionState, SessionStateConflict, SessionWireMismatch, TurnId,
-    TurnSnapshot,
+    ActionCatalogueSnapshot, CommissionRunId, CompactionId, CompactionSnapshot, FileSession,
+    FileSessionOutcome, InterruptSession, InterruptSessionOutcome, OpenSession, OpenSessionOutcome,
+    RecordCompaction, RecordCompactionOutcome, RecordTurn, RecordTurnOutcome, ResumeSession,
+    ResumeSessionOutcome, RunEnding, SessionData, SessionExists, SessionId, SessionSnapshot,
+    SessionState, SessionStateConflict, SessionWireMismatch, TurnId, TurnSnapshot,
 };
 
 /// The shape this module writes and the only one it reads.
@@ -624,19 +625,21 @@ impl Drop for Claim {
     }
 }
 
-/// The sessions a governed run records its turns into, those turns and the compactions made in
-/// them, each in the order recorded.
+/// The sessions a governed run records its turns into, those turns, the catalogue offered for each
+/// turn and the compactions made in them, each in the order recorded.
 ///
 /// `loom.run.OpenSession`, `loom.run.ResumeSession`, `loom.run.FileSession`,
-/// `loom.run.RecordTurn` and `loom.run.RecordCompaction` are the generated behaviour over this
-/// record: a session opened under an identity it already holds is refused `session-exists`, only a
-/// `Filed` session resumes and only an `Active` one is filed, and a turn or a compaction is refused
-/// for a session it does not hold or one no longer `Active`. A session, a turn or a compaction
-/// stored under an identity already held replaces it.
+/// `loom.run.InterruptSession`, `loom.run.RecordTurn` and `loom.run.RecordCompaction` are the
+/// generated behaviour over this record: a session opened under an identity it already holds is
+/// refused `session-exists`, only a `Filed` or `Interrupted` session resumes, only an `Active` one
+/// is filed or interrupted, and a turn or a compaction is refused for a session it does not hold or
+/// one no longer `Active`. A session, a turn or a compaction stored under an identity already held
+/// replaces it. Catalogues are kept as they were offered, one per offer, never replaced.
 #[derive(Debug, Default)]
 pub struct TurnRecord {
     sessions: Vec<SessionSnapshot>,
     turns: Vec<TurnSnapshot>,
+    catalogues: Vec<ActionCatalogueSnapshot>,
     compactions: Vec<CompactionSnapshot>,
 }
 
@@ -645,6 +648,26 @@ impl TurnRecord {
     #[must_use]
     pub fn sessions(&self) -> &[SessionSnapshot] {
         &self.sessions
+    }
+
+    /// The state `session` is in, or [`None`] for a session never opened here.
+    #[must_use]
+    pub fn state_of(&self, session: &SessionId) -> Option<SessionState> {
+        self.sessions
+            .iter()
+            .find(|held| &held.data.session_id == session)
+            .map(|held| held.state)
+    }
+
+    /// Every catalogue a turn was offered, in the order offered.
+    #[must_use]
+    pub fn catalogues(&self) -> &[ActionCatalogueSnapshot] {
+        &self.catalogues
+    }
+
+    /// Keeps `catalogue` as the one offered for its turn.
+    pub(crate) fn offered(&mut self, catalogue: ActionCatalogueSnapshot) {
+        self.catalogues.push(catalogue);
     }
 
     /// Every recorded turn, in the order recorded.
@@ -788,7 +811,19 @@ impl RecordCompactionBehavior for TurnRecord {
     }
 }
 
-/// `loom.run.ResumeSession`, generated, over this record: only a `Filed` session resumes.
+/// `loom.run.InterruptSession`, generated, over this record: only an `Active` session is
+/// interrupted.
+impl InterruptSessionBehavior for TurnRecord {
+    fn interrupt_session(
+        &mut self,
+        input: InterruptSession,
+    ) -> Result<InterruptSessionOutcome, UnmetObligation> {
+        self.generated(|generated| generated.interrupt_session(input))
+    }
+}
+
+/// `loom.run.ResumeSession`, generated, over this record: only a `Filed` or `Interrupted` session
+/// resumes.
 impl ResumeSessionBehavior for TurnRecord {
     fn resume_session(
         &mut self,
