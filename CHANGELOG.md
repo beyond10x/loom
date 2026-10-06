@@ -6,6 +6,22 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- `Loom::run_loop` runs the ported Harness loop over one frontier of a commission, and
+  `harness::governed::LoopExecutor` runs it behind Commission's `AgentExecutor` port. Before every
+  turn Loom reads the case's current frontier from the governor and projects it, and the turn's
+  tool list is exactly that catalogue, each action under its published name
+  (`harness::governed::tool_name`: `repository.merge` is published as `repository_merge`). A
+  model's call of a catalogue action is the selection, by the reasoning model, and carries its
+  arguments: Loom records the selection and the argument request, revalidates the selection
+  against the governor's current frontier, and returns it as a `ProposedAction`, stopping the loop
+  at an approval checkpoint before the effect. A call of anything outside the catalogue is refused
+  to the model by name and proposes nothing. Each completed turn is recorded once into the run's
+  session with the provider items it added (`loom.run.RecordTurn`, `Loom::turns`). Compaction,
+  budgets as a Commission suspension, and resuming a run once Commission has acted are not wired
+  yet, and `b10x-loom run` does not use the loop yet.
+
 ## [0.2.0] - 2026-10-06
 
 Loom 0.2.0 runs the tests of a governed case inside embedded Substrate confinement by default,

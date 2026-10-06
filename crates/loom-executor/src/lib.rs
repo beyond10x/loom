@@ -17,6 +17,12 @@
 //! Given a governor ([`Loom::with_governor`]), Loom revalidates each selection against the case's
 //! current frontier before proposing it ([`revalidation`]); Commission still rechecks every
 //! proposal before any effect.
+//!
+//! [`Loom::run_loop`] runs the ported Harness loop over a commission's frontier instead
+//! ([`harness::governed`]): each turn's tool list is the catalogue projected from the current
+//! frontier, the model's tool call is the selection and carries its arguments, and the same
+//! pipeline revalidates it before Loom proposes it. Each completed turn is recorded
+//! ([`Loom::turns`]).
 
 /// The run model, synthesized from the ESS specification.
 pub use loom as model;
@@ -55,9 +61,11 @@ use model::run::obligations::{RequestArgumentsBehavior, RevalidateSelectionBehav
 use model::run::{
     ActionCatalogue, AnySelection, ArgumentRequestId, ArgumentRequestSnapshot, CatalogueId,
     RequestArguments, RequestArgumentsOutcome, RevalidateSelection, RevalidateSelectionOutcome,
-    Selection, SelectionId, SelectionSnapshot, TurnId, action_catalogue_state, selection_state,
+    Selection, SelectionId, SelectionSnapshot, TurnId, TurnSnapshot, action_catalogue_state,
+    selection_state,
 };
 use selection::{SelectionContext, SelectionRefusal};
+use session::TurnRecord;
 
 /// Loom as Commission's agent executor: a selector, an argument generator and the run's prompt,
 /// with the record of every selection it has made, every argument request that serves one and
@@ -76,6 +84,7 @@ pub struct Loom<S, G, V = &'static NoGovernor> {
     arguments: G,
     prompt: String,
     record: Mutex<RequestRecord>,
+    turns: Mutex<TurnRecord>,
     runs: AtomicU64,
     governor: Option<V>,
 }
@@ -108,6 +117,7 @@ impl<S, G> Loom<S, G> {
             arguments,
             prompt: prompt.into(),
             record: Mutex::default(),
+            turns: Mutex::default(),
             runs: AtomicU64::new(0),
             governor: None,
         }
@@ -127,6 +137,7 @@ impl<S, G> Loom<S, G> {
             arguments: self.arguments,
             prompt: self.prompt,
             record: self.record,
+            turns: self.turns,
             runs: self.runs,
             governor: Some(governor),
         }
@@ -152,9 +163,20 @@ impl<S, G, V> Loom<S, G, V> {
         self.record().revalidations().to_vec()
     }
 
+    /// Every turn [`Loom::run_loop`] recorded (`loom.run.RecordTurn`), in the order recorded: one
+    /// per turn a provider completed, with the items it added.
+    pub fn turns(&self) -> Vec<TurnSnapshot> {
+        self.turn_record().turns().to_vec()
+    }
+
     /// The record, whatever a panicking holder left: each write to it is one whole snapshot.
     fn record(&self) -> MutexGuard<'_, RequestRecord> {
         self.record.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The sessions and turns, whatever a panicking holder left: each write is one whole snapshot.
+    fn turn_record(&self) -> MutexGuard<'_, TurnRecord> {
+        self.turns.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
@@ -277,10 +299,47 @@ where
             CatalogueId(model::primitives::Uuid(identity())),
             TurnId(model::primitives::Uuid(identity())),
         );
-        let selection = match self.select(
-            &catalogue,
-            SelectionId(run_id("selection", &identity(), run)),
-        ) {
+        self.propose(
+            &self.selector,
+            &self.arguments,
+            &commission.data().case_id,
+            (frontier, &catalogue),
+            (
+                SelectionId(run_id("selection", &identity(), run)),
+                ArgumentRequestId(run_id("argument-request", &identity(), run)),
+            ),
+        )
+    }
+}
+
+impl<S, G, V> Loom<S, G, V>
+where
+    V: Deref,
+    V::Target: Governor,
+{
+    /// From a selector's choice to a proposal, on `frontier` and the catalogue projected from it,
+    /// under the ids given: the selection, Commission's admission, the argument request, the
+    /// generator, then revalidation against the governor's current frontier. [`AgentExecutor::run`] runs it with
+    /// this Loom's own selector and generator, and [`Loom::run_loop`] with the model's tool call.
+    ///
+    /// Every selection made is recorded; for one Commission does not refuse, the argument request
+    /// is recorded against it before the generator is handed the selected catalogue entry. What it
+    /// returns instead of a proposal is what [`AgentExecutor::run`] documents.
+    fn propose(
+        &self,
+        selector: &impl ActionSelector,
+        arguments: &impl ArgumentGenerator,
+        case: &CaseId,
+        (frontier, catalogue): (
+            &Frontier<frontier_state::Issued>,
+            &ActionCatalogue<action_catalogue_state::Projected>,
+        ),
+        (selection_id, argument_request_id): (SelectionId, ArgumentRequestId),
+    ) -> ExecutorOutcome {
+        let context = SelectionContext {
+            prompt: self.prompt.clone(),
+        };
+        let selection = match selection::select(selector, &context, catalogue, selection_id) {
             Ok(selection) => selection,
             Err(SelectionRefusal::NotInCatalogue(_))
             | Err(SelectionRefusal::Selector(SelectorError::NothingAdmissible)) => {
@@ -314,7 +373,7 @@ where
             return no_useful_action();
         };
         let requested = self.record().request_arguments(RequestArguments {
-            argument_request_id: ArgumentRequestId(run_id("argument-request", &identity(), run)),
+            argument_request_id,
             selection_id: selection_id.clone(),
         });
         if !matches!(requested, Ok(RequestArgumentsOutcome::Requested { .. })) {
@@ -324,13 +383,13 @@ where
         let context = ArgumentContext {
             prompt: self.prompt.clone(),
         };
-        let arguments = match self.arguments.generate(&context, entry) {
+        let arguments = match arguments.generate(&context, entry) {
             Ok(arguments) => arguments,
             Err(error) => return outage(error),
         };
         // Revalidation is the last step before the proposal (Atlas ADR 0072): it moves the
         // selection out of `Selected`, which the argument request above requires.
-        if let Err(refused) = self.revalidate(&commission.data().case_id, selection_id) {
+        if let Err(refused) = self.revalidate(case, selection_id) {
             return refused;
         }
         ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {

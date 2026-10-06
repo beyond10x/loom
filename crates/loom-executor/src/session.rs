@@ -41,6 +41,13 @@
 //! none of them; a run that needs one builds its own [`AgentLoop`] and files the session with
 //! [`SessionFile::extend`], [`SessionFile::spent`] and [`SessionFile::file`].
 //!
+//! # Turns
+//!
+//! [`TurnRecord`] is Loom's own, not ported: the sessions a governed run records its turns into
+//! and those turns, in memory (`loom.run.OpenSession`, `loom.run.RecordTurn`, generated). It is the
+//! run's record of what each completed turn added, not a transcript a following run replays; the
+//! session file above is that.
+//!
 //! # Recovering a session by hand
 //!
 //! Three files can outlive a run that died without unwinding (killed, out of memory, power lost),
@@ -84,10 +91,14 @@ use crate::harness::turn_loop::{
     AgentLoop, ApprovalPort, LoopConfig, LoopError, LoopEvent, LoopOutcome, LoopSink, RunLedger,
 };
 use crate::harness::wire::{Item, ModelPort, ToolPort, Usage, WireId};
+use crate::model::behaviour::{Generated, SessionStorage, TurnStorage};
+use crate::model::obligation::UnmetObligation;
 use crate::model::primitives::Uuid;
+use crate::model::run::obligations::{OpenSessionBehavior, RecordTurnBehavior};
 use crate::model::run::{
-    CommissionRunId, RunEnding, SessionData, SessionExists, SessionId, SessionState,
-    SessionStateConflict, SessionWireMismatch,
+    CommissionRunId, OpenSession, OpenSessionOutcome, RecordTurn, RecordTurnOutcome, RunEnding,
+    SessionData, SessionExists, SessionId, SessionSnapshot, SessionState, SessionStateConflict,
+    SessionWireMismatch, TurnId, TurnSnapshot,
 };
 
 /// The shape this module writes and the only one it reads.
@@ -603,6 +614,116 @@ impl Claim {
 impl Drop for Claim {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
+    }
+}
+
+/// The sessions a governed run records its turns into, and those turns, in the order recorded.
+///
+/// `loom.run.OpenSession` and `loom.run.RecordTurn` are the generated behaviour over this record:
+/// a session opened under an identity it already holds is refused `session-exists`, and a turn is
+/// refused for a session it does not hold or one no longer `Active`. A session or a turn stored
+/// under an identity already held replaces it.
+#[derive(Debug, Default)]
+pub struct TurnRecord {
+    sessions: Vec<SessionSnapshot>,
+    turns: Vec<TurnSnapshot>,
+}
+
+impl TurnRecord {
+    /// Every session opened here.
+    #[must_use]
+    pub fn sessions(&self) -> &[SessionSnapshot] {
+        &self.sessions
+    }
+
+    /// Every recorded turn, in the order recorded.
+    #[must_use]
+    pub fn turns(&self) -> &[TurnSnapshot] {
+        &self.turns
+    }
+
+    /// How many turns `session` holds.
+    #[must_use]
+    pub fn turns_of(&self, session: &SessionId) -> usize {
+        self.turns
+            .iter()
+            .filter(|turn| &turn.data.session_id == session)
+            .count()
+    }
+
+    /// Runs one generated behaviour over this record, which it holds for the call.
+    fn generated<T>(&mut self, behaviour: impl FnOnce(&mut Generated<Self>) -> T) -> T {
+        let mut generated = Generated::new(std::mem::take(self));
+        let answer = behaviour(&mut generated);
+        *self = generated.ports;
+        answer
+    }
+}
+
+impl SessionStorage for TurnRecord {
+    fn get(&self, identity: &SessionId) -> Option<SessionSnapshot> {
+        self.sessions
+            .iter()
+            .find(|held| &held.data.session_id == identity)
+            .cloned()
+    }
+
+    fn put(&mut self, snapshot: SessionSnapshot) {
+        match self
+            .sessions
+            .iter_mut()
+            .find(|held| held.data.session_id == snapshot.data.session_id)
+        {
+            Some(held) => *held = snapshot,
+            None => self.sessions.push(snapshot),
+        }
+    }
+
+    fn delete(&mut self, identity: &SessionId) {
+        self.sessions
+            .retain(|held| &held.data.session_id != identity);
+    }
+
+    fn list(&self) -> Vec<SessionSnapshot> {
+        self.sessions.clone()
+    }
+}
+
+impl TurnStorage for TurnRecord {
+    fn get(&self, identity: &TurnId) -> Option<TurnSnapshot> {
+        self.turns
+            .iter()
+            .find(|held| &held.data.turn_id == identity)
+            .cloned()
+    }
+
+    fn put(&mut self, snapshot: TurnSnapshot) {
+        match self
+            .turns
+            .iter_mut()
+            .find(|held| held.data.turn_id == snapshot.data.turn_id)
+        {
+            Some(held) => *held = snapshot,
+            None => self.turns.push(snapshot),
+        }
+    }
+
+    fn delete(&mut self, identity: &TurnId) {
+        self.turns.retain(|held| &held.data.turn_id != identity);
+    }
+}
+
+/// `loom.run.OpenSession`, generated, over this record.
+impl OpenSessionBehavior for TurnRecord {
+    fn open_session(&mut self, input: OpenSession) -> Result<OpenSessionOutcome, UnmetObligation> {
+        self.generated(|generated| generated.open_session(input))
+    }
+}
+
+/// `loom.run.RecordTurn`, generated, over this record.
+impl RecordTurnBehavior for TurnRecord {
+    fn record_turn(&mut self, input: RecordTurn) -> Result<RecordTurnOutcome, UnmetObligation> {
+        self.generated(|generated| generated.record_turn(input))
     }
 }
 
