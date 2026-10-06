@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T21:29:46Z",
+  "actor": "human:timo",
+  "artifact": "story:confined-tests-run",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "GREEN after adversary repair: task check; task website; four delegated adversary cases each 1 passed, 0 failed, 0 ignored; real confinement 1 passed, 0 failed, 0 ignored; live Codex 94f72aa stopped ApprovalRequired",
+    "reference": "docs/qualification/2026-10-05-confined-tests.md"
+  }
+}

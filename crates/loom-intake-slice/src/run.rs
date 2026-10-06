@@ -97,7 +97,9 @@ use llm_core::Model;
 use loom_governor::{CanonGovernor, CaseStore};
 
 use crate::case::{self, CaseError};
+use crate::confinement::TestRunner;
 use crate::effect::{Console, LocalEffects, refuse};
+use crate::executor::backend_name;
 use crate::executor::{ExecuteError, LocalExecutor, TestCommand, fresh_uuid, now};
 use crate::selector::{Briefing, ModelArguments, ModelSelector, NO_ACTION};
 use crate::verifier::{TestResultVerifier, VerifyError};
@@ -109,8 +111,10 @@ pub const LOCAL_PROTOCOL: &str = "software-change@1";
 pub const PRODUCER: &str = "intake-slice/verifier";
 
 /// What one run is asked to do.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SliceRequest {
+    /// The explicit execution policy. Use Substrate unless the operator opts out.
+    pub runner: Arc<dyn TestRunner>,
     /// The intent, as given.
     pub intent: String,
     /// The root of the git work tree the case is about.
@@ -124,26 +128,7 @@ pub struct SliceRequest {
 }
 
 /// Why a slice run ended (`intake.routing.StopReason`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StopReason {
-    ApprovalRequired,
-    NothingAdmissible,
-    StepBudget,
-    NoLocalExecutor,
-    Refused,
-}
-
-impl fmt::Display for StopReason {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::ApprovalRequired => "ApprovalRequired",
-            Self::NothingAdmissible => "NothingAdmissible",
-            Self::StepBudget => "StepBudget",
-            Self::NoLocalExecutor => "NoLocalExecutor",
-            Self::Refused => "Refused",
-        })
-    }
-}
+pub use intake_model::routing::StopReason;
 
 /// One run of the slice, ended for a stated reason (`intake.routing.SliceRun` without its
 /// identities; see the module documentation).
@@ -245,6 +230,11 @@ pub fn run<S: CaseStore>(
         )?;
     }
 
+    writeln!(
+        out,
+        "confinement: {}",
+        backend_name(request.runner.backend())
+    )?;
     let pick = match pick(request, classifier)? {
         Ok(pick) => pick,
         Err((protocol, detail, why)) => {
@@ -292,7 +282,8 @@ pub fn run<S: CaseStore>(
             case.clone(),
             request.workspace.clone(),
             request.test.clone(),
-        ),
+        )
+        .with_runner(Arc::clone(&request.runner)),
         TestResultVerifier::new(governor, case.clone(), PRODUCER),
         governor,
         case.clone(),
@@ -321,10 +312,21 @@ pub fn run<S: CaseStore>(
     );
     drop(effects);
     drop(step);
-    if let Some(failure) = console.take_failure() {
+    let failure = console.take_failure();
+    let steps = console.steps();
+    drop(console);
+    if let Some(failure) = failure {
+        if let SliceError::Execute(ExecuteError::Confinement(refusal)) = failure {
+            return stop(
+                out,
+                pick.protocol,
+                steps,
+                StopReason::ConfinementUnavailable,
+                Some(refusal.to_string()),
+            );
+        }
         return Err(failure);
     }
-    drop(console);
 
     let end = match result {
         Ok(end) => end,
@@ -572,8 +574,8 @@ fn stop(
     detail: Option<String>,
 ) -> Result<SliceRun, SliceError> {
     match detail {
-        Some(detail) => writeln!(out, "stopped: {stop_reason} ({})", printable(&detail))?,
-        None => writeln!(out, "stopped: {stop_reason}")?,
+        Some(detail) => writeln!(out, "stopped: {stop_reason:?} ({})", printable(&detail))?,
+        None => writeln!(out, "stopped: {stop_reason:?}")?,
     }
     Ok(SliceRun {
         protocol,

@@ -13,9 +13,17 @@ under **Unreleased** until the next release.
   adapter failures explicit while preserving existing infallible `CaseStore` callers.
   Protocols with multiple capabilities on one action are refused because Commission's frontier
   can represent only one; capability requirements are never silently truncated.
-- ESS tooling, CI and conformance dependencies use 0.53.0.
 
 ### Security
+
+- Tests use embedded Substrate 0.7.10 by default: no network, cleared environment, read-only source
+  and Rust toolchain, workspace writes restricted to `target/`, 300-second timeout, 8 GiB memory
+  and 2,048 processes. Dependencies must be fetched before a run. Confinement failure stops with
+  `ConfinementUnavailable` (exit 3); one user systemd scope is attempted for delegation.
+  `--confinement none` is an explicit opt-out, visible in output and observations.
+- The SDK exposes an injectable `TestRunner`. Test observations include Substrate's actual
+  applied record; a refused launch produces no test evidence. Intake's confinement types are
+  generated from ESS, and all three systems now use ESS 0.53.0.
 
 - The slice's own git calls run no workspace hook, no `core.fsmonitor` command and no signing
   program. A case does not open on a workspace whose own git configuration names a program (a

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-05T21:43:38Z",
+  "actor": "human:timo",
+  "artifact": "decision-blocker:confined-tests-publication-authority",
+  "kind": "decision-blocker",
+  "revision": 2,
+  "change": {
+    "change": "evidence",
+    "kind": "approval",
+    "source": "Operator approved audited migration baseline and publication; separately approved one gh policy-secret update",
+    "reference": ".engineering/planning/decision-blocker/confined-tests-publication-authority.md"
+  }
+}

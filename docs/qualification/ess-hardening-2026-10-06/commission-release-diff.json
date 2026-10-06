@@ -1,0 +1,14 @@
+{
+  "format": "ess-diff/14",
+  "before": {
+    "system": "commission",
+    "specification_version": 1,
+    "spec_digest": "9bed27fd6e65172f1e7b60f9fe93551bb1ce785145cc4c15fd0ec1f1ad08c598"
+  },
+  "after": {
+    "system": "commission",
+    "specification_version": 1,
+    "spec_digest": "9bed27fd6e65172f1e7b60f9fe93551bb1ce785145cc4c15fd0ec1f1ad08c598"
+  },
+  "changes": []
+}

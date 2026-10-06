@@ -60,9 +60,14 @@ It prints each step with its effect and evidence and ends on a line such as
 `stopped: ApprovalRequired (repository.merge)`. Exit status 0 means it stopped at that human gate,
 3 another stop, 1 a failure, 2 an invalid command line.
 
-Two things before you point it at a work tree. It needs a Codex login (`codex login`). And there is
-no sandbox: the test command runs model-edited code with your rights, so use it only where you
-would run that test command yourself. Loom's own git calls run none of the work tree's hooks, and
+The current source adds test confinement (not yet included in tag `0.1.0`). It needs a Codex
+login and Linux with bubblewrap and delegated cgroup v2 controllers. Tests default to Substrate:
+no network, source and toolchain read-only, workspace writes only under `target/`, a 300-second
+timeout, 8 GiB memory and 2,048 processes. Fetch Rust dependencies explicitly before starting;
+Loom uses a private offline Cargo home and never fetches them. Without delegation it attempts
+one user systemd scope, then stops `ConfinementUnavailable` (exit 3) if confinement is unavailable.
+`--confinement none` explicitly opts out and is named in every test observation.
+Loom's own git calls run none of the work tree's hooks, and
 a run does not start on a work tree whose own git configuration names a program (a filter driver,
 a credential helper, an SSH command and the like).
 [Run an intent](https://beyond10x.github.io/loom/docs/guides/run-an-intent) explains every line of
@@ -101,6 +106,7 @@ step 1: repository.edit {"files":[{"path":"check.txt","contents":"fixed\n"}],"me
   evidence: none
 step 2: tests.run {}
   effect: the test command exited with 0
+    | confinement: none
   evidence: test_result pass
 stopped: ApprovalRequired (repository.merge)
 ```
@@ -127,8 +133,10 @@ names to the new ones.
 
 ## Contributing
 
-Changes go through `task check`, which needs Rust, [Task](https://taskfile.dev/) and the `ess`
-command line of [ESS](https://beyond10x.github.io/ess/) ([GitHub](https://github.com/beyond10x/ess)).
+Changes go through `task check`, which needs Rust, [Task](https://taskfile.dev/), bubblewrap
+(`/usr/bin/bwrap`) and the `ess` command line of [ESS](https://beyond10x.github.io/ess/)
+([GitHub](https://github.com/beyond10x/ess)). Run `cargo fetch --locked` first to prepare the
+full dependency graph for offline checks.
 [Run the checks](https://beyond10x.github.io/loom/docs/guides/run-the-checks) explains each step.
 Agents read [AGENTS.md](AGENTS.md).
 

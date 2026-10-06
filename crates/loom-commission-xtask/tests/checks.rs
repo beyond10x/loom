@@ -766,7 +766,7 @@ fn task_generate_writes_the_tree_when_it_is_absent() {
     let case = case_dir("task_generate_writes_the_tree_when_it_is_absent");
     let root = repo_copy(&case, false);
     // `cargo --locked` loads the whole Loom workspace (`members = ["crates/*"]`), so every member
-    // the lock resolves comes along: each directory under `crates/`, and Loom's generated crate.
+    // the lock resolves comes along: each directory under `crates/`, and both sibling model crates.
     let crates = repo_root().join("crates");
     for entry in fs::read_dir(&crates).expect("read crates/") {
         let entry = entry.expect("crates/ entry");
@@ -774,10 +774,12 @@ fn task_generate_writes_the_tree_when_it_is_absent() {
             copy_tree(&entry.path(), &root.join("crates").join(entry.file_name()));
         }
     }
-    copy_tree(
-        &repo_root().join("generated/rust/loom"),
-        &root.join("generated/rust/loom"),
-    );
+    for sibling in ["loom", "intake"] {
+        copy_tree(
+            &repo_root().join("generated/rust").join(sibling),
+            &root.join("generated/rust").join(sibling),
+        );
+    }
     let target = Path::new(env!("CARGO_TARGET_TMPDIR")).join("task-generate-target");
     let out = Command::new("task")
         .arg("commission:generate")

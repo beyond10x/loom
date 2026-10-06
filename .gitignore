@@ -4,3 +4,4 @@
 /website/build/
 /website/.docusaurus/
 /generated/rust/loom/.ess-output/
+/generated/rust/intake/.ess-output/

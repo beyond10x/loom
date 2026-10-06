@@ -1,0 +1,36 @@
+{
+  "format": "ess-diff/14",
+  "before": {
+    "system": "intake",
+    "specification_version": 1,
+    "spec_digest": "17553021bee1981ed9aa67801148981e347a82b89ccf4c4d86645268a2d3d140"
+  },
+  "after": {
+    "system": "intake",
+    "specification_version": 1,
+    "spec_digest": "21aa38aaa26aad3a60e61d7cc6e4896b4fb9751965f135b39870cf87720472fd"
+  },
+  "changes": [
+    {
+      "id": "type/intake.routing.StopReason/variant-removed/ConfinementUnavailable",
+      "relation": "narrowed",
+      "compatibility": {
+        "verdict": "breaking",
+        "callers": "compatible",
+        "readers": "compatible",
+        "history": "breaking",
+        "uses": [
+          "stored"
+        ]
+      },
+      "change": {
+        "category": "type",
+        "subject": "intake.routing.StopReason",
+        "changed": {
+          "kind": "variant-removed",
+          "variant": "ConfinementUnavailable"
+        }
+      }
+    }
+  ]
+}

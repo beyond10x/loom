@@ -8,21 +8,25 @@ source: Taskfile.yml, Taskfile.commission.yml, .github/workflows/pages.yml
 
 # Run the checks
 
-You need Rust, the [Task runner](https://taskfile.dev/) and the `ess` command line of
-[ESS](https://beyond10x.github.io/ess/) ([GitHub](https://github.com/beyond10x/ess)). From the
-repository root:
+You need Rust, the [Task runner](https://taskfile.dev/), the `ess` command line of
+[ESS](https://beyond10x.github.io/ess/) ([GitHub](https://github.com/beyond10x/ess)), and
+bubblewrap at `/usr/bin/bwrap`. CI installs bubblewrap before testing delegation refusals.
+The dedicated confinement qualification additionally needs delegated cgroup v2 controllers;
+its explicit skip in the ordinary suite establishes no qualification. From the repository root:
 
 ```console
+cargo fetch --locked
 task check
 ```
 
-It runs, in order:
+The explicit fetch prepares every locked platform dependency for offline metadata inspection.
+CI performs the same setup. `task check` runs, in order:
 
 | Step | Holds |
 |---|---|
 | `task spec`, `task commission:spec`, `task intake-spec` | The three ESS systems (`ess/`, `ess/commission/`, `ess/intake/`) validate |
 | `task ess-gate`, `task commission:ess-gate` | The hard gate: validate strictly, compile, synthesize with no refusal, no open question |
-| `task drift`, `task commission:drift` | The generated Rust model equals a fresh synthesis of the specification |
+| `task drift`, `task commission:drift`, `task intake-drift` | Each generated Rust model equals a fresh synthesis of its specification |
 | `task no-hand-model`, `task commission:no-hand-model` | No hand-written type shadows one the specification declares |
 | `task commission:conform` | Commission passes its synthesized ESS conformance suite |
 | `task commission:deps-guard` | Commission's contracts depend on no Loom executor, no Canon and no model-provider crate |
@@ -36,8 +40,8 @@ task intake-spec
 ```
 
 ```text
-task: [intake-spec] ess specify validate --path ess/intake
-intake v1 — 2 file(s), valid
+task: [intake-spec] ess specify validate --path ess/intake --strict-requires
+intake v1 — 3 file(s), valid
 ```
 
 ## Documentation

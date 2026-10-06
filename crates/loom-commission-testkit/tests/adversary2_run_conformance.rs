@@ -604,6 +604,41 @@ fn adversary2_run_the_synthesized_run_scenarios_pass_against_run_store() {
     );
 }
 
+#[test]
+fn event_values_reject_wrong_identity_and_literal_payload() {
+    let suite = suite("event_value_mutants");
+    let scenario = suite
+        .member("scenarios")
+        .and_then(|scenarios| {
+            scenarios.member("commission.responsibility.SuspendRun/outcome/suspended")
+        })
+        .expect("suspend scenario");
+    let Some(Value::Array(steps)) = scenario.member("steps") else {
+        panic!("scenario steps");
+    };
+    for field in ["run_id", "reason"] {
+        let mut runner = Runner::new(store());
+        let mut checked = false;
+        for step in steps {
+            if step.member("step") == Some(&text("expect_event_values")) {
+                runner.step(step).expect("unmutated payload passes");
+                let event = runner.last.as_mut().unwrap().events.first_mut().unwrap();
+                let Value::Object(payload) = &mut event.payload else {
+                    panic!("event payload");
+                };
+                let (_, value) = payload.iter_mut().find(|(name, _)| name == field).unwrap();
+                *value = text("wrong value");
+                let error = runner.step(step).expect_err("wrong event value must fail");
+                assert!(error.contains(&format!("`{field}` is")), "{error}");
+                checked = true;
+                break;
+            }
+            runner.step(step).expect("scenario setup passes");
+        }
+        assert!(checked, "scenario must assert {field}");
+    }
+}
+
 /// A store that drops every write of a suspended run: the mutant the runner above must catch, so
 /// its green says something about `RunStore`.
 struct ForgetsSuspension(RunStore);

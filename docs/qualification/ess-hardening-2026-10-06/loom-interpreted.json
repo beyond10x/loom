@@ -1,0 +1,72 @@
+{
+  "completed_at": 1700000012600,
+  "conformance_status": "failed",
+  "counts": {
+    "error": 0,
+    "failed": 2,
+    "passed": 34,
+    "skipped": 0,
+    "total": 36,
+    "unsupported": 0
+  },
+  "coverage": {
+    "knowledge": "unknown"
+  },
+  "execution_status": "failed",
+  "format": "ess-conformance-report/2",
+  "implementation": "interpreted 0.53.0",
+  "outcomes": {
+    "error": [],
+    "failed": [
+      "loom.run.RevalidateSelection/outcome/not-in-frontier",
+      "loom.run.Selection/transition/refuse/by/loom.run.RevalidateSelection/not-in-frontier"
+    ],
+    "passed": [
+      "loom.run.FileSession/outcome/filed",
+      "loom.run.FileSession/outcome/wrong-state",
+      "loom.run.OpenSession/outcome/opened",
+      "loom.run.OpenSession/outcome/session-exists",
+      "loom.run.ProjectCatalogue/outcome/catalogue-exists",
+      "loom.run.ProjectCatalogue/outcome/projected",
+      "loom.run.RecordTurn/outcome/recorded",
+      "loom.run.RecordTurn/outcome/session-not-active",
+      "loom.run.RecordTurn/outcome/session-unknown",
+      "loom.run.ReleaseSession/outcome/released",
+      "loom.run.ReleaseSession/outcome/wrong-state",
+      "loom.run.RequestArguments/outcome/requested",
+      "loom.run.RequestArguments/outcome/selection-not-selected",
+      "loom.run.RequestArguments/outcome/selection-unknown",
+      "loom.run.ResumeSession/outcome/cross-wire",
+      "loom.run.ResumeSession/outcome/resumed",
+      "loom.run.ResumeSession/outcome/wrong-state",
+      "loom.run.RevalidateSelection/outcome/admitted",
+      "loom.run.RevalidateSelection/outcome/stale-revision",
+      "loom.run.RevalidateSelection/outcome/wrong-state",
+      "loom.run.SelectAction/outcome/catalogue-unknown",
+      "loom.run.SelectAction/outcome/not-in-catalogue",
+      "loom.run.SelectAction/outcome/revision-mismatch",
+      "loom.run.SelectAction/outcome/selected",
+      "loom.run.Selection/state/Admitted/refuses/loom.run.RevalidateSelection",
+      "loom.run.Selection/state/Refused/refuses/loom.run.RevalidateSelection",
+      "loom.run.Selection/transition/admit/by/loom.run.RevalidateSelection/admitted",
+      "loom.run.Selection/transition/refuse/by/loom.run.RevalidateSelection/stale-revision",
+      "loom.run.Session/state/Active/refuses/loom.run.ResumeSession",
+      "loom.run.Session/state/Filed/refuses/loom.run.FileSession",
+      "loom.run.Session/state/Filed/refuses/loom.run.ReleaseSession",
+      "loom.run.Session/transition/file/by/loom.run.FileSession/filed",
+      "loom.run.Session/transition/release/by/loom.run.ReleaseSession/released",
+      "loom.run.Session/transition/resume/by/loom.run.ResumeSession/resumed"
+    ],
+    "skipped": [],
+    "unsupported": []
+  },
+  "policy": "complete-selection/1",
+  "producer_profile": "rust-scenario-status/1",
+  "spec_digest": "1e5c1537dda3b2b7e22b162efd4278fee13385bc49abc57d7ce5100af963d5c1",
+  "specification": "loom/v1",
+  "suite": {
+    "digest": "sha256:579d5c78f1bc0175ab26c6ddb21714a2eee1395380fd65fa9cc290446ae74b2f",
+    "digest_profile": "sha256-json-bytes/1",
+    "version": "ess-conformance/34"
+  }
+}

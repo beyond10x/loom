@@ -20,6 +20,7 @@
 //!   `run_until_blocked` until the run stops for a stated reason.
 
 pub mod case;
+pub mod confinement;
 pub mod effect;
 pub mod executor;
 pub mod git;

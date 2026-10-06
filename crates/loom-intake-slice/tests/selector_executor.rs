@@ -57,6 +57,78 @@ const PRODUCER: &str = "intake-slice-test-verifier";
 const CLAIM: &str = "I ran the tests: test_result pass, exit status 0, all tests pass.";
 
 #[test]
+fn refused_confinement_produces_no_observation_or_passing_evidence() {
+    use b10x_loom_intake_slice::confinement::{
+        Backend, ConfinementError, ConfinementRefusal, TestExecution, TestRunner,
+    };
+    struct Refused;
+    impl TestRunner for Refused {
+        fn backend(&self) -> Backend {
+            Backend::Substrate
+        }
+        fn run(&self, _: &TestCommand, _: &Path) -> Result<TestExecution, ConfinementError> {
+            Err(ConfinementError {
+                reason: ConfinementRefusal::BackendMissing,
+                detail: "fixture backend is unavailable".into(),
+            })
+        }
+    }
+    let fixture = Fixture::new();
+    let governor = CanonGovernor::new(MemoryCaseStore::default());
+    let case = case::open(&governor, PICK, INTENT, fixture.workspace()).unwrap();
+    let before = governor.observations().len();
+    let executor = LocalExecutor::new(
+        &governor,
+        case.clone(),
+        fixture.workspace(),
+        TestCommand::new("true", [] as [&str; 0]),
+    )
+    .with_runner(std::sync::Arc::new(Refused));
+    assert!(matches!(
+        executor.execute(&proposal("tests.run", &json!({}))),
+        Err(ExecuteError::Confinement(_))
+    ));
+    assert_eq!(governor.observations().len(), before);
+    assert!(evidence(&governor, &case).is_empty());
+}
+
+#[test]
+fn explicit_unconfined_execution_is_named_in_each_observation() {
+    use b10x_loom_intake_slice::{confinement::Backend, executor::UnconfinedRunner};
+    let fixture = Fixture::new();
+    let governor = CanonGovernor::new(MemoryCaseStore::default());
+    let case = case::open(&governor, PICK, INTENT, fixture.workspace()).unwrap();
+    let executor = LocalExecutor::new(
+        &governor,
+        case,
+        fixture.workspace(),
+        TestCommand::new("true", [] as [&str; 0]),
+    )
+    .with_runner(std::sync::Arc::new(UnconfinedRunner));
+    for _ in 0..2 {
+        let report = executor
+            .execute(&proposal("tests.run", &json!({})))
+            .unwrap();
+        assert!(report.to_string().contains("confinement: none"));
+        let Report::TestsRun(run) = report else {
+            panic!("test result")
+        };
+        assert_eq!(run.applied_confinement().backend, Backend::None);
+        let observations = governor.observations();
+        let observation = observations.last().unwrap();
+        let confinement = observation.payload.member("confinement").unwrap();
+        assert_eq!(
+            confinement.member("backend"),
+            Some(&cjson::Value::Text("none".into()))
+        );
+        assert_eq!(
+            confinement.member("driver_record"),
+            Some(&cjson::Value::Null)
+        );
+    }
+}
+
+#[test]
 fn a_failing_test_is_edited_and_then_passes() {
     let fixture = Fixture::new();
     let workspace = fixture.workspace();
@@ -133,7 +205,10 @@ fn a_failing_test_is_edited_and_then_passes() {
         case.clone(),
         workspace,
         TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
-    );
+    )
+    .with_runner(std::sync::Arc::new(
+        b10x_loom_intake_slice::executor::UnconfinedRunner,
+    ));
     let verifier = TestResultVerifier::new(&governor, case.clone(), PRODUCER);
     let next = || {
         let frontier = governor
@@ -372,7 +447,10 @@ fn a_test_command_past_its_timeout_is_killed_and_fails() {
         case.clone(),
         fixture.workspace(),
         TestCommand::new("sleep", ["5"]).with_timeout(Duration::from_millis(300)),
-    );
+    )
+    .with_runner(std::sync::Arc::new(
+        b10x_loom_intake_slice::executor::UnconfinedRunner,
+    ));
     let verifier = TestResultVerifier::new(&governor, case.clone(), PRODUCER);
 
     let started = Instant::now();
@@ -413,7 +491,10 @@ fn a_test_commands_output_is_kept_as_its_tail() {
         case,
         fixture.workspace(),
         TestCommand::new("seq", ["1", "200000"]),
-    );
+    )
+    .with_runner(std::sync::Arc::new(
+        b10x_loom_intake_slice::executor::UnconfinedRunner,
+    ));
     let report = executor
         .execute(&proposal("tests.run", &json!({})))
         .expect("tests.run is performed");
@@ -440,7 +521,10 @@ fn an_ignored_path_is_neither_read_nor_written() {
         case,
         fixture.workspace(),
         TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
-    );
+    )
+    .with_runner(std::sync::Arc::new(
+        b10x_loom_intake_slice::executor::UnconfinedRunner,
+    ));
 
     let inspected = executor.execute(&proposal(
         "repository.inspect",
@@ -488,7 +572,10 @@ fn a_test_run_is_verified_once() {
         case.clone(),
         fixture.workspace(),
         TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
-    );
+    )
+    .with_runner(std::sync::Arc::new(
+        b10x_loom_intake_slice::executor::UnconfinedRunner,
+    ));
     let verifier = TestResultVerifier::new(&governor, case.clone(), PRODUCER);
     let run = || {
         executor

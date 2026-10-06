@@ -1,0 +1,45 @@
+domain: intake.confinement
+summary: Requested and observed confinement of local test commands. No automatic fallback.
+types:
+  - name: intake.confinement.Backend
+    kind: enum
+    variants: [Substrate, None]
+  - name: intake.confinement.ConfinementRefusal
+    kind: enum
+    variants: [BackendMissing, CgroupUndelegated, ScopeInvalid, WorkspaceNameInvalid, CapabilityUnserved]
+  - name: intake.confinement.EnvironmentEntry
+    kind: struct
+    fields:
+      - {name: name, type: String}
+      - {name: value, type: String}
+  - name: intake.confinement.ToolchainRoot
+    kind: struct
+    fields:
+      - {name: host_path, type: String}
+      - {name: mount, type: String}
+  - name: intake.confinement.ConfinementProfile
+    kind: struct
+    fields:
+      - {name: backend, type: intake.confinement.Backend}
+      - {name: network, type: String}
+      - {name: writable_scopes, type: "List<String>"}
+      - {name: read_only_roots, type: "List<intake.confinement.ToolchainRoot>"}
+      - {name: environment, type: "List<intake.confinement.EnvironmentEntry>"}
+      - {name: timeout_ms, type: Integer}
+      - {name: memory_bytes, type: Integer}
+      - {name: processes, type: Integer}
+      - {name: cpu_millis, type: Integer}
+  # The supported driver projection is built from the actual observation, never the request.
+  # The full Substrate wire record also accompanies it in the test observation.
+  - name: intake.confinement.AppliedConfinement
+    kind: struct
+    fields:
+      - {name: backend, type: intake.confinement.Backend}
+      - {name: profile_digest, type: String}
+      - {name: capability_snapshot, type: String}
+      - {name: cgroup, type: String}
+      - {name: filesystem, type: String}
+      - {name: network, type: String}
+      - {name: profile, type: String}
+      - {name: writable_scopes, type: "List<String>"}
+      - {name: read_only_roots, type: "List<intake.confinement.ToolchainRoot>"}

@@ -35,6 +35,11 @@ jobs:
           toolchain: stable
           components: clippy, rustfmt
 
+      - name: Install test backend
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends bubblewrap
+
       - name: Install go-task
         env:
           TASK_VERSION: "3.52.0"
@@ -51,7 +56,7 @@ jobs:
       - name: Install ess
         env:
           ESS_VERSION: "0.53.0"
-          ESS_SHA256: 54ae56c63135afc9d8da12e36ef3dcc3d6c4ec8fdc6c2c30fb34bd2d8dc8a5ce
+          ESS_SHA256: 40e8c9acd9bb5016387215cb5461090eb4765805ce7c8858d4b02284e6908914
         run: |
           set -euo pipefail
           asset="ess-$ESS_VERSION-x86_64-unknown-linux-gnu.tar.gz"
@@ -63,6 +68,9 @@ jobs:
           grep -F "  $asset" SHA256SUMS | sha256sum --check --strict
           tar -xzf "$asset"
           echo "$RUNNER_TEMP/ess-$ESS_VERSION-x86_64-unknown-linux-gnu" >> "$GITHUB_PATH"
+
+      - name: Fetch locked dependencies for offline checks
+        run: cargo fetch --locked
 
       - name: task check
         run: task check

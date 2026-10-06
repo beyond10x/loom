@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-05T23:26:38Z",
+  "actor": "human:timo",
+  "artifact": "verification-report:ess-hardening-20261006",
+  "kind": "verification-report",
+  "revision": 2,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task plan: exit 0; 105 artifacts valid; one prose-only review advisory"
+  }
+}
