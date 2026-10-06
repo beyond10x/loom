@@ -16,7 +16,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-/// A command whose `never` outcome no input satisfies. ess 0.53.0 validates and compiles it, and
+/// A command whose `never` outcome no input satisfies. ess 0.54.0 validates and compiles it, and
 /// `ess verify conform synthesize` refuses the outcome (`ESS-SYNTH-003`) and still exits 0, so the
 /// refusal count on the summary line is the only signal that step 3 does not hold. Observed
 /// 2026-10-04 on a copy of `ess/`: `1 scenario(s) (0 authored), 1 refusal(s), written to …`, exit 0.
@@ -180,7 +180,7 @@ fn mutant_is_killed(name: &str, mutate: impl FnOnce(&Path), expect: &[&str]) {
     }
 }
 
-// Gate code mutant, step 3. ess 0.53.0 exits 0 while refusing (see UNSATISFIABLE_COMMAND), so the
+// Gate code mutant, step 3. ess 0.54.0 exits 0 while refusing (see UNSATISFIABLE_COMMAND), so the
 // refusal count is what holds step 3 for every refusal that is not an admission error. No case in
 // ess_gate.rs runs the gate over a specification that synthesize refuses with exit 0: the only
 // refusing copy (Optional<Binary64>) exits 1. A gate that accepts any count passes the suite.
@@ -201,7 +201,7 @@ fn mutant_gate_accepting_any_refusal_count_is_killed() {
 
 // Gate code mutant, step 1. Acceptance item 1 names `--strict-requires`. Nothing in ess_gate.rs runs
 // the gate over a specification whose `requires` differs from the ess on PATH, so dropping the flag
-// passes the suite: without it ess 0.53.0 warns about `requires: ess 0.51.0` and exits 0.
+// passes the suite: without it ess 0.54.0 warns about `requires: ess 0.51.0` and exits 0.
 #[test]
 fn mutant_validate_without_strict_requires_is_killed() {
     mutant_is_killed(
@@ -240,7 +240,7 @@ fn mutant_spec_requiring_an_older_ess_is_killed() {
         |tree| {
             replace(
                 &tree.join("ess/ess-inputs.yaml"),
-                "requires: ess 0.53.0",
+                "requires: ess 0.54.0",
                 "requires: ess 0.51.0",
             );
         },

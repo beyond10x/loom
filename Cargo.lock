@@ -875,8 +875,8 @@ dependencies = [
 
 [[package]]
 name = "ess-compiler"
-version = "0.53.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.53.0#a81a8729dc252830d4e0557176522b59be6ff253"
+version = "0.54.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.54.0#0da18eee381e7cb10cb0a65f8429818c1b7a15ad"
 dependencies = [
  "ess-domain",
  "ess-primitives",
@@ -887,8 +887,8 @@ dependencies = [
 
 [[package]]
 name = "ess-conformance"
-version = "0.53.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.53.0#a81a8729dc252830d4e0557176522b59be6ff253"
+version = "0.54.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.54.0#0da18eee381e7cb10cb0a65f8429818c1b7a15ad"
 dependencies = [
  "ess-compiler",
  "ess-domain",
@@ -902,8 +902,8 @@ dependencies = [
 
 [[package]]
 name = "ess-domain"
-version = "0.53.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.53.0#a81a8729dc252830d4e0557176522b59be6ff253"
+version = "0.54.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.54.0#0da18eee381e7cb10cb0a65f8429818c1b7a15ad"
 dependencies = [
  "ess-primitives",
  "schemars",
@@ -915,8 +915,8 @@ dependencies = [
 
 [[package]]
 name = "ess-gen"
-version = "0.53.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.53.0#a81a8729dc252830d4e0557176522b59be6ff253"
+version = "0.54.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.54.0#0da18eee381e7cb10cb0a65f8429818c1b7a15ad"
 dependencies = [
  "ess-compiler",
  "ess-domain",
@@ -931,8 +931,8 @@ dependencies = [
 
 [[package]]
 name = "ess-primitives"
-version = "0.53.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.53.0#a81a8729dc252830d4e0557176522b59be6ff253"
+version = "0.54.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.54.0#0da18eee381e7cb10cb0a65f8429818c1b7a15ad"
 dependencies = [
  "schemars",
  "serde",
@@ -943,8 +943,8 @@ dependencies = [
 
 [[package]]
 name = "ess-transport"
-version = "0.53.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.53.0#a81a8729dc252830d4e0557176522b59be6ff253"
+version = "0.54.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.54.0#0da18eee381e7cb10cb0a65f8429818c1b7a15ad"
 dependencies = [
  "ess-compiler",
  "ess-domain",
