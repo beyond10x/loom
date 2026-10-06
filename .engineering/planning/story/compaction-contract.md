@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:compaction-contract
 kind: story
-status: draft
+status: active
 title: Define the compaction contract
 refs:
 - provider: taskboard
@@ -35,7 +35,10 @@ scope:
   path: website/data/ess/loom-run.domain-graph.json
 - confidence: inferred
   path: website/docs/reference/ess/loom-run.md
-revision: 16
+revision: 18
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-06T17:23:10Z", actor: "human:timo", revision: 17, decided_on: {"recorded":{"review_outcome":3}}}
+- {from: "proposed", to: "active", at: "2026-10-06T17:23:10Z", actor: "human:timo", revision: 18, decided_on: {"recorded":{"review_outcome":3}}}
 ---
 ## Outcome
 
