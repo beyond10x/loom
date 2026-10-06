@@ -38,7 +38,7 @@ A selector can be wrong about which admissible action is best. It cannot produce
 frontier does not contain, and nothing it says becomes evidence.
 
 :::caution[Early]
-Loom's first release is `0.1.0`, from source at that tag; consumers pin `tag = "0.1.0"`.
+Loom's current release is `0.2.0`, from source at that tag; consumers pin `tag = "0.2.0"`.
 `b10x-loom run` has completed a live run against a hosted model ([qualification record][live]); the
 SDK example runs on scripted fake models. Each page says whether what it describes is
 **shipped**, **decided** or **planned**, and the [status page](/docs/status) lists every capability.
@@ -58,7 +58,7 @@ SDK example runs on scripted fake models. Each page says whether what it describ
   credential is the operator's, read by llm.
 - It does not grant authority. A capability an action needs comes from an authority provider the
   embedder supplies; the command line's provider grants none, so a run stops at the merge.
-- It does not merge, push or deploy. Current source confines tests with Substrate; an explicit
+- It does not merge, push or deploy. It confines tests with Substrate; an explicit
   `--confinement none` opts out.
 - It does not keep the engineering record of a case or compare harnesses. Both are neighbours'
   work: [AEP](https://beyond10x.github.io/ecosystem/aep/) ([GitHub](https://github.com/beyond10x/aep)) keeps

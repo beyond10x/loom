@@ -18,7 +18,7 @@ Nothing is on a registry. Depend on the release tag:
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.1.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.2.0" }
 ```
 
 Rust code uses it as `loom_sdk`. It re-exports, under stable module names:
@@ -33,7 +33,7 @@ Rust code uses it as `loom_sdk`. It re-exports, under stable module names:
 `run_until_blocked`, `LoopContext`, `LoopEnd`, `EffectPort`, `Loom`, `ActionSelector`,
 `ArgumentGenerator`, `CanonGovernor`, `CaseStore` and `MemoryCaseStore` are also at the top.
 
-Current source, after release 0.1.0, also exports `TestRunner`, `SubstrateRunner`,
+Since 0.2.0 it also exports `TestRunner`, `SubstrateRunner`,
 `UnconfinedRunner`, `TestExecution` and `ConfinementError`. `LocalExecutor::new` requires
 Substrate by default; `with_runner` accepts an explicit `Arc<dyn TestRunner>`.
 `SliceRequest.runner` selects the runner for the higher-level slice call. A runner is a trusted

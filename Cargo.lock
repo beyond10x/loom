@@ -237,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-tool-call",
@@ -252,14 +252,14 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-commission"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "commission",
 ]
 
 [[package]]
 name = "b10x-loom-commission-conformance"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "b10x-loom-commission",
  "ess-conformance",
@@ -269,7 +269,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-commission-testkit"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "b10x-loom-commission",
  "syn 3.0.6",
@@ -277,7 +277,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-executor"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
@@ -295,7 +295,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-governor"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "b10x-canon",
  "b10x-canon-engineering",
@@ -307,14 +307,14 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-intake-references"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "regex",
 ]
 
 [[package]]
 name = "b10x-loom-intake-router"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "b10x-canon-engineering",
  "b10x-llm-core",
@@ -325,7 +325,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-intake-slice"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "b10x-canon-engineering",
  "b10x-llm-core",
@@ -346,7 +346,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-sdk"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-executor",
@@ -2494,7 +2494,7 @@ version = "1.0.0"
 
 [[package]]
 name = "loom-commission-docs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "serde_json",
@@ -2502,7 +2502,7 @@ dependencies = [
 
 [[package]]
 name = "loom-commission-xtask"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "proc-macro2",
@@ -2512,7 +2512,7 @@ dependencies = [
 
 [[package]]
 name = "loom-docs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "b10x-loom-cli",
@@ -2522,7 +2522,7 @@ dependencies = [
 
 [[package]]
 name = "loom-xtask"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "proc-macro2",

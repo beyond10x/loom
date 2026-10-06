@@ -6,6 +6,14 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-06
+
+Loom 0.2.0 runs the tests of a governed case inside embedded Substrate confinement by default,
+keeps the slice's own git calls from running anything a workspace planted, lets a host run the
+governor on its own reviewed protocols, trusted time and fallible storage, and lets Loom recheck
+its selection against the governor's current frontier before proposing. Depend on it with
+`tag = "0.2.0"`; nothing is on a registry.
+
 ### Added
 
 - `Loom::with_governor` revalidates a selection against the governor's current frontier before

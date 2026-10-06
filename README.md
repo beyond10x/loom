@@ -26,9 +26,9 @@ the whole boundary.
 
 ## Status
 
-Version `0.1.0`, released from source at the tag `0.1.0`
-([release](https://github.com/beyond10x/loom/releases/tag/0.1.0)). Nothing is on a registry: you
-install from the tag or depend on it with `tag = "0.1.0"`. `b10x-loom run` completed a live run
+Version `0.2.0`, released from source at the tag `0.2.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.2.0)). Nothing is on a registry: you
+install from the tag or depend on it with `tag = "0.2.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -39,14 +39,14 @@ decided or planned; [CHANGELOG.md](CHANGELOG.md) lists the changes.
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.1.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.2.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.1.0
+b10x-loom 0.2.0
 ```
 
 `b10x-loom run` routes an intent to a protocol, opens a governed case and runs until the run is
@@ -60,7 +60,7 @@ It prints each step with its effect and evidence and ends on a line such as
 `stopped: ApprovalRequired (repository.merge)`. Exit status 0 means it stopped at that human gate,
 3 another stop, 1 a failure, 2 an invalid command line.
 
-The current source adds test confinement (not yet included in tag `0.1.0`). It needs a Codex
+Since `0.2.0` tests run confined. A run needs a Codex
 login and Linux with bubblewrap and delegated cgroup v2 controllers. Tests default to Substrate:
 no network, source and toolchain read-only, workspace writes only under `target/`, a 300-second
 timeout, 8 GiB memory and 2,048 processes. Fetch Rust dependencies explicitly before starting;
@@ -87,7 +87,7 @@ admission, durable storage and authenticated evidence remain the embedding appli
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.1.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.2.0" }
 ```
 
 The example below

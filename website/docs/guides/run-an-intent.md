@@ -13,7 +13,7 @@ source: crates/loom-cli/src/lib.rs, crates/loom-intake-slice/src/run.rs, ess/int
 - **A Codex login.** Run `codex login` once. The credential in `~/.codex/auth.json` is read, and
   renewed when it is close to expiry, by [llm](https://beyond10x.github.io/llm/)
   ([GitHub](https://github.com/beyond10x/llm)), never by Loom's own code.
-- **Linux, bubblewrap and delegated cgroup v2 controllers.** Current source (after tag 0.1.0)
+- **Linux, bubblewrap and delegated cgroup v2 controllers.** Since 0.2.0, Loom
   confines tests with Substrate. When delegation is absent, Loom attempts one user systemd scope.
   A remaining failure stops with a named refusal and exit 3.
 - **Dependencies fetched before the run.** Rust and system tools are supported. Tests have no
