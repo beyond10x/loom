@@ -11,13 +11,15 @@ scope:
   path: crates/loom-commission
 - confidence: cited
   path: crates/loom-executor
+- confidence: inferred
+  path: crates/loom-executor/src/lib.rs
 - confidence: cited
   path: crates/loom-governor
 - confidence: inferred
   path: crates/loom-intake-slice
 - confidence: inferred
   path: crates/loom-sdk
-revision: 6
+revision: 7
 ---
 ## Outcome
 Control-plane can durably host the existing Loom case and run contracts. Every CaseStore operation reports storage failure separately from absence or duplicate insertion. Add a fallible runtime run-lifecycle port with explicit operational failure, adapting existing generated behaviors without abusing UnmetObligation. Distinct executor instances and resumed assignments never reuse selection or request identities.

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:harness-loop-port
 kind: story
-status: draft
+status: active
 title: Wire the ported Harness loop to Loom's projection, selection and revalidation
 summary: The ported loop's tool list is the projected catalogue and every tool call goes through selection, arguments and revalidation; the port itself is story:harness-crate-port.
 refs:
@@ -29,7 +29,10 @@ scope:
   path: crates/loom-executor/src/session.rs
 - confidence: cited
   path: crates/loom-executor/tests/harness_loop_port.rs
-revision: 18
+revision: 20
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-06T11:44:41Z", actor: "human:timo", revision: 19, decided_on: {"recorded":{"review_outcome":3}}}
+- {from: "proposed", to: "active", at: "2026-10-06T11:44:41Z", actor: "human:timo", revision: 20, decided_on: {"recorded":{"review_outcome":3}}}
 ---
 ## Outcome
 
