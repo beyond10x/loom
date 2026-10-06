@@ -563,8 +563,8 @@ commands:
 
   # Before a selection is proposed it is revalidated against the case revision and the action ids
   # of the frontier current at revalidation, which come from the governor, never from the model.
-  # not-in-frontier is `external:`: ess 0.52.0 does not witness a stored action in an input list
-  # (ESS-SYNTH-003).
+  # not-in-frontier stays `external:`, answered by the executor from the input's frontier_actions:
+  # ess 0.53.0 synthesis refuses it as a membership guard over them (ESS-SYNTH-003, ESS-SYNTH-004).
   - name: loom.run.RevalidateSelection
     input:
       - name: selection_id
