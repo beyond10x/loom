@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:harness-loop-port
 kind: story
-status: active
+status: implemented
 title: Wire the ported Harness loop to Loom's projection, selection and revalidation
 summary: The ported loop's tool list is the projected catalogue and every tool call goes through selection, arguments and revalidation; the port itself is story:harness-crate-port.
 refs:
@@ -20,19 +20,32 @@ relations:
 - depends_on: story:harness-crate-port
 scope:
 - confidence: cited
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
   path: crates/loom-executor/src/harness/
-- confidence: inferred
+- confidence: cited
+  path: crates/loom-executor/src/harness/governed.rs
+- confidence: cited
   path: crates/loom-executor/src/harness/mod.rs
 - confidence: cited
   path: crates/loom-executor/src/lib.rs
-- confidence: inferred
+- confidence: cited
   path: crates/loom-executor/src/session.rs
 - confidence: cited
   path: crates/loom-executor/tests/harness_loop_port.rs
-revision: 20
+- confidence: cited
+  path: docs/design/harness-map.md
+- confidence: cited
+  path: website/data/status.json
+- confidence: cited
+  path: website/docs/concepts/commission-and-harness.md
+revision: 32
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-06T11:44:41Z", actor: "human:timo", revision: 19, decided_on: {"recorded":{"review_outcome":3}}}
 - {from: "proposed", to: "active", at: "2026-10-06T11:44:41Z", actor: "human:timo", revision: 20, decided_on: {"recorded":{"review_outcome":3}}}
+- {from: "active", to: "implemented", at: "2026-10-06T17:15:20Z", actor: "human:timo", revision: 32, decided_on: {"recorded":{"test_result":1,"review_outcome":9,"verification":1}}}
 ---
 ## Outcome
 
@@ -126,6 +139,20 @@ Not established while scoping:
 - Where `RecordTurn` lands: `session.rs` is a reading; `src/arguments.rs` (`RequestRecord`) or `lib.rs` could hold `Turn` storage instead.
 - The software-change frontiers exist only as private functions in `crates/loom-executor/tests/agent_executor.rs:56,79`; sharing them touches that file.
 - Harness's `provider_emulated.rs` suite (39 cases): port it here or record why not; `src/harness/mod.rs` already says it is not carried.
+
+Confirmed by the implementor in wave 2026-10-06-w2 (the lines above are kept as scoped):
+
+| scoped line | result |
+|---|---|
+| `src/harness/mod.rs` declares the new module | confirmed: `src/harness/mod.rs:45` `pub mod governed;` |
+| `session.rs` needs `TurnStorage` and `SessionStorage`; none existed | confirmed: `TurnRecord` in `session.rs` from `:627`, with `RecordTurn`, `ResumeSession` and `FileSession` |
+| Collides with `lib.rs`, harness modules, `session.rs` | confirmed: `lib.rs` `propose` (pipeline extracted from `AgentExecutor::run`), new `src/harness/governed.rs`, `session.rs` additions |
+| Whether `turn_loop/` must change | settled: no file under `turn_loop/` changed; the tool port and environment provider share one per-turn catalogue list (`turn_loop/mod.rs:2436` check holds) and `LoopStop::AwaitingApproval` with its checkpoint is the exit |
+| File for the wiring | settled: `crates/loom-executor/src/harness/governed.rs` |
+| Where `RecordTurn` lands | settled: `governed.rs`, through `TurnRecord` in `session.rs` |
+| Software-change frontiers | settled: copied into `tests/harness_loop_port.rs`; `agent_executor.rs` unedited |
+
+Landed: `crates/loom-executor/src/{lib.rs,session.rs,harness/mod.rs,harness/governed.rs}`, four test files, `CHANGELOG.md`, `AGENTS.md`, `website/data/status.json`, `website/docs/concepts/commission-and-harness.md`, `docs/design/harness-map.md`.
 
 ## Constraints
 
