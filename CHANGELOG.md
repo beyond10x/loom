@@ -9,7 +9,9 @@ under **Unreleased** until the next release.
 ### Added
 
 - `Loom::with_governor` revalidates a selection against the governor's current frontier before
-  proposing it. After the selection, Loom reads the case's frontier from the governor once and
+  proposing it. Under Commission's `run_until_blocked`, a case that moves while arguments are
+  generated is judged on the frontier it left, until a run outcome for a moved case exists.
+  After the selection, Loom reads the case's frontier from the governor once and
   proposes nothing for a selection made at another case revision (`stale-revision`) or of an
   action that frontier's catalogue does not list (`not-in-frontier`); the refusal is recorded on
   the selection and in `Loom::revalidations`. A governor that cannot answer suspends the run for
