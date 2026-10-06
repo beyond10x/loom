@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 1e5c1537dda3b2b7e22b162efd4278fee13385bc49abc57d7ce5100af963d5c1
-// contract digest d23e825dcb7bfe03fbe20cea75b62e61bd0a45f586a2de0740780d02d5d2b8a1
+// model digest 148794ff1143dcb09d0fe880c0974054e23fcd97efe7a45a4d4f53970fceb9d0
+// contract digest acd561280daea7248420b3a1815dcb9a7991f0d16278e9f7575d7077c98a0da3
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Run — `loom.run`.
@@ -58,6 +58,35 @@ pub struct CatalogueId(pub crate::primitives::Uuid);
 /// CommissionRunId — `loom.run.CommissionRunId`: a distinct wrapper around `Uuid`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommissionRunId(pub crate::primitives::Uuid);
+
+/// The states of `loom.run.Compaction`, as runtime values.
+///
+/// Synthesised from the lifecycle, so the two cannot disagree. Which *moves* are legal is not
+/// carried here — it is carried by `Compaction<S>`, where an undeclared move does not compile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompactionState {
+    /// `Recorded`.
+    Recorded,
+}
+
+/// CompactionId — `loom.run.CompactionId`: a distinct wrapper around `Uuid`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompactionId(pub crate::primitives::Uuid);
+
+/// ReportedUsage — `loom.run.ReportedUsage`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReportedUsage {
+    /// `model` — `String`.
+    pub model: String,
+    /// `input_tokens` — `Integer`.
+    pub input_tokens: i64,
+    /// `output_tokens` — `Integer`.
+    pub output_tokens: i64,
+    /// `cached_input_tokens` — `Integer`.
+    pub cached_input_tokens: i64,
+    /// `cache_creation_input_tokens` — `Optional<Integer>`.
+    pub cache_creation_input_tokens: Option<i64>,
+}
 
 /// RunEnding — `loom.run.RunEnding`: one of a closed set of names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -391,6 +420,138 @@ impl AnyArgumentRequest {
         match self {
             Self::Requested(instance) => ArgumentRequestSnapshot {
                 state: ArgumentRequestState::Requested,
+                data: instance.into_data(),
+            },
+        }
+    }
+}
+
+/// What Compaction — `loom.run.Compaction` — holds, apart from where it is in its lifecycle.
+///
+/// The identity and every declared field. The state is deliberately not one: inside the domain it
+/// is carried by the type parameter of [`Compaction<S>`], and at a boundary by [`CompactionSnapshot::state`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompactionData {
+    /// The identity: `compaction_id` — `loom.run.CompactionId`.
+    pub compaction_id: CompactionId,
+    /// `session_id` — `loom.run.SessionId`.
+    ///
+    /// Carries `compactions`: `loom.run.Session` owns many `loom.run.Compaction`.
+    pub session_id: SessionId,
+    /// `usage` — `Optional<loom.run.ReportedUsage>`.
+    pub usage: Option<ReportedUsage>,
+}
+
+/// The states of `loom.run.Compaction`, at the type level.
+///
+/// One marker type per declared state, sealed: a state the lifecycle does not declare cannot
+/// implement [`Marker`](compaction_state::Marker), so [`Compaction<S>`](Compaction) can only ever rest in a real state.
+pub mod compaction_state {
+    /// Closes [`Marker`] over the declared states.
+    mod sealed {
+        /// Implemented only by the marker types beside this module.
+        pub trait Sealed {}
+        impl Sealed for super::Recorded {}
+    }
+
+    /// A declared state of `Compaction`, as a type.
+    pub trait Marker: sealed::Sealed {
+        /// The same state, as the runtime value.
+        const STATE: super::CompactionState;
+    }
+
+    /// `Recorded`. Where a new instance starts.
+    pub struct Recorded;
+
+    impl Marker for Recorded {
+        const STATE: super::CompactionState = super::CompactionState::Recorded;
+    }
+}
+
+/// Compaction — `loom.run.Compaction` — with its lifecycle state carried by the type.
+///
+/// The one constructor rests in `Recorded`, and the only way to change `S` is a method generated from
+/// a declared transition. A move the specification does not declare is therefore not an error
+/// case: it does not compile. Where the state is data — wire, storage — use [`CompactionSnapshot`]
+/// and [`CompactionSnapshot::refine`].
+pub struct Compaction<S: compaction_state::Marker> {
+    data: CompactionData,
+    state: core::marker::PhantomData<S>,
+}
+
+impl<S: compaction_state::Marker> Compaction<S> {
+    /// The state this instance rests in, as the runtime value.
+    pub fn state(&self) -> CompactionState {
+        S::STATE
+    }
+
+    /// What it holds.
+    pub fn data(&self) -> &CompactionData {
+        &self.data
+    }
+
+    /// Hands the data back, giving up the typed state.
+    pub fn into_data(self) -> CompactionData {
+        self.data
+    }
+}
+
+impl Compaction<compaction_state::Recorded> {
+    /// A new instance, resting in `Recorded` — the only state the lifecycle starts one in.
+    pub fn new(data: CompactionData) -> Self {
+        Self {
+            data,
+            state: core::marker::PhantomData,
+        }
+    }
+}
+
+/// `loom.run.Compaction` as it crosses a boundary: the state as a value beside the data.
+///
+/// Wire and storage know states only at runtime; [`CompactionSnapshot::refine`] is the one door back
+/// into the typed lifecycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompactionSnapshot {
+    /// Where the instance is in its lifecycle.
+    pub state: CompactionState,
+    /// What it holds.
+    pub data: CompactionData,
+}
+
+/// An `Compaction` in whichever declared state it was found.
+pub enum AnyCompaction {
+    /// Resting in `Recorded`.
+    Recorded(Compaction<compaction_state::Recorded>),
+}
+
+impl CompactionSnapshot {
+    /// Refines the runtime state into the typed one.
+    ///
+    /// Total: every declared state has an arm, and an undeclared state cannot reach here because
+    /// `CompactionState` cannot spell one.
+    pub fn refine(self) -> AnyCompaction {
+        match self.state {
+            CompactionState::Recorded => AnyCompaction::Recorded(Compaction {
+                data: self.data,
+                state: core::marker::PhantomData,
+            }),
+        }
+    }
+}
+
+impl AnyCompaction {
+    /// The state, as the runtime value.
+    pub fn state(&self) -> CompactionState {
+        match self {
+            Self::Recorded(_) => CompactionState::Recorded,
+        }
+    }
+
+    /// Back to the boundary shape.
+    pub fn snapshot(self) -> CompactionSnapshot {
+        match self {
+            Self::Recorded(instance) => CompactionSnapshot {
+                state: CompactionState::Recorded,
                 data: instance.into_data(),
             },
         }
@@ -1005,6 +1166,43 @@ pub enum ProjectCatalogueOutcome {
     },
 }
 
+/// RecordCompaction — the input of `loom.run.RecordCompaction`.
+///
+/// Everything it can result in is [`RecordCompactionOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordCompaction {
+    /// `compaction_id` — `loom.run.CompactionId`.
+    pub compaction_id: CompactionId,
+    /// `session_id` — `loom.run.SessionId`.
+    pub session_id: SessionId,
+    /// `usage` — `Optional<loom.run.ReportedUsage>`.
+    pub usage: Option<ReportedUsage>,
+}
+
+/// Everything `loom.run.RecordCompaction` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordCompactionOutcome {
+    /// `session-unknown` — when no `loom.run.Session` carries the identity `input.session_id` names.
+    SessionUnknown {
+        /// Why it was refused: `loom.run.SessionNotFound`.
+        error: SessionNotFound,
+    },
+    /// `session-not-active` — when the `loom.run.Session` that `input.session_id` names satisfies `state != Active`.
+    SessionNotActive {
+        /// Why it was refused: `loom.run.SessionNotActive`.
+        error: SessionNotActive,
+    },
+    /// `recorded` — otherwise.
+    Recorded {
+        /// The `loom.run.SessionCompacted` this outcome publishes.
+        session_compacted: SessionCompacted,
+    },
+}
+
 /// RecordTurn — the input of `loom.run.RecordTurn`.
 ///
 /// Everything it can result in is [`RecordTurnOutcome`].
@@ -1305,6 +1503,17 @@ pub struct SelectionStale {
     pub case_revision: i64,
 }
 
+/// SessionCompacted — the event `loom.run.SessionCompacted`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionCompacted {
+    /// `compaction_id` — `loom.run.CompactionId`.
+    pub compaction_id: CompactionId,
+    /// `session_id` — `loom.run.SessionId`.
+    pub session_id: SessionId,
+    /// `usage` — `Optional<loom.run.ReportedUsage>`.
+    pub usage: Option<ReportedUsage>,
+}
+
 /// SessionFiled — the event `loom.run.SessionFiled`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionFiled {
@@ -1536,6 +1745,17 @@ pub mod obligations {
         ///
         /// `Err` is the typed refusal of a request the model declares no outcome for.
         fn project_catalogue(&mut self, input: super::ProjectCatalogue) -> Result<super::ProjectCatalogueOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `loom.run.RecordCompaction` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait RecordCompactionBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.run.RecordCompaction`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn record_compaction(&mut self, input: super::RecordCompaction) -> Result<super::RecordCompactionOutcome, crate::obligation::UnmetObligation>;
     }
 
     /// The behaviour `loom.run.RecordTurn` — generated.

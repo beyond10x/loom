@@ -1182,6 +1182,7 @@ fn compact(items: &mut [Item], sink: &mut dyn LoopSink) {
         bytes_before: before,
         bytes_after: after,
         summary_turn: false,
+        usage: None,
     });
 }
 
@@ -1367,14 +1368,14 @@ fn fold_end(items: &[Item], protect: usize) -> Option<usize> {
     (end > FIRST_KEPT_ITEM).then_some(end)
 }
 
-/// What a summary attempt did.
+/// What a summary attempt did. A spent turn carries what the provider reported for it.
 enum Summarised {
     /// Nothing was folded: too little to be worth a turn, or all of it protected.
     Skipped,
     /// The prefix is now one summary item, in place of this many.
-    Folded(usize),
+    Folded(usize, Option<Usage>),
     /// A turn was spent and produced nothing usable. The elided conversation stands.
-    Failed,
+    Failed(Option<Usage>),
     /// The caller cancelled. The run is over.
     Cancelled,
 }
@@ -2952,17 +2953,22 @@ impl<'a> AgentLoop<'a> {
 
         let mut summarised = 0_usize;
         let mut summary_turn = false;
+        let mut usage = None;
         if measure(&state.items) > target {
             if let Some(stop) = self.stop_before_turn(state, deadline) {
                 return Some(stop);
             }
             match self.summarise(state, target, sink) {
                 Summarised::Cancelled => return Some(cancelled()),
-                Summarised::Folded(count) => {
+                Summarised::Folded(count, reported) => {
                     summarised = count;
                     summary_turn = true;
+                    usage = reported;
                 }
-                Summarised::Failed => summary_turn = true,
+                Summarised::Failed(reported) => {
+                    summary_turn = true;
+                    usage = reported;
+                }
                 Summarised::Skipped => {}
             }
         }
@@ -2989,6 +2995,7 @@ impl<'a> AgentLoop<'a> {
             bytes_before: before,
             bytes_after: after,
             summary_turn,
+            usage,
         });
         None
     }
@@ -3064,10 +3071,11 @@ impl<'a> AgentLoop<'a> {
                              elided form and the run goes on"
                         ),
                     });
-                    return Summarised::Failed;
+                    return Summarised::Failed(None);
                 }
             }
         };
+        let reported = outcome.usage.clone();
         state.absorb_usage(outcome.usage, self.config.prices.as_ref(), sink);
         if self.cancel.is_cancelled() {
             return Summarised::Cancelled;
@@ -3088,7 +3096,7 @@ impl<'a> AgentLoop<'a> {
                           conversation it was asked to fold"
                     .to_owned(),
             });
-            return Summarised::Failed;
+            return Summarised::Failed(reported);
         }
 
         let opaque: Vec<Item> = state.items[FIRST_KEPT_ITEM..end]
@@ -3103,7 +3111,7 @@ impl<'a> AgentLoop<'a> {
             .push(Item::user(format!("{SUMMARY_MARKER}\n{summary}")));
         state.items.extend(opaque);
         state.items.extend(tail);
-        Summarised::Folded(end - FIRST_KEPT_ITEM)
+        Summarised::Folded(end - FIRST_KEPT_ITEM, reported)
     }
 
     /// What a run that would stop with `stop` actually does: ends with it, or turns again.

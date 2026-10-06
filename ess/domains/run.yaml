@@ -68,6 +68,28 @@ types:
     kind: enum
     variants: [Answered, Stopped, Failed]
 
+  - name: loom.run.CompactionId
+    kind: newtype
+    of: Uuid
+
+  # Token counts as the endpoint reported them for one request, in the shape of the ported wire's
+  # Usage (crates/loom-executor/src/harness/wire/turn.rs): input_tokens is the whole input and the
+  # cache figures are parts of it. A cache-write figure the provider does not report is absent,
+  # never zero.
+  - name: loom.run.ReportedUsage
+    kind: struct
+    fields:
+      - name: model
+        type: String
+      - name: input_tokens
+        type: Integer
+      - name: output_tokens
+        type: Integer
+      - name: cached_input_tokens
+        type: Integer
+      - name: cache_creation_input_tokens
+        type: Optional<Integer>
+
 entities:
   # Session and transcript state for one run (loom-design.md § Owns). Filed outside the workspace
   # whether the run answered or failed; a resume continues the same session by id (Harness
@@ -89,6 +111,12 @@ entities:
       - name: turns
         kind: owns
         target: loom.run.Turn
+        cardinality: many
+        via: session_id
+      # The trigger is checked before every request, so a session can compact more than once.
+      - name: compactions
+        kind: owns
+        target: loom.run.Compaction
         cardinality: many
         via: session_id
     # Active while a run takes turns in it; Filed once the run ended and the session was written;
@@ -130,6 +158,24 @@ entities:
       initial: Taken
       states: [Taken]
       terminal: [Taken]
+
+  # One compaction of a session's conversation, made by the loop before a request once the
+  # conversation crossed its trigger. It never rewrites instruction text. Its usage is what the
+  # endpoint reported for the summary request, never an estimate; absent when no summary request
+  # was made or the endpoint reported none.
+  - name: loom.run.Compaction
+    identity:
+      name: compaction_id
+      type: loom.run.CompactionId
+    fields:
+      - name: session_id
+        type: loom.run.SessionId
+      - name: usage
+        type: Optional<loom.run.ReportedUsage>
+    lifecycle:
+      initial: Recorded
+      states: [Recorded]
+      terminal: [Recorded]
 
   # The model-visible catalogue derived from one frontier (ADR 0072), projected for one turn.
   - name: loom.run.ActionCatalogue
@@ -355,6 +401,45 @@ commands:
             turn_id: input.turn_id
             session_id: input.session_id
             index: input.index
+
+  # A compaction the loop made is recorded on the session it was made in, with the usage the
+  # endpoint reported for its summary request. Recorded only into a session a run is taking turns
+  # in.
+  - name: loom.run.RecordCompaction
+    input:
+      - name: compaction_id
+        type: loom.run.CompactionId
+      - name: session_id
+        type: loom.run.SessionId
+      - name: usage
+        type: Optional<loom.run.ReportedUsage>
+    outcomes:
+      - name: session-unknown
+        when_related: {via: input.session_id, exists: false}
+        error: loom.run.SessionNotFound
+        payload:
+          loom.run.SessionNotFound:
+            session_id: input.session_id
+      - name: session-not-active
+        when_related:
+          via: input.session_id
+          predicate: state != Active
+        error: loom.run.SessionNotActive
+        payload:
+          loom.run.SessionNotActive:
+            session_id: input.session_id
+      - name: recorded
+        creates: loom.run.Compaction
+        instance: compaction_id
+        sets:
+          session_id: input.session_id
+          usage: input.usage
+        emits: [loom.run.SessionCompacted]
+        payload:
+          loom.run.SessionCompacted:
+            compaction_id: input.compaction_id
+            session_id: input.session_id
+            usage: input.usage
 
   # The run ended, answered, stopped or failed, and its session is written: outside the
   # workspace, the directory 0700 and the file 0600, holding no credential and no instruction text,
@@ -623,6 +708,15 @@ events:
         type: loom.run.SessionId
       - name: index
         type: Integer
+
+  - name: loom.run.SessionCompacted
+    fields:
+      - name: compaction_id
+        type: loom.run.CompactionId
+      - name: session_id
+        type: loom.run.SessionId
+      - name: usage
+        type: Optional<loom.run.ReportedUsage>
 
   - name: loom.run.SessionFiled
     fields:

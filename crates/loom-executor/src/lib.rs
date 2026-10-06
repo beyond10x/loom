@@ -22,7 +22,8 @@
 //! ([`harness::governed`]): each turn's tool list is the catalogue projected from the current
 //! frontier, the model's tool call is the selection and carries its arguments, and the same
 //! pipeline revalidates it before Loom proposes it. Each completed turn is recorded
-//! ([`Loom::turns`]).
+//! ([`Loom::turns`]), and so is each compaction of the run's session, with the usage the endpoint
+//! reported for it ([`Loom::compactions`], [`compaction`]).
 
 /// The run model, synthesized from the ESS specification.
 pub use loom as model;
@@ -60,9 +61,9 @@ use model::behaviour::SelectionStorage;
 use model::run::obligations::{RequestArgumentsBehavior, RevalidateSelectionBehavior};
 use model::run::{
     ActionCatalogue, AnySelection, ArgumentRequestId, ArgumentRequestSnapshot, CatalogueId,
-    RequestArguments, RequestArgumentsOutcome, RevalidateSelection, RevalidateSelectionOutcome,
-    Selection, SelectionId, SelectionSnapshot, TurnId, TurnSnapshot, action_catalogue_state,
-    selection_state,
+    CompactionSnapshot, RequestArguments, RequestArgumentsOutcome, RevalidateSelection,
+    RevalidateSelectionOutcome, Selection, SelectionId, SelectionSnapshot, TurnId, TurnSnapshot,
+    action_catalogue_state, selection_state,
 };
 use selection::{SelectionContext, SelectionRefusal};
 use session::TurnRecord;
@@ -167,6 +168,13 @@ impl<S, G, V> Loom<S, G, V> {
     /// per turn a provider completed, with the items it added.
     pub fn turns(&self) -> Vec<TurnSnapshot> {
         self.turn_record().turns().to_vec()
+    }
+
+    /// Every compaction [`Loom::run_loop`] recorded (`loom.run.RecordCompaction`), in the order
+    /// recorded: one per compaction the loop made, on the session it was made in, with the usage
+    /// the endpoint reported for its summary request ([`compaction`]).
+    pub fn compactions(&self) -> Vec<CompactionSnapshot> {
+        self.turn_record().compactions().to_vec()
     }
 
     /// The record, whatever a panicking holder left: each write to it is one whole snapshot.

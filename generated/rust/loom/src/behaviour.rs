@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 1e5c1537dda3b2b7e22b162efd4278fee13385bc49abc57d7ce5100af963d5c1
-// contract digest d23e825dcb7bfe03fbe20cea75b62e61bd0a45f586a2de0740780d02d5d2b8a1
+// model digest 148794ff1143dcb09d0fe880c0974054e23fcd97efe7a45a4d4f53970fceb9d0
+// contract digest acd561280daea7248420b3a1815dcb9a7991f0d16278e9f7575d7077c98a0da3
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -50,6 +50,20 @@ pub trait ArgumentRequestStorage {
 
     /// Removes the instance with this identity.
     fn delete(&mut self, identity: &crate::run::ArgumentRequestId);
+}
+
+/// Where `loom.run.Compaction` is stored — a port the implementor provides.
+///
+/// Keyed by the identity `compaction_id`. Generated network entries supply an ephemeral implementation; durable storage remains a port.
+pub trait CompactionStorage {
+    /// The instance with this identity, or `None` where none is stored.
+    fn get(&self, identity: &crate::run::CompactionId) -> Option<crate::run::CompactionSnapshot>;
+
+    /// Stores this instance under its identity, replacing what was held.
+    fn put(&mut self, snapshot: crate::run::CompactionSnapshot);
+
+    /// Removes the instance with this identity.
+    fn delete(&mut self, identity: &crate::run::CompactionId);
 }
 
 /// Where `loom.run.Selection` is stored — a port the implementor provides.
@@ -234,6 +248,41 @@ where
         };
         let answer = crate::run::ProjectCatalogueOutcome::Projected { catalogue_projected: crate::run::CatalogueProjected { catalogue_id: identity.clone(), turn_id: input.turn_id.clone(), case_revision: input.case_revision.clone() } };
         ActionCatalogueStorage::put(&mut self.ports, crate::run::AnyActionCatalogue::Projected(crate::run::ActionCatalogue::new(data)).snapshot());
+        return Ok(answer);
+    }
+}
+
+/// `loom.run.RecordCompaction`, generated: every outcome is one the specification fully determines.
+impl<P> crate::run::obligations::RecordCompactionBehavior for Generated<P>
+where
+    P: CompactionStorage + SessionStorage,
+{
+    fn record_compaction(&mut self, input: crate::run::RecordCompaction) -> Result<crate::run::RecordCompactionOutcome, UnmetObligation> {
+        let _ = &input;
+        // `when_related:` reads the `loom.run.Session` row `input.session_id` names, through its storage port; an absent
+        // reference reads no row and selects no related branch.
+        let reference = Some(&input.session_id);
+        let related = reference.and_then(|identity| SessionStorage::get(&self.ports, identity));
+        // `session-unknown`: the reference names an identity no row carries.
+        if reference.is_some() && related.is_none() {
+            return Ok(crate::run::RecordCompactionOutcome::SessionUnknown { error: crate::run::SessionNotFound { session_id: input.session_id.clone() } });
+        }
+        let _ = &related;
+        // `session-not-active`: selected by the present related row, in declaration order.
+        if let Some(related) = &related {
+        if decided(equal(Some(&related.state).map(|value| match value { crate::run::SessionState::Active => "Active", crate::run::SessionState::Filed => "Filed" }.to_owned()), Some("Active".to_owned())).map(|value| !value), "loom.run.RecordCompaction")? {
+            return Ok(crate::run::RecordCompactionOutcome::SessionNotActive { error: crate::run::SessionNotActive { session_id: input.session_id.clone() } });
+        }
+        }
+        // `recorded`: the default.
+        let identity: crate::run::CompactionId = input.compaction_id.clone();
+        let data = crate::run::CompactionData {
+            compaction_id: identity.clone(),
+            session_id: input.session_id.clone(),
+            usage: input.usage.clone(),
+        };
+        let answer = crate::run::RecordCompactionOutcome::Recorded { session_compacted: crate::run::SessionCompacted { compaction_id: identity.clone(), session_id: input.session_id.clone(), usage: input.usage.clone() } };
+        CompactionStorage::put(&mut self.ports, crate::run::AnyCompaction::Recorded(crate::run::Compaction::new(data)).snapshot());
         return Ok(answer);
     }
 }

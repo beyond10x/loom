@@ -24,9 +24,16 @@ under **Unreleased** until the next release.
   session with the provider items it added (`loom.run.RecordTurn`, `Loom::turns`); one run holds
   a session at a time, a second run proposes nothing, and the session is filed when its run ends
   (`Loom::sessions`). Arguments the model wrote that Commission's JSON cannot carry end the run
-  with `NoUsefulAction`. Compaction,
-  budgets as a Commission suspension, and resuming a run once Commission has acted are not wired
-  yet, and `b10x-loom run` does not use the loop yet.
+  with `NoUsefulAction`. Budgets as a Commission suspension and resuming a run once Commission has
+  acted are not wired yet, and `b10x-loom run` does not use the loop yet.
+- A governed run records each compaction of its session. The ported loop compacts before a
+  request once the conversation passes 80 % of a declared context window, aiming at 50 % (the
+  byte rule without a window); `Loom::run_loop` records each compaction on the run's session
+  (`loom.run.RecordCompaction`, `Loom::compactions`) with the usage the endpoint reported for its
+  summary request (`loom.run.ReportedUsage`), never an estimate, and `LoopEvent::Compacted` now
+  carries that usage. The request after a compaction carries the run's standing instruction
+  unchanged and the catalogue projected from the frontier current then; the model's summary stays
+  conversation content and is not recorded as a turn. The session file format is unchanged.
 
 ## [0.2.0] - 2026-10-06
 
