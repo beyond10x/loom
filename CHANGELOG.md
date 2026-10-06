@@ -8,6 +8,13 @@ under **Unreleased** until the next release.
 
 ### Added
 
+- `Loom::with_governor` revalidates a selection against the governor's current frontier before
+  proposing it. After the selection, Loom reads the case's frontier from the governor once and
+  proposes nothing for a selection made at another case revision (`stale-revision`) or of an
+  action that frontier's catalogue does not list (`not-in-frontier`); the refusal is recorded on
+  the selection and in `Loom::revalidations`. A governor that cannot answer suspends the run for
+  availability. A Loom made by `Loom::new` alone proposes as before, and Commission still
+  rechecks every proposal before any effect.
 - `CanonGovernor::with_protocol` compiles host-admitted protocols without replacing built-ins.
   `with_evaluation_time` accepts trusted freshness time, and `FallibleCaseStore` makes durable
   adapter failures explicit while preserving existing infallible `CaseStore` callers.
