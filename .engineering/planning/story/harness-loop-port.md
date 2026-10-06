@@ -19,13 +19,17 @@ relations:
 - depends_on: story:run-pipeline-skeleton
 - depends_on: story:harness-crate-port
 scope:
-- confidence: inferred
-  path: crates/loom/src/harness/
 - confidence: cited
-  path: crates/loom/src/lib.rs
+  path: crates/loom-executor/src/harness/
 - confidence: inferred
-  path: crates/loom/tests/harness_loop_port.rs
-revision: 9
+  path: crates/loom-executor/src/harness/mod.rs
+- confidence: cited
+  path: crates/loom-executor/src/lib.rs
+- confidence: inferred
+  path: crates/loom-executor/src/session.rs
+- confidence: cited
+  path: crates/loom-executor/tests/harness_loop_port.rs
+revision: 18
 ---
 ## Outcome
 
@@ -63,10 +67,62 @@ the projection, the selector, the generator and the refusal path. It edits the p
 
 ## Scope
 
-- `crates/loom/src/harness/` (the `TurnEnvironmentProvider` and `ToolPort` implementations that
-  feed the projected catalogue and route tool calls into the pipeline)
-- `crates/loom/src/lib.rs` (the executor pipeline)
-- `crates/loom/tests/harness_loop_port.rs` (new)
+Derived 2026-10-06 by `story-scoper` at `04a1a73`. Every line is **cited** (read from the story or the tree) or
+**inferred** (a reading that could be wrong).
+
+- **Path mapping:** the story's `crates/loom/` paths are `crates/loom-executor/` since
+  `story:crate-names`: `crates/loom/src/harness/` → `crates/loom-executor/src/harness/`,
+  `crates/loom/src/lib.rs` → `crates/loom-executor/src/lib.rs`,
+  `crates/loom/tests/harness_loop_port.rs` → `crates/loom-executor/tests/harness_loop_port.rs`,
+  `crates/loom/tests/harness_port_contract.rs` → `crates/loom-executor/tests/harness_port_contract.rs`;
+  Harness `harness-loop/src/environment.rs:47` → `crates/loom-executor/src/harness/turn_loop/environment.rs:49`,
+  `harness-wire/src/port.rs:135` → `crates/loom-executor/src/harness/wire/port.rs:137`; the
+  Commission fake governor is `crates/loom-commission-testkit/src/fake_governor.rs`, already a
+  dev-dependency (`crates/loom-executor/Cargo.toml:23`), read and not edited — cited
+- **Primary surface:** `crates/loom-executor`: the `AgentExecutor::run` pipeline and Loom's own
+  `TurnEnvironmentProvider` and `ToolPort` implementations — cited (story § Scope)
+- **Files:** `crates/loom-executor/src/lib.rs` (`impl AgentExecutor for Loom`, the executor
+  pipeline) — cited
+- **Files:** `crates/loom-executor/src/harness/` (the `TurnEnvironmentProvider` and `ToolPort`
+  implementations that feed the projected catalogue and route tool calls into the pipeline) — cited
+- **Files:** `crates/loom-executor/tests/harness_loop_port.rs` (new, `ported_loop_round_trip`) — cited
+- **Symbols:** `TurnEnvironmentProvider` (`src/harness/turn_loop/environment.rs:49`), `ToolPort`
+  (`src/harness/wire/port.rs:137`), `projection::project`, `ActionSelector`, `ArgumentGenerator`,
+  `ProposedAction`, `loom.run.RecordTurn` (`ess/domains/run.yaml:320`) — cited
+- **Also likely:** `crates/loom-executor/src/harness/mod.rs`: it declares the new Loom-owned module
+  beside the five ported ones, because the ported subdirectories may not name Loom's modules
+  (see Safety fact) — inferred
+- **Also likely:** `crates/loom-executor/src/session.rs`: recording one `Turn` per completed turn
+  through `RecordTurn` (the carried note from wave 2026-10-04-w15) needs `TurnStorage` and
+  `SessionStorage` implementations, and no file in `crates/loom-executor/src` implements either
+  yet — inferred
+- **Documents:** none. `docs/design/harness-map.md:98-100` already says this story wires the
+  `TurnEnvironmentProvider` seam, and no specification change is planned (§ ESS first) — cited
+- **Confidence:** medium. The story names all three paths and the tree has them under the renamed
+  crate, but it does not name the file inside `src/harness/` for the new wiring, and the
+  turn-recording half has no site the story names — cited
+- **Would collide with:** any unit editing `crates/loom-executor/src/lib.rs` (the executor
+  pipeline), any unit adding or changing a module under `crates/loom-executor/src/harness/`, and
+  any unit on session filing in `crates/loom-executor/src/session.rs` — inferred
+- **Safety fact:** the bridge cannot live inside the five ported modules.
+  `tests/adversary2_harness_port.rs:48-62` lets `turn_loop` name only `wire` and five external
+  crates, refuses any `crate::<loom module>` path (`:455-456`), and fixes the ported file count at
+  36 (`:637`). So the code that names `projection`, `selection` and `b10x_loom_commission` lands
+  outside `harness/{wire,http,responses,messages,turn_loop}/`. The refusal in acceptance item 3
+  already comes from `refuse_unadmitted` (`src/harness/turn_loop/mod.rs:1727`) once the
+  environment's tool list is the catalogue. Step 2 (pointed at `file:line`), unproven — cited
+
+Not established while scoping:
+
+- **Whether `turn_loop/` itself has to change.** `turn_loop/mod.rs:2424-2441` rejects a turn's tool
+  list unless every entry is exactly a tool the attached `ToolPort` offers, and no loop exit carries
+  a `ProposedAction`. Wiring may need an edit to the ported loop, which the boundary test above
+  constrains. Settle this before the story is proposed.
+- The file name for the wiring code (a new file beside `src/harness/mod.rs`, or a top-level module).
+- Revalidation's call site: depends on what `story:selection-revalidation` builds in `src/revalidation.rs`.
+- Where `RecordTurn` lands: `session.rs` is a reading; `src/arguments.rs` (`RequestRecord`) or `lib.rs` could hold `Turn` storage instead.
+- The software-change frontiers exist only as private functions in `crates/loom-executor/tests/agent_executor.rs:56,79`; sharing them touches that file.
+- Harness's `provider_emulated.rs` suite (39 cases): port it here or record why not; `src/harness/mod.rs` already says it is not carried.
 
 ## Constraints
 

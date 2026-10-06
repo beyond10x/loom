@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:selection-revalidation
 kind: story
-status: draft
+status: active
 title: Revalidate a selected action at the execution boundary
 refs:
 - provider: commission
@@ -17,13 +17,22 @@ relations:
 - serves: vision:governed-autonomy
 - depends_on: story:run-pipeline-skeleton
 scope:
+- confidence: inferred
+  path: crates/loom-executor/src/arguments.rs
 - confidence: cited
-  path: crates/loom/src/lib.rs
+  path: crates/loom-executor/src/lib.rs
+- confidence: cited
+  path: crates/loom-executor/src/revalidation.rs
+- confidence: cited
+  path: crates/loom-executor/tests/adversary_run_revalidation.rs
+- confidence: cited
+  path: crates/loom-executor/tests/selection_revalidation.rs
 - confidence: inferred
-  path: crates/loom/src/revalidation.rs
-- confidence: inferred
-  path: crates/loom/tests/selection_revalidation.rs
-revision: 10
+  path: ess/domains/run.yaml
+revision: 22
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-06T10:10:28Z", actor: "human:timo", revision: 21, decided_on: {"recorded":{"review_outcome":2}}}
+- {from: "proposed", to: "active", at: "2026-10-06T10:10:28Z", actor: "human:timo", revision: 22, decided_on: {"recorded":{"review_outcome":2}}}
 ---
 ## Outcome
 
@@ -80,9 +89,73 @@ the revalidation command and the `revalidation` module. `story:harness-loop-port
 
 ## Scope
 
-- `crates/loom/src/revalidation.rs` (created empty by `story:run-pipeline-skeleton`, filled here),
-  `crates/loom/src/lib.rs` (the executor pipeline)
-- `crates/loom/tests/selection_revalidation.rs` (new)
+Derived 2026-10-06 by `story-scoper` at loom `origin/main` 04a1a73. Every line is **cited** (read
+from the story or the tree) or **inferred** (a reading that could be wrong).
+
+- **Primary surface:** `crates/loom-executor` — cited
+- **Path map:** `crates/loom/src/lib.rs` → `crates/loom-executor/src/lib.rs`;
+  `crates/loom/src/revalidation.rs` → `crates/loom-executor/src/revalidation.rs`;
+  `crates/loom/tests/selection_revalidation.rs` → `crates/loom-executor/tests/selection_revalidation.rs` — cited (tree)
+- **Files:** `crates/loom-executor/src/revalidation.rs` (a 4-line stub: "story:selection-revalidation
+  builds it"), `crates/loom-executor/src/lib.rs:182-266` (`impl AgentExecutor for Loom`),
+  `crates/loom-executor/tests/selection_revalidation.rs` (absent; new) — cited
+- **Files:** `crates/loom-executor/tests/adversary_run_revalidation.rs:259`,
+  `not_in_frontier_follows_the_frontier_actions`, ignored with reason
+  `story:selection-revalidation; ESS-SYNTH-003` — cited
+- **Placement:** revalidation goes after `request_arguments` (`lib.rs:248`) and before the
+  `ProposedAction` return (`:260`). `RequestArguments` refuses a selection that is not `Selected`
+  (`ess/domains/run.yaml:545`), and revalidation moves the selection out of `Selected` — inferred
+- **Symbols:** `Governor::frontier`, asked once per run (acceptance 4);
+  `RevalidateSelectionBehavior for Generated<P>` with `P: TryContext + SelectionStorage`;
+  `ExternalCommand::LoomRunRevalidateSelection` (`generated/rust/loom/src/behaviour.rs:109`), which
+  now carries the command input; `RequestRecord` — cited
+- **Also likely:** `crates/loom-executor/src/arguments.rs`. `RequestRecord` (:56) is the only
+  `SelectionStorage` the pipeline holds (:75), so revalidation either wraps it from
+  `revalidation.rs` or extends it here — inferred
+- **Also likely:** `ess/domains/run.yaml:564-596`. The comment at :566 still blames ess 0.52.0.
+  The content changes only if `not-in-frontier` becomes a synthesized membership guard instead of an
+  `external:` branch answered from the input's `frontier_actions`. That route regenerates
+  `generated/rust/loom/src/run.rs` and `behaviour.rs` — inferred
+- **Reads, not changed (old commission references, now in this repo):** `Governor` port →
+  `crates/loom-commission/src/ports/governor.rs:14`; `AgentExecutor`/`ProposedAction` (M-004) →
+  `crates/loom-commission/src/ports/executor.rs:15`; fake governor →
+  `crates/loom-commission-testkit/src/fake_governor.rs:128` (already a dev-dependency of
+  `loom-executor`); commission `ess/domains/responsibility.yaml:182-203`@`013e392` →
+  `ess/commission/domains/responsibility.yaml:450-476` (`commission.responsibility.Frontier`);
+  M-008 stale-revision revalidation → `crates/loom-commission/src/action_request.rs:73`;
+  `story:ess-hard-gate` is in this store (implemented) — cited
+- **Documents:** none required by the acceptance — cited
+- **Confidence:** medium. The story and the tree fix the three files, but the story does not decide
+  how `Loom` gets a `Governor` (`AgentExecutor::run` takes none), or whether `not-in-frontier`
+  stays `external:` or becomes an ESS guard. Those choices decide whether `Loom::new` callers,
+  `ess/` and `generated/` change.
+- **Would collide with:** any unit on the run pipeline in `crates/loom-executor/src/lib.rs`
+  (:182-266) or `Loom::new` (:74), and with `crates/loom-executor/tests/adversary_run_revalidation.rs`.
+  Unmerged `feat/hosted-governor-contract` (1b25fe8) still differs from main there, at the import
+  (:13-14) and the `Context::external` impl (:92-97) — cited
+- **Would collide with (textual):** on the `external:` route this story must rewrite that same
+  `Context::external` impl to answer from `frontier_actions`, which is a merge conflict with that
+  branch. On the ESS-guard route only :259 changes. The branch's `generated/rust/loom/src/run.rs` and
+  `behaviour.rs` are byte-identical to main 04a1a73, so those two files collide only on the
+  ESS-guard route — inferred
+- **Safety fact:** Commission revalidates every `ProposedAction` against the governor
+  (`crates/loom-commission/src/runtime.rs:492` → `action_request.rs:73`) before `EffectPort::invoke`.
+  Loom's pre-check can therefore only narrow what is proposed, and a gap in it reaches no effect —
+  step 2, unproven
+
+Stale statements in the sections above, found while scoping (2026-10-06):
+
+- Approval-gated actions no longer return `Suspended`: the tree proposes them (`lib.rs:14-15`, test
+  at `lib.rs:344-362`, Atlas ADR 0082), so they reach this check too.
+- `decision-blocker:effect-invocation-owner` is `cleared`: Commission invokes the effect (ADR 0082).
+  The story still ends at returning the `ProposedAction`.
+- The wave-9 note "the generated `Context::external` receives no command input" no longer holds since
+  ESS 0.53.0 (`generated/rust/loom/src/behaviour.rs:109`, `:133`).
+- Commission's `governor-port`, `agent-executor-port` and `stale-revision-action-request` are not
+  artifacts in this store; they map to the code paths under *Reads, not changed*.
+- Not established: whether ESS 0.53.0 synthesizes `not-in-frontier` as a membership guard over
+  `input.frontier_actions`; how `Loom` gets a `Governor` (`Loom::new` has 44 call sites in 14 files);
+  where the wave-9/w10 turn and session binding gap lives.
 
 ## Acceptance
 

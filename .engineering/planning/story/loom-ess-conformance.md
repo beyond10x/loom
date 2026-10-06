@@ -30,13 +30,15 @@ scope:
   path: Taskfile.yml
 - confidence: cited
   path: crates/loom-conformance/
+- confidence: inferred
+  path: crates/loom-executor/
 - confidence: cited
   path: ess/SKIPPED.md
 - confidence: cited
   path: ess/domains/run.yaml
 - confidence: cited
   path: generated/rust/loom/
-revision: 5
+revision: 7
 ---
 ## Outcome
 
@@ -89,10 +91,28 @@ and `task generate` regenerates. Every synthesize `note:` is relayed in the clos
 
 ## Scope
 
-- `crates/loom-conformance/` (new): `Cargo.toml`, `src/lib.rs`, `tests/conform.rs`
-- `Cargo.lock`; `Taskfile.yml` (task `conform`, one line in `check`)
-- `ess/SKIPPED.md` (new)
-- `ess/domains/run.yaml`, `generated/rust/loom/` (only when a scenario shows the specification wrong)
+Derived 2026-10-06 by `story-scoper` at `04a1a73`. Every line is **cited** (read from the story or the tree) or
+**inferred** (a reading that could be wrong).
+
+- **Primary surface:** `crates/loom-conformance/` (new; package `b10x-loom-conformance`: `Cargo.toml`, `src/lib.rs`, `tests/conform.rs`) — cited
+- **Files:** `ess/SKIPPED.md` (new; `ess/` holds only `ess-inputs.yaml`, `system.yaml`, `domains/`, `commission/`, `intake/`) — cited
+- **Files:** `Taskfile.yml` (existing): new task `conform`, one step in `check` (`Taskfile.yml:13-32`, beside `commission:conform` at line 26) — cited
+- **Files:** `Cargo.lock` (existing): one new package entry — cited
+- **Files:** `ess/domains/run.yaml`, `generated/rust/loom/` (existing): only when a scenario shows the specification wrong — cited
+- **Symbols:** test `ess_conformance_report`; a `ess_conformance::ConformanceTarget` impl for the nine `loom.run.*` commands (`ess/domains/run.yaml:288-607`) — cited
+- **Pattern:** `crates/loom-commission-conformance/` (`src/lib.rs` `CommissionTarget`, `tests/conform.rs` `ess_conformance_report`; `ess/commission/SKIPPED.md` for the header). It is in-repo and replaces the external mandate reference — inferred
+- **Also likely:** `crates/loom-executor/`: all nine commands are implemented there (`src/session.rs`, `src/selection.rs`, `src/arguments.rs`), so the target binds to `b10x-loom-executor`, and any scenario that fails on the implementation (not the specification) is fixed there — inferred
+- **Documents:** none
+- **Confidence:** high. The story names every file, and the tree confirms which are new; only the executor line is inferred.
+- **Would collide with:** any unit adding a step to `Taskfile.yml` `check` or changing dependencies in `Cargo.lock`; any unit editing `ess/domains/run.yaml` / `generated/rust/loom/` (`story:compaction-contract`, `story:interruption-recovery` cite both, already ordered by `depends_on`); any unit in `crates/loom-executor/` if a scenario fails there
+- **Safety fact:** the new crate joins the workspace through `members = ["crates/*"]` (`Cargo.toml:3`), and `ess-conformance` / `ess-primitives` at tag 0.53.0 are already locked (`Cargo.lock:889-891`, `933-935`). So the root `Cargo.toml` is untouched and the lock gains one entry — step 2, unproven
+
+Corrections to the sections above, found while scoping (2026-10-06):
+
+- The ESS tag is `0.53.0`, not `0.52.0`: `ess/ess-inputs.yaml:2` reads `requires: ess 0.53.0`, and `Cargo.lock` locks `ess-conformance` at `0.53.0`. Build on the newest ESS release.
+- "Run against `b10x-loom`": `b10x-loom` is the CLI binary (`crates/loom-cli/Cargo.toml:14`). The nine commands are implemented in `b10x-loom-executor`, and the Commission pattern binds its target to the library; the target binds to `b10x-loom-executor` — inferred.
+- `story:commission-ess-conformance` does not resolve in this store since Commission moved in; its in-repo equivalent is `crates/loom-commission-conformance/`.
+- Not established: whether any scenario fails today (`ess verify conform synthesize` was not run); whether `loom.run.RecordTurn` has an implementation outside the generated one (`generated/rust/loom/src/behaviour.rs:241`; nothing under `crates/` names it); `ess/system.yaml` is covered by the suite but not listed above.
 
 ## Acceptance
 

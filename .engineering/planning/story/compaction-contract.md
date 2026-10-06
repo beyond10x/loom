@@ -17,17 +17,25 @@ relations:
 - depends_on: story:run-pipeline-skeleton
 - depends_on: story:harness-loop-port
 scope:
-- confidence: inferred
-  path: crates/loom/src/compaction.rs
 - confidence: cited
-  path: crates/loom/src/lib.rs
+  path: crates/loom-executor/src/compaction.rs
 - confidence: inferred
-  path: crates/loom/tests/compaction_contract.rs
+  path: crates/loom-executor/src/harness/turn_loop/
+- confidence: cited
+  path: crates/loom-executor/src/lib.rs
+- confidence: inferred
+  path: crates/loom-executor/src/session.rs
+- confidence: cited
+  path: crates/loom-executor/tests/compaction_contract.rs
 - confidence: cited
   path: ess/domains/run.yaml
 - confidence: cited
   path: generated/rust/loom/
-revision: 5
+- confidence: inferred
+  path: website/data/ess/loom-run.domain-graph.json
+- confidence: inferred
+  path: website/docs/reference/ess/loom-run.md
+revision: 16
 ---
 ## Outcome
 
@@ -68,10 +76,27 @@ the shared `ess/` and `generated/` paths keep them in separate waves. The whole 
 
 ## Scope
 
-- `crates/loom/src/compaction.rs` (created empty by `story:run-pipeline-skeleton`, filled here),
-  `crates/loom/src/lib.rs` (where compaction hooks into the run)
-- `crates/loom/tests/compaction_contract.rs` (new)
-- `ess/domains/run.yaml`, `generated/rust/loom/` (its own `Session` declarations)
+Derived 2026-10-06 by `story-scoper` at `04a1a73`. Every line is **cited** (read from the story or the tree) or **inferred** (a reading that could be wrong).
+
+- **Path map:** the body's `crates/loom/` is now `crates/loom-executor/` (package `b10x-loom-executor`, library `loom_executor`), renamed by `story:crate-names`; `crates/loom` does not exist at `04a1a73` — cited
+- **Primary surface:** `crates/loom-executor` — cited
+- **Files:** `crates/loom-executor/src/compaction.rs` (was `crates/loom/src/compaction.rs`; a 3-line stub that says this story builds it) — cited
+- **Files:** `crates/loom-executor/src/lib.rs` (was `crates/loom/src/lib.rs`; `pub mod compaction;` at :21) — cited
+- **Files:** `crates/loom-executor/tests/compaction_contract.rs` (was `crates/loom/tests/compaction_contract.rs`; new, absent today) — cited
+- **Files:** `ess/domains/run.yaml` (`loom.run.Session` at :75, the session commands at :290-430, outcomes from :609) — cited
+- **Files:** `generated/rust/loom/` (rewritten by `task generate`, checked by `task drift`, `Taskfile.yml:59-76`) — cited
+- **Symbols:** `loom.run.Session`, `MAX_CONVERSATION_BYTES`, `COMPACTED_TARGET_BYTES`; the Harness `harness-loop/src/lib.rs:885-937` the body cites is now `turn_loop/mod.rs:897-953` — cited
+- **Symbols:** `AgentLoop::compact_run` (`turn_loop/mod.rs:2925`, runs before each request at :2551), `LoopEvent::Compacted` (`turn_loop/event.rs:254`, carries no usage), `SessionFile` (`session.rs:103`, has no compaction field) — inferred, the trigger, its record and the filed session the outcome must reach
+- **Also likely:** `crates/loom-executor/src/harness/turn_loop/` — inferred: the 80 % / 50 % trigger and the summary turn already run there, and the summary turn's usage goes only into the run totals (`RunState::absorb_usage`, mod.rs:3071), not into any compaction record
+- **Also likely:** `crates/loom-executor/src/session.rs` — inferred: "recorded on the session" means the filed `SessionFile`
+- **Documents:** `website/docs/reference/ess/loom-run.md`, `website/data/ess/loom-run.domain-graph.json` — inferred: `task check` runs `docs-check` (`Taskfile.yml:31`), which rebuilds both from `ess/` (`crates/loom-docs/src/main.rs:43-45`); commit 9b9a09a, which last edited `loom.run.Session`, changed both
+- **Test dependency, not changed:** the "Commission fake governor" is `FakeGovernor` in `b10x-loom-commission-testkit` (`fake_governor.rs:128`). It is already a dev-dependency of the executor and scripts one revision and frontier per call, so acceptance item 2 needs no testkit change — inferred
+- **Confidence:** medium — all five surfaces the story names exist after the rename, but where compaction hooks in (`turn_loop/` vs `lib.rs`) and the session-file change are read from the tree, not named by the story
+- **Would collide with:** any unit editing the loom run specification `ess/domains/run.yaml` (and so `generated/rust/loom/`), or `crates/loom-executor/src/lib.rs` — cited
+- **Would collide with:** any unit in the ported loop under `crates/loom-executor/src/harness/` (where the loop-to-projection wiring lands), the filed session format in `crates/loom-executor/src/session.rs`, or the two `loom-run` reference pages — inferred
+- **Safety fact:** filed sessions keep resuming only if the compaction record goes into `SessionFile` as a `#[serde(default)]` field, or the change bumps `SESSION_VERSION`. The file is `deny_unknown_fields` at version 2 (`session.rs:98-102`) and any other version is refused by name (`session.rs:490-500`). A build that writes the field also makes its files unreadable to an older build — inferred, step 2, unproven
+
+Not established while scoping: whether the fresh catalogue is wired in `lib.rs`, `turn_loop/` or both (`lib.rs:207` projects once per run and never calls the turn loop; `story:harness-loop-port` does that wiring); the usage shape (`run.yaml` declares none; the only `Usage` is `crates/loom-executor/src/harness/wire/turn.rs:304`); whether the compaction record bumps `SESSION_VERSION` (a design decision); whether the provider-emulated endpoint in `tests/session_transcript_streaming.rs:632` is shared or copied.
 
 ## Acceptance
 

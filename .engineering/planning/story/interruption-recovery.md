@@ -18,16 +18,30 @@ relations:
 - depends_on: story:harness-loop-port
 scope:
 - confidence: cited
-  path: crates/loom/src/lib.rs
+  path: CHANGELOG.md
+- confidence: cited
+  path: crates/loom-executor/src/lib.rs
+- confidence: cited
+  path: crates/loom-executor/src/recovery.rs
 - confidence: inferred
-  path: crates/loom/src/recovery.rs
-- confidence: inferred
-  path: crates/loom/tests/interruption_recovery.rs
+  path: crates/loom-executor/src/session.rs
+- confidence: cited
+  path: crates/loom-executor/tests/adversary2_run_identity.rs
+- confidence: cited
+  path: crates/loom-executor/tests/interruption_recovery.rs
 - confidence: cited
   path: ess/domains/run.yaml
 - confidence: cited
   path: generated/rust/loom/
-revision: 7
+- confidence: inferred
+  path: website/data/ess/loom-run.domain-graph.json
+- confidence: cited
+  path: website/data/status.json
+- confidence: inferred
+  path: website/docs/concepts/commission-and-harness.md
+- confidence: cited
+  path: website/docs/reference/ess/loom-run.md
+revision: 21
 ---
 ## Outcome
 
@@ -73,10 +87,35 @@ surface.
 
 ## Scope
 
-- `crates/loom/src/recovery.rs` (created empty by `story:run-pipeline-skeleton`, filled here),
-  `crates/loom/src/lib.rs` (where cancellation and resume hook into the run)
-- `crates/loom/tests/interruption_recovery.rs` (new)
-- `ess/domains/run.yaml`, `generated/rust/loom/` (its own `Session` declarations)
+Derived 2026-10-06 by `story-scoper` at loom `04a1a73`. Every line is **cited** (read from the story or the tree) or **inferred** (a reading that could be wrong).
+
+- **Primary surface:** `crates/loom-executor` (package `b10x-loom-executor`, library `loom_executor`) — cited
+- **Path map:** the body's `crates/loom/` is `crates/loom-executor/` (story:crate-names); Harness `harness-loop/src/approval.rs` at `798325f0` is `crates/loom-executor/src/harness/turn_loop/approval.rs`; `commission:story:run-outcomes` (M-007) is `crates/loom-commission/src/outcome.rs` (`RunStore`) with `SuspendRun`/`ResumeRun` at `ess/commission/domains/responsibility.yaml:643-672`; `commission:story:authority-provider-port` (M-005) is `crates/loom-commission/src/ports/authority.rs` with its fake at `crates/loom-commission-testkit/src/fake_authority.rs` — cited
+- **Files:** `crates/loom-executor/src/recovery.rs` (3-line stub, declared at `lib.rs:24`) — cited
+- **Files:** `crates/loom-executor/src/lib.rs` (`Loom.runs` at :68; `run_id` at :152, whose doc at :148-151 assigns the cross-`Loom` id collision to this story) — cited
+- **Files:** `crates/loom-executor/tests/interruption_recovery.rs` (new) — cited
+- **Files:** `crates/loom-executor/tests/adversary2_run_identity.rs:291` (`#[ignore = "story:interruption-recovery; ESS-SYNTH-004"]` on `a_refused_selection_is_never_selected_or_admitted_again`) — cited
+- **Files:** `ess/domains/run.yaml`, the only domain `ess/ess-inputs.yaml` lists (`loom.run.Session` :75-104, lifecycle `[Active, Filed]`; `ResumeSession` :385; `SelectAction` :470 and `RequestArguments` :532 for `existing_instance`) — cited
+- **Files:** `generated/rust/loom/` (8 files, rewritten by `task generate`, checked by `task drift`) — cited
+- **Symbols:** `run_id`, `Loom::runs`, `loom.run.Session`, `loom.run.ResumeSession`, `LoopStop::Cancelled` (`harness/turn_loop/mod.rs:158`), `AgentLoop::resume_approval` (`mod.rs:2200`) — cited
+- **Also likely:** `crates/loom-executor/src/session.rs` — inferred: `run_and_file` builds the loop with no cancel handle (`session.rs:38`, `:644`) and files only completed turns, so cancelling a session run and keeping an approval checkpoint lands there
+- **Reads, does not edit:** `crates/loom-executor/src/revalidation.rs` (story:selection-revalidation), `crates/loom-executor/src/harness/turn_loop/approval.rs` and `mod.rs`, `crates/loom-commission-testkit/src/fake_governor.rs` and `fake_authority.rs` — cited
+- **Documents:** `website/docs/reference/ess/loom-run.md`, generated from `ess/` by `loom-docs` (`crates/loom-docs/src/main.rs:39-43`) and checked by `task docs-check` in `task check` — cited
+- **Documents:** `website/data/status.json:31` (row "Harness loop wired to a governed run") and `CHANGELOG.md` Unreleased, by the rule at `AGENTS.md:159-161` — cited
+- **Documents:** `website/data/ess/loom-run.domain-graph.json` — inferred, changes only if Session's states or relations change
+- **Documents:** `website/docs/concepts/commission-and-harness.md:41` ("interruption and recovery, is planned") — inferred, the page that describes the capability
+- **Confidence:** high — the story names every code file and each resolves in the tree after the rename; only `session.rs` and two documents are readings
+- **Would collide with:** any unit editing `crates/loom-executor/src/lib.rs`; any unit changing `ess/domains/run.yaml`, which also rewrites `generated/rust/loom/` and `website/docs/reference/ess/loom-run.md` (one such unit per wave); the `status.json` row shared with compaction and budgets; `CHANGELOG.md` Unreleased — cited
+- **Would also collide with:** any unit on `crates/loom-executor/src/session.rs`, and any unit on approval suspend/resume across a restart (`story:approval-suspend-resume-slice` area, no edge to this story) — inferred
+- **Safety fact:** `run_id` is private to `lib.rs`, and no file outside `crates/loom-executor`, nor `session.rs` or `harness/`, names `SelectionId` or `selection_id`. So giving each `Loom` its own id namespace reaches no session file, wire or other crate. The unit test `run_ids_are_uuids_of_their_kind_frontier_and_run` (`lib.rs:419-442`) pins today's derivation and changes with it — step 2 (`git grep -E 'SelectionId|selection_id' -- crates`), unproven
+
+Not established while scoping, to settle before the story is proposed:
+
+- Whether ESS 0.53.0 still refuses `existing_instance: true` on `SelectAction`/`RequestArguments` with ESS-SYNTH-004.
+- Which approval suspension "suspended at the merge approval" means: the Harness checkpoint (`LoopStop::AwaitingApproval`, `resume_approval`) or Commission's `AwaitingApproval` run end (`crates/loom-commission/src/runtime.rs:28-33`), while `lib.rs:13-14` says "Loom never suspends for authority".
+- The shape of interrupt: `run.yaml` has no interrupt or cancel command, and Session has only `[Active, Filed]`.
+- Whether recovery needs the Run to survive a process restart: Commission's `RunStore` is in memory only (`outcome.rs:9-11`).
+- The adversary case `two_looms_give_their_different_selections_on_one_frontier_different_ids` is not in the tree.
 
 ## Acceptance
 
