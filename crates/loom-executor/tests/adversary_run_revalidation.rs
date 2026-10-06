@@ -9,7 +9,14 @@
 //!
 //! The expectations come from `story:selection-revalidation` § Acceptance items 1 and 2, which
 //! rely on these declarations and do not change `ess/`.
+//!
+//! `not-in-frontier` stays an `external:` outcome: ess 0.53.0 synthesis refuses it as a
+//! membership guard over `frontier_actions`. Its answer is therefore the executor's, and
+//! `not_in_frontier_follows_the_frontier_actions` revalidates through the executor's
+//! `RequestRecord`, whose context decides it from the command input, rather than through
+//! `SpecPorts`' fixed answer.
 
+use b10x_loom_executor::arguments::RequestRecord;
 use b10x_loom_executor::model::behaviour::{
     ActionCatalogueStorage, Context, ExternalCommand, Generated, SelectionStorage,
 };
@@ -248,47 +255,57 @@ fn selection_on_an_older_catalogue_is_never_admitted() {
 
 /// `story:selection-revalidation` acceptance 1, and the outcome's own words ("the frontier action
 /// ids in the input do not list the selection's action"): whether a selection is refused
-/// `not-in-frontier` depends on `frontier_actions`. The generated behaviour never reads that input,
-/// and the `Context` it asks is told only the command and outcome names, so for either fixed answer
-/// the two inputs below get the same outcome.
+/// `not-in-frontier` depends on `frontier_actions`. The two selections are made through
+/// `SelectAction` as declared, then held by the executor's `RequestRecord`, which revalidates them
+/// and answers the `external:` branch itself: the one whose action the input lists is admitted, the
+/// one whose action it does not list is refused `not-in-frontier`.
 #[test]
-#[ignore = "story:selection-revalidation; ESS-SYNTH-003"]
 fn not_in_frontier_follows_the_frontier_actions() {
+    let mut model = Generated::new(SpecPorts::new(false));
+    project(&mut model, 7);
+    for selection in [20, 21] {
+        assert!(matches!(
+            select(&mut model, selection, "repository.merge", 7),
+            SelectActionOutcome::Selected { .. }
+        ));
+    }
+    let mut record = RequestRecord::default();
+    for held in SelectionStorage::list(&model.ports) {
+        SelectionStorage::put(&mut record, held);
+    }
+
     let mut failures = Vec::new();
-    for answer in [false, true] {
-        let mut model = Generated::new(SpecPorts::new(answer));
-        project(&mut model, 7);
-        for selection in [20, 21] {
-            assert!(matches!(
-                select(&mut model, selection, "repository.merge", 7),
-                SelectActionOutcome::Selected { .. }
-            ));
-        }
+    let listed = record
+        .revalidate_selection(RevalidateSelection {
+            selection_id: SelectionId(uuid(20)),
+            case_revision: 7,
+            frontier_actions: vec!["repository.read".to_owned(), "repository.merge".to_owned()],
+        })
+        .expect("the executor answers RevalidateSelection");
+    let absent = record
+        .revalidate_selection(RevalidateSelection {
+            selection_id: SelectionId(uuid(21)),
+            case_revision: 7,
+            frontier_actions: vec!["repository.read".to_owned()],
+        })
+        .expect("the executor answers RevalidateSelection");
 
-        let listed = revalidate(&mut model, 20, 7, &["repository.read", "repository.merge"]);
-        let absent = revalidate(&mut model, 21, 7, &["repository.read"]);
-
-        let expected_listed = RevalidateSelectionOutcome::Admitted {
-            selection_admitted: b10x_loom_executor::model::run::SelectionAdmitted {
-                selection_id: SelectionId(uuid(20)),
-            },
-        };
-        let expected_absent = RevalidateSelectionOutcome::NotInFrontier {
-            selection_not_in_frontier: SelectionNotInFrontier {
-                selection_id: SelectionId(uuid(21)),
-                action: "repository.merge".to_owned(),
-            },
-        };
-        if listed != expected_listed {
-            failures.push(format!(
-                "external answer {answer}: frontier listing repository.merge gave {listed:?}"
-            ));
-        }
-        if absent != expected_absent {
-            failures.push(format!(
-                "external answer {answer}: frontier without repository.merge gave {absent:?}"
-            ));
-        }
+    let expected_listed = RevalidateSelectionOutcome::Admitted {
+        selection_admitted: b10x_loom_executor::model::run::SelectionAdmitted {
+            selection_id: SelectionId(uuid(20)),
+        },
+    };
+    let expected_absent = RevalidateSelectionOutcome::NotInFrontier {
+        selection_not_in_frontier: SelectionNotInFrontier {
+            selection_id: SelectionId(uuid(21)),
+            action: "repository.merge".to_owned(),
+        },
+    };
+    if listed != expected_listed {
+        failures.push(format!("frontier listing repository.merge gave {listed:?}"));
+    }
+    if absent != expected_absent {
+        failures.push(format!("frontier without repository.merge gave {absent:?}"));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
