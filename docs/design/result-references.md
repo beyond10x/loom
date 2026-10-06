@@ -31,6 +31,8 @@ results show the end of the already-captured tail. Offsets, total size, truncati
 are explicit. Existing test runners discard earlier output and may decode lossily, so these
 artifacts are always partial. They do not recover original stdout/stderr or prove tests passed.
 Exit status, timeout and implementation revision remain visible; the verifier remains unchanged.
+A test run's briefing entry quotes the executor's report beside the captured output: how the
+command ended, whether the work tree had uncommitted changes, and the confinement applied.
 
 ## Selection and rendering
 
@@ -67,8 +69,13 @@ The model-facing `action_arguments` schema accepts ordinary arguments and a loca
 the current argument-generation exchange. At most eight lookups are allowed before a final action
 answer; errors are explicit and consume the same budget. They are not frontier actions and cannot
 read anything not already captured by this briefing. Catalogue pages share this lookup budget.
-Encoded read references are capped at 4 KiB; all accumulated lookup responses, including JSON
-escaping and metadata, are capped at 64 KiB. Lookup responses do not echo model-supplied references.
+Encoded read references are capped at 4 KiB. The data the lookups of one argument generation
+return together (selected text and catalogue pages) is capped at 64 KiB, counted after JSON
+escaping, so eight full lookups of text that needs no escaping fit. Each response adds a fixed
+framing outside that total. A malformed lookup, an invalid catalogue offset, or a lookup that
+would pass the total is answered as a lookup error, never an aborted generation. A ninth lookup
+refuses the step, as an unresolvable edit does (below). The model is told these limits. Lookup
+responses do not echo model-supplied references.
 
 For `repository.edit`, each `contents` value can remain a literal string or use:
 
@@ -80,8 +87,11 @@ Up to 256 ordered segments form a string, with at most 16 MiB of expanded conten
 No path or permission is inferred from the source. Resolution occurs in `ModelArguments` before
 Loom returns the `ProposedAction`. Commission therefore admits actual arguments; the existing
 executor still enforces workspace paths, ignored files, transaction behavior and ordinary schemas.
-A missing or invalid reference never reaches an effect. A later briefing records edit-content
-sizes and digests rather than reintroducing the expanded bodies into model context.
+A missing or invalid reference never reaches an effect. Edit contents that do not resolve refuse
+the step, as arguments the executor refuses do: nothing is proposed, the step counts against the
+budget, and the next briefing records `refused:` with the reason. The run goes on. An unreachable
+model alone suspends it. A later briefing records edit-content sizes and digests rather than
+reintroducing the expanded bodies into model context.
 
 ## Validation and remaining experiments
 

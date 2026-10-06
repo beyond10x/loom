@@ -217,6 +217,29 @@ impl TestRun {
     pub fn applied_confinement(&self) -> &AppliedConfinement {
         &self.applied
     }
+
+    /// What the executor reports of this run besides its output: how the command ended, whether
+    /// the work tree had uncommitted changes, and the confinement applied. [`Report`] writes this
+    /// and then the output; the briefing quotes it beside the captured output.
+    pub fn summary(&self) -> String {
+        let ended = match self.exit_code {
+            _ if self.timed_out => format!(
+                "the test command timed out after {} s and was killed",
+                self.timeout.as_secs_f64()
+            ),
+            Some(code) => format!("the test command exited with {code}"),
+            None => "the test command was ended by a signal".to_owned(),
+        };
+        let tree = if self.implementation.is_none() {
+            " on a work tree with uncommitted changes"
+        } else {
+            ""
+        };
+        format!(
+            "{ended}{tree}\nconfinement: {}",
+            backend_name(self.applied.backend)
+        )
+    }
 }
 
 /// What the executor did. An observation, never evidence.
@@ -241,26 +264,7 @@ impl fmt::Display for Report {
                 Ok(())
             }
             Self::Edited { revision } => write!(f, "committed; HEAD is {revision}"),
-            Self::TestsRun(run) => {
-                match run.exit_code {
-                    _ if run.timed_out => write!(
-                        f,
-                        "the test command timed out after {} s and was killed",
-                        run.timeout.as_secs_f64()
-                    )?,
-                    Some(code) => write!(f, "the test command exited with {code}")?,
-                    None => f.write_str("the test command was ended by a signal")?,
-                }
-                if run.implementation.is_none() {
-                    f.write_str(" on a work tree with uncommitted changes")?;
-                }
-                write!(
-                    f,
-                    "\nconfinement: {}\n{}",
-                    backend_name(run.applied.backend),
-                    run.output
-                )
-            }
+            Self::TestsRun(run) => write!(f, "{}\n{}", run.summary(), run.output),
         }
     }
 }

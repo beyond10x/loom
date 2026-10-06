@@ -38,11 +38,14 @@
 //!
 //! A step that is not performed still counts against the step budget, is printed as refused, and
 //! is recorded in the briefing with [`Briefing::record_refusal`], so the next selection is told
-//! `refused: <reason>`. Three kinds:
+//! `refused: <reason>`. Four kinds:
 //!
 //! - a selection Loom does not turn into a proposal while the frontier lists an admissible action:
 //!   an action the frontier lists as blocked, or one it does not list;
 //! - a selection answer that names no action ([`crate::selector::NO_ACTION`]);
+//! - arguments the model wrote that cannot become the action's arguments: edit contents that do
+//!   not resolve, or a stored-result lookup after the last one allowed
+//!   ([`ArgumentsError::Refused`]). Nothing is proposed, so Commission admits nothing;
 //! - an action the executor refuses (a path outside the workspace, an ignored path, arguments the
 //!   action does not take), and a `repository.inspect` that cannot read a path it names.
 //!
@@ -90,7 +93,7 @@ use b10x_loom_commission::runtime::{
 };
 use b10x_loom_executor::model::run::{CatalogueEntry, SelectionStrategy};
 use b10x_loom_executor::selection::{Choice, SelectionContext, SelectorError};
-use b10x_loom_executor::{ActionSelector, Loom};
+use b10x_loom_executor::{ActionSelector, ArgumentContext, ArgumentGenerator, Loom};
 use b10x_loom_intake_references::references;
 use b10x_loom_intake_router::{ProtocolPick, RouterError, classify};
 use llm_core::Model;
@@ -101,7 +104,7 @@ use crate::confinement::TestRunner;
 use crate::effect::{Console, LocalEffects, refuse};
 use crate::executor::backend_name;
 use crate::executor::{ExecuteError, LocalExecutor, TestCommand, fresh_uuid, now};
-use crate::selector::{Briefing, ModelArguments, ModelSelector, NO_ACTION};
+use crate::selector::{ArgumentsError, Briefing, ModelArguments, ModelSelector, NO_ACTION};
 use crate::verifier::{TestResultVerifier, VerifyError};
 
 /// The one protocol the slice executes locally.
@@ -262,6 +265,7 @@ pub fn run<S: CaseStore>(
 
     let briefing = Briefing::new(request.intent.clone(), found);
     let chosen = Arc::new(Mutex::new(None));
+    let refused = Arc::new(Mutex::new(None));
     let console = Console::new(out);
     let step = LoomStep {
         loom: Loom::new(
@@ -269,10 +273,14 @@ pub fn run<S: CaseStore>(
                 inner: ModelSelector::new(agent, briefing.clone()),
                 chosen: Arc::clone(&chosen),
             },
-            ModelArguments::new(agent, briefing.clone()),
+            Arguments {
+                inner: ModelArguments::new(agent, briefing.clone()),
+                refused: Arc::clone(&refused),
+            },
             request.intent.clone(),
         ),
         chosen,
+        refused,
         briefing: briefing.clone(),
         console: &console,
     };
@@ -456,10 +464,12 @@ impl LoopContext for SliceContext {
 }
 
 /// One Loom run on a frontier, as the runtime's executor: the frontier printed before it, and a
-/// selection Loom does not turn into a proposal printed and recorded as a refused step.
+/// selection Loom does not turn into a proposal, or arguments refused before one, printed and
+/// recorded as a refused step.
 struct LoomStep<'a, 'o, 'm> {
-    loom: Loom<Recording<'m>, ModelArguments<'m>>,
+    loom: Loom<Recording<'m>, Arguments<'m>>,
     chosen: Arc<Mutex<Option<Chosen>>>,
+    refused: Arc<Mutex<Option<String>>>,
     briefing: Briefing,
     console: &'a Console<'o>,
 }
@@ -494,8 +504,16 @@ impl LoomStep<'_, '_, '_> {
         self.console
             .write(|out| print_frontier(out, frontier.data()))?;
         *lock(&self.chosen) = None;
+        *lock(&self.refused) = None;
         let outcome = self.loom.run(commission, frontier);
         let chose = lock(&self.chosen).take();
+        let refused = lock(&self.refused).take();
+        if let (ExecutorOutcome::Suspended(_), Some(reason), Some(Chosen::Action(action))) =
+            (&outcome, refused, &chose)
+        {
+            self.refuse_unproposed(action, &reason)?;
+            return Ok(ExecutorOutcome::NoUsefulAction(Unit(true)));
+        }
         match outcome {
             ExecutorOutcome::NoUsefulAction(_) => {
                 let admissible = frontier
@@ -534,11 +552,39 @@ impl LoomStep<'_, '_, '_> {
                 "Loom proposed no action".to_owned(),
             ),
         };
+        self.refuse_unproposed(&action, &reason)
+    }
+
+    /// Prints the next step, an `action` that was not proposed, as refused for `reason`, and tells
+    /// the model why: a selection Loom refused, or arguments it could not use.
+    fn refuse_unproposed(&self, action: &str, reason: &str) -> Result<(), SliceError> {
         let step = self.console.next_step();
         self.console.write(|out| {
-            writeln!(out, "step {step}: {} (not proposed)", printable(&action))?;
-            refuse(out, &self.briefing, &action, &reason)
+            writeln!(out, "step {step}: {} (not proposed)", printable(action))?;
+            refuse(out, &self.briefing, action, reason)
         })
+    }
+}
+
+/// The agent's argument generator, keeping a refused answer ([`ArgumentsError::Refused`]) so the
+/// step is refused and the model told, rather than the run suspended as if the model were out of
+/// reach. Loom still sees an `Err` either way.
+struct Arguments<'m> {
+    inner: ModelArguments<'m>,
+    refused: Arc<Mutex<Option<String>>>,
+}
+
+impl ArgumentGenerator for Arguments<'_> {
+    fn generate(
+        &self,
+        context: &ArgumentContext,
+        entry: &CatalogueEntry,
+    ) -> Result<json::Value, String> {
+        let answer = self.inner.arguments(context, entry);
+        if let Err(ArgumentsError::Refused(reason)) = &answer {
+            *lock(&self.refused) = Some(reason.clone());
+        }
+        answer.map_err(|error| error.to_string())
     }
 }
 
@@ -660,8 +706,8 @@ impl ActionSelector for Recording<'_> {
     }
 }
 
-fn lock(chosen: &Mutex<Option<Chosen>>) -> MutexGuard<'_, Option<Chosen>> {
-    chosen.lock().unwrap_or_else(PoisonError::into_inner)
+fn lock<T>(slot: &Mutex<T>) -> MutexGuard<'_, T> {
+    slot.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// `text` safe to print on a terminal: every control character (C0, DEL and C1) but the tab is

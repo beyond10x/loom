@@ -139,7 +139,7 @@ fn inspected_file_is_composed_and_written_without_model_repeating_the_payload() 
 }
 
 #[test]
-fn forged_digest_never_reaches_a_workspace_write() {
+fn forged_digest_is_a_refused_step_the_model_is_told_about() {
     let payload = Payload::new();
     let workspace = Workspace::new(&payload.original);
     let before = workspace.head();
@@ -156,24 +156,144 @@ fn forged_digest_never_reaches_a_workspace_write() {
             require_lookup: false,
             gate: None,
         },
+        selection("repository.inspect"),
+        arguments(json!({"paths": ["check.txt"]})),
     ]);
     let governor = CanonGovernor::new(MemoryCaseStore::default());
+    let mut output = Vec::new();
     let result = run(
-        &request(&workspace, 2),
+        &request(&workspace, 3),
         &governor,
         &governor,
         &classifier,
         &agent,
-        &mut Vec::new(),
+        &mut output,
+    )
+    .expect("a reference that does not resolve refuses the step, and the run goes on");
+    assert_eq!(result.stop_reason, StopReason::StepBudget);
+    assert_eq!(
+        result.steps, 3,
+        "the refused step counts against the budget"
     );
+    let output = String::from_utf8(output).unwrap();
     assert!(
-        result.is_err(),
-        "an invalid reference suspends argument generation: {result:?}"
+        output.contains(
+            "step 2: repository.edit (not proposed)\n  effect: refused: the edit contents do not \
+             resolve: result SHA-256 does not match retained observation\n  evidence: none\n"
+        ),
+        "the refused step is printed with its reason:\n{output}"
     );
     assert_eq!(workspace.read(), payload.original);
     assert_eq!(workspace.head(), before);
     assert_eq!(workspace.git(&["status", "--porcelain"]), "");
     agent.assert_consumed();
+    let seen = agent.seen.lock().unwrap();
+    assert!(
+        user_text(&seen[4].0).contains(
+            "repository.edit\nrefused: the edit contents do not resolve: result SHA-256 does \
+             not match retained observation"
+        ),
+        "the next selection is told why the edit was not made:\n{}",
+        user_text(&seen[4].0)
+    );
+}
+
+#[test]
+fn a_lookup_after_the_eighth_refuses_the_step_and_the_model_is_told() {
+    let workspace = Workspace::new("status=broken\n");
+    let before = workspace.head();
+    let classifier = classifier();
+    let mut script = vec![
+        selection("repository.inspect"),
+        arguments(json!({"paths": ["check.txt"]})),
+        selection("repository.edit"),
+    ];
+    script.extend((0..9).map(|_| arguments(json!({"$list_results": 0}))));
+    script.extend([
+        selection("repository.inspect"),
+        arguments(json!({"paths": ["check.txt"]})),
+    ]);
+    let agent = Recorded::new(script);
+    let governor = CanonGovernor::new(MemoryCaseStore::default());
+    let mut output = Vec::new();
+    let result = run(
+        &request(&workspace, 3),
+        &governor,
+        &governor,
+        &classifier,
+        &agent,
+        &mut output,
+    )
+    .expect("a ninth lookup refuses the step, and the run goes on");
+    assert_eq!(result.stop_reason, StopReason::StepBudget);
+    assert_eq!(result.steps, 3);
+    let output = String::from_utf8(output).unwrap();
+    assert!(
+        output.contains("step 2: repository.edit (not proposed)\n  effect: refused: "),
+        "{output}"
+    );
+    assert_eq!(workspace.read(), "status=broken\n");
+    assert_eq!(workspace.head(), before);
+    agent.assert_consumed();
+    let seen = agent.seen.lock().unwrap();
+    let told = user_text(&seen[12].0);
+    assert!(
+        told.contains("repository.edit\nrefused: ") && told.contains("after the 8 allowed"),
+        "the next selection is told why the edit was not made:\n{told}"
+    );
+}
+
+#[test]
+fn a_lookup_mixed_with_arguments_is_answered_as_a_lookup_error() {
+    let briefing = inspected_briefing("status=broken\n");
+    let model = Recorded::new(vec![
+        arguments(json!({"$list_results": 0, "paths": ["check.txt"]})),
+        arguments(json!({"paths": ["check.txt"]})),
+    ]);
+    let generated = generate(&model, &briefing, "repository.inspect");
+    assert!(
+        generated.is_ok(),
+        "a malformed lookup is answered, not an aborted generation: {generated:?}"
+    );
+    model.assert_consumed();
+    let seen = model.seen.lock().unwrap();
+    let answered = user_text(&seen[1].0);
+    assert!(
+        answered.contains("lookup_failed")
+            && answered.contains("a result lookup must contain only $read_result or $list_results"),
+        "{answered}"
+    );
+}
+
+#[test]
+fn escaped_lookup_data_past_the_total_is_answered_as_a_lookup_error() {
+    // A quote escapes to two bytes, so four 8192-byte selections fill the 65536-byte total.
+    const LOOKUP: usize = 8192;
+    let briefing = inspected_briefing(&"\"".repeat(6 * LOOKUP));
+    let mut script: Vec<Reply> = (0..5)
+        .map(|i| Reply::Lookup {
+            start: i * LOOKUP,
+            end: (i + 1) * LOOKUP,
+        })
+        .collect();
+    script.push(arguments(json!({"paths": ["check.txt"]})));
+    let model = Recorded::new(script);
+    let generated = generate(&model, &briefing, "repository.inspect");
+    assert!(
+        generated.is_ok(),
+        "a lookup past the total is answered, not an aborted generation: {generated:?}"
+    );
+    model.assert_consumed();
+    let seen = model.seen.lock().unwrap();
+    assert!(
+        seen[0].0.instructions.contains("65536"),
+        "the model is told the total: {}",
+        seen[0].0.instructions
+    );
+    let last = user_text(&seen[5].0);
+    assert_eq!(last.matches("selected_text").count(), 4, "{last}");
+    assert_eq!(last.matches("lookup_failed").count(), 1);
+    assert!(last.contains("65536"), "the error names the total");
 }
 
 #[test]
@@ -390,6 +510,18 @@ fn inspected_briefing(contents: &str) -> Briefing {
         }]),
     );
     briefing
+}
+
+fn generate(model: &Recorded, briefing: &Briefing, action: &str) -> Result<cjson::Value, String> {
+    ModelArguments::new(model, briefing.clone()).generate(
+        &ArgumentContext {
+            prompt: "inspect the fixture".into(),
+        },
+        &CatalogueEntry {
+            action: action.into(),
+            status: CatalogueEntryStatus::Admissible,
+        },
+    )
 }
 
 fn snapshot(briefing: &Briefing) -> TurnRequest {

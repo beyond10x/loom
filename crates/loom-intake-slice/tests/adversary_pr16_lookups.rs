@@ -132,8 +132,7 @@ fn descriptor(request: &TurnRequest) -> Value {
         .lines()
         .filter_map(|line| {
             let parsed: Value = serde_json::from_str(&line[line.find('{')?..]).ok()?;
-            (parsed.get("result").is_some() && parsed.get("reference").is_some())
-                .then_some(parsed)
+            (parsed.get("result").is_some() && parsed.get("reference").is_some()).then_some(parsed)
         })
         .next()
         .expect("the inspection advertises a capture descriptor")

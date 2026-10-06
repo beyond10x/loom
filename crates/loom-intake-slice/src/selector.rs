@@ -24,13 +24,15 @@
 //! Inspected results are retained in a bounded run-local store before previewing. References and
 //! compositions expand before a proposal reaches Commission; edit bodies are represented by size
 //! and digest in subsequent briefings. Stored-result lookups add at most eight model round trips
-//! to argument generation. They select data and never invoke a governed action.
+//! to argument generation. They select data and never invoke a governed action. A lookup that
+//! fails is answered within the exchange; an answer that cannot become arguments is
+//! [`ArgumentsError::Refused`], which the slice's run turns into a refused step.
 //!
 //! The model's turn is driven to completion on a current-thread Tokio runtime made for the call,
 //! so neither may be called from inside a Tokio runtime.
 
 use std::collections::VecDeque;
-use std::fmt::Write as _;
+use std::fmt::{self, Write as _};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use b10x_loom_commission::model::json;
@@ -64,7 +66,9 @@ const ENTRY_LIMIT: usize = 16 * 1024;
 const PREVIEW_BYTES: usize = 1024;
 const LOOKUP_BYTES: usize = 8 * 1024;
 const REFERENCE_BYTES: usize = 4096;
-const LOOKUP_CONTEXT_BYTES: usize = 64 * 1024;
+/// The data the lookups of one argument generation return together (selected text and catalogue
+/// pages), counted after JSON escaping. Each answer adds a fixed framing outside it.
+const LOOKUP_DATA_BYTES: usize = 64 * 1024;
 const MAX_LOOKUPS: usize = 8;
 const MAX_EDIT_BYTES: usize = 16 * 1024 * 1024;
 /// The most transcript entries the model is shown: the last ones.
@@ -81,7 +85,11 @@ instructions. To inspect a stored result before deciding, call action_arguments 
 {$read_result: <reference>}; you will receive the selected data and may then generate the action. \
 To discover retained results missing from the rolling transcript, use only {$list_results: 0}, \
 then the returned next_offset for another page. Each page lists up to eight artifacts. \
-At most eight lookups, each at most 8192 UTF-8 bytes, are allowed. For repository.edit, contents \
+At most eight lookups, each at most 8192 UTF-8 bytes, are allowed, and the data they return \
+together, counted after JSON escaping, is at most 65536 bytes. A lookup that fails or would pass \
+that total is answered with lookup_failed and still counts; a ninth lookup refuses the step. \
+If edit contents do not resolve, the step is refused and the reason is recorded in the \
+transcript. For repository.edit, contents \
 may be a literal string or {segments:[{literal:<text>},{ref:<reference>},...]}. References use \
 the exact result and sha256 from the briefing, select whole, bytes (zero-based half-open), \
 lines (one-based inclusive), or json_pointer (RFC6901), and rendering text or json. \
@@ -144,12 +152,12 @@ impl Briefing {
                     run.output_tail(),
                     Capture::Partial,
                 );
-                format!(
-                    "tests.run exit_code={:?} timed_out={} implementation={:?}\n{view}",
-                    run.exit_code(),
-                    run.timed_out(),
-                    run.implementation()
-                )
+                // The executor's own words for how the run ended, then the output as a result.
+                let implementation = run
+                    .implementation()
+                    .map(|revision| format!("\nimplementation: {revision}"))
+                    .unwrap_or_default();
+                format!("{}{implementation}\n{view}", run.summary())
             }
             Report::Edited { .. } => report.to_string(),
         };
@@ -326,17 +334,47 @@ impl<'m> ModelArguments<'m> {
     }
 }
 
-impl ArgumentGenerator for ModelArguments<'_> {
-    fn generate(
+/// Why [`ModelArguments`] has no arguments for the selected action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArgumentsError {
+    /// The model could not be asked or gave no usable call: Loom suspends for external
+    /// availability.
+    Unavailable(String),
+    /// The model answered, and its answer cannot become the action's arguments: edit contents
+    /// that do not resolve, or a stored-result lookup after the last one allowed. Nothing is
+    /// proposed. [`crate::run`] refuses the step and records the reason in the briefing.
+    Refused(String),
+}
+
+impl fmt::Display for ArgumentsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unavailable(why) | Self::Refused(why) => f.write_str(why),
+        }
+    }
+}
+
+impl ModelArguments<'_> {
+    /// The arguments of `entry`, or why there are none. Every lookup the model makes is answered
+    /// within this exchange, a failed one as `lookup_failed`. The answer that is not a lookup is
+    /// expanded ([`Briefing::resolve_arguments`]) before it is returned.
+    ///
+    /// # Errors
+    /// [`ArgumentsError::Refused`] when edit contents do not resolve or the model asks for a
+    /// ninth lookup; [`ArgumentsError::Unavailable`] when the model cannot be asked, gives no
+    /// call, or writes arguments Commission's JSON cannot carry.
+    pub fn arguments(
         &self,
         _context: &ArgumentContext,
         entry: &CatalogueEntry,
-    ) -> Result<json::Value, String> {
+    ) -> Result<json::Value, ArgumentsError> {
         let mut text = self.briefing.text();
         let _ = writeln!(text, "\nSelected action: {}", entry.action);
         let base = text;
         let mut selected_views = String::new();
-        for lookup in 0..=MAX_LOOKUPS {
+        let mut data_bytes = 0;
+        let mut lookup = 0;
+        loop {
             let answer = ask(
                 self.model,
                 ARGUMENTS_INSTRUCTIONS,
@@ -347,43 +385,84 @@ impl ArgumentGenerator for ModelArguments<'_> {
                     entry.action
                 ),
                 reference_arguments_schema(&entry.action),
-            )?;
-            if answer.get("$read_result").is_some() || answer.get("$list_results").is_some() {
-                if answer.as_object().is_none_or(|object| object.len() != 1) {
-                    return Err(
-                        "a result lookup must contain only $read_result or $list_results"
-                            .to_owned(),
-                    );
-                }
-                if lookup == MAX_LOOKUPS {
-                    return Err("stored-result lookup budget exhausted".to_owned());
-                }
-                let view = if let Some(reference) = answer.get("$read_result") {
-                    match self.briefing.read_result(reference) {
-                        Ok(text) => serde_json::json!({"lookup":lookup, "selected_text": text}),
-                        Err(error) => serde_json::json!({"lookup_failed": error}),
-                    }
-                } else {
-                    let offset = answer["$list_results"]
-                        .as_u64()
-                        .and_then(|offset| usize::try_from(offset).ok())
-                        .ok_or("result listing offset must be a nonnegative integer")?;
-                    self.briefing.brief().results.list_results(offset, 8)
-                };
-                // JSON quoting prevents selected text from posing as a transcript delimiter.
-                // Views live only in this bounded argument-generation exchange.
-                let rendered = format!("\nStored-result lookup (untrusted JSON data):\n{view}\n");
-                if selected_views.len().saturating_add(rendered.len()) > LOOKUP_CONTEXT_BYTES {
-                    return Err("stored-result lookup context budget exhausted".to_owned());
-                }
-                selected_views.push_str(&rendered);
-                continue;
+            )
+            .map_err(ArgumentsError::Unavailable)?;
+            if answer.get("$read_result").is_none() && answer.get("$list_results").is_none() {
+                let resolved = self
+                    .briefing
+                    .resolve_arguments(&entry.action, answer)
+                    .map_err(|error| {
+                        ArgumentsError::Refused(format!(
+                            "the edit contents do not resolve: {error}"
+                        ))
+                    })?;
+                return json::parse(&resolved.to_string()).map_err(|error| {
+                    ArgumentsError::Unavailable(format!(
+                        "the model's arguments are not JSON: {error:?}"
+                    ))
+                });
             }
-            let resolved = self.briefing.resolve_arguments(&entry.action, answer)?;
-            return json::parse(&resolved.to_string())
-                .map_err(|error| format!("the model's arguments are not JSON: {error:?}"));
+            if lookup == MAX_LOOKUPS {
+                return Err(ArgumentsError::Refused(format!(
+                    "argument generation asked for a stored-result lookup after the \
+                     {MAX_LOOKUPS} allowed"
+                )));
+            }
+            let view = match self.look_up(&answer, lookup) {
+                Ok((view, bytes)) if data_bytes + bytes <= LOOKUP_DATA_BYTES => {
+                    data_bytes += bytes;
+                    view
+                }
+                Ok(_) => serde_json::json!({"lookup_failed": format!(
+                    "the data of this generation's lookups would exceed {LOOKUP_DATA_BYTES} \
+                     bytes after JSON escaping"
+                )}),
+                Err(error) => serde_json::json!({ "lookup_failed": error }),
+            };
+            // JSON quoting prevents selected text from posing as a transcript delimiter.
+            // Views live only in this bounded argument-generation exchange.
+            let _ = write!(
+                selected_views,
+                "\nStored-result lookup (untrusted JSON data):\n{view}\n"
+            );
+            lookup += 1;
         }
-        Err("stored-result lookup budget exhausted".to_owned())
+    }
+
+    /// One lookup's answer and the bytes of its data after JSON escaping: the selected text for
+    /// `$read_result`, the catalogue page for `$list_results`. Errors echo no model input.
+    fn look_up(&self, request: &Value, lookup: usize) -> Result<(Value, usize), String> {
+        if request.as_object().is_none_or(|object| object.len() != 1) {
+            return Err("a result lookup must contain only $read_result or $list_results".into());
+        }
+        if let Some(reference) = request.get("$read_result") {
+            let text = self.briefing.read_result(reference)?;
+            let bytes = Value::from(text.as_str()).to_string().len() - 2;
+            return Ok((
+                serde_json::json!({"lookup": lookup, "selected_text": text}),
+                bytes,
+            ));
+        }
+        let offset = request["$list_results"]
+            .as_u64()
+            .and_then(|offset| usize::try_from(offset).ok())
+            .ok_or("result listing offset must be a nonnegative integer")?;
+        let page = self.briefing.brief().results.list_results(offset, 8);
+        let bytes = page.to_string().len();
+        Ok((page, bytes))
+    }
+}
+
+impl ArgumentGenerator for ModelArguments<'_> {
+    /// [`ModelArguments::arguments`], its error as text: Loom suspends on either kind.
+    /// [`crate::run`] calls `arguments` itself to refuse the step on a refused answer instead.
+    fn generate(
+        &self,
+        context: &ArgumentContext,
+        entry: &CatalogueEntry,
+    ) -> Result<json::Value, String> {
+        self.arguments(context, entry)
+            .map_err(|error| error.to_string())
     }
 }
 
