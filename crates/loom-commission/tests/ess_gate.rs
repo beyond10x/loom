@@ -86,7 +86,7 @@ fn run_ess(step: &str, args: &[&str], cwd: &Path) -> Result<Output, String> {
         .output()
         .map_err(|error| {
             format!(
-                "{step}: cannot run `{ESS}` ({error}); the gate needs ess 0.53.0 on PATH \
+                "{step}: cannot run `{ESS}` ({error}); the gate needs ess 0.54.0 on PATH \
                  (ess/commission/ess-inputs.yaml)"
             )
         })
@@ -361,7 +361,7 @@ fn add_to_section(text: &str, section: &str, item: &str) -> String {
     }
 }
 
-/// Expectation 3: ess 0.53.0 exits 0 while it refuses a scenario, so the count is what fails the
+/// Expectation 3: ess 0.54.0 exits 0 while it refuses a scenario, so the count is what fails the
 /// gate. A copy of `ess/` whose synthesis refuses one scenario (ESS-SYNTH-011) fails at step 3,
 /// naming the count.
 #[test]
@@ -411,14 +411,14 @@ fn gate_fails_at_step_1_on_an_older_required_ess() {
     let text = fs::read_to_string(&inputs)
         .unwrap_or_else(|error| panic!("read {}: {error}", inputs.display()));
     assert_eq!(
-        text.matches("requires: ess 0.53.0").count(),
+        text.matches("requires: ess 0.54.0").count(),
         1,
-        "{}: expected exactly one `requires: ess 0.53.0`",
+        "{}: expected exactly one `requires: ess 0.54.0`",
         inputs.display()
     );
     fs::write(
         &inputs,
-        text.replace("requires: ess 0.53.0", "requires: ess 0.51.0"),
+        text.replace("requires: ess 0.54.0", "requires: ess 0.51.0"),
     )
     .unwrap_or_else(|error| panic!("write {}: {error}", inputs.display()));
 
@@ -659,7 +659,7 @@ fn adversary_scan_finds_nested_hidden_non_yaml_and_mid_line_markers() {
     assert!(scan(&dir).unwrap_err().starts_with("step 4 "));
 }
 
-/// Expectation 3: the count is read from ess 0.53.0's report line, and a nonzero count is not 0.
+/// Expectation 3: the count is read from ess 0.54.0's report line, and a nonzero count is not 0.
 #[test]
 fn adversary_refusal_count_is_read_from_the_report() {
     assert_eq!(
