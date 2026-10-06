@@ -1,0 +1,163 @@
+{
+  "baseline": {
+    "not_scored": [],
+    "refusals": 0,
+    "scenarios": 13
+  },
+  "counts": {
+    "equivalent": 0,
+    "inconclusive": 0,
+    "killed": 2,
+    "mutants": 10,
+    "stillborn": 8,
+    "survived": 0,
+    "unwitnessed": 0
+  },
+  "format": "ess-mutation-report/4",
+  "implementation": "b10x-loom-commission 0.1.0",
+  "mutants": [
+    {
+      "change": "`commission.responsibility.RunResumed` is no longer emitted",
+      "class": "emit-drop",
+      "id": "emit-drop/commission.responsibility.ResumeRun/resumed/commission.responsibility.RunResumed",
+      "stillborn": {
+        "cause": "ESS-COMMAND-007",
+        "code": "ESS-MUTATE-002",
+        "message": "outcome `resumed` neither emits an event nor names an error, so nothing about it is observable and no test can check it"
+      },
+      "verdict": "stillborn"
+    },
+    {
+      "change": "`commission.responsibility.RunStarted` is no longer emitted",
+      "class": "emit-drop",
+      "id": "emit-drop/commission.responsibility.StartRun/started/commission.responsibility.RunStarted",
+      "stillborn": {
+        "cause": "ESS-COMMAND-007",
+        "code": "ESS-MUTATE-002",
+        "message": "outcome `started` neither emits an event nor names an error, so nothing about it is observable and no test can check it"
+      },
+      "verdict": "stillborn"
+    },
+    {
+      "change": "`commission.responsibility.RunSuspended` is no longer emitted",
+      "class": "emit-drop",
+      "id": "emit-drop/commission.responsibility.SuspendRun/suspended/commission.responsibility.RunSuspended",
+      "stillborn": {
+        "cause": "ESS-COMMAND-007",
+        "code": "ESS-MUTATE-002",
+        "message": "outcome `suspended` neither emits an event nor names an error, so nothing about it is observable and no test can check it"
+      },
+      "verdict": "stillborn"
+    },
+    {
+      "change": "`error: commission.responsibility.RunStateConflict` becomes `error: commission.responsibility.ActionNeedsAuthority`",
+      "class": "error-swap",
+      "id": "error-swap/commission.responsibility.ResumeRun/wrong-state",
+      "killers": [
+        "commission.responsibility.ResumeRun/outcome/wrong-state",
+        "commission.responsibility.Run/state/Running/refuses/commission.responsibility.ResumeRun"
+      ],
+      "refusals": 0,
+      "scenarios": 13,
+      "verdict": "killed"
+    },
+    {
+      "change": "`error: commission.responsibility.ActionNeedsAuthority` becomes `error: commission.responsibility.ActionNotAdmitted`",
+      "class": "error-swap",
+      "id": "error-swap/commission.responsibility.RevalidateActionRequest/needs-authority",
+      "stillborn": {
+        "cause": "ESS-COMMAND-001",
+        "code": "ESS-MUTATE-002",
+        "message": "outcome `needs-authority` says where `commission.responsibility.ActionNeedsAuthority`'s payload comes from and does not emit it, so the sources describe an event this branch never publishes"
+      },
+      "verdict": "stillborn"
+    },
+    {
+      "change": "`error: commission.responsibility.ActionNotAdmitted` becomes `error: commission.responsibility.ActionNeedsAuthority`",
+      "class": "error-swap",
+      "id": "error-swap/commission.responsibility.RevalidateActionRequest/not-admitted",
+      "stillborn": {
+        "cause": "ESS-COMMAND-001",
+        "code": "ESS-MUTATE-002",
+        "message": "outcome `not-admitted` says where `commission.responsibility.ActionNotAdmitted`'s payload comes from and does not emit it, so the sources describe an event this branch never publishes"
+      },
+      "verdict": "stillborn"
+    },
+    {
+      "change": "`error: commission.responsibility.ActionRequestStale` becomes `error: commission.responsibility.ActionNeedsAuthority`",
+      "class": "error-swap",
+      "id": "error-swap/commission.responsibility.RevalidateActionRequest/stale",
+      "stillborn": {
+        "cause": "ESS-COMMAND-001",
+        "code": "ESS-MUTATE-002",
+        "message": "outcome `stale` says where `commission.responsibility.ActionRequestStale`'s payload comes from and does not emit it, so the sources describe an event this branch never publishes"
+      },
+      "verdict": "stillborn"
+    },
+    {
+      "change": "`error: commission.responsibility.RunStateConflict` becomes `error: commission.responsibility.ActionNeedsAuthority`",
+      "class": "error-swap",
+      "id": "error-swap/commission.responsibility.SuspendRun/wrong-state",
+      "killers": [
+        "commission.responsibility.Run/state/Suspended/refuses/commission.responsibility.SuspendRun",
+        "commission.responsibility.SuspendRun/outcome/wrong-state"
+      ],
+      "refusals": 0,
+      "scenarios": 13,
+      "verdict": "killed"
+    },
+    {
+      "change": "`to: Running` becomes `to: Suspended`",
+      "class": "transition-to",
+      "id": "transition-to/commission.responsibility.Run.resume",
+      "stillborn": {
+        "cause": "ESS-ENTITY-011",
+        "code": "ESS-MUTATE-002",
+        "message": "`Suspended` has no transition that leaves it and is not declared terminal, so an entity that reaches it is stuck"
+      },
+      "verdict": "stillborn"
+    },
+    {
+      "change": "`to: Suspended` becomes `to: Running`",
+      "class": "transition-to",
+      "id": "transition-to/commission.responsibility.Run.suspend",
+      "stillborn": {
+        "cause": "ESS-ENTITY-011",
+        "code": "ESS-MUTATE-002",
+        "message": "`Running` has no transition that leaves it and is not declared terminal, so an entity that reaches it is stuck"
+      },
+      "verdict": "stillborn"
+    }
+  ],
+  "spec_digest": "9bed27fd6e65172f1e7b60f9fe93551bb1ce785145cc4c15fd0ec1f1ad08c598",
+  "specification": "commission v1",
+  "unavailable_sites": [
+    {
+      "class": "emit-swap",
+      "command": "commission.responsibility.ResumeRun",
+      "event": "commission.responsibility.RunResumed",
+      "id": "emit-swap/commission.responsibility.ResumeRun/resumed/commission.responsibility.RunResumed",
+      "outcome": "resumed",
+      "reason": "no_compatible_event_alternative",
+      "unaudited": "single-event substitution was not audited here: no declared event other than `commission.responsibility.RunResumed` has exactly its fields, is published by every component that accepts `commission.responsibility.ResumeRun`, and compiles in its place"
+    },
+    {
+      "class": "emit-swap",
+      "command": "commission.responsibility.StartRun",
+      "event": "commission.responsibility.RunStarted",
+      "id": "emit-swap/commission.responsibility.StartRun/started/commission.responsibility.RunStarted",
+      "outcome": "started",
+      "reason": "no_compatible_event_alternative",
+      "unaudited": "single-event substitution was not audited here: no declared event other than `commission.responsibility.RunStarted` has exactly its fields, is published by every component that accepts `commission.responsibility.StartRun`, and compiles in its place"
+    },
+    {
+      "class": "emit-swap",
+      "command": "commission.responsibility.SuspendRun",
+      "event": "commission.responsibility.RunSuspended",
+      "id": "emit-swap/commission.responsibility.SuspendRun/suspended/commission.responsibility.RunSuspended",
+      "outcome": "suspended",
+      "reason": "no_compatible_event_alternative",
+      "unaudited": "single-event substitution was not audited here: no declared event other than `commission.responsibility.RunSuspended` has exactly its fields, is published by every component that accepts `commission.responsibility.SuspendRun`, and compiles in its place"
+    }
+  ]
+}

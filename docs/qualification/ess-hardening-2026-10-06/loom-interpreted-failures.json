@@ -1,0 +1,136 @@
+{
+  "scenario": "loom.run.RevalidateSelection/outcome/not-in-frontier",
+  "checks": [
+    {
+      "code": "ESS-CF-OUTCOME",
+      "diagnostic": {
+        "code": "ESS-CF-OUTCOME",
+        "expected": [
+          "outcome = not-in-frontier"
+        ],
+        "input": "loom.run.RevalidateSelection(case_revision = 1.0, frontier_actions = [], selection_id = \"00000000-0000-4000-8000-93206299a723\")",
+        "observed": [
+          "outcome = stale-revision"
+        ],
+        "scenario": "loom.run.RevalidateSelection/outcome/not-in-frontier",
+        "source": [
+          {
+            "kind": "outcome",
+            "name": {
+              "command": "loom.run.RevalidateSelection",
+              "outcome": "not-in-frontier"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "code": "ESS-CF-EVENT",
+      "diagnostic": {
+        "code": "ESS-CF-EVENT",
+        "expected": [
+          "event loom.run.SelectionNotInFrontier published"
+        ],
+        "input": "loom.run.RevalidateSelection(case_revision = 1.0, frontier_actions = [], selection_id = \"00000000-0000-4000-8000-93206299a723\")",
+        "observed": [
+          "loom.run.SelectionStale published with case_revision = 1.0, catalogue_revision = 194041.0, selection_id = \"00000000-0000-4000-8000-93206299a723\""
+        ],
+        "scenario": "loom.run.RevalidateSelection/outcome/not-in-frontier",
+        "source": [
+          {
+            "kind": "event",
+            "name": "loom.run.SelectionNotInFrontier"
+          }
+        ]
+      }
+    },
+    {
+      "code": "ESS-CF-NO-EVENT",
+      "diagnostic": {
+        "code": "ESS-CF-NO-EVENT",
+        "expected": [
+          "event loom.run.SelectionStale not published"
+        ],
+        "input": "loom.run.RevalidateSelection(case_revision = 1.0, frontier_actions = [], selection_id = \"00000000-0000-4000-8000-93206299a723\")",
+        "observed": [
+          "loom.run.SelectionStale published with case_revision = 1.0, catalogue_revision = 194041.0, selection_id = \"00000000-0000-4000-8000-93206299a723\""
+        ],
+        "scenario": "loom.run.RevalidateSelection/outcome/not-in-frontier",
+        "source": [
+          {
+            "kind": "event",
+            "name": "loom.run.SelectionStale"
+          }
+        ]
+      }
+    }
+  ]
+}
+{
+  "scenario": "loom.run.Selection/transition/refuse/by/loom.run.RevalidateSelection/not-in-frontier",
+  "checks": [
+    {
+      "code": "ESS-CF-OUTCOME",
+      "diagnostic": {
+        "code": "ESS-CF-OUTCOME",
+        "expected": [
+          "outcome = not-in-frontier"
+        ],
+        "input": "loom.run.RevalidateSelection(case_revision = 1.0, frontier_actions = [], selection_id = \"00000000-0000-4000-8000-93206299a723\")",
+        "observed": [
+          "outcome = stale-revision"
+        ],
+        "scenario": "loom.run.Selection/transition/refuse/by/loom.run.RevalidateSelection/not-in-frontier",
+        "source": [
+          {
+            "kind": "outcome",
+            "name": {
+              "command": "loom.run.RevalidateSelection",
+              "outcome": "not-in-frontier"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "code": "ESS-CF-EVENT",
+      "diagnostic": {
+        "code": "ESS-CF-EVENT",
+        "expected": [
+          "event loom.run.SelectionNotInFrontier published"
+        ],
+        "input": "loom.run.RevalidateSelection(case_revision = 1.0, frontier_actions = [], selection_id = \"00000000-0000-4000-8000-93206299a723\")",
+        "observed": [
+          "loom.run.SelectionStale published with case_revision = 1.0, catalogue_revision = 194041.0, selection_id = \"00000000-0000-4000-8000-93206299a723\""
+        ],
+        "scenario": "loom.run.Selection/transition/refuse/by/loom.run.RevalidateSelection/not-in-frontier",
+        "source": [
+          {
+            "kind": "event",
+            "name": "loom.run.SelectionNotInFrontier"
+          }
+        ]
+      }
+    },
+    {
+      "code": "ESS-CF-NO-EVENT",
+      "diagnostic": {
+        "code": "ESS-CF-NO-EVENT",
+        "expected": [
+          "event loom.run.SelectionStale not published"
+        ],
+        "input": "loom.run.RevalidateSelection(case_revision = 1.0, frontier_actions = [], selection_id = \"00000000-0000-4000-8000-93206299a723\")",
+        "observed": [
+          "loom.run.SelectionStale published with case_revision = 1.0, catalogue_revision = 194041.0, selection_id = \"00000000-0000-4000-8000-93206299a723\""
+        ],
+        "scenario": "loom.run.Selection/transition/refuse/by/loom.run.RevalidateSelection/not-in-frontier",
+        "source": [
+          {
+            "kind": "event",
+            "name": "loom.run.SelectionStale"
+          }
+        ]
+      }
+    }
+  ]
+}

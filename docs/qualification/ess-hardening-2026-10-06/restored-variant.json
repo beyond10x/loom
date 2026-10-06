@@ -1,0 +1,14 @@
+{
+  "format": "ess-diff/14",
+  "before": {
+    "system": "intake",
+    "specification_version": 1,
+    "spec_digest": "17553021bee1981ed9aa67801148981e347a82b89ccf4c4d86645268a2d3d140"
+  },
+  "after": {
+    "system": "intake",
+    "specification_version": 1,
+    "spec_digest": "17553021bee1981ed9aa67801148981e347a82b89ccf4c4d86645268a2d3d140"
+  },
+  "changes": []
+}
