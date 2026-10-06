@@ -94,7 +94,7 @@ rewrite.
   one turn into a `StreamSink`. The two provider projections implement it.
 - **`ToolPort`** (`harness-wire/src/port.rs:135`): where the loop's tools come from; `specs` is the
   complete set published for the next turn. In Loom it publishes the turn's catalogue and runs
-  nothing: every published tool asks first (the approval checkpoint below), and Loom's answer is
+  nothing: every published tool asks first (see the approval seam below), and Loom's answer is
   the selection, argument generation and revalidation a call goes through before it becomes a
   `ProposedAction` (`crates/loom-executor/src/harness/governed.rs`).
 - **`TurnEnvironmentProvider`** (`harness-loop/src/environment.rs:47`): refreshed before every

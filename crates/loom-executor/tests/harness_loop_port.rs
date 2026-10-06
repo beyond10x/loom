@@ -39,7 +39,11 @@ use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_commission_testkit::fake_governor::{Answer, FakeGovernor, GovernorCall};
 use b10x_loom_executor::harness::governed::{LoopExecutor, LoopPorts, tool_name};
 use b10x_loom_executor::harness::responses::{self, ResponsesClient};
-use b10x_loom_executor::harness::turn_loop::{LoopConfig, LoopEvent, LoopStop, VecLoopSink};
+use b10x_loom_executor::harness::turn_loop::{
+    DEFAULT_ANSWER_NAME, DEFAULT_DELEGATE_NAME, DEFAULT_RECALL_NAME, DEFAULT_SKILL_NAME,
+    Delegation, LoopConfig, LoopEvent, LoopStop, Memories, Memory, MemoryKind, MemoryStatus,
+    MemoryTrust, OutputSchema, Skill, Skills, VecLoopSink,
+};
 use b10x_loom_executor::harness::wire::{CallId, Item, StaticBearer, ToolCall, ToolName, WireId};
 use b10x_loom_executor::model::primitives::Uuid;
 use b10x_loom_executor::model::run::{
@@ -254,6 +258,88 @@ fn ported_loop_round_trip() {
             && turns[1].data.turn_id != turns[2].data.turn_id
             && turns[0].data.turn_id != turns[2].data.turn_id,
         "{turns:?}"
+    );
+}
+
+/// Correction 1 (F1), for every member of the class: each `LoopConfig` field that publishes one of
+/// the loop's own tools (an answer schema, delegation, skills, memories) is set, and the request
+/// still carries the catalogue and nothing else, and the catalogue call is proposed.
+#[test]
+fn ported_loop_publishes_no_loop_owned_tool() {
+    let case = CaseId(CASE.to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(
+        case.clone(),
+        [answer(2, Truth::True, after_tests_actions())],
+    );
+    let endpoint = Endpoint::start(vec![tests_run_turn()]);
+    let loom =
+        Loom::new(FirstAdmissibleSelector, EmptyObjectArguments, PROMPT).with_governor(&governor);
+    let skills = Skills::new(vec![Skill {
+        name: "release".to_owned(),
+        description: "How a release is cut.".to_owned(),
+        body: "Cut it from main.\n".to_owned(),
+    }]);
+    let memories = Memories::new(vec![Memory {
+        id: "gate".to_owned(),
+        kind: MemoryKind::Fact,
+        summary: "The gate is task check.".to_owned(),
+        trust: MemoryTrust::Unreviewed,
+        status: MemoryStatus::Active,
+        supersedes: None,
+        body: "Run task check.\n".to_owned(),
+    }])
+    .expect("a vault");
+    let config = config()
+        .with_output_schema(Some(
+            OutputSchema::new(json!({"type": "object"})).expect("an object schema"),
+        ))
+        .with_delegation(Some(Delegation::default()))
+        .with_skills(Some(skills))
+        .with_memories(Some(memories));
+
+    let handed = issued(&governor, &case);
+    let mut client = responses_client(&endpoint);
+    let mut sink = VecLoopSink::new();
+    let run = loom.run_loop(
+        &SessionData {
+            session_id: SessionId(Uuid("00000000-0000-4000-8000-00000000c013".to_owned())),
+            commission_run: CommissionRunId(Uuid(RUN.to_owned())),
+            wire: responses::WIRE.to_owned(),
+        },
+        LoopPorts {
+            model: &mut client,
+            config,
+            sink: &mut sink,
+        },
+        &commission(&case),
+        &handed,
+    );
+
+    let sent = endpoint.requests();
+    assert_eq!(sent.len(), 1, "{:?}", run.outcome);
+    let names = tool_names(&sent[0]);
+    assert_eq!(names, published(2, &after_tests_actions()));
+    for owned in [
+        DEFAULT_ANSWER_NAME,
+        DEFAULT_DELEGATE_NAME,
+        DEFAULT_SKILL_NAME,
+        DEFAULT_RECALL_NAME,
+    ] {
+        assert!(
+            !names.iter().any(|name| name == owned),
+            "`{owned}` published"
+        );
+    }
+    assert_eq!(
+        run.outcome,
+        ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
+            action: TESTS_RUN.to_owned(),
+            arguments: ProposedActionArguments(CommissionValue::Object(vec![(
+                "suite".to_owned(),
+                CommissionValue::Text("unit".to_owned()),
+            )])),
+        })
     );
 }
 

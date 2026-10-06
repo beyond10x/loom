@@ -12,7 +12,9 @@ under **Unreleased** until the next release.
   `harness::governed::LoopExecutor` runs it behind Commission's `AgentExecutor` port. Before every
   turn Loom reads the case's current frontier from the governor and projects it, and the turn's
   tool list is exactly that catalogue, each action under its published name
-  (`harness::governed::tool_name`: `repository.merge` is published as `repository_merge`). A
+  (`harness::governed::tool_name`: `repository.merge` is published as `repository_merge`); the
+  loop's own tools (an answer schema, delegation, skills, memories) are not published, whatever
+  the caller's configuration says, so no delegate runs. A
   model's call of a catalogue action is the selection, by the reasoning model, and carries its
   arguments: Loom records the selection and the argument request, revalidates the selection
   against the governor's current frontier, and returns it as a `ProposedAction`, stopping the loop

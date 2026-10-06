@@ -11,8 +11,9 @@
 //!   is read, from the governor ([`Loom::with_governor`]) or, for a Loom without one, the frontier
 //!   the run was handed. It is projected ([`crate::projection`]), and each catalogue entry is
 //!   published as one tool under [`tool_name`], in the catalogue's order and with nothing else
-//!   beside it. A call naming anything else is refused to the model by the loop's own narrowing,
-//!   naming it, and never reaches the selector.
+//!   beside it: the loop's own tools (an answer schema, delegation, skills, memories) are cleared
+//!   from the run's configuration, so no delegate runs. A call naming anything else is refused to
+//!   the model by the loop's own narrowing, naming it, and never reaches the selector.
 //! - **A tool call** ([`ApprovalPort`]). Every published tool asks before it runs, and Loom is what
 //!   answers. The model's call is the selection, by the reasoning model, from that turn's
 //!   catalogue; its arguments are the call's; and the pipeline [`AgentExecutor::run`] runs with a
@@ -93,7 +94,8 @@ pub struct LoopPorts<'p> {
     /// The model the loop turns.
     pub model: &'p mut dyn ModelPort,
     /// The run's model name, standing instructions, budget and sampling. Its tools are the
-    /// catalogue's, whatever it says.
+    /// catalogue's, whatever it says: every field that would publish one of the loop's own tools
+    /// (an answer schema, delegation, skills, memories) is cleared before the loop starts.
     pub config: LoopConfig,
     /// Where the loop's events go, as they happen.
     pub sink: &'p mut dyn LoopSink,
@@ -142,6 +144,15 @@ where
             config,
             sink,
         } = ports;
+        // Every request carries the catalogue and nothing else, so the loop's own tools are not
+        // published, whatever the caller asked: these four fields are all that adds one
+        // (`AgentLoop::owned_specs`). A delegate in particular could not hold the checkpoint a
+        // proposal stops at, so an action it selected would be admitted and never proposed.
+        let config = config
+            .with_output_schema(None)
+            .with_delegation(None)
+            .with_skills(None)
+            .with_memories(None);
         let case = &commission.data().case_id;
         if frontier.data().case_id != *case || admits_nothing(frontier) {
             return LoopRun {
@@ -565,8 +576,8 @@ impl<S, G, V> ModelPort for Recording<'_, '_, S, G, V> {
     }
 
     /// The model's turn. The first one completed after a catalogue was offered is that turn of the
-    /// session, recorded with its items; another one before the next offer (a summary turn, a
-    /// delegate's turn) is not a turn of the session.
+    /// session, recorded with its items; another one before the next offer (a summary turn) is not
+    /// a turn of the session.
     fn turn(
         &mut self,
         request: &TurnRequest,
