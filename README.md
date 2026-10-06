@@ -26,6 +26,11 @@ the whole boundary.
 
 ## Status
 
+Current development source retains inspected file contents as immutable, run-local results.
+The model sees bounded previews and can select ranges or reuse content in edits through verified
+references. Expansion happens before Commission admission. This is not in the `0.2.0` tag;
+[result references](docs/design/result-references.md) describes the contract and limits.
+
 Version `0.2.0`, released from source at the tag `0.2.0`
 ([release](https://github.com/beyond10x/loom/releases/tag/0.2.0)). Nothing is on a registry: you
 install from the tag or depend on it with `tag = "0.2.0"`. `b10x-loom run` completed a live run

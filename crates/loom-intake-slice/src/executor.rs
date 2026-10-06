@@ -177,6 +177,11 @@ pub struct TestRun {
 }
 
 impl TestRun {
+    /// The already captured, potentially lossy output tail; never the full process output.
+    pub fn output_tail(&self) -> &str {
+        &self.output
+    }
+
     /// The command's exit code; `None` when a signal ended it.
     pub fn exit_code(&self) -> Option<i32> {
         self.exit_code

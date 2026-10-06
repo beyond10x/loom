@@ -6,6 +6,16 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- The local software-change slice keeps inspected file contents in a bounded run-local result
+  store and sends previews with immutable references to the model. Argument generation can read
+  selected ranges or JSON values and compose edit contents from references and literals. The
+  expanded ordinary arguments reach Commission admission and the existing effect adapter.
+- Edit bodies are represented by size and digest in later briefings. Test-result artifacts retain
+  the runner's existing output tail and explicitly report partial capture. References expire with
+  the briefing; there is no cross-run sharing or claimed task-quality/token-price improvement.
+
 ## [0.2.0] - 2026-10-06
 
 Loom 0.2.0 runs the tests of a governed case inside embedded Substrate confinement by default,

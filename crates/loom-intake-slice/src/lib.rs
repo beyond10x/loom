@@ -24,6 +24,7 @@ pub mod confinement;
 pub mod effect;
 pub mod executor;
 pub mod git;
+pub mod results;
 pub mod run;
 pub mod selector;
 pub mod verifier;

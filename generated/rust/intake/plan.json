@@ -2,8 +2,8 @@
   "provenance": {
     "system": "intake",
     "specification_version": "v1",
-    "source_digest": "17553021bee1981ed9aa67801148981e347a82b89ccf4c4d86645268a2d3d140",
-    "contract_digest": "e162f36307324d229f7953cb18a963d4e3557ac615f512d70d9267e7f192d3ff"
+    "source_digest": "3f5061fef390c4dc8c27551efdb85452d71f8ce8cb803ed1591bf3a2cbaa8684",
+    "contract_digest": "56faa06c4640455cfd2398e5c789037ef0cc12087603ed1708c9d2ed2ba6bfa7"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -48,6 +48,48 @@
     {
       "kind": "domain_type",
       "source": "intake.confinement.ToolchainRoot",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.results.Capture",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.results.Rendering",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.results.ResultReference",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.results.ResultSelector",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.results.SelectionKind",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.results.StoredResult",
       "disposition": {
         "disposition": "generated"
       }

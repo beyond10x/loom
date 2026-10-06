@@ -195,6 +195,12 @@ crate that adds Canon uses the same reference.
 
 ## Intake and the command line
 
+Result capture and selection belong to `loom-intake-slice::results` and the shared `Briefing`.
+Resolve references before returning a `ProposedAction`, never inside an already-admitted effect.
+Keep original statuses and capture completeness explicit; stored text is data, not authority or
+verified evidence. The store expires with its briefing and grants no cross-run access. The
+`result_reference_workflow` integration suite holds the inspect-to-edit path and bounded context.
+
 - `b10x-loom-intake-router` classifies an intent against the engineering protocol registry and
   refuses a pick outside it or below the confidence threshold. A routing proposal is never
   authority; whoever opens the case checks it.

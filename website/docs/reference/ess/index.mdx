@@ -10,7 +10,8 @@ custom_edit_url: null
 
 import domainGraph0 from '@site/data/ess/loom-run.domain-graph.json';
 import domainGraph1 from '@site/data/ess/intake-confinement.domain-graph.json';
-import domainGraph2 from '@site/data/ess/intake-routing.domain-graph.json';
+import domainGraph2 from '@site/data/ess/intake-results.domain-graph.json';
+import domainGraph3 from '@site/data/ess/intake-routing.domain-graph.json';
 
 # ESS specification
 
@@ -34,10 +35,18 @@ Requested and observed confinement of local test commands. No automatic fallback
 
 [Read the confinement domain in full](./intake-confinement.md)
 
+## results
+
+Immutable UTF-8 observations retained by one run's briefing. Model-facing references select data before an ordinary action proposal reaches Commission admission; they never grant an action, carry authority, execute expressions, or stand in for verified evidence.
+
+<DomainGraph data={domainGraph2} title="results" />
+
+[Read the results domain in full](./intake-results.md)
+
 ## Routing
 
 An intent as given, the references extracted from its text, the protocol the router proposes for it, and the slice run that works the intent until it is blocked. A pick is a proposal, never authority.
 
-<DomainGraph data={domainGraph2} title="Routing" />
+<DomainGraph data={domainGraph3} title="Routing" />
 
 [Read the Routing domain in full](./intake-routing.md)

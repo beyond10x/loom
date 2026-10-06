@@ -47,6 +47,10 @@ The argument generator is handed the selected catalogue entry and nothing else. 
 request for arguments against the selection it serves, then returns the action as a
 `ProposedAction`.
 
+In current development source, the local slice can resolve [stored-result references](./result-references.md)
+while generating those arguments. Only the expanded ordinary arguments reach the proposal and
+subsequent admission; a reference never grants permission.
+
 ## 4. Revalidate — Commission runtime
 
 Time passes between selection and effect: the case may have moved, and authority may have changed.

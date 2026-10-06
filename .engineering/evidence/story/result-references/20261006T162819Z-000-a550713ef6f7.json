@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-06T16:28:19Z",
+  "actor": "human:timo",
+  "artifact": "story:result-references",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "approval",
+    "source": "Operator: do it; custom harness; b10x/loom"
+  }
+}
