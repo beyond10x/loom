@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 148794ff1143dcb09d0fe880c0974054e23fcd97efe7a45a4d4f53970fceb9d0
-// contract digest acd561280daea7248420b3a1815dcb9a7991f0d16278e9f7575d7077c98a0da3
+// model digest 10e0941a85d43e690422930dd8850593cb2bee08d738ac2a6e7ffda9505f4b60
+// contract digest 0ebc9eb4e00a223ecca76b7fa83d021e0888f6c4084ae57ce52801a0b027c73c
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -202,6 +202,30 @@ where
     }
 }
 
+/// `loom.run.InterruptSession`, generated: every outcome is one the specification fully determines.
+impl<P> crate::run::obligations::InterruptSessionBehavior for Generated<P>
+where
+    P: SessionStorage,
+{
+    fn interrupt_session(&mut self, input: crate::run::InterruptSession) -> Result<crate::run::InterruptSessionOutcome, UnmetObligation> {
+        let _ = &input;
+        // `interrupted`: the default.
+        let Some(held) = SessionStorage::get(&self.ports, &input.session_id) else {
+            return Ok(crate::run::InterruptSessionOutcome::WrongStateUnknownInstance);
+        };
+        let _ = &held;
+        let held_state = held.state;
+        let moved = match held.refine() {
+            crate::run::AnySession::Active(instance) => crate::run::AnySession::Interrupted(instance.interrupt()),
+            _ => return Ok(crate::run::InterruptSessionOutcome::WrongState { error: crate::run::SessionStateConflict { state: held_state } }),
+        };
+        let next = moved.snapshot();
+        let answer = crate::run::InterruptSessionOutcome::Interrupted { session_interrupted: crate::run::SessionInterrupted { session_id: input.session_id.clone() } };
+        SessionStorage::put(&mut self.ports, next);
+        return Ok(answer);
+    }
+}
+
 /// `loom.run.OpenSession`, generated: every outcome is one the specification fully determines.
 impl<P> crate::run::obligations::OpenSessionBehavior for Generated<P>
 where
@@ -270,7 +294,7 @@ where
         let _ = &related;
         // `session-not-active`: selected by the present related row, in declaration order.
         if let Some(related) = &related {
-        if decided(equal(Some(&related.state).map(|value| match value { crate::run::SessionState::Active => "Active", crate::run::SessionState::Filed => "Filed" }.to_owned()), Some("Active".to_owned())).map(|value| !value), "loom.run.RecordCompaction")? {
+        if decided(equal(Some(&related.state).map(|value| match value { crate::run::SessionState::Active => "Active", crate::run::SessionState::Filed => "Filed", crate::run::SessionState::Interrupted => "Interrupted" }.to_owned()), Some("Active".to_owned())).map(|value| !value), "loom.run.RecordCompaction")? {
             return Ok(crate::run::RecordCompactionOutcome::SessionNotActive { error: crate::run::SessionNotActive { session_id: input.session_id.clone() } });
         }
         }
@@ -305,7 +329,7 @@ where
         let _ = &related;
         // `session-not-active`: selected by the present related row, in declaration order.
         if let Some(related) = &related {
-        if decided(equal(Some(&related.state).map(|value| match value { crate::run::SessionState::Active => "Active", crate::run::SessionState::Filed => "Filed" }.to_owned()), Some("Active".to_owned())).map(|value| !value), "loom.run.RecordTurn")? {
+        if decided(equal(Some(&related.state).map(|value| match value { crate::run::SessionState::Active => "Active", crate::run::SessionState::Filed => "Filed", crate::run::SessionState::Interrupted => "Interrupted" }.to_owned()), Some("Active".to_owned())).map(|value| !value), "loom.run.RecordTurn")? {
             return Ok(crate::run::RecordTurnOutcome::SessionNotActive { error: crate::run::SessionNotActive { session_id: input.session_id.clone() } });
         }
         }
@@ -405,6 +429,7 @@ where
         let held_state = held.state;
         let moved = match held.refine() {
             crate::run::AnySession::Filed(instance) => crate::run::AnySession::Active(instance.resume()),
+            crate::run::AnySession::Interrupted(instance) => crate::run::AnySession::Active(instance.resume()),
             _ => return Ok(crate::run::ResumeSessionOutcome::WrongState { error: crate::run::SessionStateConflict { state: held_state } }),
         };
         let next = moved.snapshot();

@@ -24,8 +24,25 @@ under **Unreleased** until the next release.
   session with the provider items it added (`loom.run.RecordTurn`, `Loom::turns`); one run holds
   a session at a time, a second run proposes nothing, and the session is filed when its run ends
   (`Loom::sessions`). Arguments the model wrote that Commission's JSON cannot carry end the run
-  with `NoUsefulAction`. Budgets as a Commission suspension and resuming a run once Commission has
-  acted are not wired yet, and `b10x-loom run` does not use the loop yet.
+  with `NoUsefulAction`. Budgets as a Commission suspension are not wired yet, and `b10x-loom run`
+  does not use the loop yet.
+- A governed run can be interrupted and recovered. `Loom::interrupt` cancels the run holding a
+  session: the session becomes `Interrupted` (`loom.run.InterruptSession`), nothing more is
+  recorded into it, the run proposes nothing, and a call it was selecting when the cancel came is
+  stopped before revalidation, its selection left `Selected`. A run that stops at the approval
+  checkpoint of a call leaves that checkpoint held for its session, in memory.
+  `Loom::resume_loop` resumes a session by id, from `Filed` or `Interrupted`
+  (`loom.run.ResumeSession`), and continues from its held checkpoint: the catalogue is projected
+  from the frontier current at resume first, a selection in flight is revalidated, and a proposal
+  already returned (a merge awaiting its approval) is returned again without asking the model
+  while the case is at the revision it was selected at; otherwise the model is told the held call
+  is stale, naming both revisions, and chooses again. A resume that ends before its held call is
+  answered (a governor that cannot answer, an interrupt, a panic) keeps the checkpoint for
+  the next; a resume whose narrowing admits a tool the stopped run's did not, or whose commission
+  is for another case, fails as a changed configuration. `Loom::run_loop` still starts a
+  conversation of its own and drops a held checkpoint. `Loom::catalogues` lists the catalogue
+  each governed turn was offered, and the ported loop gains `AgentLoop::resume_asking`, which
+  resumes a checkpoint by asking the approval port again.
 - A governed run records each compaction of its session. The ported loop compacts before a
   request once the conversation passes 80 % of a declared context window, aiming at 50 % (the
   byte rule without a window); `Loom::run_loop` records each compaction on the run's session
@@ -37,6 +54,9 @@ under **Unreleased** until the next release.
 
 ### Changed
 
+- Each `Loom` derives its turn, catalogue, selection and argument-request ids in a namespace of
+  its own, random by default and fixed with `Loom::with_instance`, so two Looms, a Loom built to
+  recover a run among them, never give one id to two different selections on one frontier.
 - Loom requires ESS 0.54.0: the Loom, Commission and intake specifications require it, the
   Commission conformance target builds on the 0.54.0 `ess-conformance` and `ess-primitives`, and
   CI installs the 0.54.0 `ess`. The source formats are unchanged, and the generated Rust is the

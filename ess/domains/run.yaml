@@ -120,16 +120,19 @@ entities:
         cardinality: many
         via: session_id
     # Active while a run takes turns in it; Filed once the run ended and the session was written;
-    # Active again when a later run resumes it. A session left Active by a run that died without
-    # filing it is released back to Filed by an operator.
+    # Interrupted once its run was cancelled while it held the session, so nothing that run had in
+    # flight is trusted; Active again when a later run resumes it, from Filed or Interrupted. A
+    # session left Active by a run that died without filing it is released back to Filed by an
+    # operator.
     lifecycle:
       initial: Active
-      states: [Active, Filed]
+      states: [Active, Filed, Interrupted]
       terminal: []
       transitions:
         - {name: file, from: [Active], to: Filed}
-        - {name: resume, from: [Filed], to: Active}
+        - {name: resume, from: [Filed, Interrupted], to: Active}
         - {name: release, from: [Active], to: Filed}
+        - {name: interrupt, from: [Active], to: Interrupted}
 
   # One completed model turn. A turn that did not complete is never recorded, so a filed session
   # holds exactly the turns completed before the run ended.
@@ -314,7 +317,8 @@ errors:
       - name: session_id
         type: loom.run.SessionId
 
-  # A session is filed only while Active and resumed only while Filed.
+  # A session is filed and interrupted only while Active, and resumed only while Filed or
+  # Interrupted.
   - name: loom.run.SessionStateConflict
     fields:
       - name: state
@@ -463,10 +467,30 @@ commands:
         wrong_state: true
         error: loom.run.SessionStateConflict
 
-  # A later run continues a filed session by id, replaying its stored items in stored order. A
-  # session recorded on another wire is refused before anything is sent, naming both wires. Once
-  # claimed, a session is filed again in every case: a run refused on another wire files it back
-  # unchanged.
+  # A run is cancelled while it holds its session: the session is interrupted, and nothing the run
+  # had in flight is proposed. Only an Active session is interrupted.
+  - name: loom.run.InterruptSession
+    input:
+      - name: session_id
+        type: loom.run.SessionId
+    outcomes:
+      - name: interrupted
+        moves: loom.run.Session.interrupt
+        instance: session_id
+        emits: [loom.run.SessionInterrupted]
+        payload:
+          loom.run.SessionInterrupted:
+            session_id: input.session_id
+      - name: wrong-state
+        wrong_state: true
+        error: loom.run.SessionStateConflict
+
+  # A later run continues a filed or interrupted session by id, replaying its stored items in
+  # stored order. An interrupted session is recovered by the same resume: the resumed run projects
+  # its catalogue from the frontier current at resume, and revalidates what the interrupted run had
+  # in flight, before anything is proposed. A session recorded on another wire is refused before
+  # anything is sent, naming both wires. Once claimed, a session is filed or interrupted again in every case: a run refused on
+  # another wire files it back unchanged.
   - name: loom.run.ResumeSession
     input:
       - name: session_id
@@ -731,6 +755,11 @@ events:
         type: loom.run.SessionId
       - name: wire
         type: String
+
+  - name: loom.run.SessionInterrupted
+    fields:
+      - name: session_id
+        type: loom.run.SessionId
 
   # Released by an operator after its run died: filed as Failed.
   - name: loom.run.SessionReleased

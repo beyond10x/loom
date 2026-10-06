@@ -233,7 +233,7 @@ It owns any number of [`Turn`](#turn), as `turns`, carried by `Turn.session_id`.
 
 No invariant is declared, so nothing here constrains an instance at rest.
 
-Its state is a `loom.run.Session.State`, one of `Active` and `Filed`. That enum is synthesised from the lifecycle rather than declared beside it, so the states a view's filter compares and the states drawn below cannot disagree.
+Its state is a `loom.run.Session.State`, one of `Active`, `Filed` and `Interrupted`. That enum is synthesised from the lifecycle rather than declared beside it, so the states a view's filter compares and the states drawn below cannot disagree.
 
 An instance is created in `Active`. No state is terminal: nothing in this lifecycle says an instance may stop moving.
 
@@ -242,7 +242,9 @@ stateDiagram-v2
     [*] --> Active
     Active --> Filed: file (FileSession)
     Filed --> Active: resume (ResumeSession)
+    Interrupted --> Active: resume (ResumeSession)
     Active --> Filed: release (ReleaseSession)
+    Active --> Interrupted: interrupt (InterruptSession)
 ```
 
 Each move is taken by a declared command outcome, and a move nothing takes is refused as `missing_causation` rather than left as a state change nobody can trigger:
@@ -250,10 +252,14 @@ Each move is taken by a declared command outcome, and a move nothing takes is re
 - `file` — taken by `loom.run.FileSession` on its `filed` outcome
 - `resume` — taken by `loom.run.ResumeSession` on its `resumed` outcome
 - `release` — taken by `loom.run.ReleaseSession` on its `released` outcome
+- `interrupt` — taken by `loom.run.InterruptSession` on its `interrupted` outcome
 
 An instance is brought into existence by `loom.run.OpenSession` on its `opened` outcome.
 
-Every ordered pair of these states is connected by some move, so this lifecycle forbids nothing.
+Illegal transitions are illegal by absence: no rule forbids them, there is simply no arrow, because a rule would be a second place for the same truth to live. A diagram cannot show an absence, so the pairs it does not connect are listed here, derived from the same transitions — anything named below is a move this specification does not permit.
+
+- `Filed` may not become `Interrupted`
+- `Interrupted` may not become `Filed`
 
 One view projects it: [`Sessions`](#sessions).
 
@@ -372,7 +378,21 @@ It has two outcomes.
 
 **`filed`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.run.Session` from `Active` to `Filed`, along the declared move `file`. The instance is the one named by the input field `session_id`. It emits `loom.run.SessionFiled`. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
-**`wrong-state`** — Taken when the subject is resting in a state none of this command's moves start from — a `loom.run.Session` in `Filed`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `loom.run.SessionStateConflict`, carrying `state`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
+**`wrong-state`** — Taken when the subject is resting in a state none of this command's moves start from — a `loom.run.Session` in `Filed` and `Interrupted`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `loom.run.SessionStateConflict`, carrying `state`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
+
+### `InterruptSession`
+
+`loom.run.InterruptSession`.
+
+It takes:
+
+- `session_id` — `loom.run.SessionId`
+
+It has two outcomes.
+
+**`interrupted`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.run.Session` from `Active` to `Interrupted`, along the declared move `interrupt`. The instance is the one named by the input field `session_id`. It emits `loom.run.SessionInterrupted`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+**`wrong-state`** — Taken when the subject is resting in a state none of this command's moves start from — a `loom.run.Session` in `Filed` and `Interrupted`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `loom.run.SessionStateConflict`, carrying `state`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
 
 ### `OpenSession`
 
@@ -457,7 +477,7 @@ It has two outcomes.
 
 **`released`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.run.Session` from `Active` to `Filed`, along the declared move `release`. The instance is the one named by the input field `session_id`. It emits `loom.run.SessionReleased`. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
-**`wrong-state`** — Taken when the subject is resting in a state none of this command's moves start from — a `loom.run.Session` in `Filed`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `loom.run.SessionStateConflict`, carrying `state`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
+**`wrong-state`** — Taken when the subject is resting in a state none of this command's moves start from — a `loom.run.Session` in `Filed` and `Interrupted`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `loom.run.SessionStateConflict`, carrying `state`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
 
 ### `RequestArguments`
 
@@ -489,7 +509,7 @@ It has three outcomes.
 
 **`cross-wire`** — Taken when the existing subject's stored fields satisfy `wire != input.wire`. No entity in this specification changes. It reports `loom.run.SessionWireMismatch`, carrying `session_id`, `session_wire` and `wire`. It emits nothing. A test establishes and independently observes the subject enum fact before selecting this branch.
 
-**`resumed`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.run.Session` from `Filed` to `Active`, along the declared move `resume`. The instance is the one named by the input field `session_id`. It emits `loom.run.SessionResumed`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+**`resumed`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.run.Session` from `Filed` and `Interrupted` to `Active`, along the declared move `resume`. The instance is the one named by the input field `session_id`. It emits `loom.run.SessionResumed`. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
 **`wrong-state`** — Taken when the subject is resting in a state none of this command's moves start from — a `loom.run.Session` in `Active`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `loom.run.SessionStateConflict`, carrying `state`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
 
@@ -645,6 +665,18 @@ Emitted by `loom.run.FileSession` on its `filed` outcome.
 
 Nothing in this system reacts to it.
 
+### `SessionInterrupted`
+
+`loom.run.SessionInterrupted`.
+
+It carries:
+
+- `session_id` — `loom.run.SessionId`
+
+Emitted by `loom.run.InterruptSession` on its `interrupted` outcome.
+
+Nothing in this system reacts to it.
+
 ### `SessionOpened`
 
 `loom.run.SessionOpened`.
@@ -795,6 +827,8 @@ It carries:
 
 Reported by `loom.run.FileSession` on its `wrong-state` outcome.
 
+Reported by `loom.run.InterruptSession` on its `wrong-state` outcome.
+
 Reported by `loom.run.ReleaseSession` on its `wrong-state` outcome.
 
 Reported by `loom.run.ResumeSession` on its `wrong-state` outcome.
@@ -812,4 +846,4 @@ Reported by `loom.run.ResumeSession` on its `cross-wire` outcome.
 
 ---
 
-Generated from loom v1 · model digest `148794ff1143dcb09d0fe880c0974054e23fcd97efe7a45a4d4f53970fceb9d0` · contract digest `slice-sha256/2:acd561280daea7248420b3a1815dcb9a7991f0d16278e9f7575d7077c98a0da3`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · model digest `10e0941a85d43e690422930dd8850593cb2bee08d738ac2a6e7ffda9505f4b60` · contract digest `slice-sha256/2:0ebc9eb4e00a223ecca76b7fa83d021e0888f6c4084ae57ce52801a0b027c73c`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
