@@ -28,8 +28,8 @@ use b10x_loom_commission::model::json::Value as CommissionValue;
 use b10x_loom_commission::model::primitives::Uuid as CommissionUuid;
 use b10x_loom_commission::model::responsibility::{
     ActionStatus, AgentRevisionId, AuthorityContext, CaseId, Commission, CommissionData,
-    CommissionId, ExecutorOutcome, Frontier, FrontierAction, FrontierData, FrontierId,
-    PrincipalId, Unit, commission_state, frontier_state,
+    CommissionId, ExecutorOutcome, Frontier, FrontierAction, FrontierData, FrontierId, PrincipalId,
+    Unit, commission_state, frontier_state,
 };
 use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_commission_testkit::fake_governor::{Answer, FakeGovernor, GovernorCall};
@@ -244,7 +244,9 @@ fn compaction_contract() {
             "no instruction carries what the model wrote"
         );
         assert!(
-            !request.body["tools"].to_string().contains("SUMMARY-by-the-model"),
+            !request.body["tools"]
+                .to_string()
+                .contains("SUMMARY-by-the-model"),
             "no tool carries what the model wrote"
         );
     }

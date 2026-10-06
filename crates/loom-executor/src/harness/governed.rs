@@ -5,7 +5,9 @@
 //!
 //! Loom's own code, not ported: it names Loom's projection, selection and revalidation, which the
 //! five ported modules may not (`tests/adversary2_harness_port.rs`), and it reaches the loop only
-//! through the seams the loop already has. No ported file changed for it.
+//! through the seams the loop already has. One ported type changed for it:
+//! [`LoopEvent::Compacted`](crate::harness::turn_loop::LoopEvent::Compacted) carries the usage
+//! the provider reported for the summary request.
 //!
 //! - **The tool list** ([`TurnEnvironmentProvider`]). Before every turn the case's current frontier
 //!   is read, from the governor ([`Loom::with_governor`]) or, for a Loom without one, the frontier
@@ -28,11 +30,15 @@
 //!   once into the run's session with the provider items it added, verbatim
 //!   (`loom.run.RecordTurn`, [`Loom::turns`]). A turn the endpoint broke off is not recorded. One
 //!   run holds a session at a time, and files it when it ends ([`Loom::sessions`]).
+//! - **A compaction** ([`LoopSink`]). The caller's sink receives every event, and each compaction
+//!   the loop reports is first recorded on the run's session with the usage the endpoint reported
+//!   for its summary request (`loom.run.RecordCompaction`, [`Loom::compactions`],
+//!   [`crate::compaction`]). The summary turn is not a turn of the session, and the turn after a
+//!   compaction is offered the catalogue of the frontier current then, like any other.
 //!
-//! Not wired yet: compaction (a summary turn is not recorded as a turn of the session); budgets as
-//! a Commission suspension (a budget that binds is `NoUsefulAction`); interruption and recovery
-//! (a run stopped at its checkpoint is not resumed once Commission has acted, so each run starts a
-//! conversation of its own).
+//! Not wired yet: budgets as a Commission suspension (a budget that binds is `NoUsefulAction`);
+//! interruption and recovery (a run stopped at its checkpoint is not resumed once Commission has
+//! acted, so each run starts a conversation of its own).
 
 use std::cell::{Cell, OnceCell};
 use std::ops::Deref;
@@ -48,6 +54,7 @@ use b10x_loom_commission::ports::governor::Governor;
 use serde_json::json as wire_json;
 
 use crate::arguments::{ArgumentContext, ArgumentGenerator};
+use crate::compaction::CompactionRecorder;
 use crate::harness::turn_loop::{
     AgentLoop, ApprovalDecision, ApprovalPort, ContextPackage, EnvironmentError, LoopConfig,
     LoopError, LoopOutcome, LoopSink, LoopStop, NullLoopSink, TurnEnvironment,
@@ -207,11 +214,16 @@ where
             session: &session.session_id,
             offers: &offers,
         };
+        let mut sink = CompactionRecorder {
+            sink,
+            loom: self,
+            session: &session.session_id,
+        };
         // The session is filed however the run ends, a panic included, so a later run resumes it.
         let run = match catch_unwind(AssertUnwindSafe(|| {
             AgentLoop::new(&mut model, &mut tools, &mut approvals, config)
                 .with_environment(&mut environment)
-                .run(self.prompt.clone(), sink)
+                .run(self.prompt.clone(), &mut sink)
         })) {
             Ok(run) => run,
             Err(panic) => {
