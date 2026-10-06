@@ -1,0 +1,37 @@
+domain: intake.results
+summary: >-
+  Immutable UTF-8 observations retained by one run's briefing. Model-facing references select
+  data before an ordinary action proposal reaches Commission admission; they never grant an
+  action, carry authority, execute expressions, or stand in for verified evidence.
+types:
+  - name: intake.results.Capture
+    kind: enum
+    variants: [Complete, Partial]
+  - name: intake.results.SelectionKind
+    kind: enum
+    variants: [Whole, Bytes, Lines, JsonPointer]
+  - name: intake.results.Rendering
+    kind: enum
+    variants: [Text, Json]
+  - name: intake.results.StoredResult
+    kind: struct
+    fields:
+      - {name: result_id, type: String}
+      - {name: sha256, type: String}
+      - {name: origin, type: String}
+      - {name: capture, type: intake.results.Capture}
+      - {name: utf8_bytes, type: Integer}
+  - name: intake.results.ResultSelector
+    kind: struct
+    fields:
+      - {name: kind, type: intake.results.SelectionKind}
+      - {name: start, type: "Optional<Integer>"}
+      - {name: end, type: "Optional<Integer>"}
+      - {name: pointer, type: "Optional<String>"}
+  - name: intake.results.ResultReference
+    kind: struct
+    fields:
+      - {name: result, type: String}
+      - {name: sha256, type: String}
+      - {name: select, type: intake.results.ResultSelector}
+      - {name: rendering, type: intake.results.Rendering}

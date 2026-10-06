@@ -5,3 +5,4 @@ version: v1
 domains:
   - intake.routing
   - intake.confinement
+  - intake.results
