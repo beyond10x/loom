@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:interruption-recovery
 kind: story
-status: draft
+status: active
 title: Define interruption and recovery
 refs:
 - provider: taskboard
@@ -41,7 +41,10 @@ scope:
   path: website/docs/concepts/commission-and-harness.md
 - confidence: cited
   path: website/docs/reference/ess/loom-run.md
-revision: 21
+revision: 23
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-06T18:37:47Z", actor: "human:timo", revision: 22, decided_on: {"recorded":{"review_outcome":1}}}
+- {from: "proposed", to: "active", at: "2026-10-06T18:37:47Z", actor: "human:timo", revision: 23, decided_on: {"recorded":{"review_outcome":1}}}
 ---
 ## Outcome
 
