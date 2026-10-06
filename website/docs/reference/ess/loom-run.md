@@ -39,6 +39,20 @@ One model session executing a commission's run. Each catalogue is projected from
 
 `loom.run.CommissionRunId` wraps `Uuid` and is not interchangeable with one: the whole value of naming it separately is the crossings the model then refuses.
 
+### `CompactionId`
+
+`loom.run.CompactionId` wraps `Uuid` and is not interchangeable with one: the whole value of naming it separately is the crossings the model then refuses.
+
+### `ReportedUsage`
+
+`loom.run.ReportedUsage` is a record of five fields:
+
+- `model` — `String`
+- `input_tokens` — `Integer`
+- `output_tokens` — `Integer`
+- `cached_input_tokens` — `Integer`
+- `cache_creation_input_tokens` — `Optional<Integer>`, which may be absent
+
 ### `RunEnding`
 
 `loom.run.RunEnding` is one of `Answered`, `Stopped` and `Failed`.
@@ -126,6 +140,37 @@ It has one state, so there is no move to permit or to forbid.
 
 No view projects it, so nothing outside this context is promised a way to observe one.
 
+### `Compaction`
+
+`loom.run.Compaction`.
+
+An instance is identified by `compaction_id`, a `loom.run.CompactionId`. The name is part of the model and not a convention: a view projects the identity under that name, so a projection inventing its own would disagree with the view.
+
+It holds:
+
+- `session_id` — `loom.run.SessionId`
+- `usage` — `Optional<loom.run.ReportedUsage>`, which may be absent
+
+Its `session_id` is what [`Session`](#session) owns it by, as `compactions`.
+
+No invariant is declared, so nothing here constrains an instance at rest.
+
+Its state is a `loom.run.Compaction.State`, one of `Recorded`. That enum is synthesised from the lifecycle rather than declared beside it, so the states a view's filter compares and the states drawn below cannot disagree.
+
+An instance is created in `Recorded`. `Recorded` is terminal, so an instance may rest there forever. That is declared rather than inferred from having no way out: an entity that cannot leave a state is either finished or stuck, and only its author knows which.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Recorded
+    Recorded --> [*]
+```
+
+It declares no moves, so nothing changes its state once it exists.
+
+It has one state, so there is no move to permit or to forbid.
+
+No view projects it, so nothing outside this context is promised a way to observe one.
+
 ### `Selection`
 
 `loom.run.Selection`.
@@ -184,7 +229,7 @@ It holds:
 - `commission_run` — `loom.run.CommissionRunId`
 - `wire` — `String`
 
-It owns any number of [`Turn`](#turn), as `turns`, carried by `Turn.session_id`.
+It owns any number of [`Turn`](#turn), as `turns`, carried by `Turn.session_id`. It owns any number of [`Compaction`](#compaction), as `compactions`, carried by `Compaction.session_id`.
 
 No invariant is declared, so nothing here constrains an instance at rest.
 
@@ -362,6 +407,24 @@ It has two outcomes.
 **`catalogue-exists`** — Taken when a record already carries the identity the command's creating branch would create, and no input-guarded refusal applies. No entity in this specification changes. It reports `loom.run.CatalogueExists`, carrying `catalogue_id`. It emits nothing. A test reaches it by sending the command twice with one identity: the first call creates the record, the second is answered by this branch.
 
 **`projected`** — The default branch, taken when no other outcome's condition matched. It creates a `loom.run.ActionCatalogue`, which starts in `Projected`. The new instance's identity is published as `catalogue_id` on `loom.run.CatalogueProjected`. It emits `loom.run.CatalogueProjected`. It sets `turn_id` from `input.turn_id`, `frontier` from `input.frontier`, `case_revision` from `input.case_revision` and `entries` from `input.entries`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+### `RecordCompaction`
+
+`loom.run.RecordCompaction`.
+
+It takes:
+
+- `compaction_id` — `loom.run.CompactionId`
+- `session_id` — `loom.run.SessionId`
+- `usage` — `Optional<loom.run.ReportedUsage>`, which may be absent
+
+It has three outcomes.
+
+**`session-unknown`** — Taken when no `loom.run.Session` carries the identity `input.session_id` names. No entity in this specification changes. It reports `loom.run.SessionNotFound`, carrying `session_id`. It emits nothing. A test reaches it by arranging the row of the other entity the input names, or its absence, and sending the command for it.
+
+**`session-not-active`** — Taken when the `loom.run.Session` that `input.session_id` names exists and its stored fields satisfy `state != Active`. No entity in this specification changes. It reports `loom.run.SessionNotActive`, carrying `session_id`. It emits nothing. A test reaches it by arranging the row of the other entity the input names, or its absence, and sending the command for it.
+
+**`recorded`** — The default branch, taken when no other outcome's condition matched. It creates a `loom.run.Compaction`, which starts in `Recorded`. The new instance's identity is published as `compaction_id` on `loom.run.SessionCompacted`. It emits `loom.run.SessionCompacted`. It sets `session_id` from `input.session_id` and `usage` from `input.usage`. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
 ### `RecordTurn`
 
@@ -555,6 +618,20 @@ Emitted by `loom.run.RevalidateSelection` on its `stale-revision` outcome.
 
 Nothing in this system reacts to it.
 
+### `SessionCompacted`
+
+`loom.run.SessionCompacted`.
+
+It carries:
+
+- `compaction_id` — `loom.run.CompactionId`
+- `session_id` — `loom.run.SessionId`
+- `usage` — `Optional<loom.run.ReportedUsage>`, which may be absent
+
+Emitted by `loom.run.RecordCompaction` on its `recorded` outcome.
+
+Nothing in this system reacts to it.
+
 ### `SessionFiled`
 
 `loom.run.SessionFiled`.
@@ -696,6 +773,8 @@ It carries:
 
 - `session_id` — `loom.run.SessionId`
 
+Reported by `loom.run.RecordCompaction` on its `session-not-active` outcome.
+
 Reported by `loom.run.RecordTurn` on its `session-not-active` outcome.
 
 ### `SessionNotFound`
@@ -703,6 +782,8 @@ Reported by `loom.run.RecordTurn` on its `session-not-active` outcome.
 It carries:
 
 - `session_id` — `loom.run.SessionId`
+
+Reported by `loom.run.RecordCompaction` on its `session-unknown` outcome.
 
 Reported by `loom.run.RecordTurn` on its `session-unknown` outcome.
 
@@ -731,4 +812,4 @@ Reported by `loom.run.ResumeSession` on its `cross-wire` outcome.
 
 ---
 
-Generated from loom v1 · model digest `1e5c1537dda3b2b7e22b162efd4278fee13385bc49abc57d7ce5100af963d5c1` · contract digest `slice-sha256/2:d23e825dcb7bfe03fbe20cea75b62e61bd0a45f586a2de0740780d02d5d2b8a1`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · model digest `148794ff1143dcb09d0fe880c0974054e23fcd97efe7a45a4d4f53970fceb9d0` · contract digest `slice-sha256/2:acd561280daea7248420b3a1815dcb9a7991f0d16278e9f7575d7077c98a0da3`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

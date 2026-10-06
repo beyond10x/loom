@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest 1e5c1537dda3b2b7e22b162efd4278fee13385bc49abc57d7ce5100af963d5c1
-  contract digest d23e825dcb7bfe03fbe20cea75b62e61bd0a45f586a2de0740780d02d5d2b8a1
+  model digest 148794ff1143dcb09d0fe880c0974054e23fcd97efe7a45a4d4f53970fceb9d0
+  contract digest acd561280daea7248420b3a1815dcb9a7991f0d16278e9f7575d7077c98a0da3
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-67 capabilities: **66 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+74 capabilities: **73 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -21,6 +21,9 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.run.CatalogueEntryStatus` |
 | domain type | `loom.run.CatalogueId` |
 | domain type | `loom.run.CommissionRunId` |
+| domain type | `loom.run.Compaction.State` |
+| domain type | `loom.run.CompactionId` |
+| domain type | `loom.run.ReportedUsage` |
 | domain type | `loom.run.RunEnding` |
 | domain type | `loom.run.Selection.State` |
 | domain type | `loom.run.SelectionId` |
@@ -31,6 +34,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.run.TurnId` |
 | entity lifecycle | `loom.run.ActionCatalogue` |
 | entity lifecycle | `loom.run.ArgumentRequest` |
+| entity lifecycle | `loom.run.Compaction` |
 | entity lifecycle | `loom.run.Selection` |
 | entity lifecycle | `loom.run.Session` |
 | entity lifecycle | `loom.run.Turn` |
@@ -40,6 +44,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command behaviour | `loom.run.OpenSession` |
 | command contract | `loom.run.ProjectCatalogue` |
 | command behaviour | `loom.run.ProjectCatalogue` |
+| command contract | `loom.run.RecordCompaction` |
+| command behaviour | `loom.run.RecordCompaction` |
 | command contract | `loom.run.RecordTurn` |
 | command behaviour | `loom.run.RecordTurn` |
 | command contract | `loom.run.ReleaseSession` |
@@ -57,6 +63,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | event type | `loom.run.SelectionAdmitted` |
 | event type | `loom.run.SelectionNotInFrontier` |
 | event type | `loom.run.SelectionStale` |
+| event type | `loom.run.SessionCompacted` |
 | event type | `loom.run.SessionFiled` |
 | event type | `loom.run.SessionOpened` |
 | event type | `loom.run.SessionReleased` |
