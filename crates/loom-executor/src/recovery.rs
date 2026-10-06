@@ -17,7 +17,10 @@
 //! or would have made: a proposal returned to Commission, or a selection in flight when the run was
 //! interrupted. The checkpoint is held by this Loom, in memory, and a process restart loses it. A
 //! run that starts a conversation of its own in the session ([`Loom::run_loop`]) drops it, and so
-//! does a run that ends any other way.
+//! does a run that ends any other way, except a resumed run that ended before its held call was
+//! answered: one whose configuration was refused, whose governor could not answer the first
+//! projection, or that was interrupted or failed before the call was put to the pipeline or the
+//! model asked again. Its checkpoint is held again, unchanged, for the next resume.
 //!
 //! # Recovery
 //!
@@ -38,7 +41,9 @@
 //! A model told its held call is stale names the revision the call was selected at and the
 //! current one, and chooses again from the catalogue projected at resume; what it selects is
 //! revalidated before anything is proposed. A held call the current catalogue no longer publishes
-//! is refused to the model by the loop itself, and its selection is never proposed.
+//! is refused to the model by the loop itself, and its selection is never proposed. Only the held
+//! call itself is answered as held: a later call that reuses its call id is that call only when it
+//! also calls the held action, and is selected like any other call otherwise.
 //!
 //! Authority stays Commission's. A proposal returned again is rechecked by Commission, whose
 //! authority provider decides whether its approval was granted; Loom resumes the same way whatever
@@ -50,12 +55,13 @@
 use std::ops::Deref;
 
 use b10x_loom_commission::model::responsibility::{
-    Commission, ExecutorOutcomeProposedAction, Frontier, commission_state, frontier_state,
+    CaseId, Commission, ExecutorOutcomeProposedAction, Frontier, commission_state, frontier_state,
 };
 use b10x_loom_commission::ports::governor::Governor;
 
 use crate::harness::governed::{LoopPorts, LoopRun, Start};
 use crate::harness::turn_loop::{ApprovalCheckpoint, LoopCancel};
+use crate::harness::wire::ToolName;
 use crate::model::behaviour::SessionStorage;
 use crate::model::obligation::UnmetObligation;
 use crate::model::run::obligations::InterruptSessionBehavior;
@@ -71,11 +77,37 @@ pub(crate) struct Recovery {
 }
 
 /// The checkpoint a session's last run stopped at.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Held {
     pub(crate) session: SessionId,
     pub(crate) checkpoint: ApprovalCheckpoint,
     pub(crate) pending: Pending,
+    /// The case the run that stopped there worked on.
+    pub(crate) case: CaseId,
+    /// The narrowing of the run that stopped there (`LoopConfig::admits`): a resume may narrow it
+    /// further, never widen it.
+    pub(crate) admits: Option<Vec<ToolName>>,
+}
+
+impl Held {
+    /// Why a run for `case`, narrowed by `admits`, may not resume from here, when it may not: the
+    /// checkpoint was made for another case, or the narrowing admits a tool the run that stopped
+    /// here did not (it removes the narrowing, or names a tool the narrowing did not).
+    pub(crate) fn refuses(
+        &self,
+        case: &CaseId,
+        admits: Option<&[ToolName]>,
+    ) -> Option<&'static str> {
+        if self.case != *case {
+            return Some("the commission's case is not the case the checkpoint was made for");
+        }
+        let widened = match (self.admits.as_deref(), admits) {
+            (None, _) => false,
+            (Some(_), None) => true,
+            (Some(held), Some(resumed)) => resumed.iter().any(|name| !held.contains(name)),
+        };
+        widened.then_some("the resumed run's narrowing admits a tool the stopped run's did not")
+    }
 }
 
 /// The call a checkpoint stopped at, as the selection pipeline left it.
@@ -165,10 +197,15 @@ where
     /// continues its run from the checkpoint it stopped at, for `commission` on `frontier`, as the
     /// module docs say. With no checkpoint held, the resumed run starts a conversation of its own.
     ///
-    /// `ports.config` must be the configuration the run was started with: a checkpoint resumed under
-    /// another one fails, the session is filed as failed, and no checkpoint is held after it. The
-    /// outcome is what [`Loom::run_loop`] answers, and a session this Loom never opened is refused
-    /// as an outage before anything is sent.
+    /// `ports.config` must be the configuration the run was started with, except that its narrowing
+    /// (`admits`) may be narrower, and `commission` must be for the case the run worked on: a
+    /// checkpoint resumed under another configuration, under a narrowing that admits a tool the
+    /// stopped run's did not, or for another case, fails with `LoopError::Config` and the session
+    /// is filed as failed. The checkpoint stays held until a resumed run's held call is
+    /// answered: a resume that ends before that (a refused configuration, a governor that cannot
+    /// answer, an interrupt, a panic) holds it again for the next. The outcome is what
+    /// [`Loom::run_loop`] answers, and a session this Loom never opened is refused as an outage
+    /// before anything is sent.
     pub fn resume_loop(
         &self,
         session: &SessionId,

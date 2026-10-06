@@ -86,7 +86,9 @@ use session::TurnRecord;
 /// derived from this Loom's namespace, the frontier's id and the run's number. Two runs on one
 /// frontier therefore keep two selections and two requests apart, and so do two Looms: each has a
 /// namespace of its own, random unless [`Loom::with_instance`] fixes it, so a Loom built to recover
-/// a run never gives an id an earlier one gave.
+/// a run never gives an id an earlier one gave. The catalogues and selections of the governed loop
+/// ([`Loom::run_loop`], [`Loom::resume_loop`]) are numbered by one count of this Loom's, across all
+/// of its runs, so a resumed run never repeats an id an earlier run of the same Loom gave.
 ///
 /// `V` is how Loom holds the governor it revalidates selections against: a reference, `Box`, `Rc`
 /// or `Arc` of a [`Governor`], given by [`Loom::with_governor`]. A Loom made by [`Loom::new`] holds
@@ -100,6 +102,7 @@ pub struct Loom<S, G, V = &'static NoGovernor> {
     turns: Mutex<TurnRecord>,
     recovery: Mutex<Recovery>,
     runs: AtomicU64,
+    numbered: AtomicU64,
     governor: Option<V>,
 }
 
@@ -136,6 +139,7 @@ impl<S, G> Loom<S, G> {
             turns: Mutex::default(),
             recovery: Mutex::default(),
             runs: AtomicU64::new(0),
+            numbered: AtomicU64::new(0),
             governor: None,
         }
     }
@@ -158,6 +162,7 @@ impl<S, G> Loom<S, G> {
             turns: self.turns,
             recovery: self.recovery,
             runs: self.runs,
+            numbered: self.numbered,
             governor: Some(governor),
         }
     }
@@ -223,6 +228,12 @@ impl<S, G, V> Loom<S, G, V> {
     /// turn record whenever both are held, never after it.
     fn recovery(&self) -> MutexGuard<'_, Recovery> {
         self.recovery.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The next number of this Loom's governed catalogues and selections: from 0, across every
+    /// run, resumed runs included, so no two get one number.
+    fn next_number(&self) -> u64 {
+        self.numbered.fetch_add(1, Ordering::Relaxed)
     }
 }
 
@@ -306,7 +317,8 @@ fn fresh_instance() -> String {
 /// Within one namespace, two runs, two scopes or two kinds get different ids, up to a SHA-256
 /// collision; two Looms get different ids because each has its own namespace, so a Loom built to
 /// recover a run, which numbers its runs from 0 again, never repeats an earlier Loom's ids. Every
-/// turn, catalogue, selection and argument-request id is one.
+/// turn, catalogue, selection and argument-request id is one. A turn is numbered by its index in
+/// its session; the others by a count of their Loom's that no run restarts, so none repeats.
 fn loom_id(instance: &str, kind: &str, scope: &str, run: u64) -> model::primitives::Uuid {
     name_uuid(&format!("{instance}\n{kind}\n{scope}\n{run}"))
 }

@@ -39,7 +39,9 @@ use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
 use b10x_loom_commission_testkit::fake_governor::{Answer, FakeGovernor};
 use b10x_loom_executor::harness::governed::{LoopPorts, tool_name};
 use b10x_loom_executor::harness::responses;
-use b10x_loom_executor::harness::turn_loop::{LoopConfig, LoopEvent, LoopSink, VecLoopSink};
+use b10x_loom_executor::harness::turn_loop::{
+    LoopConfig, LoopError, LoopEvent, LoopSink, VecLoopSink,
+};
 use b10x_loom_executor::harness::wire::{
     CallId, Item, ModelPort, StopReason, StreamSink, ToolCall, ToolName, TurnOutcome, TurnRequest,
     WireError, WireId,
@@ -367,6 +369,201 @@ fn suspended_at_the_merge_approval_and_resumed_on_a_moved_case() {
         told.contains("case revision 1") && told.contains("revision 2"),
         "4. the model is told the held call is stale, naming both revisions: {told}"
     );
+}
+
+// --- correction round 1: the classes behind the adversary's findings ----------------------------
+
+/// Every id the governed loop numbers is numbered across the runs of one Loom: the catalogues,
+/// selections and argument requests of a run and of two resumes after it, the resumes recording no
+/// turn before they select, are each recorded under ids no other one has.
+#[test]
+fn no_catalogue_selection_or_argument_request_id_repeats_across_resumed_runs() {
+    let case = CaseId(CASE.to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(case.clone(), [answer(1, ready_actions())]);
+    let loom = Loom::new(Counting::default(), EmptyObjectArguments, PROMPT)
+        .with_governor(&governor)
+        .with_instance("class-ids");
+    let session = session("00000000-0000-4000-8000-00000000d101");
+    let commission = commission(&case);
+    let (mut model, _requests) = Scripted::new(vec![
+        calls(vec![
+            call(
+                "call_merge",
+                "repository_merge",
+                json!({"strategy": "squash"}),
+            ),
+            call("call_inspect", "repository_inspect", json!({})),
+        ]),
+        calls(vec![call(
+            "call_inspect_again",
+            "repository_inspect",
+            json!({}),
+        )]),
+    ]);
+
+    let first = loom.run_loop(
+        &session,
+        LoopPorts {
+            model: &mut model,
+            config: config(),
+            sink: &mut VecLoopSink::new(),
+        },
+        &commission,
+        &issued(&governor, &case),
+    );
+    assert_eq!(first.outcome, merge_proposal("squash"), "precondition");
+    for revision in [2, 3] {
+        governor.script(case.clone(), [answer(revision, moved_actions())]);
+        let resumed = loom.resume_loop(
+            &session.session_id,
+            LoopPorts {
+                model: &mut model,
+                config: config(),
+                sink: &mut VecLoopSink::new(),
+            },
+            &commission,
+            &issued(&governor, &case),
+        );
+        assert!(
+            matches!(&resumed.outcome, ExecutorOutcome::ProposedAction(proposal) if proposal.action == "repository.inspect"),
+            "precondition, resume at revision {revision}: {:?}",
+            resumed.outcome
+        );
+    }
+
+    let distinct = |ids: Vec<String>| {
+        let count = ids.len();
+        let unique: std::collections::BTreeSet<String> = ids.into_iter().collect();
+        (count, unique.len())
+    };
+    let catalogues = loom.catalogues();
+    assert_eq!(catalogues.len(), 3, "{catalogues:?}");
+    let (count, unique) = distinct(
+        catalogues
+            .iter()
+            .map(|catalogue| catalogue.data.catalogue_id.0.0.clone())
+            .collect(),
+    );
+    assert_eq!(count, unique, "catalogue ids repeat: {catalogues:#?}");
+    let selections = loom.selections();
+    assert_eq!(selections.len(), 3, "{selections:?}");
+    let (count, unique) = distinct(
+        selections
+            .iter()
+            .map(|selection| selection.data.selection_id.0.0.clone())
+            .collect(),
+    );
+    assert_eq!(count, unique, "selection ids repeat: {selections:#?}");
+    let requests = loom.argument_requests();
+    assert_eq!(requests.len(), 3, "{requests:?}");
+    let (count, unique) = distinct(
+        requests
+            .iter()
+            .map(|request| request.data.argument_request_id.0.0.clone())
+            .collect(),
+    );
+    assert_eq!(count, unique, "argument-request ids repeat: {requests:#?}");
+}
+
+/// A resume refused as a changed configuration, under a narrowing wider than the stopped run's or
+/// for a commission of another case, keeps the checkpoint: the resume after it, as the run was
+/// started, returns the held proposal without asking the model.
+#[test]
+fn a_refused_resume_keeps_the_checkpoint_for_the_next() {
+    let case = CaseId(CASE.to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(case.clone(), [answer(1, ready_actions())]);
+    let loom =
+        Loom::new(Counting::default(), EmptyObjectArguments, PROMPT).with_governor(&governor);
+    let session = session("00000000-0000-4000-8000-00000000d102");
+    let commission = commission(&case);
+    let narrowed = || config().with_admitted(Some(vec![tool("repository_merge")]));
+    let (mut model, requests) = Scripted::new(vec![calls(vec![call(
+        "call_merge",
+        "repository_merge",
+        json!({"strategy": "squash"}),
+    )])]);
+    let first = loom.run_loop(
+        &session,
+        LoopPorts {
+            model: &mut model,
+            config: narrowed(),
+            sink: &mut VecLoopSink::new(),
+        },
+        &commission,
+        &issued(&governor, &case),
+    );
+    assert_eq!(first.outcome, merge_proposal("squash"), "precondition");
+
+    let other_case = CaseId("CHG-0001".to_owned());
+    let other_governor = FakeGovernor::new();
+    other_governor.script(other_case.clone(), [answer(1, ready_actions())]);
+    for (what, config, commission, frontier) in [
+        (
+            "a narrowing that also admits repository_inspect",
+            config().with_admitted(Some(vec![
+                tool("repository_merge"),
+                tool("repository_inspect"),
+            ])),
+            self::commission(&case),
+            issued(&governor, &case),
+        ),
+        (
+            "no narrowing",
+            config(),
+            self::commission(&case),
+            issued(&governor, &case),
+        ),
+        (
+            "a commission of another case",
+            narrowed(),
+            self::commission(&other_case),
+            issued(&other_governor, &other_case),
+        ),
+    ] {
+        let refused = loom.resume_loop(
+            &session.session_id,
+            LoopPorts {
+                model: &mut model,
+                config,
+                sink: &mut VecLoopSink::new(),
+            },
+            &commission,
+            &frontier,
+        );
+        assert!(
+            matches!(refused.run, Some(Err(LoopError::Config(_)))),
+            "a resume under {what} fails as a changed configuration: {:?}",
+            refused.run
+        );
+    }
+
+    let resumed = loom.resume_loop(
+        &session.session_id,
+        LoopPorts {
+            model: &mut model,
+            config: narrowed(),
+            sink: &mut VecLoopSink::new(),
+        },
+        &commission,
+        &issued(&governor, &case),
+    );
+    assert_eq!(
+        resumed.outcome,
+        merge_proposal("squash"),
+        "the checkpoint outlives the refused resumes: {:?}",
+        resumed.run
+    );
+    assert_eq!(
+        requests.lock().expect("lock").len(),
+        1,
+        "the model is asked once"
+    );
+}
+
+fn tool(name: &str) -> ToolName {
+    ToolName::new(name).expect("valid")
 }
 
 // --- the interrupting sink ----------------------------------------------------------------------

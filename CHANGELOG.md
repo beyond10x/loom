@@ -36,7 +36,10 @@ under **Unreleased** until the next release.
   from the frontier current at resume first, a selection in flight is revalidated, and a proposal
   already returned (a merge awaiting its approval) is returned again without asking the model
   while the case is at the revision it was selected at; otherwise the model is told the held call
-  is stale, naming both revisions, and chooses again. `Loom::run_loop` still starts a
+  is stale, naming both revisions, and chooses again. A resume that ends before its held call is
+  answered (a governor that cannot answer, an interrupt, a panic) keeps the checkpoint for
+  the next; a resume whose narrowing admits a tool the stopped run's did not, or whose commission
+  is for another case, fails as a changed configuration. `Loom::run_loop` still starts a
   conversation of its own and drops a held checkpoint. `Loom::catalogues` lists the catalogue
   each governed turn was offered, and the ported loop gains `AgentLoop::resume_asking`, which
   resumes a checkpoint by asking the approval port again.
