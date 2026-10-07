@@ -2,11 +2,42 @@
   "domain": {
     "display": "Responsibility",
     "id": "commission.responsibility",
-    "source": "commission ess/commission/ compiled with ess 0.54.0",
+    "source": "commission ess/commission/ compiled with ess 0.55.0",
     "summary": "An agent revision commissioned to a durable case. The governor owns the case's truth and returns a frontier; a run is one bounded period of execution against it. The executor proposes; it never completes a case.",
     "system": "commission"
   },
   "entities": [
+    {
+      "fields": [
+        {
+          "name": "commission_id",
+          "type": "CommissionId"
+        },
+        {
+          "name": "instance_id",
+          "type": "ConnectorInstanceId"
+        },
+        {
+          "name": "operation_id",
+          "type": "ConnectorOperationId"
+        }
+      ],
+      "id": "commission.responsibility.ActionBinding",
+      "identity": {
+        "name": "binding",
+        "type": "ActionBindingKey"
+      },
+      "lifecycle": {
+        "initial": "Declared",
+        "states": [
+          "Declared"
+        ],
+        "terminal": [
+          "Declared"
+        ]
+      },
+      "name": "ActionBinding"
+    },
     {
       "fields": [
         {
@@ -409,6 +440,14 @@
       "kind": "owns",
       "name": "runs",
       "to": "commission.responsibility.Run",
+      "via": "commission_id"
+    },
+    {
+      "cardinality": "many",
+      "from": "commission.responsibility.Commission",
+      "kind": "owns",
+      "name": "bindings",
+      "to": "commission.responsibility.ActionBinding",
       "via": "commission_id"
     },
     {

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-07T03:04:04Z",
+  "actor": "human:timo",
+  "artifact": "story:compaction-summary-bound",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-executor --locked --test adversary_w3_compaction_contract",
+    "reference": "VERIFIED: base 9154eb2 session 4292 of 4000 tokens after compaction (red-run.log); impl head 13 passed, at or below half the window"
+  }
+}

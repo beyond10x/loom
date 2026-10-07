@@ -1,8 +1,5 @@
 version: '3'
 
-env:
-  CARGO_TARGET_DIR: '{{.HOME}}/.cache/b10x-target/loom'
-
 tasks:
   check:
     desc: Commission's own gate; its build, lint and test steps cover only the Commission crates.
@@ -44,7 +41,7 @@ tasks:
       - cargo test --locked -p b10x-loom-commission-conformance --test conform
 
   deps-guard:
-    desc: Fail when b10x-loom-commission depends on b10x-loom-executor, b10x-canon or a crate in model-provider-deny.txt (ADR 0075).
+    desc: Fail when b10x-loom-commission depends on b10x-loom-executor, b10x-canon, a crate in model-provider-deny.txt or a Connectors crate (ADR 0075).
     cmds:
       - cargo test --locked -p b10x-loom-commission-testkit --test executor_port
 

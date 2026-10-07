@@ -2,11 +2,13 @@
 format: aep.planning-md/3
 id: decision-blocker:selector-threshold-scope
 kind: decision-blocker
-status: open
+status: cleared
 title: Nobody has decided what a selector confidence threshold is calibrated per, or who owns its value
 relations:
 - blocks: epic:fast-selector
-revision: 1
+revision: 3
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-07T00:06:18Z", actor: "human:timo", revision: 3, executor: "agent:loom"}
 ---
 ## Question
 
@@ -30,3 +32,13 @@ chooses or loads a value is drafted.
 ## Source
 
 Decomposition of `epic:fast-selector`; `docs/integrations/laya-fast-selection.md`; Atlas ADR 0073.
+
+## Decision (2026-10-07)
+
+Option A. A confidence threshold is calibrated per protocol. The embedding host supplies the value
+to Loom with the run's configuration, and Loom ships no default. Metaharness calibrates values
+offline and the host loads its output; Loom does not read Metaharness. `story:confidence-fallback`
+keeps taking the threshold as an input.
+
+Per protocol and action family (B) is moot while there are no families
+(`decision-blocker:action-family-membership`, option C); per tenant (C) is not taken.

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:loom-ess-conformance
 kind: story
-status: draft
+status: implemented
 title: Carry the Loom ESS specification to a synthesized conformance suite in task check
 refs:
 - provider: taskboard
@@ -23,6 +23,7 @@ relations:
 - depends_on: story:harness-loop-port
 - depends_on: story:run-pipeline-skeleton
 - depends_on: story:harness-crate-port
+- depends_on: story:ess-055-upgrade
 scope:
 - confidence: cited
   path: Cargo.lock
@@ -30,26 +31,32 @@ scope:
   path: Taskfile.yml
 - confidence: cited
   path: crates/loom-conformance/
-- confidence: inferred
-  path: crates/loom-executor/
+- confidence: cited
+  path: crates/loom-executor/src/selection.rs
+- confidence: cited
+  path: crates/loom-executor/src/session.rs
+- confidence: cited
+  path: crates/loom-executor/tests/crate_names.rs
 - confidence: cited
   path: ess/SKIPPED.md
 - confidence: cited
-  path: ess/domains/run.yaml
-- confidence: cited
-  path: generated/rust/loom/
-revision: 7
+  path: website/docs/reference/crates.md
+revision: 13
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-07T02:51:19Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":4}}, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
+- {from: "proposed", to: "active", at: "2026-10-07T02:51:19Z", actor: "human:timo", revision: 10, decided_on: {"recorded":{"review_outcome":4}}, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
+- {from: "active", to: "implemented", at: "2026-10-07T06:42:43Z", actor: "human:timo", revision: 13, decided_on: {"recorded":{"test_result":1,"review_outcome":10,"verification":1}}, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
 ---
 ## Outcome
 
 `task check` holds the Loom ESS specification (`ess/`), complete for this epic, to its synthesized
-conformance suite, run against `b10x-loom`:
+conformance suite, run against `b10x-loom-executor`:
 
 - **Where the suite comes from.** `ess verify conform synthesize --path ess` writes it, into the test
   crate's own build directory on every run, so it tracks `ess/` without a committed copy to drift.
-- **What it runs against.** `b10x-loom`, through a Rust target in a new crate,
+- **What it runs against.** `b10x-loom-executor` (the library that implements the nine `loom.run` commands), through a Rust target in a new crate,
   `crates/loom-conformance/` (package `b10x-loom-conformance`), built on the `ess-conformance` crate
-  as a git dependency at ESS tag `0.52.0` (the `requires: ess 0.52.0` of `ess/ess-inputs.yaml`),
+  as a git dependency at the ESS tag `story:ess-055-upgrade` pins (`0.55.0`, the `requires:` of `ess/ess-inputs.yaml`),
   pinned by `Cargo.lock`. This is the route Mandate takes in `crates/mandate-conformance/`
   (mandate `95e0a4b`) and commission `story:commission-ess-conformance` plans. ESS's Go and
   TypeScript packages are not used: anything committed here that runs is Rust (`AGENTS.md` § Rules).
@@ -113,11 +120,14 @@ Corrections to the sections above, found while scoping (2026-10-06):
 - "Run against `b10x-loom`": `b10x-loom` is the CLI binary (`crates/loom-cli/Cargo.toml:14`). The nine commands are implemented in `b10x-loom-executor`, and the Commission pattern binds its target to the library; the target binds to `b10x-loom-executor` — inferred.
 - `story:commission-ess-conformance` does not resolve in this store since Commission moved in; its in-repo equivalent is `crates/loom-commission-conformance/`.
 - Not established: whether any scenario fails today (`ess verify conform synthesize` was not run); whether `loom.run.RecordTurn` has an implementation outside the generated one (`generated/rust/loom/src/behaviour.rs:241`; nothing under `crates/` names it); `ess/system.yaml` is covered by the suite but not listed above.
+- 2026-10-07: the corrections above are applied to the Outcome and Acceptance: the target binds to
+  `b10x-loom-executor`, and the ESS tag is the one `story:ess-055-upgrade` pins (this story depends
+  on it).
 
 ## Acceptance
 
 `task check` runs the test `ess_conformance_report` in `crates/loom-conformance/tests/conform.rs`,
-and it passes. It synthesizes the suite from `ess/`, runs it against `b10x-loom` through the Rust
+and it passes. It synthesizes the suite from `ess/`, runs it against `b10x-loom-executor` through the Rust
 target, and checks:
 
 1. The report records at least one executed scenario.
@@ -132,3 +142,23 @@ target, and checks:
 TASKBOARD I-006; Atlas ADR 0071; workspace AGENTS.md § ESS drives every product repository;
 `ess:specifying` § Conformance is a record, not a claim; the answer recorded on
 `decision-blocker:rust-conformance-target` (2026-10-04).
+
+## Scope confirmed (wave 2026-10-07-w2)
+
+From the implementor's confirmation table and the merged commits (0706e2a, a650b1e, 9a96b0a):
+
+- `crates/loom-conformance/` (new), `ess/SKIPPED.md` (new), `Taskfile.yml`, `Cargo.lock` (one
+  entry), `website/docs/reference/crates.md` — cited, changed.
+- Pattern `crates/loom-commission-conformance/` (inferred) — confirmed.
+- Target binds to `b10x-loom-executor` (inferred) — confirmed.
+- "All nine commands are implemented" in `session.rs`, `selection.rs`, `arguments.rs` (inferred) —
+  **wrong**: `ess/` has 11 commands. `SelectAction` had no command implementation, `ReleaseSession`
+  existed only on the on-disk `SessionFile`, and `ProjectCatalogue` only as `projection::project`;
+  `RevalidateSelection` is in `revalidation.rs`. Changed as a result:
+  `crates/loom-executor/src/selection.rs` (`select_action`, `chosen`) and
+  `crates/loom-executor/src/session.rs` (`TurnRecord` answers ProjectCatalogue and ReleaseSession).
+- Not in the first scope, changed: `crates/loom-executor/tests/crate_names.rs` (the fifteenth
+  package), `crates/loom-executor/tests/adversary_w2_conformance_select_action.rs`, and the
+  adversary files under `crates/loom-conformance/tests/`.
+- `ess/domains/run.yaml`, `generated/rust/loom/` — not changed; the scenario that shows the
+  specification's `not-in-frontier` text at odds with ESS is `story:revalidation-membership-conformance`.

@@ -2,12 +2,14 @@
 format: aep.planning-md/3
 id: decision-blocker:suspension-durable-record
 kind: decision-blocker
-status: open
+status: cleared
 title: Nobody has decided which system holds a suspended commission's approval request across a restart when AEP governs
 refs:
 - provider: commission
   reference: decision-blocker:suspension-durable-record
-revision: 1
+revision: 3
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-07T00:06:18Z", actor: "human:timo", revision: 3, executor: "agent:loom"}
 ---
 > Re-filed from `beyond10x/commission` `decision-blocker:suspension-durable-record` at `e61e4f0` (status there: `open`) under Atlas ADR 0090
 > (loom `story:import-commission`). Paths below are Commission's: `ess/` is now `ess/commission/`,
@@ -44,3 +46,15 @@ one asks where the record is kept when AEP governs.
 
 The durable suspend/resume part of TASKBOARD M-011 (build pack `ROADMAP.md` Phase 6), and with it
 the governor-adapter epic’s acceptance clause “a suspend/resume across a process restart”.
+
+## Decision (2026-10-07)
+
+Option B. Commission defines a durable suspension port that the host implements, as the governor's
+`FallibleCaseStore` is a storage port the host implements for cases. The port holds a suspended
+commission's pending approval request with the action and the case revision it was raised for. The
+record lives and dies with the commission; it is not kept in AEP's engineering record of the case
+(option A) or by the authority provider (option C).
+
+The suspension entity and its relation to the commission are declared in `ess/commission/` before
+the restart half of `story:approval-suspend-resume-slice` is implemented. Until then, Loom's
+checkpoints stay in memory (`Loom::resume_loop`, 0.3.0).

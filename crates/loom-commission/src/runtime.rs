@@ -25,12 +25,20 @@
 //! 4. a frontier that lists actions, none of which the effect port performs
 //!    ([`EffectPort::performs`]), ends the run with `NoPerformableAction`, and the executor is not
 //!    run. A frontier that lists no action at all goes on: the outcome is derived from it;
-//! 5. the approval gate: when the previous iteration was a step on a frontier listing actions that
-//!    need approval, and this frontier lists the same actions, each with the same status and
-//!    reasons, the run ends `AwaitingApproval`, carrying the actions that need approval in frontier
-//!    order, and the executor is not run. An action an authority verdict denied in this Run is not
-//!    awaited; a frontier whose only actions needing approval were denied is no gate;
-//! 6. [`AgentExecutor::run`] on that frontier. The step is reported to the [`ObservationPort`] as
+//! 5. the approval gate, read on the frontier the executor is handed (6): when the previous
+//!    iteration was a step on a handed frontier listing actions that need approval, and this
+//!    handed frontier lists the same actions, each with the same status and reasons, the run ends
+//!    `AwaitingApproval`, carrying the actions that need approval in frontier order, and the
+//!    executor is not run. An action an authority verdict denied in this Run is not awaited; a
+//!    frontier whose only actions needing approval were denied is no gate;
+//! 6. [`AgentExecutor::run`] on that frontier, less every action the effect port does not perform
+//!    and that needs no authority (`story:effect-invocation`), action by action: an action with an
+//!    entry listed `ApprovalRequired`, or an entry naming a capability, stays with all its entries,
+//!    performed or not, so a run still stops at its gate, and a kept action is admitted as the
+//!    governor's frontier admits it. The gate (5) and the run outcome (8, 9) read this handed
+//!    frontier, so an action the executor was never offered neither keeps a run going nor takes
+//!    it off its gate; the request (8) and [`LoopEnd::last_frontier`] read the frontier as the
+//!    governor issued it. The step is reported to the [`ObservationPort`] as
 //!    one observation: its id and time come from the [`LoopContext`], its source is `executor`, its
 //!    subject is `<case>@<frontier revision>`, and its payload names the outcome (`outcome`) and
 //!    carries a proposal's `action` and `arguments` or a human request's `request`. It is never
@@ -49,11 +57,13 @@
 //!    [`EffectOutcome`] is recorded ([`LoopEnd::effects`]) and delivered as one observation: id and
 //!    time from the context, source [`EFFECT_SOURCE`], subject `<case>@<request revision>`, payload
 //!    `outcome` (`Performed` or `Refused`), `action_request`, `action`, `arguments`, and `report`
-//!    or `reason`. It is never evidence. Stale: the iteration is a step, and the next iteration
+//!    with, when the effect was invoked through a Connector, the one `attempt` the invocation
+//!    produced, or `reason`. It is never evidence.
+//!    The loop never retries an invocation. Stale: the iteration is a step, and the next iteration
 //!    loads the case, which has moved: it ends the run completed if the case is complete, else with
 //!    no admissible action. Otherwise, and after an authority answer other than an allow, the run
-//!    outcome is derived ([`derive`]);
-//! 9. on any other outcome, the run outcome is derived.
+//!    outcome is derived ([`derive`]) from the frontier the executor was handed;
+//! 9. on any other outcome, the run outcome is derived from the frontier the executor was handed.
 //!
 //! Without a step budget the loop is bounded where the frontier does not change: two iterations in
 //! a row that are idle end the run with no admissible action. An iteration is idle when it admits
@@ -394,7 +404,8 @@ where
     let mut effected = false;
     // Whether the previous iteration admitted no request.
     let mut idle = false;
-    // The actions of the previous step's frontier, when it listed actions awaiting approval.
+    // The actions of the frontier the previous step's executor was handed, when it listed actions
+    // awaiting approval.
     let mut gate: Option<Vec<FrontierAction>> = None;
     // The actions an authority verdict denied in this Run.
     let mut denied: Vec<String> = Vec::new();
@@ -443,10 +454,12 @@ where
         {
             return Ok(track.end(run_id, RunOutcome::NoPerformableAction(Unit(true))));
         }
+        // The frontier the executor is handed; the gate and the outcome read it too.
+        let handed = offered(&frontier, effects);
         if let Some(before) = &gate
-            && unchanged(before, &frontier.data().actions)
+            && unchanged(before, &handed.data().actions)
         {
-            let actions = awaited(&frontier, &denied);
+            let actions = awaited(&handed, &denied);
             if !actions.is_empty() {
                 let outcome = RunOutcome::AwaitingApproval(RunOutcomeAwaitingApproval { actions });
                 return Ok(track.end(run_id, outcome));
@@ -456,7 +469,7 @@ where
             return out_of_budget(runs, run_id, limit, track);
         }
 
-        let outcome = executor.run(commission, &frontier);
+        let outcome = executor.run(commission, &handed);
         let observed = governor.observe(observation(context, &frontier, &outcome));
         if let ExecutorOutcome::Suspended(suspended) = &outcome {
             let reason = suspended.reason.clone();
@@ -546,7 +559,7 @@ where
                     capability,
                     verdict,
                 });
-            if let Derived::Ended(outcome) = derive(&determination, &frontier, &outcome, counted) {
+            if let Derived::Ended(outcome) = derive(&determination, &handed, &outcome, counted) {
                 return Ok(track.end(run_id, outcome));
             }
         }
@@ -558,10 +571,10 @@ where
             idle = !progressed;
         }
         track.steps += 1;
-        gate = if awaited(&frontier, &denied).is_empty() {
+        gate = if awaited(&handed, &denied).is_empty() {
             None
         } else {
-            Some(frontier.data().actions.clone())
+            Some(handed.data().actions.clone())
         };
     }
 }
@@ -585,6 +598,34 @@ fn out_of_budget<R: SuspendRunBehavior + ?Sized>(
     }
     let outcome = RunOutcome::Suspended(RunOutcomeSuspended { reason });
     Ok(track.end(run_id, outcome))
+}
+
+/// The frontier an executor is handed: `frontier` less every action the effect port does not
+/// perform and that needs no authority. An action behind an authority gate stays, performed or not
+/// (`decision-blocker:gated-unbound-action-visibility`, B). The filter works by action, not by
+/// entry: an action the frontier lists more than once is kept or dropped with every entry it has,
+/// and it needs authority when any of its entries is `ApprovalRequired` or names a capability, as
+/// the local slice's `repository.merge` does while it is still `Blocked`. So each kept action is
+/// admitted exactly as the governor's frontier admits it. Same id, case and revision.
+fn offered<F: EffectPort + ?Sized>(
+    frontier: &Frontier<frontier_state::Issued>,
+    effects: &F,
+) -> Frontier<frontier_state::Issued> {
+    let listed = &frontier.data().actions;
+    let gated = |action: &str| {
+        listed.iter().any(|entry| {
+            entry.action == action
+                && (entry.status == ActionStatus::ApprovalRequired
+                    || entry
+                        .capability
+                        .as_deref()
+                        .is_some_and(|capability| !capability.is_empty()))
+        })
+    };
+    let mut data = frontier.data().clone();
+    data.actions
+        .retain(|entry| effects.performs(&entry.action) || gated(&entry.action));
+    Frontier::new(data)
 }
 
 /// The actions `frontier` lists as needing approval that no verdict in this Run denied, in its
@@ -663,10 +704,17 @@ fn effect_observation<C: LoopContext + ?Sized>(
         ("action".to_owned(), text(&request.action)),
         ("arguments".to_owned(), request.arguments.0.clone()),
     ];
-    payload.push(match effect {
-        EffectOutcome::Performed(performed) => ("report".to_owned(), performed.report.clone()),
-        EffectOutcome::Refused(refused) => ("reason".to_owned(), text(&refused.reason)),
-    });
+    match effect {
+        EffectOutcome::Performed(performed) => {
+            payload.push(("report".to_owned(), performed.report.clone()));
+            if let Some(attempt) = &performed.attempt {
+                payload.push(("attempt".to_owned(), text(&attempt.0)));
+            }
+        }
+        EffectOutcome::Refused(refused) => {
+            payload.push(("reason".to_owned(), text(&refused.reason)));
+        }
+    }
     Observation::new(ObservationData {
         observation_id: context.observation_id(),
         source: EFFECT_SOURCE.to_owned(),

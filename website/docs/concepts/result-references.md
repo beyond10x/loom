@@ -6,10 +6,9 @@ lede: Loom retains inspected content outside the rolling model briefing and reso
 source: crates/loom-intake-slice/src/results.rs; crates/loom-intake-slice/src/selector.rs; crates/loom-intake-slice/tests/result_reference_workflow.rs; ess/intake/domains/results.yaml
 ---
 
-:::caution[Development source]
-This capability is implemented after the `0.2.0` release. The tag does not include it. Recorded-model
-checks establish content preservation and bounded request bytes; they do not establish live task
-quality or billed-token savings.
+:::caution[Measured offline only]
+This capability shipped in `0.3.0`. Recorded-model checks establish content preservation and
+bounded request bytes; they do not establish live task quality or billed-token savings.
 :::
 
 An inspection keeps each file's immutable UTF-8 contents for the run and shows the model a preview

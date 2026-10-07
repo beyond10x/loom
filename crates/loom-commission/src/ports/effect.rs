@@ -10,9 +10,12 @@
 //! evidence (Atlas ADR 0074). A port that cannot answer at all returns an [`EffectError`]; the
 //! runtime then suspends the Run.
 //!
-//! The port is domain-neutral: how an action binds to an operation, and what confines it, is the
-//! implementation's (`decision-blocker:action-operation-binding`,
-//! `decision-blocker:connector-substrate-containment`).
+//! The port is domain-neutral. [`crate::ports::connector::ConnectorEffects`] is the
+//! Connector-backed implementation: it performs the actions a commission's bindings name, each
+//! through its one Connector operation (`decision-blocker:action-operation-binding`); what
+//! confines the operation is Connectors' (`decision-blocker:connector-substrate-containment`).
+//! [`EffectPort::performs`] also decides what an executor sees: the runtime hands it the frontier
+//! less every action the port does not perform and that needs no authority.
 
 use std::fmt;
 
@@ -23,7 +26,8 @@ use crate::model::responsibility::{
 /// Performs admitted action requests.
 pub trait EffectPort {
     /// Whether this port performs `action` at all, whatever its arguments. The runtime runs no
-    /// executor on a frontier that lists no action the port performs.
+    /// executor on a frontier that lists no action the port performs, and hands an executor no
+    /// action the port does not perform unless the action needs authority.
     fn performs(&self, action: &str) -> bool;
 
     /// Performs `request` for `commission`, or refuses it. An `Err` is a failure to answer, never a

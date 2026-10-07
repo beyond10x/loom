@@ -26,18 +26,18 @@ the whole boundary.
 
 ## Status
 
-Current development source retains inspected file contents as immutable, run-local results.
-The model sees bounded previews and can select ranges or reuse content in edits through verified
-references. Expansion happens before Commission admission. This is not in the `0.2.0` tag;
-[result references](docs/design/result-references.md) describes the contract and limits.
-
-Version `0.2.0`, released from source at the tag `0.2.0`
-([release](https://github.com/beyond10x/loom/releases/tag/0.2.0)). Nothing is on a registry: you
-install from the tag or depend on it with `tag = "0.2.0"`. `b10x-loom run` completed a live run
+Version `0.3.0`, released from source at the tag `0.3.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.3.0)). Nothing is on a registry: you
+install from the tag or depend on it with `tag = "0.3.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
 decided or planned; [CHANGELOG.md](CHANGELOG.md) lists the changes.
+
+Since `0.3.0` the slice keeps inspected file contents as immutable, run-local results. The model
+sees bounded previews and can select ranges or reuse content in edits through verified references,
+which are expanded before Commission admission;
+[result references](docs/design/result-references.md) describes the contract and limits.
 
 ## Run the command line
 
@@ -49,14 +49,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.2.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.3.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.2.0
+b10x-loom 0.3.0
 ```
 
 `b10x-loom run` routes an intent to a protocol, opens a governed case and runs until the run is
@@ -90,14 +90,14 @@ An application depends on one crate, `b10x-loom-sdk` (library `loom_sdk`). It re
 Commission's contracts and runtime, the executor, the governor and intake. The application supplies
 the selector, the argument generator, the authority provider and the effect port.
 
-On the development branch, `CanonGovernor::with_protocol` admits host-reviewed Canon protocols;
+Since `0.2.0`, `CanonGovernor::with_protocol` admits host-reviewed Canon protocols;
 `with_evaluation_time` supplies trusted freshness time. Durable hosts implement
 `governor::FallibleCaseStore`, while existing `CaseStore` users remain compatible. Protocol
 admission, durable storage and authenticated evidence remain the embedding application's duties.
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.2.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.3.0" }
 ```
 
 The example below
@@ -135,7 +135,7 @@ its code.
 | `b10x-loom-governor` | Evaluates a case's protocol with Canon and issues the frontier; executes nothing |
 | `b10x-loom-intake-router`, `-references`, `-slice` | Route an intent to a protocol, extract its references, and run the local slice over a git work tree |
 
-The [crate reference](https://beyond10x.github.io/loom/docs/reference/crates) lists all fourteen
+The [crate reference](https://beyond10x.github.io/loom/docs/reference/crates) lists all fifteen
 workspace packages, test kits and repository tools included. If you depended on the archived
 `commission`, `governor` or `intake` repositories,
 [Move to Loom's crates](https://beyond10x.github.io/loom/docs/guides/move-to-loom) maps the old

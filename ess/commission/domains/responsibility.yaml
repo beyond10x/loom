@@ -247,17 +247,49 @@ types:
       Refused: commission.responsibility.EffectOutcomeRefused
 
   # What the effect did, as the effect port reports it. Commission declares no structure for it.
+  # story:effect-invocation (decision-blocker:invocation-attempt-record, A): the one Connector
+  # attempt the invocation produced, present exactly when the effect was invoked through a
+  # Connector; an effect port that reaches no Connector names none. A request refused at the
+  # recheck is never invoked and names none; a retry is a new action request.
   - name: commission.responsibility.EffectOutcomePerformed
     kind: struct
     fields:
       - name: report
         type: Json
+      - name: attempt
+        type: Optional<commission.responsibility.ConnectorAttemptId>
 
   # The effect port did not perform the request, and changed nothing; why.
   - name: commission.responsibility.EffectOutcomeRefused
     kind: struct
     fields:
       - name: reason
+        type: String
+
+  # story:effect-invocation: a Connector operation is the pair (instance_id, operation_id), as
+  # Connectors names it. Which Connection serves it is Connectors' choice and is not modelled here.
+  - name: commission.responsibility.ConnectorInstanceId
+    kind: newtype
+    of: String
+
+  - name: commission.responsibility.ConnectorOperationId
+    kind: newtype
+    of: String
+
+  # The id of the connectors.mutations.AttemptRecord an invocation produced; Connectors owns the
+  # attempt. An identifier, not a relation: ESS refuses a relation to another system's entity
+  # (undeclared_reference).
+  - name: commission.responsibility.ConnectorAttemptId
+    kind: newtype
+    of: String
+
+  # What identifies an ActionBinding: one per action id of a commission.
+  - name: commission.responsibility.ActionBindingKey
+    kind: struct
+    fields:
+      - name: commission_id
+        type: commission.responsibility.CommissionId
+      - name: action
         type: String
 
   # docs/contracts/protocol-core.md: three-valued truth.
@@ -413,10 +445,38 @@ entities:
         target: commission.responsibility.Run
         cardinality: many
         via: commission_id
+      # The host's composition declares the commission's bindings (story:effect-invocation).
+      - name: bindings
+        kind: owns
+        target: commission.responsibility.ActionBinding
+        cardinality: many
+        via: commission_id
     lifecycle:
       initial: Assigned
       states: [Assigned]
       terminal: [Assigned]
+
+  # story:effect-invocation (decision-blocker:action-operation-binding, B): a frontier action id
+  # the host can execute for a commission binds to exactly one Connector operation. The identity
+  # holds at most one binding per action id of a commission; `commission_id` repeats the key's for
+  # the relation, since `via` names a field, not a member of the identity. Protocol definitions
+  # and the Connectors catalog carry no binding. An action no binding names, and that needs no
+  # authority, is not offered to an executor (decision-blocker:gated-unbound-action-visibility, B).
+  - name: commission.responsibility.ActionBinding
+    identity:
+      name: binding
+      type: commission.responsibility.ActionBindingKey
+    fields:
+      - name: commission_id
+        type: commission.responsibility.CommissionId
+      - name: instance_id
+        type: commission.responsibility.ConnectorInstanceId
+      - name: operation_id
+        type: commission.responsibility.ConnectorOperationId
+    lifecycle:
+      initial: Declared
+      states: [Declared]
+      terminal: [Declared]
 
   - name: commission.responsibility.Run
     identity:

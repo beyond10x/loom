@@ -2,11 +2,13 @@
 format: aep.planning-md/3
 id: decision-blocker:action-operation-binding
 kind: decision-blocker
-status: open
+status: cleared
 title: Nobody has decided who declares which Connector operations a frontier action binds to, or how many
 relations:
 - blocks: story:connector-action-binding
-revision: 2
+revision: 5
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-07T00:06:18Z", actor: "human:timo", revision: 4, executor: "agent:loom"}
 ---
 ## Question
 
@@ -67,3 +69,25 @@ there as commission `decision-blocker:action-operation-binding`, blocking commis
 answer: whether an unbound action is still offered in the catalogue Loom projects from the frontier
 (Atlas ADR 0072 § Rule, candidates intersected with available integrations), or filtered out before
 Loom sees it. Not decided here.
+
+## Decision (2026-10-07)
+
+Option B. The host's Commission composition declares the binding: each frontier action id the host
+can execute binds to exactly one Connector operation (`instance_id`, `operation_id`). Protocol
+definitions (Canon, engineering-protocols) and the Connectors catalog carry no binding, so
+protocols stay provider-neutral.
+
+An action the composition does not bind is filtered out before Loom projects the catalogue (Atlas
+ADR 0072: candidates are available integrations intersected with protocol-admissible actions), so
+Loom never offers an unbound action and refuses nothing for it at selection.
+
+The binding and its cardinality are declared in `ess/commission/` before
+`story:connector-action-binding` and `story:effect-invocation` implement them. Which Connection
+serves an operation is not part of this decision.
+
+## Narrowed (2026-10-07)
+
+The filtering half of this decision applies only to actions that need no authority
+(`decision-blocker:gated-unbound-action-visibility`, option B): an action behind an authority gate
+stays visible even when no port performs it, so a run stops at the gate; an approved action no port
+performs ends `NoPerformableAction` at invocation. The binding half is unchanged.

@@ -967,6 +967,14 @@ pub const SUMMARY_MIN_FOLD_BYTES: usize = 8 * 1024;
 pub const SUMMARY_MARKER: &str =
     "[Earlier turns were summarised by the harness; the summary follows.]";
 
+/// The first line of the item that stands where a failed summary's items were elided.
+///
+/// A summary no shorter than the items it would replace is not kept; those items are dropped
+/// instead, and this item says so, how many and how many bytes. Fixed text for the same reason as
+/// [`SUMMARY_MARKER`]: it is the harness's own words, never a person's.
+pub const ELISION_MARKER: &str =
+    "[Earlier turns were elided by the harness; what went is stated below.]";
+
 /// What the model is asked for when the harness folds the earlier part of a run into one item.
 ///
 /// It is deliberately not the run's own standing instruction: this turn has no tools, no task and
@@ -1368,13 +1376,25 @@ fn fold_end(items: &[Item], protect: usize) -> Option<usize> {
     (end > FIRST_KEPT_ITEM).then_some(end)
 }
 
+/// Puts `replacement` where the items from [`FIRST_KEPT_ITEM`] to `end` were, followed by the
+/// `opaque` reasoning items among them, which this loop carries verbatim and never rewrites.
+fn fold(items: &mut Vec<Item>, end: usize, replacement: Item, opaque: Vec<Item>) {
+    let tail = items.split_off(end);
+    items.truncate(FIRST_KEPT_ITEM);
+    items.push(replacement);
+    items.extend(opaque);
+    items.extend(tail);
+}
+
 /// What a summary attempt did. A spent turn carries what the provider reported for it.
 enum Summarised {
     /// Nothing was folded: too little to be worth a turn, or all of it protected.
     Skipped,
     /// The prefix is now one summary item, in place of this many.
     Folded(usize, Option<Usage>),
-    /// A turn was spent and produced nothing usable. The elided conversation stands.
+    /// A turn was spent and produced nothing usable. Where it answered with a summary no shorter
+    /// than what it would replace, those items were elided behind one [`ELISION_MARKER`] item;
+    /// otherwise the elided conversation stands.
     Failed(Option<Usage>),
     /// The caller cancelled. The run is over.
     Cancelled,
@@ -3052,6 +3072,17 @@ impl<'a> AgentLoop<'a> {
     /// The turn is counted against the run's turn, token and spend ceilings like any other,
     /// because every model request consumes the same finite budget regardless of why the loop
     /// made it.
+    ///
+    /// # A summary that does not shrink is a failed summary
+    ///
+    /// The summary is model-authored and its length is the model's choice. Folded whatever its
+    /// size, one longer than the items it replaced grew the conversation it was asked to shrink:
+    /// 14,596 bytes became 17,170, 4,292 tokens of a 4,000-token window, and the next request
+    /// was still sent. So a summary no shorter than those items is not kept. They are elided
+    /// instead, behind one [`ELISION_MARKER`] item that says how many and how many bytes, and the
+    /// result is [`Summarised::Failed`] carrying what the provider reported, because the turn was
+    /// still paid for. Where even that item would not be shorter, the items stand: a compaction
+    /// never leaves the conversation larger than it found it.
     fn summarise(
         &mut self,
         state: &mut RunState,
@@ -3136,14 +3167,40 @@ impl<'a> AgentLoop<'a> {
             .filter(|item| matches!(item, Item::Opaque { .. }))
             .cloned()
             .collect();
-        let tail = state.items.split_off(end);
-        state.items.truncate(FIRST_KEPT_ITEM);
-        state
-            .items
-            .push(Item::user(format!("{SUMMARY_MARKER}\n{summary}")));
-        state.items.extend(opaque);
-        state.items.extend(tail);
-        Summarised::Folded(end - FIRST_KEPT_ITEM, reported)
+        let count = end - FIRST_KEPT_ITEM;
+        let replaced = measure(&folded);
+        let summarised = Item::user(format!("{SUMMARY_MARKER}\n{summary}"));
+        let written = measure_one(&summarised);
+        if written + measure(&opaque) < replaced {
+            fold(&mut state.items, end, summarised, opaque);
+            return Summarised::Folded(count, reported);
+        }
+
+        // A summary no shorter than what it would replace is a failed summary: folded in, it grows
+        // the conversation it was asked to shrink, and the next request goes out above the target.
+        let notice = Item::user(format!(
+            "{ELISION_MARKER}\n{count} earlier item(s) of this conversation, {replaced} bytes, \
+             were dropped to keep it inside its context window, because the summary written of \
+             them was no shorter than they were. The task above is unchanged; anything else they \
+             held has to be read again."
+        ));
+        let elided = measure_one(&notice) + measure(&opaque) < replaced;
+        if elided {
+            fold(&mut state.items, end, notice, opaque);
+        }
+        sink.emit(LoopEvent::Warning {
+            code: "summary-failed".to_owned(),
+            message: format!(
+                "the summary turn answered with {written} bytes, no fewer than the {replaced} \
+                 bytes of the {count} item(s) it was to replace, so the summary was not kept {}",
+                if elided {
+                    "and those items were elided instead"
+                } else {
+                    "and the conversation keeps its elided form"
+                }
+            ),
+        });
+        Summarised::Failed(reported)
     }
 
     /// What a run that would stop with `stop` actually does: ends with it, or turns again.

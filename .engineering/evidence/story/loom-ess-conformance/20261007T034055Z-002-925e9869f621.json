@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-07T03:40:55Z",
+  "actor": "human:timo",
+  "artifact": "story:loom-ess-conformance",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adversary-w2-loom-ess-conformance-pass-1",
+    "reference": "finding 3: unsupported self-check and status agreement (a650b1e)",
+    "review": "review-result:adversary-w2-loom-ess-conformance-pass-1",
+    "outcome": "fixed"
+  }
+}

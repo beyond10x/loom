@@ -2,11 +2,13 @@
 format: aep.planning-md/3
 id: decision-blocker:connector-substrate-containment
 kind: decision-blocker
-status: open
+status: cleared
 title: Nobody has decided whether Substrate is the Connector provider an effect invokes or the confinement a Connector invocation runs in
 relations:
 - blocks: story:substrate-execution-binding
-revision: 2
+revision: 5
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-07T00:06:29Z", actor: "human:timo", revision: 5, executor: "agent:loom"}
 ---
 ## Question
 
@@ -56,3 +58,17 @@ Commission copy of it is filed yet, so this record stays the single open one. It
 this note.
 `story:substrate-execution-binding`, the story it blocked here, is archived (no Loom-side work
 remains); the `blocks` edge is kept as the record of what it stopped.
+
+
+## Decision (operator, 2026-10-07)
+
+Reading A. Substrate is a Connectors provider: each enrolled Substrate daemon is a Connection, a
+Connector operation targets it, Connectors governs the call and Substrate runs the effect
+(substrate `docs/VISION.md:30,104`). Reading B, a Connector invocation confined as a Substrate
+workload, is not taken.
+
+Atlas records the architecture decision, and Connectors declares the Substrate provider in its own
+ESS domains. Commission's effect invocation (`story:effect-invocation`) is planned against this
+contract: it invokes through the action's binding to a Connector operation, and the relation
+`connectors.mutations.AttemptRecord` -> `substrate.operations.AcceptedOperation` belongs to those
+two repositories.

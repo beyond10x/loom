@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-07T06:41:39Z",
+  "actor": "human:timo",
+  "artifact": "story:connector-action-binding",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check, task plan, task website (ess 0.55.0)",
+    "reference": "f0cb704: task check exit 201 at docs-check only (TMPDIR ownership lock), docs-check and commission:docs-drift re-run 0; 1210 passed, 0 failed, 8 ignored"
+  }
+}

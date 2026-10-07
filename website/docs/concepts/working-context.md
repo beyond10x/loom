@@ -7,7 +7,7 @@ source: ess/intake/domains/context.yaml; crates/loom-intake-slice/src/context.rs
 ---
 
 :::caution[Development source]
-This capability is implemented after release `0.2.0`. `legacy` remains the default. Recorded
+This capability is implemented after release `0.3.0`. `legacy` remains the default. Recorded
 workflows establish behavior and request-byte reduction; matched live evaluations are still needed
 to establish task quality and cost. No proportional token-cost saving is assumed.
 :::

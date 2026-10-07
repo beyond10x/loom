@@ -1,6 +1,7 @@
 //! Acceptance for `story:agent-executor-port`: an `AgentExecutor` returns one generated
 //! `ExecutorOutcome` for a commission and its current frontier, and `b10x-loom-commission` depends on
-//! no model-provider crate and not on Loom or Canon.
+//! no model-provider crate and not on Loom or Canon. Since `story:effect-invocation` it depends on
+//! no Connectors crate either: its Connector invoker is a port the host fills.
 //!
 //! `task deps-guard` runs this file. Source paths are read when the test runs
 //! (`CARGO_MANIFEST_DIR`), never baked in at build time: a build directory shared between
@@ -61,6 +62,18 @@ fn guard_violations(listing: &str, refused: &[String]) -> Vec<String> {
         .iter()
         .filter(|name| named.contains(&name.as_str()))
         .cloned()
+        .collect()
+}
+
+/// The Connectors crates a `cargo tree --prefix none` listing names: every crate whose first word
+/// is `connectors` or starts with `connectors-`, in listing order. A family, not a list, so a
+/// Connectors crate added later is refused too.
+fn connectors_violations(listing: &str) -> Vec<String> {
+    listing
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .filter(|name| *name == "connectors" || name.starts_with("connectors-"))
+        .map(str::to_owned)
         .collect()
 }
 
@@ -287,6 +300,35 @@ fn executor_port_contract() {
     assert!(guard_violations(clean, &refused).is_empty());
     let lookalike = format!("{clean}{first}-extras v0.1.0\n");
     assert!(guard_violations(&lookalike, &refused).is_empty());
+}
+
+/// `b10x-loom-commission` depends on no Connectors crate (`story:effect-invocation`): the real
+/// listing names none, and the matcher is shown to fire on a canned listing naming one.
+#[test]
+fn commission_depends_on_no_connectors_crate() {
+    let listing = real_listing();
+    assert!(
+        listing
+            .lines()
+            .any(|line| line.split_whitespace().next() == Some("b10x-loom-commission")),
+        "`cargo tree` did not print b10x-loom-commission:\n{listing}"
+    );
+    let found = connectors_violations(&listing);
+    assert!(
+        found.is_empty(),
+        "b10x-loom-commission depends on Connectors crates {found:?}:\n{listing}"
+    );
+
+    let clean = "b10x-loom-commission v0.0.0 (/repo/crates/loom-commission)\ncommission v1.0.0 (/repo/generated/rust/commission)\n";
+    assert!(connectors_violations(clean).is_empty());
+    assert_eq!(
+        connectors_violations(&format!(
+            "{clean}connectors-client v0.1.0\nconnectors v0.1.0\n"
+        )),
+        vec!["connectors-client".to_owned(), "connectors".to_owned()]
+    );
+    let lookalike = format!("{clean}connectorsx v0.1.0\nb10x-connectors-ish v0.1.0\n");
+    assert!(connectors_violations(&lookalike).is_empty());
 }
 
 /// The fake logs each call's commission id and frontier id, in call order, for the runtime loop

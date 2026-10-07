@@ -9,6 +9,6 @@ repository.workspace = true
 
 [dependencies]
 b10x-loom-commission = { path = "../loom-commission" }
-ess-conformance = { git = "https://github.com/beyond10x/ess.git", tag = "0.54.0" }
-ess-primitives = { git = "https://github.com/beyond10x/ess.git", tag = "0.54.0" }
+ess-conformance = { git = "https://github.com/beyond10x/ess.git", tag = "0.55.0" }
+ess-primitives = { git = "https://github.com/beyond10x/ess.git", tag = "0.55.0" }
 serde_json = "1"

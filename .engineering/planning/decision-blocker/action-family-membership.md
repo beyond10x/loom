@@ -2,14 +2,16 @@
 format: aep.planning-md/3
 id: decision-blocker:action-family-membership
 kind: decision-blocker
-status: open
+status: cleared
 title: Nobody has decided where an action's tool family comes from or how many families an action has
 refs:
 - provider: taskboard
   reference: L-010
 relations:
 - blocks: epic:fast-selector
-revision: 2
+revision: 4
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-07T00:06:18Z", actor: "human:timo", revision: 4, executor: "agent:loom"}
 ---
 ## Question
 
@@ -36,3 +38,10 @@ needs an ESS home (planning guardrail 7) and every way of grouping actions answe
 ## Source
 
 Decomposition of `epic:fast-selector`; Atlas ADR 0073; `docs/contracts/loom-action-selection.md`.
+
+## Decision (2026-10-07)
+
+Option C. No action families for now. Hierarchical selection (TASKBOARD L-010) is not planned until a
+protocol's frontier passes about 20 actions; software-change@1 has 4 (`repository.edit`,
+`repository.inspect`, `repository.merge`, `tests.run`). No family noun enters `ess/`. When a
+protocol passes that size, this question is filed again as a new blocker.

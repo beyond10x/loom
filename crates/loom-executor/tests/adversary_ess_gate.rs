@@ -134,11 +134,12 @@ fn mutant_is_killed(name: &str, mutate: impl FnOnce(&Path), expect: &[&str]) {
     }
 }
 
-// ADR 0076 / acceptance: `task ess-gate` fails on a tree carrying a marker. Every loom worktree's
-// `task check` builds into the one `CARGO_TARGET_DIR` that `Taskfile.yml` fixes. The gate takes the
-// repository root from `env!("CARGO_MANIFEST_DIR")`, which is compiled into the test binary, so when
-// cargo judges another worktree's `ess_gate` binary fresh it runs that binary — and the gate checks
-// the other worktree's `ess/`, not the one `task check` was run in.
+// ADR 0076 / acceptance: `task ess-gate` fails on a tree carrying a marker. Each tree builds into
+// its own `target/`, but a `CARGO_TARGET_DIR` set in the environment can still point two
+// worktrees' `task check` at one build directory. The gate takes the repository root from
+// `env!("CARGO_MANIFEST_DIR")`, which is compiled into the test binary, so when cargo judges
+// another worktree's `ess_gate` binary fresh it runs that binary — and the gate checks the other
+// worktree's `ess/`, not the one `task check` was run in.
 #[test]
 fn gate_checks_the_tree_it_runs_in_when_worktrees_share_a_build_directory() {
     let dir = scratch("shared_target");

@@ -28,7 +28,7 @@ CI performs the same setup. `task check` runs, in order:
 | `task ess-gate`, `task commission:ess-gate` | The hard gate: validate strictly, compile, synthesize with no refusal, no open question |
 | `task drift`, `task commission:drift`, `task intake-drift` | Each generated Rust model equals a fresh synthesis of its specification |
 | `task no-hand-model`, `task commission:no-hand-model` | No hand-written type shadows one the specification declares |
-| `task commission:conform` | Commission passes its synthesized ESS conformance suite |
+| `task conform`, `task commission:conform` | The executor and Commission each pass the ESS conformance suite synthesized from their specification |
 | `task commission:deps-guard` | Commission's contracts depend on no Loom executor, no Canon and no model-provider crate |
 | `cargo fmt --all --check`, `cargo clippy … -D warnings`, `cargo test --workspace --locked` | Format, lint and every test; no test makes a model or network call |
 | `task docs-check`, `task commission:docs-drift` | The generated documentation pages are current |
