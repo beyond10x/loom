@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:system-query
 kind: story
-status: active
+status: implemented
 title: Compose protocol sources and execute verified system time queries
 summary: Implement the user-approved protocol catalog, pinned installation and read-only clock query plan.
 relations:
@@ -19,10 +19,11 @@ scope:
   path: protocols
 - confidence: cited
   path: website
-revision: 10
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-07T10:46:01Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-07T10:46:01Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-07T11:40:00Z", actor: "human:timo", revision: 12, decided_on: {"recorded":{"test_result":2}}}
 ---
 ## Outcome and authorization
 
@@ -83,4 +84,8 @@ runner/model access. Root tests also refuse oversized escaped classification inp
 
 The live exact-intent query completed with real local/UTC clock evidence and exit zero. The durable
 qualification record is docs/qualification/2026-10-07-system-query.md. Full repository, planning
-and documentation validation are in progress; this story remains active until they pass.
+and documentation validation passed: task check (1,243 passed, eight existing ignored), inventory
+verification, task plan (134 valid artifacts) and the website build. The source security scan passed.
+The operator also requested task install, a source-build convenience target with no new runtime
+model; it installs the current checkout into the existing local binary location. Remote PR and local
+main installation are delivery steps, recorded separately from tagged release status.

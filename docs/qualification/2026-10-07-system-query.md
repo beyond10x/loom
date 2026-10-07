@@ -77,3 +77,22 @@ The report retained one classification and six selection/argument calls, a maxim
 of 8,299 bytes, and 31,831 ms elapsed. The substrate probe's read-only filesystem diagnostics
 appeared as expected. This run qualifies real confined execution; private process handoff timing
 and route restoration are additionally held by regression tests.
+
+## Repository validation
+
+At implementation commit `8fd2a94`, `task check` passed: specification and conformance gates,
+generated-model drift, dependency and model-boundary checks, formatting, strict Clippy, workspace
+tests and documentation drift. The workspace run reported 1,243 passed tests and eight existing
+ignored tests. All 1,237 distinct executed test names were verified against `cargo test --workspace
+--locked -- --list` in this same tree (normalizing the expected-panic display suffix).
+
+The first gate runs caught an outdated 15-crate inventory and the former single-Git-helper guard.
+The inventory now includes the protocol catalog. The Git guard admits exactly one workspace helper
+and one hardened source-fetch helper, checks both hardening configurations and retains the Git-library
+dependency prohibition. No test was disabled to admit the new functionality.
+
+`task plan` validated 134 artifacts, retaining the existing prose-only findings warning for
+`review-result:ess-hardening-design-20261006`. `task website` installed dependencies and built the
+site; `npm --prefix website run build` passed again after final documentation changes. The source
+security scan passed. These are repository results; documentation deployment remains pending the
+remote PR merge. `task install` is the local build/install entry point added at the operator's request.
