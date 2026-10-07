@@ -1,6 +1,6 @@
 // generated from intake v1
-// model digest 27eba34a158e1027a48b4584d4a9cfd7db24040200cceaab4f1148ba47ce865e
-// contract digest 6db3749de79840686760677941a2171cf13badb3ab1d8d4190151e3870d23df9
+// model digest 8158f2c6f08736511dded8320855abb57ef13c8b3b492ffef5ed2fd4bb05d87d
+// contract digest 6edfc386e180a0eea5e77b3cac17ef9f12f629f4d81c0918f6db81cbb71e4848
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Routing — `intake.routing`.
@@ -87,6 +87,8 @@ pub enum StopReason {
     Refused,
     /// `ConfinementUnavailable`.
     ConfinementUnavailable,
+    /// `Completed`.
+    Completed,
 }
 
 /// What ExtractedReference — `intake.routing.ExtractedReference` — holds, apart from where it is in its lifecycle.
