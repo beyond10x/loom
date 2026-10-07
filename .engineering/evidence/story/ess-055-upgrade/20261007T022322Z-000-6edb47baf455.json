@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-07T02:23:22Z",
+  "actor": "human:timo",
+  "artifact": "story:ess-055-upgrade",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "ess specify validate --path {ess,ess/commission,ess/intake} --strict-requires, ess 0.55.0",
+    "reference": "VERIFIED: base 03f1fe9 exit 1/1/1 vs treatment 2235aa8 exit 0/0/0"
+  }
+}

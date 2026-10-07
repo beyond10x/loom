@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-07T02:40:39Z",
+  "actor": "human:timo",
+  "artifact": "story:ess-055-upgrade",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check, task plan, task website (ess 0.55.0)",
+    "reference": "2235aa8: EXIT=0; 1181 passed, 0 failed, 8 ignored, 175 suites"
+  }
+}
