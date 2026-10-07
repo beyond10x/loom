@@ -64,6 +64,9 @@ b10x-loom --version
 b10x-loom 0.3.0
 ```
 
+On a development checkout, `task install` rebuilds the checked-out source and replaces
+`~/.local/bin/b10x-loom`. Keep `~/.local/bin` on your `PATH`. It does not fetch or switch branches.
+
 `b10x-loom run` routes an intent to a protocol, opens a governed case and runs until the run is
 blocked:
 

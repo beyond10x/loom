@@ -149,6 +149,10 @@ There is no `rust-toolchain.toml`: CI builds on `stable` (`dtolnay/rust-toolchai
 toolchain newer than CI's `stable` can add Clippy lints CI does not have. Run the gate on CI's
 version (`RUSTUP_TOOLCHAIN=<version> task check`) when Clippy disagrees.
 
+`task install` builds and installs the current checkout into `~/.local/bin` through locked
+`cargo install --path`; it does not fetch or move a branch. Run the gates before installing a
+candidate for dogfooding.
+
 `task --list` names every step, and each runs alone (`task drift`, `task conform`, `task commission:conform`, …).
 `task commission:check` is Commission's own gate, limited to its crates. While iterating, prefer
 `cargo test -p <package> --locked` on the crate you touched.

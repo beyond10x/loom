@@ -9,7 +9,8 @@ source: protocols/system-query/1.yaml, crates/loom-protocols/src/lib.rs, crates/
 # System queries and custom protocols
 
 This capability is implemented in development after 0.3.0. Use a build containing the system-query
-change; older installed binaries still require a software workspace.
+change; older installed binaries still require a software workspace. From the development checkout,
+`task install` rebuilds and replaces `~/.local/bin/b10x-loom`; that directory must be on your `PATH`.
 
 ## Read the time
 

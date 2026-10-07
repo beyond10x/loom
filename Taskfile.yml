@@ -7,6 +7,11 @@ tasks:
   default:
     cmds: [{task: check}]
 
+  install:
+    desc: Build this checkout and install b10x-loom into ~/.local/bin.
+    cmds:
+      - 'cargo install --path crates/loom-cli --bin b10x-loom --locked --force --root "$HOME/.local"'
+
   check:
     desc: Format, lint, test; Loom's steps, every Commission step and intake's specification.
     cmds:

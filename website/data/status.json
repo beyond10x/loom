@@ -3,7 +3,7 @@
   "asOf": "2026-10-07",
   "source": "Loom's status record, maintained in the repository and checked against main",
   "items": [
-    {"label": "System time queries", "status": "decided", "area": "Intake", "detail": "Implemented in development source: system-query@1 reads the host clock, verifies its observation and completes without a workspace or confinement.", "href": "/docs/guides/system-queries"},
+    {"label": "System time queries", "status": "decided", "area": "Intake", "detail": "Implemented in development source: task install builds the current checkout; system-query@1 reads the host clock, verifies its observation and completes without a workspace or confinement.", "href": "/docs/guides/system-queries"},
     {"label": "Custom protocol sources", "status": "decided", "area": "Intake", "detail": "Implemented in development source: shared catalogs, local snapshots and pinned Git installation. Offline verified loading; executable bindings remain host supplied.", "href": "/docs/guides/system-queries"},
     {"label":"Bounded working context", "status":"decided", "area":"Intake", "detail":"Implemented in development source as an opt-in CLI policy: typed working state, retrievable history, bounded requests and payload-free measurements. Legacy remains default pending matched live quality and cost evaluation.", "href":"/docs/concepts/working-context"},
     {"label":"Stored result references", "status":"shipped", "area":"Intake", "detail":"Since 0.3.0: bounded result previews and exact reference-based edit composition, resolved before admission. Run-local storage; live quality and token-cost savings remain unmeasured.", "href":"/docs/concepts/result-references"},

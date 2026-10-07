@@ -8,6 +8,8 @@ under **Unreleased** until the next release.
 
 ### Added
 
+- `task install` rebuilds the current checkout and installs `b10x-loom` into `~/.local/bin`.
+
 - Loom owns `system-query@1` with the governed read-only `system.time.read` action. `run` can
   answer local date/time and UTC without a workspace or confinement, and reports verified query
   completion as exit 0. Software changes still require a Git worktree and retain confinement.
