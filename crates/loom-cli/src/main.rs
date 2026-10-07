@@ -94,10 +94,14 @@ fn run_command(arguments: RunArgs) -> Result<ExitCode, String> {
     };
     let mut metrics = ContextMetrics::new(options.context_policy);
     let result = execute(&arguments, &options, &mut metrics);
-    if !matches!(result, Ok((_, true)))
-        && let Some(path) = &options.context_report
-        && let Err(error) = metrics.write(path)
-    {
+    let report = options.context_report.as_ref().map(|path| {
+        if matches!(result, Ok((_, true))) {
+            metrics.finish_delegated_report(path)
+        } else {
+            metrics.write(path)
+        }
+    });
+    if let Some(Err(error)) = report {
         let original = result.err().map(|e| format!("{e}; ")).unwrap_or_default();
         return Err(format!(
             "{original}context report cannot be written: {error}"
@@ -116,9 +120,6 @@ fn execute(
             "the threshold {} is not a number from 0 to 1",
             arguments.threshold
         ));
-    }
-    if arguments.test_cmd.split_whitespace().next().is_none() {
-        return Err("--test-cmd names no program".into());
     }
     let catalog = InstallStore::user()?.catalog()?;
     let governor = CanonGovernor::new(MemoryCaseStore::default())

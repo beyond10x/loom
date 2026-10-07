@@ -62,6 +62,17 @@ impl ContextMetrics {
         serde_json::to_writer_pretty(file, &self.snapshot()).map_err(io::Error::other)
     }
 
+    /// Preserve the delegated child's counters while closing elapsed time with the original
+    /// process's monotonic clock. This includes process startup and child initialization.
+    pub fn finish_delegated_report(&self, path: &Path) -> io::Result<()> {
+        let mut value: Value =
+            serde_json::from_slice(&std::fs::read(path)?).map_err(io::Error::other)?;
+        Self::restore(&value, self.lock().policy).map_err(io::Error::other)?;
+        value["elapsed_ms"] = json!(self.report().elapsed_ms);
+        let file = std::fs::File::create(path)?;
+        serde_json::to_writer_pretty(file, &value).map_err(io::Error::other)
+    }
+
     /// Payload-free state carried across the CLI's private delegation handoff.
     pub fn snapshot(&self) -> Value {
         let report = self.report();
@@ -401,6 +412,36 @@ mod tests {
         malformed = snapshot;
         malformed["requests"][0]["input_tokens"] = json!(-1);
         assert!(ContextMetrics::restore(&malformed, ContextPolicy::Bounded).is_err());
+    }
+
+    #[test]
+    fn delegated_report_includes_handoff_delay_without_losing_child_usage() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("report.json");
+        let original = ContextMetrics::new(ContextPolicy::Bounded);
+        let snapshot = original.snapshot();
+        // A delay between snapshot and restore represents systemd and child startup.
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        let child = ContextMetrics::restore(&snapshot, ContextPolicy::Bounded).unwrap();
+        let inner = Recorded::new(false);
+        turn(
+            &MeasuredModel::new(&inner, child.clone()),
+            &request("select_action", "private prompt"),
+        )
+        .unwrap();
+        child.write(&path).unwrap();
+        let before: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        original.finish_delegated_report(&path).unwrap();
+        let after: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert!(after["elapsed_ms"].as_i64().unwrap() >= 25);
+        assert!(
+            after["elapsed_ms"].as_i64().unwrap() >= before["elapsed_ms"].as_i64().unwrap() + 20
+        );
+        assert_eq!(after["requests"], before["requests"]);
+        assert_eq!(after["model_calls"], 1);
+        assert_eq!(after["requests"][0]["input_tokens"], 37);
+        assert!(after["requests"][0]["cache_write_tokens"].is_null());
+        assert!(!after.to_string().contains("private prompt"));
     }
 
     #[test]

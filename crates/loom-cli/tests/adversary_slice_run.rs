@@ -553,6 +553,7 @@ fn bin(label: &str, args: &[&str]) -> std::process::Output {
         .args(args)
         .env("HOME", &home)
         .env("CODEX_HOME", &home)
+        .env("XDG_DATA_HOME", &home)
         .env_remove("RUST_LOG");
     let output = command.output().expect("run b10x-loom");
     drop(workspace);
@@ -560,20 +561,69 @@ fn bin(label: &str, args: &[&str]) -> std::process::Output {
     output
 }
 
-/// `--test-cmd` that names no program fails before any model is built: exit status 1, a message
-/// naming the flag, nothing on standard output.
+/// Test-command validity depends on the accepted route. With no credential, a time query
+/// reaches classification even when its unused software-change test command is blank.
 #[test]
-fn a_test_command_with_no_program_fails_before_any_model() {
+fn a_query_with_no_test_program_reaches_classification() {
     for test_cmd in ["", "   ", "\t"] {
-        let output = bin("empty-cmd", &["--test-cmd", test_cmd, INTENT]);
+        let output = bin(
+            "empty-cmd",
+            &["--test-cmd", test_cmd, "need to know the current time"],
+        );
         assert_eq!(output.status.code(), Some(1), "{test_cmd:?}");
         assert!(output.stdout.is_empty(), "{test_cmd:?}");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
-            stderr.contains("--test-cmd names no program"),
+            stderr.contains("no protocol was picked") && stderr.contains("no Codex access token"),
             "{test_cmd:?}: {stderr}"
         );
     }
+}
+
+/// Once routed, a clock query completes with no test runner, a blank test command and an
+/// unusable workspace. The recorded model cannot be replaced by a software preflight.
+#[test]
+fn a_routed_query_completes_without_software_test_configuration() {
+    use b10x_loom_intake_slice::clock::HostClock;
+    use b10x_loom_intake_slice::intent::{IntentRequest, run_intent_with_options};
+    use b10x_loom_intake_slice::run::RunOptions;
+    use loom_protocols::ProtocolCatalog;
+
+    let catalog = ProtocolCatalog::bundled().unwrap();
+    let governor = CanonGovernor::new(MemoryCaseStore::default())
+        .with_catalog(&catalog)
+        .unwrap();
+    let classifier = Recorded::new("recorded-classifier", vec![pick("system-query@1", 0.99)]);
+    let agent = Recorded::new(
+        "recorded-agent",
+        vec![select("system.time.read"), json!({})],
+    );
+    let request = IntentRequest {
+        intent: "need to know the current time".into(),
+        workspace: Some(PathBuf::from("/loom-nonexistent-unused-workspace")),
+        test: TestCommand::new("", [] as [&str; 0]),
+        runner: None,
+        max_steps: 4,
+        threshold: 0.5,
+    };
+    let mut output = Vec::new();
+    let run = run_intent_with_options(
+        &request,
+        &catalog,
+        &governor,
+        &governor,
+        &classifier,
+        &agent,
+        &HostClock,
+        &mut output,
+        &RunOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(run.stop_reason, StopReason::Completed);
+    assert_eq!(run.steps, 1);
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("stopped: Completed (answered)"), "{output}");
+    assert!(!output.contains("confinement:"), "{output}");
 }
 
 /// A threshold outside 0..1, or not a number, fails with status 1 and a message about the
