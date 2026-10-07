@@ -46,7 +46,8 @@
 //! [`TurnRecord`] is Loom's own, not ported: the sessions a governed run records its turns into,
 //! those turns, the catalogue each turn was offered and the compactions made in them, in memory
 //! (`loom.run.OpenSession`, `loom.run.ResumeSession`, `loom.run.FileSession`,
-//! `loom.run.InterruptSession`, `loom.run.RecordTurn`, `loom.run.RecordCompaction`, generated). It
+//! `loom.run.InterruptSession`, `loom.run.ReleaseSession`, `loom.run.RecordTurn`,
+//! `loom.run.RecordCompaction`, `loom.run.ProjectCatalogue`, generated). It
 //! is the run's record of what each completed turn added and what each compaction cost, not a
 //! transcript a following run replays; the session file above is that, and its format does not
 //! carry compactions or the `Interrupted` state.
@@ -94,19 +95,22 @@ use crate::harness::turn_loop::{
     AgentLoop, ApprovalPort, LoopConfig, LoopError, LoopEvent, LoopOutcome, LoopSink, RunLedger,
 };
 use crate::harness::wire::{Item, ModelPort, ToolPort, Usage, WireId};
-use crate::model::behaviour::{CompactionStorage, Generated, SessionStorage, TurnStorage};
+use crate::model::behaviour::{
+    ActionCatalogueStorage, CompactionStorage, Generated, SessionStorage, TurnStorage,
+};
 use crate::model::obligation::UnmetObligation;
 use crate::model::primitives::Uuid;
 use crate::model::run::obligations::{
-    FileSessionBehavior, InterruptSessionBehavior, OpenSessionBehavior, RecordCompactionBehavior,
-    RecordTurnBehavior, ResumeSessionBehavior,
+    FileSessionBehavior, InterruptSessionBehavior, OpenSessionBehavior, ProjectCatalogueBehavior,
+    RecordCompactionBehavior, RecordTurnBehavior, ReleaseSessionBehavior, ResumeSessionBehavior,
 };
 use crate::model::run::{
-    ActionCatalogueSnapshot, CommissionRunId, CompactionId, CompactionSnapshot, FileSession,
-    FileSessionOutcome, InterruptSession, InterruptSessionOutcome, OpenSession, OpenSessionOutcome,
-    RecordCompaction, RecordCompactionOutcome, RecordTurn, RecordTurnOutcome, ResumeSession,
-    ResumeSessionOutcome, RunEnding, SessionData, SessionExists, SessionId, SessionSnapshot,
-    SessionState, SessionStateConflict, SessionWireMismatch, TurnId, TurnSnapshot,
+    ActionCatalogueSnapshot, CatalogueId, CommissionRunId, CompactionId, CompactionSnapshot,
+    FileSession, FileSessionOutcome, InterruptSession, InterruptSessionOutcome, OpenSession,
+    OpenSessionOutcome, ProjectCatalogue, ProjectCatalogueOutcome, RecordCompaction,
+    RecordCompactionOutcome, RecordTurn, RecordTurnOutcome, ReleaseSession, ReleaseSessionOutcome,
+    ResumeSession, ResumeSessionOutcome, RunEnding, SessionData, SessionExists, SessionId,
+    SessionSnapshot, SessionState, SessionStateConflict, SessionWireMismatch, TurnId, TurnSnapshot,
 };
 
 /// The shape this module writes and the only one it reads.
@@ -629,12 +633,16 @@ impl Drop for Claim {
 /// turn and the compactions made in them, each in the order recorded.
 ///
 /// `loom.run.OpenSession`, `loom.run.ResumeSession`, `loom.run.FileSession`,
-/// `loom.run.InterruptSession`, `loom.run.RecordTurn` and `loom.run.RecordCompaction` are the
-/// generated behaviour over this record: a session opened under an identity it already holds is
-/// refused `session-exists`, only a `Filed` or `Interrupted` session resumes, only an `Active` one
-/// is filed or interrupted, and a turn or a compaction is refused for a session it does not hold or
-/// one no longer `Active`. A session, a turn or a compaction stored under an identity already held
-/// replaces it. Catalogues are kept as they were offered, one per offer, never replaced.
+/// `loom.run.InterruptSession`, `loom.run.ReleaseSession`, `loom.run.RecordTurn`,
+/// `loom.run.RecordCompaction` and `loom.run.ProjectCatalogue` are the generated behaviour over
+/// this record: a session opened under an identity it already holds is refused `session-exists`,
+/// only a `Filed` or `Interrupted` session resumes, only an `Active` one is filed, interrupted or
+/// released, a turn or a compaction is refused for a session it does not hold or one no longer
+/// `Active`, and a catalogue projected under an identity it already holds is refused
+/// `catalogue-exists`. A session, a turn or a compaction stored under an identity already held
+/// replaces it. Catalogues a governed run offers are kept as they were offered, one per offer,
+/// never replaced; one stored through [`ActionCatalogueStorage`] under an identity already held
+/// replaces the first held under it.
 #[derive(Debug, Default)]
 pub struct TurnRecord {
     sessions: Vec<SessionSnapshot>,
@@ -784,6 +792,57 @@ impl CompactionStorage for TurnRecord {
     fn delete(&mut self, identity: &CompactionId) {
         self.compactions
             .retain(|held| &held.data.compaction_id != identity);
+    }
+}
+
+impl ActionCatalogueStorage for TurnRecord {
+    fn get(&self, identity: &CatalogueId) -> Option<ActionCatalogueSnapshot> {
+        self.catalogues
+            .iter()
+            .find(|held| &held.data.catalogue_id == identity)
+            .cloned()
+    }
+
+    fn put(&mut self, snapshot: ActionCatalogueSnapshot) {
+        match self
+            .catalogues
+            .iter_mut()
+            .find(|held| held.data.catalogue_id == snapshot.data.catalogue_id)
+        {
+            Some(held) => *held = snapshot,
+            None => self.catalogues.push(snapshot),
+        }
+    }
+
+    fn delete(&mut self, identity: &CatalogueId) {
+        self.catalogues
+            .retain(|held| &held.data.catalogue_id != identity);
+    }
+
+    fn list(&self) -> Vec<ActionCatalogueSnapshot> {
+        self.catalogues.clone()
+    }
+}
+
+/// `loom.run.ProjectCatalogue`, generated, over this record: a catalogue identity is projected
+/// once.
+impl ProjectCatalogueBehavior for TurnRecord {
+    fn project_catalogue(
+        &mut self,
+        input: ProjectCatalogue,
+    ) -> Result<ProjectCatalogueOutcome, UnmetObligation> {
+        self.generated(|generated| generated.project_catalogue(input))
+    }
+}
+
+/// `loom.run.ReleaseSession`, generated, over this record: only an `Active` session is released,
+/// filed back as failed.
+impl ReleaseSessionBehavior for TurnRecord {
+    fn release_session(
+        &mut self,
+        input: ReleaseSession,
+    ) -> Result<ReleaseSessionOutcome, UnmetObligation> {
+        self.generated(|generated| generated.release_session(input))
     }
 }
 
