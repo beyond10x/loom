@@ -1,0 +1,169 @@
+{
+  "packages": [
+    {
+      "name": "b10x-loom-executor",
+      "version": "0.3.0",
+      "id": "path+file:///workspace/loom/crates/loom-executor#b10x-loom-executor@0.3.0",
+      "source": null
+    },
+    {
+      "name": "b10x-loom-commission",
+      "version": "0.3.0",
+      "id": "path+file:///workspace/loom/crates/loom-commission#b10x-loom-commission@0.3.0",
+      "source": null
+    },
+    {
+      "name": "b10x-loom-commission-testkit",
+      "version": "0.3.0",
+      "id": "path+file:///workspace/loom/crates/loom-commission-testkit#b10x-loom-commission-testkit@0.3.0",
+      "source": null
+    },
+    {
+      "name": "serde_json",
+      "version": "1.0.145",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.145",
+      "source": "registry+https://github.com/rust-lang/crates.io-index"
+    },
+    {
+      "name": "connectors-client",
+      "version": "0.4.0",
+      "id": "git+https://github.com/beyond10x/connectors?tag=0.4.0#connectors-client@0.4.0",
+      "source": "git+https://github.com/beyond10x/connectors?tag=0.4.0"
+    },
+    {
+      "name": "b10x_connectors_secrets",
+      "version": "0.4.0",
+      "id": "git+https://github.com/beyond10x/connectors?tag=0.4.0#b10x_connectors_secrets@0.4.0",
+      "source": "git+https://github.com/beyond10x/connectors?tag=0.4.0"
+    },
+    {
+      "name": "connectors-build",
+      "version": "0.4.0",
+      "id": "git+https://github.com/beyond10x/connectors?tag=0.4.0#connectors-build@0.4.0",
+      "source": "git+https://github.com/beyond10x/connectors?tag=0.4.0"
+    },
+    {
+      "name": "connectors-conformance",
+      "version": "0.4.0",
+      "id": "git+https://github.com/beyond10x/connectors?tag=0.4.0#connectors-conformance@0.4.0",
+      "source": "git+https://github.com/beyond10x/connectors?tag=0.4.0"
+    }
+  ],
+  "workspace_members": [
+    "path+file:///workspace/loom/crates/loom-executor#b10x-loom-executor@0.3.0",
+    "path+file:///workspace/loom/crates/loom-commission#b10x-loom-commission@0.3.0",
+    "path+file:///workspace/loom/crates/loom-commission-testkit#b10x-loom-commission-testkit@0.3.0"
+  ],
+  "workspace_default_members": [
+    "path+file:///workspace/loom/crates/loom-executor#b10x-loom-executor@0.3.0",
+    "path+file:///workspace/loom/crates/loom-commission#b10x-loom-commission@0.3.0",
+    "path+file:///workspace/loom/crates/loom-commission-testkit#b10x-loom-commission-testkit@0.3.0"
+  ],
+  "resolve": {
+    "nodes": [
+      {
+        "id": "path+file:///workspace/loom/crates/loom-executor#b10x-loom-executor@0.3.0",
+        "dependencies": [
+          "path+file:///workspace/loom/crates/loom-commission#b10x-loom-commission@0.3.0",
+          "path+file:///workspace/loom/crates/loom-commission-testkit#b10x-loom-commission-testkit@0.3.0",
+          "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.145"
+        ],
+        "deps": [
+          {
+            "name": "b10x_loom_commission",
+            "pkg": "path+file:///workspace/loom/crates/loom-commission#b10x-loom-commission@0.3.0",
+            "dep_kinds": [{ "kind": null, "target": null }]
+          },
+          {
+            "name": "b10x_loom_commission_testkit",
+            "pkg": "path+file:///workspace/loom/crates/loom-commission-testkit#b10x-loom-commission-testkit@0.3.0",
+            "dep_kinds": [{ "kind": "dev", "target": null }]
+          },
+          {
+            "name": "serde_json",
+            "pkg": "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.145",
+            "dep_kinds": [{ "kind": null, "target": null }]
+          }
+        ],
+        "features": []
+      },
+      {
+        "id": "path+file:///workspace/loom/crates/loom-commission#b10x-loom-commission@0.3.0",
+        "dependencies": [
+          "git+https://github.com/beyond10x/connectors?tag=0.4.0#connectors-build@0.4.0",
+          "git+https://github.com/beyond10x/connectors?tag=0.4.0#connectors-client@0.4.0"
+        ],
+        "deps": [
+          {
+            "name": "connectors_build",
+            "pkg": "git+https://github.com/beyond10x/connectors?tag=0.4.0#connectors-build@0.4.0",
+            "dep_kinds": [{ "kind": "build", "target": null }]
+          },
+          {
+            "name": "connectors_client",
+            "pkg": "git+https://github.com/beyond10x/connectors?tag=0.4.0#connectors-client@0.4.0",
+            "dep_kinds": [{ "kind": null, "target": null }]
+          }
+        ],
+        "features": []
+      },
+      {
+        "id": "path+file:///workspace/loom/crates/loom-commission-testkit#b10x-loom-commission-testkit@0.3.0",
+        "dependencies": [
+          "git+https://github.com/beyond10x/connectors?tag=0.4.0#connectors-conformance@0.4.0"
+        ],
+        "deps": [
+          {
+            "name": "connectors_conformance",
+            "pkg": "git+https://github.com/beyond10x/connectors?tag=0.4.0#connectors-conformance@0.4.0",
+            "dep_kinds": [{ "kind": null, "target": null }]
+          }
+        ],
+        "features": []
+      },
+      {
+        "id": "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.145",
+        "dependencies": [],
+        "deps": [],
+        "features": ["default", "std"]
+      },
+      {
+        "id": "git+https://github.com/beyond10x/connectors?tag=0.4.0#connectors-client@0.4.0",
+        "dependencies": [
+          "git+https://github.com/beyond10x/connectors?tag=0.4.0#b10x_connectors_secrets@0.4.0"
+        ],
+        "deps": [
+          {
+            "name": "b10x_connectors_secrets",
+            "pkg": "git+https://github.com/beyond10x/connectors?tag=0.4.0#b10x_connectors_secrets@0.4.0",
+            "dep_kinds": [{ "kind": null, "target": "cfg(unix)" }]
+          }
+        ],
+        "features": []
+      },
+      {
+        "id": "git+https://github.com/beyond10x/connectors?tag=0.4.0#b10x_connectors_secrets@0.4.0",
+        "dependencies": [],
+        "deps": [],
+        "features": []
+      },
+      {
+        "id": "git+https://github.com/beyond10x/connectors?tag=0.4.0#connectors-build@0.4.0",
+        "dependencies": [],
+        "deps": [],
+        "features": []
+      },
+      {
+        "id": "git+https://github.com/beyond10x/connectors?tag=0.4.0#connectors-conformance@0.4.0",
+        "dependencies": [],
+        "deps": [],
+        "features": []
+      }
+    ],
+    "root": null
+  },
+  "target_directory": "/workspace/loom/target",
+  "version": 1,
+  "workspace_root": "/workspace/loom",
+  "metadata": null
+}
