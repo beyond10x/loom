@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:release-040
 kind: story
-status: active
+status: implemented
 title: Release Loom 0.4.0 with llm 0.3.1
 relations:
 - informed_by: story:release-process
@@ -22,10 +22,11 @@ scope:
   path: crates
 - confidence: cited
   path: website
-revision: 4
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-07T13:49:07Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-07T13:49:07Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-07T14:42:47Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":3}}}
 ---
 ## Outcome
 
@@ -54,3 +55,20 @@ Cargo.toml, Cargo.lock, llm dependency manifests, CHANGELOG.md, README.md, AGENT
 
 No Atlas reconciliation, Website pin promotion or deployment is part of this source release.
 Documentation publication is asynchronous. Do not report a queued tag as a completed release.
+
+## Release evidence
+
+Functional PRs #26 and #27 and release PR #28 are merged. The release merge commit is
+`dca1051554b61e6165e1a59e120663654314c562`, with the same tree as the green release candidate
+`8ebff12e8f19d96daad3c82831689bec16287de0`. The dependency is the published llm0.3.1 tag,
+resolving to `560f044c46faaac33a727885faebd7cc6be96042`.
+
+Local repository, planning, documentation and release metadata gates passed. The 1,252 unique
+executed test names match the test inventory in this checkout. The installed 0.4.0 binary passed
+`b10x-loom run --context-policy=bounded --workspace=/tmp/foo "need to know the current time"`:
+one trusted clock effect, `Completed (answered)`, three model requests of 2,198, 4,127 and 5,273
+bytes. Installation was built from the candidate tree, identical to the release tree.
+
+The source release and exact-tag workflow are linked by the evidence records. Documentation
+publication is asynchronous and is not asserted by this record. The verification logs and
+context report are retained in the managed release worktree archive.
