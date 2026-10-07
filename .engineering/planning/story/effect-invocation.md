@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:effect-invocation
 kind: story
-status: active
+status: implemented
 title: After the recheck, the Commission runtime invokes the effect through the action's binding
 refs:
 - provider: commission
@@ -13,24 +13,33 @@ relations:
 - serves: vision:governed-autonomy
 - depends_on: story:ess-055-upgrade
 scope:
-- confidence: inferred
-  path: crates/loom-commission-testkit/src/
+- confidence: cited
+  path: crates/loom-commission-testkit/src/fake_executor.rs
+- confidence: cited
+  path: crates/loom-commission-testkit/src/fake_invoker.rs
 - confidence: cited
   path: crates/loom-commission-testkit/tests/effect_invocation.rs
-- confidence: inferred
-  path: crates/loom-commission/src/ports/
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/executor_port.rs
+- confidence: cited
+  path: crates/loom-commission/src/ports/connector.rs
 - confidence: cited
   path: crates/loom-commission/src/ports/effect.rs
 - confidence: cited
   path: crates/loom-commission/src/runtime.rs
 - confidence: cited
+  path: crates/loom-intake-slice/src/effect.rs
+- confidence: cited
   path: ess/commission/domains/responsibility.yaml
 - confidence: cited
   path: generated/rust/commission/
-revision: 8
+- confidence: cited
+  path: website/docs/reference/commission/
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-07T02:51:19Z", actor: "human:timo", revision: 5, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
 - {from: "proposed", to: "active", at: "2026-10-07T02:51:19Z", actor: "human:timo", revision: 6, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
+- {from: "active", to: "implemented", at: "2026-10-07T06:42:43Z", actor: "human:timo", revision: 12, decided_on: {"recorded":{"test_result":1,"review_outcome":8,"verification":1}}, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
 ---
 ## Outcome
 
@@ -59,7 +68,9 @@ This story adds:
    so a Loom catalogue never lists one. An action behind an authority gate stays visible even when
    no port performs it (`decision-blocker:gated-unbound-action-visibility`, option B), so a run
    stops at the gate as today; an approved action no port performs ends `NoPerformableAction` at
-   invocation. A frontier left with no action still ends `NoPerformableAction`, as today.
+   invocation. A frontier none of whose actions the effect port performs still ends
+   `NoPerformableAction` before the executor runs, gated actions or not, as today; a frontier that
+   lists no action at all goes on (adversary pass 1, finding 4).
 3. **One attempt per invoked request.** `EffectOutcome::Performed` names exactly one Connector
    attempt: the reference to the `connectors.mutations.AttemptRecord` the invocation produced. A
    request refused at the recheck is never invoked and names none. The runtime never retries an
@@ -138,3 +149,25 @@ Edits `ess/commission/domains/responsibility.yaml`, `generated/rust/commission/`
 Atlas ADR 0082 (Commission invokes effects); Atlas ADR 0080 (specification first); Atlas ADR 0072
 (revalidate before every effect; candidates are integrations intersected with admissible actions);
 the four decisions recorded on the blockers named in the Outcome.
+
+## Scope confirmed (wave 2026-10-07-w2)
+
+From the implementor's confirmation table and the merged commits (47b706b, 68bc8b9, a34422e,
+09c1c9e, 34b7457):
+
+- `ess/commission/domains/responsibility.yaml`, `generated/rust/commission/`,
+  `crates/loom-commission/src/runtime.rs`, `crates/loom-commission/src/ports/effect.rs` — cited,
+  changed.
+- `crates/loom-commission/src/ports/` (inferred) — confirmed: the new code is
+  `crates/loom-commission/src/ports/connector.rs`, not inside `effect.rs`.
+- `crates/loom-commission-testkit/src/` (inferred) — confirmed: `fake_invoker.rs` (new),
+  `fake_executor.rs`.
+- `crates/loom-commission-testkit/tests/effect_invocation.rs` (new), and the adversary files
+  `adversary_w2_effect_invocation.rs`, `adversary2_w2_effect_invocation.rs` — changed.
+- `crates/loom-intake-slice/src/effect.rs` (inferred, "only if it must change") — it had to:
+  `LocalEffects` names no attempt.
+- Not in the first scope, changed: the `EffectPort` test doubles in
+  `crates/loom-commission-testkit/tests/` (runtime_effect, runtime_loop, adversary_runtime_effect,
+  adversary_loop_runtime, adversary2_loop_runtime) and `crates/loom-executor/tests/`
+  (adversary_w1_runtime_stale, adversary_w1p2_runtime_windows); `crates/loom-commission-testkit/tests/executor_port.rs`
+  (the deps guard); `website/docs/reference/commission/` (three generated pages).

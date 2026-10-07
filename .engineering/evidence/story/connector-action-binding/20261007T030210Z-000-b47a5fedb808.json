@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-07T03:02:10Z",
+  "actor": "human:timo",
+  "artifact": "story:connector-action-binding",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-executor --locked --test connector_boundary",
+    "reference": "VERIFIED (new behaviour): base 9154eb2 no such target, exit 101; b3c8fb8 1 passed, exit 0"
+  }
+}

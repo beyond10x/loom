@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:loom-ess-conformance
 kind: story
-status: active
+status: implemented
 title: Carry the Loom ESS specification to a synthesized conformance suite in task check
 refs:
 - provider: taskboard
@@ -31,18 +31,21 @@ scope:
   path: Taskfile.yml
 - confidence: cited
   path: crates/loom-conformance/
-- confidence: inferred
-  path: crates/loom-executor/
+- confidence: cited
+  path: crates/loom-executor/src/selection.rs
+- confidence: cited
+  path: crates/loom-executor/src/session.rs
+- confidence: cited
+  path: crates/loom-executor/tests/crate_names.rs
 - confidence: cited
   path: ess/SKIPPED.md
 - confidence: cited
-  path: ess/domains/run.yaml
-- confidence: cited
-  path: generated/rust/loom/
-revision: 10
+  path: website/docs/reference/crates.md
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-07T02:51:19Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":4}}, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
 - {from: "proposed", to: "active", at: "2026-10-07T02:51:19Z", actor: "human:timo", revision: 10, decided_on: {"recorded":{"review_outcome":4}}, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
+- {from: "active", to: "implemented", at: "2026-10-07T06:42:43Z", actor: "human:timo", revision: 13, decided_on: {"recorded":{"test_result":1,"review_outcome":10,"verification":1}}, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
 ---
 ## Outcome
 
@@ -139,3 +142,23 @@ target, and checks:
 TASKBOARD I-006; Atlas ADR 0071; workspace AGENTS.md § ESS drives every product repository;
 `ess:specifying` § Conformance is a record, not a claim; the answer recorded on
 `decision-blocker:rust-conformance-target` (2026-10-04).
+
+## Scope confirmed (wave 2026-10-07-w2)
+
+From the implementor's confirmation table and the merged commits (0706e2a, a650b1e, 9a96b0a):
+
+- `crates/loom-conformance/` (new), `ess/SKIPPED.md` (new), `Taskfile.yml`, `Cargo.lock` (one
+  entry), `website/docs/reference/crates.md` — cited, changed.
+- Pattern `crates/loom-commission-conformance/` (inferred) — confirmed.
+- Target binds to `b10x-loom-executor` (inferred) — confirmed.
+- "All nine commands are implemented" in `session.rs`, `selection.rs`, `arguments.rs` (inferred) —
+  **wrong**: `ess/` has 11 commands. `SelectAction` had no command implementation, `ReleaseSession`
+  existed only on the on-disk `SessionFile`, and `ProjectCatalogue` only as `projection::project`;
+  `RevalidateSelection` is in `revalidation.rs`. Changed as a result:
+  `crates/loom-executor/src/selection.rs` (`select_action`, `chosen`) and
+  `crates/loom-executor/src/session.rs` (`TurnRecord` answers ProjectCatalogue and ReleaseSession).
+- Not in the first scope, changed: `crates/loom-executor/tests/crate_names.rs` (the fifteenth
+  package), `crates/loom-executor/tests/adversary_w2_conformance_select_action.rs`, and the
+  adversary files under `crates/loom-conformance/tests/`.
+- `ess/domains/run.yaml`, `generated/rust/loom/` — not changed; the scenario that shows the
+  specification's `not-in-frontier` text at odds with ESS is `story:revalidation-membership-conformance`.

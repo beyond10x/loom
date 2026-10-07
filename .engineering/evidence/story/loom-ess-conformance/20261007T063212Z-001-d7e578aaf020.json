@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-07T06:32:12Z",
+  "actor": "human:timo",
+  "artifact": "story:loom-ess-conformance",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "task conform",
+    "reference": "VERIFIED (new behaviour): base 9154eb2 no conform task, red run 0 of 46 scenarios, exit 101; 9a96b0a 46 of 46, conform 3 passed"
+  }
+}

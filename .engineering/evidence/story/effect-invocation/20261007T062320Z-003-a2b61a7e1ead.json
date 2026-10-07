@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-07T06:23:20Z",
+  "actor": "human:timo",
+  "artifact": "story:effect-invocation",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-commission-testkit --locked --test effect_invocation; cargo test -p b10x-loom-cli --locked",
+    "reference": "VERIFIED (new behaviour): base 4d51820 has no effect_invocation target; 34b7457 effect_invocation_only_through_its_binding passes items 1-6, slice_run 9/9 still stops at ApprovalRequired (repository.merge)"
+  }
+}

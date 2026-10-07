@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-07T03:34:09Z",
+  "actor": "human:timo",
+  "artifact": "story:effect-invocation",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adversary-w2-loom-effect-invocation-pass-1",
+    "reference": "finding 5: intake-slice effect.rs:187, attempt optional (a34422e, 09c1c9e)",
+    "review": "review-result:adversary-w2-loom-effect-invocation-pass-1",
+    "outcome": "fixed"
+  }
+}

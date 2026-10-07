@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:connector-action-binding
 kind: story
-status: active
+status: implemented
 title: Consequential actions leave Loom only as a ProposedAction
 summary: Loom returns a ProposedAction for a selected consequential action, invokes no Connector operation and links no credential crate; the invocation is Commission's (ADR 0082, L-014).
 refs:
@@ -16,10 +16,13 @@ relations:
 scope:
 - confidence: cited
   path: crates/loom-executor/tests/connector_boundary.rs
-revision: 8
+- confidence: cited
+  path: crates/loom-executor/tests/fixtures/connector-boundary/
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-07T02:51:19Z", actor: "human:timo", revision: 7, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
 - {from: "proposed", to: "active", at: "2026-10-07T02:51:19Z", actor: "human:timo", revision: 8, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
+- {from: "active", to: "implemented", at: "2026-10-07T06:42:43Z", actor: "human:timo", revision: 11, decided_on: {"recorded":{"test_result":1,"verification":1}}, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
 ---
 ## Outcome
 
@@ -85,3 +88,10 @@ recorded yet.
 
 Governed Autonomy build pack `TASKBOARD.md` § Loom, L-014 "Add connector action binding";
 `epic:effect-bindings`; Atlas `epic:ga-governed-effects`; Atlas ADR 0082.
+
+## Scope confirmed (wave 2026-10-07-w2)
+
+From the merged commit b3c8fb8: `crates/loom-executor/tests/connector_boundary.rs` (new) — cited,
+changed; and, not in the first scope,
+`crates/loom-executor/tests/fixtures/connector-boundary/metadata-with-connectors.json` (new). No
+`Cargo.toml` change: `serde_json` was already a dependency.

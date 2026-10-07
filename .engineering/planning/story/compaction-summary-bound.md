@@ -2,20 +2,23 @@
 format: aep.planning-md/3
 id: story:compaction-summary-bound
 kind: story
-status: active
+status: implemented
 title: A compaction never leaves the session above its target
 relations:
 - decomposes: epic:loom-native-harness
 - serves: vision:O1
 scope:
 - confidence: cited
+  path: crates/loom-executor/src/compaction.rs
+- confidence: cited
   path: crates/loom-executor/src/harness/turn_loop/mod.rs
 - confidence: cited
   path: crates/loom-executor/tests/adversary_w3_compaction_contract.rs
-revision: 7
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-07T02:51:19Z", actor: "human:timo", revision: 6, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
 - {from: "proposed", to: "active", at: "2026-10-07T02:51:19Z", actor: "human:timo", revision: 7, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
+- {from: "active", to: "implemented", at: "2026-10-07T06:42:42Z", actor: "human:timo", revision: 11, decided_on: {"recorded":{"test_result":1,"verification":1}}, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
 ---
 ## Outcome
 
@@ -30,7 +33,7 @@ are in the base the wave started from (`268d37b`), so the defect predates `story
 ## Acceptance
 
 `crates/loom-executor/tests/adversary_w3_compaction_contract.rs`
-`adversary_w3_a_summary_longer_than_the_target_leaves_the_session_above_half_the_window` today
+`adversary_w3_a_summary_longer_than_the_items_it_replaces_leaves_the_session_at_or_below_half_the_window` today
 asserts the current outcome (above half the window) and names this story; it is flipped to assert
 that after compaction the session is at or below 50 % of the declared window, and passes.
 
@@ -54,6 +57,12 @@ than it was asked to fold.
 No specification change. The compaction record (`loom.run.RecordCompaction`, `loom.run.ReportedUsage`
 in `ess/domains/run.yaml`) keeps its shape; what changes is the ported loop's fold rule, which no ESS
 declaration states. The red test is the existing adversary case, flipped first:
-`adversary_w3_a_summary_longer_than_the_target_leaves_the_session_above_half_the_window` in
+`adversary_w3_a_summary_longer_than_the_items_it_replaces_leaves_the_session_at_or_below_half_the_window` in
 `crates/loom-executor/tests/adversary_w3_compaction_contract.rs` asserts the bound and fails on that
 commit; the fix in `crates/loom-executor/src/harness/turn_loop/mod.rs` makes it pass.
+
+## Scope confirmed (wave 2026-10-07-w2)
+
+From the merged commit cff8690: `crates/loom-executor/src/harness/turn_loop/mod.rs` and
+`crates/loom-executor/tests/adversary_w3_compaction_contract.rs` — cited, changed; and, not in the
+first scope, `crates/loom-executor/src/compaction.rs` (module documentation).

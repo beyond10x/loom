@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-07T06:23:20Z",
+  "actor": "human:timo",
+  "artifact": "story:effect-invocation",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adversary-w2-loom-effect-invocation-pass-2",
+    "reference": "pass 2 finding 3: runtime.rs:700, adversary case kept in the unit (34b7457)",
+    "review": "review-result:adversary-w2-loom-effect-invocation-pass-2",
+    "outcome": "fixed"
+  }
+}
