@@ -276,6 +276,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "b10x-loom-conformance"
+version = "0.3.0"
+dependencies = [
+ "b10x-loom-executor",
+ "ess-conformance",
+ "ess-primitives",
+ "serde_json",
+]
+
+[[package]]
 name = "b10x-loom-executor"
 version = "0.3.0"
 dependencies = [
