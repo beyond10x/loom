@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-07T14:42:47Z",
+  "actor": "human:timo",
+  "artifact": "story:release-040",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "Published bot source release: annotated tag, exact commit, changelog notes and release identity verified",
+    "reference": "https://github.com/beyond10x/loom/releases/tag/0.4.0"
+  }
+}
