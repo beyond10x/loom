@@ -6,7 +6,7 @@ status: open
 title: Nobody has decided where a frontier action's argument schema comes from
 relations:
 - blocks: epic:fast-selector
-revision: 1
+revision: 2
 ---
 ## Question
 
@@ -31,3 +31,8 @@ L-003 and L-006); that epic is not related here.
 ## Source
 
 Decomposition of `epic:fast-selector`; Atlas ADR 0073; `docs/examples/laya-fast-selection.md`.
+
+## Status (2026-10-07)
+
+Left open on 2026-10-07: every answer changes what Canon or a protocol declares, and no scheduled
+story needs it. The blocker stays open until a story does.

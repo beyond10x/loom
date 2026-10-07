@@ -9,7 +9,7 @@ refs:
   reference: decision-blocker:managed-composition-host
 relations:
 - blocks: story:managed-composition
-revision: 1
+revision: 2
 ---
 > Re-filed from `beyond10x/commission` `decision-blocker:managed-composition-host` at `e61e4f0` (status there: `open`) under Atlas ADR 0090
 > (loom `story:import-commission`). Paths below are Commission's: `ess/` is now `ess/commission/`,
@@ -40,3 +40,8 @@ Commission owns agent revisions in managed mode.
 ## What it stops
 
 `story:managed-composition` (TASKBOARD M-012), which is deferred and unscheduled in any case.
+
+## Status (2026-10-07)
+
+Left open on 2026-10-07: nothing scheduled depends on it, and `story:managed-composition` stays
+deferred and unscheduled. The blocker stays open.
