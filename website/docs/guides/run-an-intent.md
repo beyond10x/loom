@@ -8,6 +8,10 @@ source: crates/loom-cli/src/lib.rs, crates/loom-intake-slice/src/run.rs, ess/int
 
 # Run an intent
 
+For local date/time, see [System queries and custom protocols](system-queries.md): a system query
+uses the same command without a workspace or confinement. The requirements below apply to software
+changes. Routing occurs before workspace validation or test confinement.
+
 ## Before you run it
 
 - **A Codex login.** Run `codex login` once. The credential in `~/.codex/auth.json` is read, and
@@ -65,10 +69,11 @@ The lines below are from the [live run of 2026-10-05][live], abbreviated.
 
 | `stopped:` | When | Exit status |
 |---|---|---|
+| `Completed (answered)` | A system query has verified clock evidence and its protocol completed | 0 |
 | `ApprovalRequired (<action>)` | The only useful action needs authority, which the command line never grants: normally the merge, once the tests pass on the current revision | 0 |
 | `NothingAdmissible` | Loom proposes nothing and the frontier admits nothing | 3 |
 | `StepBudget` | `--max-steps` actions were taken | 3 |
-| `NoLocalExecutor` | The router picked a protocol other than `software-change@1`, which is the only one the slice can perform | 3 |
+| `NoLocalExecutor` | The picked protocol needs tools or artifact initialization this host does not provide | 3 |
 | `Refused` | The router refused its pick | 3 |
 | `ConfinementUnavailable` | The requested confinement could not be provided; no passing evidence is submitted | 3 |
 
@@ -81,10 +86,9 @@ b10x-loom run
 
 ```text
 error: the following required arguments were not provided:
-  --workspace <DIR>
   <INTENT>
 
-Usage: b10x-loom run --workspace <DIR> <INTENT>
+Usage: b10x-loom run <INTENT>
 
 For more information, try '--help'.
 ```

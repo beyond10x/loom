@@ -20,22 +20,26 @@ Generated from the clap definition of the `b10x-loom` command line in [`crates/l
 | Command | What it does |
 |---|---|
 | [`b10x-loom run`](#b10x-loom-run) | Run the slice on an intent until it is blocked, and say why it stopped |
+| [`b10x-loom protocols`](#b10x-loom-protocols) | Install, inspect, or remove protocol definitions available to this host |
+| [`b10x-loom protocols add`](#b10x-loom-protocols-add) | Validate and snapshot one protocol from a file or a pinned Git repository |
+| [`b10x-loom protocols list`](#b10x-loom-protocols-list) | List bundled and installed definitions, provenance, and available execution bindings |
+| [`b10x-loom protocols remove`](#b10x-loom-protocols-remove) | Remove an installed definition; bundled definitions cannot be removed |
 
 ## `b10x-loom run`
 
 Run the slice on an intent until it is blocked, and say why it stopped
 
 ```text
-Usage: b10x-loom run [OPTIONS] --workspace <DIR> <INTENT>
+Usage: b10x-loom run [OPTIONS] <INTENT>
 ```
 
 | Argument | Required | Default | Meaning |
 |---|---|---|---|
 | `--context-policy <CONTEXT_POLICY>` | no | `legacy` | Keep the legacy rolling transcript, or opt into bounded working context and history lookup |
-| `--context-report <PATH>` | no | none | Write payload-free measurements, including failures after the slice starts |
+| `--context-report <PATH>` | no | none | Write payload-free measurements, including routing and startup failures |
 | `--confinement <CONFINEMENT>` | no | `substrate` | Confine tests with Substrate, or explicitly run with the operator's rights |
 | `--cgroup-root <DIR>` | no | none | An explicitly delegated cgroup v2 root for confined tests |
-| `--workspace <DIR>` | yes | none | The root of the git work tree the change is made in |
+| `--workspace <DIR>` | no | none | Existing Git worktree for software changes; unnecessary for system queries |
 | `--test-cmd <CMD>` | no | `cargo test` | The test command, run in the workspace without a shell: a program and its arguments, split at white space |
 | `--max-steps <N>` | no | `20` | The most actions performed before the run stops |
 | `--model <ID>` | no | `gpt-5.6-sol` | The model that selects actions and writes their arguments |
@@ -45,8 +49,52 @@ Usage: b10x-loom run [OPTIONS] --workspace <DIR> <INTENT>
 
 ```text
 Exit status:
-  0  the run stopped at its human gate (ApprovalRequired)
+  0  the query completed (Completed) or the run reached its human gate (ApprovalRequired)
   3  the run stopped for another reason (NothingAdmissible, StepBudget, NoLocalExecutor, Refused, ConfinementUnavailable)
   1  the run failed
   2  the command line is not valid
 ```
+
+## `b10x-loom protocols`
+
+Install, inspect, or remove protocol definitions available to this host
+
+```text
+Usage: b10x-loom protocols <COMMAND>
+```
+
+## `b10x-loom protocols add`
+
+Validate and snapshot one protocol from a file or a pinned Git repository
+
+```text
+Usage: b10x-loom protocols add [OPTIONS] <NAME>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `<NAME>` | yes | none | Registration identity, such as clock-check@1 |
+| `--file <PATH>` | no | none | Local YAML to validate and snapshot |
+| `--source <LOCATOR>` | no | none | Git locator with a full commit pin: git+https://host/repo.git#<commit> |
+| `--path <RELATIVE_PATH>` | no | none | Regular-file path inside the pinned Git commit |
+| `--replace` | no | `false` | Explicitly replace an existing installed definition |
+
+## `b10x-loom protocols list`
+
+List bundled and installed definitions, provenance, and available execution bindings
+
+```text
+Usage: b10x-loom protocols list
+```
+
+## `b10x-loom protocols remove`
+
+Remove an installed definition; bundled definitions cannot be removed
+
+```text
+Usage: b10x-loom protocols remove <NAME>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `<NAME>` | yes | none |  |

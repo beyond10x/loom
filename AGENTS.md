@@ -28,6 +28,22 @@ record of a case (AEP).
 do not break its consumers while they still depend on it. Code ported from Harness into Loom is
 Apache-2.0 (operator, 2026-10-04); Harness keeps its own `LicenseRef-B10x-Proprietary` licence.
 
+## Protocol composition and system queries
+
+Loom owns `protocols/system-query/1.yaml`, a read-only local clock query. Canon still owns protocol
+semantics, and engineering-protocols still owns engineering definitions. `b10x-loom-protocols`
+composes bundled and explicitly installed definitions. Intake routing, artifact declarations and
+host admission must use the same immutable catalog; a remote package never installs executable
+code or authority. Protocol installation is explicit and runs read verified snapshots offline.
+
+`run --workspace` is optional for system queries and required for software changes. Route before
+protocol-specific setup: a clock query must not touch Git, a workspace or Substrate. Software
+changes retain confinement and merge approval. Clock evidence comes from one trusted reading,
+not model output; only Canon completion makes a query successful. The integration test
+`crates/loom-intake-slice/tests/system_query.rs::clock_query_runs_in_both_policies_without_workspace_resources`
+holds this path in both context modes. `protocols add/list/remove` manage user installations;
+`--replace` is explicit and bundled definitions cannot be shadowed. The SDK exports the catalog.
+
 ## Rules
 
 - Model-visible actions derive from the current frontier and runtime capability. Nothing
@@ -133,6 +149,10 @@ There is no `rust-toolchain.toml`: CI builds on `stable` (`dtolnay/rust-toolchai
 toolchain newer than CI's `stable` can add Clippy lints CI does not have. Run the gate on CI's
 version (`RUSTUP_TOOLCHAIN=<version> task check`) when Clippy disagrees.
 
+`task install` builds and installs the current checkout into `~/.local/bin` through locked
+`cargo install --path`; it does not fetch or move a branch. Run the gates before installing a
+candidate for dogfooding.
+
 `task --list` names every step, and each runs alone (`task drift`, `task conform`, `task commission:conform`, …).
 `task commission:check` is Commission's own gate, limited to its crates. While iterating, prefer
 `cargo test -p <package> --locked` on the crate you touched.
@@ -210,7 +230,7 @@ a measurement-report path. Preserve typed revision-bound test state, exact inten
 complete history records, and the 64 KiB serialized request ceiling including schemas and lookups.
 `crates/loom-intake-slice/tests/bounded_context.rs` compares recorded workflows in both policies.
 This does not change the separate governed-loop compactor. Reports contain counters only and retain
-unknown provider counters as unknown; setup failures before the slice starts produce no report.
+unknown provider counters as unknown; the catalog-based CLI also reports routing and startup failures.
 
 Result capture and selection belong to `loom-intake-slice::results` and the shared `Briefing`.
 Resolve references before returning a `ProposedAction`, never inside an already-admitted effect.
@@ -218,14 +238,14 @@ Keep original statuses and capture completeness explicit; stored text is data, n
 verified evidence. The store expires with its briefing and grants no cross-run access. The
 `result_reference_workflow` integration suite holds the inspect-to-edit path and bounded context.
 
-- `b10x-loom-intake-router` classifies an intent against the engineering protocol registry and
+- `b10x-loom-intake-router` classifies an intent against the host catalog (legacy wrappers use engineering definitions) and
   refuses a pick outside it or below the confidence threshold. A routing proposal is never
   authority; whoever opens the case checks it.
 - `b10x-loom-intake-references` extracts tracker keys, chat permalinks, merge and pull requests and
   URLs from an intent, deterministically.
 - `b10x-loom-intake-slice` is the local effect adapter (`LocalEffects`) and a thin caller of
   `run_until_blocked`. It has no loop of its own; keep it small. It executes `software.change/1`
-  actions inside the given workspace only, never merges, pushes or deploys, and never supplies
+  actions inside the given workspace and `system.query/1` through the host clock, never merges, pushes or deploys, and never supplies
   authority on the operator's behalf. It submits evidence from the test command it runs itself.
 - `b10x-loom-cli` is `b10x-loom`. Its clap definition is the library (`src/lib.rs`, `Cli`), which
   `loom-docs` renders.
@@ -245,8 +265,10 @@ a skip with a named missing prerequisite establishes no qualification. The slice
 go through one helper, `crates/loom-intake-slice/src/git.rs`: no workspace hook, `core.fsmonitor`
 command or signing program runs, a case does not open on a workspace whose own configuration
 names a program, and a call is refused once that configuration, its includes or the git directory
-changed since the case opened. `tests/host_git_hardening.rs` fails on any `Command::new` of git
-outside that helper. Gates still run when the operator or the bot commits and pushes.
+changed since the case opened. `tests/host_git_hardening.rs::every_host_git_command_goes_through_a_hardened_helper` rejects
+other Git call sites except the separately hardened pinned-source helper at
+`crates/loom-protocols/src/git.rs`. That helper fetches into a private bare repository, never a
+run workspace, with hooks, fsmonitor, helpers and global/system configuration disabled. Gates still run when the operator or the bot commits and pushes.
 
 Model calls go through llm's crates at a pinned tag (`b10x-llm-tool-call` and `b10x-llm-core`,
 `0.1.7`), never a hand-written HTTP client. The Codex preset and the forced tool call are

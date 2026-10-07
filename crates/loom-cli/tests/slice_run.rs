@@ -583,7 +583,7 @@ fn the_exit_status_says_how_the_run_ended() {
     );
 
     let usage = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
-        .args(["run", INTENT])
+        .args(["run"])
         .env("HOME", &home)
         .env("CODEX_HOME", &home)
         .output()
@@ -591,7 +591,7 @@ fn the_exit_status_says_how_the_run_ended() {
     assert_eq!(
         usage.status.code(),
         Some(2),
-        "a missing --workspace is a usage error: {}",
+        "a missing intent is a usage error: {}",
         String::from_utf8_lossy(&usage.stderr)
     );
 }

@@ -6,6 +6,11 @@ only through the actions a governed frontier admits at that moment.
 **Documentation: <https://beyond10x.github.io/loom/>**, starting at
 [Getting started](https://beyond10x.github.io/loom/docs/getting-started).
 
+Development after `0.3.0` also includes workspace-free system queries and an extensible protocol
+catalog. Loom owns `system-query@1`; engineering definitions and installed custom definitions
+remain separate sources. [System queries and custom protocols](https://beyond10x.github.io/loom/docs/guides/system-queries)
+describes the clock tool, pinned installation and offline loading.
+
 Each step of a run goes the same way. Loom turns the frontier into the catalogue the model sees,
 selects one action, asks for that action's arguments and returns a `ProposedAction`. Commission's
 runtime, which lives in this repository, rechecks the proposal against the frontier, the case
@@ -28,7 +33,7 @@ the whole boundary.
 
 Version `0.3.0`, released from source at the tag `0.3.0`
 ([release](https://github.com/beyond10x/loom/releases/tag/0.3.0)). Nothing is on a registry: you
-install from the tag or depend on it with `tag = "0.3.0"`. `b10x-loom run` completed a live run
+install from the tag or depend on it with `tag = "0.3.0"`. The development capabilities below require a build from their source commit. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -59,6 +64,9 @@ b10x-loom --version
 b10x-loom 0.3.0
 ```
 
+On a development checkout, `task install` rebuilds the checked-out source and replaces
+`~/.local/bin/b10x-loom`. Keep `~/.local/bin` on your `PATH`. It does not fetch or switch branches.
+
 `b10x-loom run` routes an intent to a protocol, opens a governed case and runs until the run is
 blocked:
 
@@ -66,11 +74,11 @@ blocked:
 b10x-loom run --workspace <git work tree> --test-cmd "cargo test" "make the failing test pass"
 ```
 
-It prints each step with its effect and evidence and ends on a line such as
-`stopped: ApprovalRequired (repository.merge)`. Exit status 0 means it stopped at that human gate,
+For a software change, it prints each step with its effect and evidence and ends on a line such as
+`stopped: ApprovalRequired (repository.merge)`. Exit status 0 means a query completed or a software change stopped at that human gate,
 3 another stop, 1 a failure, 2 an invalid command line.
 
-Since `0.2.0` tests run confined. A run needs a Codex
+Since `0.2.0` tests run confined. A software-change run needs a Codex
 login and Linux with bubblewrap and delegated cgroup v2 controllers. Tests default to Substrate:
 no network, source and toolchain read-only, workspace writes only under `target/`, a 300-second
 timeout, 8 GiB memory and 2,048 processes. Fetch Rust dependencies explicitly before starting;
@@ -128,6 +136,7 @@ its code.
 
 | Package | What it is |
 |---|---|
+| `b10x-loom-protocols` | The shared protocol catalog and verified offline installations |
 | `b10x-loom-cli` | The `b10x-loom` command line |
 | `b10x-loom-sdk` | The one crate an embedding depends on |
 | `b10x-loom-executor` | The executor: catalogue, action selection, argument generation, and the model wires, turn loop and sessions ported from Harness |
@@ -135,7 +144,7 @@ its code.
 | `b10x-loom-governor` | Evaluates a case's protocol with Canon and issues the frontier; executes nothing |
 | `b10x-loom-intake-router`, `-references`, `-slice` | Route an intent to a protocol, extract its references, and run the local slice over a git work tree |
 
-The [crate reference](https://beyond10x.github.io/loom/docs/reference/crates) lists all fifteen
+The [crate reference](https://beyond10x.github.io/loom/docs/reference/crates) lists all
 workspace packages, test kits and repository tools included. If you depended on the archived
 `commission`, `governor` or `intake` repositories,
 [Move to Loom's crates](https://beyond10x.github.io/loom/docs/guides/move-to-loom) maps the old
