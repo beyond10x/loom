@@ -6,8 +6,8 @@ lede: Loom can send current working state and recent events while keeping earlie
 source: ess/intake/domains/context.yaml; crates/loom-intake-slice/src/context.rs; crates/loom-intake-slice/src/selector.rs; crates/loom-intake-slice/tests/bounded_context.rs
 ---
 
-:::caution[Development source]
-This capability is implemented after release `0.3.0`. `legacy` remains the default. Recorded
+:::caution[Opt-in policy]
+This capability ships in `0.4.0`. `legacy` remains the default. Recorded
 workflows establish behavior and request-byte reduction; matched live evaluations are still needed
 to establish task quality and cost. No proportional token-cost saving is assumed.
 :::
@@ -46,8 +46,8 @@ by phase, checkpoint and retrieval counts, model calls, total elapsed time, and 
 input, cache-read, cache-write and output counters. Missing counters are `null`; `final_usage`
 distinguishes final usage from partial error observations. Reports contain no prompts or source
 payloads. Request bytes describe the serialized provider-neutral `TurnRequest`, not provider HTTP
-framing or billed tokens. Reports are also written when a started slice fails; CLI setup failures
-before the slice starts produce no report.
+framing or billed tokens. Reports are also written when a started slice fails; the catalog-based
+CLI includes routing and startup failures.
 
 Embedders can call `run_with_options` with `RunOptions`; `run` and `SliceRequest` remain compatible.
 Interactive corrections, durable session memory, training exports and the governed-loop compactor

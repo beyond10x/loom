@@ -6,8 +6,16 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-07
+
+Loom 0.4.0 adds opt-in bounded working context, verified system time queries without a workspace,
+and installed custom protocol definitions. Transient provider overload is classified correctly
+through llm 0.3.1 and retried within a fixed attempt budget before output. Context reports count
+every attempt, and tool effects are never replayed by model retries. Legacy context remains the
+default. This is a source release; install or embed it from tag `0.4.0`.
+
 - Recognize provider overload through the updated llm adapter and retry transient intake model
-  failures at most three times before output. Count every attempt in context reports, preserve
+  failures for at most three attempts before output. Count every attempt in context reports, preserve
   cancellation and final error evidence, and never retry tool effects or actual refusals.
 
 ### Added

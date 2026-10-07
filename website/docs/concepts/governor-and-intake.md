@@ -36,7 +36,7 @@ refused. Protocol adoption is the host's decision, never a model proposal accept
 `with_protocol_yaml(name, yaml)` parses through Loom's pinned Canon so the host does not need a
 matching Canon dependency merely to register a definition.
 
-Development source adds `ProtocolCatalog`, which combines engineering definitions, Loom's own
+Since 0.4.0, Loom provides `ProtocolCatalog`, which combines engineering definitions, Loom's own
 `system-query@1`, and explicitly installed custom definitions. `with_catalog` admits and seals the
 same names and content digests that routing and case initialization use. No later definition can
 replace them. Existing `classify`, `case::open`, and software-slice callers retain their engineering

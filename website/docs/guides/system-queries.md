@@ -8,9 +8,8 @@ source: protocols/system-query/1.yaml, crates/loom-protocols/src/lib.rs, crates/
 
 # System queries and custom protocols
 
-This capability is implemented in development after 0.3.0. Use a build containing the system-query
-change; older installed binaries still require a software workspace. From the development checkout,
-`task install` rebuilds and replaces `~/.local/bin/b10x-loom`; that directory must be on your `PATH`.
+System queries and custom protocols ship in 0.4.0. From a checkout of tag `0.4.0`, `task install`
+builds and installs `b10x-loom` into `~/.local/bin`; that directory must be on your `PATH`.
 
 ## Read the time
 
@@ -35,7 +34,7 @@ time without source payloads. See [bounded context](../concepts/working-context.
 
 ## Provider overload
 
-Development builds retry a transient model failure at most twice, on the same model and account.
+Loom retries a transient model failure at most twice, on the same model and account.
 The waits are one and two seconds; a provider-requested delay can extend either wait up to
 thirty seconds. Context reports count each attempt, including failed attempts and any reported usage.
 

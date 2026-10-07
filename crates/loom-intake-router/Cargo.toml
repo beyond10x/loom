@@ -13,8 +13,8 @@ name = "b10x_loom_intake_router"
 [dependencies]
 b10x-loom-protocols = { path = "../loom-protocols" }
 b10x-canon-engineering = { git = "https://github.com/beyond10x/engineering-protocols", tag = "0.1.0" }
-b10x-llm-tool-call = { git = "https://github.com/beyond10x/llm", rev = "c0e97d620c27a8b413facffb119793d6881599f2" }
-llm-core = { package = "b10x-llm-core", git = "https://github.com/beyond10x/llm", rev = "c0e97d620c27a8b413facffb119793d6881599f2" }
+b10x-llm-tool-call = { git = "https://github.com/beyond10x/llm", tag = "0.3.1" }
+llm-core = { package = "b10x-llm-core", git = "https://github.com/beyond10x/llm", tag = "0.3.1" }
 serde_json = "1"
 
 [dev-dependencies]

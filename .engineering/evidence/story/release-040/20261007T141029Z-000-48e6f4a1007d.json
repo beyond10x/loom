@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-07T14:10:29Z",
+  "actor": "human:timo",
+  "artifact": "story:release-040",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check, task plan, task website, release-check and SDK smoke passed on release candidate; 1252 test names match inventory",
+    "reference": ".engineering/drafts/release-040/task-check.log"
+  }
+}
