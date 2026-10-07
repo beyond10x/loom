@@ -11,104 +11,117 @@ relations:
 - decomposes: epic:commission-core
 - serves: vision:O1
 - serves: vision:governed-autonomy
-revision: 1
+- depends_on: story:ess-055-upgrade
+scope:
+- confidence: inferred
+  path: crates/loom-commission-testkit/src/
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/effect_invocation.rs
+- confidence: inferred
+  path: crates/loom-commission/src/ports/
+- confidence: cited
+  path: crates/loom-commission/src/ports/effect.rs
+- confidence: cited
+  path: crates/loom-commission/src/runtime.rs
+- confidence: cited
+  path: ess/commission/domains/responsibility.yaml
+- confidence: cited
+  path: generated/rust/commission/
+revision: 4
 ---
-> Re-filed from `beyond10x/commission` `story:effect-invocation` at `e61e4f0` (status there: `draft`) under Atlas ADR 0090
-> (loom `story:import-commission`). Paths below are Commission's: `ess/` is now `ess/commission/`,
-> `docs/` is now `docs/commission/`.
-
 ## Outcome
 
-After the recheck, the Commission runtime invokes the effect of a selected action through the
-action's binding. Atlas ADR 0082 (operator decision of 2026-10-04, option A): executors (Loom, a
-human tool, a workflow executor, test fakes) only return a `ProposedAction`; Commission makes the
-invocation. This answers loom `decision-blocker:effect-invocation-owner` (cleared there).
+The Commission runtime invokes an admitted action through the action's binding to one Connector
+operation, offers an executor only actions that have a binding, and records the one Connector
+attempt an invocation produced. This applies the decisions of 2026-10-07 on
+`decision-blocker:action-operation-binding` (B), `decision-blocker:invocation-attempt-record` (A),
+`decision-blocker:read-action-effect-path` (A) and `decision-blocker:connector-substrate-containment`
+(A) to the effect step `story:runtime-merge` already shipped.
 
-For an action request the run has turned a `ProposedAction` into, and immediately before the effect,
-the runtime:
+What exists (`crates/loom-commission/src/runtime.rs`, `crates/loom-commission/src/ports/effect.rs`
+at `657c8fa`): the runtime revalidates a request against case revision, frontier and authority, and
+only then calls `EffectPort::invoke` once with an `AdmittedRequest`; `EffectPort::performs(action)`
+says whether a port performs an action, and an admitted action the port does not perform ends the
+run `NoPerformableAction`. The executor is handed the whole frontier.
 
-1. revalidates the request against the current case revision and frontier
-   (`story:stale-revision-action-request`);
-2. asks authority at the moment of the call (`story:authority-provider-port`); a deny, an
-   approval-required or a provider failure stops it;
-3. only then invokes through the action's binding, Connectors inside Substrate, once.
+This story adds:
 
-An action with no binding is refused by name and nothing is invoked. A refusal at any step invokes
-nothing. The executor never sees the binding, the Connection or the result of the invocation.
+1. **The binding.** The host's composition declares, per commission, which frontier action binds to
+   which Connector operation (`instance_id`, `operation_id`): exactly one operation per bound action,
+   at most one binding per action id. Protocol definitions and the Connectors catalog carry no
+   binding. Which Connection serves the operation is Connectors' choice and is not modelled here.
+2. **Unbound actions are never offered.** Before the executor runs, the runtime removes from the
+   frontier it hands over every action the effect port does not perform (for a Connector-backed
+   port: every action without a binding), so a Loom catalogue never lists one. A frontier left with
+   no action still ends `NoPerformableAction`, as today.
+3. **One attempt per invoked request.** `EffectOutcome::Performed` names exactly one Connector
+   attempt: the reference to the `connectors.mutations.AttemptRecord` the invocation produced. A
+   request refused at the recheck is never invoked and names none. The runtime never retries an
+   invocation; a retry is a new action request, rechecked.
+4. **One path for every action.** Read actions (`repository.inspect`, `logs.search`,
+   `metrics.inspect`) take the same recheck and the same invocation as consequential ones; nothing
+   distinguishes them.
+5. **A Connector-backed effect port behind a port of its own.** `ConnectorEffects` implements
+   `EffectPort` from a commission's bindings and invokes through a `ConnectorInvoker` port, one call
+   per admitted request. The real Connectors client is not part of this story: Connectors declares
+   the Substrate provider (a Substrate daemon is a Connection, decision of 2026-10-07) in its own
+   repository first. The testkit supplies a recording invoker.
 
-This replaces the reason `story:local-runtime-loop` gives for executing no effect ("the sources put
-execution bindings in Loom"); that story still executes none, and this one adds the step after it.
-
-## Blocked
-
-Not ready to schedule. Open decisions stop it, and no answer is written here:
-
-- `decision-blocker:action-operation-binding`: who declares action -> Connector operation, and how
-  many (moved here from loom `decision-blocker:action-operation-binding`, ADR 0082 § Open).
-- `decision-blocker:read-action-effect-path`: whether read actions take this same path
-  (ADR 0082 § Open).
-- `decision-blocker:invocation-attempt-record`: whether Commission records the Connector attempt an
-  invocation produced, and how many one request may have.
-- loom `decision-blocker:connector-substrate-containment`: whether Substrate is the Connector
-  provider or the confinement the invocation runs in. Open, filed in the loom store; not duplicated
-  here.
+`b10x-loom-commission` keeps its dependency rule: no executor, Canon or model-provider crate, and no
+Connectors crate (the invoker is a port).
 
 ## ESS first
 
-Atlas ADR 0080: the first commit changes only the specification, a named test is red on it, later
-commits make it pass.
+Atlas ADR 0080: the first commit changes only `ess/commission/`, a named test is red on it, later
+commits make it pass without changing `ess/commission/`.
 
-- **Specification change (first commit, `ess/domains/responsibility.yaml` only):** a command that
-  invokes the effect of a revalidated action request, with outcomes invoked, refused as stale,
-  refused as not admitted, refused by authority and refused as unbound; and the port vocabulary for
-  the binding the runtime invokes through. Its relations are not written until the blockers above
-  clear: the Commission ESS gate admits no open question, so this commit cannot be made yet.
-- **Red on that commit:** `drift_passes_on_the_committed_tree`
-  (`crates/commission-xtask/tests/checks.rs`, `task drift`) fails because the committed
-  `generated/rust/commission/` no longer matches a fresh synthesis of `ess/`.
-- **Then:** `task generate`, the invocation step and the test `effect_invoked_only_after_recheck`.
-
-## Domain relations
-
-- Frontier action -> Connector operation (the binding): UNSETTLED,
-  `decision-blocker:action-operation-binding`.
-- Action request -> Connector attempt (`connectors.mutations.AttemptRecord`): UNSETTLED,
-  `decision-blocker:invocation-attempt-record`.
-- Connector attempt <-> `substrate.operations.AcceptedOperation`: UNSETTLED, loom
-  `decision-blocker:connector-substrate-containment`.
-- Read action -> effect path: UNSETTLED, `decision-blocker:read-action-effect-path`.
-
-## Shared surface
-
-Depends on `story:stale-revision-action-request` (the request and its revalidation),
-`story:authority-provider-port` (the authority recheck) and `story:local-runtime-loop` (the loop the
-step joins, in `crates/commission/src/runtime.rs`, which that story fills). It edits
-`ess/domains/responsibility.yaml` and `generated/rust/commission/`, so it cannot share a wave with
-another story that does.
-
-## Scope
-
-- `crates/commission/src/runtime.rs` (the step after revalidation)
-- `crates/commission/src/ports/effect.rs`, `crates/commission-testkit/src/fake_effect.rs` (new;
-  not created by `story:port-skeleton`)
-- `crates/commission-testkit/tests/effect_invocation.rs` (new)
-- `ess/domains/responsibility.yaml`, `generated/rust/commission/`
+- **Specification change (first commit, `ess/commission/domains/responsibility.yaml`):** the binding
+  noun (an action id, a Connector `instance_id` and `operation_id`) with its relation to the
+  commission whose composition declares it (cardinality: many bindings per commission, one per action
+  id); the Connector attempt reference on `EffectOutcomePerformed` (exactly one). Model them with
+  `ess:specifying`, validate with the newest `ess` (`--strict-requires`). If ESS cannot express the
+  reference to a Connectors entity across systems, the reference is an identifier type declared
+  here and the limit is reported, not worked around by hand.
+- **Red on that commit:** `task commission:drift` fails, because the committed
+  `generated/rust/commission/` no longer matches a fresh synthesis.
+- **Then:** `task commission:generate`, the runtime filter, `ConnectorEffects`, and the test below.
 
 ## Acceptance
 
-The test `effect_invoked_only_after_recheck` in
-`crates/commission-testkit/tests/effect_invocation.rs` passes, with the scripted fake governor, the
-static fake authority provider and a recording fake binding:
+The test `effect_invoked_only_through_its_binding` in
+`crates/loom-commission-testkit/tests/effect_invocation.rs` passes, with the scripted fake governor,
+the static fake authority provider, a recording executor and a recording `ConnectorInvoker`:
 
-1. A request at the current revision, admitted by the frontier and allowed by authority, is invoked
-   exactly once through its bound operation, and the recording shows the governor and authority
-   calls before the invocation.
-2. The same request after the fake governor moves the case from N to N+1 is refused as stale,
-   naming N and N+1, and nothing is invoked.
-3. Authority deny, approval-required and provider failure each invoke nothing.
-4. An action with no binding is refused as unbound, naming the action, and nothing is invoked.
+1. An admitted request for a bound action is invoked exactly once, through its bound
+   (`instance_id`, `operation_id`), after the governor and authority calls (the recording shows the
+   order), and its `Performed` outcome names exactly one attempt.
+2. The recording executor is never handed an unbound action: with a frontier listing one bound and
+   one unbound action, the frontier it receives lists only the bound one.
+3. A frontier whose only action is unbound ends `NoPerformableAction`, and nothing is invoked.
+4. A bound read action (`repository.inspect`) is rechecked and invoked by the same path as a
+   consequential one.
+5. A stale request, an authority deny and an approval-required each invoke nothing.
+
+`task commission:deps-guard` still passes: `b10x-loom-commission` names no Connectors crate.
+
+## Scope
+
+- `ess/commission/domains/responsibility.yaml`, `generated/rust/commission/`
+- `crates/loom-commission/src/runtime.rs` (the frontier filter before the executor)
+- `crates/loom-commission/src/ports/effect.rs`, `crates/loom-commission/src/ports/` (new
+  `ConnectorInvoker` port and `ConnectorEffects`; inferred placement)
+- `crates/loom-commission-testkit/src/` (recording invoker; inferred)
+- `crates/loom-commission-testkit/tests/effect_invocation.rs` (new)
+- `crates/loom-intake-slice/src/` only if `LocalEffects` must change to keep compiling (inferred)
+
+## Shared surface
+
+Edits `ess/commission/domains/responsibility.yaml`, `generated/rust/commission/` and
+`crates/loom-commission/src/runtime.rs`, so no other unit that edits any of them shares its wave
+(`story:moved-case-outcome`, `story:ess-055-upgrade`).
 
 ## Source
 
-Atlas ADR 0082; Atlas ADR 0080; Atlas ADR 0072 (revalidate before every effect);
-`docs/contracts/commission-executor.md` (executor outcomes end at `ProposedAction`).
+Atlas ADR 0082 (Commission invokes effects); Atlas ADR 0080 (specification first); Atlas ADR 0072
+(revalidate before every effect; candidates are integrations intersected with admissible actions);
+the four decisions recorded on the blockers named in the Outcome.

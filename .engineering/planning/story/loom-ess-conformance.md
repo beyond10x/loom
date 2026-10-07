@@ -23,6 +23,7 @@ relations:
 - depends_on: story:harness-loop-port
 - depends_on: story:run-pipeline-skeleton
 - depends_on: story:harness-crate-port
+- depends_on: story:ess-055-upgrade
 scope:
 - confidence: cited
   path: Cargo.lock
@@ -38,18 +39,18 @@ scope:
   path: ess/domains/run.yaml
 - confidence: cited
   path: generated/rust/loom/
-revision: 7
+revision: 8
 ---
 ## Outcome
 
 `task check` holds the Loom ESS specification (`ess/`), complete for this epic, to its synthesized
-conformance suite, run against `b10x-loom`:
+conformance suite, run against `b10x-loom-executor`:
 
 - **Where the suite comes from.** `ess verify conform synthesize --path ess` writes it, into the test
   crate's own build directory on every run, so it tracks `ess/` without a committed copy to drift.
-- **What it runs against.** `b10x-loom`, through a Rust target in a new crate,
+- **What it runs against.** `b10x-loom-executor` (the library that implements the nine `loom.run` commands), through a Rust target in a new crate,
   `crates/loom-conformance/` (package `b10x-loom-conformance`), built on the `ess-conformance` crate
-  as a git dependency at ESS tag `0.52.0` (the `requires: ess 0.52.0` of `ess/ess-inputs.yaml`),
+  as a git dependency at the ESS tag `story:ess-055-upgrade` pins (`0.55.0`, the `requires:` of `ess/ess-inputs.yaml`),
   pinned by `Cargo.lock`. This is the route Mandate takes in `crates/mandate-conformance/`
   (mandate `95e0a4b`) and commission `story:commission-ess-conformance` plans. ESS's Go and
   TypeScript packages are not used: anything committed here that runs is Rust (`AGENTS.md` § Rules).
@@ -113,11 +114,14 @@ Corrections to the sections above, found while scoping (2026-10-06):
 - "Run against `b10x-loom`": `b10x-loom` is the CLI binary (`crates/loom-cli/Cargo.toml:14`). The nine commands are implemented in `b10x-loom-executor`, and the Commission pattern binds its target to the library; the target binds to `b10x-loom-executor` — inferred.
 - `story:commission-ess-conformance` does not resolve in this store since Commission moved in; its in-repo equivalent is `crates/loom-commission-conformance/`.
 - Not established: whether any scenario fails today (`ess verify conform synthesize` was not run); whether `loom.run.RecordTurn` has an implementation outside the generated one (`generated/rust/loom/src/behaviour.rs:241`; nothing under `crates/` names it); `ess/system.yaml` is covered by the suite but not listed above.
+- 2026-10-07: the corrections above are applied to the Outcome and Acceptance: the target binds to
+  `b10x-loom-executor`, and the ESS tag is the one `story:ess-055-upgrade` pins (this story depends
+  on it).
 
 ## Acceptance
 
 `task check` runs the test `ess_conformance_report` in `crates/loom-conformance/tests/conform.rs`,
-and it passes. It synthesizes the suite from `ess/`, runs it against `b10x-loom` through the Rust
+and it passes. It synthesizes the suite from `ess/`, runs it against `b10x-loom-executor` through the Rust
 target, and checks:
 
 1. The report records at least one executed scenario.

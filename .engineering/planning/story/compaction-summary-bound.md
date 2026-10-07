@@ -12,7 +12,7 @@ scope:
   path: crates/loom-executor/src/harness/turn_loop/mod.rs
 - confidence: cited
   path: crates/loom-executor/tests/adversary_w3_compaction_contract.rs
-revision: 3
+revision: 5
 ---
 ## Outcome
 
@@ -33,12 +33,24 @@ that after compaction the session is at or below 50 % of the declared window, an
 
 ## Options (to settle when the story is proposed)
 
-- A summary that does not shrink the folded items is treated as a failed summary
-  (`Summarised::Failed(reported)`): the items are elided instead, and the reported usage is kept.
-- The summary request's output tokens are capped at the target.
+Settled 2026-10-07, before proposing: the first option. A summary that does not shrink the items it
+would replace is treated as a failed summary (`Summarised::Failed(reported)`): the items are elided
+instead, as the byte rule does without a window, and the usage the endpoint reported for the summary
+request is still recorded. Only this option bounds the result in every case; capping the summary
+request's output tokens (the second option) bounds tokens, not the bytes the fold adds, so it is not
+taken.
 
 ## Reach
 
 No caller or configuration shown to produce it: the summary request is limited only by
 `max_output_tokens_per_turn`, which defaults to `None`, and needs a model that writes more summary
 than it was asked to fold.
+
+## ESS first
+
+No specification change. The compaction record (`loom.run.RecordCompaction`, `loom.run.ReportedUsage`
+in `ess/domains/run.yaml`) keeps its shape; what changes is the ported loop's fold rule, which no ESS
+declaration states. The red test is the existing adversary case, flipped first:
+`adversary_w3_a_summary_longer_than_the_target_leaves_the_session_above_half_the_window` in
+`crates/loom-executor/tests/adversary_w3_compaction_contract.rs` asserts the bound and fails on that
+commit; the fix in `crates/loom-executor/src/harness/turn_loop/mod.rs` makes it pass.

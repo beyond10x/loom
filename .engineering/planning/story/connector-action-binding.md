@@ -13,7 +13,10 @@ relations:
 - serves: vision:O1
 - serves: vision:O3
 - serves: vision:governed-autonomy
-revision: 3
+scope:
+- confidence: cited
+  path: crates/loom-executor/tests/connector_boundary.rs
+revision: 6
 ---
 ## Outcome
 
@@ -29,16 +32,28 @@ commission `story:effect-invocation`.
 
 ## Acceptance
 
-In a Loom run that selects a consequential action, the executor returns a `ProposedAction` for that
-action id and performs no invocation, and `cargo tree -p b10x-loom -e normal` lists no crate
-implementing Connectors `auth.custody/v1alpha1` or `auth.capability/v1alpha1`.
+The test `consequential_actions_leave_loom_only_as_a_proposal` in
+`crates/loom-executor/tests/connector_boundary.rs` passes:
+
+1. A Loom run on a frontier admitting `repository.merge`, whose scripted selector picks it, returns a
+   `ProposedAction` for `repository.merge` with its arguments; Loom is handed no effect port, so
+   nothing can be invoked.
+2. The dependency graph of `b10x-loom-executor` (normal edges, transitively, read from
+   `cargo metadata --locked --offline`) holds no package whose name starts with `connectors` or
+   `b10x-connectors`. The same check, applied to a recorded metadata fixture that adds such a
+   package, fails and names it.
+
+No specification change: the story guards behaviour that exists (`cargo tree -p b10x-loom-executor
+-e normal --offline` on `657c8fa` lists no Connectors crate). The red test is the fixture half of
+item 2, written first against a check that does not exist yet.
 
 ## Blocked
 
-One open decision touches the Loom side: `decision-blocker:action-operation-binding`. After ADR 0082
-the question itself is Commission's (commission `decision-blocker:action-operation-binding`); what
-stays open for Loom is whether an unbound action is still offered in the catalogue Loom projects, or
-filtered out before Loom sees it. The acceptance holds under either answer.
+Not blocked since 2026-10-07: `decision-blocker:action-operation-binding` is cleared with option B. The
+host's Commission composition binds an action to one Connector operation, and the Commission runtime
+removes every unbound action from the frontier before an executor runs (`story:effect-invocation`),
+so Loom never projects an unbound action into its catalogue. The acceptance below is unchanged by
+that answer; nothing in Loom filters bindings.
 
 ## Domain relations
 
