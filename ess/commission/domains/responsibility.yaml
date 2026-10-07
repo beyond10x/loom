@@ -248,15 +248,16 @@ types:
 
   # What the effect did, as the effect port reports it. Commission declares no structure for it.
   # story:effect-invocation (decision-blocker:invocation-attempt-record, A): the one Connector
-  # attempt the invocation produced. A request refused at the recheck is never invoked and names
-  # none; a retry is a new action request.
+  # attempt the invocation produced, present exactly when the effect was invoked through a
+  # Connector; an effect port that reaches no Connector names none. A request refused at the
+  # recheck is never invoked and names none; a retry is a new action request.
   - name: commission.responsibility.EffectOutcomePerformed
     kind: struct
     fields:
       - name: report
         type: Json
       - name: attempt
-        type: commission.responsibility.ConnectorAttemptId
+        type: Optional<commission.responsibility.ConnectorAttemptId>
 
   # The effect port did not perform the request, and changed nothing; why.
   - name: commission.responsibility.EffectOutcomeRefused
