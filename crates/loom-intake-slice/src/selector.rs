@@ -931,7 +931,9 @@ fn ask_request(model: &dyn Model, request: TurnRequest, tool: &str) -> Result<Va
     let cancel = Cancel::new();
     let mut sink = Discard;
     let outcome = runtime
-        .block_on(model.turn(&request, &mut sink, &cancel))
+        .block_on(crate::model_retry::turn_with_retries(
+            model, &request, &mut sink, &cancel,
+        ))
         .map_err(|error| error.to_string())?;
     outcome
         .validate_for(&request, model.provenance())

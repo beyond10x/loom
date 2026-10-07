@@ -18,7 +18,7 @@ path = "src/main.rs"
 b10x-loom-protocols = { path = "../loom-protocols" }
 serde_json = "1"
 b10x-loom-governor = { path = "../loom-governor" }
-b10x-llm-tool-call = { git = "https://github.com/beyond10x/llm", tag = "0.1.7" }
+b10x-llm-tool-call = { git = "https://github.com/beyond10x/llm", rev = "c0e97d620c27a8b413facffb119793d6881599f2" }
 b10x-loom-intake-slice = { path = "../loom-intake-slice" }
 clap = { version = "4.6", features = ["derive"] }
 tempfile = "3"
@@ -26,5 +26,5 @@ tempfile = "3"
 [dev-dependencies]
 b10x-loom-commission = { path = "../loom-commission" }
 b10x-loom-intake-references = { path = "../loom-intake-references" }
-b10x-llm-core = { git = "https://github.com/beyond10x/llm", tag = "0.1.7" }
+b10x-llm-core = { git = "https://github.com/beyond10x/llm", rev = "c0e97d620c27a8b413facffb119793d6881599f2" }
 serde_json = "1"

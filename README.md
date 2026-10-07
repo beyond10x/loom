@@ -9,7 +9,9 @@ only through the actions a governed frontier admits at that moment.
 Development after `0.3.0` also includes workspace-free system queries and an extensible protocol
 catalog. Loom owns `system-query@1`; engineering definitions and installed custom definitions
 remain separate sources. [System queries and custom protocols](https://beyond10x.github.io/loom/docs/guides/system-queries)
-describes the clock tool, pinned installation and offline loading.
+describes the clock tool, pinned installation and offline loading. Transient model failures get
+at most three attempts on the same binding; reports count every attempt. Persistent overload
+is reported as unavailable, and tool effects are never retried by this policy.
 
 Each step of a run goes the same way. Loom turns the frontier into the catalogue the model sees,
 selects one action, asks for that action's arguments and returns a `ProposedAction`. Commission's

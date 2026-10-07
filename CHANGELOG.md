@@ -6,6 +6,10 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+- Recognize provider overload through the updated llm adapter and retry transient intake model
+  failures at most three times before output. Count every attempt in context reports, preserve
+  cancellation and final error evidence, and never retry tool effects or actual refusals.
+
 ### Added
 
 - `task install` rebuilds the current checkout and installs `b10x-loom` into `~/.local/bin`.

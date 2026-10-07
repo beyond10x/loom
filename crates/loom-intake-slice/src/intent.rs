@@ -5,9 +5,10 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::model_retry::classify_with_retries;
 use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_intake_references::references;
-use b10x_loom_intake_router::{RouterError, classify_with_catalog};
+use b10x_loom_intake_router::RouterError;
 use llm_core::Model;
 use loom_governor::{CanonGovernor, CaseStore};
 use loom_protocols::ProtocolCatalog;
@@ -114,11 +115,11 @@ pub fn prepare_intent(
         .enable_all()
         .build()
         .map_err(SliceError::Runtime)?;
-    let result = runtime.block_on(classify_with_catalog(
+    let result = runtime.block_on(classify_with_retries(
         &request.intent,
         &model,
         request.threshold,
-        catalog,
+        Some(catalog),
     ));
     drop(runtime);
     let pick = match result {
