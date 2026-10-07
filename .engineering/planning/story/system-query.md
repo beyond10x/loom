@@ -19,7 +19,7 @@ scope:
   path: protocols
 - confidence: cited
   path: website
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-07T10:46:01Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-07T10:46:01Z", actor: "human:timo", revision: 3}
@@ -67,3 +67,20 @@ governor, intake router/slice, CLI and SDK extension points; corresponding tests
 One story because catalog registration, case initialization and clock execution share contracts.
 Read-only architecture review and independent adversarial review accompany implementation.
 No Jira ingestion, arbitrary tool plugins, named timezone conversion or general assistant.
+
+## Implementation and review
+
+One catalog now composes bundled, in-memory, local and pinned-Git snapshots. Canon compiles the
+same definitions used by intake, and the CLI initializes software resources only after routing.
+Clock observations are private verifier inputs bound to case/intent; local and UTC values share
+one sampled instant. Unsupported definitions name the missing host binding without executing.
+
+Independent code review found premature test-command validation, silent timezone fallback and
+lost elapsed time across delegation. Commits 660539a and 35d17aa fix these with regressions.
+The reviewer added software_intent.rs (integrated as ab0e834), exercising real Git edits and test
+observations under both policies, stale evidence after another edit, and workspace failures before
+runner/model access. Root tests also refuse oversized escaped classification inputs before calls.
+
+The live exact-intent query completed with real local/UTC clock evidence and exit zero. The durable
+qualification record is docs/qualification/2026-10-07-system-query.md. Full repository, planning
+and documentation validation are in progress; this story remains active until they pass.

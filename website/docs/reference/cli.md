@@ -77,7 +77,7 @@ Usage: b10x-loom protocols add [OPTIONS] <NAME>
 | `--file <PATH>` | no | none | Local YAML to validate and snapshot |
 | `--source <LOCATOR>` | no | none | Git locator with a full commit pin: git+https://host/repo.git#<commit> |
 | `--path <RELATIVE_PATH>` | no | none | Regular-file path inside the pinned Git commit |
-| `--replace <REPLACE>` | no | `false` | Explicitly replace an existing installed definition |
+| `--replace` | no | `false` | Explicitly replace an existing installed definition |
 
 ## `b10x-loom protocols list`
 
