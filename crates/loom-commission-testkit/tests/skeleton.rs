@@ -298,7 +298,13 @@ fn skeleton_lands_port_vocabulary_and_modules() {
             ("Suspended", "ExecutorOutcomeSuspended"),
             ("NoUsefulAction", "Unit"),
             ("CompletedLocalReasoning", "Unit"),
+            ("CaseMoved", "ExecutorOutcomeCaseMoved"),
         ],
+    );
+    assert_struct(
+        &model,
+        "ExecutorOutcomeCaseMoved",
+        &[("expected_case_revision", "Integer")],
     );
     assert_struct(
         &model,
@@ -428,6 +434,7 @@ fn skeleton_lands_port_vocabulary_and_modules() {
         std::any::type_name::<model::ExecutorOutcomeProposedAction>(),
         std::any::type_name::<model::ExecutorOutcomeNeedsHumanJudgment>(),
         std::any::type_name::<model::ExecutorOutcomeSuspended>(),
+        std::any::type_name::<model::ExecutorOutcomeCaseMoved>(),
         std::any::type_name::<model::AuthorityVerdict>(),
         std::any::type_name::<model::AuthorityVerdictDeny>(),
         std::any::type_name::<model::AuthorityVerdictApprovalRequired>(),

@@ -11,9 +11,10 @@ use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::{
     AgentRevisionId, AuthorityContext, CaseId, Commission, CommissionData, CommissionId,
-    ExecutorOutcome, ExecutorOutcomeNeedsHumanJudgment, ExecutorOutcomeProposedAction,
-    ExecutorOutcomeSuspended, Frontier, FrontierData, FrontierId, HumanDecisionRequest,
-    PrincipalId, ProposedActionArguments, SuspensionReason, Unit, commission_state, frontier_state,
+    ExecutorOutcome, ExecutorOutcomeCaseMoved, ExecutorOutcomeNeedsHumanJudgment,
+    ExecutorOutcomeProposedAction, ExecutorOutcomeSuspended, Frontier, FrontierData, FrontierId,
+    HumanDecisionRequest, PrincipalId, ProposedActionArguments, SuspensionReason, Unit,
+    commission_state, frontier_state,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission_testkit::fake_executor::{ExecutorCall, ScriptedExecutor};
@@ -154,7 +155,7 @@ fn human_request() -> HumanDecisionRequest {
     )]))
 }
 
-/// The variant's name. Exhaustive with no wildcard: a sixth variant does not compile until this
+/// The variant's name. Exhaustive with no wildcard: a seventh variant does not compile until this
 /// test says what it is.
 fn variant(outcome: &ExecutorOutcome) -> &'static str {
     match outcome {
@@ -163,6 +164,7 @@ fn variant(outcome: &ExecutorOutcome) -> &'static str {
         ExecutorOutcome::Suspended(_) => "Suspended",
         ExecutorOutcome::NoUsefulAction(_) => "NoUsefulAction",
         ExecutorOutcome::CompletedLocalReasoning(_) => "CompletedLocalReasoning",
+        ExecutorOutcome::CaseMoved(_) => "CaseMoved",
     }
 }
 
@@ -173,12 +175,12 @@ fn call<E: AgentExecutor>(executor: &E) -> ExecutorOutcome {
 
 #[test]
 fn executor_port_contract() {
-    // 1. Each of the five generated variants comes back through `AgentExecutor`, payload unchanged.
+    // 1. Each of the six generated variants comes back through `AgentExecutor`, payload unchanged.
     let arguments = ProposedActionArguments(Value::Object(vec![
         ("amount".to_owned(), Value::Number("10.50".to_owned())),
         ("currency".to_owned(), text("EUR")),
     ]));
-    let five = vec![
+    let six = vec![
         ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
             action: "refund".to_owned(),
             arguments: arguments.clone(),
@@ -191,14 +193,17 @@ fn executor_port_contract() {
         }),
         ExecutorOutcome::NoUsefulAction(Unit(true)),
         ExecutorOutcome::CompletedLocalReasoning(Unit(true)),
+        ExecutorOutcome::CaseMoved(ExecutorOutcomeCaseMoved {
+            expected_case_revision: 7,
+        }),
     ];
-    let mut names: Vec<&str> = five.iter().map(variant).collect();
+    let mut names: Vec<&str> = six.iter().map(variant).collect();
     names.sort_unstable();
     names.dedup();
-    assert_eq!(names.len(), 5, "the script must cover all five variants");
+    assert_eq!(names.len(), 6, "the script must cover all six variants");
 
-    let executor = ScriptedExecutor::new(five.clone());
-    for expected in &five {
+    let executor = ScriptedExecutor::new(six.clone());
+    for expected in &six {
         let returned = call(&executor);
         assert_eq!(
             &returned,
@@ -210,7 +215,7 @@ fn executor_port_contract() {
 
     // 2. `ProposedAction` carries generated `ProposedActionArguments`; `Suspended` carries a
     //    generated `SuspensionReason`, every one of its seven variants intact.
-    let proposed = call(&ScriptedExecutor::new([five[0].clone()]));
+    let proposed = call(&ScriptedExecutor::new([six[0].clone()]));
     let ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
         action,
         arguments: carried,

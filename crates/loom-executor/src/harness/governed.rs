@@ -859,8 +859,9 @@ where
     V::Target: Governor,
 {
     /// Ends the run at `checkpoint` with `outcome`, holding `pending` when the outcome proposes it;
-    /// a selection the pipeline refused (`NoUsefulAction`) is denied to the model instead, which
-    /// chooses again.
+    /// a selection the pipeline refused (`NoUsefulAction`, or `CaseMoved` for one made at a
+    /// revision the case has left) is denied to the model instead, which chooses again from the
+    /// next turn's catalogue, projected from the frontier current then.
     fn answer(
         &mut self,
         checkpoint: String,
@@ -868,7 +869,10 @@ where
         pending: Option<Pending>,
         action: &str,
     ) -> ApprovalDecision {
-        if matches!(outcome, ExecutorOutcome::NoUsefulAction(_)) {
+        if matches!(
+            outcome,
+            ExecutorOutcome::NoUsefulAction(_) | ExecutorOutcome::CaseMoved(_)
+        ) {
             return ApprovalDecision::denied(format!(
                 "`{action}` was not proposed: the case's current frontier does not admit it as it \
                  was selected; choose from the tools of the next turn"
@@ -916,7 +920,7 @@ where
         if pending.in_flight {
             match self.loom.revalidate(self.case, pending.selection.clone()) {
                 Ok(()) => {}
-                Err(ExecutorOutcome::NoUsefulAction(_)) => {
+                Err(ExecutorOutcome::NoUsefulAction(_) | ExecutorOutcome::CaseMoved(_)) => {
                     return ApprovalDecision::denied(self.refused(&pending.selection, &action));
                 }
                 Err(unanswered) => return self.defer(checkpoint, unanswered, Some(pending)),

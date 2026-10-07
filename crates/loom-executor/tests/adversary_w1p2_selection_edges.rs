@@ -11,8 +11,8 @@ use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::Uuid as CommissionUuid;
 use b10x_loom_commission::model::responsibility::{
     ActionStatus, AgentRevisionId, AuthorityContext, CaseId, Commission, CommissionData,
-    CommissionId, ExecutorOutcome, Frontier, FrontierAction, FrontierData, FrontierId, PrincipalId,
-    Unit, commission_state, frontier_state,
+    CommissionId, ExecutorOutcome, ExecutorOutcomeCaseMoved, Frontier, FrontierAction,
+    FrontierData, FrontierId, PrincipalId, commission_state, frontier_state,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission_testkit::fake_governor::{Answer, FakeGovernor, GovernorCall};
@@ -125,9 +125,15 @@ fn stale_revision_is_exact_at_the_far_ends_of_i64() {
 
         let outcome = loom.run(&commission(), &handed(selected_at));
 
-        if outcome != ExecutorOutcome::NoUsefulAction(Unit(true)) {
+        // `story:moved-case-outcome`: the refusal is reported as the case having moved, from the
+        // revision the selection was made at, exactly.
+        let moved = ExecutorOutcome::CaseMoved(ExecutorOutcomeCaseMoved {
+            expected_case_revision: selected_at,
+        });
+        if outcome != moved {
             failures.push(format!(
-                "selected at {selected_at}, current {now}: Loom returned {outcome:?}"
+                "selected at {selected_at}, current {now}: Loom returned {outcome:?}, expected \
+                 {moved:?}"
             ));
         }
         let selection_id = loom

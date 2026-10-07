@@ -36,12 +36,13 @@
 //!    entry listed `ApprovalRequired`, or an entry naming a capability, stays with all its entries,
 //!    performed or not, so a run still stops at its gate, and a kept action is admitted as the
 //!    governor's frontier admits it. The gate (5) and the run outcome (8, 9) read this handed
-//!    frontier, so an action the executor was never offered neither keeps a run going nor takes
-//!    it off its gate; the request (8) and [`LoopEnd::last_frontier`] read the frontier as the
-//!    governor issued it. The step is reported to the [`ObservationPort`] as
-//!    one observation: its id and time come from the [`LoopContext`], its source is `executor`, its
-//!    subject is `<case>@<frontier revision>`, and its payload names the outcome (`outcome`) and
-//!    carries a proposal's `action` and `arguments` or a human request's `request`. It is never
+//!    frontier, or after `CaseMoved` the reloaded one as it would be handed (9), so an action the
+//!    executor was never offered neither keeps a run going nor takes it off its gate; the request
+//!    (8) and [`LoopEnd::last_frontier`] read the frontier as the governor issued it. The step is
+//!    reported to the [`ObservationPort`] as one observation: its id and time come from the
+//!    [`LoopContext`], its source is `executor`, its subject is `<case>@<frontier revision>`, and
+//!    its payload names the outcome (`outcome`) and carries a proposal's `action` and `arguments`,
+//!    a human request's `request`, or a reported move's `expected_case_revision`. It is never
 //!    evidence;
 //! 7. on `Suspended`, the Run is suspended through `SuspendRun` with the executor's reason and the
 //!    run ends suspended, carrying it. The Run is suspended with that reason even when delivering
@@ -63,7 +64,18 @@
 //!    loads the case, which has moved: it ends the run completed if the case is complete, else with
 //!    no admissible action. Otherwise, and after an authority answer other than an allow, the run
 //!    outcome is derived ([`derive`]) from the frontier the executor was handed;
-//! 9. on any other outcome, the run outcome is derived from the frontier the executor was handed.
+//! 9. on `CaseMoved`, by which the executor reports that the case moved while it worked, naming
+//!    the revision of the frontier it was handed (`story:moved-case-outcome`), the run ends judged
+//!    on the case as the governor holds it now, and the executor is not run again. The case is
+//!    loaded once more ([`Governor::current_revision`], [`Governor::completion`], then
+//!    [`Governor::frontier`]): a case the governor holds complete ends the run completed, with no
+//!    frontier read; a frontier for another revision than the one just loaded ends it with no
+//!    admissible action; one that lists actions, none of which the effect port performs, with
+//!    `NoPerformableAction` (4). Otherwise the outcome is derived from that frontier as the
+//!    executor would be handed it (6), and where it would let the run go on, the run ends with no
+//!    admissible action: the Run holds the case at the revision it left. The reported revision is
+//!    observed (6), never trusted. On any other outcome, the run outcome is derived from the
+//!    frontier the executor was handed.
 //!
 //! Without a step budget the loop is bounded where the frontier does not change: two iterations in
 //! a row that are idle end the run with no admissible action. An iteration is idle when it admits
@@ -72,8 +84,8 @@
 //! new. A newly admitted request starts the count again. Idle covers `NoUsefulAction`,
 //! `CompletedLocalReasoning`, a refused proposal, an authority answer other than an allow and a
 //! repeated admission alike; a stale proposal is not counted, since the next iteration ends the
-//! run. A loop that keeps making progress is ended by [`UNBUDGETED_STEP_LIMIT`]. With a step
-//! budget, the budget alone bounds the loop.
+//! run, and `CaseMoved` ends it at once (9). A loop that keeps making progress is ended by
+//! [`UNBUDGETED_STEP_LIMIT`]. With a step budget, the budget alone bounds the loop.
 //!
 //! A failure that leaves no run outcome is a [`LoopError`]. Once the Run is started, the error
 //! names it. When the governor, its observation port or the effect port fails after the Run
@@ -92,7 +104,7 @@ use crate::model::obligation::UnmetObligation;
 use crate::model::primitives::Timestamp;
 use crate::model::responsibility::obligations::{StartRunBehavior, SuspendRunBehavior};
 use crate::model::responsibility::{
-    ActionRequestData, ActionRequestId, ActionStatus, AuthorityVerdict, Commission,
+    ActionRequestData, ActionRequestId, ActionStatus, AuthorityVerdict, CaseId, Commission,
     CompletionDetermination, EffectOutcome, ExecutorOutcome, Frontier, FrontierAction,
     FrontierData, GovernorError, Observation, ObservationData, ObservationId,
     RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeAwaitingApproval,
@@ -446,12 +458,7 @@ where
             return Ok(track.end(run_id, moved()));
         }
         track.last_frontier = Some(frontier.data().clone());
-        let actions = &frontier.data().actions;
-        if !actions.is_empty()
-            && !actions
-                .iter()
-                .any(|listed| effects.performs(&listed.action))
-        {
+        if performs_none(&frontier, effects) {
             return Ok(track.end(run_id, RunOutcome::NoPerformableAction(Unit(true))));
         }
         // The frontier the executor is handed; the gate and the outcome read it too.
@@ -490,6 +497,10 @@ where
             };
         }
         observed?;
+        if let ExecutorOutcome::CaseMoved(_) = &outcome {
+            let outcome = moved_outcome(governor, effects, case, &outcome)?;
+            return Ok(track.end(run_id, outcome));
+        }
 
         let mut progressed = false;
         let mut decided = false;
@@ -600,6 +611,54 @@ fn out_of_budget<R: SuspendRunBehavior + ?Sized>(
     Ok(track.end(run_id, outcome))
 }
 
+/// Whether `frontier` lists actions and the effect port performs none of them (item 4).
+fn performs_none<F: EffectPort + ?Sized>(
+    frontier: &Frontier<frontier_state::Issued>,
+    effects: &F,
+) -> bool {
+    let actions = &frontier.data().actions;
+    !actions.is_empty()
+        && !actions
+            .iter()
+            .any(|listed| effects.performs(&listed.action))
+}
+
+/// How a run ends after its executor reported `CaseMoved` (item 9): `case` is loaded once more
+/// and judged on the frontier current then, as the executor would be handed it. The Run holds the
+/// case at the revision it left, so a frontier that would let the run go on ends it with no
+/// admissible action.
+fn moved_outcome<G, F>(
+    governor: &G,
+    effects: &F,
+    case: &CaseId,
+    reported: &ExecutorOutcome,
+) -> Result<RunOutcome, GovernorError>
+where
+    G: Governor + ?Sized,
+    F: EffectPort + ?Sized,
+{
+    let no_admissible_action = || RunOutcome::NoAdmissibleAction(Unit(true));
+    let loaded = governor.current_revision(case)?;
+    let determination = governor.completion(case)?;
+    if let CompletionDetermination::Complete(complete) = &determination {
+        return Ok(RunOutcome::Completed(RunOutcomeCompleted {
+            outcome: complete.outcome.clone(),
+        }));
+    }
+    let frontier = governor.frontier(case)?;
+    if frontier.data().case_revision != loaded {
+        return Ok(no_admissible_action());
+    }
+    if performs_none(&frontier, effects) {
+        return Ok(RunOutcome::NoPerformableAction(Unit(true)));
+    }
+    let handed = offered(&frontier, effects);
+    Ok(match derive(&determination, &handed, reported, None) {
+        Derived::Ended(outcome) => outcome,
+        Derived::Continue => no_admissible_action(),
+    })
+}
+
 /// The frontier an executor is handed: `frontier` less every action the effect port does not
 /// perform and that needs no authority. An action behind an authority gate stays, performed or not
 /// (`decision-blocker:gated-unbound-action-visibility`, B). The filter works by action, not by
@@ -672,6 +731,13 @@ fn observation<C: LoopContext + ?Sized>(
         ExecutorOutcome::CompletedLocalReasoning(_) => {
             vec![("outcome".to_owned(), text("CompletedLocalReasoning"))]
         }
+        ExecutorOutcome::CaseMoved(moved) => vec![
+            ("outcome".to_owned(), text("CaseMoved")),
+            (
+                "expected_case_revision".to_owned(),
+                Value::Number(moved.expected_case_revision.to_string()),
+            ),
+        ],
     };
     Observation::new(ObservationData {
         observation_id: context.observation_id(),

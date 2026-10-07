@@ -61,6 +61,7 @@ Tagged by `kind`.
 
 | Variant | Payload |
 |---|---|
+| `CaseMoved` | [`ExecutorOutcomeCaseMoved`](#executoroutcomecasemoved) |
 | `CompletedLocalReasoning` | none |
 | `NeedsHumanJudgment` | [`ExecutorOutcomeNeedsHumanJudgment`](#executoroutcomeneedshumanjudgment) |
 | `NoUsefulAction` | none |
@@ -148,6 +149,12 @@ Tagged by `kind`.
 | Field | Type |
 |---|---|
 | `reason` | `string` |
+
+### ExecutorOutcomeCaseMoved
+
+| Field | Type |
+|---|---|
+| `expected_case_revision` | `integer` |
 
 ### ExecutorOutcomeNeedsHumanJudgment
 

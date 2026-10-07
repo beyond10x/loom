@@ -13,8 +13,9 @@ use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::Uuid as CommissionUuid;
 use b10x_loom_commission::model::responsibility::{
     ActionStatus, AgentRevisionId, AuthorityContext, CaseId, Commission, CommissionData,
-    CommissionId, CompletionDetermination, ExecutorOutcome, Frontier, FrontierAction, FrontierData,
-    FrontierId, GovernorError, PrincipalId, Unit, commission_state, frontier_state,
+    CommissionId, CompletionDetermination, ExecutorOutcome, ExecutorOutcomeCaseMoved, Frontier,
+    FrontierAction, FrontierData, FrontierId, GovernorError, PrincipalId, Unit, commission_state,
+    frontier_state,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
@@ -137,6 +138,14 @@ fn proposed(outcome: &ExecutorOutcome, action: &str) -> bool {
     matches!(outcome, ExecutorOutcome::ProposedAction(proposal) if proposal.action == action)
 }
 
+/// What Loom returns for a selection refused `stale-revision` (`story:moved-case-outcome`): the
+/// case moved, from the revision the selection was made at.
+fn case_moved(selected_at: i64) -> ExecutorOutcome {
+    ExecutorOutcome::CaseMoved(ExecutorOutcomeCaseMoved {
+        expected_case_revision: selected_at,
+    })
+}
+
 fn not_in_frontier(revalidations: &[RevalidateSelectionOutcome], action: &str) -> bool {
     matches!(
         revalidations,
@@ -170,7 +179,7 @@ fn a_current_frontier_older_than_the_catalogue_is_stale() {
         handed(REVISION, both_admissible()),
         current(REVISION - 1, both_admissible()),
     );
-    assert_eq!(outcome, ExecutorOutcome::NoUsefulAction(Unit(true)));
+    assert_eq!(outcome, case_moved(REVISION));
     assert!(
         matches!(
             revalidations.as_slice(),
@@ -334,7 +343,7 @@ fn the_handed_frontier_does_not_leak_into_revalidation() {
         handed(REVISION + 5, both_admissible()),
         current(REVISION, both_admissible()),
     );
-    assert_eq!(outcome, ExecutorOutcome::NoUsefulAction(Unit(true)));
+    assert_eq!(outcome, case_moved(REVISION + 5));
     assert!(
         matches!(
             revalidations.as_slice(),
@@ -412,7 +421,7 @@ fn a_case_moving_during_argument_generation_is_refused_stale() {
 
     let outcome = loom.run(&commission(), &handed(REVISION, both_admissible()));
 
-    assert_eq!(outcome, ExecutorOutcome::NoUsefulAction(Unit(true)));
+    assert_eq!(outcome, case_moved(REVISION));
     assert!(
         matches!(
             loom.revalidations().as_slice(),
@@ -510,7 +519,7 @@ fn a_revision_moving_between_runs_is_read_per_run() {
     let second = loom.run(&commission(), &handed(REVISION, both_admissible()));
 
     assert!(proposed(&first, EDIT), "{first:?}");
-    assert_eq!(second, ExecutorOutcome::NoUsefulAction(Unit(true)));
+    assert_eq!(second, case_moved(REVISION));
     assert_eq!(governor.calls().len(), 2, "{:?}", governor.calls());
 }
 
@@ -603,7 +612,7 @@ fn concurrent_runs_on_one_loom_keep_their_revalidations_apart() {
                             loom.run(&commission(), &current_frontier())
                         };
                         let right = if stale {
-                            outcome == ExecutorOutcome::NoUsefulAction(Unit(true))
+                            outcome == case_moved(REVISION)
                         } else {
                             proposed(&outcome, EDIT)
                         };
