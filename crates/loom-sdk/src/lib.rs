@@ -29,6 +29,9 @@ pub use b10x_loom_executor as loom;
 /// The governor (`b10x-loom-governor`).
 pub use loom_governor as governor;
 
+/// Protocol definitions and the immutable host catalog (`b10x-loom-protocols`).
+pub use loom_protocols as protocols;
+
 /// Intake: routing an intent to a protocol, and the local slice that performs `software-change@1`.
 pub mod intake {
     /// The router (`b10x-loom-intake-router`).
@@ -47,3 +50,6 @@ pub use b10x_loom_intake_slice::confinement::{
 };
 pub use b10x_loom_intake_slice::executor::UnconfinedRunner;
 pub use loom_governor::{CanonGovernor, CaseStore, MemoryCaseStore};
+
+/// The protocol catalog shared by routing, case initialization and governor admission.
+pub use loom_protocols::ProtocolCatalog;

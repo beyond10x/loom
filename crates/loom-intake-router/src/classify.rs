@@ -4,6 +4,7 @@ use std::fmt::{self, Write as _};
 
 use b10x_llm_tool_call::{ModelError, call_tool};
 use llm_core::{Item, Model, ToolName, ToolSpec};
+use loom_protocols::ProtocolCatalog;
 use serde_json::{Map, Value, json};
 
 /// The tool [`classify`] forces on the model.
@@ -29,6 +30,8 @@ pub enum RouterError {
     /// A built-in protocol of the registry cannot be read: Canon cannot parse it or finds it
     /// invalid.
     Registry(canon_engineering::registry::Error),
+    /// The host catalog cannot be assembled.
+    Catalog(String),
     /// The forced call gave no usable answer.
     Model(ModelError),
     /// The call's arguments are not a pick: a field is missing or of the wrong type, or the
@@ -51,6 +54,7 @@ impl fmt::Display for RouterError {
                 write!(f, "the threshold {threshold} is not a number from 0 to 1")
             }
             Self::Registry(error) => write!(f, "the protocol registry cannot be read: {error}"),
+            Self::Catalog(error) => write!(f, "the protocol catalog cannot be read: {error}"),
             Self::Model(error) => write!(f, "no protocol was picked: {error}"),
             Self::Malformed(why) => write!(f, "the model's pick is malformed: {why}"),
             Self::OutsideRegistry { protocol } => {
@@ -89,7 +93,7 @@ impl std::error::Error for RouterError {
 ///
 /// # Errors
 /// [`RouterError::InvalidThreshold`] for a threshold outside 0 to 1 (before any call),
-/// [`RouterError::Registry`] for a built-in Canon refuses, [`RouterError::Model`] when the call
+/// [`RouterError::Catalog`] when the engineering catalog cannot be assembled, [`RouterError::Model`] when the call
 /// gives no answer, [`RouterError::Malformed`] for arguments that are not a pick,
 /// [`RouterError::OutsideRegistry`] for a protocol the registry does not hold and
 /// [`RouterError::Unsure`] for a confidence below `threshold`.
@@ -101,7 +105,30 @@ pub async fn classify(
     if !(0.0..=1.0).contains(&threshold) {
         return Err(RouterError::InvalidThreshold(threshold));
     }
-    let registry = Registry::read()?;
+    let catalog = ProtocolCatalog::engineering().map_err(RouterError::Catalog)?;
+    classify_with_catalog(intent, model, threshold, &catalog).await
+}
+
+/// Proposes a protocol from the host's immutable catalog. The proposal conveys no authority.
+///
+/// Uses the same request and answer checks as [`classify`], but offers exactly the supplied
+/// catalog, including host-admitted definitions from any supported source.
+///
+/// # Errors
+/// The same threshold, model, malformed-answer, membership and confidence errors as [`classify`].
+pub async fn classify_with_catalog(
+    intent: &str,
+    model: &dyn Model,
+    threshold: f64,
+    catalog: &ProtocolCatalog,
+) -> Result<ProtocolPick, RouterError> {
+    if !(0.0..=1.0).contains(&threshold) {
+        return Err(RouterError::InvalidThreshold(threshold));
+    }
+    let registry = Registry::from_catalog(catalog);
+    if registry.entries.is_empty() {
+        return Err(RouterError::Catalog("no protocols are admitted".into()));
+    }
     let arguments = call_tool(
         model,
         &registry.instructions,
@@ -122,38 +149,31 @@ struct Registry {
 }
 
 impl Registry {
-    fn read() -> Result<Self, RouterError> {
+    fn from_catalog(catalog: &ProtocolCatalog) -> Self {
         let mut entries = Vec::new();
         let mut instructions = String::from(
             "Pick the one protocol below that the user's intent should run under, by calling \
              pick_protocol. Give your confidence from 0 to 1 and your reasons. Pick only a \
              listed protocol; when none fits, say so with a low confidence.\n\nProtocols:\n",
         );
-        for (name, major) in canon_engineering::registry::list() {
-            let builtin =
-                canon_engineering::registry::get(name, major).map_err(RouterError::Registry)?;
-            let entry = format!("{name}@{major}");
-            let header = &builtin.model.protocol;
-            let description = header.description.as_deref().unwrap_or("(no description)");
+        for definition in catalog.iter() {
+            let entry = definition.name();
+            let description = definition.description();
             // Writing to a String cannot fail.
             let _ = writeln!(instructions, "\n- {entry}: {description}");
-            let mut artifacts = builtin.model.artifacts.iter().peekable();
-            if artifacts.peek().is_some() {
+            let artifacts = definition.artifacts();
+            if !artifacts.is_empty() {
                 let _ = writeln!(instructions, "  Artifacts:");
             }
-            for (artifact, declared) in artifacts {
-                let description = declared
-                    .description
-                    .as_deref()
-                    .unwrap_or("(no description)");
+            for (artifact, description) in artifacts {
                 let _ = writeln!(instructions, "  - {artifact}: {description}");
             }
-            entries.push(entry);
+            entries.push(entry.to_owned());
         }
-        Ok(Self {
+        Self {
             entries,
             instructions,
-        })
+        }
     }
 
     /// The forced tool, its `protocol` an enum of the entries.

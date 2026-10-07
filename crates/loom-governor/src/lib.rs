@@ -57,6 +57,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
+use loom_protocols::ProtocolCatalog;
+
 use b10x_canon::eval::{Supplied, evaluate_with, evidence_from_value};
 use b10x_canon::ir::{Ir, compile};
 use b10x_canon::model::{
@@ -317,6 +319,7 @@ impl std::error::Error for UpdateError {}
 pub struct CanonGovernor<S, T = NoEvaluationTime> {
     store: S,
     protocols: BTreeMap<String, Ir>,
+    catalog_definitions: Option<BTreeMap<String, String>>,
     time: T,
 }
 
@@ -326,12 +329,68 @@ impl<S: FallibleCaseStore> CanonGovernor<S> {
         Self {
             store,
             protocols: BTreeMap::new(),
+            catalog_definitions: None,
             time: NoEvaluationTime,
         }
     }
 }
 
 impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
+    /// Admit exactly the immutable host catalog, compiling every definition with Canon.
+    ///
+    /// This replaces implicit bundled lookup with the catalog's exact membership. Admission
+    /// must precede any explicit protocol registrations; it cannot silently replace definitions
+    /// already admitted by another host path. Once bound, the catalog cannot be extended.
+    pub fn with_catalog(mut self, catalog: &ProtocolCatalog) -> Result<Self, OpenError> {
+        if self.catalog_definitions.is_some() || !self.protocols.is_empty() {
+            return Err(OpenError::InvalidProtocol {
+                protocol: "catalog".into(),
+                problem: "a catalog or host protocol is already registered".into(),
+            });
+        }
+        let mut protocols = BTreeMap::new();
+        for entry in catalog.iter() {
+            let name = entry.name();
+            let ir = compile(&entry.model).map_err(|problems| OpenError::InvalidProtocol {
+                protocol: name.to_owned(),
+                problem: problems
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            })?;
+            representable(name, &ir)?;
+            protocols.insert(name.to_owned(), ir);
+        }
+        self.protocols = protocols;
+        self.catalog_definitions = Some(
+            catalog
+                .iter()
+                .map(|entry| (entry.name().to_owned(), entry.definition.sha256.clone()))
+                .collect(),
+        );
+        Ok(self)
+    }
+
+    /// Check that routing and artifact initialization use the exact admitted catalog.
+    ///
+    /// Legacy governors without explicit catalog admission fail this check; their existing
+    /// protocol registration and case-opening methods remain available unchanged.
+    pub fn validate_catalog(&self, catalog: &ProtocolCatalog) -> Result<(), OpenError> {
+        let definitions: BTreeMap<_, _> = catalog
+            .iter()
+            .map(|entry| (entry.name().to_owned(), entry.definition.sha256.clone()))
+            .collect();
+        if self.catalog_definitions.as_ref() != Some(&definitions) {
+            return Err(OpenError::InvalidProtocol {
+                protocol: "catalog".into(),
+                problem: "the supplied catalog differs from the governor's admitted definitions"
+                    .into(),
+            });
+        }
+        Ok(())
+    }
+
     /// Parse and register a host-admitted protocol with the governor's pinned Canon. This keeps
     /// embedders independent of Canon crate identity; all registration checks still apply.
     pub fn with_protocol_yaml(self, name: &str, yaml: &str) -> Result<Self, OpenError> {
@@ -356,6 +415,9 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             protocol: name.to_owned(),
             problem,
         };
+        if self.catalog_definitions.is_some() {
+            return Err(invalid("the admitted catalog is immutable".into()));
+        }
         if name.is_empty()
             || name.trim() != name
             || name.chars().any(char::is_control)
@@ -385,6 +447,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
         CanonGovernor {
             store: self.store,
             protocols: self.protocols,
+            catalog_definitions: self.catalog_definitions,
             time,
         }
     }
@@ -392,6 +455,9 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
     fn protocol_ir(&self, protocol: &str) -> Result<Ir, OpenError> {
         match self.protocols.get(protocol) {
             Some(ir) => Ok(ir.clone()),
+            None if self.catalog_definitions.is_some() => Err(OpenError::UnknownProtocol {
+                protocol: protocol.to_owned(),
+            }),
             None => {
                 let ir = protocol_ir(protocol)?;
                 representable(protocol, &ir)?;

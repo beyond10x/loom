@@ -11,6 +11,7 @@ publish = false
 name = "loom_sdk"
 
 [dependencies]
+b10x-loom-protocols = { path = "../loom-protocols" }
 b10x-loom-commission = { path = "../loom-commission" }
 b10x-loom-governor = { path = "../loom-governor" }
 b10x-loom-intake-router = { path = "../loom-intake-router" }
