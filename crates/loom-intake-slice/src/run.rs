@@ -101,6 +101,7 @@ use loom_governor::{CanonGovernor, CaseStore};
 
 use crate::case::{self, CaseError};
 use crate::confinement::TestRunner;
+use crate::context_metrics::{ContextMetrics, ContextPolicy, MeasuredModel};
 use crate::effect::{Console, LocalEffects, refuse};
 use crate::executor::backend_name;
 use crate::executor::{ExecuteError, LocalExecutor, TestCommand, fresh_uuid, now};
@@ -130,6 +131,22 @@ pub struct SliceRequest {
     pub threshold: f64,
 }
 
+/// Optional context policy and measurement destination for one run. Existing callers stay legacy.
+#[derive(Debug, Clone)]
+pub struct RunOptions {
+    pub context_policy: ContextPolicy,
+    pub context_report: Option<PathBuf>,
+}
+
+impl Default for RunOptions {
+    fn default() -> Self {
+        Self {
+            context_policy: ContextPolicy::Legacy,
+            context_report: None,
+        }
+    }
+}
+
 /// Why a slice run ended (`intake.routing.StopReason`).
 pub use intake_model::routing::StopReason;
 
@@ -148,6 +165,13 @@ pub struct SliceRun {
 /// Why a run ended without a stop reason.
 #[derive(Debug)]
 pub enum SliceError {
+    /// Context capacity was exhausted after preserving the effects already completed.
+    Context(String),
+    /// Measurement output failed; a simultaneous run failure is retained too.
+    ContextReport {
+        error: io::Error,
+        run_error: Option<Box<SliceError>>,
+    },
     /// The output could not be written.
     Output(io::Error),
     /// No runtime could be made for the classification.
@@ -176,6 +200,13 @@ pub enum SliceError {
 impl fmt::Display for SliceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Context(why) => write!(f, "working context refused: {why}"),
+            Self::ContextReport { error, run_error } => {
+                if let Some(run_error) = run_error {
+                    write!(f, "{run_error}; ")?;
+                }
+                write!(f, "context report cannot be written: {error}")
+            }
             Self::Output(error) => write!(f, "the output cannot be written: {error}"),
             Self::Runtime(error) => write!(f, "no runtime for the classification: {error}"),
             Self::Router(error) => error.fmt(f),
@@ -223,6 +254,66 @@ pub fn run<S: CaseStore>(
     agent: &dyn Model,
     out: &mut dyn Write,
 ) -> Result<SliceRun, SliceError> {
+    run_with_options(
+        request,
+        governor,
+        frontiers,
+        classifier,
+        agent,
+        out,
+        &RunOptions::default(),
+    )
+}
+
+/// Runs with an opt-in context policy and writes payload-free measurements even on run failure.
+///
+/// # Errors
+/// As [`run`], plus explicit context capacity and report output failures. A report output failure
+/// retains any original run failure; already printed output and completed effects remain visible.
+pub fn run_with_options<S: CaseStore>(
+    request: &SliceRequest,
+    governor: &CanonGovernor<S>,
+    frontiers: &dyn Governor,
+    classifier: &dyn Model,
+    agent: &dyn Model,
+    out: &mut dyn Write,
+    options: &RunOptions,
+) -> Result<SliceRun, SliceError> {
+    let metrics = ContextMetrics::new(options.context_policy);
+    let classifier = MeasuredModel::new(classifier, metrics.clone());
+    let agent = MeasuredModel::new(agent, metrics.clone());
+    let result = run_measured(
+        request,
+        governor,
+        frontiers,
+        &classifier,
+        &agent,
+        out,
+        options,
+        &metrics,
+    );
+    if let Some(path) = &options.context_report
+        && let Err(error) = metrics.write(path)
+    {
+        return Err(SliceError::ContextReport {
+            error,
+            run_error: result.err().map(Box::new),
+        });
+    }
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_measured<S: CaseStore>(
+    request: &SliceRequest,
+    governor: &CanonGovernor<S>,
+    frontiers: &dyn Governor,
+    classifier: &dyn Model,
+    agent: &dyn Model,
+    out: &mut dyn Write,
+    options: &RunOptions,
+    metrics: &ContextMetrics,
+) -> Result<SliceRun, SliceError> {
     let found = references(&request.intent);
     for reference in &found {
         writeln!(
@@ -263,7 +354,12 @@ pub fn run<S: CaseStore>(
     )
     .map_err(SliceError::Case)?;
 
-    let briefing = Briefing::new(request.intent.clone(), found);
+    let briefing = Briefing::with_options(
+        request.intent.clone(),
+        found,
+        options.context_policy,
+        metrics.clone(),
+    );
     let chosen = Arc::new(Mutex::new(None));
     let refused = Arc::new(Mutex::new(None));
     let console = Console::new(out);
@@ -296,7 +392,7 @@ pub fn run<S: CaseStore>(
         governor,
         case.clone(),
         &pick.protocol,
-        briefing,
+        briefing.clone(),
         &console,
     );
     let reads = Reads {
@@ -321,6 +417,7 @@ pub fn run<S: CaseStore>(
     drop(effects);
     drop(step);
     let failure = console.take_failure();
+    let context_failure = briefing.failure();
     let steps = console.steps();
     drop(console);
     if let Some(failure) = failure {
@@ -334,6 +431,9 @@ pub fn run<S: CaseStore>(
             );
         }
         return Err(failure);
+    }
+    if let Some(why) = context_failure {
+        return Err(SliceError::Context(why));
     }
 
     let end = match result {

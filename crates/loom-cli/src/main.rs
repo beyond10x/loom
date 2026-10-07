@@ -14,7 +14,9 @@ use b10x_loom_cli::{Cli, Command, Confinement, RunArgs};
 use b10x_loom_intake_slice::confinement::ConfinementRefusal;
 use b10x_loom_intake_slice::confinement::{SubstrateRunner, TestRunner, prepare_delegated_cgroup};
 use b10x_loom_intake_slice::executor::{TestCommand, UnconfinedRunner};
-use b10x_loom_intake_slice::run::{SliceRequest, SliceRun, StopReason, printable, run};
+use b10x_loom_intake_slice::run::{
+    RunOptions, SliceRequest, SliceRun, StopReason, printable, run_with_options,
+};
 use clap::Parser;
 use loom_governor::{CanonGovernor, MemoryCaseStore};
 
@@ -138,6 +140,10 @@ fn exit_status(reason: StopReason) -> u8 {
 }
 
 fn run_slice(arguments: RunArgs, runner: Arc<dyn TestRunner>) -> Result<SliceRun, String> {
+    let options = RunOptions {
+        context_policy: arguments.context_policy,
+        context_report: arguments.context_report,
+    };
     let mut words = arguments.test_cmd.split_whitespace();
     let program = words
         .next()
@@ -155,13 +161,14 @@ fn run_slice(arguments: RunArgs, runner: Arc<dyn TestRunner>) -> Result<SliceRun
         threshold: arguments.threshold,
     };
     let mut out = std::io::stdout().lock();
-    run(
+    run_with_options(
         &request,
         &governor,
         &governor,
         &classifier,
         &agent,
         &mut out,
+        &options,
     )
     .map_err(|error| error.to_string())
 }

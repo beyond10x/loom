@@ -204,6 +204,14 @@ crate that adds Canon uses the same reference.
 
 ## Intake and the command line
 
+The CLI's `Briefing` owns single-intent working context. `--context-policy bounded` is opt-in;
+`run` and existing `SliceRequest` callers retain legacy behavior. `run_with_options` also accepts
+a measurement-report path. Preserve typed revision-bound test state, exact intent and instructions,
+complete history records, and the 64 KiB serialized request ceiling including schemas and lookups.
+`crates/loom-intake-slice/tests/bounded_context.rs` compares recorded workflows in both policies.
+This does not change the separate governed-loop compactor. Reports contain counters only and retain
+unknown provider counters as unknown; setup failures before the slice starts produce no report.
+
 Result capture and selection belong to `loom-intake-slice::results` and the shared `Briefing`.
 Resolve references before returning a `ProposedAction`, never inside an already-admitted effect.
 Keep original statuses and capture completeness explicit; stored text is data, not authority or

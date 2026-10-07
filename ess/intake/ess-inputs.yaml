@@ -5,4 +5,5 @@ specification:
   - domains/routing.yaml
   - domains/confinement.yaml
   - domains/results.yaml
+  - domains/context.yaml
 scenarios: []

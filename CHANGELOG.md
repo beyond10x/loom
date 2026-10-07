@@ -8,6 +8,14 @@ under **Unreleased** until the next release.
 
 ### Added
 
+- Opt-in `--context-policy bounded` uses report-derived working state, a recent-event tail and
+  retrievable history in the local CLI slice. It retires history in batches above 48 KiB toward
+  32 KiB and enforces a 64 KiB serialized request ceiling. The separate history archive is limited
+  to 16 MiB and 4,096 events; capacity failures stop later model requests while preserving completed
+  effects. Selection and arguments each support eight history/result lookups. `--context-report`
+  writes payload-free request and provider-usage measurements, including failures after the slice
+  starts. Embedders gain `run_with_options`; existing callers and the CLI default remain legacy.
+
 - Commission declares the action-operation binding: a commission's composition binds a frontier
   action id to exactly one Connector operation (`instance_id`, `operation_id`), at most one binding
   per action id (`ActionBinding`, identity `(commission_id, action)`).

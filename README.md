@@ -41,6 +41,11 @@ which are expanded before Commission admission;
 
 ## Run the command line
 
+Development source also supports opt-in `--context-policy bounded` and `--context-report PATH`.
+It keeps typed working state and a recent event tail, with retrievable run-local history and a
+64 KiB serialized request ceiling. The default remains `legacy`; recorded byte reductions do not
+establish live quality or cost savings. See [working context](website/docs/concepts/working-context.md).
+
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console

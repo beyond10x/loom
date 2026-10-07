@@ -21,6 +21,8 @@
 
 pub mod case;
 pub mod confinement;
+pub mod context;
+pub mod context_metrics;
 pub mod effect;
 pub mod executor;
 pub mod git;

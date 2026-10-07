@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-06T20:56:39Z",
+  "actor": "human:timo",
+  "artifact": "story:bounded-context",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test -p b10x-loom-intake-slice --test bounded_context --locked: 10 passed",
+    "reference": "docs/qualification/bounded-context.md"
+  }
+}
