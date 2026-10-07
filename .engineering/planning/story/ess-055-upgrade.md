@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:ess-055-upgrade
 kind: story
-status: draft
+status: active
 title: Loom builds, generates and gates on ESS 0.55.0
 relations:
 - decomposes: epic:runtime-consolidation
@@ -38,7 +38,10 @@ scope:
   path: generated/rust/loom/
 - confidence: inferred
   path: website/docs/reference/
-revision: 3
+revision: 6
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-07T02:13:06Z", actor: "human:timo", revision: 5, executor: "agent:loom", correlation: "wave/2026-10-07-w1"}
+- {from: "proposed", to: "active", at: "2026-10-07T02:13:06Z", actor: "human:timo", revision: 6, executor: "agent:loom", correlation: "wave/2026-10-07-w1"}
 ---
 ## Outcome
 
@@ -70,8 +73,9 @@ and `ess/intake/ess-inputs.yaml`; on it `task drift` (or a generation check) is 
 committed generated trees, and the run is recorded. No domain declaration changes. Source formats
 stay as they are unless 0.55.0 refuses one.
 
-The unit runs `ess` 0.55.0 from the release archive, verified against `SHA256SUMS`, on its own
-`PATH`; the machine's shared `ess` is not replaced by this story (other repositories gate on it).
+The machine's shared `ess` (`~/.cargo/bin/ess`) has been 0.55.0 since 2026-10-06T23:31Z, so the
+unit uses it; until this story lands, a loom gate run against it fails the `--strict-requires`
+check (`requires: ess 0.54.0`), which is the red state this story ends.
 
 ## Acceptance
 
