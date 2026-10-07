@@ -13,6 +13,7 @@ name = "b10x_loom_intake_slice"
 [dependencies]
 b10x-loom-protocols = { path = "../loom-protocols" }
 chrono = "0.4"
+jiff = "0.2"
 b10x-loom-commission = { path = "../loom-commission" }
 b10x-canon-engineering = { git = "https://github.com/beyond10x/engineering-protocols", tag = "0.1.0" }
 b10x-loom-governor = { path = "../loom-governor" }

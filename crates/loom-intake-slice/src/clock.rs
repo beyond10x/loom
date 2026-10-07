@@ -10,7 +10,7 @@ use b10x_loom_commission::model::{json, primitives::Timestamp};
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use b10x_loom_commission::ports::evidence::{ObservationPort, submit_evidence};
 use b10x_loom_commission::ports::governor::Governor;
-use chrono::{DateTime, FixedOffset, Local, SecondsFormat, Utc};
+use chrono::{DateTime, FixedOffset, SecondsFormat, Utc};
 use intake_model::query::TimeObservation;
 use loom_governor::{CanonGovernor, CaseStore};
 
@@ -33,8 +33,20 @@ pub trait Clock {
 pub struct HostClock;
 impl Clock for HostClock {
     fn read(&self) -> Result<DateTime<FixedOffset>, String> {
-        std::panic::catch_unwind(|| Local::now().fixed_offset())
-            .map_err(|_| "host clock or local timezone conversion failed".to_owned())
+        std::panic::catch_unwind(|| {
+            // Chrono's Local resolver silently falls back when TZ is invalid. Jiff's
+            // fallible system resolver owns IANA/POSIX/TZif parsing and reports failure.
+            let timezone = jiff::tz::TimeZone::try_system()
+                .map_err(|error| format!("host timezone resolution failed: {error}"))?;
+            let instant = Utc::now();
+            let timestamp = jiff::Timestamp::from_second(instant.timestamp())
+                .map_err(|error| format!("host clock instant conversion failed: {error}"))?;
+            let seconds = timezone.to_offset(timestamp).seconds();
+            let offset = FixedOffset::east_opt(seconds)
+                .ok_or_else(|| "host timezone offset is outside the supported range".to_owned())?;
+            Ok(instant.with_timezone(&offset))
+        })
+        .map_err(|_| "host clock or local timezone conversion failed".to_owned())?
     }
 }
 
