@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:compaction-summary-bound
 kind: story
-status: draft
+status: active
 title: A compaction never leaves the session above its target
 relations:
 - decomposes: epic:loom-native-harness
@@ -12,7 +12,10 @@ scope:
   path: crates/loom-executor/src/harness/turn_loop/mod.rs
 - confidence: cited
   path: crates/loom-executor/tests/adversary_w3_compaction_contract.rs
-revision: 5
+revision: 7
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-07T02:51:19Z", actor: "human:timo", revision: 6, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
+- {from: "proposed", to: "active", at: "2026-10-07T02:51:19Z", actor: "human:timo", revision: 7, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
 ---
 ## Outcome
 

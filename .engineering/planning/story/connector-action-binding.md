@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:connector-action-binding
 kind: story
-status: draft
+status: active
 title: Consequential actions leave Loom only as a ProposedAction
 summary: Loom returns a ProposedAction for a selected consequential action, invokes no Connector operation and links no credential crate; the invocation is Commission's (ADR 0082, L-014).
 refs:
@@ -16,7 +16,10 @@ relations:
 scope:
 - confidence: cited
   path: crates/loom-executor/tests/connector_boundary.rs
-revision: 6
+revision: 8
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-07T02:51:19Z", actor: "human:timo", revision: 7, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
+- {from: "proposed", to: "active", at: "2026-10-07T02:51:19Z", actor: "human:timo", revision: 8, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
 ---
 ## Outcome
 

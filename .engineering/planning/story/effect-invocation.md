@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:effect-invocation
 kind: story
-status: draft
+status: active
 title: After the recheck, the Commission runtime invokes the effect through the action's binding
 refs:
 - provider: commission
@@ -27,7 +27,10 @@ scope:
   path: ess/commission/domains/responsibility.yaml
 - confidence: cited
   path: generated/rust/commission/
-revision: 4
+revision: 6
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-07T02:51:19Z", actor: "human:timo", revision: 5, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
+- {from: "proposed", to: "active", at: "2026-10-07T02:51:19Z", actor: "human:timo", revision: 6, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
 ---
 ## Outcome
 

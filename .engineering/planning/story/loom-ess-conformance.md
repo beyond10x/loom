@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:loom-ess-conformance
 kind: story
-status: draft
+status: active
 title: Carry the Loom ESS specification to a synthesized conformance suite in task check
 refs:
 - provider: taskboard
@@ -39,7 +39,10 @@ scope:
   path: ess/domains/run.yaml
 - confidence: cited
   path: generated/rust/loom/
-revision: 8
+revision: 10
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-07T02:51:19Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":4}}, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
+- {from: "proposed", to: "active", at: "2026-10-07T02:51:19Z", actor: "human:timo", revision: 10, decided_on: {"recorded":{"review_outcome":4}}, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
 ---
 ## Outcome
 
