@@ -1,6 +1,6 @@
 // generated from intake v1
-// model digest f7fab3ba3958266082725d66c0d412f3b6ea6a13a27a13510350f0b62657a8e3
-// contract digest de8b096fd7c892c2a32f23173c969f86f7576e033c100ea6b2e2e7537e8531e1
+// model digest 27eba34a158e1027a48b4584d4a9cfd7db24040200cceaab4f1148ba47ce865e
+// contract digest 6db3749de79840686760677941a2171cf13badb3ab1d8d4190151e3870d23df9
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! confinement — `intake.confinement`.

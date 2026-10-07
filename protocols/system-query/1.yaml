@@ -1,0 +1,32 @@
+format: protocol/1
+protocol:
+  id: system.query
+  revision: 1
+  description: >-
+    Read this machine's current date or time and answer from a real clock observation.
+    Currently supports only local date/time and UTC. Other system information, arbitrary
+    questions, remote timezone conversions, and software changes are not supported here.
+artifacts:
+  intent:
+    description: the exact system query for this run
+evidence_kinds:
+  system_time:
+    description: a verified reading of the local host clock for this query
+claims:
+  time.observed:
+    true_when:
+      evidence:
+        kind: system_time
+        result: observed
+        subject: intent
+actions:
+  system.time.read:
+    description: read this machine's clock and return local time and UTC from one instant
+    effect: read
+    may_produce:
+      - evidence: system_time
+outcomes:
+  answered:
+    description: the query has a verified clock observation
+    requires:
+      claim: time.observed
