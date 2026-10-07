@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:moved-case-outcome
 kind: story
-status: draft
+status: active
 title: An executor reports a moved case and the run is judged on the current frontier
 relations:
 - decomposes: epic:commission-core
@@ -24,7 +24,10 @@ scope:
   path: ess/commission/domains/responsibility.yaml
 - confidence: cited
   path: generated/rust/commission/
-revision: 3
+revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-07T07:33:43Z", actor: "human:timo", revision: 4, executor: "agent:loom", correlation: "wave/2026-10-07-w3"}
+- {from: "proposed", to: "active", at: "2026-10-07T07:33:43Z", actor: "human:timo", revision: 5, executor: "agent:loom", correlation: "wave/2026-10-07-w3"}
 ---
 ## Outcome
 

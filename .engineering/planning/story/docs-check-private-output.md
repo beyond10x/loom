@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:docs-check-private-output
 kind: story
-status: draft
+status: active
 title: The docs check writes ESS output to a directory it owns alone
 relations:
 - decomposes: epic:loom-native-harness
@@ -10,7 +10,10 @@ relations:
 scope:
 - confidence: inferred
   path: crates/loom-docs/src/
-revision: 2
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-07T07:33:43Z", actor: "human:timo", revision: 3, executor: "agent:loom", correlation: "wave/2026-10-07-w3"}
+- {from: "proposed", to: "active", at: "2026-10-07T07:33:43Z", actor: "human:timo", revision: 4, executor: "agent:loom", correlation: "wave/2026-10-07-w3"}
 ---
 ## Outcome
 
