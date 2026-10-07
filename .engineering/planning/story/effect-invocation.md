@@ -27,7 +27,7 @@ scope:
   path: ess/commission/domains/responsibility.yaml
 - confidence: cited
   path: generated/rust/commission/
-revision: 6
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-07T02:51:19Z", actor: "human:timo", revision: 5, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
 - {from: "proposed", to: "active", at: "2026-10-07T02:51:19Z", actor: "human:timo", revision: 6, executor: "agent:loom", correlation: "wave/2026-10-07-w2"}
@@ -53,10 +53,13 @@ This story adds:
    which Connector operation (`instance_id`, `operation_id`): exactly one operation per bound action,
    at most one binding per action id. Protocol definitions and the Connectors catalog carry no
    binding. Which Connection serves the operation is Connectors' choice and is not modelled here.
-2. **Unbound actions are never offered.** Before the executor runs, the runtime removes from the
-   frontier it hands over every action the effect port does not perform (for a Connector-backed
-   port: every action without a binding), so a Loom catalogue never lists one. A frontier left with
-   no action still ends `NoPerformableAction`, as today.
+2. **Unbound actions that need no authority are never offered.** Before the executor runs, the
+   runtime removes from the frontier it hands over every action the effect port does not perform
+   (for a Connector-backed port: every action without a binding) **and** that needs no authority,
+   so a Loom catalogue never lists one. An action behind an authority gate stays visible even when
+   no port performs it (`decision-blocker:gated-unbound-action-visibility`, option B), so a run
+   stops at the gate as today; an approved action no port performs ends `NoPerformableAction` at
+   invocation. A frontier left with no action still ends `NoPerformableAction`, as today.
 3. **One attempt per invoked request.** `EffectOutcome::Performed` names exactly one Connector
    attempt: the reference to the `connectors.mutations.AttemptRecord` the invocation produced. A
    request refused at the recheck is never invoked and names none. The runtime never retries an
@@ -98,12 +101,19 @@ the static fake authority provider, a recording executor and a recording `Connec
 1. An admitted request for a bound action is invoked exactly once, through its bound
    (`instance_id`, `operation_id`), after the governor and authority calls (the recording shows the
    order), and its `Performed` outcome names exactly one attempt.
-2. The recording executor is never handed an unbound action: with a frontier listing one bound and
-   one unbound action, the frontier it receives lists only the bound one.
-3. A frontier whose only action is unbound ends `NoPerformableAction`, and nothing is invoked.
+2. The recording executor is never handed an unbound action that needs no authority: with a
+   frontier listing one bound and one unbound ungated action, the frontier it receives lists only the
+   bound one.
+3. A frontier whose only action is unbound and ungated ends `NoPerformableAction`, and nothing is
+   invoked.
 4. A bound read action (`repository.inspect`) is rechecked and invoked by the same path as a
    consequential one.
 5. A stale request, an authority deny and an approval-required each invoke nothing.
+6. An unbound action behind an authority gate stays in the frontier the executor receives; the run
+   stops at the gate (`ApprovalRequired` or `NeedsAuthority`), and once approved, its invocation
+   ends `NoPerformableAction` with nothing invoked. The slice keeps stopping at
+   `ApprovalRequired (repository.merge)`: the existing intake-slice and CLI tests that assert it
+   still pass unchanged.
 
 `task commission:deps-guard` still passes: `b10x-loom-commission` names no Connectors crate.
 

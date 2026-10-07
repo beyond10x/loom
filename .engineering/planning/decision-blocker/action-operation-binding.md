@@ -6,7 +6,7 @@ status: cleared
 title: Nobody has decided who declares which Connector operations a frontier action binds to, or how many
 relations:
 - blocks: story:connector-action-binding
-revision: 4
+revision: 5
 transitions:
 - {from: "open", to: "cleared", at: "2026-10-07T00:06:18Z", actor: "human:timo", revision: 4, executor: "agent:loom"}
 ---
@@ -84,3 +84,10 @@ Loom never offers an unbound action and refuses nothing for it at selection.
 The binding and its cardinality are declared in `ess/commission/` before
 `story:connector-action-binding` and `story:effect-invocation` implement them. Which Connection
 serves an operation is not part of this decision.
+
+## Narrowed (2026-10-07)
+
+The filtering half of this decision applies only to actions that need no authority
+(`decision-blocker:gated-unbound-action-visibility`, option B): an action behind an authority gate
+stays visible even when no port performs it, so a run stops at the gate; an approved action no port
+performs ends `NoPerformableAction` at invocation. The binding half is unchanged.
