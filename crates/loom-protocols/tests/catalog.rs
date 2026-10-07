@@ -132,21 +132,23 @@ fn corrupt_digest_missing_fields_and_wrong_registration_fail_closed() {
     let root = tmp.path().join("installed");
     fs::write(&source, SYSTEM_QUERY_YAML).unwrap();
     let store = InstallStore::new(root.clone());
+    store.install_file("custom@1", &source, false).unwrap();
+    let path = root.join("catalog.json");
+    let original = fs::read(&path).unwrap();
     for mode in 0..4 {
-        store.install_file("custom@1", &source, true).unwrap();
-        let path = root.join("custom@1.json");
-        let mut json: serde_json::Value =
-            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let mut json: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        let entry = &mut json["definitions"][0];
         match mode {
-            0 => json["sha256"] = "forged".into(),
+            0 => entry["sha256"] = "forged".into(),
             1 => {
-                json.as_object_mut().unwrap().remove("yaml");
+                entry.as_object_mut().unwrap().remove("yaml");
             }
-            2 => json["name"] = "other@1".into(),
-            _ => json["source"]["kind"] = "loom".into(),
+            2 => entry["name"] = "system-query@1".into(),
+            _ => entry["source"]["kind"] = "loom".into(),
         }
         fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
         assert!(store.catalog().is_err());
+        assert!(store.install_file("custom@1", &source, true).is_err());
     }
 }
 fn git(path: &Path, args: &[&str]) -> String {
@@ -277,16 +279,16 @@ fn snapshots_preserve_unicode_escaping_and_reject_symlink_records() {
     );
     #[cfg(unix)]
     {
-        let record = root.join("custom@1.json");
+        let record = root.join("catalog.json");
         let hidden = tmp.path().join("record.json");
         fs::rename(&record, &hidden).unwrap();
         std::os::unix::fs::symlink(&hidden, &record).unwrap();
         assert!(store.catalog().is_err());
         assert!(store.install_file("custom@1", &source, false).is_err());
-        // Explicit replacement replaces the link, without touching its target.
-        store.install_file("custom@1", &source, true).unwrap();
+        // A manifest symlink is corruption, even for explicit replacement.
+        assert!(store.install_file("custom@1", &source, true).is_err());
         assert!(hidden.is_file());
-        assert!(store.catalog().is_ok());
+        assert!(store.catalog().is_err());
     }
 }
 
@@ -341,4 +343,87 @@ fn custom_git_attributes_and_hooks_are_never_executed() {
             .yaml,
         SYSTEM_QUERY_YAML
     );
+}
+
+#[test]
+fn an_existing_store_with_missing_manifest_is_corrupt_not_empty() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("installed");
+    let store = InstallStore::new(root.clone());
+    assert!(store.catalog().is_ok());
+    let source = tmp.path().join("clock.yaml");
+    fs::write(&source, SYSTEM_QUERY_YAML).unwrap();
+    store.install_file("custom@1", &source, false).unwrap();
+    fs::remove_file(root.join("catalog.json")).unwrap();
+    assert!(store.catalog().unwrap_err().contains("catalog missing"));
+    assert!(store.install_file("another@1", &source, false).is_err());
+    assert!(store.install_file("custom@1", &source, true).is_err());
+    assert!(store.remove("custom@1").is_err());
+    assert!(!root.join("catalog.json").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn redirected_and_dangling_store_paths_refuse_every_operation() {
+    let tmp = tempfile::tempdir().unwrap();
+    let actual = tmp.path().join("actual");
+    let good = InstallStore::new(actual.clone());
+    let source = tmp.path().join("clock.yaml");
+    fs::write(&source, SYSTEM_QUERY_YAML).unwrap();
+    good.install_file("custom@1", &source, false).unwrap();
+    let original = fs::read(actual.join("catalog.json")).unwrap();
+    let link = tmp.path().join("link");
+    std::os::unix::fs::symlink(&actual, &link).unwrap();
+    let dangling = tmp.path().join("dangling");
+    std::os::unix::fs::symlink(tmp.path().join("absent"), &dangling).unwrap();
+    for root in [
+        link.clone(),
+        link.join("nested"),
+        dangling.clone(),
+        dangling.join("nested"),
+    ] {
+        let store = InstallStore::new(root);
+        assert!(store.catalog().is_err());
+        assert!(store.install_file("custom@1", &source, true).is_err());
+        assert!(store.remove("custom@1").is_err());
+    }
+    assert_eq!(fs::read(actual.join("catalog.json")).unwrap(), original);
+    assert!(!actual.join("nested").exists());
+    assert!(!tmp.path().join("absent").exists());
+}
+
+#[test]
+fn concurrent_installations_preserve_complete_atomic_catalog_snapshots() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("installed");
+    let source = tmp.path().join("clock.yaml");
+    fs::write(&source, SYSTEM_QUERY_YAML).unwrap();
+    let store = InstallStore::new(root.clone());
+    store.install_file("seed@1", &source, false).unwrap();
+    std::thread::scope(|threads| {
+        let mut writers = Vec::new();
+        for i in 0..8 {
+            let store = &store;
+            let source = &source;
+            writers.push(threads.spawn(move || {
+                store
+                    .install_file(&format!("custom-{i}@1"), source, false)
+                    .unwrap();
+                store.install_file("seed@1", source, true).unwrap();
+            }));
+        }
+        for _ in 0..30 {
+            let catalog = store.catalog().unwrap();
+            assert!(catalog.get("seed@1").is_some());
+        }
+        for writer in writers {
+            writer.join().unwrap();
+        }
+    });
+    let catalog = store.catalog().unwrap();
+    for i in 0..8 {
+        assert!(catalog.get(&format!("custom-{i}@1")).is_some());
+    }
+    store.remove("seed@1").unwrap();
+    assert!(store.catalog().unwrap().get("seed@1").is_none());
 }
