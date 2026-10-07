@@ -6,7 +6,7 @@ only through the actions a governed frontier admits at that moment.
 **Documentation: <https://beyond10x.github.io/loom/>**, starting at
 [Getting started](https://beyond10x.github.io/loom/docs/getting-started).
 
-Development after `0.3.0` also includes workspace-free system queries and an extensible protocol
+Loom `0.4.0` includes workspace-free system queries and an extensible protocol
 catalog. Loom owns `system-query@1`; engineering definitions and installed custom definitions
 remain separate sources. [System queries and custom protocols](https://beyond10x.github.io/loom/docs/guides/system-queries)
 describes the clock tool, pinned installation and offline loading. Transient model failures get
@@ -33,9 +33,9 @@ the whole boundary.
 
 ## Status
 
-Version `0.3.0`, released from source at the tag `0.3.0`
-([release](https://github.com/beyond10x/loom/releases/tag/0.3.0)). Nothing is on a registry: you
-install from the tag or depend on it with `tag = "0.3.0"`. The development capabilities below require a build from their source commit. `b10x-loom run` completed a live run
+Version `0.4.0`, released from source at the tag `0.4.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.4.0)). Nothing is on a registry: you
+install from the tag or depend on it with `tag = "0.4.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -48,7 +48,7 @@ which are expanded before Commission admission;
 
 ## Run the command line
 
-Development source also supports opt-in `--context-policy bounded` and `--context-report PATH`.
+Since `0.4.0`, Loom supports opt-in `--context-policy bounded` and `--context-report PATH`.
 It keeps typed working state and a recent event tail, with retrievable run-local history and a
 64 KiB serialized request ceiling. The default remains `legacy`; recorded byte reductions do not
 establish live quality or cost savings. See [working context](website/docs/concepts/working-context.md).
@@ -56,14 +56,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.3.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.4.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.3.0
+b10x-loom 0.4.0
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -107,7 +107,7 @@ admission, durable storage and authenticated evidence remain the embedding appli
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.3.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.4.0" }
 ```
 
 The example below

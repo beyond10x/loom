@@ -19,9 +19,9 @@ b10x-canon-engineering = { git = "https://github.com/beyond10x/engineering-proto
 b10x-loom-governor = { path = "../loom-governor" }
 b10x-loom-intake-references = { path = "../loom-intake-references" }
 b10x-loom-intake-router = { path = "../loom-intake-router" }
-llm-routing = { package = "b10x-llm-routing", git = "https://github.com/beyond10x/llm", rev = "c0e97d620c27a8b413facffb119793d6881599f2" }
-b10x-llm-tool-call = { git = "https://github.com/beyond10x/llm", rev = "c0e97d620c27a8b413facffb119793d6881599f2" }
-b10x-llm-core = { git = "https://github.com/beyond10x/llm", rev = "c0e97d620c27a8b413facffb119793d6881599f2" }
+llm-routing = { package = "b10x-llm-routing", git = "https://github.com/beyond10x/llm", tag = "0.3.1" }
+b10x-llm-tool-call = { git = "https://github.com/beyond10x/llm", tag = "0.3.1" }
+b10x-llm-core = { git = "https://github.com/beyond10x/llm", tag = "0.3.1" }
 b10x-loom-executor = { path = "../loom-executor" }
 serde_json = "1"
 serde = "1"
