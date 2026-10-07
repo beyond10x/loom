@@ -20,6 +20,7 @@ pub const REQUEST_CEILING: usize = 64 * 1024;
 pub struct ContextMetrics {
     report: Arc<Mutex<ContextReport>>,
     started: Instant,
+    elapsed_before_ms: i64,
 }
 
 impl ContextMetrics {
@@ -34,6 +35,7 @@ impl ContextMetrics {
                 elapsed_ms: 0,
             })),
             started: Instant::now(),
+            elapsed_before_ms: 0,
         }
     }
 
@@ -48,12 +50,20 @@ impl ContextMetrics {
     /// A snapshot remains available after a run fails.
     pub fn report(&self) -> ContextReport {
         let mut report = self.lock().clone();
-        report.elapsed_ms = milliseconds(self.started);
+        report.elapsed_ms = self
+            .elapsed_before_ms
+            .saturating_add(milliseconds(self.started));
         report
     }
 
     /// Writes only measurements. Unknown provider counters are represented by JSON null.
     pub fn write(&self, path: &Path) -> io::Result<()> {
+        let file = std::fs::File::create(path)?;
+        serde_json::to_writer_pretty(file, &self.snapshot()).map_err(io::Error::other)
+    }
+
+    /// Payload-free state carried across the CLI's private delegation handoff.
+    pub fn snapshot(&self) -> Value {
         let report = self.report();
         let requests: Vec<Value> = report
             .requests
@@ -71,16 +81,72 @@ impl ContextMetrics {
                 })
             })
             .collect();
-        let value = json!({
+        json!({
             "policy": match report.policy { ContextPolicy::Legacy => "legacy", ContextPolicy::Bounded => "bounded" },
             "requests": requests,
             "checkpoints": report.checkpoints,
             "retrievals": report.retrievals,
             "model_calls": report.model_calls,
             "elapsed_ms": report.elapsed_ms,
-        });
-        let file = std::fs::File::create(path)?;
-        serde_json::to_writer_pretty(file, &value).map_err(io::Error::other)
+        })
+    }
+
+    /// Restores measurements after a host-controlled process restart.
+    pub fn restore(value: &Value, policy: ContextPolicy) -> Result<Self, String> {
+        let invalid = || "invalid context measurement handoff".to_owned();
+        let number = |v: &Value| v.as_i64().filter(|n| *n >= 0).ok_or_else(invalid);
+        let expected = match policy {
+            ContextPolicy::Legacy => "legacy",
+            ContextPolicy::Bounded => "bounded",
+        };
+        if value["policy"].as_str() != Some(expected) {
+            return Err(invalid());
+        }
+        let requests = value["requests"]
+            .as_array()
+            .ok_or_else(invalid)?
+            .iter()
+            .map(|r| {
+                let optional = |key: &str| -> Result<Option<i64>, String> {
+                    if r[key].is_null() {
+                        Ok(None)
+                    } else {
+                        number(&r[key]).map(Some)
+                    }
+                };
+                Ok(ContextRequestMetric {
+                    phase: match r["phase"].as_str() {
+                        Some("classification") => RequestPhase::Classification,
+                        Some("selection") => RequestPhase::Selection,
+                        Some("arguments") => RequestPhase::Arguments,
+                        _ => return Err(invalid()),
+                    },
+                    request_bytes: number(&r["request_bytes"])?,
+                    elapsed_ms: number(&r["elapsed_ms"])?,
+                    final_usage: r["final_usage"].as_bool().ok_or_else(invalid)?,
+                    input_tokens: optional("input_tokens")?,
+                    cache_read_tokens: optional("cache_read_tokens")?,
+                    cache_write_tokens: optional("cache_write_tokens")?,
+                    output_tokens: optional("output_tokens")?,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let report = ContextReport {
+            policy,
+            requests,
+            checkpoints: number(&value["checkpoints"])?,
+            retrievals: number(&value["retrievals"])?,
+            model_calls: number(&value["model_calls"])?,
+            elapsed_ms: number(&value["elapsed_ms"])?,
+        };
+        if report.model_calls != report.requests.len() as i64 {
+            return Err(invalid());
+        }
+        Ok(Self {
+            elapsed_before_ms: report.elapsed_ms,
+            report: Arc::new(Mutex::new(report)),
+            started: Instant::now(),
+        })
     }
 
     fn lock(&self) -> MutexGuard<'_, ContextReport> {
@@ -314,6 +380,27 @@ mod tests {
         assert!(!text.contains("private source"));
         let value: Value = serde_json::from_str(&text).unwrap();
         assert!(value["requests"][0]["cache_write_tokens"].is_null());
+    }
+
+    #[test]
+    fn delegation_preserves_classification_usage_and_unknown_counters() {
+        let inner = Recorded::new(false);
+        let metrics = ContextMetrics::new(ContextPolicy::Bounded);
+        let model = MeasuredModel::new(&inner, metrics.clone());
+        turn(&model, &request("pick_protocol", "private intent")).unwrap();
+        let snapshot = metrics.snapshot();
+        let restored = ContextMetrics::restore(&snapshot, ContextPolicy::Bounded).unwrap();
+        assert_eq!(restored.report().requests, metrics.report().requests);
+        assert_eq!(restored.report().model_calls, 1);
+        assert!(restored.report().elapsed_ms >= snapshot["elapsed_ms"].as_i64().unwrap());
+        assert!(!snapshot.to_string().contains("private intent"));
+        assert!(ContextMetrics::restore(&snapshot, ContextPolicy::Legacy).is_err());
+        let mut malformed = snapshot.clone();
+        malformed["model_calls"] = json!(19);
+        assert!(ContextMetrics::restore(&malformed, ContextPolicy::Bounded).is_err());
+        malformed = snapshot;
+        malformed["requests"][0]["input_tokens"] = json!(-1);
+        assert!(ContextMetrics::restore(&malformed, ContextPolicy::Bounded).is_err());
     }
 
     #[test]

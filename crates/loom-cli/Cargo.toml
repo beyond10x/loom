@@ -15,6 +15,8 @@ name = "b10x-loom"
 path = "src/main.rs"
 
 [dependencies]
+b10x-loom-protocols = { path = "../loom-protocols" }
+serde_json = "1"
 b10x-loom-governor = { path = "../loom-governor" }
 b10x-llm-tool-call = { git = "https://github.com/beyond10x/llm", tag = "0.1.7" }
 b10x-loom-intake-slice = { path = "../loom-intake-slice" }

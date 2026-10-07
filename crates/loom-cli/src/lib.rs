@@ -14,7 +14,7 @@ pub const DEFAULT_MODEL: &str = "gpt-5.6-sol";
 
 /// What `run --help` says about the exit status; the binary's `exit_status` decides it.
 pub const EXIT_STATUS: &str = "Exit status:
-  0  the run stopped at its human gate (ApprovalRequired)
+  0  the query completed (Completed) or the run reached its human gate (ApprovalRequired)
   3  the run stopped for another reason (NothingAdmissible, StepBudget, NoLocalExecutor, Refused, ConfinementUnavailable)
   1  the run failed
   2  the command line is not valid";
@@ -38,6 +38,8 @@ pub enum Command {
     /// Run the slice on an intent until it is blocked, and say why it stopped.
     #[command(after_help = EXIT_STATUS)]
     Run(RunArgs),
+    /// Install, inspect, or remove protocol definitions available to this host.
+    Protocols(ProtocolsArgs),
 }
 
 /// The arguments of `b10x-loom run`.
@@ -58,9 +60,9 @@ pub struct RunArgs {
     /// An explicitly delegated cgroup v2 root for confined tests.
     #[arg(long, value_name = "DIR")]
     pub cgroup_root: Option<PathBuf>,
-    /// The root of the git work tree the change is made in.
+    /// Existing Git worktree for software changes; unnecessary for system queries.
     #[arg(long, value_name = "DIR")]
-    pub workspace: PathBuf,
+    pub workspace: Option<PathBuf>,
     /// The test command, run in the workspace without a shell: a program and its arguments,
     /// split at white space.
     #[arg(long, value_name = "CMD", default_value = "cargo test")]
@@ -81,6 +83,52 @@ pub struct RunArgs {
     pub intent: String,
 }
 
+/// Protocol catalog management.
+#[derive(Debug, Args)]
+pub struct ProtocolsArgs {
+    #[command(subcommand)]
+    pub command: ProtocolCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProtocolCommand {
+    /// Validate and snapshot one protocol from a file or a pinned Git repository.
+    Add(AddProtocolArgs),
+    /// List bundled and installed definitions, provenance, and available execution bindings.
+    List,
+    /// Remove an installed definition; bundled definitions cannot be removed.
+    Remove { name: String },
+}
+
+#[derive(Debug, Args)]
+pub struct AddProtocolArgs {
+    /// Registration identity, such as clock-check@1.
+    pub name: String,
+    /// Local YAML to validate and snapshot.
+    #[arg(
+        long,
+        value_name = "PATH",
+        conflicts_with = "source",
+        required_unless_present = "source"
+    )]
+    pub file: Option<PathBuf>,
+    /// Git locator with a full commit pin: git+https://host/repo.git#<commit>.
+    #[arg(
+        long,
+        value_name = "LOCATOR",
+        conflicts_with = "file",
+        requires = "path",
+        required_unless_present = "file"
+    )]
+    pub source: Option<String>,
+    /// Regular-file path inside the pinned Git commit.
+    #[arg(long, value_name = "RELATIVE_PATH", requires = "source")]
+    pub path: Option<PathBuf>,
+    /// Explicitly replace an existing installed definition.
+    #[arg(long)]
+    pub replace: bool,
+}
+
 /// The operator's requested test execution policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Confinement {
@@ -99,7 +147,10 @@ mod tests {
         let Command::Run(defaults) =
             Cli::try_parse_from(["b10x-loom", "run", "--workspace", ".", "fix tests"])
                 .unwrap()
-                .command;
+                .command
+        else {
+            panic!("run command")
+        };
         assert_eq!(defaults.context_policy, ContextPolicy::Legacy);
         assert!(defaults.context_report.is_none());
         let Command::Run(bounded) = Cli::try_parse_from([
@@ -114,7 +165,10 @@ mod tests {
             "fix tests",
         ])
         .unwrap()
-        .command;
+        .command
+        else {
+            panic!("run command")
+        };
         assert_eq!(bounded.context_policy, ContextPolicy::Bounded);
         assert_eq!(bounded.context_report, Some(PathBuf::from("metrics.json")));
         assert!(
@@ -129,5 +183,65 @@ mod tests {
             ])
             .is_err()
         );
+    }
+    #[test]
+    fn query_requires_no_workspace_and_protocol_install_sources_are_exclusive() {
+        let Command::Run(query) = Cli::try_parse_from(["b10x-loom", "run", "current time"])
+            .unwrap()
+            .command
+        else {
+            panic!("run");
+        };
+        assert!(query.workspace.is_none());
+        assert!(
+            Cli::try_parse_from([
+                "b10x-loom",
+                "protocols",
+                "add",
+                "clock-check@1",
+                "--file",
+                "clock.yaml"
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "b10x-loom",
+                "protocols",
+                "add",
+                "clock-check@1",
+                "--source",
+                "git+https://example.invalid/r#abc",
+                "--path",
+                "clock.yaml"
+            ])
+            .is_ok()
+        );
+        for args in [
+            vec!["b10x-loom", "protocols", "add", "clock-check@1"],
+            vec![
+                "b10x-loom",
+                "protocols",
+                "add",
+                "clock-check@1",
+                "--source",
+                "repo",
+            ],
+            vec![
+                "b10x-loom",
+                "protocols",
+                "add",
+                "clock-check@1",
+                "--file",
+                "x",
+                "--source",
+                "repo",
+                "--path",
+                "x",
+            ],
+            vec!["b10x-loom", "run", "--protocol", "system-query@1", "time"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
     }
 }
