@@ -386,6 +386,188 @@ fn oversized_intent_or_catalog_stops_before_classification_call() {
     }
 }
 
+/// Replays the observed provider overload at the same three CLI stage boundaries.
+#[test]
+fn transient_overload_retries_each_stage_without_repeating_the_clock_effect() {
+    for policy in [ContextPolicy::Legacy, ContextPolicy::Bounded] {
+        for phase in ["pick_protocol", "select_action", "action_arguments"] {
+            let catalog = ProtocolCatalog::bundled().unwrap();
+            let gov = CanonGovernor::new(MemoryCaseStore::default())
+                .with_catalog(&catalog)
+                .unwrap();
+            let router = Overloaded::new(classifier("system-query@1"), phase, 1);
+            let agent = Overloaded::new(
+                Recorded::new(vec![select(READ_TIME), args(json!({}))]),
+                phase,
+                1,
+            );
+            let clock = FixedClock {
+                reads: Cell::new(0),
+                fail: false,
+                instant: "2026-10-07T14:00:00+02:00",
+            };
+            let dir = tempfile::tempdir().unwrap();
+            let report = dir.path().join("metrics.json");
+            let outcome = run_intent_with_options(
+                &request(None),
+                &catalog,
+                &gov,
+                &gov,
+                &router,
+                &agent,
+                &clock,
+                &mut Vec::new(),
+                &RunOptions {
+                    context_policy: policy,
+                    context_report: Some(report.clone()),
+                },
+            )
+            .unwrap();
+            assert_eq!(outcome.stop_reason, StopReason::Completed);
+            assert_eq!(clock.reads.get(), 1);
+            let metrics: Value = serde_json::from_slice(&std::fs::read(report).unwrap()).unwrap();
+            assert_eq!(metrics["model_calls"], 4);
+            let failed: Vec<_> = metrics["requests"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|m| m["input_tokens"] == 17)
+                .collect();
+            assert_eq!(failed.len(), 1, "failed attempt usage is retained");
+            assert_eq!(failed[0]["output_tokens"], 2);
+            assert_eq!(failed[0]["final_usage"], false);
+            let attempts = if phase == "pick_protocol" {
+                router.seen.lock().unwrap()
+            } else {
+                agent.seen.lock().unwrap()
+            };
+            assert_eq!(attempts.len(), 2);
+            assert_eq!(
+                attempts[0], attempts[1],
+                "retry sends the identical request"
+            );
+            for metric in metrics["requests"].as_array().unwrap() {
+                assert!(metric["request_bytes"].as_u64().unwrap() <= 65536);
+            }
+        }
+    }
+}
+
+#[test]
+fn exhausted_overload_and_real_refusal_never_read_the_clock() {
+    for refused in [false, true] {
+        let catalog = ProtocolCatalog::bundled().unwrap();
+        let gov = CanonGovernor::new(MemoryCaseStore::default())
+            .with_catalog(&catalog)
+            .unwrap();
+        let router = classifier("system-query@1");
+        let mut agent = Overloaded::new(Recorded::new(vec![]), "select_action", usize::MAX);
+        agent.refused = refused;
+        let clock = FixedClock {
+            reads: Cell::new(0),
+            fail: true,
+            instant: "unused",
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let report = dir.path().join("metrics.json");
+        let error = run_intent_with_options(
+            &request(None),
+            &catalog,
+            &gov,
+            &gov,
+            &router,
+            &agent,
+            &clock,
+            &mut Vec::new(),
+            &RunOptions {
+                context_policy: ContextPolicy::Bounded,
+                context_report: Some(report.clone()),
+            },
+        )
+        .unwrap_err();
+        assert_eq!(clock.reads.get(), 0);
+        assert_eq!(
+            agent.seen.lock().unwrap().len(),
+            if refused { 1 } else { 3 }
+        );
+        assert!(
+            error.to_string().contains(if refused {
+                "Refused"
+            } else {
+                "after 3 attempts"
+            }),
+            "{error}"
+        );
+        let metrics: Value = serde_json::from_slice(&std::fs::read(report).unwrap()).unwrap();
+        assert_eq!(metrics["model_calls"], if refused { 2 } else { 4 });
+    }
+}
+
+struct Overloaded {
+    inner: Recorded,
+    phase: &'static str,
+    failures: usize,
+    refused: bool,
+    seen: Mutex<Vec<Vec<u8>>>,
+}
+impl Overloaded {
+    fn new(inner: Recorded, phase: &'static str, failures: usize) -> Self {
+        Self {
+            inner,
+            phase,
+            failures,
+            refused: false,
+            seen: Mutex::default(),
+        }
+    }
+}
+impl Model for Overloaded {
+    fn provenance(&self) -> &Provenance {
+        self.inner.provenance()
+    }
+    fn capabilities(&self) -> &Capabilities {
+        self.inner.capabilities()
+    }
+    fn turn<'a>(
+        &'a self,
+        request: &'a TurnRequest,
+        sink: &'a mut dyn StreamSink,
+        cancel: &'a Cancel,
+    ) -> BoxFuture<'a, Result<TurnOutcome, Error>> {
+        Box::pin(async move {
+            let fail = if request.tools[0].name.as_str() == self.phase {
+                let mut seen = self.seen.lock().unwrap();
+                seen.push(serde_json::to_vec(request).unwrap());
+                seen.len() <= self.failures
+            } else {
+                false
+            };
+            if fail {
+                let observation = TurnObservation {
+                    usage: Some(llm_core::Usage {
+                        input_tokens: Some(17),
+                        output_tokens: Some(2),
+                        ..llm_core::Usage::default()
+                    }),
+                    ..TurnObservation::new(self.provenance().clone())
+                };
+                return Err(Error::new(
+                    if self.refused {
+                        llm_core::ErrorCode::Refused
+                    } else {
+                        llm_core::ErrorCode::Unavailable
+                    },
+                    "the provider is overloaded",
+                )
+                .with_dispatch(llm_core::Dispatch::Accepted)
+                .with_retriable(true)
+                .with_observation(observation));
+            }
+            self.inner.turn(request, sink, cancel).await
+        })
+    }
+}
+
 type Answer = Box<dyn FnOnce(&TurnRequest) -> Value + Send>;
 struct Reply {
     tool: &'static str,

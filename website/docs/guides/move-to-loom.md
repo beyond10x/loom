@@ -45,7 +45,7 @@ An application that uses several of them can depend on `b10x-loom-sdk` alone; se
 ## Dependencies that moved with it
 
 - Model calls use [llm](https://beyond10x.github.io/llm/) ([GitHub](https://github.com/beyond10x/llm))
-  at tag `0.1.7`.
+  at development revision `c0e97d620c27a8b413facffb119793d6881599f2` (0.3.0 source with the overload fix).
 - The engineering protocol registry is `b10x-canon-engineering` `0.1.0` from
   [engineering protocols](https://beyond10x.github.io/engineering-protocols/)
   ([GitHub](https://github.com/beyond10x/engineering-protocols)); it replaces `b10x-els`.

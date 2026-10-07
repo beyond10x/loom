@@ -153,8 +153,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-core"
-version = "0.1.7"
-source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+version = "0.3.0"
+source = "git+https://github.com/beyond10x/llm?rev=c0e97d620c27a8b413facffb119793d6881599f2#c0e97d620c27a8b413facffb119793d6881599f2"
 dependencies = [
  "serde",
  "serde_json",
@@ -164,8 +164,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-credentials"
-version = "0.1.7"
-source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+version = "0.3.0"
+source = "git+https://github.com/beyond10x/llm?rev=c0e97d620c27a8b413facffb119793d6881599f2#c0e97d620c27a8b413facffb119793d6881599f2"
 dependencies = [
  "b10x-llm-core",
  "base64 0.22.1",
@@ -180,8 +180,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-http"
-version = "0.1.7"
-source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+version = "0.3.0"
+source = "git+https://github.com/beyond10x/llm?rev=c0e97d620c27a8b413facffb119793d6881599f2#c0e97d620c27a8b413facffb119793d6881599f2"
 dependencies = [
  "b10x-llm-core",
  "bytes",
@@ -194,8 +194,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-providers"
-version = "0.1.7"
-source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+version = "0.3.0"
+source = "git+https://github.com/beyond10x/llm?rev=c0e97d620c27a8b413facffb119793d6881599f2#c0e97d620c27a8b413facffb119793d6881599f2"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -210,8 +210,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-responses"
-version = "0.1.7"
-source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+version = "0.3.0"
+source = "git+https://github.com/beyond10x/llm?rev=c0e97d620c27a8b413facffb119793d6881599f2#c0e97d620c27a8b413facffb119793d6881599f2"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -222,9 +222,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "b10x-llm-routing"
+version = "0.3.0"
+source = "git+https://github.com/beyond10x/llm?rev=c0e97d620c27a8b413facffb119793d6881599f2#c0e97d620c27a8b413facffb119793d6881599f2"
+dependencies = [
+ "b10x-llm-core",
+ "b10x-llm-providers",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "toml 1.1.6+spec-1.1.0",
+]
+
+[[package]]
 name = "b10x-llm-tool-call"
-version = "0.1.7"
-source = "git+https://github.com/beyond10x/llm?tag=0.1.7#f8cda77e620dacf6ad6f838d1970a73553a9bb17"
+version = "0.3.0"
+source = "git+https://github.com/beyond10x/llm?rev=c0e97d620c27a8b413facffb119793d6881599f2#c0e97d620c27a8b413facffb119793d6881599f2"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -342,6 +355,8 @@ version = "0.3.0"
 dependencies = [
  "b10x-canon-engineering",
  "b10x-llm-core",
+ "b10x-llm-routing",
+ "b10x-llm-tool-call",
  "b10x-loom-commission",
  "b10x-loom-executor",
  "b10x-loom-governor",
@@ -2539,7 +2554,7 @@ dependencies = [
  "clap",
  "proc-macro2",
  "syn 3.0.6",
- "toml",
+ "toml 0.8.23",
 ]
 
 [[package]]
@@ -2561,7 +2576,7 @@ dependencies = [
  "serde_json",
  "serde_yaml_ng",
  "syn 3.0.6",
- "toml",
+ "toml 0.8.23",
 ]
 
 [[package]]
@@ -3253,6 +3268,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_spanned"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6662b5879511e06e8999a8a235d848113e942c9124f211511b16466ee2995f26"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
 name = "serde_urlencoded"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3465,7 +3489,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -3565,9 +3589,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362"
 dependencies = [
  "serde",
- "serde_spanned",
- "toml_datetime",
+ "serde_spanned 0.6.9",
+ "toml_datetime 0.6.11",
  "toml_edit",
+]
+
+[[package]]
+name = "toml"
+version = "1.1.6+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "920602543f0911ab71da12c50d59701da54c196d1a2bf5cb4b75667f137a406a"
+dependencies = [
+ "serde_core",
+ "serde_spanned 1.1.1",
+ "toml_datetime 1.1.1+spec-1.1.0",
+ "toml_parser",
+ "winnow 1.0.4",
 ]
 
 [[package]]
@@ -3580,6 +3617,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "toml_datetime"
+version = "1.1.1+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3165f65f62e28e0115a00b2ebdd37eb6f3b641855f9d636d3cd4103767159ad7"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
 name = "toml_edit"
 version = "0.22.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3587,10 +3633,19 @@ checksum = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a"
 dependencies = [
  "indexmap",
  "serde",
- "serde_spanned",
- "toml_datetime",
+ "serde_spanned 0.6.9",
+ "toml_datetime 0.6.11",
  "toml_write",
- "winnow",
+ "winnow 0.7.15",
+]
+
+[[package]]
+name = "toml_parser"
+version = "1.1.3+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d38ac1cf9b95face32296c0a3ede1fdc270627c9d9c02a7274dd6d960dc4d56"
+dependencies = [
+ "winnow 1.0.4",
 ]
 
 [[package]]
@@ -4091,6 +4146,12 @@ checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
 dependencies = [
  "memchr",
 ]
+
+[[package]]
+name = "winnow"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 
 [[package]]
 name = "wit-bindgen"

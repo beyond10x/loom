@@ -95,7 +95,7 @@ use b10x_loom_executor::model::run::{CatalogueEntry, SelectionStrategy};
 use b10x_loom_executor::selection::{Choice, SelectionContext, SelectorError};
 use b10x_loom_executor::{ActionSelector, ArgumentContext, ArgumentGenerator, Loom};
 use b10x_loom_intake_references::references;
-use b10x_loom_intake_router::{ProtocolPick, RouterError, classify};
+use b10x_loom_intake_router::{ProtocolPick, RouterError};
 use llm_core::Model;
 use loom_governor::{CanonGovernor, CaseStore};
 
@@ -770,7 +770,12 @@ fn pick(request: &SliceRequest, classifier: &dyn Model) -> Result<Pick, SliceErr
         .enable_all()
         .build()
         .map_err(SliceError::Runtime)?;
-    let classified = runtime.block_on(classify(&request.intent, classifier, request.threshold));
+    let classified = runtime.block_on(crate::model_retry::classify_with_retries(
+        &request.intent,
+        classifier,
+        request.threshold,
+        None,
+    ));
     drop(runtime);
     let error = match classified {
         Ok(pick) => return Ok(Ok(pick)),

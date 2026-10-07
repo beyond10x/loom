@@ -33,6 +33,17 @@ require an existing Git worktree and retain test confinement and the merge appro
 including classification. Add `--context-report PATH` for request bytes, model calls, usage and elapsed
 time without source payloads. See [bounded context](../concepts/working-context.md).
 
+## Provider overload
+
+Development builds retry a transient model failure at most twice, on the same model and account.
+The waits are one and two seconds; a provider-requested delay can extend either wait up to
+thirty seconds. Context reports count each attempt, including failed attempts and any reported usage.
+
+A persistent overload stops the run with `Unavailable` and the attempt count. This is a provider
+capacity failure. Earlier builds could misreport `server_is_overloaded` as `Refused`.
+Actual refusals, invalid requests and authorization failures stop immediately. Once a model has
+streamed output, its failed request is final. Tool effects are not retried by this policy.
+
 ## Install a local definition
 
 The CLI includes engineering definitions from engineering-protocols and Loom's

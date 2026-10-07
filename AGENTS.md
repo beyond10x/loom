@@ -270,8 +270,12 @@ other Git call sites except the separately hardened pinned-source helper at
 `crates/loom-protocols/src/git.rs`. That helper fetches into a private bare repository, never a
 run workspace, with hooks, fsmonitor, helpers and global/system configuration disabled. Gates still run when the operator or the bot commits and pushes.
 
-Model calls go through llm's crates at a pinned tag (`b10x-llm-tool-call` and `b10x-llm-core`,
-`0.1.7`), never a hand-written HTTP client. The Codex preset and the forced tool call are
+Model calls go through llm's crates, never a hand-written HTTP client. Development currently pins
+`c0e97d620c27a8b413facffb119793d6881599f2` (0.3.0 source, overload fix in llm PR #24) pending
+a released tag that contains the fix. `model_retry.rs` owns caller retries using llm's retry
+classification and `RetryPolicy`: three identical attempts, no retry after a sink event,
+cancellation-aware backoff and per-attempt context metrics. Model ports stay single-attempt;
+effects remain outside this loop. `system_query.rs` exercises recovery in all three request phases. The Codex preset and the forced tool call are
 `codex_model` (the CLI builds its model with it) and `call_tool` (the router calls it). The
 credential is the operator's Codex login (`~/.codex/auth.json`), read and renewed by llm, never by
 Loom code.

@@ -18,6 +18,15 @@ summary: >-
   calls are made. Context reports contain measurements only, no source payloads; absent provider
   counters remain unknown. This contract adds no persisted entity, interactive correction,
   durable session memory, training export, or governed-loop compaction behavior.
+  Each classification, selection or argument request permits at most three identical model
+  attempts on the same binding, only when llm marks a failure retriable and no stream event has
+  been offered to the caller. The waits before attempts two and three are one and two seconds;
+  a provider retry delay may extend a wait up to thirty seconds. Cancellation interrupts waits.
+  Refusal, authorization, invalid requests, capacity failures and failures after stream output
+  are never retried. Every attempt is checked against the request ceiling and measured separately,
+  including failed attempts and their available usage. Exhaustion preserves the final error class
+  and observation, clears retry eligibility and reports the attempt count. No effect is performed
+  until argument generation succeeds and Commission revalidates the proposed action.
 types:
   - name: intake.context.ContextPolicy
     kind: enum
