@@ -23,9 +23,9 @@ use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
     ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, AuthorityVerdict,
-    AuthorityVerdictDeny, CaseId, Commission, CommissionData, CommissionId, ExecutorOutcome,
-    ExecutorOutcomeNeedsHumanJudgment, ExecutorOutcomeProposedAction, Frontier, FrontierAction,
-    HumanDecisionRequest, ObservationId, PrincipalId, ProposedActionArguments,
+    AuthorityVerdictDeny, CaseId, Commission, CommissionData, CommissionId, ConnectorAttemptId,
+    ExecutorOutcome, ExecutorOutcomeNeedsHumanJudgment, ExecutorOutcomeProposedAction, Frontier,
+    FrontierAction, HumanDecisionRequest, ObservationId, PrincipalId, ProposedActionArguments,
     RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeCompleted,
     RunOutcomeNeedsHumanJudgment, RunState, Unit, commission_state, frontier_state,
 };
@@ -130,6 +130,7 @@ impl EffectPort for Performs {
     ) -> Result<EffectOutcome, EffectError> {
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {
             report: Value::Null,
+            attempt: ConnectorAttemptId("attempt-1".to_owned()),
         }))
     }
 }

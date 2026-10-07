@@ -98,6 +98,13 @@ Tagged by `kind`.
 
 ## Structs
 
+### ActionBindingKey
+
+| Field | Type |
+|---|---|
+| `commission_id` | [`CommissionId`](#commissionid) |
+| `action` | `string` |
+
 ### AdmissionNeedsAuthority
 
 | Field | Type |
@@ -134,6 +141,7 @@ Tagged by `kind`.
 | Field | Type |
 |---|---|
 | `report` | `json` |
+| `attempt` | [`ConnectorAttemptId`](#connectorattemptid) |
 
 ### EffectOutcomeRefused
 
@@ -262,6 +270,18 @@ Wraps `string`.
 ### CommissionId
 
 Wraps `uuid`.
+
+### ConnectorAttemptId
+
+Wraps `string`.
+
+### ConnectorInstanceId
+
+Wraps `string`.
+
+### ConnectorOperationId
+
+Wraps `string`.
 
 ### EvidenceId
 

@@ -12,11 +12,12 @@ use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
     ActionRequestData, ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, CaseId,
-    Commission, CommissionData, CommissionId, CompletionDetermination, EffectOutcome,
-    EffectOutcomePerformed, EffectOutcomeRefused, ExecutorOutcome, ExecutorOutcomeProposedAction,
-    ExecutorOutcomeSuspended, Frontier, FrontierAction, FrontierData, FrontierId, GovernorError,
-    Observation, ObservationId, PrincipalId, ProposedActionArguments, RunId, RunOutcome,
-    SuspensionReason, Unit, commission_state, frontier_state, observation_state,
+    Commission, CommissionData, CommissionId, CompletionDetermination, ConnectorAttemptId,
+    EffectOutcome, EffectOutcomePerformed, EffectOutcomeRefused, ExecutorOutcome,
+    ExecutorOutcomeProposedAction, ExecutorOutcomeSuspended, Frontier, FrontierAction,
+    FrontierData, FrontierId, GovernorError, Observation, ObservationId, PrincipalId,
+    ProposedActionArguments, RunId, RunOutcome, SuspensionReason, Unit, commission_state,
+    frontier_state, observation_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -145,6 +146,7 @@ impl EffectPort for Effects {
             .pop_front()
             .unwrap_or(EffectOutcome::Performed(EffectOutcomePerformed {
                 report: Value::Null,
+                attempt: ConnectorAttemptId("attempt-1".to_owned()),
             })))
     }
 }
@@ -301,6 +303,7 @@ impl EffectPort for Bumps<'_> {
             .unwrap_or_else(PoisonError::into_inner) += 1;
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {
             report: Value::Null,
+            attempt: ConnectorAttemptId("attempt-1".to_owned()),
         }))
     }
 }

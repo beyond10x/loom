@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 9bed27fd6e65172f1e7b60f9fe93551bb1ce785145cc4c15fd0ec1f1ad08c598
-// contract digest cc3143220ec00a04b6a7164c58d293ad930be8a93afd9ac03ed872a0f7b85db6
+// model digest dd29b7e5628705e0dbc1057be0df0e640e0273d23d2036dd58d5a13a192f0661
+// contract digest ffc7386f00a154d29ae71609caec46060f782e89dbae8e9a36260450e7005e14
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Responsibility — `commission.responsibility`.
@@ -8,6 +8,25 @@
 //! An agent revision commissioned to a durable case. The governor owns the case's truth and returns a frontier; a run is one bounded period of execution against it. The executor proposes; it never completes a case.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
+
+/// The states of `commission.responsibility.ActionBinding`, as runtime values.
+///
+/// Synthesised from the lifecycle, so the two cannot disagree. Which *moves* are legal is not
+/// carried here — it is carried by `ActionBinding<S>`, where an undeclared move does not compile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionBindingState {
+    /// `Declared`.
+    Declared,
+}
+
+/// ActionBindingKey — `commission.responsibility.ActionBindingKey`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionBindingKey {
+    /// `commission_id` — `commission.responsibility.CommissionId`.
+    pub commission_id: CommissionId,
+    /// `action` — `String`.
+    pub action: String,
+}
 
 /// The states of `commission.responsibility.ActionRequest`, as runtime values.
 ///
@@ -176,6 +195,18 @@ pub struct CompletionDeterminationComplete {
     pub outcome: String,
 }
 
+/// ConnectorAttemptId — `commission.responsibility.ConnectorAttemptId`: a distinct wrapper around `String`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectorAttemptId(pub String);
+
+/// ConnectorInstanceId — `commission.responsibility.ConnectorInstanceId`: a distinct wrapper around `String`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectorInstanceId(pub String);
+
+/// ConnectorOperationId — `commission.responsibility.ConnectorOperationId`: a distinct wrapper around `String`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectorOperationId(pub String);
+
 /// EffectOutcome — `commission.responsibility.EffectOutcome`: one of a fixed set of shapes, tagged on the wire by `kind`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EffectOutcome {
@@ -190,6 +221,8 @@ pub enum EffectOutcome {
 pub struct EffectOutcomePerformed {
     /// `report` — `Json`.
     pub report: crate::json::Value,
+    /// `attempt` — `commission.responsibility.ConnectorAttemptId`.
+    pub attempt: ConnectorAttemptId,
 }
 
 /// EffectOutcomeRefused — `commission.responsibility.EffectOutcomeRefused`.
@@ -443,6 +476,140 @@ pub enum Truth {
 /// Unit — `commission.responsibility.Unit`: a distinct wrapper around `Boolean`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unit(pub bool);
+
+/// What ActionBinding — `commission.responsibility.ActionBinding` — holds, apart from where it is in its lifecycle.
+///
+/// The identity and every declared field. The state is deliberately not one: inside the domain it
+/// is carried by the type parameter of [`ActionBinding<S>`], and at a boundary by [`ActionBindingSnapshot::state`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionBindingData {
+    /// The identity: `binding` — `commission.responsibility.ActionBindingKey`.
+    pub binding: ActionBindingKey,
+    /// `commission_id` — `commission.responsibility.CommissionId`.
+    ///
+    /// Carries `bindings`: `commission.responsibility.Commission` owns many `commission.responsibility.ActionBinding`.
+    pub commission_id: CommissionId,
+    /// `instance_id` — `commission.responsibility.ConnectorInstanceId`.
+    pub instance_id: ConnectorInstanceId,
+    /// `operation_id` — `commission.responsibility.ConnectorOperationId`.
+    pub operation_id: ConnectorOperationId,
+}
+
+/// The states of `commission.responsibility.ActionBinding`, at the type level.
+///
+/// One marker type per declared state, sealed: a state the lifecycle does not declare cannot
+/// implement [`Marker`](action_binding_state::Marker), so [`ActionBinding<S>`](ActionBinding) can only ever rest in a real state.
+pub mod action_binding_state {
+    /// Closes [`Marker`] over the declared states.
+    mod sealed {
+        /// Implemented only by the marker types beside this module.
+        pub trait Sealed {}
+        impl Sealed for super::Declared {}
+    }
+
+    /// A declared state of `ActionBinding`, as a type.
+    pub trait Marker: sealed::Sealed {
+        /// The same state, as the runtime value.
+        const STATE: super::ActionBindingState;
+    }
+
+    /// `Declared`. Where a new instance starts.
+    pub struct Declared;
+
+    impl Marker for Declared {
+        const STATE: super::ActionBindingState = super::ActionBindingState::Declared;
+    }
+}
+
+/// ActionBinding — `commission.responsibility.ActionBinding` — with its lifecycle state carried by the type.
+///
+/// The one constructor rests in `Declared`, and the only way to change `S` is a method generated from
+/// a declared transition. A move the specification does not declare is therefore not an error
+/// case: it does not compile. Where the state is data — wire, storage — use [`ActionBindingSnapshot`]
+/// and [`ActionBindingSnapshot::refine`].
+pub struct ActionBinding<S: action_binding_state::Marker> {
+    data: ActionBindingData,
+    state: core::marker::PhantomData<S>,
+}
+
+impl<S: action_binding_state::Marker> ActionBinding<S> {
+    /// The state this instance rests in, as the runtime value.
+    pub fn state(&self) -> ActionBindingState {
+        S::STATE
+    }
+
+    /// What it holds.
+    pub fn data(&self) -> &ActionBindingData {
+        &self.data
+    }
+
+    /// Hands the data back, giving up the typed state.
+    pub fn into_data(self) -> ActionBindingData {
+        self.data
+    }
+}
+
+impl ActionBinding<action_binding_state::Declared> {
+    /// A new instance, resting in `Declared` — the only state the lifecycle starts one in.
+    pub fn new(data: ActionBindingData) -> Self {
+        Self {
+            data,
+            state: core::marker::PhantomData,
+        }
+    }
+}
+
+/// `commission.responsibility.ActionBinding` as it crosses a boundary: the state as a value beside the data.
+///
+/// Wire and storage know states only at runtime; [`ActionBindingSnapshot::refine`] is the one door back
+/// into the typed lifecycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionBindingSnapshot {
+    /// Where the instance is in its lifecycle.
+    pub state: ActionBindingState,
+    /// What it holds.
+    pub data: ActionBindingData,
+}
+
+/// An `ActionBinding` in whichever declared state it was found.
+pub enum AnyActionBinding {
+    /// Resting in `Declared`.
+    Declared(ActionBinding<action_binding_state::Declared>),
+}
+
+impl ActionBindingSnapshot {
+    /// Refines the runtime state into the typed one.
+    ///
+    /// Total: every declared state has an arm, and an undeclared state cannot reach here because
+    /// `ActionBindingState` cannot spell one.
+    pub fn refine(self) -> AnyActionBinding {
+        match self.state {
+            ActionBindingState::Declared => AnyActionBinding::Declared(ActionBinding {
+                data: self.data,
+                state: core::marker::PhantomData,
+            }),
+        }
+    }
+}
+
+impl AnyActionBinding {
+    /// The state, as the runtime value.
+    pub fn state(&self) -> ActionBindingState {
+        match self {
+            Self::Declared(_) => ActionBindingState::Declared,
+        }
+    }
+
+    /// Back to the boundary shape.
+    pub fn snapshot(self) -> ActionBindingSnapshot {
+        match self {
+            Self::Declared(instance) => ActionBindingSnapshot {
+                state: ActionBindingState::Declared,
+                data: instance.into_data(),
+            },
+        }
+    }
+}
 
 /// What ActionRequest — `commission.responsibility.ActionRequest` — holds, apart from where it is in its lifecycle.
 ///

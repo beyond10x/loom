@@ -1,9 +1,9 @@
 //! A scripted fake `AgentExecutor`: it returns the outcomes its script names, in order, and logs
-//! each call.
+//! each call and the frontier it was handed.
 
 use b10x_loom_commission::model::responsibility::{
-    Commission, CommissionId, ExecutorOutcome, Frontier, FrontierId, commission_state,
-    frontier_state,
+    Commission, CommissionId, ExecutorOutcome, Frontier, FrontierData, FrontierId,
+    commission_state, frontier_state,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use std::collections::VecDeque;
@@ -19,7 +19,8 @@ pub struct ExecutorCall {
 }
 
 /// An executor that returns the next outcome of its script on each call to
-/// [`AgentExecutor::run`], whatever the commission and frontier, and records each call.
+/// [`AgentExecutor::run`], whatever the commission and frontier, and records each call and the
+/// frontier it was handed.
 ///
 /// A call after the script is used up panics: a test that runs the executor more often than it
 /// scripted is wrong, and saying so beats inventing an outcome.
@@ -27,6 +28,7 @@ pub struct ExecutorCall {
 pub struct ScriptedExecutor {
     script: Mutex<VecDeque<ExecutorOutcome>>,
     calls: Mutex<Vec<ExecutorCall>>,
+    frontiers: Mutex<Vec<FrontierData>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -41,12 +43,18 @@ impl ScriptedExecutor {
         Self {
             script: Mutex::new(script.into_iter().collect()),
             calls: Mutex::new(Vec::new()),
+            frontiers: Mutex::new(Vec::new()),
         }
     }
 
     /// Every call so far, in the order it was made.
     pub fn calls(&self) -> Vec<ExecutorCall> {
         lock(&self.calls).clone()
+    }
+
+    /// The frontier each call was handed, whole, in the order the calls were made.
+    pub fn frontiers(&self) -> Vec<FrontierData> {
+        lock(&self.frontiers).clone()
     }
 }
 
@@ -60,6 +68,7 @@ impl AgentExecutor for ScriptedExecutor {
             commission_id: commission.data().commission_id.clone(),
             frontier_id: frontier.data().frontier_id.clone(),
         });
+        lock(&self.frontiers).push(frontier.data().clone());
         lock(&self.script)
             .pop_front()
             .unwrap_or_else(|| panic!("ScriptedExecutor: the script is used up"))

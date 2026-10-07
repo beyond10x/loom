@@ -30,7 +30,11 @@
 //!    reasons, the run ends `AwaitingApproval`, carrying the actions that need approval in frontier
 //!    order, and the executor is not run. An action an authority verdict denied in this Run is not
 //!    awaited; a frontier whose only actions needing approval were denied is no gate;
-//! 6. [`AgentExecutor::run`] on that frontier. The step is reported to the [`ObservationPort`] as
+//! 6. [`AgentExecutor::run`] on that frontier, less every action the effect port does not perform
+//!    and that needs no authority (`story:effect-invocation`): an action listed `ApprovalRequired`
+//!    stays, performed or not, so a run still stops at its gate. Everything else in the iteration,
+//!    [`LoopEnd::last_frontier`] included, reads the frontier as the governor issued it. The step
+//!    is reported to the [`ObservationPort`] as
 //!    one observation: its id and time come from the [`LoopContext`], its source is `executor`, its
 //!    subject is `<case>@<frontier revision>`, and its payload names the outcome (`outcome`) and
 //!    carries a proposal's `action` and `arguments` or a human request's `request`. It is never
@@ -49,7 +53,8 @@
 //!    [`EffectOutcome`] is recorded ([`LoopEnd::effects`]) and delivered as one observation: id and
 //!    time from the context, source [`EFFECT_SOURCE`], subject `<case>@<request revision>`, payload
 //!    `outcome` (`Performed` or `Refused`), `action_request`, `action`, `arguments`, and `report`
-//!    or `reason`. It is never evidence. Stale: the iteration is a step, and the next iteration
+//!    with the one Connector `attempt` the invocation produced, or `reason`. It is never evidence.
+//!    The loop never retries an invocation. Stale: the iteration is a step, and the next iteration
 //!    loads the case, which has moved: it ends the run completed if the case is complete, else with
 //!    no admissible action. Otherwise, and after an authority answer other than an allow, the run
 //!    outcome is derived ([`derive`]);
@@ -456,7 +461,7 @@ where
             return out_of_budget(runs, run_id, limit, track);
         }
 
-        let outcome = executor.run(commission, &frontier);
+        let outcome = executor.run(commission, &offered(&frontier, effects));
         let observed = governor.observe(observation(context, &frontier, &outcome));
         if let ExecutorOutcome::Suspended(suspended) = &outcome {
             let reason = suspended.reason.clone();
@@ -587,6 +592,20 @@ fn out_of_budget<R: SuspendRunBehavior + ?Sized>(
     Ok(track.end(run_id, outcome))
 }
 
+/// The frontier an executor is handed: `frontier` less every action the effect port does not
+/// perform and that needs no authority. An action behind an authority gate stays, performed or not
+/// (`decision-blocker:gated-unbound-action-visibility`, B). Same id, case and revision.
+fn offered<F: EffectPort + ?Sized>(
+    frontier: &Frontier<frontier_state::Issued>,
+    effects: &F,
+) -> Frontier<frontier_state::Issued> {
+    let mut data = frontier.data().clone();
+    data.actions.retain(|listed| {
+        listed.status == ActionStatus::ApprovalRequired || effects.performs(&listed.action)
+    });
+    Frontier::new(data)
+}
+
 /// The actions `frontier` lists as needing approval that no verdict in this Run denied, in its
 /// order.
 fn awaited(frontier: &Frontier<frontier_state::Issued>, denied: &[String]) -> Vec<String> {
@@ -663,10 +682,15 @@ fn effect_observation<C: LoopContext + ?Sized>(
         ("action".to_owned(), text(&request.action)),
         ("arguments".to_owned(), request.arguments.0.clone()),
     ];
-    payload.push(match effect {
-        EffectOutcome::Performed(performed) => ("report".to_owned(), performed.report.clone()),
-        EffectOutcome::Refused(refused) => ("reason".to_owned(), text(&refused.reason)),
-    });
+    match effect {
+        EffectOutcome::Performed(performed) => {
+            payload.push(("report".to_owned(), performed.report.clone()));
+            payload.push(("attempt".to_owned(), text(&performed.attempt.0)));
+        }
+        EffectOutcome::Refused(refused) => {
+            payload.push(("reason".to_owned(), text(&refused.reason)));
+        }
+    }
     Observation::new(ObservationData {
         observation_id: context.observation_id(),
         source: EFFECT_SOURCE.to_owned(),

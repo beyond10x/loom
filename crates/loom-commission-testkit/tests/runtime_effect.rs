@@ -51,9 +51,9 @@ use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
     ActionRequestData, ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext,
     AuthorityVerdict, AuthorityVerdictApprovalRequired, AuthorityVerdictDeny, CaseId, Commission,
-    CommissionData, CommissionId, EffectOutcome, EffectOutcomePerformed, EffectOutcomeRefused,
-    ExecutorOutcome, ExecutorOutcomeProposedAction, Frontier, FrontierAction, FrontierId,
-    FrontierObligation, ObservationId, PrincipalId, ProposedActionArguments,
+    CommissionData, CommissionId, ConnectorAttemptId, EffectOutcome, EffectOutcomePerformed,
+    EffectOutcomeRefused, ExecutorOutcome, ExecutorOutcomeProposedAction, Frontier, FrontierAction,
+    FrontierId, FrontierObligation, ObservationId, PrincipalId, ProposedActionArguments,
     RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeAwaitingApproval,
     RunOutcomeCompleted, RunOutcomeNeedsAuthority, RunOutcomeNeedsExternalEvidence,
     RunOutcomeSuspended, RunState, SuspensionReason, Unit, commission_state, frontier_state,
@@ -148,6 +148,7 @@ fn request(
 fn performed(report: &str) -> EffectOutcome {
     EffectOutcome::Performed(EffectOutcomePerformed {
         report: Value::Text(report.to_owned()),
+        attempt: ConnectorAttemptId("attempt-1".to_owned()),
     })
 }
 

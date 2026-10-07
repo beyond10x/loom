@@ -5,7 +5,8 @@
 //! performs it in the workspace with [`LocalExecutor`], lets the [`TestResultVerifier`] submit
 //! evidence for a test run, prints the step, and records it in the briefing. It answers:
 //!
-//! - `Performed`, carrying the executor's report as text, for a performed action;
+//! - `Performed`, carrying the executor's report as text, for a performed action. No Connector
+//!   performs it, so its attempt is `local:<action request id>`, never a Connectors attempt id;
 //! - `Refused`, carrying the reason, for an action the executor refuses (a path outside the
 //!   workspace, an ignored path, arguments the action does not take, an action it never performs)
 //!   and for a `repository.inspect` that cannot read a path it names. The model is told why;
@@ -25,8 +26,8 @@ use std::io::Write;
 
 use b10x_loom_commission::model::json;
 use b10x_loom_commission::model::responsibility::{
-    ActionRequestData, CaseId, Commission, EffectOutcome, EffectOutcomePerformed,
-    EffectOutcomeRefused, ExecutorOutcomeProposedAction, commission_state,
+    ActionRequestData, CaseId, Commission, ConnectorAttemptId, EffectOutcome,
+    EffectOutcomePerformed, EffectOutcomeRefused, ExecutorOutcomeProposedAction, commission_state,
 };
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use loom_governor::{CanonGovernor, CaseStore};
@@ -183,6 +184,7 @@ impl<'a, 'o, S: CaseStore> LocalEffects<'a, 'o, S> {
         self.briefing.record(&proposal, &report);
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {
             report: json::Value::Text(report.to_string()),
+            attempt: ConnectorAttemptId(format!("local:{}", request.action_request_id.0.0)),
         }))
     }
 

@@ -29,7 +29,7 @@ use b10x_loom_commission::model::responsibility::obligations::{
 };
 use b10x_loom_commission::model::responsibility::{
     ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, CaseId, Commission,
-    CommissionData, CommissionId, CompletionDetermination, ExecutorOutcome,
+    CommissionData, CommissionId, CompletionDetermination, ConnectorAttemptId, ExecutorOutcome,
     ExecutorOutcomeProposedAction, ExecutorOutcomeSuspended, Frontier, FrontierAction,
     GovernorError, Observation, ObservationId, PrincipalId, ProposedActionArguments, RunId,
     RunOutcome, RunOutcomeCompleted, RunState, StartRun, StartRunOutcome, SuspendRun,
@@ -123,6 +123,7 @@ impl EffectPort for Performs {
     ) -> Result<EffectOutcome, EffectError> {
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {
             report: Value::Null,
+            attempt: ConnectorAttemptId("attempt-1".to_owned()),
         }))
     }
 }
