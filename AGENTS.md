@@ -265,8 +265,10 @@ a skip with a named missing prerequisite establishes no qualification. The slice
 go through one helper, `crates/loom-intake-slice/src/git.rs`: no workspace hook, `core.fsmonitor`
 command or signing program runs, a case does not open on a workspace whose own configuration
 names a program, and a call is refused once that configuration, its includes or the git directory
-changed since the case opened. `tests/host_git_hardening.rs` fails on any `Command::new` of git
-outside that helper. Gates still run when the operator or the bot commits and pushes.
+changed since the case opened. `tests/host_git_hardening.rs::every_host_git_command_goes_through_a_hardened_helper` rejects
+other Git call sites except the separately hardened pinned-source helper at
+`crates/loom-protocols/src/git.rs`. That helper fetches into a private bare repository, never a
+run workspace, with hooks, fsmonitor, helpers and global/system configuration disabled. Gates still run when the operator or the bot commits and pushes.
 
 Model calls go through llm's crates at a pinned tag (`b10x-llm-tool-call` and `b10x-llm-core`,
 `0.1.7`), never a hand-written HTTP client. The Codex preset and the forced tool call are
