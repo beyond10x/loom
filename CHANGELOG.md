@@ -29,6 +29,16 @@ under **Unreleased** until the next release.
   action a Loom run selects leaves Loom only as a `ProposedAction`, and `b10x-loom-executor`'s
   normal dependency graph holds no `connectors*` or `b10x-connectors*` package.
 
+- Commission's `ExecutorOutcome` has a `CaseMoved` variant (`ExecutorOutcomeCaseMoved`,
+  `expected_case_revision`): an executor reports that the case moved to another revision while it
+  worked, naming the revision of the frontier it was handed. On it, `run_until_blocked` loads the
+  case once more, and the governor decides whether it moved: still at the Run's revision, the step
+  counts as `NoUsefulAction` and the run goes on. Moved, the run is judged on the frontier current
+  then, as the executor would be handed it: a complete case ends the run `Completed`; otherwise
+  the outcome is derived from that frontier, and a frontier that would let the run go on ends it
+  with no admissible action, since the Run holds the case at the revision it left. The executor's
+  revision is observed, never trusted.
+
 ### Changed
 
 - Before the executor runs, the Commission runtime removes from the frontier it hands over every
@@ -57,6 +67,20 @@ under **Unreleased** until the next release.
   item beginning with `ELISION_MARKER`, and the usage the endpoint reported for the summary request
   is still recorded on the session. Where even that item would not be shorter (the items are
   reasoning items the loop carries verbatim), they stand.
+
+- A Loom built with `Loom::with_governor` reports a selection made at a revision the case has left
+  (`stale-revision`) as `CaseMoved` instead of `NoUsefulAction`. Under `run_until_blocked`, a case
+  that moves while the selector selects or while arguments are generated is no longer judged on the
+  frontier it left: a case completed meanwhile ends `Completed`, and a case moved past an open
+  obligation ends on the obligation its current frontier holds. In the governed loop
+  (`Loom::run_loop`) such a selection is still denied to the model, which chooses again from the
+  next turn's catalogue; `LoopExecutor` reports a run that then ends without a proposal as
+  `CaseMoved`, naming the revision it was handed, instead of `CompletedLocalReasoning` or
+  `NoUsefulAction`.
+- `task docs-check` writes ESS output under the workspace's build directory
+  (`target/loom-docs/<run>/`), a parent each run owns alone, instead of the system temporary
+  directory, where another process's `ess` run held the output lock and failed the check
+  ("output ownership busy", os error 11).
 
 ## [0.3.0] - 2026-10-07
 
