@@ -6,13 +6,57 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- Commission declares the action-operation binding: a commission's composition binds a frontier
+  action id to exactly one Connector operation (`instance_id`, `operation_id`), at most one binding
+  per action id (`ActionBinding`, identity `(commission_id, action)`).
+  `ports::connector::ConnectorEffects` is the Connector-backed `EffectPort` over a commission's
+  bindings; it invokes each admitted request once through the new `ConnectorInvoker` port, and
+  refuses bindings of another commission or a second binding for one action. The testkit adds
+  `RecordingInvoker`, and `ScriptedExecutor` records the frontier each call was handed. No
+  Connectors client fills the port yet.
+- `task check` holds Loom's own specification (`ess/`) to its synthesized ESS conformance suite:
+  `task conform` synthesizes the suite, runs it against `b10x-loom-executor` through the new Rust
+  target `b10x-loom-conformance`, and reads the verdict from the report. All 46 scenarios pass and
+  none is named in `ess/SKIPPED.md`. The target answers `loom.run.RevalidateSelection`'s
+  `not-in-frontier` branch itself (it is `external:` in the specification); the executor's
+  membership rule is held by `adversary_run_revalidation.rs`.
+- `selection::select_action` answers `loom.run.SelectAction` over stored catalogues and selections,
+  and the session record (`session::TurnRecord`) answers `loom.run.ReleaseSession` and
+  `loom.run.ProjectCatalogue` through their generated behaviours.
+- `crates/loom-executor/tests/connector_boundary.rs` holds the Connectors boundary: a consequential
+  action a Loom run selects leaves Loom only as a `ProposedAction`, and `b10x-loom-executor`'s
+  normal dependency graph holds no `connectors*` or `b10x-connectors*` package.
+
 ### Changed
 
+- Before the executor runs, the Commission runtime removes from the frontier it hands over every
+  action the effect port does not perform and that needs no authority, action by action. An action
+  with an entry that needs approval or names a capability stays with all its entries, so
+  `b10x-loom run` still lists `repository.merge (blocked)` and stops at
+  `ApprovalRequired (repository.merge)`. The approval gate and the run outcome read the frontier
+  the executor was handed.
+- `EffectOutcomePerformed` names the Connector attempt the invocation produced (`attempt`, an
+  optional `ConnectorAttemptId`, present exactly when the effect was invoked through a Connector),
+  and the effect observation carries it only then. The local slice names none.
+- `task commission:deps-guard` also refuses a Connectors crate in `b10x-loom-commission`.
 - Loom requires ESS 0.55.0: the Loom, Commission and intake specifications require it, the
   Commission conformance target builds on the 0.55.0 `ess-conformance` and `ess-primitives`, and
   CI installs the 0.55.0 `ess`. The source formats are unchanged, and the generated Rust is the
   same as under 0.54.0: no specification has a `{generated: true}` value of an `Optional` type, so
   no context gains the new `generate_optional_<t>` port method.
+
+### Fixed
+
+- A compaction never leaves the session larger than it found it. The ported loop folded any
+  non-empty summary, so a model that answered the summary request with more text than it was asked
+  to fold grew the conversation (14,596 bytes became 17,170, 4,292 tokens of a 4,000-token window)
+  and the next request was still sent. A summary no shorter than the items it would replace is now
+  a failed summary (`summary-failed`): it is not kept, those items are elided instead behind one
+  item beginning with `ELISION_MARKER`, and the usage the endpoint reported for the summary request
+  is still recorded on the session. Where even that item would not be shorter (the items are
+  reasoning items the loop carries verbatim), they stand.
 
 ## [0.3.0] - 2026-10-07
 

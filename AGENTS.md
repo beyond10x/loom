@@ -59,7 +59,10 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | A blocked or merge-seeking pick is never proposed | `crates/loom-executor/tests/adversary_executor_admission.rs` |
 | A stale or unlisted request is refused at revalidation | `crates/loom-commission-testkit/tests/action_request.rs`, `crates/loom-executor/tests/adversary_run_revalidation.rs`, `crates/loom-executor/tests/selection_revalidation.rs` |
 | Unknown capabilities and panicking authority providers yield no grant | `crates/loom-commission-testkit/tests/adversary_authority_fail_closed.rs` |
-| Commission names no executor, Canon or `model-provider-deny.txt` crate | `task commission:deps-guard` (`crates/loom-commission-testkit/tests/executor_port.rs`) |
+| Commission names no executor, Canon, `model-provider-deny.txt` or Connectors crate | `task commission:deps-guard` (`crates/loom-commission-testkit/tests/executor_port.rs`) |
+| An executor is never handed an unperformed action that needs no authority; an effect is invoked once, through its binding | `crates/loom-commission-testkit/tests/effect_invocation.rs` (`effect_invoked_only_through_its_binding`) |
+| A consequential action leaves Loom only as a proposal, and the executor links no Connectors crate | `crates/loom-executor/tests/connector_boundary.rs` (`consequential_actions_leave_loom_only_as_a_proposal`) |
+| The executor answers the commands of `ess/` as their synthesized scenarios specify, except `not-in-frontier`, which the conformance target answers | `task conform` (`crates/loom-conformance/tests/conform.rs`, `ess_conformance_report`); the membership rule: `crates/loom-executor/tests/adversary_run_revalidation.rs` (`not_in_frontier_follows_the_frontier_actions`) |
 | The router refuses a pick outside the registry or below the threshold | `crates/loom-intake-router/tests/adversary_classify.rs` |
 | Model or provider JSON nested past 128 levels is refused | `crates/loom-executor/tests/json_depth.rs` |
 | No hand-written type shadows an ESS-declared one | `task no-hand-model`, `task commission:no-hand-model` |
@@ -116,7 +119,7 @@ the offline dependency guard inspects the full graph, including platform-specifi
 Before a change is reported done, in this order:
 
 1. `task check`: the three specification validations, both ESS gates, all three drift checks, both
-   no-hand-model checks, Commission's conformance suite, the dependency guard,
+   no-hand-model checks, Loom's and Commission's conformance suites, the dependency guard,
    `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
    `cargo test --workspace --locked`, then `task docs-check` and `task commission:docs-drift`.
    CI runs exactly this (`check.yml`, job `loom / task check`).
@@ -130,7 +133,7 @@ There is no `rust-toolchain.toml`: CI builds on `stable` (`dtolnay/rust-toolchai
 toolchain newer than CI's `stable` can add Clippy lints CI does not have. Run the gate on CI's
 version (`RUSTUP_TOOLCHAIN=<version> task check`) when Clippy disagrees.
 
-`task --list` names every step, and each runs alone (`task drift`, `task commission:conform`, …).
+`task --list` names every step, and each runs alone (`task drift`, `task conform`, `task commission:conform`, …).
 `task commission:check` is Commission's own gate, limited to its crates. While iterating, prefer
 `cargo test -p <package> --locked` on the crate you touched.
 

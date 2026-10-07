@@ -130,7 +130,7 @@ its code.
 | `b10x-loom-governor` | Evaluates a case's protocol with Canon and issues the frontier; executes nothing |
 | `b10x-loom-intake-router`, `-references`, `-slice` | Route an intent to a protocol, extract its references, and run the local slice over a git work tree |
 
-The [crate reference](https://beyond10x.github.io/loom/docs/reference/crates) lists all fourteen
+The [crate reference](https://beyond10x.github.io/loom/docs/reference/crates) lists all fifteen
 workspace packages, test kits and repository tools included. If you depended on the archived
 `commission`, `governor` or `intake` repositories,
 [Move to Loom's crates](https://beyond10x.github.io/loom/docs/guides/move-to-loom) maps the old
