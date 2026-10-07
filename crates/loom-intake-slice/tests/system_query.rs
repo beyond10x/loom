@@ -71,8 +71,10 @@ fn run_case(
     let dir = tempfile::tempdir().unwrap();
     let report = dir.path().join("metrics.json");
     let mut output = Vec::new();
+    let mut query = request(workspace);
+    query.test = TestCommand::new("", std::iter::empty::<&str>());
     let result = run_intent_with_options(
-        &request(workspace),
+        &query,
         catalog,
         &gov,
         &gov,
@@ -273,6 +275,117 @@ fn clock_failure_has_no_success_evidence_and_retains_metrics() {
     let metrics: Value = serde_json::from_slice(&std::fs::read(report).unwrap()).unwrap();
     assert_eq!(metrics["model_calls"], 3);
 }
+#[test]
+fn unsupported_or_low_confidence_routes_never_initialize_query_resources() {
+    for (name, confidence, expected) in [
+        ("system-query@1", 0.01, StopReason::Refused),
+        ("unknown@1", 0.99, StopReason::Refused),
+        ("changed-clock@1", 0.99, StopReason::NoLocalExecutor),
+    ] {
+        let mut catalog = ProtocolCatalog::bundled().unwrap();
+        catalog
+            .add_yaml(
+                "changed-clock@1",
+                &YAML.replace("effect: read", "effect: write"),
+                loom_protocols::ProtocolSource {
+                    kind: loom_protocols::SourceKind::Memory,
+                    location: "fixture".into(),
+                    revision: String::new(),
+                    path: String::new(),
+                },
+            )
+            .unwrap();
+        let gov = CanonGovernor::new(MemoryCaseStore::default())
+            .with_catalog(&catalog)
+            .unwrap();
+        let router = Recorded::new(vec![args_for(
+            "pick_protocol",
+            json!({"protocol":name,"confidence":confidence,"reasons":["fixture"]}),
+        )]);
+        let agent = Recorded::new(vec![]);
+        let clock = FixedClock {
+            reads: Cell::new(0),
+            fail: true,
+            instant: "unused",
+        };
+        let result = run_intent_with_options(
+            &request(Some(PathBuf::from("/missing/workspace"))),
+            &catalog,
+            &gov,
+            &gov,
+            &router,
+            &agent,
+            &clock,
+            &mut Vec::new(),
+            &RunOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(result.stop_reason, expected);
+        assert_eq!(result.steps, 0);
+        assert_eq!(clock.reads.get(), 0);
+        assert!(agent.requests().is_empty());
+    }
+}
+
+#[test]
+fn oversized_intent_or_catalog_stops_before_classification_call() {
+    for oversized_catalog in [false, true] {
+        let mut catalog = ProtocolCatalog::bundled().unwrap();
+        let mut request = request(None);
+        if oversized_catalog {
+            let yaml = YAML.replace(
+                "Read this machine's current date or time",
+                &"時刻\\\"".repeat(12000),
+            );
+            catalog
+                .add_yaml(
+                    "large-clock@1",
+                    &yaml,
+                    loom_protocols::ProtocolSource {
+                        kind: loom_protocols::SourceKind::Memory,
+                        location: "fixture".into(),
+                        revision: String::new(),
+                        path: String::new(),
+                    },
+                )
+                .unwrap();
+        } else {
+            request.intent = "時刻\\\"".repeat(12000);
+        }
+        let gov = CanonGovernor::new(MemoryCaseStore::default())
+            .with_catalog(&catalog)
+            .unwrap();
+        let model = Recorded::new(vec![]);
+        let clock = FixedClock {
+            reads: Cell::new(0),
+            fail: true,
+            instant: "unused",
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let report = dir.path().join("metrics.json");
+        let error = run_intent_with_options(
+            &request,
+            &catalog,
+            &gov,
+            &gov,
+            &model,
+            &model,
+            &clock,
+            &mut Vec::new(),
+            &RunOptions {
+                context_policy: ContextPolicy::Bounded,
+                context_report: Some(report.clone()),
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("ceiling"), "{error}");
+        assert!(model.requests().is_empty());
+        assert_eq!(clock.reads.get(), 0);
+        let metrics: Value = serde_json::from_slice(&std::fs::read(report).unwrap()).unwrap();
+        assert_eq!(metrics["model_calls"], 0);
+    }
+}
+
 type Answer = Box<dyn FnOnce(&TurnRequest) -> Value + Send>;
 struct Reply {
     tool: &'static str,
