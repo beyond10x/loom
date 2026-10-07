@@ -355,6 +355,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "b10x-loom-protocols"
+version = "0.3.0"
+dependencies = [
+ "b10x-canon",
+ "b10x-canon-engineering",
+ "intake",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "url",
+]
+
+[[package]]
 name = "b10x-loom-sdk"
 version = "0.3.0"
 dependencies = [
