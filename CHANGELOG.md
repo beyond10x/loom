@@ -6,6 +6,14 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Changed
+
+- Loom requires ESS 0.55.0: the Loom, Commission and intake specifications require it, the
+  Commission conformance target builds on the 0.55.0 `ess-conformance` and `ess-primitives`, and
+  CI installs the 0.55.0 `ess`. The source formats are unchanged, and the generated Rust is the
+  same as under 0.54.0: no specification has a `{generated: true}` value of an `Optional` type, so
+  no context gains the new `generate_optional_<t>` port method.
+
 ## [0.3.0] - 2026-10-07
 
 Loom 0.3.0 runs the ported Harness loop over a governed run: each turn's tools are the catalogue

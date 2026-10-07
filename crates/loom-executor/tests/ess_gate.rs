@@ -314,7 +314,7 @@ fn gate_over_a_copy_synthesize_refuses_fails_at_synthesize() {
     );
 }
 
-/// A command whose `never` outcome no input satisfies. ess 0.54.0 validates and compiles it, and
+/// A command whose `never` outcome no input satisfies. ess 0.55.0 validates and compiles it, and
 /// `ess verify conform synthesize` refuses the outcome (`ESS-SYNTH-003`) and still exits 0 with
 /// `1 refusal(s)` on its summary line: the refusal count is the only signal that step 3 fails.
 /// It is a file of its own in domain `loom.run`, so it does not depend on which sections
@@ -393,7 +393,7 @@ fn gate_over_a_copy_synthesize_refuses_with_exit_0_fails_at_synthesize() {
 #[test]
 fn gate_over_a_copy_requiring_an_older_ess_fails_at_validate() {
     let copy = copy_with_edit("gate_requires_older", "ess-inputs.yaml", |text| {
-        text.replacen("requires: ess 0.54.0", "requires: ess 0.51.0", 1)
+        text.replacen("requires: ess 0.55.0", "requires: ess 0.51.0", 1)
     });
     let suite = copy.parent().expect("scratch").join("loom-suite.json");
     let Err(failure) = run_gate(&copy, &suite) else {
@@ -575,7 +575,7 @@ fn refusal_count_is_read_from_the_summary_line() {
         refusals("3 scenario(s) (1 authored), 12 refusal(s), written to x"),
         Some(12)
     );
-    // ess 0.54.0 can exit 0 while refusing: `refused:` lines, then the summary. The count is read
+    // ess 0.55.0 can exit 0 while refusing: `refused:` lines, then the summary. The count is read
     // from the summary, the last line that carries one.
     assert_eq!(
         refusals(
