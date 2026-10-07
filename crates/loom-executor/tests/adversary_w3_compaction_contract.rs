@@ -630,17 +630,18 @@ fn adversary_w3_the_record_is_there_when_the_callers_sink_sees_the_compaction() 
 // --- acceptance item 1 --------------------------------------------------------------------------
 
 /// Acceptance 1: "After compaction the session is at or below 50 % of the declared window." The
-/// summary is model-authored, and the loop folds whatever non-empty text it gets back. A model that
-/// answers the summary request with more text than it was asked to fold leaves the session above
-/// half the window, and larger than it was before the compaction.
+/// summary is model-authored. A model that answers the summary request with more text than it was
+/// asked to fold would, folded, leave the session above half the window and larger than it was
+/// before the compaction (`story:compaction-summary-bound`: 14,596 bytes before, 17,170 after).
 ///
-/// This holds today's outcome, a known defect that predates `story:compaction-contract` and is
-/// filed as `story:compaction-summary-bound`. When that story lands, this assertion becomes "at or
-/// below 50 % of the declared window".
+/// A summary that does not shrink the items it would replace is a failed summary: it is not
+/// folded, the items it would have replaced are elided instead, the failure is said out loud, and
+/// the usage the endpoint reported for the summary request is still recorded.
 #[test]
-fn adversary_w3_a_summary_longer_than_the_target_leaves_the_session_above_half_the_window() {
+fn adversary_w3_a_summary_longer_than_the_items_it_replaces_leaves_the_session_at_or_below_half_the_window()
+ {
     let verbose = "SUMMARY-verbose: the plan said to read, test and merge. ".repeat(300);
-    let (_, sink, sent) = one_compaction(Ok(prose(&verbose, usage(3_600, 4_200, 0, None))));
+    let (records, sink, sent) = one_compaction(Ok(prose(&verbose, usage(3_600, 4_200, 0, None))));
 
     let (bytes_before, bytes_after) = sink
         .events()
@@ -662,14 +663,112 @@ fn adversary_w3_a_summary_longer_than_the_target_leaves_the_session_above_half_t
         .sum();
     assert_eq!(carried, bytes_after, "the loop's measure of what it sent");
     assert!(
-        tokens(bytes_after) * 100 > WINDOW * 50,
-        "story:compaction-summary-bound: a summary longer than the target is still expected to \
-         leave the session above half the window, and after compaction it is {} tokens of a \
-         {WINDOW} token window ({bytes_before} bytes before the compaction, {bytes_after} after). \
-         If story:compaction-summary-bound has landed, this assertion becomes \"at or below 50 % \
-         of the declared window\": rewrite it to `tokens(bytes_after) * 100 <= WINDOW * 50`.",
+        tokens(bytes_after) * 100 <= WINDOW * 50,
+        "after compaction the session is {} tokens of a {WINDOW} token window, above half of it \
+         ({bytes_before} bytes before the compaction, {bytes_after} after)",
         tokens(bytes_after)
     );
+    assert!(
+        bytes_after < bytes_before,
+        "a compaction never leaves the session larger: {bytes_before} bytes became {bytes_after}"
+    );
+    assert!(
+        after.items.iter().all(|item| !serde_json::to_string(item)
+            .expect("encodes")
+            .contains("SUMMARY-verbose")),
+        "a summary no shorter than what it would replace is not folded into the conversation"
+    );
+    assert_eq!(
+        sink.warnings()
+            .filter(|(code, _)| *code == "summary-failed")
+            .count(),
+        1,
+        "the failed summary is said out loud: {:?}",
+        sink.warnings().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        compacted(&sink),
+        vec![(true, usage(3_600, 4_200, 0, None))],
+        "a summary turn was spent, and the event carries what it reported"
+    );
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(
+        records[0].data.usage,
+        Some(reported(3_600, 4_200, 0, None)),
+        "the usage the endpoint reported for the failed summary request is still recorded"
+    );
+}
+
+/// The other half of the bound: a compaction never leaves the session larger than it found it. The
+/// only weight before the protected tail is one provider reasoning item, which the loop carries
+/// verbatim and never rewrites, so neither a summary nor a note saying what was elided can be
+/// shorter than what it would stand in for. Nothing is folded and nothing is elided, the reasoning
+/// item survives byte for byte, and the summary request is still recorded at its reported usage.
+#[test]
+fn adversary_w3_a_fold_of_reasoning_items_alone_never_leaves_the_session_larger() {
+    let reasoning = Item::Opaque {
+        wire: WireId::new(responses::WIRE).expect("valid"),
+        payload: json!({"type": "reasoning", "encrypted_content": "r".repeat(13_000)}),
+    };
+    let first = TurnOutcome {
+        stop_reason: StopReason::ToolCalls,
+        items: vec![
+            reasoning.clone(),
+            Item::assistant("PLAN-reasoned: ask for the merge."),
+            Item::ToolCall(call("call_1", "no_such_tool", json!({}))),
+        ],
+        usage: usage(7, 100, 0, None),
+    };
+    let (records, sink, sent) =
+        one_compaction_after(first, Ok(prose("SUMMARY-short", usage(1_111, 11, 0, None))));
+
+    let (bytes_before, bytes_after) = sizes(&sink);
+    assert!(
+        bytes_after <= bytes_before,
+        "a compaction never leaves the session larger: {bytes_before} bytes became {bytes_after}"
+    );
+    let after = sent.last().expect("a request after the compaction");
+    assert_eq!(
+        after
+            .items
+            .iter()
+            .filter(|item| **item == reasoning)
+            .count(),
+        1,
+        "the reasoning item is carried verbatim"
+    );
+    assert!(
+        after.items.iter().all(|item| !serde_json::to_string(item)
+            .expect("encodes")
+            .contains("SUMMARY-short")),
+        "a summary no shorter than what it would replace is not folded into the conversation"
+    );
+    assert_eq!(
+        sink.warnings()
+            .filter(|(code, _)| *code == "summary-failed")
+            .count(),
+        1,
+        "{:?}",
+        sink.warnings().collect::<Vec<_>>()
+    );
+    assert_eq!(compacted(&sink), vec![(true, usage(1_111, 11, 0, None))]);
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(records[0].data.usage, Some(reported(1_111, 11, 0, None)));
+}
+
+/// The one compaction's size before and after, in the loop's own bytes.
+fn sizes(sink: &VecLoopSink) -> (usize, usize) {
+    sink.events()
+        .iter()
+        .find_map(|event| match event {
+            LoopEvent::Compacted {
+                bytes_before,
+                bytes_after,
+                ..
+            } => Some((*bytes_before, *bytes_after)),
+            _ => None,
+        })
+        .expect("a compaction")
 }
 
 // --- a run with one compaction ------------------------------------------------------------------
@@ -678,6 +777,17 @@ fn adversary_w3_a_summary_longer_than_the_target_leaves_the_session_above_half_t
 /// 1 on revision 1 writes a plan and calls an unpublished name, the summary request, then turn 2 on
 /// revision 2 answers. Returns the records, the events and every request sent.
 fn one_compaction(
+    summary: Result<TurnOutcome, WireError>,
+) -> (Vec<CompactionSnapshot>, VecLoopSink, Vec<TurnRequest>) {
+    one_compaction_after(
+        plan_then_call("SOLO", "call_1", usage(7, 100, 0, None)),
+        summary,
+    )
+}
+
+/// [`one_compaction`] with `first` as turn 1.
+fn one_compaction_after(
+    first: TurnOutcome,
     summary: Result<TurnOutcome, WireError>,
 ) -> (Vec<CompactionSnapshot>, VecLoopSink, Vec<TurnRequest>) {
     let case = CaseId(CASE.to_owned());
@@ -694,7 +804,7 @@ fn one_compaction(
         Loom::new(FirstAdmissibleSelector, EmptyObjectArguments, PROMPT).with_governor(&governor);
     let handed = issued(&governor, &case);
     let (mut model, requests) = Scripted::new(vec![
-        Ok(plan_then_call("SOLO", "call_1", usage(7, 100, 0, None))),
+        Ok(first),
         summary,
         Ok(prose("DONE", usage(5, 5, 0, None))),
     ]);
