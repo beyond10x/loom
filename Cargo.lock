@@ -245,6 +245,7 @@ dependencies = [
  "b10x-loom-governor",
  "b10x-loom-intake-references",
  "b10x-loom-intake-slice",
+ "b10x-loom-protocols",
  "clap",
  "serde_json",
  "tempfile",
@@ -311,6 +312,7 @@ dependencies = [
  "b10x-canon-engineering",
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
+ "b10x-loom-protocols",
  "serde_json",
  "serde_yaml_ng",
 ]
@@ -329,6 +331,7 @@ dependencies = [
  "b10x-canon-engineering",
  "b10x-llm-core",
  "b10x-llm-tool-call",
+ "b10x-loom-protocols",
  "serde_json",
  "tokio",
 ]
@@ -344,8 +347,10 @@ dependencies = [
  "b10x-loom-governor",
  "b10x-loom-intake-references",
  "b10x-loom-intake-router",
+ "b10x-loom-protocols",
  "b10x-substrate-host",
  "b10x-substrate-wire",
+ "chrono",
  "intake",
  "serde",
  "serde_json",
@@ -376,6 +381,7 @@ dependencies = [
  "b10x-loom-governor",
  "b10x-loom-intake-router",
  "b10x-loom-intake-slice",
+ "b10x-loom-protocols",
 ]
 
 [[package]]
@@ -561,8 +567,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link",
 ]
 

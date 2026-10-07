@@ -8,6 +8,16 @@ under **Unreleased** until the next release.
 
 ### Added
 
+- Loom owns `system-query@1` with the governed read-only `system.time.read` action. `run` can
+  answer local date/time and UTC without a workspace or confinement, and reports verified query
+  completion as exit 0. Software changes still require a Git worktree and retain confinement.
+- `b10x-loom-protocols` composes engineering, Loom and custom definitions into the same catalog
+  used by routing and governor admission. `protocols add/list/remove` install validated local
+  snapshots or regular Git blobs at full commits. Runs verify installed content and load offline;
+  replacement is explicit and packages supply no executable tools. Catalog-aware SDK entrypoints
+  preserve the legacy embedding callers.
+
+
 - Opt-in `--context-policy bounded` uses report-derived working state, a recent-event tail and
   retrievable history in the local CLI slice. It retires history in batches above 48 KiB toward
   32 KiB and enforces a 64 KiB serialized request ceiling. The separate history archive is limited

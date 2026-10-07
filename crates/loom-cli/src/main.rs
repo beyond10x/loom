@@ -50,7 +50,7 @@ fn protocols(command: ProtocolCommand) -> Result<(), String> {
                     entry
                         .clock_compatible()
                         .map(|()| "clock".to_owned())
-                        .unwrap_or_else(|error| format!("NoLocalExecutor: {error}"))
+                        .unwrap_or_else(|error| error)
                 };
                 println!(
                     "{}  {:?} {} {} {}  sha256:{}  {}",

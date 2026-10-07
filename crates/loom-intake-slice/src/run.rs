@@ -167,6 +167,8 @@ pub struct SliceRun {
 pub enum SliceError {
     /// Context capacity was exhausted after preserving the effects already completed.
     Context(String),
+    /// A trusted clock operation failed.
+    Clock(String),
     /// Measurement output failed; a simultaneous run failure is retained too.
     ContextReport {
         error: io::Error,
@@ -200,6 +202,7 @@ pub enum SliceError {
 impl fmt::Display for SliceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Clock(error) => write!(f, "clock unavailable: {error}"),
             Self::Context(why) => write!(f, "working context refused: {why}"),
             Self::ContextReport { error, run_error } => {
                 if let Some(run_error) = run_error {
@@ -360,6 +363,49 @@ fn run_measured<S: CaseStore>(
         options.context_policy,
         metrics.clone(),
     );
+    drive(
+        &request.intent,
+        &pick.protocol,
+        case,
+        request.max_steps,
+        governor,
+        frontiers,
+        agent,
+        out,
+        briefing,
+        Execution::Software {
+            workspace: &request.workspace,
+            test: &request.test,
+            runner: Arc::clone(&request.runner),
+        },
+    )
+}
+
+pub(crate) enum Execution<'a> {
+    Software {
+        workspace: &'a std::path::Path,
+        test: &'a TestCommand,
+        runner: Arc<dyn TestRunner>,
+    },
+    Clock {
+        clock: &'a dyn crate::clock::Clock,
+        intent_revision: &'a str,
+    },
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn drive<S: CaseStore>(
+    intent: &str,
+    protocol: &str,
+    case: CaseId,
+    budget: usize,
+    governor: &CanonGovernor<S>,
+    frontiers: &dyn Governor,
+    agent: &dyn Model,
+    out: &mut dyn Write,
+    briefing: Briefing,
+    execution: Execution<'_>,
+) -> Result<SliceRun, SliceError> {
     let chosen = Arc::new(Mutex::new(None));
     let refused = Arc::new(Mutex::new(None));
     let console = Console::new(out);
@@ -373,28 +419,46 @@ fn run_measured<S: CaseStore>(
                 inner: ModelArguments::new(agent, briefing.clone()),
                 refused: Arc::clone(&refused),
             },
-            request.intent.clone(),
+            intent.to_owned(),
         ),
         chosen,
         refused,
         briefing: briefing.clone(),
         console: &console,
     };
-    let effects = LocalEffects::new(
-        LocalExecutor::new(
+    let query = matches!(&execution, Execution::Clock { .. });
+    let effects: Box<dyn b10x_loom_commission::ports::effect::EffectPort + '_> = match execution {
+        Execution::Software {
+            workspace,
+            test,
+            runner,
+        } => Box::new(LocalEffects::new(
+            LocalExecutor::new(
+                governor,
+                case.clone(),
+                workspace.to_path_buf(),
+                test.clone(),
+            )
+            .with_runner(runner),
+            TestResultVerifier::new(governor, case.clone(), PRODUCER),
             governor,
             case.clone(),
-            request.workspace.clone(),
-            request.test.clone(),
-        )
-        .with_runner(Arc::clone(&request.runner)),
-        TestResultVerifier::new(governor, case.clone(), PRODUCER),
-        governor,
-        case.clone(),
-        &pick.protocol,
-        briefing.clone(),
-        &console,
-    );
+            protocol,
+            briefing.clone(),
+            &console,
+        )),
+        Execution::Clock {
+            clock,
+            intent_revision,
+        } => Box::new(crate::clock::ClockEffects::new(
+            governor,
+            case.clone(),
+            intent_revision,
+            clock,
+            briefing.clone(),
+            &console,
+        )),
+    };
     let reads = Reads {
         frontiers,
         governor,
@@ -403,13 +467,13 @@ fn run_measured<S: CaseStore>(
     let mut runs = Generated::new(RunStore::new(move || RunId(fresh_uuid("run", &seed))));
     let mut context = SliceContext {
         case: case.0.clone(),
-        budget: request.max_steps,
+        budget,
     };
     let result = run_until_blocked(
         &reads,
         &step,
         &NoDelegatedAuthority,
-        &effects,
+        &*effects,
         &commission(&case),
         &mut runs,
         &mut context,
@@ -424,7 +488,7 @@ fn run_measured<S: CaseStore>(
         if let SliceError::Execute(ExecuteError::Confinement(refusal)) = failure {
             return stop(
                 out,
-                pick.protocol,
+                protocol.to_owned(),
                 steps,
                 StopReason::ConfinementUnavailable,
                 Some(refusal.to_string()),
@@ -444,7 +508,16 @@ fn run_measured<S: CaseStore>(
         }) => return Err(SliceError::Governor(error)),
         Err(error) => return Err(SliceError::Loop(error)),
     };
-    finish(out, pick.protocol, end)
+    if query && let RunOutcome::Completed(ref complete) = end.outcome {
+        return stop(
+            out,
+            protocol.to_owned(),
+            end.steps,
+            StopReason::Completed,
+            Some(complete.outcome.clone()),
+        );
+    }
+    finish(out, protocol.to_owned(), end)
 }
 
 /// The stop reason the runtime's `end` stands for, as the module documents, printed.

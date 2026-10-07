@@ -127,6 +127,7 @@ struct Brief {
     results: ResultStore,
     working: Option<WorkingContext>,
     metrics: ContextMetrics,
+    query: bool,
 }
 
 impl Briefing {
@@ -156,7 +157,52 @@ impl Briefing {
                 results: ResultStore::new(),
                 working: (policy == ContextPolicy::Bounded).then(WorkingContext::new),
                 metrics,
+                query: false,
             })),
+        }
+    }
+
+    /// Use the read-only system-query prompt profile, with the same context machinery.
+    pub fn for_query(self) -> Self {
+        self.brief().query = true;
+        self
+    }
+
+    fn selection_instructions(&self) -> &'static str {
+        if self.brief().query {
+            "Choose the next read-only system query action from the admitted candidates. Call select_action. Only a tool observation can answer the query; never invent a clock reading."
+        } else {
+            SELECT_INSTRUCTIONS
+        }
+    }
+
+    fn argument_instructions(&self) -> &'static str {
+        if self.brief().query {
+            "Generate arguments for the selected read-only system query tool. system.time.read takes exactly an empty object. Never supply an observation, timestamp or evidence as an argument."
+        } else {
+            ARGUMENTS_INSTRUCTIONS
+        }
+    }
+
+    pub(crate) fn record_time(
+        &self,
+        proposal: &ExecutorOutcomeProposedAction,
+        observation: &intake_model::query::TimeObservation,
+    ) {
+        let report = serde_json::json!({"kind":"system_time", "case_id": observation.case_id,
+            "intent_revision":observation.intent_revision, "utc":observation.utc,
+            "local":observation.local, "offset_seconds":observation.offset_seconds});
+        let mut brief = self.brief();
+        if let Some(working) = &mut brief.working {
+            working.append(
+                &proposal.action,
+                recorded_arguments(proposal),
+                report,
+                Vec::new(),
+            );
+        } else {
+            drop(brief);
+            self.push(format!("{}\n{}", proposal.action, report));
         }
     }
 
@@ -540,7 +586,7 @@ impl ActionSelector for ModelSelector<'_> {
             self.briefing
                 .exchange(
                     self.model,
-                    SELECT_INSTRUCTIONS,
+                    self.briefing.selection_instructions(),
                     &suffix,
                     SELECT_TOOL,
                     schema,
@@ -549,7 +595,7 @@ impl ActionSelector for ModelSelector<'_> {
         } else {
             ask(
                 self.model,
-                SELECT_INSTRUCTIONS,
+                self.briefing.selection_instructions(),
                 format!("{}{suffix}", self.briefing.text()),
                 SELECT_TOOL,
                 "Choose the next action from the candidates.",
@@ -622,7 +668,7 @@ impl ModelArguments<'_> {
         if self.briefing.bounded() {
             let answer = self.briefing.exchange(
                 self.model,
-                ARGUMENTS_INSTRUCTIONS,
+                self.briefing.argument_instructions(),
                 &format!("\nSelected action: {}\n", entry.action),
                 ARGUMENTS_TOOL,
                 reference_arguments_schema(&entry.action),
@@ -648,7 +694,7 @@ impl ModelArguments<'_> {
         loop {
             let answer = ask(
                 self.model,
-                ARGUMENTS_INSTRUCTIONS,
+                self.briefing.argument_instructions(),
                 format!("{base}{selected_views}"),
                 ARGUMENTS_TOOL,
                 &format!(
@@ -739,7 +785,11 @@ impl ArgumentGenerator for ModelArguments<'_> {
 }
 
 fn reference_arguments_schema(action: &str) -> Value {
-    let mut ordinary = arguments_schema(action);
+    let mut ordinary = if action == crate::clock::READ_TIME {
+        serde_json::json!({"type":"object", "properties":{}, "additionalProperties":false})
+    } else {
+        arguments_schema(action)
+    };
     if action == EDIT {
         ordinary["properties"]["files"]["items"]["properties"]["contents"] = serde_json::json!({
             "oneOf": [

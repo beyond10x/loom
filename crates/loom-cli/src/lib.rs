@@ -51,7 +51,7 @@ pub struct RunArgs {
         _ => ContextPolicy::Legacy,
     }))]
     pub context_policy: ContextPolicy,
-    /// Write payload-free measurements, including failures after the slice starts.
+    /// Write payload-free measurements, including routing and startup failures.
     #[arg(long, value_name = "PATH")]
     pub context_report: Option<PathBuf>,
     /// Confine tests with Substrate, or explicitly run with the operator's rights.
