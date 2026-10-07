@@ -1,0 +1,85 @@
+domain: intake.context
+summary: >-
+  Run-local working context owned by the CLI briefing for a single intent. Legacy remains the
+  default; Bounded is opt-in. Intent and instructions are preserved exactly. Working state is
+  derived only from typed execution reports, never parsed from model or artifact text. A test
+  result records its tested revision: passing on revision A never validates later revision B.
+  Compact history events are archived from the first action, with bulk contents retained in the
+  existing result store. The separate archive admits at most 4096 events and 16777216 UTF-8 bytes.
+  Capacity refusal stops subsequent model requests and preserves already completed effects.
+  Bounded context retires old events in batches when a serialized agent request exceeds 49152
+  bytes or a 64-entry tail would discard history, aiming for 32768 bytes. Every serialized bounded
+  request, including schemas and escaped lookup responses, must fit 65536 bytes; mandatory
+  content that cannot fit is an explicit refusal. A stable prompt prefix changes only at a
+  checkpoint, with changing state and candidates afterward. Both selection and argument
+  generation may list and read archived history using existing result-reference selection
+  semantics, at most eight lookups per stage and always within the request ceiling. Retrieval
+  omits whole records when necessary and never truncates structured data. No summarization model
+  calls are made. Context reports contain measurements only, no source payloads; absent provider
+  counters remain unknown. This contract adds no persisted entity, interactive correction,
+  durable session memory, training export, or governed-loop compaction behavior.
+  Each classification, selection or argument request permits at most three identical model
+  attempts on the same binding, only when llm marks a failure retriable and no stream event has
+  been offered to the caller. The waits before attempts two and three are one and two seconds;
+  a provider retry delay may extend a wait up to thirty seconds. Cancellation interrupts waits.
+  Refusal, authorization, invalid requests, capacity failures and failures after stream output
+  are never retried. Every attempt is checked against the request ceiling and measured separately,
+  including failed attempts and their available usage. Exhaustion preserves the final error class
+  and observation, clears retry eligibility and reports the attempt count. No effect is performed
+  until argument generation succeeds and Commission revalidates the proposed action.
+types:
+  - name: intake.context.ContextPolicy
+    kind: enum
+    variants: [Legacy, Bounded]
+  - name: intake.context.RequestPhase
+    kind: enum
+    variants: [Classification, Selection, Arguments]
+  - name: intake.context.TestState
+    kind: struct
+    fields:
+      - {name: exit_code, type: "Optional<Integer>"}
+      - {name: timed_out, type: Boolean}
+      - {name: tested_revision, type: "Optional<String>"}
+  - name: intake.context.RefusalState
+    kind: struct
+    fields:
+      - {name: action, type: String}
+      - {name: reason, type: String}
+  - name: intake.context.WorkingState
+    kind: struct
+    fields:
+      - {name: latest_revision, type: "Optional<String>"}
+      - {name: latest_test, type: "Optional<intake.context.TestState>"}
+      - {name: latest_refusal, type: "Optional<intake.context.RefusalState>"}
+      - {name: recent_artifacts, type: "List<intake.results.StoredResult>"}
+  - name: intake.context.HistoryEvent
+    kind: struct
+    fields:
+      - {name: sequence, type: Integer}
+      - {name: action, type: String}
+      # Compact JSON: edit bodies become digest/length descriptors, not repeated payloads.
+      - {name: arguments, type: String}
+      # Compact JSON derived from a typed report; artifact contents cannot forge its fields.
+      - {name: report, type: String}
+      - {name: artifacts, type: "List<intake.results.StoredResult>"}
+  - name: intake.context.ContextRequestMetric
+    kind: struct
+    fields:
+      - {name: phase, type: intake.context.RequestPhase}
+      - {name: request_bytes, type: Integer}
+      - {name: elapsed_ms, type: Integer}
+      # False when terminal usage is absent; counters may be partial stream observations.
+      - {name: final_usage, type: Boolean}
+      - {name: input_tokens, type: "Optional<Integer>"}
+      - {name: cache_read_tokens, type: "Optional<Integer>"}
+      - {name: cache_write_tokens, type: "Optional<Integer>"}
+      - {name: output_tokens, type: "Optional<Integer>"}
+  - name: intake.context.ContextReport
+    kind: struct
+    fields:
+      - {name: policy, type: intake.context.ContextPolicy}
+      - {name: requests, type: "List<intake.context.ContextRequestMetric>"}
+      - {name: checkpoints, type: Integer}
+      - {name: retrievals, type: Integer}
+      - {name: model_calls, type: Integer}
+      - {name: elapsed_ms, type: Integer}

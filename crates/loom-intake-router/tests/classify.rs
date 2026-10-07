@@ -243,3 +243,60 @@ async fn intents_pick_their_protocol() {
     }
     assert_request(&model, intent);
 }
+
+#[tokio::test]
+async fn host_catalog_controls_both_offered_protocols_and_membership() {
+    use b10x_loom_intake_router::classify_with_catalog;
+    use loom_protocols::ProtocolCatalog;
+
+    let catalog = ProtocolCatalog::bundled().unwrap();
+    let model = Recorded::answering(json!({
+        "protocol": "system-query@1", "confidence": 0.99, "reasons": ["read the clock"]
+    }));
+    let pick = classify_with_catalog("current time", &model, THRESHOLD, &catalog)
+        .await
+        .unwrap();
+    assert_eq!(pick.protocol, "system-query@1");
+    let request = model.request();
+    let offered = request.tools[0].input_schema["properties"]["protocol"]["enum"]
+        .as_array()
+        .unwrap();
+    assert_eq!(offered.len(), catalog.iter().count());
+    for entry in catalog.iter() {
+        assert!(offered.contains(&json!(entry.name())));
+    }
+    let mut text = String::new();
+    strings(&serde_json::to_value(&request).unwrap(), &mut text);
+    assert!(text.contains(catalog.get("system-query@1").unwrap().description()));
+
+    // The legacy wrapper remains engineering-only, even though the CLI supplies both bundles.
+    let legacy = Recorded::answering(json!({
+        "protocol": "system-query@1", "confidence": 0.99, "reasons": []
+    }));
+    assert!(matches!(classify("current time", &legacy, THRESHOLD).await,
+        Err(RouterError::OutsideRegistry { protocol }) if protocol == "system-query@1"));
+}
+
+#[tokio::test]
+async fn catalog_classifier_rejects_invalid_threshold_before_model_access() {
+    use b10x_loom_intake_router::classify_with_catalog;
+    let catalog = loom_protocols::ProtocolCatalog::bundled().unwrap();
+    let model = Recorded::answering(json!({}));
+    assert!(
+        matches!(classify_with_catalog("time", &model, f64::NAN, &catalog).await,
+        Err(RouterError::InvalidThreshold(value)) if value.is_nan())
+    );
+    assert!(model.seen.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn empty_catalog_refuses_without_sending_an_invalid_tool_schema() {
+    use b10x_loom_intake_router::classify_with_catalog;
+    let catalog = loom_protocols::ProtocolCatalog::default();
+    let model = Recorded::answering(json!({}));
+    assert!(matches!(
+        classify_with_catalog("time", &model, THRESHOLD, &catalog).await,
+        Err(RouterError::Catalog(_))
+    ));
+    assert!(model.seen.lock().unwrap().is_empty());
+}

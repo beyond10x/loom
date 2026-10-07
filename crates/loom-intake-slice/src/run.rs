@@ -95,12 +95,13 @@ use b10x_loom_executor::model::run::{CatalogueEntry, SelectionStrategy};
 use b10x_loom_executor::selection::{Choice, SelectionContext, SelectorError};
 use b10x_loom_executor::{ActionSelector, ArgumentContext, ArgumentGenerator, Loom};
 use b10x_loom_intake_references::references;
-use b10x_loom_intake_router::{ProtocolPick, RouterError, classify};
+use b10x_loom_intake_router::{ProtocolPick, RouterError};
 use llm_core::Model;
 use loom_governor::{CanonGovernor, CaseStore};
 
 use crate::case::{self, CaseError};
 use crate::confinement::TestRunner;
+use crate::context_metrics::{ContextMetrics, ContextPolicy, MeasuredModel};
 use crate::effect::{Console, LocalEffects, refuse};
 use crate::executor::backend_name;
 use crate::executor::{ExecuteError, LocalExecutor, TestCommand, fresh_uuid, now};
@@ -130,6 +131,22 @@ pub struct SliceRequest {
     pub threshold: f64,
 }
 
+/// Optional context policy and measurement destination for one run. Existing callers stay legacy.
+#[derive(Debug, Clone)]
+pub struct RunOptions {
+    pub context_policy: ContextPolicy,
+    pub context_report: Option<PathBuf>,
+}
+
+impl Default for RunOptions {
+    fn default() -> Self {
+        Self {
+            context_policy: ContextPolicy::Legacy,
+            context_report: None,
+        }
+    }
+}
+
 /// Why a slice run ended (`intake.routing.StopReason`).
 pub use intake_model::routing::StopReason;
 
@@ -148,6 +165,15 @@ pub struct SliceRun {
 /// Why a run ended without a stop reason.
 #[derive(Debug)]
 pub enum SliceError {
+    /// Context capacity was exhausted after preserving the effects already completed.
+    Context(String),
+    /// A trusted clock operation failed.
+    Clock(String),
+    /// Measurement output failed; a simultaneous run failure is retained too.
+    ContextReport {
+        error: io::Error,
+        run_error: Option<Box<SliceError>>,
+    },
     /// The output could not be written.
     Output(io::Error),
     /// No runtime could be made for the classification.
@@ -176,6 +202,14 @@ pub enum SliceError {
 impl fmt::Display for SliceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Clock(error) => write!(f, "clock unavailable: {error}"),
+            Self::Context(why) => write!(f, "working context refused: {why}"),
+            Self::ContextReport { error, run_error } => {
+                if let Some(run_error) = run_error {
+                    write!(f, "{run_error}; ")?;
+                }
+                write!(f, "context report cannot be written: {error}")
+            }
             Self::Output(error) => write!(f, "the output cannot be written: {error}"),
             Self::Runtime(error) => write!(f, "no runtime for the classification: {error}"),
             Self::Router(error) => error.fmt(f),
@@ -223,6 +257,66 @@ pub fn run<S: CaseStore>(
     agent: &dyn Model,
     out: &mut dyn Write,
 ) -> Result<SliceRun, SliceError> {
+    run_with_options(
+        request,
+        governor,
+        frontiers,
+        classifier,
+        agent,
+        out,
+        &RunOptions::default(),
+    )
+}
+
+/// Runs with an opt-in context policy and writes payload-free measurements even on run failure.
+///
+/// # Errors
+/// As [`run`], plus explicit context capacity and report output failures. A report output failure
+/// retains any original run failure; already printed output and completed effects remain visible.
+pub fn run_with_options<S: CaseStore>(
+    request: &SliceRequest,
+    governor: &CanonGovernor<S>,
+    frontiers: &dyn Governor,
+    classifier: &dyn Model,
+    agent: &dyn Model,
+    out: &mut dyn Write,
+    options: &RunOptions,
+) -> Result<SliceRun, SliceError> {
+    let metrics = ContextMetrics::new(options.context_policy);
+    let classifier = MeasuredModel::new(classifier, metrics.clone());
+    let agent = MeasuredModel::new(agent, metrics.clone());
+    let result = run_measured(
+        request,
+        governor,
+        frontiers,
+        &classifier,
+        &agent,
+        out,
+        options,
+        &metrics,
+    );
+    if let Some(path) = &options.context_report
+        && let Err(error) = metrics.write(path)
+    {
+        return Err(SliceError::ContextReport {
+            error,
+            run_error: result.err().map(Box::new),
+        });
+    }
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_measured<S: CaseStore>(
+    request: &SliceRequest,
+    governor: &CanonGovernor<S>,
+    frontiers: &dyn Governor,
+    classifier: &dyn Model,
+    agent: &dyn Model,
+    out: &mut dyn Write,
+    options: &RunOptions,
+    metrics: &ContextMetrics,
+) -> Result<SliceRun, SliceError> {
     let found = references(&request.intent);
     for reference in &found {
         writeln!(
@@ -263,7 +357,55 @@ pub fn run<S: CaseStore>(
     )
     .map_err(SliceError::Case)?;
 
-    let briefing = Briefing::new(request.intent.clone(), found);
+    let briefing = Briefing::with_options(
+        request.intent.clone(),
+        found,
+        options.context_policy,
+        metrics.clone(),
+    );
+    drive(
+        &request.intent,
+        &pick.protocol,
+        case,
+        request.max_steps,
+        governor,
+        frontiers,
+        agent,
+        out,
+        briefing,
+        Execution::Software {
+            workspace: &request.workspace,
+            test: &request.test,
+            runner: Arc::clone(&request.runner),
+        },
+    )
+}
+
+pub(crate) enum Execution<'a> {
+    Software {
+        workspace: &'a std::path::Path,
+        test: &'a TestCommand,
+        runner: Arc<dyn TestRunner>,
+    },
+    Clock {
+        clock: &'a dyn crate::clock::Clock,
+        intent_revision: &'a str,
+    },
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn drive<S: CaseStore>(
+    intent: &str,
+    protocol: &str,
+    case: CaseId,
+    budget: usize,
+    governor: &CanonGovernor<S>,
+    frontiers: &dyn Governor,
+    agent: &dyn Model,
+    out: &mut dyn Write,
+    briefing: Briefing,
+    execution: Execution<'_>,
+) -> Result<SliceRun, SliceError> {
     let chosen = Arc::new(Mutex::new(None));
     let refused = Arc::new(Mutex::new(None));
     let console = Console::new(out);
@@ -277,28 +419,46 @@ pub fn run<S: CaseStore>(
                 inner: ModelArguments::new(agent, briefing.clone()),
                 refused: Arc::clone(&refused),
             },
-            request.intent.clone(),
+            intent.to_owned(),
         ),
         chosen,
         refused,
         briefing: briefing.clone(),
         console: &console,
     };
-    let effects = LocalEffects::new(
-        LocalExecutor::new(
+    let query = matches!(&execution, Execution::Clock { .. });
+    let effects: Box<dyn b10x_loom_commission::ports::effect::EffectPort + '_> = match execution {
+        Execution::Software {
+            workspace,
+            test,
+            runner,
+        } => Box::new(LocalEffects::new(
+            LocalExecutor::new(
+                governor,
+                case.clone(),
+                workspace.to_path_buf(),
+                test.clone(),
+            )
+            .with_runner(runner),
+            TestResultVerifier::new(governor, case.clone(), PRODUCER),
             governor,
             case.clone(),
-            request.workspace.clone(),
-            request.test.clone(),
-        )
-        .with_runner(Arc::clone(&request.runner)),
-        TestResultVerifier::new(governor, case.clone(), PRODUCER),
-        governor,
-        case.clone(),
-        &pick.protocol,
-        briefing,
-        &console,
-    );
+            protocol,
+            briefing.clone(),
+            &console,
+        )),
+        Execution::Clock {
+            clock,
+            intent_revision,
+        } => Box::new(crate::clock::ClockEffects::new(
+            governor,
+            case.clone(),
+            intent_revision,
+            clock,
+            briefing.clone(),
+            &console,
+        )),
+    };
     let reads = Reads {
         frontiers,
         governor,
@@ -307,13 +467,13 @@ pub fn run<S: CaseStore>(
     let mut runs = Generated::new(RunStore::new(move || RunId(fresh_uuid("run", &seed))));
     let mut context = SliceContext {
         case: case.0.clone(),
-        budget: request.max_steps,
+        budget,
     };
     let result = run_until_blocked(
         &reads,
         &step,
         &NoDelegatedAuthority,
-        &effects,
+        &*effects,
         &commission(&case),
         &mut runs,
         &mut context,
@@ -321,19 +481,23 @@ pub fn run<S: CaseStore>(
     drop(effects);
     drop(step);
     let failure = console.take_failure();
+    let context_failure = briefing.failure();
     let steps = console.steps();
     drop(console);
     if let Some(failure) = failure {
         if let SliceError::Execute(ExecuteError::Confinement(refusal)) = failure {
             return stop(
                 out,
-                pick.protocol,
+                protocol.to_owned(),
                 steps,
                 StopReason::ConfinementUnavailable,
                 Some(refusal.to_string()),
             );
         }
         return Err(failure);
+    }
+    if let Some(why) = context_failure {
+        return Err(SliceError::Context(why));
     }
 
     let end = match result {
@@ -344,7 +508,16 @@ pub fn run<S: CaseStore>(
         }) => return Err(SliceError::Governor(error)),
         Err(error) => return Err(SliceError::Loop(error)),
     };
-    finish(out, pick.protocol, end)
+    if query && let RunOutcome::Completed(ref complete) = end.outcome {
+        return stop(
+            out,
+            protocol.to_owned(),
+            end.steps,
+            StopReason::Completed,
+            Some(complete.outcome.clone()),
+        );
+    }
+    finish(out, protocol.to_owned(), end)
 }
 
 /// The stop reason the runtime's `end` stands for, as the module documents, printed.
@@ -597,7 +770,12 @@ fn pick(request: &SliceRequest, classifier: &dyn Model) -> Result<Pick, SliceErr
         .enable_all()
         .build()
         .map_err(SliceError::Runtime)?;
-    let classified = runtime.block_on(classify(&request.intent, classifier, request.threshold));
+    let classified = runtime.block_on(crate::model_retry::classify_with_retries(
+        &request.intent,
+        classifier,
+        request.threshold,
+        None,
+    ));
     drop(runtime);
     let error = match classified {
         Ok(pick) => return Ok(Ok(pick)),

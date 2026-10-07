@@ -3,7 +3,7 @@ title: The governor and intake
 sidebar_position: 6
 description: How a case gets its frontier from Canon, and how an intent becomes a governed case that a local slice works until it is blocked.
 status: shipped
-lede: The governor evaluates a case's protocol with Canon and decides; it never acts. Intake turns an intent into a governed case and works it with a local slice whose only evidence is a test command it ran itself.
+lede: The governor evaluates a case's protocol with Canon and decides; it never acts. Intake turns an intent into a governed case and works it with a local slice whose evidence comes from verified host observations.
 source: Atlas ADRs 0074, 0089 and 0090; crates/loom-governor, crates/loom-intake-references, crates/loom-intake-router, crates/loom-intake-slice; ess/intake/domains/routing.yaml
 ---
 
@@ -11,7 +11,7 @@ source: Atlas ADRs 0074, 0089 and 0090; crates/loom-governor, crates/loom-intake
 
 `CanonGovernor` (`b10x-loom-governor`) implements Commission's governor, evidence and observation
 ports over [Canon](https://beyond10x.github.io/canon/) ([GitHub](https://github.com/beyond10x/canon)).
-A case is opened on a protocol of the
+The compatibility API opens a case on a protocol of the
 [engineering protocols](https://beyond10x.github.io/engineering-protocols/)
 ([GitHub](https://github.com/beyond10x/engineering-protocols)) registry, named `<name>@<major>`
 (`software-change@1`), with the caller's revision of every artifact the protocol declares.
@@ -36,6 +36,12 @@ refused. Protocol adoption is the host's decision, never a model proposal accept
 `with_protocol_yaml(name, yaml)` parses through Loom's pinned Canon so the host does not need a
 matching Canon dependency merely to register a definition.
 
+Since 0.4.0, Loom provides `ProtocolCatalog`, which combines engineering definitions, Loom's own
+`system-query@1`, and explicitly installed custom definitions. `with_catalog` admits and seals the
+same names and content digests that routing and case initialization use. No later definition can
+replace them. Existing `classify`, `case::open`, and software-slice callers retain their engineering
+catalog behavior; new catalog-aware entrypoints serve custom protocols.
+
 `with_evaluation_time` supplies a trusted callback for freshness evaluation. Failure to obtain
 time makes the governor unavailable. No authority or explicit decision enters through that port.
 Evidence producers authenticate their observations before calling `submit_evidence`, including
@@ -54,16 +60,16 @@ Intake takes what someone asked for, as given, and runs it.
 | Crate | Does | Does not |
 |---|---|---|
 | `b10x-loom-intake-references` | Extracts tracker keys, chat permalinks, merge and pull requests and URLs from the intent, in order, without a model | Fetch what they point at |
-| `b10x-loom-intake-router` | Offers a model every protocol of the registry and takes one forced `pick_protocol` call | Turn a pick into authority. A pick outside the registry or below the threshold is refused |
-| `b10x-loom-intake-slice` | Opens the case through the governor, runs the Commission runtime with Loom proposing, performs `software.change/1` actions in the work tree, and submits test results as evidence | Merge, push or deploy; run a loop of its own; trust a model's account of what happened |
+| `b10x-loom-intake-router` | Offers a model every protocol of the selected catalog and takes one forced `pick_protocol` call | Turn a pick into authority. A pick outside the registry or below the threshold is refused |
+| `b10x-loom-intake-slice` | Opens the case through the governor, runs the Commission runtime with Loom proposing, performs software changes or read-only clock queries with host-supplied bindings, and submits verified observations as evidence | Merge, push or deploy; run a loop of its own; trust a model's account of what happened |
 
 The slice's selector and argument generator (`ModelSelector`, `ModelArguments`) each ask a model
 for one forced tool call through [llm](https://beyond10x.github.io/llm/)
 ([GitHub](https://github.com/beyond10x/llm)). The model sees the intent, its references and a
 bounded transcript of what the executor reported. Whatever else it says is dropped.
 
-Evidence comes only from the slice's verifier, from the exit status of the test command the
-executor ran (Atlas ADR 0074). A transcript line that a model-written file imitates can mislead the
+Evidence comes from trusted verifiers: the exit status of an executed test command, or a clock
+reading produced by the host clock binding (Atlas ADR 0074). A transcript line that a model-written file imitates can mislead the
 next choice; it cannot become evidence.
 
 :::note[Test confinement]

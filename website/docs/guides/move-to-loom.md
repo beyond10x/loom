@@ -19,7 +19,7 @@ Every crate now comes from the Loom repository:
 
 ```toml
 [dependencies]
-b10x-loom-commission = { git = "https://github.com/beyond10x/loom", tag = "0.3.0" }
+b10x-loom-commission = { git = "https://github.com/beyond10x/loom", tag = "0.4.0" }
 ```
 
 An application that uses several of them can depend on `b10x-loom-sdk` alone; see
@@ -45,7 +45,7 @@ An application that uses several of them can depend on `b10x-loom-sdk` alone; se
 ## Dependencies that moved with it
 
 - Model calls use [llm](https://beyond10x.github.io/llm/) ([GitHub](https://github.com/beyond10x/llm))
-  at tag `0.1.7`.
+  at release tag `0.3.1`, including the provider overload fix.
 - The engineering protocol registry is `b10x-canon-engineering` `0.1.0` from
   [engineering protocols](https://beyond10x.github.io/engineering-protocols/)
   ([GitHub](https://github.com/beyond10x/engineering-protocols)); it replaces `b10x-els`.

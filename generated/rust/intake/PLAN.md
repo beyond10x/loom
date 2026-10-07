@@ -1,14 +1,14 @@
 <!--
   generated from intake v1
-  model digest 3f5061fef390c4dc8c27551efdb85452d71f8ce8cb803ed1591bf3a2cbaa8684
-  contract digest 56faa06c4640455cfd2398e5c789037ef0cc12087603ed1708c9d2ed2ba6bfa7
+  model digest b3281773ee88313834099ce04aab0b9af436baedbe62ff1a432c305c3ed756d4
+  contract digest eba8d734a7767f27148ac6b7d3a96ad427989af6d293d3c3496fba405caae95a
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — intake v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-23 capabilities: **23 generated**, **0 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+35 capabilities: **35 generated**, **0 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -20,6 +20,18 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `intake.confinement.ConfinementRefusal` |
 | domain type | `intake.confinement.EnvironmentEntry` |
 | domain type | `intake.confinement.ToolchainRoot` |
+| domain type | `intake.context.ContextPolicy` |
+| domain type | `intake.context.ContextReport` |
+| domain type | `intake.context.ContextRequestMetric` |
+| domain type | `intake.context.HistoryEvent` |
+| domain type | `intake.context.RefusalState` |
+| domain type | `intake.context.RequestPhase` |
+| domain type | `intake.context.TestState` |
+| domain type | `intake.context.WorkingState` |
+| domain type | `intake.protocols.ProtocolDefinition` |
+| domain type | `intake.protocols.ProtocolSource` |
+| domain type | `intake.protocols.SourceKind` |
+| domain type | `intake.query.TimeObservation` |
 | domain type | `intake.results.Capture` |
 | domain type | `intake.results.Rendering` |
 | domain type | `intake.results.ResultReference` |

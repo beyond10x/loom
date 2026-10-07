@@ -40,6 +40,7 @@ use crate::git::HostGitRefusal;
 
 use b10x_loom_commission::model::responsibility::CaseId;
 use loom_governor::{CanonGovernor, CaseStore, OpenError, UpdateError};
+use loom_protocols::ProtocolCatalog;
 use sha2::{Digest, Sha256};
 
 /// The artifact whose revision is the intent text's hash.
@@ -52,7 +53,7 @@ pub const INITIAL: &str = "r0";
 /// Why a case was not opened, or a `HEAD` not reported.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CaseError {
-    /// The pick is not `<name>@<major>` of an ELS built-in.
+    /// The pick does not identify an admitted catalog definition.
     UnknownProtocol { pick: String, problem: String },
     /// The workspace's `HEAD` could not be read.
     Workspace { problem: String },
@@ -69,7 +70,7 @@ impl fmt::Display for CaseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownProtocol { pick, problem } => {
-                write!(f, "`{pick}` is not an ELS built-in protocol: {problem}")
+                write!(f, "`{pick}` is not an admitted protocol: {problem}")
             }
             Self::Workspace { problem } => {
                 write!(f, "the workspace's HEAD cannot be read: {problem}")
@@ -93,7 +94,47 @@ pub fn open<S: CaseStore>(
     intent: &str,
     workspace: &Path,
 ) -> Result<CaseId, CaseError> {
-    let declared = declared_artifacts(pick)?;
+    let catalog = ProtocolCatalog::engineering().map_err(|problem| CaseError::UnknownProtocol {
+        pick: pick.to_owned(),
+        problem,
+    })?;
+    open_declared(
+        governor,
+        pick,
+        intent,
+        workspace,
+        declared_artifacts(pick, &catalog)?,
+    )
+}
+
+/// Opens a workspace case using the same host catalog used for routing and governor admission.
+/// Query cases without a workspace initialize their artifacts directly through the governor.
+pub fn open_with_catalog<S: CaseStore>(
+    governor: &CanonGovernor<S>,
+    pick: &str,
+    intent: &str,
+    workspace: &Path,
+    catalog: &ProtocolCatalog,
+) -> Result<CaseId, CaseError> {
+    governor
+        .validate_catalog(catalog)
+        .map_err(CaseError::Open)?;
+    open_declared(
+        governor,
+        pick,
+        intent,
+        workspace,
+        declared_artifacts(pick, catalog)?,
+    )
+}
+
+fn open_declared<S: CaseStore>(
+    governor: &CanonGovernor<S>,
+    pick: &str,
+    intent: &str,
+    workspace: &Path,
+    declared: Vec<String>,
+) -> Result<CaseId, CaseError> {
     let head = head(workspace, Calls::Opening)?;
     crate::git::record(workspace).map_err(CaseError::HostGit)?;
     let revisions: BTreeMap<String, String> = declared
@@ -108,6 +149,14 @@ pub fn open<S: CaseStore>(
         })
         .collect();
     governor.open(pick, revisions).map_err(CaseError::Open)
+}
+
+/// Checks that `workspace` is a non-bare Git worktree root with a committed HEAD and a safe
+/// host Git configuration. This writes no files; it records the checked Git configuration
+/// in memory for subsequent host operations, without opening a case.
+pub fn validate_workspace(workspace: &Path) -> Result<(), CaseError> {
+    head(workspace, Calls::Opening)?;
+    crate::git::record(workspace).map_err(CaseError::HostGit)
 }
 
 /// Reports the workspace's current `HEAD` as the case's `implementation` revision and returns the
@@ -134,27 +183,18 @@ pub fn intent_revision(intent: &str) -> String {
     revision
 }
 
-/// Every artifact the ELS built-in `pick` declares, in declaration order.
-fn declared_artifacts(pick: &str) -> Result<Vec<String>, CaseError> {
-    let refused = |problem: &str| CaseError::UnknownProtocol {
-        pick: pick.to_owned(),
-        problem: problem.to_owned(),
-    };
-    let (name, major) = pick
-        .split_once('@')
-        .ok_or_else(|| refused("it is not `<name>@<major>`"))?;
-    let major: u32 = major
-        .parse()
-        .ok()
-        .filter(|parsed: &u32| parsed.to_string() == major)
-        .ok_or_else(|| refused("its major is not a number"))?;
-    let builtin = canon_engineering::registry::get(name, major)
-        .map_err(|error| refused(&error.to_string()))?;
-    Ok(builtin
-        .model
-        .artifacts
-        .ids()
-        .map(|artifact| artifact.as_str().to_owned())
+/// Every artifact the admitted `pick` declares, in declaration order.
+fn declared_artifacts(pick: &str, catalog: &ProtocolCatalog) -> Result<Vec<String>, CaseError> {
+    let entry = catalog
+        .get(pick)
+        .ok_or_else(|| CaseError::UnknownProtocol {
+            pick: pick.to_owned(),
+            problem: "the host catalog does not contain this protocol".to_owned(),
+        })?;
+    Ok(entry
+        .artifacts()
+        .into_iter()
+        .map(|(name, _)| name)
         .collect())
 }
 
@@ -255,4 +295,47 @@ fn git_bytes(dir: &Path, args: &[&str], calls: Calls) -> Result<Vec<u8>, CaseErr
         });
     }
     Ok(output.stdout)
+}
+
+#[cfg(test)]
+mod catalog_tests {
+    use super::*;
+    use loom_governor::MemoryCaseStore;
+
+    #[test]
+    fn catalog_mismatch_refuses_before_workspace_access() {
+        let admitted = ProtocolCatalog::engineering().unwrap();
+        let governor = CanonGovernor::new(MemoryCaseStore::default())
+            .with_catalog(&admitted)
+            .unwrap();
+        let different = ProtocolCatalog::bundled().unwrap();
+        let error = open_with_catalog(
+            &governor,
+            "software-change@1",
+            "change",
+            Path::new("/missing-loom-workspace"),
+            &different,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            CaseError::Open(OpenError::InvalidProtocol { .. })
+        ));
+    }
+
+    #[test]
+    fn catalog_open_requires_explicit_governor_admission() {
+        let governor = CanonGovernor::new(MemoryCaseStore::default());
+        let catalog = ProtocolCatalog::engineering().unwrap();
+        assert!(matches!(
+            open_with_catalog(
+                &governor,
+                "software-change@1",
+                "change",
+                Path::new("/missing-loom-workspace"),
+                &catalog
+            ),
+            Err(CaseError::Open(OpenError::InvalidProtocol { .. }))
+        ));
+    }
 }

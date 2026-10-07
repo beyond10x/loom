@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-07T13:36:47Z",
+  "actor": "human:timo",
+  "artifact": "story:query-provider-refusal",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "81d4b42: task check, task plan, task website; 1252 distinct executed test names match checkout inventory; five live bounded time queries Completed; qualification document records limits"
+  }
+}

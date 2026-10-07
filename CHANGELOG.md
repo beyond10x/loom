@@ -8,6 +8,66 @@ under **Unreleased** until the next release.
 
 ### Added
 
+- Commission's `ExecutorOutcome` has a `CaseMoved` variant (`ExecutorOutcomeCaseMoved`,
+  `expected_case_revision`): an executor reports that the case moved to another revision while it
+  worked, naming the revision of the frontier it was handed. On it, `run_until_blocked` loads the
+  case once more, and the governor decides whether it moved: still at the Run's revision, the step
+  counts as `NoUsefulAction` and the run goes on. Moved, the run is judged on the frontier current
+  then, as the executor would be handed it: a complete case ends the run `Completed`; otherwise
+  the outcome is derived from that frontier, and a frontier that would let the run go on ends it
+  with no admissible action, since the Run holds the case at the revision it left. The executor's
+  revision is observed, never trusted.
+
+### Fixed
+
+- A Loom built with `Loom::with_governor` reports a selection made at a revision the case has left
+  (`stale-revision`) as `CaseMoved` instead of `NoUsefulAction`. Under `run_until_blocked`, a case
+  that moves while the selector selects or while arguments are generated is no longer judged on the
+  frontier it left: a case completed meanwhile ends `Completed`, and a case moved past an open
+  obligation ends on the obligation its current frontier holds. In the governed loop
+  (`Loom::run_loop`) such a selection is still denied to the model, which chooses again from the
+  next turn's catalogue; `LoopExecutor` reports a run that then ends without a proposal as
+  `CaseMoved`, naming the revision it was handed, instead of `CompletedLocalReasoning` or
+  `NoUsefulAction`.
+- `task docs-check` writes ESS output under the workspace's build directory
+  (`target/loom-docs/<run>/`), a parent each run owns alone, instead of the system temporary
+  directory, where another process's `ess` run held the output lock and failed the check
+  ("output ownership busy", os error 11).
+
+## [0.4.0] - 2026-10-07
+
+Loom 0.4.0 adds opt-in bounded working context, verified system time queries without a workspace,
+and installed custom protocol definitions. Transient provider overload is classified correctly
+through llm 0.3.1 and retried within a fixed attempt budget before output. Context reports count
+every attempt, and tool effects are never replayed by model retries. Legacy context remains the
+default. This is a source release; install or embed it from tag `0.4.0`.
+
+- Recognize provider overload through the updated llm adapter and retry transient intake model
+  failures for at most three attempts before output. Count every attempt in context reports, preserve
+  cancellation and final error evidence, and never retry tool effects or actual refusals.
+
+### Added
+
+- `task install` rebuilds the current checkout and installs `b10x-loom` into `~/.local/bin`.
+
+- Loom owns `system-query@1` with the governed read-only `system.time.read` action. `run` can
+  answer local date/time and UTC without a workspace or confinement, and reports verified query
+  completion as exit 0. Software changes still require a Git worktree and retain confinement.
+- `b10x-loom-protocols` composes engineering, Loom and custom definitions into the same catalog
+  used by routing and governor admission. `protocols add/list/remove` install validated local
+  snapshots or regular Git blobs at full commits. Runs verify installed content and load offline;
+  replacement is explicit and packages supply no executable tools. Catalog-aware SDK entrypoints
+  preserve the legacy embedding callers.
+
+
+- Opt-in `--context-policy bounded` uses report-derived working state, a recent-event tail and
+  retrievable history in the local CLI slice. It retires history in batches above 48 KiB toward
+  32 KiB and enforces a 64 KiB serialized request ceiling. The separate history archive is limited
+  to 16 MiB and 4,096 events; capacity failures stop later model requests while preserving completed
+  effects. Selection and arguments each support eight history/result lookups. `--context-report`
+  writes payload-free request and provider-usage measurements, including failures after the slice
+  starts. Embedders gain `run_with_options`; existing callers and the CLI default remain legacy.
+
 - Commission declares the action-operation binding: a commission's composition binds a frontier
   action id to exactly one Connector operation (`instance_id`, `operation_id`), at most one binding
   per action id (`ActionBinding`, identity `(commission_id, action)`).
@@ -28,16 +88,6 @@ under **Unreleased** until the next release.
 - `crates/loom-executor/tests/connector_boundary.rs` holds the Connectors boundary: a consequential
   action a Loom run selects leaves Loom only as a `ProposedAction`, and `b10x-loom-executor`'s
   normal dependency graph holds no `connectors*` or `b10x-connectors*` package.
-
-- Commission's `ExecutorOutcome` has a `CaseMoved` variant (`ExecutorOutcomeCaseMoved`,
-  `expected_case_revision`): an executor reports that the case moved to another revision while it
-  worked, naming the revision of the frontier it was handed. On it, `run_until_blocked` loads the
-  case once more, and the governor decides whether it moved: still at the Run's revision, the step
-  counts as `NoUsefulAction` and the run goes on. Moved, the run is judged on the frontier current
-  then, as the executor would be handed it: a complete case ends the run `Completed`; otherwise
-  the outcome is derived from that frontier, and a frontier that would let the run go on ends it
-  with no admissible action, since the Run holds the case at the revision it left. The executor's
-  revision is observed, never trusted.
 
 ### Changed
 
@@ -67,20 +117,6 @@ under **Unreleased** until the next release.
   item beginning with `ELISION_MARKER`, and the usage the endpoint reported for the summary request
   is still recorded on the session. Where even that item would not be shorter (the items are
   reasoning items the loop carries verbatim), they stand.
-
-- A Loom built with `Loom::with_governor` reports a selection made at a revision the case has left
-  (`stale-revision`) as `CaseMoved` instead of `NoUsefulAction`. Under `run_until_blocked`, a case
-  that moves while the selector selects or while arguments are generated is no longer judged on the
-  frontier it left: a case completed meanwhile ends `Completed`, and a case moved past an open
-  obligation ends on the obligation its current frontier holds. In the governed loop
-  (`Loom::run_loop`) such a selection is still denied to the model, which chooses again from the
-  next turn's catalogue; `LoopExecutor` reports a run that then ends without a proposal as
-  `CaseMoved`, naming the revision it was handed, instead of `CompletedLocalReasoning` or
-  `NoUsefulAction`.
-- `task docs-check` writes ESS output under the workspace's build directory
-  (`target/loom-docs/<run>/`), a parent each run owns alone, instead of the system temporary
-  directory, where another process's `ess` run held the output lock and failed the check
-  ("output ownership busy", os error 11).
 
 ## [0.3.0] - 2026-10-07
 

@@ -21,6 +21,8 @@
 
 pub mod case;
 pub mod confinement;
+pub mod context;
+pub mod context_metrics;
 pub mod effect;
 pub mod executor;
 pub mod git;
@@ -28,3 +30,8 @@ pub mod results;
 pub mod run;
 pub mod selector;
 pub mod verifier;
+
+pub mod clock;
+pub mod intent;
+
+mod model_retry;

@@ -6,3 +6,6 @@ domains:
   - intake.routing
   - intake.confinement
   - intake.results
+  - intake.context
+  - intake.protocols
+  - intake.query

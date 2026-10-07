@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-07T13:05:00Z",
+  "actor": "human:timo",
+  "artifact": "story:query-provider-refusal",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "ESS-first 8037406: task intake-drift failed on changed digest; transient_overload_retries_each_stage_without_repeating_the_clock_effect failed before caller retry implementation"
+  }
+}

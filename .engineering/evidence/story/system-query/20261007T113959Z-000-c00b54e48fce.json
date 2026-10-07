@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-07T11:39:59Z",
+  "actor": "human:timo",
+  "artifact": "story:system-query",
+  "kind": "story",
+  "revision": 11,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check: 1243 passed; inventory, planning and documentation gates passed",
+    "reference": "docs/qualification/2026-10-07-system-query.md"
+  }
+}

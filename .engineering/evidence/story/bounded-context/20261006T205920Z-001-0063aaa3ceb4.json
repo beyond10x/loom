@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-06T20:59:20Z",
+  "actor": "human:timo",
+  "artifact": "story:bounded-context",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task plan: exit 0; npm ci and npm run build: exit 0"
+  }
+}

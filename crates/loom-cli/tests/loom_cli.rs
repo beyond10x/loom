@@ -17,7 +17,7 @@ fn confinement_defaults_to_substrate_and_requires_explicit_opt_out() {
 }
 
 #[test]
-fn unavailable_delegation_after_reexec_stops_three_before_model_access() {
+fn reexec_without_private_route_handoff_fails_before_model_access() {
     let output = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
         .args([
             "run",
@@ -31,10 +31,9 @@ fn unavailable_delegation_after_reexec_stops_three_before_model_access() {
         .env("HOME", "/loom-no-credentials")
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(3));
+    assert_eq!(output.status.code(), Some(1));
     let error = String::from_utf8(output.stderr).unwrap();
-    assert!(error.contains("ConfinementUnavailable"), "{error}");
-    assert!(error.contains("CgroupUndelegated"), "{error}");
+    assert!(error.contains("private routing handoff"), "{error}");
     assert!(!error.contains("picked "), "{error}");
 }
 

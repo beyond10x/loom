@@ -42,6 +42,7 @@ fn arguments(command: &clap::Command) -> Vec<[String; 4]> {
                 .and_then(|names| names.first().map(ToString::to_string))
                 .unwrap_or_else(|| arg.get_id().as_str().to_uppercase());
             let written = match arg.get_long() {
+                Some(long) if !arg.get_action().takes_values() => format!("--{long}"),
                 Some(long) => format!("--{long} <{value}>"),
                 None => format!("<{value}>"),
             };
@@ -136,12 +137,14 @@ mod tests {
         assert!(page.contains("custom_edit_url: null"));
         assert!(page.contains("| [`b10x-loom run`](#b10x-loom-run) |"));
         assert!(page.contains("## `b10x-loom run`"));
-        assert!(page.contains("Usage: b10x-loom run [OPTIONS] --workspace <DIR> <INTENT>"));
-        assert!(page.contains("| `--workspace <DIR>` | yes | none |"));
+        assert!(page.contains("Usage: b10x-loom run [OPTIONS] <INTENT>"));
+        assert!(page.contains("| `--workspace <DIR>` | no | none |"));
         assert!(page.contains("| `--test-cmd <CMD>` | no | `cargo test` |"));
         assert!(page.contains("| `--max-steps <N>` | no | `20` |"));
         assert!(page.contains("| `<INTENT>` | yes | none | What to do, as given |"));
-        assert!(page.contains("0  the run stopped at its human gate (ApprovalRequired)"));
+        assert!(page.contains("0  the query completed (Completed) or the run reached its human gate (ApprovalRequired)"));
+        assert!(page.contains("| `--replace` | no | `false` |"));
+        assert!(!page.contains("--replace <REPLACE>"));
         assert!(!page.contains("b10x-loom help"));
     }
 }

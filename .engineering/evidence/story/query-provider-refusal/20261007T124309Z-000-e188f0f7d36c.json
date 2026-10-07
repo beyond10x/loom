@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-07T12:43:09Z",
+  "actor": "human:timo",
+  "artifact": "story:query-provider-refusal",
+  "kind": "story",
+  "revision": 1,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "Three bounded installed CLI clock-query runs: third reproduced Refused during selection; .engineering/drafts/query-refusal-baseline/3.log"
+  }
+}

@@ -18,9 +18,9 @@
 //!   commits) and `tests.run`: every entry through which Loom runs git. No marker may exist
 //!   afterwards. The same fixture then runs plain `git status` and `git commit` itself and the
 //!   pre-commit and fsmonitor markers must appear, so the planted commands are shown to be live.
-//! - [`every_host_git_command_goes_through_the_one_helper`]: a scan of every crate's `src/` finds
-//!   `Command::new` with a git program only in `crates/loom-intake-slice/src/git.rs`, and no
-//!   manifest or lock file names a git library, so a new call site cannot forget the flags.
+//! - [`every_host_git_command_goes_through_a_hardened_helper`]: a scan of every crate's `src/` finds
+//!   `Command::new` with a git program only in the workspace helper or the separate pinned-source
+//!   fetch helper. Both carry the hardening flags; no other Git library bypass is admitted.
 //!
 //! Fixture repositories live under `CARGO_TARGET_TMPDIR`; the fixture's own git calls run with no
 //! system or global configuration. Source paths are read at run time from `CARGO_MANIFEST_DIR`.
@@ -396,7 +396,7 @@ fn a_linked_worktree_opens_and_commits() {
 }
 
 #[test]
-fn every_host_git_command_goes_through_the_one_helper() {
+fn every_host_git_command_goes_through_a_hardened_helper() {
     let root = workspace_root();
     let mut sources = Vec::new();
     for entry in std::fs::read_dir(root.join("crates")).expect("read crates/") {
@@ -431,21 +431,43 @@ fn every_host_git_command_goes_through_the_one_helper() {
             }
         }
     }
-    let bypassing: Vec<&(String, String)> =
-        starts.iter().filter(|(file, _)| file != HELPER).collect();
+    const SOURCE_HELPER: &str = "crates/loom-protocols/src/git.rs";
+    let helpers = [HELPER, SOURCE_HELPER];
+    let bypassing: Vec<&(String, String)> = starts
+        .iter()
+        .filter(|(file, _)| !helpers.contains(&file.as_str()))
+        .collect();
     assert!(
         bypassing.is_empty(),
-        "git is started outside `{HELPER}`, without its hook and fsmonitor flags: {bypassing:?}"
+        "git is started outside the hardened helpers {helpers:?}: {bypassing:?}"
     );
-    assert_eq!(
-        starts.len(),
-        1,
-        "`{HELPER}` starts git in exactly one place: {starts:?}"
-    );
-
-    let helper = std::fs::read_to_string(root.join(HELPER)).expect("read the helper");
-    for flag in ["core.hooksPath=", "core.fsmonitor=false"] {
-        assert!(helper.contains(flag), "`{HELPER}` does not set `{flag}`");
+    for path in helpers {
+        assert_eq!(
+            starts.iter().filter(|(file, _)| file == path).count(),
+            1,
+            "`{path}` must start git in exactly one place: {starts:?}"
+        );
+        let helper = std::fs::read_to_string(root.join(path)).expect("read helper");
+        for flag in ["core.hooksPath=", "core.fsmonitor=false"] {
+            assert!(helper.contains(flag), "`{path}` does not set `{flag}`");
+        }
+    }
+    // The catalog helper fetches into its private bare store; it never opens a run workspace.
+    let source = std::fs::read_to_string(root.join(SOURCE_HELPER)).unwrap();
+    for setting in [
+        "env_clear()",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_SYSTEM",
+        "credential.helper=",
+        "GIT_LITERAL_PATHSPECS",
+        "--template=",
+        "--no-recurse-submodules",
+        "protocol.allow=never",
+    ] {
+        assert!(
+            source.contains(setting),
+            "source fetch helper omitted {setting}"
+        );
     }
 
     // Substrate's pinned host driver implements its own Git source service. Loom never

@@ -34,6 +34,8 @@ pub struct ResultStore {
     entries: HashMap<String, Entry>,
     insertion_order: Vec<String>,
     bytes: usize,
+    capacity_bytes: usize,
+    capacity_count: usize,
 }
 impl Default for ResultStore {
     fn default() -> Self {
@@ -43,6 +45,11 @@ impl Default for ResultStore {
 impl ResultStore {
     /// The host, never model input, creates the scope. No payload is written to disk.
     pub fn new() -> Self {
+        Self::with_capacity(STORE_BYTES, ARTIFACT_COUNT)
+    }
+
+    /// Separate run-local stores share reference semantics, not capacity or identifiers.
+    pub(crate) fn with_capacity(capacity_bytes: usize, capacity_count: usize) -> Self {
         let instant = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_nanos());
@@ -52,6 +59,8 @@ impl ResultStore {
             entries: HashMap::new(),
             insertion_order: Vec::new(),
             bytes: 0,
+            capacity_bytes,
+            capacity_count,
         }
     }
 
@@ -83,13 +92,21 @@ impl ResultStore {
         if origin.len() > ORIGIN_BYTES {
             return Err("result origin exceeds 4096 byte metadata limit".into());
         }
-        if self.entries.len() >= ARTIFACT_COUNT {
-            return Err("result store exceeds 1024 artifact limit".into());
+        if self.entries.len() >= self.capacity_count {
+            return Err(format!(
+                "result store exceeds {} artifact limit",
+                self.capacity_count
+            ));
         }
         self.bytes
             .checked_add(text_bytes)
-            .filter(|n| *n <= STORE_BYTES)
-            .ok_or_else(|| "result store exceeds 64 MiB payload limit".into())
+            .filter(|n| *n <= self.capacity_bytes)
+            .ok_or_else(|| {
+                format!(
+                    "result store exceeds {} byte payload limit",
+                    self.capacity_bytes
+                )
+            })
     }
 
     fn insert_checked(

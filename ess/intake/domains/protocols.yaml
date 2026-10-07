@@ -1,0 +1,38 @@
+domain: intake.protocols
+summary: >-
+  A trusted host composes engineering, Loom and explicitly installed custom Canon definitions
+  into one immutable catalog per run. Registration names are name@major and their major matches
+  the definition revision. Canon owns parsing, validation and evaluation. Routing, artifact
+  initialization and governor admission use the same exact definitions. Duplicate identities
+  refuse, including attempts to shadow a bundled definition. Definition availability does not
+  grant authority or supply executable tools; host bindings and revision initializers decide
+  execution support. Custom documents never execute code or prescribe host commands.
+  Installation snapshots one local file or regular Git blob at a full pinned commit. Git uses
+  HTTPS, SSH or file transports, never a checkout, filters, submodules or package hooks.
+  Installation validates before atomically publishing in the user XDG data directory. Replacement
+  is explicit; bundled entries cannot be replaced or removed. Source bytes and digest are retained
+  together. Every run verifies installed content and loads offline; no automatic network fetch
+  or workspace discovery occurs. Missing, corrupt or incompatible definitions fail before model
+  calls. Source credentials are never stored in locators. Protocol documents are bounded to one
+  MiB and model requests retain the bounded-context ceiling without silently omitting entries.
+  Installed definitions are one atomic manifest bounded to 64 MiB. An existing installation
+  directory without its manifest is corrupt, not an empty catalog. Writers serialize updates;
+  readers observe a whole manifest. Symlinked installation roots or ancestors refuse.
+types:
+  - name: intake.protocols.SourceKind
+    kind: enum
+    variants: [Engineering, Loom, Local, Git, Memory]
+  - name: intake.protocols.ProtocolSource
+    kind: struct
+    fields:
+      - {name: kind, type: intake.protocols.SourceKind}
+      - {name: location, type: String}
+      - {name: revision, type: String}
+      - {name: path, type: String}
+  - name: intake.protocols.ProtocolDefinition
+    kind: struct
+    fields:
+      - {name: name, type: String}
+      - {name: yaml, type: String}
+      - {name: sha256, type: String}
+      - {name: source, type: intake.protocols.ProtocolSource}
