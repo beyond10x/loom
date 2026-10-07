@@ -24,7 +24,9 @@
 //! governor's current frontier. A scenario decides that answer with `configure_external_outcome`
 //! instead, so this target plays the governor: the frontier action ids it hands the executor are the
 //! input's, without the selection's action when the scenario forced `not-in-frontier` for this
-//! invocation and with it otherwise. The executor still decides the outcome from them.
+//! invocation and with it otherwise. The executor decides the outcome from them, but over those
+//! two lists only, so the suite does not exercise its membership rule; the comment in
+//! `revalidate_selection` names the test that does.
 //!
 //! Each scenario starts from empty records, an empty event log and no forced outcome, so no
 //! observation of one scenario can satisfy another. Consistency tokens come from a counter, so two
@@ -760,6 +762,14 @@ fn revalidate_selection(
     let forced = std::mem::take(&mut live.not_in_frontier);
     let selection_id = SelectionId(codec::uuid(input, "selection_id")?);
     let mut frontier_actions = codec::texts(input, "frontier_actions")?;
+    // Membership is answered here from the forced flag, not from the input: the specification
+    // marks `not-in-frontier` `external:` (`ess/domains/run.yaml`), and ESS 0.55 synthesis refuses
+    // it as a membership guard over `frontier_actions` (ESS-SYNTH-003, ESS-SYNTH-004), so every
+    // synthesized scenario sends an empty list and forces the branch instead. The executor
+    // therefore only ever sees `[]` or `[action]`, and this suite does not exercise its
+    // not-in-frontier rule (`crates/loom-executor/src/revalidation.rs`): that rule is held by
+    // `crates/loom-executor/tests/adversary_run_revalidation.rs`,
+    // `not_in_frontier_follows_the_frontier_actions`. A follow-up story takes it.
     if let Some(held) = SelectionStorage::get(&live.requests, &selection_id) {
         frontier_actions.retain(|listed| *listed != held.data.action);
         if !forced {

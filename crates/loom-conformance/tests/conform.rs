@@ -14,9 +14,14 @@
 //!
 //! The Rust producer profile has no `skipped` category of its own for a scenario the target cannot
 //! answer: it reports it `unsupported`. The check therefore holds `unsupported` to the same rule
-//! as `skipped` (named in `ess/SKIPPED.md` or refused), and refuses `error` outright, since an
-//! execution failure hides whatever the scenario would have shown. It also refuses an
-//! `ess/SKIPPED.md` entry naming a scenario the report records as passed.
+//! as `skipped` (named in `ess/SKIPPED.md` or refused), and expectation 4's self-check runs for
+//! both: a copy that adds an unnamed unsupported scenario `U` fails and names `U`, as `S` does. It
+//! refuses `error` outright, since an execution failure hides whatever the scenario would have
+//! shown, and it refuses an `ess/SKIPPED.md` entry naming a scenario the report records as passed.
+//!
+//! The report's own `execution_status` and `conformance_status` are read too, and each must be the
+//! status its counts and coverage come to by ESS's rule ([`derived_statuses`]). A copy of the
+//! report with either field changed fails the check and names the field.
 //!
 //! [`taskfile_check_runs_conform`] holds the other half of the claim: `task check` runs this test,
 //! through the task `conform`, as a step of its own.
@@ -36,6 +41,12 @@ const REPORT_FORMAT: &str = "ess-conformance-report/2";
 
 /// The scenario expectation 4 adds to a copy of the report as skipped.
 const UNNAMED_SKIP: &str = "loom.run.Unnamed/outcome/not-in-skipped-md";
+
+/// The scenario expectation 4 adds to a copy of the report as unsupported.
+const UNNAMED_UNSUPPORTED: &str = "loom.run.Unnamed/outcome/unsupported-not-in-skipped-md";
+
+/// The two statuses a report carries, each checked against what its counts and coverage come to.
+const STATUSES: [&str; 2] = ["execution_status", "conformance_status"];
 
 /// The command `task conform` runs.
 const CONFORM: &str = "cargo test --locked -p b10x-loom-conformance --test conform";
@@ -203,20 +214,83 @@ fn violations(report: &Value, named: &BTreeSet<String>) -> Vec<String> {
         }
     }
 
+    let derived = derived_statuses(report);
+    for (field, status) in STATUSES.into_iter().zip(derived) {
+        if report[field] != status {
+            found.push(format!(
+                "the report's {field} is {}, and its counts and coverage come to `{status}`",
+                report[field]
+            ));
+        }
+    }
+
     found
 }
 
-/// A copy of `report` that records `scenario` as one more skipped scenario.
-fn with_skipped(report: &Value, scenario: &str) -> Value {
+/// The `execution_status` and `conformance_status` a report's counts and coverage come to, by the
+/// rule ESS writes them with (ess-conformance `counts.rs`, `execution` and `qualification`).
+///
+/// Execution fails on a failed or unsupported scenario, is inconclusive on an errored or skipped
+/// one, and passes otherwise. Conformance fails when execution fails, passes when execution passes
+/// over a suite that is not empty and whose coverage is a complete inventory with no in-scope
+/// refusal, and is inconclusive otherwise.
+fn derived_statuses(report: &Value) -> [&'static str; 2] {
+    let execution = if count(report, "failed") > 0 || count(report, "unsupported") > 0 {
+        "failed"
+    } else if count(report, "error") > 0 || count(report, "skipped") > 0 {
+        "inconclusive"
+    } else {
+        "passed"
+    };
+    let coverage = &report["coverage"];
+    let complete = coverage["knowledge"] == "complete_inventory"
+        && !coverage["refused"]
+            .as_array()
+            .is_some_and(|refused| refused.iter().any(|one| one["scope"] == "in_scope"));
+    let conformance = match execution {
+        "failed" => "failed",
+        "passed" if count(report, "total") > 0 && complete => "passed",
+        _ => "inconclusive",
+    };
+    [execution, conformance]
+}
+
+/// A copy of `report` that records `scenario` as one more `category` scenario, with the statuses
+/// its counts and coverage then come to, as a producer would write it.
+fn with_outcome(report: &Value, category: &str, scenario: &str) -> Value {
     let mut copy = report.clone();
-    copy["outcomes"]["skipped"]
+    copy["outcomes"][category]
         .as_array_mut()
-        .expect("the report lists an `outcomes.skipped` array")
+        .unwrap_or_else(|| panic!("the report lists an `outcomes.{category}` array"))
         .push(Value::String(scenario.to_owned()));
-    for category in ["skipped", "total"] {
-        copy["counts"][category] = Value::from(count(report, category) + 1);
+    for counted in [category, "total"] {
+        copy["counts"][counted] = Value::from(count(report, counted) + 1);
+    }
+    let derived = derived_statuses(&copy);
+    for (field, status) in STATUSES.into_iter().zip(derived) {
+        copy[field] = Value::from(status);
     }
     copy
+}
+
+/// A copy of `report` whose `field` says another status than it does.
+fn with_status_changed(report: &Value, field: &str) -> Value {
+    let mut copy = report.clone();
+    copy[field] = Value::from(if report[field] == "passed" {
+        "failed"
+    } else {
+        "passed"
+    });
+    copy
+}
+
+/// What the check finds in `copy` that it does not find in `report`.
+fn added_violations(report: &Value, copy: &Value, named: &BTreeSet<String>) -> Vec<String> {
+    let before: BTreeSet<String> = violations(report, named).into_iter().collect();
+    violations(copy, named)
+        .into_iter()
+        .filter(|found| !before.contains(found))
+        .collect()
 }
 
 #[test]
@@ -260,21 +334,33 @@ fn ess_conformance_report() {
         }
     };
 
-    // Expectation 4: the check refuses a skip ess/SKIPPED.md does not name, and names it.
-    assert!(
-        !named.contains(UNNAMED_SKIP),
-        "ess/SKIPPED.md names `{UNNAMED_SKIP}`, which expectation 4 needs unnamed"
-    );
-    let before: BTreeSet<String> = violations(&report, &named).into_iter().collect();
-    let after: BTreeSet<String> = violations(&with_skipped(&report, UNNAMED_SKIP), &named)
-        .into_iter()
-        .collect();
-    let added: Vec<&String> = after.difference(&before).collect();
-    assert!(
-        added.len() == 1 && added[0].contains(UNNAMED_SKIP),
-        "expectation 4: a copy of the report with the unnamed skip `{UNNAMED_SKIP}` must fail the \
-         check naming it, and only it; it added {added:?}"
-    );
+    // Expectation 4: the check refuses a skipped or an unsupported scenario ess/SKIPPED.md does not
+    // name, and names it.
+    for (category, scenario) in [
+        ("skipped", UNNAMED_SKIP),
+        ("unsupported", UNNAMED_UNSUPPORTED),
+    ] {
+        assert!(
+            !named.contains(scenario),
+            "ess/SKIPPED.md names `{scenario}`, which expectation 4 needs unnamed"
+        );
+        let added = added_violations(&report, &with_outcome(&report, category, scenario), &named);
+        assert!(
+            added.len() == 1 && added[0].contains(scenario),
+            "expectation 4: a copy of the report with the unnamed {category} scenario `{scenario}` \
+             must fail the check naming it, and only it; it added {added:?}"
+        );
+    }
+
+    // The statuses: a copy whose status disagrees with its counts and coverage fails, naming it.
+    for field in STATUSES {
+        let added = added_violations(&report, &with_status_changed(&report, field), &named);
+        assert!(
+            added.len() == 1 && added[0].contains(field),
+            "a copy of the report whose {field} disagrees with its counts must fail the check \
+             naming {field}, and only it; it added {added:?}"
+        );
+    }
 
     // Expectation 2, on the suite.
     let commands = compiled_commands();
@@ -287,7 +373,7 @@ fn ess_conformance_report() {
         ));
     }
 
-    // Expectations 1, 3 and 4, on the report itself.
+    // Expectations 1, 3 and 4, and the two statuses, on the report itself.
     found.extend(violations(&report, &named));
     assert!(
         found.is_empty(),
