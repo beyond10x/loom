@@ -25,6 +25,18 @@ The responsibility model for governed autonomous workers: an agent revision comm
 
 <DomainGraph data={domainGraph} />
 
+### ActionBinding
+
+Identity: `binding`, [`ActionBindingKey`](./types.mdx#actionbindingkey).
+
+| Field | Type |
+|---|---|
+| `commission_id` | [`CommissionId`](./types.mdx#commissionid) |
+| `instance_id` | [`ConnectorInstanceId`](./types.mdx#connectorinstanceid) |
+| `operation_id` | [`ConnectorOperationId`](./types.mdx#connectoroperationid) |
+
+Lifecycle: states `Declared`; initial `Declared`; terminal `Declared`.
+
 ### ActionRequest
 
 Identity: `action_request_id`, [`ActionRequestId`](./types.mdx#actionrequestid).
@@ -113,6 +125,7 @@ Lifecycle: states `Assigned`; initial `Assigned`; terminal `Assigned`.
 | `agent_revision` | references | [AgentRevision](#agentrevision) | one | `agent_revision_id` |
 | `case` | references | [Case](#case) | one | `case_id` |
 | `runs` | owns | [Run](#run) | many | `commission_id` |
+| `bindings` | owns | [ActionBinding](#actionbinding) | many | `commission_id` |
 
 ### Evidence
 

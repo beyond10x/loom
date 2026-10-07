@@ -145,6 +145,7 @@ impl EffectPort for Effects {
             .pop_front()
             .unwrap_or(EffectOutcome::Performed(EffectOutcomePerformed {
                 report: Value::Null,
+                attempt: None,
             })))
     }
 }
@@ -301,6 +302,7 @@ impl EffectPort for Bumps<'_> {
             .unwrap_or_else(PoisonError::into_inner) += 1;
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {
             report: Value::Null,
+            attempt: None,
         }))
     }
 }

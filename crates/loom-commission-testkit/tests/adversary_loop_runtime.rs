@@ -130,6 +130,7 @@ impl EffectPort for Performs {
     ) -> Result<EffectOutcome, EffectError> {
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {
             report: Value::Null,
+            attempt: None,
         }))
     }
 }

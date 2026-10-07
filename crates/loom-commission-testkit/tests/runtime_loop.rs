@@ -263,6 +263,7 @@ impl EffectPort for Effects {
             .push(request.data().clone());
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {
             report: Value::Null,
+            attempt: None,
         }))
     }
 }
@@ -409,6 +410,7 @@ fn order_refusal_admission_completion(runs: &mut Generated<RunStore>) {
         end.effects,
         vec![EffectOutcome::Performed(EffectOutcomePerformed {
             report: Value::Null,
+            attempt: None,
         })],
         "{name}: 4. the one effect"
     );
