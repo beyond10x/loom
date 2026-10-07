@@ -8,16 +8,27 @@ relations:
 - decomposes: epic:commission-core
 - serves: vision:O1
 - depends_on: story:moved-case-outcome
+- depends_on: story:ess-056-upgrade
 scope:
 - confidence: cited
+  path: crates/loom-commission-conformance/src/lib.rs
+- confidence: cited
   path: crates/loom-commission-testkit/tests/moved_case_outcome.rs
+- confidence: inferred
+  path: crates/loom-commission/src/outcome.rs
 - confidence: cited
   path: crates/loom-commission/src/runtime.rs
+- confidence: cited
+  path: crates/loom-intake-slice/src/run.rs
+- confidence: cited
+  path: crates/loom-sdk/examples/software_change.rs
 - confidence: cited
   path: ess/commission/domains/responsibility.yaml
 - confidence: cited
   path: generated/rust/commission/
-revision: 3
+- confidence: cited
+  path: website/docs/reference/commission/
+revision: 9
 ---
 ## Outcome
 
@@ -34,19 +45,60 @@ the revision it left, cannot go on, and it ends `NoAdmissibleAction`
 one `decision-blocker:run-stale-outcome` was filed for. The stale-proposal path, where the runtime
 finds the move itself, ends the same way.
 
-## Acceptance
-
 Decided (option A of `decision-blocker:moved-run-admissible-frontier`): a new `RunOutcome` variant
-naming the Run's revision and the current one ends a run whose case moved to a frontier that still
-admits an action. A case per path asserts it: the executor-reported move (`CaseMoved`) and the move
-the runtime finds itself (the stale-proposal path). `crates/loom-commission-testkit/tests/moved_case_outcome.rs`'s
-case that asserts `NoAdmissibleAction` for that frontier is rewritten to the new variant. The
-CHANGELOG entry names the variant for callers that match `RunOutcome`.
+naming the revision the Run is bound to and the current one; the caller starts a new Run at the
+current revision. A Run stays bound to one revision.
 
 ## ESS first
 
-A run-outcome change is a specification change in `ess/commission/` first.
+- **Specification change (first commit, `ess/commission/domains/responsibility.yaml` only):**
+  `commission.responsibility.RunOutcome` gains the variant `CaseMovedOn:
+  commission.responsibility.RunOutcomeCaseMovedOn`, a struct with `bound_case_revision` and
+  `current_case_revision`, typed as the `case_revision` the specification already declares.
+  Modelled with `ess:specifying` and validated with `ess` 0.56.0
+  (`ess specify validate --path ess/commission --strict-requires`), the release
+  `story:ess-056-upgrade` moves Loom to.
+- **Red on that commit:** `task commission:drift` fails against the committed
+  `generated/rust/commission/`; record the run.
+- **Then:** `task commission:generate`, `task commission:docs`, the runtime, and the callers below.
+  Later commits do not change `ess/`.
+
+## Acceptance
+
+- When a run's case moved (reported by the executor as `CaseMoved`, or found by the runtime on a
+  stale proposal) to a revision whose frontier, filtered as the executor would be handed it, still
+  admits an action, `run_until_blocked` ends the run `CaseMovedOn` with `bound_case_revision` the
+  Run's revision and `current_case_revision` the revision it loaded. One test per path asserts it:
+  the executor-reported move and the stale-proposal path.
+- The case in `crates/loom-commission-testkit/tests/moved_case_outcome.rs` that asserts
+  `NoAdmissibleAction` for that frontier asserts `CaseMovedOn` instead, with both revisions.
+- A complete case still ends `Completed` and an open obligation still ends `NeedsExternalEvidence`
+  on the same paths; the existing cases for them pass unchanged.
+- Every match on `RunOutcome` outside tests handles the variant: the intake slice
+  (`crates/loom-intake-slice/src/run.rs`) maps it as it maps `NoAdmissibleAction` (a stop that is
+  not a success) and its printed stop line names both revisions; the Commission conformance target
+  and the SDK example compile against it.
+- `task commission:conform` passes; CHANGELOG (Unreleased) names the variant for callers that
+  match `RunOutcome`, and the release notes of the release that carries it do too.
+
+## Scope
+
+- `ess/commission/domains/responsibility.yaml` (cited), `generated/rust/commission/` (by task),
+  `website/docs/reference/commission/` (by task)
+- `crates/loom-commission/src/runtime.rs` (cited: `moved_outcome`), `crates/loom-commission/src/outcome.rs`
+  (inferred: the derivation that returns `NoAdmissibleAction`)
+- `crates/loom-commission-testkit/tests/moved_case_outcome.rs` (cited)
+- `crates/loom-intake-slice/src/run.rs` (cited: the `RunOutcome` match at the stop line),
+  `crates/loom-commission-conformance/src/lib.rs`, `crates/loom-sdk/examples/software_change.rs`
+  (cited: they match `RunOutcome`)
+- `CHANGELOG.md`, `website/data/status.json` (coordinator)
+
+## Shared surface
+
+Edits `generated/rust/commission/` and Commission's gate surface like `story:ess-056-upgrade`, on
+which it depends; the two run in order, not in one parallel set.
 
 ## Source
 
-`review-result:adversary-w3-loom-moved-case-outcome-pass-1`, F3.
+`review-result:adversary-w3-loom-moved-case-outcome-pass-1`, F3;
+`decision-blocker:moved-run-admissible-frontier` (option A).
