@@ -19,9 +19,18 @@
 //! refuses `error` outright, since an execution failure hides whatever the scenario would have
 //! shown, and it refuses an `ess/SKIPPED.md` entry naming a scenario the report records as passed.
 //!
+//! So the check passes when every scenario passed or is named in `ess/SKIPPED.md`, and only then.
+//! A named `unsupported` scenario keeps it green while ESS rates the run `failed`: ESS fails the
+//! execution of any run with an unsupported scenario. That is decided, not overlooked: acceptance
+//! item 4 admits a named scenario, and the Rust producer has no other category for one.
+//!
 //! The report's own `execution_status` and `conformance_status` are read too, and each must be the
-//! status its counts and coverage come to by ESS's rule ([`derived_statuses`]). A copy of the
-//! report with either field changed fails the check and names the field.
+//! status its counts and coverage come to by ESS's rule ([`derived_statuses`]); a copy of the
+//! report with either field changed fails the check and names the field. `run_suite` builds the
+//! report with `CountReport::from_run`, which refuses statuses that contradict the counts, so on
+//! this target's own report the check holds by construction. The rule itself is held to ESS's
+//! ratings written out as literals: the self-check copies of expectation 4 carry the statuses ESS
+//! rates them, and [`derived_statuses_rate_reports_as_ess_does`] covers each branch.
 //!
 //! [`taskfile_check_runs_conform`] holds the other half of the claim: `task check` runs this test,
 //! through the task `conform`, as a step of its own.
@@ -255,9 +264,51 @@ fn derived_statuses(report: &Value) -> [&'static str; 2] {
     [execution, conformance]
 }
 
-/// A copy of `report` that records `scenario` as one more `category` scenario, with the statuses
-/// its counts and coverage then come to, as a producer would write it.
-fn with_outcome(report: &Value, category: &str, scenario: &str) -> Value {
+/// Every category a report lists its scenarios under.
+const CATEGORIES: [&str; 5] = ["passed", "failed", "error", "unsupported", "skipped"];
+
+/// What ESS rates a run in which every scenario passed over a suite that declares no coverage
+/// inventory: execution passes (`counts.rs` `execution`), and conformance is inconclusive because
+/// the coverage is not a complete inventory (`counts.rs` `qualification`).
+const ALL_PASSED: [&str; 2] = ["passed", "inconclusive"];
+
+/// What ESS rates [`ALL_PASSED`] with one unsupported scenario more: any unsupported scenario fails
+/// execution, and a failed execution fails conformance.
+const ONE_UNSUPPORTED: [&str; 2] = ["failed", "failed"];
+
+/// What ESS rates [`ALL_PASSED`] with one skipped scenario more, under a producer profile that has
+/// the category: a skipped scenario makes execution inconclusive, and so conformance. (ESS refuses
+/// a Rust-profile report with a skipped scenario outright, `counts.rs` `execution`.)
+const ONE_SKIPPED: [&str; 2] = ["inconclusive", "inconclusive"];
+
+/// A copy of `report` in which every scenario it lists passed, with the coverage of a suite that
+/// declares no inventory and the statuses [`ALL_PASSED`]: the fixed base expectation 4's
+/// self-checks start from, so the statuses they expect are literals, not whatever the run came to.
+fn all_passed(report: &Value) -> Value {
+    let mut base = report.clone();
+    let mut ids: Vec<String> = CATEGORIES
+        .into_iter()
+        .flat_map(|category| outcome_ids(report, category))
+        .collect();
+    ids.sort();
+    for category in CATEGORIES {
+        base["outcomes"][category] = Value::Array(Vec::new());
+        base["counts"][category] = Value::from(0);
+    }
+    let total = ids.len();
+    base["outcomes"]["passed"] = Value::from(ids);
+    base["counts"]["passed"] = Value::from(total);
+    base["counts"]["total"] = Value::from(total);
+    base["coverage"] = serde_json::json!({"knowledge": "unknown"});
+    for (field, status) in STATUSES.into_iter().zip(ALL_PASSED) {
+        base[field] = Value::from(status);
+    }
+    base
+}
+
+/// A copy of `report` that records `scenario` as one more `category` scenario and carries
+/// `statuses`, the statuses ESS rates that copy.
+fn with_outcome(report: &Value, category: &str, scenario: &str, statuses: [&str; 2]) -> Value {
     let mut copy = report.clone();
     copy["outcomes"][category]
         .as_array_mut()
@@ -266,8 +317,7 @@ fn with_outcome(report: &Value, category: &str, scenario: &str) -> Value {
     for counted in [category, "total"] {
         copy["counts"][counted] = Value::from(count(report, counted) + 1);
     }
-    let derived = derived_statuses(&copy);
-    for (field, status) in STATUSES.into_iter().zip(derived) {
+    for (field, status) in STATUSES.into_iter().zip(statuses) {
         copy[field] = Value::from(status);
     }
     copy
@@ -335,16 +385,29 @@ fn ess_conformance_report() {
     };
 
     // Expectation 4: the check refuses a skipped or an unsupported scenario ess/SKIPPED.md does not
-    // name, and names it.
-    for (category, scenario) in [
-        ("skipped", UNNAMED_SKIP),
-        ("unsupported", UNNAMED_UNSUPPORTED),
+    // name, and names it. The copies start from a run in which every scenario passed, so the
+    // statuses ESS rates each one are literals, and the check's own rule is held to them.
+    let base = all_passed(&report);
+    assert_eq!(
+        derived_statuses(&base),
+        ALL_PASSED,
+        "the check rates a run in which every scenario passed otherwise than ESS does"
+    );
+    for (category, scenario, rated) in [
+        ("skipped", UNNAMED_SKIP, ONE_SKIPPED),
+        ("unsupported", UNNAMED_UNSUPPORTED, ONE_UNSUPPORTED),
     ] {
         assert!(
             !named.contains(scenario),
             "ess/SKIPPED.md names `{scenario}`, which expectation 4 needs unnamed"
         );
-        let added = added_violations(&report, &with_outcome(&report, category, scenario), &named);
+        let copy = with_outcome(&base, category, scenario, rated);
+        assert_eq!(
+            derived_statuses(&copy),
+            rated,
+            "the check rates a run with one {category} scenario more otherwise than ESS does"
+        );
+        let added = added_violations(&base, &copy, &named);
         assert!(
             added.len() == 1 && added[0].contains(scenario),
             "expectation 4: a copy of the report with the unnamed {category} scenario `{scenario}` \
@@ -386,6 +449,106 @@ fn ess_conformance_report() {
         diagnostics_path.display()
     );
     let _ = fs::remove_dir_all(&dir);
+}
+
+/// A report reduced to what [`derived_statuses`] reads: one scenario in each category of
+/// `categories`, and `coverage`.
+fn rated_report(categories: &[&str], coverage: Value) -> Value {
+    let mut counts = serde_json::Map::new();
+    for category in CATEGORIES {
+        let listed = categories
+            .iter()
+            .filter(|listed| **listed == category)
+            .count();
+        counts.insert(category.to_owned(), Value::from(listed));
+    }
+    counts.insert("total".to_owned(), Value::from(categories.len()));
+    serde_json::json!({"counts": counts, "coverage": coverage})
+}
+
+/// [`derived_statuses`] rates each report as ESS does (ess-conformance `counts.rs`, `execution`,
+/// `qualification` and `coverage.rs` `Inventory::is_complete`), each expectation written out.
+#[test]
+fn derived_statuses_rate_reports_as_ess_does() {
+    let complete = serde_json::json!({"knowledge": "complete_inventory", "refused": []});
+    let refused_in_scope = serde_json::json!({
+        "knowledge": "complete_inventory",
+        "refused": [{"scope": "in_scope"}]
+    });
+    let refused_outside = serde_json::json!({
+        "knowledge": "complete_inventory",
+        "refused": [{"scope": "outside_component"}]
+    });
+    let unknown = serde_json::json!({"knowledge": "unknown"});
+    let cases: [(&str, &[&str], &Value, [&str; 2]); 9] = [
+        (
+            "every scenario passed, complete inventory",
+            &["passed"],
+            &complete,
+            ["passed", "passed"],
+        ),
+        (
+            "every scenario passed, an in-scope refusal",
+            &["passed"],
+            &refused_in_scope,
+            ["passed", "inconclusive"],
+        ),
+        (
+            "every scenario passed, a refusal outside the component",
+            &["passed"],
+            &refused_outside,
+            ["passed", "passed"],
+        ),
+        (
+            "every scenario passed, no inventory",
+            &["passed"],
+            &unknown,
+            ["passed", "inconclusive"],
+        ),
+        (
+            "an empty suite, complete inventory",
+            &[],
+            &complete,
+            ["passed", "inconclusive"],
+        ),
+        (
+            "an unsupported scenario",
+            &["passed", "unsupported"],
+            &complete,
+            ["failed", "failed"],
+        ),
+        (
+            "a failed scenario",
+            &["passed", "failed"],
+            &complete,
+            ["failed", "failed"],
+        ),
+        (
+            "an errored scenario",
+            &["passed", "error"],
+            &complete,
+            ["inconclusive", "inconclusive"],
+        ),
+        (
+            "a skipped scenario, under a profile that has the category",
+            &["passed", "skipped"],
+            &complete,
+            ["inconclusive", "inconclusive"],
+        ),
+    ];
+    let wrong: Vec<String> = cases
+        .into_iter()
+        .filter_map(|(case, categories, coverage, rated)| {
+            let derived = derived_statuses(&rated_report(categories, coverage.clone()));
+            (derived != rated)
+                .then(|| format!("{case}: ESS rates {rated:?}, the check {derived:?}"))
+        })
+        .collect();
+    assert!(
+        wrong.is_empty(),
+        "the check rates reports otherwise than ESS:\n  {}",
+        wrong.join("\n  ")
+    );
 }
 
 /// `task conform` runs [`ess_conformance_report`], and `task check` lists `conform` as a step of

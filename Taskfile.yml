@@ -79,7 +79,7 @@ tasks:
       - cargo run -q --locked -p loom-xtask -- no-hand-model
 
   conform:
-    desc: Run the conformance suite synthesized from ess/ against b10x-loom-executor and fail unless its report passes.
+    desc: Run the conformance suite synthesized from ess/ against b10x-loom-executor and fail unless every scenario passes or is named in ess/SKIPPED.md.
     cmds:
       - cargo test --locked -p b10x-loom-conformance --test conform
 
