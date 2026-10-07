@@ -23,7 +23,7 @@ use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
     ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, AuthorityVerdict,
     AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData, CommissionId,
-    CompletionDetermination, CompletionDeterminationComplete, ConnectorAttemptId, EffectOutcome,
+    CompletionDetermination, CompletionDeterminationComplete, EffectOutcome,
     EffectOutcomePerformed, Frontier, FrontierAction, FrontierData, FrontierId, FrontierObligation,
     GovernorError, Observation, ObservationId, PrincipalId, RunId, RunOutcome, RunOutcomeCompleted,
     RunOutcomeNeedsAuthority, RunOutcomeNeedsExternalEvidence, Unit, commission_state,
@@ -238,7 +238,7 @@ impl EffectPort for Effects<'_> {
         }
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {
             report: Value::Null,
-            attempt: ConnectorAttemptId("attempt-1".to_owned()),
+            attempt: None,
         }))
     }
 }

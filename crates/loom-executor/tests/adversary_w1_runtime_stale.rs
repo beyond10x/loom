@@ -29,10 +29,10 @@ use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
     ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, CaseId, Commission,
     CommissionData, CommissionId, CompletionDetermination, CompletionDeterminationComplete,
-    ConnectorAttemptId, EffectOutcome, EffectOutcomePerformed, Frontier, FrontierAction,
-    FrontierData, FrontierId, FrontierObligation, GovernorError, Observation, ObservationId,
-    PrincipalId, RunId, RunOutcome, RunOutcomeCompleted, RunOutcomeNeedsExternalEvidence, Unit,
-    commission_state, frontier_state, observation_state,
+    EffectOutcome, EffectOutcomePerformed, Frontier, FrontierAction, FrontierData, FrontierId,
+    FrontierObligation, GovernorError, Observation, ObservationId, PrincipalId, RunId, RunOutcome,
+    RunOutcomeCompleted, RunOutcomeNeedsExternalEvidence, Unit, commission_state, frontier_state,
+    observation_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -190,7 +190,7 @@ impl EffectPort for Effects {
     ) -> Result<EffectOutcome, EffectError> {
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {
             report: Value::Null,
-            attempt: ConnectorAttemptId("attempt-1".to_owned()),
+            attempt: None,
         }))
     }
 }

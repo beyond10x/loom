@@ -10,7 +10,8 @@
 //!
 //! An admitted request is handed to the [`ConnectorInvoker`] port once, with its binding. The
 //! invoker's `Performed` names the one Connector attempt the invocation produced
-//! (`decision-blocker:invocation-attempt-record`, A); nothing here retries, since a retry is a new
+//! (`decision-blocker:invocation-attempt-record`, A): every `Performed` this port returns carries
+//! an attempt, and one without is a failure to answer. Nothing here retries, since a retry is a new
 //! action request, rechecked. Read and consequential actions take this one path
 //! (`decision-blocker:read-action-effect-path`, A). Commission depends on no Connectors crate: the
 //! invoker is a port the host fills.
@@ -121,8 +122,8 @@ impl<I: ConnectorInvoker> EffectPort for ConnectorEffects<I> {
     }
 
     /// Hands `request` to the invoker once, with its action's binding. An unbound action is
-    /// refused and nothing is invoked; a commission other than the one the bindings belong to is a
-    /// failure to answer.
+    /// refused and nothing is invoked; a commission other than the one the bindings belong to, and
+    /// an invoker's `Performed` that names no attempt, are failures to answer.
     fn invoke(
         &self,
         commission: &Commission<commission_state::Assigned>,
@@ -136,11 +137,19 @@ impl<I: ConnectorInvoker> EffectPort for ConnectorEffects<I> {
             )));
         }
         let action = &request.data().action;
-        match self.bindings.get(action) {
-            Some(binding) => self.invoker.invoke(binding, request),
-            None => Ok(EffectOutcome::Refused(EffectOutcomeRefused {
+        let Some(binding) = self.bindings.get(action) else {
+            return Ok(EffectOutcome::Refused(EffectOutcomeRefused {
                 reason: format!("`{action}` has no binding"),
-            })),
+            }));
+        };
+        match self.invoker.invoke(binding, request)? {
+            EffectOutcome::Performed(performed) if performed.attempt.is_none() => {
+                Err(EffectError::new(format!(
+                    "the Connector operation `{}` of `{}` performed `{action}` and named no attempt",
+                    binding.operation_id.0, binding.instance_id.0
+                )))
+            }
+            answered => Ok(answered),
         }
     }
 }

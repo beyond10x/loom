@@ -366,7 +366,7 @@ fn performed(n: usize, instance: &str, operation: &str) -> EffectOutcome {
             &ConnectorInstanceId(instance.to_owned()),
             &ConnectorOperationId(operation.to_owned()),
         ),
-        attempt: RecordingInvoker::attempt(n),
+        attempt: Some(RecordingInvoker::attempt(n)),
     })
 }
 
@@ -432,7 +432,7 @@ fn bound_request_invoked_once_through_its_binding_after_the_recheck() {
     };
     assert_eq!(
         done.attempt,
-        ConnectorAttemptId("attempt-1".to_owned()),
+        Some(ConnectorAttemptId("attempt-1".to_owned())),
         "{name}: the attempt the invocation produced"
     );
 
@@ -822,4 +822,55 @@ fn an_invocation_for_another_commission_is_not_answered() {
     );
     assert!(error.suspension_reason.is_some(), "{name}: {error:?}");
     assert!(ran.invoked.is_empty(), "{name}: {:?}", ran.invoked);
+}
+
+/// Every `Performed` that `ConnectorEffects` returns names its attempt: an invoker that reports a
+/// performed operation without one has failed to answer, so the run is suspended with the effect
+/// failure and no effect is recorded as performed.
+#[test]
+fn a_performed_operation_that_names_no_attempt_is_not_answered() {
+    let name = "no attempt";
+    let case = CaseId("case-unattempted".to_owned());
+    let own = commission(&case);
+    let governor = FakeGovernor::new();
+    governor.script(case.clone(), [listing(1, vec![admissible(INSPECT)])]);
+    let executor = ScriptedExecutor::new([proposal(INSPECT), idle(), idle()]);
+    let invoker =
+        RecordingInvoker::new().answering([Ok(EffectOutcome::Performed(EffectOutcomePerformed {
+            report: Value::Null,
+            attempt: None,
+        }))]);
+    let effects = ConnectorEffects::new(&own, bindings(&own), &invoker)
+        .unwrap_or_else(|error| panic!("{name}: the bindings are refused: {error}"));
+    let mut issued = 0u64;
+    let mut runs = Generated::new(RunStore::new(move || {
+        issued += 1;
+        RunId(uuid(0x100 + issued))
+    }));
+    let result = run_until_blocked(
+        &governor,
+        &executor,
+        &StaticAuthorityProvider::new(),
+        &effects,
+        &own,
+        &mut runs,
+        &mut Context::default(),
+    );
+    let Err(error) = &result else {
+        panic!("{name}: the loop ended: {result:?}");
+    };
+    assert!(
+        matches!(error.failure, LoopFailure::Effect(_)),
+        "{name}: {error:?}"
+    );
+    assert!(error.suspension_reason.is_some(), "{name}: {error:?}");
+    assert_eq!(invoker.calls().len(), 1, "{name}: invoked once");
+    assert!(
+        governor
+            .observations()
+            .iter()
+            .all(|observed| observed.source != "effect"),
+        "{name}: an effect was observed: {:?}",
+        governor.observations()
+    );
 }

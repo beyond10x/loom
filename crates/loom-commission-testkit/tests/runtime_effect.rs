@@ -51,9 +51,9 @@ use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
     ActionRequestData, ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext,
     AuthorityVerdict, AuthorityVerdictApprovalRequired, AuthorityVerdictDeny, CaseId, Commission,
-    CommissionData, CommissionId, ConnectorAttemptId, EffectOutcome, EffectOutcomePerformed,
-    EffectOutcomeRefused, ExecutorOutcome, ExecutorOutcomeProposedAction, Frontier, FrontierAction,
-    FrontierId, FrontierObligation, ObservationId, PrincipalId, ProposedActionArguments,
+    CommissionData, CommissionId, EffectOutcome, EffectOutcomePerformed, EffectOutcomeRefused,
+    ExecutorOutcome, ExecutorOutcomeProposedAction, Frontier, FrontierAction, FrontierId,
+    FrontierObligation, ObservationId, PrincipalId, ProposedActionArguments,
     RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeAwaitingApproval,
     RunOutcomeCompleted, RunOutcomeNeedsAuthority, RunOutcomeNeedsExternalEvidence,
     RunOutcomeSuspended, RunState, SuspensionReason, Unit, commission_state, frontier_state,
@@ -148,7 +148,7 @@ fn request(
 fn performed(report: &str) -> EffectOutcome {
     EffectOutcome::Performed(EffectOutcomePerformed {
         report: Value::Text(report.to_owned()),
-        attempt: ConnectorAttemptId("attempt-1".to_owned()),
+        attempt: None,
     })
 }
 
@@ -970,8 +970,15 @@ fn a_frontier_with_nothing_performable_never_runs_the_executor() {
         Context::default(),
     );
     let end = ended(name, result);
-    assert_eq!(executor.calls().len(), 2, "{name}: the executor ran");
+    // `triage` is never offered (`story:effect-invocation`): the frontier the executor is handed
+    // admits nothing, so the outcome derived from it ends the run after the one call.
+    assert_eq!(executor.calls().len(), 1, "{name}: the executor ran");
     assert_ne!(end.outcome, RunOutcome::NoPerformableAction(Unit(true)));
+    assert_eq!(
+        end.outcome,
+        RunOutcome::NoAdmissibleAction(Unit(true)),
+        "{name}: outcome"
+    );
 }
 
 /// `ApprovalRequired`, when the executor proposes an action needing approval: the provider is

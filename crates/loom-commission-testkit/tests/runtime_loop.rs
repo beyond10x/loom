@@ -53,8 +53,8 @@ use b10x_loom_commission::model::responsibility::{
     ActionNeedsAuthority, ActionNotAdmitted, ActionRequestData, ActionRequestId,
     ActionRequestStale, ActionStatus, AgentRevisionId, AuthorityContext, AuthorityVerdict,
     AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData, CommissionId,
-    ConnectorAttemptId, ExecutorOutcome, ExecutorOutcomeProposedAction, ExecutorOutcomeSuspended,
-    Frontier, FrontierAction, FrontierId, ObservationId, PrincipalId, ProposedActionArguments,
+    ExecutorOutcome, ExecutorOutcomeProposedAction, ExecutorOutcomeSuspended, Frontier,
+    FrontierAction, FrontierId, ObservationId, PrincipalId, ProposedActionArguments,
     RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeCompleted,
     RunOutcomeNeedsAuthority, RunOutcomeSuspended, RunState, RunStates, SuspensionReason, Unit,
     commission_state, frontier_state,
@@ -263,7 +263,7 @@ impl EffectPort for Effects {
             .push(request.data().clone());
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {
             report: Value::Null,
-            attempt: ConnectorAttemptId("attempt-1".to_owned()),
+            attempt: None,
         }))
     }
 }
@@ -410,7 +410,7 @@ fn order_refusal_admission_completion(runs: &mut Generated<RunStore>) {
         end.effects,
         vec![EffectOutcome::Performed(EffectOutcomePerformed {
             report: Value::Null,
-            attempt: ConnectorAttemptId("attempt-1".to_owned()),
+            attempt: None,
         })],
         "{name}: 4. the one effect"
     );

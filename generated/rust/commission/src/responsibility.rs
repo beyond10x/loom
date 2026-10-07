@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest dd29b7e5628705e0dbc1057be0df0e640e0273d23d2036dd58d5a13a192f0661
-// contract digest ffc7386f00a154d29ae71609caec46060f782e89dbae8e9a36260450e7005e14
+// model digest b591e8b9ead48953d86efb7e3edde0078b9afa9db83e615afaad0f867d5dfaa3
+// contract digest 351f450a15d041450febd56481b7e3491c7088fd1dfaf030605d6765f5b1c910
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Responsibility — `commission.responsibility`.
@@ -221,8 +221,8 @@ pub enum EffectOutcome {
 pub struct EffectOutcomePerformed {
     /// `report` — `Json`.
     pub report: crate::json::Value,
-    /// `attempt` — `commission.responsibility.ConnectorAttemptId`.
-    pub attempt: ConnectorAttemptId,
+    /// `attempt` — `Optional<commission.responsibility.ConnectorAttemptId>`.
+    pub attempt: Option<ConnectorAttemptId>,
 }
 
 /// EffectOutcomeRefused — `commission.responsibility.EffectOutcomeRefused`.

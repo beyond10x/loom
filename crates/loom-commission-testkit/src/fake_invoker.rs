@@ -92,7 +92,7 @@ impl ConnectorInvoker for RecordingInvoker {
         lock(&self.answers).pop_front().unwrap_or_else(|| {
             Ok(EffectOutcome::Performed(EffectOutcomePerformed {
                 report: Self::report(&binding.instance_id, &binding.operation_id),
-                attempt: Self::attempt(n),
+                attempt: Some(Self::attempt(n)),
             }))
         })
     }
