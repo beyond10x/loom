@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T02:14:56Z",
+  "actor": "human:timo",
+  "artifact": "story:release-050",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "Published bot source release: annotated tag on 2257d607e9ebb4a7d5f6e652e02e0a2afecdde52, changelog notes, author b10x-bot[bot] verified",
+    "reference": "https://github.com/beyond10x/loom/releases/tag/0.5.0"
+  }
+}
