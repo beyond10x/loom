@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest ffb19b60693c5b585ca20e76a24082175bdd8e55c1fc7f3c2cd40a66d6f66e86
-// contract digest be195eb875e2d6ae90ca6af7da1be3c6372ed661e48863a8f44c7346a7bccae5
+// model digest 1ba42c043f9934dcbbb38e6d540f230eda0871defa63756e7c3db7d01b3050c3
+// contract digest 9f2ffaa60ef43fd8f3ad719e5f980e33a4fc329e9ba4c5a990bbcfa1579a3135
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Responsibility — `commission.responsibility`.
@@ -2290,6 +2290,11 @@ pub enum StartRunOutcome {
         /// The `commission.responsibility.RunStarted` this outcome publishes.
         run_started: RunStarted,
     },
+    /// `storage-failed` — externally decided (the run store cannot hold the new run).
+    StorageFailed {
+        /// Why it was refused: `commission.responsibility.RunStorageFailed`.
+        error: RunStorageFailed,
+    },
 }
 
 /// SuspendRun — the input of `commission.responsibility.SuspendRun`.
@@ -2319,6 +2324,11 @@ pub enum SuspendRunOutcome {
     WrongState {
         /// Why it was refused: `commission.responsibility.RunStateConflict`.
         error: RunStateConflict,
+    },
+    /// `storage-failed` — externally decided (the run store cannot record the suspension).
+    StorageFailed {
+        /// Why it was refused: `commission.responsibility.RunStorageFailed`.
+        error: RunStorageFailed,
     },
     /// `wrong-state` — for an instance no record carries.
     ///
@@ -2388,6 +2398,13 @@ pub struct RunStateConflict {
     pub state: RunState,
 }
 
+/// The declared error `commission.responsibility.RunStorageFailed`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunStorageFailed {
+    /// `reason` — `String`.
+    pub reason: String,
+}
+
 /// RunStates — one row of the view `commission.responsibility.RunStates`.
 ///
 /// Projects `commission.responsibility.Run` at `read_your_writes` consistency.
@@ -2435,25 +2452,29 @@ pub mod obligations {
         fn revalidate_action_request(&mut self, input: super::RevalidateActionRequest) -> Result<super::RevalidateActionRequestOutcome, crate::obligation::UnmetObligation>;
     }
 
-    /// The behaviour `commission.responsibility.StartRun` — generated.
+    /// The behaviour `commission.responsibility.StartRun` — an implementation obligation.
     ///
-    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
-    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    /// Why it is not generated: kept an obligation by the fields of error `commission.responsibility.RunStorageFailed`, which the specification gives no source, in `storage-failed`.
+    ///
+    /// Contract: given `commission.responsibility.StartRun` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `started` otherwise, creates `commission.responsibility.Run`, emits `commission.responsibility.RunStarted`; `storage-failed` externally decided (the run store cannot hold the new run), error `commission.responsibility.RunStorageFailed`.
     pub trait StartRunBehavior {
         /// Decides and enacts exactly one declared outcome of `commission.responsibility.StartRun`.
         ///
-        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
         fn start_run(&mut self, input: super::StartRun) -> Result<super::StartRunOutcome, crate::obligation::UnmetObligation>;
     }
 
-    /// The behaviour `commission.responsibility.SuspendRun` — generated.
+    /// The behaviour `commission.responsibility.SuspendRun` — an implementation obligation.
     ///
-    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
-    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    /// Why it is not generated: kept an obligation by the fields of error `commission.responsibility.RunStorageFailed`, which the specification gives no source, in `storage-failed`.
+    ///
+    /// Contract: given `commission.responsibility.SuspendRun` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `suspended` otherwise, takes `suspend` of `commission.responsibility.Run`, emits `commission.responsibility.RunSuspended`; `wrong-state` from a state no declared move starts in, error `commission.responsibility.RunStateConflict`, and for an instance no record carries, without the error's fields; `storage-failed` externally decided (the run store cannot record the suspension), error `commission.responsibility.RunStorageFailed`.
     pub trait SuspendRunBehavior {
         /// Decides and enacts exactly one declared outcome of `commission.responsibility.SuspendRun`.
         ///
-        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
         fn suspend_run(&mut self, input: super::SuspendRun) -> Result<super::SuspendRunOutcome, crate::obligation::UnmetObligation>;
     }
 
@@ -2477,6 +2498,18 @@ pub mod obligations {
     impl RevalidateActionRequestBehavior for Unimplemented {
         fn revalidate_action_request(&mut self, _input: super::RevalidateActionRequest) -> Result<super::RevalidateActionRequestOutcome, crate::obligation::UnmetObligation> {
             Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "commission.responsibility.RevalidateActionRequest" })
+        }
+    }
+
+    impl StartRunBehavior for Unimplemented {
+        fn start_run(&mut self, _input: super::StartRun) -> Result<super::StartRunOutcome, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "commission.responsibility.StartRun" })
+        }
+    }
+
+    impl SuspendRunBehavior for Unimplemented {
+        fn suspend_run(&mut self, _input: super::SuspendRun) -> Result<super::SuspendRunOutcome, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "commission.responsibility.SuspendRun" })
         }
     }
 }

@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest ffb19b60693c5b585ca20e76a24082175bdd8e55c1fc7f3c2cd40a66d6f66e86
-// contract digest be195eb875e2d6ae90ca6af7da1be3c6372ed661e48863a8f44c7346a7bccae5
+// model digest 1ba42c043f9934dcbbb38e6d540f230eda0871defa63756e7c3db7d01b3050c3
+// contract digest 9f2ffaa60ef43fd8f3ad719e5f980e33a4fc329e9ba4c5a990bbcfa1579a3135
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -37,30 +37,6 @@ pub trait RunStorage {
     /// answers an unordered view in.
     fn list(&self) -> Vec<crate::responsibility::RunSnapshot>;
 }
-
-/// What the specification leaves to the implementor's context — a port the implementor provides.
-///
-/// The caller's attributes, the values the model says the implementation assigns, and the answer
-/// to each `external:` branch.
-pub trait Context {
-    /// A new `commission.responsibility.RunId`, which the model says the implementation assigns — a created identity, a
-    /// `{generated: true}` value, or an event field the model leaves undetermined.
-    fn generate_commission_responsibility_run_id(&mut self) -> crate::responsibility::RunId;
-}
-
-/// Context answers that may be unavailable, without fabricated values.
-/// Existing `Context` implementations receive the blanket adapter.
-pub trait TryContext {
-/// Assigns the value, or names the unavailable answer.
-fn try_generate_commission_responsibility_run_id(&mut self) -> Result<crate::responsibility::RunId, UnmetObligation>;
-}
-
-impl<T: Context + ?Sized> TryContext for T {
-fn try_generate_commission_responsibility_run_id(&mut self) -> Result<crate::responsibility::RunId, UnmetObligation> { Ok(Context::generate_commission_responsibility_run_id(self)) }
-}
-
-/// An unavailable runtime context answer, rather than a new planned capability.
-pub fn unmet_context(source: &'static str) -> UnmetObligation { UnmetObligation { capability: "context answer", source } }
 
 /// Every generated behaviour of this workspace, over the ports `P` supplies.
 ///
@@ -109,47 +85,15 @@ impl<P: crate::responsibility::obligations::RevalidateActionRequestBehavior> cra
     }
 }
 
-/// `commission.responsibility.StartRun`, generated: every outcome is one the specification fully determines.
-impl<P> crate::responsibility::obligations::StartRunBehavior for Generated<P>
-where
-    P: TryContext + RunStorage,
-{
+impl<P: crate::responsibility::obligations::StartRunBehavior> crate::responsibility::obligations::StartRunBehavior for Generated<P> {
     fn start_run(&mut self, input: crate::responsibility::StartRun) -> Result<crate::responsibility::StartRunOutcome, UnmetObligation> {
-        let _ = &input;
-        // `started`: the default.
-        let identity: crate::responsibility::RunId = self.ports.try_generate_commission_responsibility_run_id()?;
-        let data = crate::responsibility::RunData {
-            run_id: identity.clone(),
-            commission_id: input.commission_id.clone(),
-            case_revision: input.case_revision.clone(),
-        };
-        let answer = crate::responsibility::StartRunOutcome::Started { run_started: crate::responsibility::RunStarted { run_id: identity.clone(), commission_id: input.commission_id.clone(), case_revision: input.case_revision.clone() } };
-        RunStorage::put(&mut self.ports, crate::responsibility::AnyRun::Running(crate::responsibility::Run::new(data)).snapshot());
-        return Ok(answer);
+        crate::responsibility::obligations::StartRunBehavior::start_run(&mut self.ports, input)
     }
 }
 
-/// `commission.responsibility.SuspendRun`, generated: every outcome is one the specification fully determines.
-impl<P> crate::responsibility::obligations::SuspendRunBehavior for Generated<P>
-where
-    P: RunStorage,
-{
+impl<P: crate::responsibility::obligations::SuspendRunBehavior> crate::responsibility::obligations::SuspendRunBehavior for Generated<P> {
     fn suspend_run(&mut self, input: crate::responsibility::SuspendRun) -> Result<crate::responsibility::SuspendRunOutcome, UnmetObligation> {
-        let _ = &input;
-        // `suspended`: the default.
-        let Some(held) = RunStorage::get(&self.ports, &input.run_id) else {
-            return Ok(crate::responsibility::SuspendRunOutcome::WrongStateUnknownInstance);
-        };
-        let _ = &held;
-        let held_state = held.state;
-        let moved = match held.refine() {
-            crate::responsibility::AnyRun::Running(instance) => crate::responsibility::AnyRun::Suspended(instance.suspend()),
-            _ => return Ok(crate::responsibility::SuspendRunOutcome::WrongState { error: crate::responsibility::RunStateConflict { state: held_state } }),
-        };
-        let next = moved.snapshot();
-        let answer = crate::responsibility::SuspendRunOutcome::Suspended { run_suspended: crate::responsibility::RunSuspended { run_id: input.run_id.clone(), reason: input.reason.clone() } };
-        RunStorage::put(&mut self.ports, next);
-        return Ok(answer);
+        crate::responsibility::obligations::SuspendRunBehavior::suspend_run(&mut self.ports, input)
     }
 }
 

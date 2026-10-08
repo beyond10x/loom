@@ -305,7 +305,9 @@ fn resume_continues_the_same_run() {
             case_revision: REVISION,
         })
         .unwrap_or_else(|unmet| panic!("start: {unmet}"));
-    let StartRunOutcome::Started { run_started } = started;
+    let StartRunOutcome::Started { run_started } = started else {
+        panic!("start: {started:?}");
+    };
     let run_id = run_started.run_id.clone();
     assert_eq!(run_started.case_revision, REVISION, "RunStarted revision");
 
