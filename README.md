@@ -33,9 +33,9 @@ the whole boundary.
 
 ## Status
 
-Version `0.7.0`, released from source at the tag `0.7.0`
-([release](https://github.com/beyond10x/loom/releases/tag/0.7.0)). Nothing is on a registry: you
-install from the tag or depend on it with `tag = "0.7.0"`. `b10x-loom run` completed a live run
+Version `0.8.0`, released from source at the tag `0.8.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.8.0)). Nothing is on a registry: you
+install from the tag or depend on it with `tag = "0.8.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -61,6 +61,10 @@ it keeps itself through `b10x-loom evaluate`, and drive a run with a model from 
 through `b10x-loom run --catalog`; a ported wire can take its credential from an llm credential
 reference.
 
+Since `0.8.0` `b10x-loom-connectors` (`loom_sdk::connectors`) performs a commission's bound
+actions through a Connectors service at `v0.35.0`, answering each effect with the Connector attempt
+it produced; a read operation through it answers an error until Connectors records reads.
+
 ## Run the command line
 
 Since `0.4.0`, Loom supports opt-in `--context-policy bounded` and `--context-report PATH`.
@@ -71,14 +75,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.7.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.8.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.7.0
+b10x-loom 0.8.0
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -135,7 +139,7 @@ A supervisor that keeps its own case record calls `loom_governor::evaluate` (or 
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.7.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.8.0" }
 ```
 
 The example below

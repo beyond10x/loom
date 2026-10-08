@@ -6,6 +6,16 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-08
+
+Loom 0.8.0 lets a commission's bound actions leave Loom through Connectors. The new crate
+`b10x-loom-connectors`, re-exported as `loom_sdk::connectors`, fills Commission's
+`ConnectorInvoker` over a Connectors `v0.35.0` service: it invokes each admitted request once on
+`POST /v1alpha2/invoke` and answers `Performed` with the Connector attempt the service recorded,
+`Refused` only when Connectors states nothing was performed, and an error otherwise. The commission
+specification declares the host's Connector endpoint per instance. A read operation through the
+invoker answers an error in this release, because Connectors records no attempt for reads.
+
 ### Added
 
 - `b10x-loom-connectors` (`crates/loom-connectors`, re-exported as `loom_sdk::connectors`) fills
