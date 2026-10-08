@@ -5,7 +5,6 @@ kind: story
 status: draft
 title: Conformance suites carry declared coverage and must qualify as passed
 relations:
-- decomposes: epic:loom-native-harness
 - serves: vision:O1
 scope:
 - confidence: inferred

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: epic:commission-core
 kind: epic
-status: draft
+status: implemented
 title: 'Commission core: responsibility contracts over fakes'
 refs:
 - provider: commission
@@ -10,7 +10,11 @@ refs:
 relations:
 - serves: vision:governed-autonomy
 - serves: vision:O1
-revision: 1
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-08T10:40:12Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-10-08T10:40:12Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-08T10:40:12Z", actor: "human:timo", revision: 4}
 ---
 > Re-filed from `beyond10x/commission` `epic:commission-core` at `e61e4f0` (status there: `active`) under Atlas ADR 0090
 > (loom `story:import-commission`). Paths below are Commission's: `ess/` is now `ess/commission/`,

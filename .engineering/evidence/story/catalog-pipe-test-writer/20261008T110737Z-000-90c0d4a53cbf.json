@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T11:07:37Z",
+  "actor": "human:timo",
+  "artifact": "story:catalog-pipe-test-writer",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "baseline 7813d58: catalog_route 6 passed and one 'sh -c cat ... catalog.fifo' left with PPID 1; treatment 2929940: 6 passed, ps shows no catalog.fifo process after a pass and after a forced panic (exit 101)",
+    "reference": "2929940"
+  }
+}

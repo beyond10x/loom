@@ -15,7 +15,7 @@
 use std::io::{ErrorKind, Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Child, Command, Output};
 use std::thread::JoinHandle;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -237,12 +237,16 @@ fn a_catalog_pipe_with_a_writer_is_refused_naming_it() {
             .expect("mkfifo")
             .success()
     );
-    let mut writer = Command::new("sh")
-        .args(["-c", "cat \"$1\" > \"$2\"", "writer"])
-        .arg(&source)
-        .arg(&fifo)
-        .spawn()
-        .expect("a writer");
+    // `exec` keeps the writer one process: the shell opens the pipe itself, blocking there, then
+    // becomes `cat`, so the guard's kill reaches whatever holds the pipe on every path.
+    let _writer = Reaped(
+        Command::new("sh")
+            .args(["-c", "exec cat \"$1\" > \"$2\"", "writer"])
+            .arg(&source)
+            .arg(&fifo)
+            .spawn()
+            .expect("a writer"),
+    );
     let report = scratch.root.join("report.json");
     let output = scratch.run(&[
         "--context-report",
@@ -255,8 +259,6 @@ fn a_catalog_pipe_with_a_writer_is_refused_naming_it() {
         "lab-agent",
         QUERY,
     ]);
-    let _ = writer.kill();
-    let _ = writer.wait();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(1), "{stderr}");
     assert!(
@@ -329,6 +331,16 @@ impl Scratch {
 impl Drop for Scratch {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+/// A child process killed and reaped on drop, so a failed assertion or a panic leaves none alive.
+struct Reaped(Child);
+
+impl Drop for Reaped {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
     }
 }
 

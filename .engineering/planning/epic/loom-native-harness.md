@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: epic:loom-native-harness
 kind: epic
-status: active
+status: implemented
 title: Loom native harness implements AgentExecutor
 summary: ESS-led frontier projection, selection/argument split, revalidation, and the Harness loop ported in.
 refs:
@@ -12,10 +12,11 @@ relations:
 - serves: vision:governed-autonomy
 - serves: vision:O1
 - serves: vision:O3
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-04T00:01:26Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-04T01:17:41Z", actor: "human:timo", revision: 3, decided_on: {"recorded":{"review_outcome":1}}}
+- {from: "active", to: "implemented", at: "2026-10-08T10:40:12Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"review_outcome":1}}}
 ---
 ## Outcome
 

@@ -5,7 +5,6 @@ kind: story
 status: draft
 title: Conformance exercises the executor's frontier-membership rule
 relations:
-- decomposes: epic:loom-native-harness
 - serves: vision:O1
 scope:
 - confidence: inferred
