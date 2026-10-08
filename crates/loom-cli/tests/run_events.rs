@@ -274,6 +274,8 @@ fn drive_jsonl(script: Vec<(&'static str, Value)>, max_steps: usize) -> (Vec<Val
     };
     let status = stream.finish(Ok(&ended)).unwrap();
     let text = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+    // The stream as `b10x-loom` writes it; `--nocapture` shows it (website/docs/reference/run-events.md).
+    print!("{text}");
     let lines = text
         .lines()
         .map(|line| serde_json::from_str(line).unwrap_or_else(|e| panic!("{e}: {line}")))

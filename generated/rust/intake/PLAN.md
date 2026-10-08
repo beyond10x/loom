@@ -1,14 +1,14 @@
 <!--
   generated from intake v1
-  model digest b3281773ee88313834099ce04aab0b9af436baedbe62ff1a432c305c3ed756d4
-  contract digest eba8d734a7767f27148ac6b7d3a96ad427989af6d293d3c3496fba405caae95a
+  model digest 0dcbb44891d966a08164d0845cc89345f20e9da1a2bff9d8412d32181f207f99
+  contract digest 03a4eba225331c590679bbbce8fd69d4e4f51fa6589d185caf24c7551cb770fd
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — intake v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-35 capabilities: **35 generated**, **0 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+44 capabilities: **44 generated**, **0 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -28,6 +28,15 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `intake.context.RequestPhase` |
 | domain type | `intake.context.TestState` |
 | domain type | `intake.context.WorkingState` |
+| domain type | `intake.events.ApprovalEvent` |
+| domain type | `intake.events.RouteEvent` |
+| domain type | `intake.events.RunEvent` |
+| domain type | `intake.events.RunEventLine` |
+| domain type | `intake.events.SchemaVersion` |
+| domain type | `intake.events.TerminalEvent` |
+| domain type | `intake.events.ToolCallEvent` |
+| domain type | `intake.events.TurnEvent` |
+| domain type | `intake.events.UsageEvent` |
 | domain type | `intake.protocols.ProtocolDefinition` |
 | domain type | `intake.protocols.ProtocolSource` |
 | domain type | `intake.protocols.SourceKind` |

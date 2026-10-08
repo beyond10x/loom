@@ -6,7 +6,8 @@ use std::process::{Command as Process, ExitCode};
 use std::sync::Arc;
 
 use b10x_llm_tool_call::codex_model;
-use b10x_loom_cli::{Cli, Command, Confinement, ProtocolCommand, RunArgs};
+use b10x_loom_cli::events::{EventStream, FAILED};
+use b10x_loom_cli::{Cli, Command, Confinement, Output, ProtocolCommand, RunArgs, exit_status};
 use b10x_loom_intake_slice::case;
 use b10x_loom_intake_slice::clock::HostClock;
 use b10x_loom_intake_slice::confinement::{
@@ -17,8 +18,9 @@ use b10x_loom_intake_slice::executor::{TestCommand, UnconfinedRunner};
 use b10x_loom_intake_slice::intent::{
     IntentRequest, Preparation, PreparedIntent, prepare_intent, run_prepared_intent,
 };
-use b10x_loom_intake_slice::run::{LOCAL_PROTOCOL, RunOptions, StopReason, printable};
+use b10x_loom_intake_slice::run::{LOCAL_PROTOCOL, RunOptions, SliceRun, StopReason, printable};
 use clap::Parser;
+use llm_core::Model;
 use loom_governor::{CanonGovernor, MemoryCaseStore};
 use loom_protocols::InstallStore;
 use serde_json::{Value, json};
@@ -28,14 +30,25 @@ const REEXEC_READY: &str = "B10X_LOOM_CONFINEMENT_READY";
 const REEXEC_HANDOFF: &str = "B10X_LOOM_CONFINEMENT_HANDOFF";
 
 fn main() -> ExitCode {
-    let result = match Cli::parse().command {
+    match Cli::parse().command {
         Command::Run(arguments) => run_command(arguments),
-        Command::Protocols(arguments) => protocols(arguments.command).map(|()| ExitCode::SUCCESS),
-    };
-    result.unwrap_or_else(|error| {
-        eprintln!("b10x-loom: {}", printable(&error));
-        ExitCode::FAILURE
-    })
+        Command::Protocols(arguments) => match protocols(arguments.command) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => failed(&error),
+        },
+    }
+}
+
+fn failed(error: &str) -> ExitCode {
+    eprintln!("b10x-loom: {}", printable(error));
+    ExitCode::from(FAILED)
+}
+
+/// How `execute` ended: a stop reason, or a delegated child that wrote its own output and whose
+/// exit status this process returns.
+enum Ending {
+    Stopped(SliceRun),
+    Delegated(ExitCode),
 }
 
 fn protocols(command: ProtocolCommand) -> Result<(), String> {
@@ -86,35 +99,73 @@ fn protocols(command: ProtocolCommand) -> Result<(), String> {
     Ok(())
 }
 
-/// The boolean signals a delegated child owns final measurement output.
-fn run_command(arguments: RunArgs) -> Result<ExitCode, String> {
+/// Runs `run`; with `--output jsonl` standard output carries the event stream instead of the human
+/// lines, ended by the one terminal record whose exit status this returns. A delegated child owns
+/// the final measurement output and, with the stream, the terminal record.
+fn run_command(arguments: RunArgs) -> ExitCode {
     let options = RunOptions {
         context_policy: arguments.context_policy,
         context_report: arguments.context_report.clone(),
     };
+    let stream = (arguments.output == Output::Jsonl).then(|| EventStream::new(std::io::stdout()));
     let mut metrics = ContextMetrics::new(options.context_policy);
-    let result = execute(&arguments, &options, &mut metrics);
+    let result = {
+        let mut out: Box<dyn Write> = match stream {
+            Some(_) => Box::new(std::io::sink()),
+            None => Box::new(std::io::stdout().lock()),
+        };
+        execute(
+            &arguments,
+            &options,
+            &mut metrics,
+            &mut *out,
+            stream.as_ref(),
+        )
+    };
     let report = options.context_report.as_ref().map(|path| {
-        if matches!(result, Ok((_, true))) {
+        if matches!(result, Ok(Ending::Delegated(_))) {
             metrics.finish_delegated_report(path)
         } else {
             metrics.write(path)
         }
     });
-    if let Some(Err(error)) = report {
-        let original = result.err().map(|e| format!("{e}; ")).unwrap_or_default();
-        return Err(format!(
-            "{original}context report cannot be written: {error}"
-        ));
+    let result = match report {
+        Some(Err(error)) => {
+            let original = result.err().map(|e| format!("{e}; ")).unwrap_or_default();
+            Err(format!(
+                "{original}context report cannot be written: {error}"
+            ))
+        }
+        _ => result,
+    };
+    match result {
+        Ok(Ending::Delegated(status)) => status,
+        Ok(Ending::Stopped(run)) => match &stream {
+            Some(stream) => match stream.finish(Ok(&run)) {
+                Ok(status) => ExitCode::from(status),
+                Err(error) => failed(&format!("the event stream cannot be written: {error}")),
+            },
+            None => ExitCode::from(exit_status(run.stop_reason)),
+        },
+        Err(error) => {
+            let status = failed(&error);
+            if let Some(stream) = &stream
+                && let Err(written) = stream.finish(Err(printable(&error).as_str()))
+            {
+                return failed(&format!("the event stream cannot be written: {written}"));
+            }
+            status
+        }
     }
-    result.map(|(status, _)| status)
 }
 
 fn execute(
     arguments: &RunArgs,
     options: &RunOptions,
     metrics: &mut ContextMetrics,
-) -> Result<(ExitCode, bool), String> {
+    out: &mut dyn Write,
+    stream: Option<&EventStream>,
+) -> Result<Ending, String> {
     if !(0.0..=1.0).contains(&arguments.threshold) {
         return Err(format!(
             "the threshold {} is not a number from 0 to 1",
@@ -135,7 +186,6 @@ fn execute(
         max_steps: arguments.max_steps,
         threshold: arguments.threshold,
     };
-    let mut out = std::io::stdout().lock();
     let prepared = if std::env::var_os(REEXEC_MARKER).is_some() {
         let handoff = read_handoff()?;
         *metrics = ContextMetrics::restore(&handoff["metrics"], options.context_policy)?;
@@ -143,13 +193,25 @@ fn execute(
             .map_err(|e| e.to_string())?
     } else {
         let classifier = codex_model(&arguments.classifier_model).map_err(|e| e.to_string())?;
-        match prepare_intent(&request, &catalog, &classifier, &mut out, options, metrics)
-            .map_err(|e| e.to_string())?
-        {
+        let observed = stream.map(|stream| stream.observe(&classifier));
+        let classifier: &dyn Model = match &observed {
+            Some(observed) => observed,
+            None => &classifier,
+        };
+        let preparation = prepare_intent(&request, &catalog, classifier, out, options, metrics)
+            .map_err(|e| e.to_string())?;
+        let (protocol, accepted) = match &preparation {
+            Preparation::Ready(prepared) => (prepared.protocol(), true),
+            Preparation::Stopped(run) => (run.protocol.as_str(), false),
+        };
+        if let Some(stream) = stream {
+            stream
+                .route(protocol, accepted)
+                .map_err(|e| format!("the event stream cannot be written: {e}"))?;
+        }
+        match preparation {
             Preparation::Ready(prepared) => prepared,
-            Preparation::Stopped(run) => {
-                return Ok((ExitCode::from(exit_status(run.stop_reason)), false));
-            }
+            Preparation::Stopped(run) => return Ok(Ending::Stopped(run)),
         }
     };
     if prepared.protocol() == LOCAL_PROTOCOL {
@@ -168,7 +230,9 @@ fn execute(
                 {
                     match prepare_delegated_cgroup() {
                         Ok(root) => Some(root),
-                        Err(error) => return Ok((confinement_refused(&error.to_string()), false)),
+                        Err(error) => {
+                            return Ok(confinement_refused(&prepared, &error.to_string()));
+                        }
                     }
                 } else {
                     arguments.cgroup_root.clone()
@@ -185,7 +249,7 @@ fn execute(
                         }
                         return Ok(reexec(&prepared, metrics));
                     }
-                    return Ok((confinement_refused(&error.to_string()), false));
+                    return Ok(confinement_refused(&prepared, &error.to_string()));
                 }
                 Arc::new(runner)
             }
@@ -200,22 +264,32 @@ fn execute(
             .map_err(|e| format!("delegation handshake failed: {e}"))?;
     }
     let agent = codex_model(&arguments.model).map_err(|e| e.to_string())?;
+    let observed = stream.map(|stream| stream.observe(&agent));
+    let agent: &dyn Model = match &observed {
+        Some(observed) => observed,
+        None => &agent,
+    };
     let run = run_prepared_intent(
-        &request, &prepared, &catalog, &governor, &governor, &agent, &HostClock, &mut out, options,
+        &request, &prepared, &catalog, &governor, &governor, agent, &HostClock, out, options,
         metrics,
     )
     .map_err(|e| e.to_string())?;
-    Ok((ExitCode::from(exit_status(run.stop_reason)), false))
+    Ok(Ending::Stopped(run))
 }
 
-fn confinement_refused(reason: &str) -> ExitCode {
+fn confinement_refused(prepared: &PreparedIntent, reason: &str) -> Ending {
     eprintln!("confinement: substrate");
     eprintln!("stopped: ConfinementUnavailable ({})", printable(reason));
-    ExitCode::from(3)
+    Ending::Stopped(SliceRun {
+        protocol: prepared.protocol().to_owned(),
+        steps: 0,
+        stop_reason: StopReason::ConfinementUnavailable,
+        approvals: Vec::new(),
+    })
 }
 
-fn reexec(prepared: &PreparedIntent, metrics: &ContextMetrics) -> (ExitCode, bool) {
-    let run = || -> Result<(ExitCode, bool), String> {
+fn reexec(prepared: &PreparedIntent, metrics: &ContextMetrics) -> Ending {
+    let run = || -> Result<Ending, String> {
         let state = tempfile::Builder::new()
             .prefix("loom-delegation-")
             .tempdir()
@@ -253,25 +327,19 @@ fn reexec(prepared: &PreparedIntent, metrics: &ContextMetrics) -> (ExitCode, boo
             .map_err(|e| format!("systemd-run unavailable: {e}"))?;
         // Consumption proves the child received the route, even if its later preflight failed.
         if !handoff.exists() {
-            return Ok((
-                ExitCode::from(
-                    status
-                        .code()
-                        .and_then(|n| u8::try_from(n).ok())
-                        .unwrap_or(1),
-                ),
-                true,
-            ));
+            return Ok(Ending::Delegated(ExitCode::from(
+                status
+                    .code()
+                    .and_then(|n| u8::try_from(n).ok())
+                    .unwrap_or(1),
+            )));
         }
         Err(format!(
             "delegated run exited {status}; configure a working user systemd manager or pass --cgroup-root"
         ))
     };
     run().unwrap_or_else(|error| {
-        (
-            confinement_refused(&format!("CgroupUndelegated: {error}")),
-            false,
-        )
+        confinement_refused(prepared, &format!("CgroupUndelegated: {error}"))
     })
 }
 
@@ -316,34 +384,9 @@ fn read_private_handoff(path: &Path, ready: &Path) -> Result<Value, String> {
     Ok(value)
 }
 
-fn exit_status(reason: StopReason) -> u8 {
-    match reason {
-        StopReason::Completed | StopReason::ApprovalRequired => 0,
-        StopReason::NothingAdmissible
-        | StopReason::StepBudget
-        | StopReason::NoLocalExecutor
-        | StopReason::ConfinementUnavailable
-        | StopReason::Refused => 3,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn each_stop_reason_has_its_exit_status() {
-        assert_eq!(exit_status(StopReason::Completed), 0);
-        assert_eq!(exit_status(StopReason::ApprovalRequired), 0);
-        for reason in [
-            StopReason::NothingAdmissible,
-            StopReason::StepBudget,
-            StopReason::NoLocalExecutor,
-            StopReason::Refused,
-            StopReason::ConfinementUnavailable,
-        ] {
-            assert_eq!(exit_status(reason), 3);
-        }
-    }
     #[cfg(unix)]
     #[test]
     fn delegation_reads_only_a_private_regular_file_and_consumes_it() {

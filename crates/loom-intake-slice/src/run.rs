@@ -161,6 +161,9 @@ pub struct SliceRun {
     pub steps: usize,
     /// Why the run ended.
     pub stop_reason: StopReason,
+    /// The actions the run awaits approval for, in frontier order; empty unless it stopped
+    /// [`StopReason::ApprovalRequired`].
+    pub approvals: Vec<String>,
 }
 
 /// Why a run ended without a stop reason.
@@ -541,14 +544,19 @@ fn finish(out: &mut dyn Write, protocol: String, end: LoopEnd) -> Result<SliceRu
                     }
                     _ => None,
                 });
+            let approvals = action.iter().cloned().collect();
             stop(out, protocol, steps, StopReason::ApprovalRequired, action)
+                .map(|run| SliceRun { approvals, ..run })
         }
         RunOutcome::AwaitingApproval(awaiting) => {
             if let Some(frontier) = &end.last_frontier {
                 print_frontier(out, frontier)?;
             }
             let detail = Some(awaiting.actions.join(", "));
-            stop(out, protocol, steps, StopReason::ApprovalRequired, detail)
+            stop(out, protocol, steps, StopReason::ApprovalRequired, detail).map(|run| SliceRun {
+                approvals: awaiting.actions,
+                ..run
+            })
         }
         RunOutcome::NoAdmissibleAction(_) | RunOutcome::NeedsExternalEvidence(_) => {
             stop(out, protocol, steps, StopReason::NothingAdmissible, None)
@@ -819,6 +827,7 @@ fn stop(
         protocol,
         steps,
         stop_reason,
+        approvals: Vec::new(),
     })
 }
 
@@ -1004,6 +1013,7 @@ mod tests {
                 protocol: "software-change@1".to_owned(),
                 steps: 2,
                 stop_reason: StopReason::NothingAdmissible,
+                approvals: Vec::new(),
             }
         );
         assert_eq!(

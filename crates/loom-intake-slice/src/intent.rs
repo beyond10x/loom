@@ -171,6 +171,7 @@ fn stop(
         protocol,
         steps: 0,
         stop_reason: reason,
+        approvals: Vec::new(),
     })
 }
 
