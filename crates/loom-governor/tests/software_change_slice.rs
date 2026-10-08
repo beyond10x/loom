@@ -647,6 +647,7 @@ impl EffectPort for Adapter<'_> {
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {
             report: json::Value::Text(format!("performed {}", request.action)),
             attempt: None,
+            audit: None,
         }))
     }
 }

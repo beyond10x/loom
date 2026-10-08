@@ -377,6 +377,7 @@ impl EffectPort for Rollback<'_> {
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {
             report: json::Value::Null,
             attempt: None,
+            audit: None,
         }))
     }
 }
