@@ -32,26 +32,21 @@ impl std::fmt::Debug for Bearer {
     }
 }
 
-/// What kind of secret a source answers with, so a wire can present it the way its route wants.
-///
-/// # Why the neutral layer knows this at all
-///
-/// The first wire never needed it: one route, one presentation, one header, and the adapter could
-/// hard-code it. The second wire has two routes for the same endpoint that take the *same string*
-/// under **different header names** — one for a key issued to a program, one for a token obtained
-/// on a person's behalf — so which one a credential is stopped being derivable from the wire alone
-/// and became a property of the source that produced it.
-///
-/// This names the **kind**, never the header. Header names are vendor-shaped bytes and live in the
-/// wire crate (invariant 3 of Harness `AGENTS.md` at `798325f0`); a source declares what it holds
-/// and the wire decides how to send it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum CredentialKind {
-    /// A long-lived secret issued to a program.
-    ApiKey,
-    /// A short-lived token obtained on a person's behalf, which expires and is renewed elsewhere.
-    Oauth,
-}
+// What kind of secret a source answers with, so a wire can present it the way its route wants:
+// `loom.run.CredentialKind`, generated from `ess/domains/run.yaml`.
+//
+// # Why the neutral layer knows this at all
+//
+// The first wire never needed it: one route, one presentation, one header, and the adapter could
+// hard-code it. The second wire has two routes for the same endpoint that take the *same string*
+// under **different header names** — one for a key issued to a program, one for a token obtained
+// on a person's behalf — so which one a credential is stopped being derivable from the wire alone
+// and became a property of the source that produced it.
+//
+// This names the **kind**, never the header. Header names are vendor-shaped bytes and live in the
+// wire crate (invariant 3 of Harness `AGENTS.md` at `798325f0`); a source declares what it holds
+// and the wire decides how to send it.
+pub use loom::run::CredentialKind;
 
 /// Where a wire adapter obtains its credential, at call time.
 ///
