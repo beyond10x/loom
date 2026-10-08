@@ -6,6 +6,21 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- Commission's `RunOutcome` has a `CaseMovedOn` variant (`RunOutcomeCaseMovedOn`,
+  `bound_case_revision`, `current_case_revision`); callers that match `RunOutcome` exhaustively
+  must handle it. A run whose case moved to a revision whose frontier, as the executor would be
+  handed it, still admits an action now ends `CaseMovedOn`, naming the Run's revision and the
+  current one, instead of `NoAdmissibleAction`, which read the same as an empty frontier. A Run
+  stays bound to its revision; start a new Run at the current one. This holds whether the executor
+  reported the move (`CaseMoved`) or the runtime found it itself, as after a stale proposal; there
+  the runtime now reads the current frontier before ending the run. A moved case whose frontier
+  admits nothing still ends as before.
+- The intake slice stops a run that ends `CaseMovedOn` as `NothingAdmissible`, and its stop line
+  names both revisions: `stopped: NothingAdmissible (case moved on from revision <bound> to
+  <current>)`.
+
 ### Changed
 
 - Loom requires ESS 0.56.0: the Loom, Commission and intake specifications require it, the

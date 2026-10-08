@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 43a3c632efbe62d6009e162f9228cf9e37cae5f9d01b17fe7605529448a1ff38
-// contract digest 66bcc392ea844a2f5a3d58c7ee43d70995938794d6d94bc82c744f2b7312e04e
+// model digest 8db90cc66d4bc3ec0bb9488f3f0c5b7ef98e8ad5c63e3a689e5fbb11cc97e1b3
+// contract digest a9c189d13a15cd5bd6f11d0b3c6466a26c029c0f91acd1680229ac61b3cb20eb
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Responsibility — `commission.responsibility`.
@@ -394,6 +394,8 @@ pub struct RunId(pub crate::primitives::Uuid);
 pub enum RunOutcome {
     /// Tagged `AwaitingApproval` — `commission.responsibility.RunOutcomeAwaitingApproval`.
     AwaitingApproval(RunOutcomeAwaitingApproval),
+    /// Tagged `CaseMovedOn` — `commission.responsibility.RunOutcomeCaseMovedOn`.
+    CaseMovedOn(RunOutcomeCaseMovedOn),
     /// Tagged `Completed` — `commission.responsibility.RunOutcomeCompleted`.
     Completed(RunOutcomeCompleted),
     /// Tagged `NeedsAuthority` — `commission.responsibility.RunOutcomeNeedsAuthority`.
@@ -415,6 +417,15 @@ pub enum RunOutcome {
 pub struct RunOutcomeAwaitingApproval {
     /// `actions` — `List<String>`.
     pub actions: Vec<String>,
+}
+
+/// RunOutcomeCaseMovedOn — `commission.responsibility.RunOutcomeCaseMovedOn`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunOutcomeCaseMovedOn {
+    /// `bound_case_revision` — `Integer`.
+    pub bound_case_revision: i64,
+    /// `current_case_revision` — `Integer`.
+    pub current_case_revision: i64,
 }
 
 /// RunOutcomeCompleted — `commission.responsibility.RunOutcomeCompleted`.
