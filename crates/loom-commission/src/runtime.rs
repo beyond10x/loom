@@ -115,7 +115,9 @@
 //! already suspended it for the executor, so no Run is left `Running` that no return value
 //! identifies; when that suspension fails too, the error carries both failures. The error reports
 //! the reason the loop suspended the Run for ([`LoopError::suspension_reason`]): the reason is
-//! reported, not stored on the Run.
+//! reported, not stored on the Run. A run store that answers `storage-failed` is reported as
+//! [`LoopFailure::RunStorage`]: from `StartRun`, the loop ends with no Run named before any
+//! executor, authority or effect call; from `SuspendRun`, as the suspension's failure.
 #![forbid(unsafe_code)]
 
 use std::fmt;
@@ -130,9 +132,9 @@ use crate::model::responsibility::{
     CompletionDetermination, EffectOutcome, ExecutorOutcome, Frontier, FrontierAction,
     FrontierData, GovernorError, Observation, ObservationData, ObservationId,
     RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeAwaitingApproval,
-    RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeSuspended, RunStarted, StartRun,
-    StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionReason, Unit, commission_state,
-    frontier_state, observation_state,
+    RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeSuspended, RunStarted, RunStorageFailed,
+    StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionReason, Unit,
+    commission_state, frontier_state, observation_state,
 };
 use crate::outcome::{CapabilityVerdict, Derived, derive};
 use crate::ports::authority::{AuthorityCheck, AuthorityProvider, check_authority};
@@ -201,10 +203,13 @@ pub enum LoopFailure {
     Governor(GovernorError),
     /// A run command refused with an unmet obligation.
     Obligation(UnmetObligation),
-    /// `SuspendRun` did not suspend the loop's run.
+    /// `SuspendRun` did not suspend the loop's run, for a reason other than storage.
     NotSuspended(Box<SuspendRunOutcome>),
     /// The effect port could not answer for an admitted request.
     Effect(EffectError),
+    /// The run store could not hold the new run (`StartRun`) or record its suspension
+    /// (`SuspendRun`): their `storage-failed` outcome.
+    RunStorage(RunStorageFailed),
 }
 
 impl fmt::Display for LoopFailure {
@@ -214,6 +219,7 @@ impl fmt::Display for LoopFailure {
             Self::Obligation(unmet) => write!(f, "run command failed: {unmet}"),
             Self::NotSuspended(outcome) => write!(f, "run not suspended: {outcome:?}"),
             Self::Effect(error) => error.fmt(f),
+            Self::RunStorage(failed) => write!(f, "run store failed: {}", failed.reason),
         }
     }
 }
@@ -305,6 +311,7 @@ fn suspend<R: SuspendRunBehavior + ?Sized>(
         reason,
     })? {
         SuspendRunOutcome::Suspended { .. } => Ok(()),
+        SuspendRunOutcome::StorageFailed { error } => Err(LoopFailure::RunStorage(error)),
         other => Err(LoopFailure::NotSuspended(Box::new(other))),
     }
 }
@@ -330,12 +337,18 @@ where
     let revision = governor
         .current_revision(&commission.data().case_id)
         .map_err(unstarted)?;
-    let StartRunOutcome::Started { run_started } = runs
+    let run_started = match runs
         .start_run(StartRun {
             commission_id: commission.data().commission_id.clone(),
             case_revision: revision,
         })
-        .map_err(unstarted)?;
+        .map_err(unstarted)?
+    {
+        StartRunOutcome::Started { run_started } => run_started,
+        StartRunOutcome::StorageFailed { error } => {
+            return Err(unstarted(LoopFailure::RunStorage(error)));
+        }
+    };
     let ports = Ports {
         governor,
         executor,

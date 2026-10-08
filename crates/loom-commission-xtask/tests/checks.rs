@@ -263,7 +263,7 @@ fn no_hand_model_refuses_a_hand_written_run_outcome_and_run_command_types() {
     for (item, name) in [
         ("pub enum", "RunOutcome"),
         ("pub trait", "RunStorage"),
-        ("pub trait", "Context"),
+        ("pub struct", "RunStorageFailed"),
         ("pub struct", "Generated"),
         ("pub struct", "UnmetObligation"),
         ("pub struct", "StartRun"),
