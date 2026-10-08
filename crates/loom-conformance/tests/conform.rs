@@ -1,7 +1,7 @@
 //! `task check` holds Loom's ESS specification to its synthesized conformance suite.
 //!
 //! [`ess_conformance_report`] synthesizes the suite from `ess/` with `ess verify conform
-//! synthesize`, runs it against `b10x-loom-executor` through [`LoomTarget`], and reads the verdict
+//! synthesize --suite-format 5`, runs it against `b10x-loom-executor` through [`LoomTarget`], and reads the verdict
 //! from the `ess-conformance-report/2` document, never from an exit code:
 //!
 //! 1. the report records at least one executed scenario (passed or failed);
@@ -19,11 +19,6 @@
 //! refuses `error` outright, since an execution failure hides whatever the scenario would have
 //! shown, and it refuses an `ess/SKIPPED.md` entry naming a scenario the report records as passed.
 //!
-//! So the check passes when every scenario passed or is named in `ess/SKIPPED.md`, and only then.
-//! A named `unsupported` scenario keeps it green while ESS rates the run `failed`: ESS fails the
-//! execution of any run with an unsupported scenario. That is decided, not overlooked: acceptance
-//! item 4 admits a named scenario, and the Rust producer has no other category for one.
-//!
 //! The report's own `execution_status` and `conformance_status` are read too, and each must be the
 //! status its counts and coverage come to by ESS's rule ([`derived_statuses`]); a copy of the
 //! report with either field changed fails the check and names the field. `run_suite` builds the
@@ -31,6 +26,14 @@
 //! this target's own report the check holds by construction. The rule itself is held to ESS's
 //! ratings written out as literals: the self-check copies of expectation 4 carry the statuses ESS
 //! rates them, and [`derived_statuses_rate_reports_as_ess_does`] covers each branch.
+//!
+//! On top of that, the report must qualify: its `conformance_status` must be `passed`
+//! ([`qualification`]), and a copy of a passing report that says `inconclusive` fails the check
+//! naming the field. The suite is synthesized with declared coverage (`--suite-format 5`), so it
+//! carries a complete coverage inventory and a run in which every scenario passed qualifies
+//! `passed`; in the ordinary format the coverage is unknown and the same run is `inconclusive`.
+//! A named `unsupported` scenario therefore no longer keeps the check green: ESS fails the
+//! execution, and so the conformance, of any run with an unsupported scenario.
 //!
 //! [`taskfile_check_runs_conform`] holds the other half of the claim: `task check` runs this test,
 //! through the task `conform`, as a step of its own.
@@ -105,10 +108,20 @@ fn ess(args: &[&str], out: Option<&Path>) -> String {
     String::from_utf8(output.stdout).expect("`ess` prints UTF-8")
 }
 
-/// The suite `ess/` obliges, synthesized fresh.
+/// The suite `ess/` obliges, synthesized fresh with declared coverage (`--suite-format 5`), so the
+/// report can qualify the run `passed` rather than `inconclusive`.
 fn synthesize(out: &Path) -> String {
     ess(
-        &["verify", "conform", "synthesize", "--path", "ess", "--out"],
+        &[
+            "verify",
+            "conform",
+            "synthesize",
+            "--path",
+            "ess",
+            "--suite-format",
+            "5",
+            "--out",
+        ],
         Some(out),
     );
     fs::read_to_string(out).unwrap_or_else(|error| panic!("read {}: {error}", out.display()))
@@ -236,6 +249,20 @@ fn violations(report: &Value, named: &BTreeSet<String>) -> Vec<String> {
     found
 }
 
+/// The qualification `task conform` requires: the report's `conformance_status` is `passed`. A
+/// status that agrees with its counts is not enough; an `inconclusive` run, such as one over a
+/// suite that declares no coverage inventory, does not pass. Empty means the report qualifies.
+fn qualification(report: &Value) -> Vec<String> {
+    if report["conformance_status"] == "passed" {
+        Vec::new()
+    } else {
+        vec![format!(
+            "the report's conformance_status is {}; task conform requires `passed`",
+            report["conformance_status"]
+        )]
+    }
+}
+
 /// The `execution_status` and `conformance_status` a report's counts and coverage come to, by the
 /// rule ESS writes them with (ess-conformance `counts.rs`, `execution` and `qualification`).
 ///
@@ -267,10 +294,10 @@ fn derived_statuses(report: &Value) -> [&'static str; 2] {
 /// Every category a report lists its scenarios under.
 const CATEGORIES: [&str; 5] = ["passed", "failed", "error", "unsupported", "skipped"];
 
-/// What ESS rates a run in which every scenario passed over a suite that declares no coverage
-/// inventory: execution passes (`counts.rs` `execution`), and conformance is inconclusive because
-/// the coverage is not a complete inventory (`counts.rs` `qualification`).
-const ALL_PASSED: [&str; 2] = ["passed", "inconclusive"];
+/// What ESS rates a run in which every scenario passed over a suite that declares a complete
+/// coverage inventory with no refusal: execution passes (`counts.rs` `execution`), and so does
+/// conformance (`counts.rs` `qualification`).
+const ALL_PASSED: [&str; 2] = ["passed", "passed"];
 
 /// What ESS rates [`ALL_PASSED`] with one unsupported scenario more: any unsupported scenario fails
 /// execution, and a failed execution fails conformance.
@@ -282,8 +309,8 @@ const ONE_UNSUPPORTED: [&str; 2] = ["failed", "failed"];
 const ONE_SKIPPED: [&str; 2] = ["inconclusive", "inconclusive"];
 
 /// A copy of `report` in which every scenario it lists passed, with the coverage of a suite that
-/// declares no inventory and the statuses [`ALL_PASSED`]: the fixed base expectation 4's
-/// self-checks start from, so the statuses they expect are literals, not whatever the run came to.
+/// declares a complete inventory and the statuses [`ALL_PASSED`]: the fixed base the self-checks
+/// start from, so the statuses they expect are literals, not whatever the run came to.
 fn all_passed(report: &Value) -> Value {
     let mut base = report.clone();
     let mut ids: Vec<String> = CATEGORIES
@@ -299,7 +326,7 @@ fn all_passed(report: &Value) -> Value {
     base["outcomes"]["passed"] = Value::from(ids);
     base["counts"]["passed"] = Value::from(total);
     base["counts"]["total"] = Value::from(total);
-    base["coverage"] = serde_json::json!({"knowledge": "unknown"});
+    base["coverage"] = serde_json::json!({"knowledge": "complete_inventory", "refused": []});
     for (field, status) in STATUSES.into_iter().zip(ALL_PASSED) {
         base[field] = Value::from(status);
     }
@@ -425,6 +452,33 @@ fn ess_conformance_report() {
         );
     }
 
+    // The qualification: a copy of a passing report that says `conformance_status: inconclusive`
+    // fails the check, and every violation it adds names the field.
+    assert!(
+        qualification(&base).is_empty(),
+        "the check refuses a run in which every scenario passed over a complete inventory: {:?}",
+        qualification(&base)
+    );
+    let inconclusive = {
+        let mut copy = base.clone();
+        copy["conformance_status"] = Value::from("inconclusive");
+        copy
+    };
+    let added: Vec<String> = added_violations(&base, &inconclusive, &named)
+        .into_iter()
+        .chain(qualification(&inconclusive))
+        .collect();
+    assert!(
+        added
+            .iter()
+            .any(|found| found.contains("conformance_status") && found.contains("inconclusive"))
+            && added
+                .iter()
+                .all(|found| found.contains("conformance_status")),
+        "a copy of a passing report with conformance_status `inconclusive` must fail the check \
+         naming conformance_status; it added {added:?}"
+    );
+
     // Expectation 2, on the suite.
     let commands = compiled_commands();
     let missing = uncovered(&commands, &scenarios);
@@ -436,8 +490,9 @@ fn ess_conformance_report() {
         ));
     }
 
-    // Expectations 1, 3 and 4, and the two statuses, on the report itself.
+    // Expectations 1, 3 and 4, the two statuses and the qualification, on the report itself.
     found.extend(violations(&report, &named));
+    found.extend(qualification(&report));
     assert!(
         found.is_empty(),
         "the conformance report does not pass ({} of {} scenario(s) passed):\n  {}\n\

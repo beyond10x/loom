@@ -1,14 +1,19 @@
 //! `task check` holds Commission's ESS specification to its synthesized conformance suite.
 //!
-//! [`ess_conformance_report`] synthesizes the suite from `ess/` with `ess verify conform
-//! synthesize`, runs it against `b10x-loom-commission` through [`CommissionTarget`], and reads the
-//! verdict from the `ess-conformance-report/2` document, never from an exit code:
+//! [`ess_conformance_report`] synthesizes the suite from `ess/commission/` with `ess verify conform
+//! synthesize --suite-format 5` (declared coverage), runs it against `b10x-loom-commission` through
+//! [`CommissionTarget`], and reads the verdict from the `ess-conformance-report/2` document, never
+//! from an exit code:
 //!
 //! 1. the report records at least one passed scenario;
 //! 2. the report records no failed scenario;
 //! 3. every skipped scenario in the report is named in `ess/SKIPPED.md`;
 //! 4. the same check, applied to a copy of the report that adds one skipped scenario `S` that
-//!    `ess/SKIPPED.md` does not name, fails and names `S`.
+//!    `ess/SKIPPED.md` does not name, fails and names `S`;
+//! 5. the report's `conformance_status` is `passed`: without declared coverage ESS rates a run in
+//!    which every scenario passed `inconclusive`;
+//! 6. the same check, applied to a copy of a passing report whose `conformance_status` is
+//!    `inconclusive`, fails and names the field.
 //!
 //! The Rust producer profile has no `skipped` category: a scenario the target cannot answer is
 //! reported `unsupported`. The check therefore holds `unsupported` to the same rule as `skipped`
@@ -55,7 +60,8 @@ fn scratch() -> PathBuf {
     dir
 }
 
-/// The suite `ess/` obliges, synthesized fresh.
+/// The suite `ess/commission/` obliges, synthesized fresh with declared coverage
+/// (`--suite-format 5`), so the report can qualify the run `passed` rather than `inconclusive`.
 fn synthesize(out: &Path) -> String {
     let output = Command::new("ess")
         .current_dir(root())
@@ -65,6 +71,8 @@ fn synthesize(out: &Path) -> String {
             "synthesize",
             "--path",
             "ess/commission",
+            "--suite-format",
+            "5",
             "--out",
         ])
         .arg(out)
@@ -72,7 +80,7 @@ fn synthesize(out: &Path) -> String {
         .unwrap_or_else(|error| panic!("`ess` must be on PATH: {error}"));
     assert!(
         output.status.success(),
-        "`ess verify conform synthesize --path ess/commission` exited {}:\n{}{}",
+        "`ess verify conform synthesize --path ess/commission --suite-format 5` exited {}:\n{}{}",
         output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
@@ -162,7 +170,22 @@ fn violations(report: &Value, named: &BTreeSet<String>) -> Vec<String> {
         }
     }
 
+    if report["conformance_status"] != "passed" {
+        found.push(format!(
+            "expectation 5: the report's conformance_status is {}; task commission:conform \
+             requires `passed`",
+            report["conformance_status"]
+        ));
+    }
+
     found
+}
+
+/// A copy of `report` whose `conformance_status` is `status`.
+fn with_conformance_status(report: &Value, status: &str) -> Value {
+    let mut copy = report.clone();
+    copy["conformance_status"] = Value::from(status);
+    copy
 }
 
 /// A copy of `report` that records `scenario` as one more skipped scenario.
@@ -228,7 +251,24 @@ fn ess_conformance_report() {
          check naming it, and only it; it added {added:?}"
     );
 
-    // Expectations 1, 2 and 3, on the report itself.
+    // Expectation 6: a copy of a passing report that says `conformance_status: inconclusive` fails
+    // the check naming the field, and only it.
+    let passing = with_conformance_status(&report, "passed");
+    let before: BTreeSet<String> = violations(&passing, &named).into_iter().collect();
+    let after: BTreeSet<String> =
+        violations(&with_conformance_status(&passing, "inconclusive"), &named)
+            .into_iter()
+            .collect();
+    let added: Vec<&String> = after.difference(&before).collect();
+    assert!(
+        added.len() == 1
+            && added[0].contains("conformance_status")
+            && added[0].contains("inconclusive"),
+        "expectation 6: a copy of a passing report with conformance_status `inconclusive` must \
+         fail the check naming conformance_status, and only it; it added {added:?}"
+    );
+
+    // Expectations 1, 2, 3 and 5, on the report itself.
     let found = violations(&report, &named);
     assert!(
         found.is_empty(),
