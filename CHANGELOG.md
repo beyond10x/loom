@@ -6,6 +6,16 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-08
+
+Loom 0.9.0 lets a read leave Loom through Connectors. A read action bound to a Connector read
+operation answers `Performed` naming the execution audit record Connectors completed for it, where
+0.8.0 answered an error; a write still names its attempt. The commission specification declares
+each binding's `effect` (`Read` or `Write`) and the read's `audit` on `EffectOutcomePerformed`, so
+hosts that build `ActionBindingData` or `EffectOutcomePerformed` add a field. Both conformance
+suites now carry declared coverage, and `task conform` passes only when ESS rates the run `passed`.
+The two governor vertical slices, software change and incident response, run end to end as tests.
+
 ### Changed
 
 - `task conform` and `task commission:conform` synthesize their suites with declared coverage
