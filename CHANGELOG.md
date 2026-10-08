@@ -6,6 +6,8 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+- `FileCaseStore` (`loom_governor`) keeps each governor case in its own file, written atomically as the `loom.governor` domain's `StoredCase`, so a case survives a process restart.
+
 ## [0.9.0] - 2026-10-08
 
 Loom 0.9.0 lets a read leave Loom through Connectors. A read action bound to a Connector read

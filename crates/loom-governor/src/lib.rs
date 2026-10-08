@@ -99,7 +99,12 @@ use b10x_loom_commission::model::responsibility::{
 use b10x_loom_commission::ports::evidence::{AttributedEvidence, EvidencePort, ObservationPort};
 use b10x_loom_commission::ports::governor::Governor;
 
-/// One case as the governor holds it.
+mod file_store;
+
+pub use file_store::{FileCaseStore, FileStoreError};
+
+/// One case as the governor holds it. A durable store writes it as the `loom.governor` domain's
+/// `StoredCase` (`ess/domains/governor.yaml`), as [`FileCaseStore`] does.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CaseState {
     /// The case id.
