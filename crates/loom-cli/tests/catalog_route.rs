@@ -222,6 +222,51 @@ fn an_unreadable_catalog_is_refused_naming_the_file() {
     }
 }
 
+/// The catalog is a regular file: a named pipe is refused naming it even while a writer holds it
+/// open with a valid catalog, which is what `--catalog <(cmd)` hands the run.
+#[test]
+fn a_catalog_pipe_with_a_writer_is_refused_naming_it() {
+    let scratch = Scratch::new("pipe");
+    let listener = idle();
+    let source = scratch.catalog(&format!("http://{}/v1", listener.local_addr().unwrap()));
+    let fifo = scratch.root.join("catalog.fifo");
+    assert!(
+        Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("mkfifo")
+            .success()
+    );
+    let mut writer = Command::new("sh")
+        .args(["-c", "cat \"$1\" > \"$2\"", "writer"])
+        .arg(&source)
+        .arg(&fifo)
+        .spawn()
+        .expect("a writer");
+    let report = scratch.root.join("report.json");
+    let output = scratch.run(&[
+        "--context-report",
+        report.to_str().unwrap(),
+        "--catalog",
+        fifo.to_str().unwrap(),
+        "--classifier-model",
+        "lab-classifier",
+        "--model",
+        "lab-agent",
+        QUERY,
+    ]);
+    let _ = writer.kill();
+    let _ = writer.wait();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    assert!(
+        stderr.contains(fifo.to_str().unwrap()) && stderr.contains("not a regular file"),
+        "{stderr}"
+    );
+    assert_eq!(model_calls(&report), 0);
+    assert_untouched(&listener);
+}
+
 /// `run --help` documents the flag.
 #[test]
 fn run_help_documents_the_catalog_flag() {
@@ -232,6 +277,7 @@ fn run_help_documents_the_catalog_flag() {
     let help = String::from_utf8_lossy(&output.stdout);
     assert!(help.contains("--catalog <PATH>"), "{help}");
     assert!(help.contains("route alias"), "{help}");
+    assert!(help.contains("regular file"), "{help}");
 }
 
 // ---------------------------------------------------------------------------------------------
