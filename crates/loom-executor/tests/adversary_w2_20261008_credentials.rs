@@ -257,11 +257,13 @@ fn adv_an_empty_resolved_secret_is_refused_naming_the_reference() {
     assert!(error.message.contains(REFERENCE), "{error:?}");
 }
 
-/// The doc on `ResolvedBearer` says the bridge "never blocks one [runtime] it does not own".
-/// Called on a current-thread runtime, it blocks that runtime's only thread until the resolver
-/// answers, so a resolver that needs the caller's runtime to make progress never does.
+/// The doc on `ResolvedBearer` says the bridge blocks the calling thread until the resolver
+/// answers or its bound passes, and then refuses naming the reference. Called on a
+/// current-thread runtime, it blocks that runtime's only thread, so a resolver that needs the
+/// caller's runtime to make progress never does: the task it waits for has not run when the call
+/// returns, and the call is refused naming the reference and never the value.
 #[test]
-fn adv_the_bridge_does_not_block_the_callers_runtime() {
+fn adv_the_bridge_blocks_the_callers_runtime_and_refuses_naming_the_reference() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -273,16 +275,19 @@ fn adv_the_bridge_does_not_block_the_callers_runtime() {
     )
     .expect("a valid reference");
 
-    let result = runtime.block_on(async move {
+    let (result, ran) = runtime.block_on(async move {
         let flag = ready.clone();
         tokio::spawn(async move { flag.store(true, Ordering::SeqCst) });
-        bearer.bearer()
+        let result = bearer.bearer();
+        (result, ready.load(Ordering::SeqCst))
     });
 
-    assert!(
-        result.is_ok(),
-        "the caller's runtime was blocked: {result:?}"
-    );
+    assert!(!ran, "the caller's runtime ran while the bridge waited");
+    let error = result.expect_err("the resolver could not finish on a blocked runtime");
+    assert_eq!(error.code, WireErrorCode::Unauthorized, "{error:?}");
+    assert!(!error.retriable, "{error:?}");
+    assert!(error.message.contains(REFERENCE), "{error:?}");
+    assert!(!error.message.contains(SECRET), "{error:?}");
 }
 
 /// A configuration value that is not a reference and a kind is refused with an error that echoes
