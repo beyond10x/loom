@@ -4,7 +4,7 @@ sidebar_position: 6
 description: How a case gets its frontier from Canon, and how an intent becomes a governed case that a local slice works until it is blocked.
 status: shipped
 lede: The governor evaluates a case's protocol with Canon and decides; it never acts. Intake turns an intent into a governed case and works it with a local slice whose evidence comes from verified host observations.
-source: Atlas ADRs 0074, 0089 and 0090; crates/loom-governor, crates/loom-intake-references, crates/loom-intake-router, crates/loom-intake-slice; ess/intake/domains/routing.yaml
+source: Atlas ADRs 0074, 0089 and 0090; crates/loom-governor, crates/loom-intake-references, crates/loom-intake-router, crates/loom-intake-slice; ess/domains/evaluation.yaml, ess/intake/domains/routing.yaml
 ---
 
 ## The governor
@@ -52,6 +52,41 @@ stops opening the case rather than retrying another identifier. Updates are atom
 write preserves previous state. `try_observations` reports read failures. Existing infallible
 `CaseStore` implementations retain their API through a compatibility adapter. Loom supplies no
 database backend: hosts restore their cases and the same admitted protocol definitions.
+
+### One evaluation, for a caller that keeps its own case
+
+A supervisor that keeps its own case record does not need Commission's types or a case store to get
+a decision. `loom_governor::evaluate(&catalog, &request)` takes a protocol named from the host's
+`ProtocolCatalog`, a `canon-case/1` case snapshot, the `canon-evidence/1` records and an optional
+trusted time, and returns Canon's decision as the frontier and completion report it: each action's
+status, the capabilities it requires and Canon's reasons, every claim and obligation, the one
+legitimate outcome when the case is complete, and Canon's whole `canon-decision/1` document. It
+uses the same evaluation as `CanonGovernor`, holds nothing, and reads no clock. The request and the
+decision are declared in `ess/domains/evaluation.yaml`.
+
+`b10x-loom evaluate` is the same call for a program in any language: the request as JSON on standard
+input (or `--input <PATH>`), the decision as JSON on standard output.
+
+```console
+b10x-loom evaluate --input request.json | jq -c '{outcome, actions}'
+```
+
+```text
+{"outcome":"answered","actions":[{"action":"system.time.read","status":"Admissible","requires":[],"reasons":[]}]}
+```
+
+An input it cannot use is refused with exit status 3, naming the input: the protocol (the catalog
+has no such name), the snapshot, an evidence record by its position, or the time. Where
+`CanonGovernor` sets a record that does not apply aside, `evaluate` refuses it, because the caller
+sent it for this one evaluation:
+
+```text
+b10x-loom: evaluation refused: evidence record 0: evidence `clock-1` is not a canon-evidence/1 document: missing field `kind`
+{"input":"Evidence","evidence_index":0,"code":"malformed-input","message":"evidence `clock-1` is not a canon-evidence/1 document: missing field `kind`"}
+```
+
+The protocol comes only from the catalog the host installed (`protocols add`), never from the
+request, so host review of protocols still holds. Authenticating the evidence stays the host's job.
 
 ## Intake
 

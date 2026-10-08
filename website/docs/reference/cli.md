@@ -24,6 +24,7 @@ Generated from the clap definition of the `b10x-loom` command line in [`crates/l
 | [`b10x-loom protocols add`](#b10x-loom-protocols-add) | Validate and snapshot one protocol from a file or a pinned Git repository |
 | [`b10x-loom protocols list`](#b10x-loom-protocols-list) | List bundled and installed definitions, provenance, and available execution bindings |
 | [`b10x-loom protocols remove`](#b10x-loom-protocols-remove) | Remove an installed definition; bundled definitions cannot be removed |
+| [`b10x-loom evaluate`](#b10x-loom-evaluate) | Decide a case snapshot and its evidence under a catalog protocol, and write the decision as JSON. It decides and never acts |
 
 ## `b10x-loom run`
 
@@ -99,3 +100,27 @@ Usage: b10x-loom protocols remove <NAME>
 | Argument | Required | Default | Meaning |
 |---|---|---|---|
 | `<NAME>` | yes | none |  |
+
+## `b10x-loom evaluate`
+
+Decide a case snapshot and its evidence under a catalog protocol, and write the decision as JSON. It decides and never acts
+
+```text
+Usage: b10x-loom evaluate [OPTIONS]
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--input <PATH>` | no | none | Read the request from this file instead of standard input |
+
+```text
+The request is one JSON object (loom.evaluation.EvaluationRequest):
+  {"protocol": "<name>@<major>", "snapshot": {canon-case/1}, "evidence": [{canon-evidence/1}, ...], "at": "<RFC 3339>"}
+`at` is optional. The protocol comes from this host's catalog (`protocols list`), never from the request.
+
+Exit status:
+  0  decided: standard output carries the decision (loom.evaluation.EvaluationDecision)
+  3  refused: standard output carries the refusal (loom.evaluation.EvaluationRefusal), and standard error names the input
+  1  the request or the protocol catalog cannot be read
+  2  the command line is not valid
+```

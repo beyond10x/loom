@@ -116,6 +116,10 @@ Since `0.2.0`, `CanonGovernor::with_protocol` admits host-reviewed Canon protoco
 `with_evaluation_time` supplies trusted freshness time. Durable hosts implement
 `governor::FallibleCaseStore`, while existing `CaseStore` users remain compatible. Protocol
 admission, durable storage and authenticated evidence remain the embedding application's duties.
+A supervisor that keeps its own case record calls `loom_governor::evaluate` (or runs
+`b10x-loom evaluate`, JSON in and out) with a catalog protocol, a `canon-case/1` snapshot and its
+`canon-evidence/1` records, and gets Canon's decision without Commission's types
+([the governor](https://beyond10x.github.io/loom/docs/concepts/governor-and-intake)).
 
 ```toml
 [dependencies]

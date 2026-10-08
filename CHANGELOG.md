@@ -33,6 +33,19 @@ under **Unreleased** until the next release.
   documented on the Run events reference page, which `task docs-check` holds to that
   declaration. Human output stays the default and is unchanged. `SliceRun` gains `approvals`,
   the actions a run stopped to await approval for.
+- `loom_governor::evaluate(&ProtocolCatalog, &EvaluationRequest)` decides a case the caller keeps
+  itself, with no Commission type in its signature and no case store: a protocol named
+  `<name>@<major>` from the host's catalog, a `canon-case/1` snapshot, the `canon-evidence/1`
+  records and an optional trusted time go in; Canon's decision comes out as `CanonGovernor`
+  reports it (each action's status, required capabilities and reasons, claims, obligations, the
+  one legitimate outcome when complete) with the whole `canon-decision/1` document beside it. It
+  runs the governor's own evaluation, holds nothing and reads no clock. An unusable input is
+  refused naming it: the protocol, the snapshot, an evidence record by position, or the time; a
+  record `CanonGovernor` would set aside is refused. The types are the new `loom.evaluation`
+  domain (`ess/domains/evaluation.yaml`), re-exported as `loom_governor::model`.
+- `b10x-loom evaluate` is the same call over JSON: the request on standard input or from
+  `--input <PATH>`, the decision on standard output (exit 0), or the refusal on standard output
+  with the input named on standard error (exit 3).
 
 ### Changed
 
