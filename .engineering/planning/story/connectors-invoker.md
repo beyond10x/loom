@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:connectors-invoker
 kind: story
-status: draft
+status: active
 title: A Connectors client fills ConnectorInvoker
 relations:
 - decomposes: epic:downstream-adoption
@@ -24,7 +24,10 @@ scope:
   path: ess/commission/domains/responsibility.yaml
 - confidence: inferred
   path: generated/rust/commission/
-revision: 12
+revision: 16
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-08T15:55:36Z", actor: "human:timo", revision: 14}
+- {from: "proposed", to: "active", at: "2026-10-08T15:55:37Z", actor: "human:timo", revision: 15}
 ---
 ## Outcome
 
@@ -75,13 +78,14 @@ test of the first commit is the new invoker test in `crates/loom-connectors/test
 
 ## Upstream
 
-Blocked by `upstream-blocker:connectors-attempt-id`: `connectors-client` at `v0.33.0` returns only
-the operation's result `Value` from `Client::invoke`; its wire `Response` carries `version`,
-`request_id` and the outcome, and no attempt id, so `Performed.attempt` cannot be filled, and the
-port treats a `Performed` without an attempt as a failure to answer. Also not known here: whether a
-released Connectors provider offers file-edit and test-run operations (the Substrate provider of
-`decision-blocker:connector-substrate-containment`, reading A). Pin the Connectors tag that ships
-both.
+Pins Connectors `v0.35.0` (`aedd89aa45`). `connectors_client::Client::invoke_v1alpha2` returns
+`Invoked` (the result value, the optional `MutationObservation` with `attempt: {instance, id}`,
+`audit_ref`, `audit_status`) or a boxed `Failure` that keeps the host's `mutation` when one was
+recorded; it never falls back to `/v1/invoke` and never resends. `Performed.attempt` is filled from
+`MutationObservation.attempt`; a successful invocation with no attempt is a failure to answer
+(`Err`), as the port already treats it. `Client::invoke` (v1alpha1) carries no attempt and is not
+used. Still not known here: whether a released Connectors provider offers file-edit and test-run
+operations; the acceptance does not depend on it.
 
 ## Notes
 
