@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-08T00:25:52Z",
+  "actor": "human:timo",
+  "artifact": "story:moved-case-outcome",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adversary-w3-loom-moved-case-outcome-pass-3",
+    "review": "review-result:adversary-w3-loom-moved-case-outcome-pass-3",
+    "outcome": "fixed"
+  }
+}
