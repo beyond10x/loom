@@ -12,7 +12,9 @@
 //!    reason. A step is an executor call whose iteration did not end the run ([`LoopEnd::steps`]).
 //!    When the last step left an approval gate pending (5), the iteration first reads the case and
 //!    the frontier (1-3) and checks the gate, so a last step that leaves the gate unchanged ends
-//!    `AwaitingApproval`, not suspended for its budget;
+//!    `AwaitingApproval`, not suspended for its budget. When the last step's proposal was stale (8),
+//!    the iteration first loads the case (1-2), so a move it finds ends the run as item 2 says;
+//!    only a case still at the revision held is suspended for its budget;
 //! 1. [`Governor::current_revision`]: the case is loaded. After an iteration whose effect the port
 //!    reported `Performed`, the loaded revision is the one the loop holds the case at from then on;
 //!    after a `Refused` one, as after no effect, a move is somebody else's;
@@ -442,13 +444,17 @@ where
     // The actions an authority verdict denied in this Run.
     let mut denied: Vec<String> = Vec::new();
     let mut first = true;
+    // Whether the previous iteration's proposal was stale: the case has moved, and this iteration
+    // loads it before any budget stop (0).
+    let mut after_stale = false;
 
     let limit = budget.unwrap_or(UNBUDGETED_STEP_LIMIT);
 
     loop {
-        // With the budget used up, a pending approval gate is still read and checked first.
+        // With the budget used up, a pending approval gate is still read and checked first, and
+        // after a stale proposal the move is judged first.
         let exhausted = track.steps >= limit;
-        if exhausted && gate.is_none() {
+        if exhausted && gate.is_none() && !after_stale {
             return out_of_budget(runs, run_id, limit, track);
         }
 
@@ -625,6 +631,7 @@ where
         if budget.is_none() && !stale && !progressed && idle {
             return Ok(track.end(run_id, RunOutcome::NoAdmissibleAction(Unit(true))));
         }
+        after_stale = stale;
         if !stale {
             idle = !progressed;
         }

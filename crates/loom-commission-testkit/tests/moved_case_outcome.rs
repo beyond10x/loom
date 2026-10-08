@@ -26,8 +26,8 @@ use b10x_loom_commission::model::responsibility::{
     CommissionData, CommissionId, EffectOutcome, EffectOutcomePerformed, ExecutorOutcome,
     ExecutorOutcomeCaseMoved, ExecutorOutcomeProposedAction, FrontierAction, FrontierObligation,
     ObservationId, PrincipalId, ProposedActionArguments, RevalidateActionRequestOutcome, RunId,
-    RunOutcome, RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeNeedsExternalEvidence, Unit,
-    commission_state,
+    RunOutcome, RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeNeedsExternalEvidence,
+    RunOutcomeSuspended, SuspensionReason, Unit, commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -157,6 +157,7 @@ impl EffectPort for Effects {
 #[derive(Debug, Default)]
 struct Context {
     ids: u64,
+    budget: Option<usize>,
 }
 
 impl LoopContext for Context {
@@ -175,7 +176,7 @@ impl LoopContext for Context {
     }
 
     fn step_budget(&self) -> Option<usize> {
-        None
+        self.budget
     }
 }
 
@@ -190,6 +191,16 @@ fn run_on(
     effects: &Effects,
     outcome: ExecutorOutcome,
 ) -> (LoopEnd, ScriptedExecutor) {
+    run_budgeted(governor, effects, outcome, None)
+}
+
+/// One loop over `governor` with step budget `budget`, whose executor returns `outcome` once.
+fn run_budgeted(
+    governor: &FakeGovernor,
+    effects: &Effects,
+    outcome: ExecutorOutcome,
+    budget: Option<usize>,
+) -> (LoopEnd, ScriptedExecutor) {
     let executor = ScriptedExecutor::new([outcome]);
     let mut runs = Generated::new(RunStore::new(|| RunId(uuid(0x500))));
     let end = run_until_blocked(
@@ -199,7 +210,7 @@ fn run_on(
         effects,
         &commission(),
         &mut runs,
-        &mut Context::default(),
+        &mut Context { ids: 0, budget },
     )
     .unwrap_or_else(|error| panic!("the loop failed: {error}"));
     (end, executor)
@@ -417,4 +428,67 @@ fn a_moved_case_whose_current_frontier_lists_nothing_performable_ends_with_no_pe
     );
     assert_eq!(governor.calls(), [load(), load()].concat());
     assert_eq!(executor.calls().len(), 1);
+}
+
+/// A stale proposal is the run's one budgeted step, but the case did not move: the frontier the
+/// proposal was revalidated against was issued for [`CURRENT`] while the case stayed at [`LEFT`].
+/// The next iteration loads the case first, finds it where the Run holds it, reads the frontier
+/// (at [`LEFT`] again), and only then is the Run suspended for its budget.
+#[test]
+fn a_stale_proposal_on_the_last_budgeted_step_with_no_move_is_suspended_for_its_budget() {
+    let governor = FakeGovernor::new();
+    let held = at(LEFT, vec![open("tests-pass")], vec![admissible(TEST)]);
+    let current = at(CURRENT, vec![open("tests-pass")], vec![admissible(TEST)]);
+    governor.script(
+        case(),
+        [
+            held.clone(),
+            held.clone(),
+            held.clone(),
+            held.clone(),
+            current,
+            held.clone(),
+            held.clone(),
+            held,
+        ],
+    );
+    let effects = Effects::default();
+    let proposal = ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
+        action: TEST.to_owned(),
+        arguments: ProposedActionArguments(Value::Null),
+    });
+    let (end, executor) = run_budgeted(&governor, &effects, proposal, Some(1));
+
+    assert!(
+        matches!(
+            end.requests.first().map(|made| &made.outcome),
+            Some(RevalidateActionRequestOutcome::Stale { .. })
+        ),
+        "{:?}",
+        end.requests
+    );
+    assert_eq!(
+        end.outcome,
+        RunOutcome::Suspended(RunOutcomeSuspended {
+            reason: SuspensionReason::Budget(Value::Object(vec![(
+                "max_steps".to_owned(),
+                Value::Number("1".to_owned()),
+            )])),
+        }),
+        "{end:#?}"
+    );
+    assert_eq!(
+        governor.calls(),
+        [
+            load(),
+            vec![
+                GovernorCall::CurrentRevision(case()),
+                GovernorCall::Frontier(case()),
+            ],
+            load(),
+        ]
+        .concat()
+    );
+    assert_eq!(executor.calls().len(), 1);
+    assert!(effects.invoked().is_empty(), "{:?}", effects.invoked());
 }
