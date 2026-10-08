@@ -9,6 +9,7 @@ use b10x_llm_tool_call::codex_model;
 use b10x_loom_cli::evaluate::{decision_json, refusal_json, refused_input, request_from_json};
 use b10x_loom_cli::events::{EventStream, FAILED};
 use b10x_loom_cli::model_catalog::ModelCatalog;
+use b10x_loom_cli::regular_file;
 use b10x_loom_cli::{
     Cli, Command, Confinement, EvaluateArgs, Output, ProtocolCommand, RunArgs, exit_status,
 };
@@ -83,8 +84,10 @@ fn read_request(path: Option<&Path>) -> Result<String, String> {
     use std::io::Read;
     let mut bytes = Vec::new();
     let read = match path {
-        Some(path) => std::fs::File::open(path)
-            .and_then(|file| file.take(MAX_REQUEST_BYTES + 1).read_to_end(&mut bytes)),
+        Some(path) => regular_file::open(path)
+            .map_err(|reason| format!("the request {} {reason}", path.display()))?
+            .take(MAX_REQUEST_BYTES + 1)
+            .read_to_end(&mut bytes),
         None => std::io::stdin()
             .lock()
             .take(MAX_REQUEST_BYTES + 1)

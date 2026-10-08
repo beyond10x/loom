@@ -45,11 +45,10 @@ impl ModelCatalog {
     pub fn read(path: &Path) -> Result<Self, String> {
         let refused = |reason: String| format!("the model catalog {} {reason}", path.display());
         let mut bytes = Vec::new();
-        std::fs::File::open(path)
-            .and_then(|file| {
-                file.take(MAX_CONFIG_BYTES as u64 + 1)
-                    .read_to_end(&mut bytes)
-            })
+        crate::regular_file::open(path)
+            .map_err(refused)?
+            .take(MAX_CONFIG_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
             .map_err(|error| refused(format!("cannot be read: {error}")))?;
         let text = String::from_utf8(bytes).map_err(|_| refused("is not UTF-8".into()))?;
         let invalid = |error: llm_core::Error| {

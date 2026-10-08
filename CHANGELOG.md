@@ -47,7 +47,8 @@ under **Unreleased** until the next release.
   domain (`ess/domains/evaluation.yaml`), re-exported as `loom_governor::model`.
 - `b10x-loom evaluate` is the same call over JSON: the request on standard input or from
   `--input <PATH>`, the decision on standard output (exit 0), or the refusal on standard output
-  with the input named on standard error (exit 3).
+  with the input named on standard error (exit 3). `--input` must name a regular file: a named
+  pipe, a device or a directory is refused naming the path (exit 1) instead of being waited on.
 - `b10x-loom run --catalog <PATH>` reads an llm catalog (`llm.catalog/1` TOML), and
   `--model` and `--classifier-model` then each name one of its route aliases instead of a Codex
   model, both of them. Each model is the port llm's `b10x-llm-models` builds for the route's first
@@ -56,13 +57,15 @@ under **Unreleased** until the next release.
   alias the catalog does not declare, a route that permits fallback to a second target, an
   account that needs a credential (the command line supplies no credential resolver), or a model
   that cannot take a forced tool call; a catalog that cannot be read or is not valid is refused
-  naming the file. Without `--catalog` both flags name Codex models as before.
+  naming the file. The catalog must be a regular file: a named pipe, including the one
+  `--catalog <(cmd)` hands the run, a device or a directory is refused naming the path, before
+  it is read. Without `--catalog` both flags name Codex models as before.
 
 ### Changed
 
 - Every llm dependency moves from tag `0.3.1` to `0.4.0`; no existing caller needed a change.
   `b10x-loom-cli` adds `b10x-llm-models`, `b10x-llm-routing`, `b10x-llm-http` and
-  `b10x-llm-credentials`.
+  `b10x-llm-credentials`, and `libc` for opening a named file without waiting on a pipe.
 
 - `harness::wire::CredentialKind` is now the generated `loom.run.CredentialKind`. It no longer
   implements `PartialOrd`, `Ord` or `Hash`.

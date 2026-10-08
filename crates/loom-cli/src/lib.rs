@@ -40,6 +40,7 @@ Exit status:
 pub mod evaluate;
 pub mod events;
 pub mod model_catalog;
+pub mod regular_file;
 
 /// The exit status a run that stopped for `reason` returns, as [`EXIT_STATUS`] states it.
 pub fn exit_status(reason: StopReason) -> u8 {
@@ -83,7 +84,8 @@ pub enum Command {
 /// The arguments of `b10x-loom evaluate`.
 #[derive(Debug, Args)]
 pub struct EvaluateArgs {
-    /// Read the request from this file instead of standard input.
+    /// Read the request from this regular file instead of standard input; a named pipe, a device
+    /// or a directory is refused (pipe a request to standard input instead).
     #[arg(long, value_name = "PATH")]
     pub input: Option<PathBuf>,
 }
@@ -116,9 +118,10 @@ pub struct RunArgs {
     /// The most actions performed before the run stops.
     #[arg(long, value_name = "N", default_value_t = 20)]
     pub max_steps: usize,
-    /// An llm catalog file (`llm.catalog/1` TOML). With it, `--model` and `--classifier-model`
-    /// each name a route alias of this catalog instead of a Codex model, both of them; an alias it
-    /// does not declare, or a catalog that cannot be read, stops the run before any model call.
+    /// An llm catalog (`llm.catalog/1` TOML) in a regular file; a named pipe such as `<(cmd)`, a
+    /// device or a directory is refused. With it, `--model` and `--classifier-model` each name a
+    /// route alias of this catalog instead of a Codex model, both of them; an alias it does not
+    /// declare, or a catalog that cannot be read, stops the run before any model call.
     #[arg(long, value_name = "PATH")]
     pub catalog: Option<PathBuf>,
     /// The model that selects actions and writes their arguments: a Codex model name, or with

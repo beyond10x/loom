@@ -310,6 +310,7 @@ dependencies = [
  "b10x-loom-protocols",
  "clap",
  "intake",
+ "libc",
  "serde_json",
  "tempfile",
 ]

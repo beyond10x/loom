@@ -43,7 +43,7 @@ Usage: b10x-loom run [OPTIONS] <INTENT>
 | `--workspace <DIR>` | no | none | Existing Git worktree for software changes; unnecessary for system queries |
 | `--test-cmd <CMD>` | no | `cargo test` | The test command, run in the workspace without a shell: a program and its arguments, split at white space |
 | `--max-steps <N>` | no | `20` | The most actions performed before the run stops |
-| `--catalog <PATH>` | no | none | An llm catalog file (`llm.catalog/1` TOML). With it, `--model` and `--classifier-model` each name a route alias of this catalog instead of a Codex model, both of them; an alias it does not declare, or a catalog that cannot be read, stops the run before any model call |
+| `--catalog <PATH>` | no | none | An llm catalog (`llm.catalog/1` TOML) in a regular file; a named pipe such as `<(cmd)`, a device or a directory is refused. With it, `--model` and `--classifier-model` each name a route alias of this catalog instead of a Codex model, both of them; an alias it does not declare, or a catalog that cannot be read, stops the run before any model call |
 | `--model <ID>` | no | `gpt-5.6-sol` | The model that selects actions and writes their arguments: a Codex model name, or with `--catalog` a route alias of that catalog |
 | `--classifier-model <ID>` | no | `gpt-5.6-sol` | The model that classifies the intent: a Codex model name, or with `--catalog` a route alias of that catalog |
 | `--threshold <X>` | no | `0.5` | The confidence, from 0 to 1, below which the router refuses its pick |
@@ -112,7 +112,7 @@ Usage: b10x-loom evaluate [OPTIONS]
 
 | Argument | Required | Default | Meaning |
 |---|---|---|---|
-| `--input <PATH>` | no | none | Read the request from this file instead of standard input |
+| `--input <PATH>` | no | none | Read the request from this regular file instead of standard input; a named pipe, a device or a directory is refused (pipe a request to standard input instead) |
 
 ```text
 The request is one JSON object (loom.evaluation.EvaluationRequest):
