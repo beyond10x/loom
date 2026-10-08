@@ -136,9 +136,9 @@ fn items_read_back_from_json_text_keep_their_numeric_arguments_and_outputs() {
     assert_numbers(&read_call.arguments);
 }
 
-/// A filed session holds the conversation verbatim; `SessionFile::load` reads it through a
-/// `Value` (`session.rs:498`, `:527`). A tool call whose arguments hold an integer one past
-/// `u64::MAX` must not make the session unreadable.
+/// A filed session holds the conversation verbatim; `SessionFile::parse` reads only the version
+/// through a `Value` and reads the session itself from the text. A tool call whose arguments hold
+/// an integer one past `u64::MAX` must not make the session unreadable.
 #[test]
 fn a_filed_session_whose_tool_call_holds_a_large_integer_loads() {
     let root = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
