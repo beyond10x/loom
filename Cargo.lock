@@ -389,6 +389,7 @@ dependencies = [
  "b10x-canon-engineering",
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
+ "b10x-loom-executor",
  "b10x-loom-protocols",
  "loom",
  "serde_json",
