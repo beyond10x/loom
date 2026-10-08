@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:governor-evaluate
 kind: story
-status: draft
+status: active
 title: One call evaluates a protocol over a case snapshot and evidence, without Commission types
 relations:
 - decomposes: epic:downstream-adoption
@@ -30,7 +30,10 @@ scope:
   path: generated/rust/loom/
 - confidence: inferred
   path: website/docs/reference/cli.md
-revision: 14
+revision: 16
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-08T08:47:51Z", actor: "human:timo", revision: 15}
+- {from: "proposed", to: "active", at: "2026-10-08T08:47:52Z", actor: "human:timo", revision: 16}
 ---
 ## Outcome
 

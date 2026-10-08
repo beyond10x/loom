@@ -6,7 +6,7 @@ status: open
 title: connectors-client returns no Connector attempt id for an invocation
 relations:
 - blocks: story:connectors-invoker
-revision: 2
+revision: 3
 ---
 ## Waiting on
 
@@ -24,3 +24,7 @@ coding phase needs.
 
 A Connectors release tag ships the attempt id on a successful invocation;
 `story:connectors-invoker` then pins that tag.
+
+## Upstream story
+
+Connectors `story:invoke-returns-attempt-id` (draft in the Connectors store on 2026-10-08) carries the change. `story:connectors-invoker` stays blocked until a Connectors release tag ships it.
