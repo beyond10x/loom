@@ -121,8 +121,9 @@ conditions with `--path ess/commission` by `task commission:ess-gate`
 (`crates/loom-commission/tests/ess_gate.rs`), which `task check` also runs. Intake's
 `intake.routing` domain is `ess/intake/`, validated by `task intake-spec`. The governor's nouns are
 Commission's and Canon's, except its stateless evaluation request, decision and refusal, which are
-the `loom.evaluation` domain (`ess/domains/evaluation.yaml`); a noun it introduces gets a
-declaration before a story is written around it.
+the `loom.evaluation` domain (`ess/domains/evaluation.yaml`), and its held case as a durable store
+writes it, which is the `loom.governor` domain (`ess/domains/governor.yaml`); a noun it introduces
+gets a declaration before a story is written around it.
 
 An open question is settled before the specification changes, in a story or in a
 `decision-blocker` when nobody has decided it, and is never written into `ess/` as an `UNMAPPED:`
@@ -224,7 +225,10 @@ It depends on Commission by path, never the reverse.
 Host-reviewed protocols enter through `CanonGovernor::with_protocol`; compile and frontier
 representability checks remain in the governor. `EvaluationTime` is a trusted host callback,
 never a model argument. Durable stores implement `FallibleCaseStore` atomically and report
-failures explicitly; the legacy `CaseStore` bridge is only for infallible adapters. The host
+failures explicitly; the legacy `CaseStore` bridge is only for infallible adapters.
+`FileCaseStore` is one: a file per case, written as `loom.governor`'s `StoredCase` to a temporary
+file and renamed, under a per-operation lock; `crates/loom-governor/tests/restart_durability.rs`
+holds a case across a real process restart. The host
 restores the same admitted protocol definitions on recovery and authenticates evidence before
 `submit_evidence`. The governor supplies no authority decision.
 
