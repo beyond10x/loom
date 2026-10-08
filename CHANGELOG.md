@@ -6,6 +6,14 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Changed
+
+- Loom requires ESS 0.56.0: the Loom, Commission and intake specifications require it, the
+  conformance targets build on the 0.56.0 `ess-conformance` and `ess-primitives`, and CI installs
+  the 0.56.0 `ess`. Every specification validates under 0.56.0's new ordering rule for held-state
+  branches (`ESS-COMMAND-004`) without change, and the generated Rust is the same as under 0.55.0;
+  only the Commission domain graph page names the new compiler.
+
 ## [0.5.0] - 2026-10-08
 
 Loom 0.5.0 judges a run whose case moved under its executor on the case as it is now. Commission's

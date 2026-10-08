@@ -139,7 +139,7 @@ fn provenance(site: &Path, commit: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// `ess --version`, as it prints it (`ess 0.55.0`). CI pins the release.
+/// `ess --version`, as it prints it (`ess 0.56.0`). CI pins the release.
 fn ess_version(ess: &Path) -> Result<String> {
     let output = Command::new(ess)
         .arg("--version")

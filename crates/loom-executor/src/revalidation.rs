@@ -7,7 +7,7 @@
 //! refusal moves the selection to `Refused`, an admission to `Admitted`, and every outcome is
 //! recorded.
 //!
-//! `not-in-frontier` is an `external:` outcome: ess 0.55.0 does not synthesize it as a membership
+//! `not-in-frontier` is an `external:` outcome: ess 0.56.0 does not synthesize it as a membership
 //! guard over `frontier_actions`. The context here answers it from the command input it is handed
 //! and the selection the record holds, and refuses to answer any other external branch.
 //!
