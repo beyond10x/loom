@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T00:33:19Z",
+  "actor": "human:timo",
+  "artifact": "story:docs-check-private-output",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test --locked --no-fail-fast -p b10x-loom-commission -p b10x-loom-commission-testkit -p b10x-loom-commission-conformance -p b10x-loom-executor -p b10x-loom-intake-slice -p loom-docs -p b10x-loom-conformance -p b10x-loom-cli (ess 0.55.0)",
+    "reference": "wave/2026-10-07-w3 a3eda39: test exit 0, 1081 passed, 0 failed, 8 ignored, 1089 listed; clippy -D warnings exit 0; fmt --check exit 0 after a3eda39"
+  }
+}

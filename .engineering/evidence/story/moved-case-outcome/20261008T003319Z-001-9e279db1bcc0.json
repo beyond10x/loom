@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T00:33:19Z",
+  "actor": "human:timo",
+  "artifact": "story:moved-case-outcome",
+  "kind": "story",
+  "revision": 14,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-executor --locked --test adversary2_w3_moved_case_loop --test adversary3_w3_moved_case_loop",
+    "reference": "VERIFIED: a5b2e2e 4 failed (scratch/round-3/red-run.log), 43de0b0 3 failed (scratch/round-4/red-run.log), in the archived impl tree; a3eda39 9 passed, 0 failed; base b8af5c2 asserted NoAdmissibleAction and NeedsExternalEvidence([tests-pass]) for the completed and moved-on cases (scratch/base-run.log)"
+  }
+}
