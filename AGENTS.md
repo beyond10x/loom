@@ -86,6 +86,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | An executor's report that the case moved is decided by the governor and judged on the case's current frontier, reloaded once | `crates/loom-commission-testkit/tests/moved_case_outcome.rs`, `crates/loom-executor/tests/adversary_w1_runtime_stale.rs`, `crates/loom-executor/tests/adversary_w1p2_runtime_windows.rs` |
 | An executor is never handed an unperformed action that needs no authority; an effect is invoked once, through its binding | `crates/loom-commission-testkit/tests/effect_invocation.rs` (`effect_invoked_only_through_its_binding`) |
 | A consequential action leaves Loom only as a proposal, and the executor links no Connectors crate | `crates/loom-executor/tests/connector_boundary.rs` (`consequential_actions_leave_loom_only_as_a_proposal`) |
+| A Connector invocation is made once, and only Connectors' own "nothing changed" is a refusal | `crates/loom-connectors/tests/connectors_invoker.rs` |
 | The executor answers the commands of `ess/` as their synthesized scenarios specify, except `not-in-frontier`, which the conformance target answers | `task conform` (`crates/loom-conformance/tests/conform.rs`, `ess_conformance_report`); the membership rule: `crates/loom-executor/tests/adversary_run_revalidation.rs` (`not_in_frontier_follows_the_frontier_actions`) |
 | The router refuses a pick outside the registry or below the threshold | `crates/loom-intake-router/tests/adversary_classify.rs` |
 | Model or provider JSON nested past 128 levels is refused | `crates/loom-executor/tests/json_depth.rs` |
@@ -241,6 +242,20 @@ Canon is named by the reference `b10x-canon-engineering` uses (`branch = "main"`
 `Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon with
 `cargo update -p b10x-canon` together with the `b10x-canon-engineering` tag (now `0.1.0`); any other
 crate that adds Canon uses the same reference.
+
+## Connectors
+
+`b10x-loom-connectors` (`crates/loom-connectors`, `loom_sdk::connectors`) is the one crate that
+links Connectors: `connectors-client` and `connectors-core` at tag `v0.35.0`. Move both together.
+`ConnectorsInvoker` fills Commission's `ConnectorInvoker` from the host's `ConnectorEndpoint`
+records (`ess/commission/domains/responsibility.yaml`), one per instance, and a
+`CredentialResolver` the host injects; it reads no credential itself. It describes on
+`GET /v1/describe` and invokes once on `POST /v1alpha2/invoke`, never `/v1/invoke`, and never
+resends. `Refused` is only what Connectors states as nothing changed (`mutation.classification`
+`refused` or `not_attempted` on a valid response); every other failure, a failure without a
+recorded attempt included, is `Err`. The sync port runs on a Tokio runtime the invoker owns.
+`crates/loom-connectors/tests/connectors_invoker.rs` holds it against a fake service on a loopback
+port.
 
 ## Intake and the command line
 

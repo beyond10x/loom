@@ -15,20 +15,12 @@ scope:
 - confidence: inferred
   path: crates/loom-commission-testkit
 - confidence: inferred
-  path: crates/loom-governor/tests
-- confidence: inferred
   path: crates/loom-governor/tests/fixtures/inc-492.fixture.yaml
 - confidence: inferred
   path: crates/loom-governor/tests/incident_response_slice.rs
-- confidence: inferred
-  path: crates/loom-intake-slice/src/effect.rs
-- confidence: inferred
-  path: crates/loom-intake-slice/src/run.rs
-revision: 7
+revision: 11
 ---
-> Re-filed from `beyond10x/commission` `story:incident-response-slice` at `e61e4f0` (status there: `draft`) under Atlas ADR 0090
-> (loom `story:import-commission`). Paths below are Commission's: `ess/` is now `ess/commission/`,
-> `docs/` is now `docs/commission/`.
+> Re-filed from `beyond10x/commission` `story:incident-response-slice` at `e61e4f0` (status there: `draft`) under Atlas ADR 0090 (loom `story:import-commission`); paths mapped to Loom.
 
 ## Outcome
 
@@ -48,7 +40,7 @@ Observable steps (build pack `START-HERE.md`, section Second demonstrator; ELS
 
 ## Domain relations
 
-- Commission -> Case, many-to-one, references: `ess/domains/responsibility.yaml`,
+- Commission -> Case, many-to-one, references: `ess/commission/domains/responsibility.yaml`,
   `commission.responsibility.Commission` relation `case`.
 - Frontier -> Case, many-to-one, references, carrying `case_revision`:
   `commission.responsibility.Frontier` relation `case`.
@@ -64,18 +56,26 @@ defines it, and still lists the investigation obligation as open.
 
 ## Tests
 
-The tests live under commission `tests/` and drive ELS fixtures through Loom (pinned
-dev-dependency). Loom is a dev-dependency pinned by `Cargo.lock`; the pin moves only in a story that
-names the Loom change it takes and re-runs all three slices. No loom or els source changes here.
+The test lives under `crates/loom-governor/tests/` and drives the ELS `inc-492` fixture
+(`fixtures/incident-response/inc-492.fixture.yaml` in beyond10x/engineering-protocols) through
+Commission's runtime (`crates/loom-commission`) and the governor (`crates/loom-governor`,
+`CanonGovernor`), using the port fakes in `crates/loom-commission-testkit`. As with
+`tests/fixtures/chg-1842.fixture.yaml`, the fixture is copied byte for byte from the
+`b10x-canon-engineering` release pinned in `Cargo.lock` (tag `0.1.0`). That pin moves only in a
+story that names the protocol change it takes and re-runs all three slices. This story changes
+tests only: no Loom crate source and no engineering-protocols source.
 
 ## Notes
 
 - "Emergency mode" and the investigation obligation id are not defined by any ELS or Canon source
-  yet: ELS `docs/examples/incident-response.md` uses the phrase and names only the urgent obligation
-  `restore_service`. Both come from `incident.response/1` (TASKBOARD E-004); until it names them,
-  that clause of the acceptance cannot be checked.
-- Claim ids follow ELS `docs/examples/incident-response.md` and Atlas `epic:ga-vertical-slices`;
-  `START-HERE.md` calls the first claim "impact mitigated".
+  yet. At the pinned tag `0.1.0`, `protocols/incident-response/1.yaml` partly settles it: leaving
+  emergency mode is the action `emergency.leave`, admissible once `service.healthy` and
+  `impact.bounded` are true; the only obligation is `restore_service`, so there is no investigation
+  obligation, and that clause of the acceptance cannot be checked until the protocol names one.
+- The pinned protocol's claim ids are `impact.bounded`, `service.healthy` and `cause.identified`;
+  the acceptance keeps the ELS example's names. `START-HERE.md` calls the first claim "impact
+  mitigated".
+- Unchecked: whether `inc-492` ends with the cause unknown and the service healthy.
 
 ## Source
 

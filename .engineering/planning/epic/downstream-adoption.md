@@ -2,13 +2,15 @@
 format: aep.planning-md/3
 id: epic:downstream-adoption
 kind: epic
-status: proposed
+status: implemented
 title: A downstream factory runs its agent phases on Loom
 relations:
 - serves: vision:O3
-revision: 3
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-08T07:47:45Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-10-08T16:22:11Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-08T16:22:11Z", actor: "human:timo", revision: 5}
 ---
 ## Outcome
 

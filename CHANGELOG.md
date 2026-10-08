@@ -6,6 +6,33 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- `b10x-loom-connectors` (`crates/loom-connectors`, re-exported as `loom_sdk::connectors`) fills
+  Commission's `ConnectorInvoker` over a Connectors service. `ConnectorsInvoker` resolves a
+  binding's `instance_id` to the one endpoint the host declares for it, resolves the endpoint's
+  credential reference through the host's `CredentialResolver`, describes the service and invokes
+  the bound operation once on `POST /v1alpha2/invoke`, with the admitted request's arguments. It
+  answers `Performed` naming the attempt Connectors recorded, `Refused` only when Connectors
+  reports that attempt `refused` or `not_attempted`, and an error for everything else: a success
+  that names no attempt, an error without a recorded attempt, an unknown outcome, a protocol or
+  transport failure. An unknown instance, an unresolvable credential and a service that describes
+  another instance are errors before the operation is invoked, and so is an argument number that
+  cannot be sent without changing its value, such as an integer beyond the 64-bit range. A
+  success naming another instance's attempt is an error. It never falls back to `/v1/invoke` and
+  never resends. Known limit: a read operation answers an error, because Connectors `v0.35.0`
+  records no attempt for a read and the port requires an attempt on every `Performed`.
+- `commission.responsibility.ConnectorEndpoint` in `ess/commission/domains/responsibility.yaml`:
+  the host's Connectors endpoint for one Connector instance, with its URL
+  (`ConnectorEndpointUrl`), a non-secret credential reference (`ConnectorCredentialRef`) and
+  whether plain `http` is admitted. `ActionBinding.endpoint` references it through `instance_id`.
+
+### Changed
+
+- Loom now depends on Connectors `v0.35.0` (`connectors-client`, `connectors-core`), through
+  `b10x-loom-connectors` only. `b10x-loom-commission` and `b10x-loom-executor` still link no
+  Connectors crate.
+
 ## [0.7.0] - 2026-10-08
 
 Loom 0.7.0 makes Loom usable by a supervisor that is not written in Rust and by a model that is not

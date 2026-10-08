@@ -119,7 +119,10 @@ flag.
 
 An application depends on one crate, `b10x-loom-sdk` (library `loom_sdk`). It re-exports
 Commission's contracts and runtime, the executor, the governor and intake. The application supplies
-the selector, the argument generator, the authority provider and the effect port.
+the selector, the argument generator, the authority provider and the effect port. For actions
+bound to Connector operations, the effect port is Commission's `ConnectorEffects` over
+`loom_sdk::connectors::ConnectorsInvoker`, which invokes each admitted request once on the host's
+Connectors endpoint for the operation's instance and reports the attempt Connectors recorded.
 
 Since `0.2.0`, `CanonGovernor::with_protocol` admits host-reviewed Canon protocols;
 `with_evaluation_time` supplies trusted freshness time. Durable hosts implement
@@ -168,6 +171,7 @@ its code.
 | `b10x-loom-sdk` | The one crate an embedding depends on |
 | `b10x-loom-executor` | The executor: catalogue, action selection, argument generation, and the model wires, turn loop and sessions ported from Harness |
 | `b10x-loom-commission` | Commission's contracts and runtime loop, generated from its ESS specification |
+| `b10x-loom-connectors` | Commission's `ConnectorInvoker` over a Connectors service (Connectors `v0.35.0`) |
 | `b10x-loom-governor` | Evaluates a case's protocol with Canon and issues the frontier; executes nothing |
 | `b10x-loom-intake-router`, `-references`, `-slice` | Route an intent to a protocol, extract its references, and run the local slice over a git work tree |
 

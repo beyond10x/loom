@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T16:21:57Z",
+  "actor": "human:timo",
+  "artifact": "story:connectors-invoker",
+  "kind": "story",
+  "revision": 16,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "an admitted request against an in-process fake Connectors v1alpha2 service is invoked once and answers Performed naming the attempt the service reported (admitted_request_is_performed_once_and_names_the_attempt); not-performed answers Refused; every other failure answers Err; unknown instance answers Err before any call; red first on a stub (0 passed, 4 failed). Adversary pass 1: 2 red cases fixed in f69d0b2 (attempt of another instance, unsendable integer)",
+    "reference": "1696397"
+  }
+}

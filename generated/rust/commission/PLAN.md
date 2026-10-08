@@ -1,14 +1,14 @@
 <!--
   generated from commission v1
-  model digest 8db90cc66d4bc3ec0bb9488f3f0c5b7ef98e8ad5c63e3a689e5fbb11cc97e1b3
-  contract digest a9c189d13a15cd5bd6f11d0b3c6466a26c029c0f91acd1680229ac61b3cb20eb
+  model digest a32c2a6e9e2a197db12e3115b709774d3cd71cf05e85abc4bf84e97964942b17
+  contract digest 40d66bc15b14d23fcd1d682c020fe0282a937b912f74bc1c3dd8f34410f106f9
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — commission v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-89 capabilities: **88 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+93 capabilities: **92 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -39,6 +39,9 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `commission.responsibility.CompletionDetermination` |
 | domain type | `commission.responsibility.CompletionDeterminationComplete` |
 | domain type | `commission.responsibility.ConnectorAttemptId` |
+| domain type | `commission.responsibility.ConnectorCredentialRef` |
+| domain type | `commission.responsibility.ConnectorEndpoint.State` |
+| domain type | `commission.responsibility.ConnectorEndpointUrl` |
 | domain type | `commission.responsibility.ConnectorInstanceId` |
 | domain type | `commission.responsibility.ConnectorOperationId` |
 | domain type | `commission.responsibility.EffectOutcome` |
@@ -82,6 +85,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | entity lifecycle | `commission.responsibility.AuthorityDecision` |
 | entity lifecycle | `commission.responsibility.Case` |
 | entity lifecycle | `commission.responsibility.Commission` |
+| entity lifecycle | `commission.responsibility.ConnectorEndpoint` |
 | entity lifecycle | `commission.responsibility.Evidence` |
 | entity lifecycle | `commission.responsibility.Frontier` |
 | entity lifecycle | `commission.responsibility.Observation` |

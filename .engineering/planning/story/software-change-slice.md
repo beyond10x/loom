@@ -13,14 +13,18 @@ relations:
 - serves: vision:governed-autonomy
 scope:
 - confidence: inferred
+  path: Cargo.lock
+- confidence: inferred
   path: crates/loom-governor/Cargo.toml
 - confidence: inferred
   path: crates/loom-governor/tests
-revision: 3
+- confidence: cited
+  path: crates/loom-governor/tests/fixtures/chg-1842.fixture.yaml
+- confidence: inferred
+  path: crates/loom-intake-slice/tests
+revision: 7
 ---
-> Re-filed from `beyond10x/commission` `story:software-change-slice` at `e61e4f0` (status there: `draft`) under Atlas ADR 0090
-> (loom `story:import-commission`). Paths below are Commission's: `ess/` is now `ess/commission/`,
-> `docs/` is now `docs/commission/`.
+> Re-filed from `beyond10x/commission` `story:software-change-slice` at `e61e4f0` (status there: `draft`) under Atlas ADR 0090 (loom `story:import-commission`); paths below are Loom's.
 
 ## Outcome
 
@@ -44,7 +48,7 @@ run/session" belong to `story:approval-suspend-resume-slice` (I-003), not here.
 
 ## Domain relations
 
-- Commission -> Case, many-to-one, references: `ess/domains/responsibility.yaml`,
+- Commission -> Case, many-to-one, references: `ess/commission/domains/responsibility.yaml`,
   `commission.responsibility.Commission` relation `case`.
 - Frontier -> Case, many-to-one, references, carrying `case_revision`:
   `commission.responsibility.Frontier` relation `case`.
@@ -65,16 +69,23 @@ current at the call.
 
 ## Tests
 
-The tests live under commission `tests/` and drive ELS fixtures through Loom (pinned
-dev-dependency). Loom is a dev-dependency pinned by `Cargo.lock`; the pin moves only in a story that
-names the Loom change it takes and re-runs all three slices. No loom or els source changes here.
+The test is a Rust integration test in this workspace. It drives the `chg-1842` fixture
+(`crates/loom-governor/tests/fixtures/chg-1842.fixture.yaml`) through Commission's runtime
+(`crates/loom-commission`), Loom's executor (`crates/loom-executor`) and the governor
+(`crates/loom-governor`, `CanonGovernor`), with authority from `crates/loom-commission-testkit`
+(`StaticAuthorityProvider`). Commission, Loom and the governor are path crates of one workspace,
+so no dependency pin moves here. The change adds tests only: no `crates/*/src` source and no
+engineering-protocols (ELS) change.
 
 ## Notes
 
 - Claim and action ids (`tests.pass`, `repository.merge`) are taken from Atlas
-  `epic:ga-vertical-slices` and `docs/contracts/frontier.md`; ELS does not define the
-  `software.change/1` fixture yet (TASKBOARD E-002, E-005).
-- Sequenced after `epic:governor-adapter` (the epic `depends_on` edge).
+  `epic:ga-vertical-slices` and `docs/commission/contracts/frontier.md`. ELS `software.change/1`
+  ships as `software-change@1` in engineering-protocols `0.1.0`; its fixture case `chg-1842` is copied
+  at `crates/loom-governor/tests/fixtures/chg-1842.fixture.yaml`.
+- Sequenced after `epic:governor` (which replaces Commission's `epic:governor-adapter`).
+- Unchecked: which of the six steps existing tests already cover; `crates/loom-cli/tests/slice_run.rs`
+  already stops at `ApprovalRequired (repository.merge)`.
 
 ## Source
 
