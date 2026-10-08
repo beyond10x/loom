@@ -295,12 +295,16 @@ other Git call sites except the separately hardened pinned-source helper at
 `crates/loom-protocols/src/git.rs`. That helper fetches into a private bare repository, never a
 run workspace, with hooks, fsmonitor, helpers and global/system configuration disabled. Gates still run when the operator or the bot commits and pushes.
 
-Model calls go through llm's crates at release tag `0.3.1`, never a hand-written HTTP client.
+Model calls go through llm's crates at release tag `0.4.0`, never a hand-written HTTP client.
 `model_retry.rs` owns caller retries using llm's retry
 classification and `RetryPolicy`: three identical attempts, no retry after a sink event,
 cancellation-aware backoff and per-attempt context metrics. Model ports stay single-attempt;
 effects remain outside this loop. `system_query.rs` exercises recovery in all three request phases. The Codex preset and the forced tool call are
-`codex_model` (the CLI builds its model with it) and `call_tool` (the router calls it). The
+`codex_model` (the CLI builds its model with it) and `call_tool` (the router calls it). With
+`run --catalog`, the CLI builds both models instead with `b10x-llm-models` `port` from the
+route aliases `--model` and `--classifier-model` name (`crates/loom-cli/src/model_catalog.rs`,
+held by `crates/loom-cli/tests/catalog_route.rs`): one target per route, no fallback, and no
+credential resolver, so a credentialed account is refused before any model call. The
 credential is the operator's Codex login (`~/.codex/auth.json`), read and renewed by llm, never by
 Loom code. The ported wires take theirs from a `loom.run.WireCredential` reference through
 `credentials::ResolvedBearer`, which asks a `SecretResolver` the embedder injects at each call.

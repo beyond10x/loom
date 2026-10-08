@@ -8,6 +8,8 @@ use std::sync::Arc;
 use b10x_llm_tool_call::codex_model;
 use b10x_loom_cli::evaluate::{decision_json, refusal_json, refused_input, request_from_json};
 use b10x_loom_cli::events::{EventStream, FAILED};
+use b10x_loom_cli::model_catalog::ModelCatalog;
+use b10x_loom_cli::regular_file;
 use b10x_loom_cli::{
     Cli, Command, Confinement, EvaluateArgs, Output, ProtocolCommand, RunArgs, exit_status,
 };
@@ -24,6 +26,7 @@ use b10x_loom_intake_slice::intent::{
 use b10x_loom_intake_slice::run::{LOCAL_PROTOCOL, RunOptions, SliceRun, StopReason, printable};
 use clap::Parser;
 use llm_core::Model;
+use llm_models::Port;
 use loom_governor::{CanonGovernor, MemoryCaseStore};
 use loom_protocols::InstallStore;
 use serde_json::{Value, json};
@@ -81,8 +84,10 @@ fn read_request(path: Option<&Path>) -> Result<String, String> {
     use std::io::Read;
     let mut bytes = Vec::new();
     let read = match path {
-        Some(path) => std::fs::File::open(path)
-            .and_then(|file| file.take(MAX_REQUEST_BYTES + 1).read_to_end(&mut bytes)),
+        Some(path) => regular_file::open(path)
+            .map_err(|reason| format!("the request {} {reason}", path.display()))?
+            .take(MAX_REQUEST_BYTES + 1)
+            .read_to_end(&mut bytes),
         None => std::io::stdin()
             .lock()
             .take(MAX_REQUEST_BYTES + 1)
@@ -228,6 +233,18 @@ fn execute(
             arguments.threshold
         ));
     }
+    // Both models are settled here, before any model call: an alias the catalog does not name
+    // or a catalog that cannot be read stops the run now.
+    let (mut classifier_route, mut agent_route) = match &arguments.catalog {
+        Some(path) => {
+            let models = ModelCatalog::read(path)?;
+            (
+                Some(models.model("--classifier-model", &arguments.classifier_model)?),
+                Some(models.model("--model", &arguments.model)?),
+            )
+        }
+        None => (None, None),
+    };
     let catalog = InstallStore::user()?.catalog()?;
     let governor = CanonGovernor::new(MemoryCaseStore::default())
         .with_catalog(&catalog)
@@ -248,11 +265,11 @@ fn execute(
         PreparedIntent::restore(&handoff["route"], &request, &catalog, options)
             .map_err(|e| e.to_string())?
     } else {
-        let classifier = codex_model(&arguments.classifier_model).map_err(|e| e.to_string())?;
-        let observed = stream.map(|stream| stream.observe(&classifier));
+        let classifier = chosen_model(classifier_route.take(), &arguments.classifier_model)?;
+        let observed = stream.map(|stream| stream.observe(&*classifier));
         let classifier: &dyn Model = match &observed {
             Some(observed) => observed,
-            None => &classifier,
+            None => &*classifier,
         };
         let preparation = prepare_intent(&request, &catalog, classifier, out, options, metrics)
             .map_err(|e| e.to_string())?;
@@ -319,11 +336,11 @@ fn execute(
             .open(ready)
             .map_err(|e| format!("delegation handshake failed: {e}"))?;
     }
-    let agent = codex_model(&arguments.model).map_err(|e| e.to_string())?;
-    let observed = stream.map(|stream| stream.observe(&agent));
+    let agent = chosen_model(agent_route.take(), &arguments.model)?;
+    let observed = stream.map(|stream| stream.observe(&*agent));
     let agent: &dyn Model = match &observed {
         Some(observed) => observed,
-        None => &agent,
+        None => &*agent,
     };
     let run = run_prepared_intent(
         &request, &prepared, &catalog, &governor, &governor, agent, &HostClock, out, options,
@@ -331,6 +348,16 @@ fn execute(
     )
     .map_err(|e| e.to_string())?;
     Ok(Ending::Stopped(run))
+}
+
+/// The catalog route's model when `--catalog` named one, otherwise the Codex model `name`.
+fn chosen_model(route: Option<Port>, name: &str) -> Result<Box<dyn Model>, String> {
+    match route {
+        Some(port) => Ok(Box::new(port)),
+        None => codex_model(name)
+            .map(|model| Box::new(model) as Box<dyn Model>)
+            .map_err(|e| e.to_string()),
+    }
 }
 
 fn confinement_refused(prepared: &PreparedIntent, reason: &str) -> Ending {

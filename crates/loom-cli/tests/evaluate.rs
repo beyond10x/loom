@@ -265,6 +265,62 @@ fn each_unusable_input_is_refused_naming_it() {
     assert_eq!(missing.status.code(), Some(1));
 }
 
+/// `--input` names a regular file or is refused, naming the path, before anything is read: a
+/// named pipe nobody writes ends the command with exit status 1 instead of blocking it forever,
+/// and so do a directory and an endless device.
+#[test]
+fn an_input_that_is_not_a_regular_file_is_refused_naming_it() {
+    use std::time::{Duration, Instant};
+    let root = tempfile::tempdir().expect("a store root");
+    let fifo = root.path().join("request.fifo");
+    assert!(
+        Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("mkfifo")
+            .success()
+    );
+    let directory = root.path().join("request.d");
+    std::fs::create_dir_all(&directory).unwrap();
+    for path in [fifo.as_path(), directory.as_path(), Path::new("/dev/zero")] {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+            .args(["evaluate", "--input", path.to_str().unwrap()])
+            .env("XDG_DATA_HOME", root.path())
+            .env_remove("B10X_LOOM_CONFINEMENT_REEXEC")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("b10x-loom starts");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() > deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!(
+                    "evaluate --input {} still blocked after 10 s",
+                    path.display()
+                );
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let output = child.wait_with_output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "{}: {stderr}",
+            path.display()
+        );
+        assert!(
+            stderr.contains(path.to_str().unwrap()) && stderr.contains("not a regular file"),
+            "{}: {stderr}",
+            path.display()
+        );
+        assert!(output.stdout.is_empty(), "{}", path.display());
+    }
+}
+
 /// Submits `record` through Commission's `submit_evidence`, bound to the case's current revision.
 fn submit(governor: &CanonGovernor<MemoryCaseStore>, case: &CaseId, n: u64, record: &Value) {
     let uuid = |k: u64| Uuid(format!("00000000-0000-4000-8000-{k:012x}"));

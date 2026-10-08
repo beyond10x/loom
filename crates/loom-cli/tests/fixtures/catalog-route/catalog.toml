@@ -1,0 +1,149 @@
+format = "llm.catalog/1"
+
+[[providers]]
+id = "lab"
+category = "self-hosted"
+
+[[accounts]]
+id = "local"
+provider_id = "lab"
+auth_kind = "anonymous"
+billing_kind = "self-hosted"
+
+[[accounts]]
+id = "keyed"
+provider_id = "lab"
+auth_kind = "bearer"
+billing_kind = "metered"
+secret_reference_id = "lab-token"
+
+[[endpoints]]
+id = "loopback"
+account_id = "local"
+base_url = "http://127.0.0.1:1/v1"
+
+[[endpoints]]
+id = "keyed-loopback"
+account_id = "keyed"
+base_url = "http://127.0.0.1:1/v1"
+
+[[models]]
+id = "classifier"
+upstream_name = "example/Classifier-Model"
+
+[[models]]
+id = "agent"
+upstream_name = "example/Agent-Model"
+
+[[serving_models]]
+id = "classifier-chat"
+endpoint_id = "loopback"
+model_id = "classifier"
+protocol = "chat-completions"
+[serving_models.capabilities]
+tools = true
+tool_choice = true
+temperature = false
+top_p = false
+reasoning_efforts = []
+context_window = 128000
+max_output_tokens = 8192
+
+[[serving_models]]
+id = "agent-chat"
+endpoint_id = "loopback"
+model_id = "agent"
+protocol = "chat-completions"
+[serving_models.capabilities]
+tools = true
+tool_choice = true
+temperature = false
+top_p = false
+reasoning_efforts = []
+context_window = 128000
+max_output_tokens = 8192
+
+[[serving_models]]
+id = "agent-keyed"
+endpoint_id = "keyed-loopback"
+model_id = "agent"
+protocol = "chat-completions"
+[serving_models.capabilities]
+tools = true
+tool_choice = true
+temperature = false
+top_p = false
+reasoning_efforts = []
+context_window = 128000
+max_output_tokens = 8192
+
+[[serving_models]]
+id = "agent-text"
+endpoint_id = "loopback"
+model_id = "agent"
+protocol = "chat-completions"
+[serving_models.capabilities]
+tools = false
+tool_choice = false
+temperature = false
+top_p = false
+reasoning_efforts = []
+context_window = 128000
+max_output_tokens = 8192
+
+[[routes]]
+id = "classify"
+alias = "lab-classifier"
+
+[[routes]]
+id = "act"
+alias = "lab-agent"
+
+[[routes]]
+id = "keyed"
+alias = "lab-keyed"
+
+[[routes]]
+id = "text"
+alias = "lab-text"
+
+[[routes]]
+id = "fallback"
+alias = "lab-fallback"
+fallback_enabled = true
+
+[[targets]]
+id = "classify-primary"
+route_id = "classify"
+serving_model_id = "classifier-chat"
+position = 0
+
+[[targets]]
+id = "act-primary"
+route_id = "act"
+serving_model_id = "agent-chat"
+position = 0
+
+[[targets]]
+id = "keyed-primary"
+route_id = "keyed"
+serving_model_id = "agent-keyed"
+position = 0
+
+[[targets]]
+id = "text-primary"
+route_id = "text"
+serving_model_id = "agent-text"
+position = 0
+
+[[targets]]
+id = "fallback-primary"
+route_id = "fallback"
+serving_model_id = "agent-chat"
+position = 0
+
+[[targets]]
+id = "fallback-secondary"
+route_id = "fallback"
+serving_model_id = "classifier-chat"
+position = 1

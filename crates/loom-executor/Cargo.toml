@@ -8,7 +8,7 @@ repository.workspace = true
 
 [dependencies]
 b10x-loom-commission = { path = "../loom-commission" }
-b10x-llm-credentials = { git = "https://github.com/beyond10x/llm", tag = "0.3.1" }
+b10x-llm-credentials = { git = "https://github.com/beyond10x/llm", tag = "0.4.0" }
 httpdate = "1.0.3"
 jsonschema = { version = "0.52.1", default-features = false }
 loom = { path = "../../generated/rust/loom" }
