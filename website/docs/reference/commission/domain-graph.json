@@ -223,6 +223,37 @@
     {
       "fields": [
         {
+          "name": "url",
+          "type": "ConnectorEndpointUrl"
+        },
+        {
+          "name": "credential",
+          "type": "ConnectorCredentialRef"
+        },
+        {
+          "name": "allow_plaintext",
+          "type": "boolean"
+        }
+      ],
+      "id": "commission.responsibility.ConnectorEndpoint",
+      "identity": {
+        "name": "instance_id",
+        "type": "ConnectorInstanceId"
+      },
+      "lifecycle": {
+        "initial": "Declared",
+        "states": [
+          "Declared"
+        ],
+        "terminal": [
+          "Declared"
+        ]
+      },
+      "name": "ConnectorEndpoint"
+    },
+    {
+      "fields": [
+        {
           "name": "case_id",
           "type": "CaseId"
         },
@@ -394,6 +425,14 @@
   ],
   "format": "b10x-domain-graph/1",
   "relations": [
+    {
+      "cardinality": "one",
+      "from": "commission.responsibility.ActionBinding",
+      "kind": "references",
+      "name": "endpoint",
+      "to": "commission.responsibility.ConnectorEndpoint",
+      "via": "instance_id"
+    },
     {
       "cardinality": "one",
       "from": "commission.responsibility.ActionRequest",

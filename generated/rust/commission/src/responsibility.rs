@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 8db90cc66d4bc3ec0bb9488f3f0c5b7ef98e8ad5c63e3a689e5fbb11cc97e1b3
-// contract digest a9c189d13a15cd5bd6f11d0b3c6466a26c029c0f91acd1680229ac61b3cb20eb
+// model digest a32c2a6e9e2a197db12e3115b709774d3cd71cf05e85abc4bf84e97964942b17
+// contract digest 40d66bc15b14d23fcd1d682c020fe0282a937b912f74bc1c3dd8f34410f106f9
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Responsibility — `commission.responsibility`.
@@ -198,6 +198,24 @@ pub struct CompletionDeterminationComplete {
 /// ConnectorAttemptId — `commission.responsibility.ConnectorAttemptId`: a distinct wrapper around `String`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectorAttemptId(pub String);
+
+/// ConnectorCredentialRef — `commission.responsibility.ConnectorCredentialRef`: a distinct wrapper around `String`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectorCredentialRef(pub String);
+
+/// The states of `commission.responsibility.ConnectorEndpoint`, as runtime values.
+///
+/// Synthesised from the lifecycle, so the two cannot disagree. Which *moves* are legal is not
+/// carried here — it is carried by `ConnectorEndpoint<S>`, where an undeclared move does not compile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectorEndpointState {
+    /// `Declared`.
+    Declared,
+}
+
+/// ConnectorEndpointUrl — `commission.responsibility.ConnectorEndpointUrl`: a distinct wrapper around `String`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectorEndpointUrl(pub String);
 
 /// ConnectorInstanceId — `commission.responsibility.ConnectorInstanceId`: a distinct wrapper around `String`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -510,6 +528,8 @@ pub struct ActionBindingData {
     /// Carries `bindings`: `commission.responsibility.Commission` owns many `commission.responsibility.ActionBinding`.
     pub commission_id: CommissionId,
     /// `instance_id` — `commission.responsibility.ConnectorInstanceId`.
+    ///
+    /// Carries `endpoint`: `commission.responsibility.ActionBinding` references one `commission.responsibility.ConnectorEndpoint`.
     pub instance_id: ConnectorInstanceId,
     /// `operation_id` — `commission.responsibility.ConnectorOperationId`.
     pub operation_id: ConnectorOperationId,
@@ -1427,6 +1447,138 @@ impl AnyCommission {
         match self {
             Self::Assigned(instance) => CommissionSnapshot {
                 state: CommissionState::Assigned,
+                data: instance.into_data(),
+            },
+        }
+    }
+}
+
+/// What ConnectorEndpoint — `commission.responsibility.ConnectorEndpoint` — holds, apart from where it is in its lifecycle.
+///
+/// The identity and every declared field. The state is deliberately not one: inside the domain it
+/// is carried by the type parameter of [`ConnectorEndpoint<S>`], and at a boundary by [`ConnectorEndpointSnapshot::state`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectorEndpointData {
+    /// The identity: `instance_id` — `commission.responsibility.ConnectorInstanceId`.
+    pub instance_id: ConnectorInstanceId,
+    /// `url` — `commission.responsibility.ConnectorEndpointUrl`.
+    pub url: ConnectorEndpointUrl,
+    /// `credential` — `commission.responsibility.ConnectorCredentialRef`.
+    pub credential: ConnectorCredentialRef,
+    /// `allow_plaintext` — `Boolean`.
+    pub allow_plaintext: bool,
+}
+
+/// The states of `commission.responsibility.ConnectorEndpoint`, at the type level.
+///
+/// One marker type per declared state, sealed: a state the lifecycle does not declare cannot
+/// implement [`Marker`](connector_endpoint_state::Marker), so [`ConnectorEndpoint<S>`](ConnectorEndpoint) can only ever rest in a real state.
+pub mod connector_endpoint_state {
+    /// Closes [`Marker`] over the declared states.
+    mod sealed {
+        /// Implemented only by the marker types beside this module.
+        pub trait Sealed {}
+        impl Sealed for super::Declared {}
+    }
+
+    /// A declared state of `ConnectorEndpoint`, as a type.
+    pub trait Marker: sealed::Sealed {
+        /// The same state, as the runtime value.
+        const STATE: super::ConnectorEndpointState;
+    }
+
+    /// `Declared`. Where a new instance starts.
+    pub struct Declared;
+
+    impl Marker for Declared {
+        const STATE: super::ConnectorEndpointState = super::ConnectorEndpointState::Declared;
+    }
+}
+
+/// ConnectorEndpoint — `commission.responsibility.ConnectorEndpoint` — with its lifecycle state carried by the type.
+///
+/// The one constructor rests in `Declared`, and the only way to change `S` is a method generated from
+/// a declared transition. A move the specification does not declare is therefore not an error
+/// case: it does not compile. Where the state is data — wire, storage — use [`ConnectorEndpointSnapshot`]
+/// and [`ConnectorEndpointSnapshot::refine`].
+pub struct ConnectorEndpoint<S: connector_endpoint_state::Marker> {
+    data: ConnectorEndpointData,
+    state: core::marker::PhantomData<S>,
+}
+
+impl<S: connector_endpoint_state::Marker> ConnectorEndpoint<S> {
+    /// The state this instance rests in, as the runtime value.
+    pub fn state(&self) -> ConnectorEndpointState {
+        S::STATE
+    }
+
+    /// What it holds.
+    pub fn data(&self) -> &ConnectorEndpointData {
+        &self.data
+    }
+
+    /// Hands the data back, giving up the typed state.
+    pub fn into_data(self) -> ConnectorEndpointData {
+        self.data
+    }
+}
+
+impl ConnectorEndpoint<connector_endpoint_state::Declared> {
+    /// A new instance, resting in `Declared` — the only state the lifecycle starts one in.
+    pub fn new(data: ConnectorEndpointData) -> Self {
+        Self {
+            data,
+            state: core::marker::PhantomData,
+        }
+    }
+}
+
+/// `commission.responsibility.ConnectorEndpoint` as it crosses a boundary: the state as a value beside the data.
+///
+/// Wire and storage know states only at runtime; [`ConnectorEndpointSnapshot::refine`] is the one door back
+/// into the typed lifecycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectorEndpointSnapshot {
+    /// Where the instance is in its lifecycle.
+    pub state: ConnectorEndpointState,
+    /// What it holds.
+    pub data: ConnectorEndpointData,
+}
+
+/// An `ConnectorEndpoint` in whichever declared state it was found.
+pub enum AnyConnectorEndpoint {
+    /// Resting in `Declared`.
+    Declared(ConnectorEndpoint<connector_endpoint_state::Declared>),
+}
+
+impl ConnectorEndpointSnapshot {
+    /// Refines the runtime state into the typed one.
+    ///
+    /// Total: every declared state has an arm, and an undeclared state cannot reach here because
+    /// `ConnectorEndpointState` cannot spell one.
+    pub fn refine(self) -> AnyConnectorEndpoint {
+        match self.state {
+            ConnectorEndpointState::Declared => AnyConnectorEndpoint::Declared(ConnectorEndpoint {
+                data: self.data,
+                state: core::marker::PhantomData,
+            }),
+        }
+    }
+}
+
+impl AnyConnectorEndpoint {
+    /// The state, as the runtime value.
+    pub fn state(&self) -> ConnectorEndpointState {
+        match self {
+            Self::Declared(_) => ConnectorEndpointState::Declared,
+        }
+    }
+
+    /// Back to the boundary shape.
+    pub fn snapshot(self) -> ConnectorEndpointSnapshot {
+        match self {
+            Self::Declared(instance) => ConnectorEndpointSnapshot {
+                state: ConnectorEndpointState::Declared,
                 data: instance.into_data(),
             },
         }

@@ -1,0 +1,18 @@
+[package]
+name = "b10x-loom-connectors"
+description = "Commission's ConnectorInvoker over a Connectors service: invokes a bound Connector operation once and reports the attempt Connectors recorded."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+b10x-loom-commission = { path = "../loom-commission" }
+connectors-client = { git = "https://github.com/beyond10x/connectors", tag = "v0.35.0" }
+connectors-core = { git = "https://github.com/beyond10x/connectors", tag = "v0.35.0" }
+serde_json = "1"
+tokio = { version = "1.53", features = ["rt-multi-thread"] }
+
+[dev-dependencies]
+b10x-loom-commission-testkit = { path = "../loom-commission-testkit" }

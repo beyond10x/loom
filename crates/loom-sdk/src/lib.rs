@@ -8,6 +8,7 @@
 //! | Module | Crate | What it is for |
 //! | --- | --- | --- |
 //! | [`commission`] | `b10x-loom-commission` | The contracts and the runtime: the generated responsibility model ([`commission::model`]), the ports an embedder implements or calls ([`commission::ports`]), and the loop that drives a commission until it is blocked ([`commission::runtime`]). |
+//! | [`connectors`] | `b10x-loom-connectors` | Commission's `ConnectorInvoker` over a Connectors service: [`connectors::ConnectorsInvoker`] invokes the operation an action is bound to once, on the host's endpoint for its instance, and reports the attempt Connectors recorded. |
 //! | [`loom`] | `b10x-loom-executor` | The executor: [`Loom`] proposes one action per frontier through an [`ActionSelector`] and an [`ArgumentGenerator`] the embedder supplies. |
 //! | [`governor`] | `b10x-loom-governor` | The governor: [`CanonGovernor`] evaluates a case's protocol with Canon over a [`CaseStore`] and issues its frontier. |
 //! | [`intake`] | `b10x-loom-intake-router`, `b10x-loom-intake-slice` | Intake: the router that proposes a protocol for an intent ([`intake::router`]), and the slice's case opening, local executor, test-result verifier and local effect adapter ([`intake::slice`]). |
@@ -22,6 +23,9 @@
 
 /// Commission's contracts and runtime (`b10x-loom-commission`).
 pub use b10x_loom_commission as commission;
+
+/// Commission's `ConnectorInvoker` over a Connectors service (`b10x-loom-connectors`).
+pub use b10x_loom_connectors as connectors;
 
 /// The Loom executor (`b10x-loom-executor`).
 pub use b10x_loom_executor as loom;
