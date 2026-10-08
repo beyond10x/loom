@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:incident-response-slice
 kind: story
-status: draft
+status: active
 title: 'Incident-response vertical slice: leave emergency mode with cause unknown'
 refs:
 - provider: commission
@@ -18,7 +18,10 @@ scope:
   path: crates/loom-governor/tests/fixtures/inc-492.fixture.yaml
 - confidence: inferred
   path: crates/loom-governor/tests/incident_response_slice.rs
-revision: 11
+revision: 13
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-08T17:26:32Z", actor: "human:timo", revision: 12}
+- {from: "proposed", to: "active", at: "2026-10-08T17:26:32Z", actor: "human:timo", revision: 13}
 ---
 > Re-filed from `beyond10x/commission` `story:incident-response-slice` at `e61e4f0` (status there: `draft`) under Atlas ADR 0090 (loom `story:import-commission`); paths mapped to Loom.
 

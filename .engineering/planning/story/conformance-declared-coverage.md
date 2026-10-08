@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:conformance-declared-coverage
 kind: story
-status: draft
+status: active
 title: Conformance suites carry declared coverage and must qualify as passed
 relations:
 - serves: vision:O1
@@ -11,7 +11,10 @@ scope:
   path: crates/loom-commission-conformance/tests/conform.rs
 - confidence: inferred
   path: crates/loom-conformance/tests/conform.rs
-revision: 2
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-08T17:26:32Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-10-08T17:26:32Z", actor: "human:timo", revision: 4}
 ---
 ## Outcome
 

@@ -2,12 +2,15 @@
 format: aep.planning-md/3
 id: story:connector-read-performed
 kind: story
-status: draft
+status: active
 title: A read through Connectors answers Performed
 relations:
 - serves: vision:O3
 - decomposes: epic:effect-bindings
-revision: 2
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-08T17:26:31Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-10-08T17:26:31Z", actor: "human:timo", revision: 4}
 ---
 ## Outcome
 
