@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T02:14:56Z",
+  "actor": "human:timo",
+  "artifact": "story:release-050",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "Exact tag release workflow: version/changelog check and full task check passed",
+    "reference": "https://github.com/beyond10x/loom/actions/runs/37715998279"
+  }
+}
