@@ -206,7 +206,12 @@ fn an_unreadable_catalog_is_refused_naming_the_file() {
         ]);
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(output.status.code(), Some(1), "{}: {stderr}", path.display());
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "{}: {stderr}",
+            path.display()
+        );
         assert!(
             stderr.contains(path.to_str().unwrap()),
             "names {}: {stderr}",

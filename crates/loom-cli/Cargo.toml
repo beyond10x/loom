@@ -18,9 +18,13 @@ path = "src/main.rs"
 b10x-loom-protocols = { path = "../loom-protocols" }
 serde_json = "1"
 b10x-loom-governor = { path = "../loom-governor" }
-b10x-llm-tool-call = { git = "https://github.com/beyond10x/llm", tag = "0.3.1" }
+b10x-llm-tool-call = { git = "https://github.com/beyond10x/llm", tag = "0.4.0" }
 b10x-loom-intake-slice = { path = "../loom-intake-slice" }
-b10x-llm-core = { git = "https://github.com/beyond10x/llm", tag = "0.3.1" }
+b10x-llm-core = { git = "https://github.com/beyond10x/llm", tag = "0.4.0" }
+b10x-llm-models = { git = "https://github.com/beyond10x/llm", tag = "0.4.0" }
+b10x-llm-routing = { git = "https://github.com/beyond10x/llm", tag = "0.4.0" }
+b10x-llm-http = { git = "https://github.com/beyond10x/llm", tag = "0.4.0" }
+b10x-llm-credentials = { git = "https://github.com/beyond10x/llm", tag = "0.4.0" }
 intake_model = { package = "intake", path = "../../generated/rust/intake" }
 clap = { version = "4.6", features = ["derive"] }
 tempfile = "3"

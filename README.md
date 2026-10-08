@@ -91,6 +91,10 @@ For a software change, it prints each step with its effect and evidence and ends
 3 another stop, 1 a failure, 2 an invalid command line. With `--output jsonl` standard output is
 one JSON record per line instead, the last one the terminal record with the stop reason and that
 exit status ([run events](https://beyond10x.github.io/loom/docs/reference/run-events)).
+`--model` and `--classifier-model` name Codex models (default `gpt-5.6-sol`). With
+`--catalog <PATH>`, an [llm](https://beyond10x.github.io/llm/) catalog file, both name route
+aliases of that catalog instead, such as a self-hosted endpoint whose account needs no
+credential; an unknown alias or an unreadable catalog stops the run before any model call.
 
 Since `0.2.0` tests run confined. A software-change run needs a Codex
 login and Linux with bubblewrap and delegated cgroup v2 controllers. Tests default to Substrate:

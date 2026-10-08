@@ -43,8 +43,9 @@ Usage: b10x-loom run [OPTIONS] <INTENT>
 | `--workspace <DIR>` | no | none | Existing Git worktree for software changes; unnecessary for system queries |
 | `--test-cmd <CMD>` | no | `cargo test` | The test command, run in the workspace without a shell: a program and its arguments, split at white space |
 | `--max-steps <N>` | no | `20` | The most actions performed before the run stops |
-| `--model <ID>` | no | `gpt-5.6-sol` | The model that selects actions and writes their arguments |
-| `--classifier-model <ID>` | no | `gpt-5.6-sol` | The model that classifies the intent |
+| `--catalog <PATH>` | no | none | An llm catalog file (`llm.catalog/1` TOML). With it, `--model` and `--classifier-model` each name a route alias of this catalog instead of a Codex model, both of them; an alias it does not declare, or a catalog that cannot be read, stops the run before any model call |
+| `--model <ID>` | no | `gpt-5.6-sol` | The model that selects actions and writes their arguments: a Codex model name, or with `--catalog` a route alias of that catalog |
+| `--classifier-model <ID>` | no | `gpt-5.6-sol` | The model that classifies the intent: a Codex model name, or with `--catalog` a route alias of that catalog |
 | `--threshold <X>` | no | `0.5` | The confidence, from 0 to 1, below which the router refuses its pick |
 | `--output <FORMAT>` | no | `human` | What standard output carries: lines for a person, or one JSON record per line, the last one the terminal record with the stop reason and the exit status |
 | `<INTENT>` | yes | none | What to do, as given |
