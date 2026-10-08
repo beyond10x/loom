@@ -2,15 +2,45 @@
 format: aep.planning-md/3
 id: story:connector-read-performed
 kind: story
-status: active
+status: implemented
 title: A read through Connectors answers Performed
 relations:
 - serves: vision:O3
 - decomposes: epic:effect-bindings
-revision: 4
+scope:
+- confidence: cited
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
+  path: README.md
+- confidence: cited
+  path: crates/loom-commission-testkit
+- confidence: cited
+  path: crates/loom-commission/src/ports/connector.rs
+- confidence: cited
+  path: crates/loom-commission/src/runtime.rs
+- confidence: cited
+  path: crates/loom-connectors
+- confidence: cited
+  path: crates/loom-executor/tests
+- confidence: cited
+  path: crates/loom-intake-slice/src
+- confidence: cited
+  path: ess/commission/domains/responsibility.yaml
+- confidence: cited
+  path: generated/rust/commission
+- confidence: cited
+  path: website/data/status.json
+- confidence: cited
+  path: website/docs/concepts/where-loom-ends.md
+- confidence: cited
+  path: website/docs/reference/commission
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-08T17:26:31Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-08T17:26:31Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-08T17:46:56Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}}
 ---
 ## Outcome
 

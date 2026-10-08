@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:software-change-slice
 kind: story
-status: active
+status: implemented
 title: 'Software-change vertical slice: stale evidence, projected merge, authority outside the model'
 refs:
 - provider: commission
@@ -12,20 +12,19 @@ relations:
 - serves: vision:O1
 - serves: vision:governed-autonomy
 scope:
-- confidence: inferred
+- confidence: cited
   path: Cargo.lock
-- confidence: inferred
+- confidence: cited
   path: crates/loom-governor/Cargo.toml
-- confidence: inferred
-  path: crates/loom-governor/tests
 - confidence: cited
   path: crates/loom-governor/tests/fixtures/chg-1842.fixture.yaml
-- confidence: inferred
-  path: crates/loom-intake-slice/tests
-revision: 9
+- confidence: cited
+  path: crates/loom-governor/tests/software_change_slice.rs
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-08T17:26:32Z", actor: "human:timo", revision: 8}
 - {from: "proposed", to: "active", at: "2026-10-08T17:26:32Z", actor: "human:timo", revision: 9}
+- {from: "active", to: "implemented", at: "2026-10-08T17:46:56Z", actor: "human:timo", revision: 12, decided_on: {"recorded":{"test_result":1,"verification":1}}}
 ---
 > Re-filed from `beyond10x/commission` `story:software-change-slice` at `e61e4f0` (status there: `draft`) under Atlas ADR 0090 (loom `story:import-commission`); paths below are Loom's.
 

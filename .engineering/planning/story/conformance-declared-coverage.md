@@ -2,19 +2,28 @@
 format: aep.planning-md/3
 id: story:conformance-declared-coverage
 kind: story
-status: active
+status: implemented
 title: Conformance suites carry declared coverage and must qualify as passed
 relations:
 - serves: vision:O1
 scope:
-- confidence: inferred
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
+  path: Taskfile.yml
+- confidence: cited
   path: crates/loom-commission-conformance/tests/conform.rs
-- confidence: inferred
+- confidence: cited
+  path: crates/loom-conformance/tests/adversary2_w2_conformance_status.rs
+- confidence: cited
   path: crates/loom-conformance/tests/conform.rs
-revision: 4
+- confidence: cited
+  path: ess/SKIPPED.md
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-08T17:26:32Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-08T17:26:32Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-08T17:46:56Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"test_result":1,"verification":1}}}
 ---
 ## Outcome
 

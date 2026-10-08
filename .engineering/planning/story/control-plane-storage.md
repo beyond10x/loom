@@ -21,7 +21,7 @@ scope:
   path: crates/loom-sdk/examples/software_change.rs
 - confidence: inferred
   path: ess/commission/domains/responsibility.yaml
-revision: 24
+revision: 25
 ---
 ## Outcome
 
@@ -84,3 +84,23 @@ left by a session that has ended. That file recorded `draft → proposed → act
 2026-10-05T20:09:15Z as `human:timo`; no commit holds those moves, so this record starts at
 `draft`. `story:hosted-governor` (`1b25fe8`) already delivers `FallibleCaseStore` and trusted
 evaluation time; what this story adds beyond it is unassessed.
+
+## ESS probe
+
+Probed 2026-10-08 with `ess` 0.56.0 on a scratch copy of `ess/commission/`: an error
+`commission.responsibility.RunStorageFailed` (field `reason: String`) and a `StartRun` outcome
+`storage-failed` with `external: the run store cannot hold the new run` and that error.
+
+- `ess specify validate --path <copy> --strict-requires`: exit 0, "commission v1 — 2 file(s), valid".
+- `ess generate synthesize --target rust --layout crate`: exit 0, "94 capabilities: 92 generated,
+  2 obligation(s), 0 refused" (unchanged specification: "93 capabilities: 92 generated, 1
+  obligation(s), 0 refused").
+- `ess verify conform synthesize`: "14 scenario(s) (0 authored), 0 refusal(s)".
+- Generated `StartRunOutcome` gains `StorageFailed`; `start_run` stops being generated and becomes
+  an obligation the host implements (`impl StartRunBehavior for Generated<P>` delegates to the
+  ports), so a durable host reports its failed write as that outcome. The generated `RunStorage`
+  stays infallible.
+
+So the decision's option A is expressible: declare the error and the `external:` outcome on
+`StartRun` and `SuspendRun`, regenerate; no ess change is needed. The `SuspendRun` half was not
+probed.

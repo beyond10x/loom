@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T17:46:45Z",
+  "actor": "human:timo",
+  "artifact": "story:connector-read-performed",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "at 3788cc1: task commission:ess-gate, commission:drift, commission:docs-drift, commission:deps-guard exit 0; cargo clippy -D warnings and cargo test --no-fail-fast -p b10x-loom-commission -p b10x-loom-commission-testkit -p b10x-loom-connectors --locked: 248 passed, 0 failed, exit 0; cargo check --all-targets intake-slice, executor, sdk, cli exit 0 at b565e96",
+    "reference": "3788cc1"
+  }
+}
