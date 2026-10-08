@@ -117,9 +117,10 @@ the ESS release that refuses open entries (beyond10x/ess `epic:typed-open-questi
 Commission's specification is its own ESS system under `ess/commission/`, held to the same four
 conditions with `--path ess/commission` by `task commission:ess-gate`
 (`crates/loom-commission/tests/ess_gate.rs`), which `task check` also runs. Intake's
-`intake.routing` domain is `ess/intake/`, validated by `task intake-spec`. The governor has no domain of its own:
-its nouns are Commission's and Canon's, and a noun it introduces gets one before a story is written
-around it.
+`intake.routing` domain is `ess/intake/`, validated by `task intake-spec`. The governor's nouns are
+Commission's and Canon's, except its stateless evaluation request, decision and refusal, which are
+the `loom.evaluation` domain (`ess/domains/evaluation.yaml`); a noun it introduces gets a
+declaration before a story is written around it.
 
 An open question is settled before the specification changes, in a story or in a
 `decision-blocker` when nobody has decided it, and is never written into `ess/` as an `UNMAPPED:`
@@ -225,6 +226,17 @@ failures explicitly; the legacy `CaseStore` bridge is only for infallible adapte
 restores the same admitted protocol definitions on recovery and authenticates evidence before
 `submit_evidence`. The governor supplies no authority decision.
 
+`evaluate` (`loom_governor::evaluate`, `b10x-loom evaluate`) decides a caller's `canon-case/1`
+snapshot and `canon-evidence/1` records under a protocol of the host catalog, never raw YAML from
+the caller. Its request, decision and refusal are the `loom.evaluation` domain
+(`ess/domains/evaluation.yaml`); its signature names no Commission type. It goes through the
+private `decide_case` and `project` that `CanonGovernor` uses, never a second evaluator, and a
+refusal names the input (protocol, snapshot, evidence record by position, time). A readable
+record that does not apply is set aside as `CanonGovernor` sets it aside; an unreadable record or
+a repeated id is refused. The time and the records are judged once each, never by re-running Canon
+on prefixes. `crates/loom-governor/tests/evaluate.rs` and `evaluate_adversary.rs` hold it against
+`CanonGovernor`; `crates/loom-cli/tests/evaluate.rs` holds the subcommand against the library.
+
 Canon is named by the reference `b10x-canon-engineering` uses (`branch = "main"`), pinned by
 `Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon with
 `cargo update -p b10x-canon` together with the `b10x-canon-engineering` tag (now `0.1.0`); any other
@@ -256,7 +268,8 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   actions inside the given workspace and `system.query/1` through the host clock, never merges, pushes or deploys, and never supplies
   authority on the operator's behalf. It submits evidence from the test command it runs itself.
 - `b10x-loom-cli` is `b10x-loom`. Its clap definition is the library (`src/lib.rs`, `Cli`), which
-  `loom-docs` renders. The library also holds `exit_status` and `events`, the writer of
+  `loom-docs` renders. The library also holds `evaluate`, the JSON codec of `b10x-loom evaluate`
+  over the generated `loom.evaluation` types, and `exit_status` and `events`, the writer of
   `run --output jsonl`: one `intake.events` record per line (`ess/intake/domains/events.yaml`),
   built from the generated types, the terminal record last and exactly once.
   `crates/loom-cli/tests/run_events.rs` holds it; `loom-docs` checks the hand-written
@@ -282,12 +295,16 @@ other Git call sites except the separately hardened pinned-source helper at
 `crates/loom-protocols/src/git.rs`. That helper fetches into a private bare repository, never a
 run workspace, with hooks, fsmonitor, helpers and global/system configuration disabled. Gates still run when the operator or the bot commits and pushes.
 
-Model calls go through llm's crates at release tag `0.3.1`, never a hand-written HTTP client.
+Model calls go through llm's crates at release tag `0.4.0`, never a hand-written HTTP client.
 `model_retry.rs` owns caller retries using llm's retry
 classification and `RetryPolicy`: three identical attempts, no retry after a sink event,
 cancellation-aware backoff and per-attempt context metrics. Model ports stay single-attempt;
 effects remain outside this loop. `system_query.rs` exercises recovery in all three request phases. The Codex preset and the forced tool call are
-`codex_model` (the CLI builds its model with it) and `call_tool` (the router calls it). The
+`codex_model` (the CLI builds its model with it) and `call_tool` (the router calls it). With
+`run --catalog`, the CLI builds both models instead with `b10x-llm-models` `port` from the
+route aliases `--model` and `--classifier-model` name (`crates/loom-cli/src/model_catalog.rs`,
+held by `crates/loom-cli/tests/catalog_route.rs`): one target per route, no fallback, and no
+credential resolver, so a credentialed account is refused before any model call. The
 credential is the operator's Codex login (`~/.codex/auth.json`), read and renewed by llm, never by
 Loom code. The ported wires take theirs from a `loom.run.WireCredential` reference through
 `credentials::ResolvedBearer`, which asks a `SecretResolver` the embedder injects at each call.

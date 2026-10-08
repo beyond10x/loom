@@ -13,7 +13,16 @@ relations:
 - serves: vision:O1
 - serves: vision:O3
 - serves: vision:governed-autonomy
-revision: 1
+scope:
+- confidence: cited
+  path: crates/loom-executor
+- confidence: inferred
+  path: crates/loom-executor/src/lib.rs
+- confidence: inferred
+  path: crates/loom-executor/src/selection.rs
+- confidence: inferred
+  path: crates/loom-executor/tests/reasoning_model_selector.rs
+revision: 5
 ---
 ## Outcome
 

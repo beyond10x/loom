@@ -13,7 +13,24 @@ relations:
 - serves: vision:O1
 - serves: vision:O3
 - serves: vision:governed-autonomy
-revision: 2
+scope:
+- confidence: inferred
+  path: crates/loom-executor/src/lib.rs
+- confidence: cited
+  path: crates/loom-executor/src/selection.rs
+- confidence: inferred
+  path: crates/loom-executor/tests
+- confidence: inferred
+  path: docs/contracts/loom-action-selection.md
+- confidence: inferred
+  path: docs/design/loom-design.md
+- confidence: inferred
+  path: docs/integrations/laya-fast-selection.md
+- confidence: inferred
+  path: ess/domains/run.yaml
+- confidence: inferred
+  path: generated/rust/loom/src/primitives.rs
+revision: 10
 ---
 ## Outcome
 

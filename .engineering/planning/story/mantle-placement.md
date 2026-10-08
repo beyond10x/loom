@@ -7,7 +7,12 @@ title: A Loom run can be placed on a remote Mantle node (later)
 relations:
 - decomposes: epic:effect-bindings
 - informed_by: architecture-design:effect-isolation
-revision: 1
+scope:
+- confidence: inferred
+  path: crates/loom-cli
+- confidence: inferred
+  path: docs
+revision: 3
 ---
 ## Outcome
 

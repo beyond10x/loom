@@ -13,7 +13,16 @@ relations:
 - serves: vision:O1
 - serves: vision:O3
 - serves: vision:governed-autonomy
-revision: 1
+scope:
+- confidence: inferred
+  path: Cargo.lock
+- confidence: inferred
+  path: crates/loom-selector-laya
+- confidence: inferred
+  path: docs/contracts/loom-action-selection.md
+- confidence: inferred
+  path: docs/integrations/laya-fast-selection.md
+revision: 5
 ---
 ## Outcome
 

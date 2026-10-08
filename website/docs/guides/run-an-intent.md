@@ -42,7 +42,11 @@ b10x-loom run --workspace <git work tree> --test-cmd "cargo test" "make the fail
 
 Every flag and its default is on the [CLI reference](../reference/cli.md). `--max-steps` (default
 20) bounds the actions performed, refused ones included. `--model` and `--classifier-model` name the
-models that choose actions and classify the intent.
+models that choose actions and classify the intent: Codex models, or, with `--catalog <PATH>`, route
+aliases of that [llm](https://beyond10x.github.io/llm/) catalog file. A catalog route serves the
+port its first target declares, never falls back to another target, and needs an account without
+a credential, because the command line supplies none. An alias the catalog does not declare, or a
+catalog that cannot be read, stops the run with exit status 1 before any model call.
 
 `--confinement substrate` is the default. `--cgroup-root` selects an explicit delegated
 root. Tests retain their 300-second timeout, with 8 GiB memory and 2,048-process limits.

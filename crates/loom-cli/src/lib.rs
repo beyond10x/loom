@@ -2,7 +2,9 @@
 //!
 //! The command is the `b10x-loom` binary (`src/main.rs`). This library holds only the definition
 //! of its command line, so `loom-docs` can generate the CLI reference from it, the exit status a
-//! stop reason maps to, and the run event stream `run --output jsonl` writes ([`events`]).
+//! stop reason maps to, the run event stream `run --output jsonl` writes ([`events`]), the
+//! JSON `evaluate` reads and writes ([`evaluate`]), and the llm catalog `run --catalog` reads
+//! ([`model_catalog`]).
 
 use std::path::PathBuf;
 
@@ -11,7 +13,7 @@ use b10x_loom_intake_slice::run::StopReason;
 use clap::builder::TypedValueParser;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
-/// The model both the agent and the classifier use unless told otherwise.
+/// The Codex model both the agent and the classifier use unless told otherwise.
 pub const DEFAULT_MODEL: &str = "gpt-5.6-sol";
 
 /// What `run --help` says about the exit status; the binary's `exit_status` decides it.
@@ -21,7 +23,26 @@ pub const EXIT_STATUS: &str = "Exit status:
   1  the run failed
   2  the command line is not valid";
 
+/// What `evaluate --help` says about its input, its output and its exit status.
+pub const EVALUATE_HELP: &str = "The request is one JSON object (loom.evaluation.EvaluationRequest):
+  {\"protocol\": \"<name>@<major>\", \"snapshot\": {canon-case/1}, \"evidence\": [{canon-evidence/1}, ...], \"at\": \"<RFC 3339>\"}
+`at` is optional. The protocol comes from this host's catalog (`protocols list`), never from the request.
+A record that is not a readable canon-evidence/1 record, or repeats an earlier record's id, is refused.
+A readable record that does not apply to the case (an undeclared kind or subject, for instance) is set
+aside, as the governor sets it aside, and the decision is made from the rest without listing it.
+Unlike the governor, which sets an unreadable record and a repeated id aside (keeping the first) and
+still decides, evaluate refuses both (a repeated id as duplicate-identifier, naming the later record).
+
+Exit status:
+  0  decided: standard output carries the decision (loom.evaluation.EvaluationDecision)
+  3  refused: standard output carries the refusal (loom.evaluation.EvaluationRefusal), and standard error names the input
+  1  the request or the protocol catalog cannot be read
+  2  the command line is not valid";
+
+pub mod evaluate;
 pub mod events;
+pub mod model_catalog;
+pub mod regular_file;
 
 /// The exit status a run that stopped for `reason` returns, as [`EXIT_STATUS`] states it.
 pub fn exit_status(reason: StopReason) -> u8 {
@@ -56,6 +77,19 @@ pub enum Command {
     Run(RunArgs),
     /// Install, inspect, or remove protocol definitions available to this host.
     Protocols(ProtocolsArgs),
+    /// Decide a case snapshot and its evidence under a catalog protocol, and write the decision as
+    /// JSON. It decides and never acts.
+    #[command(after_help = EVALUATE_HELP)]
+    Evaluate(EvaluateArgs),
+}
+
+/// The arguments of `b10x-loom evaluate`.
+#[derive(Debug, Args)]
+pub struct EvaluateArgs {
+    /// Read the request from this regular file instead of standard input; a named pipe, a device
+    /// or a directory is refused (pipe a request to standard input instead).
+    #[arg(long, value_name = "PATH")]
+    pub input: Option<PathBuf>,
 }
 
 /// The arguments of `b10x-loom run`.
@@ -86,10 +120,18 @@ pub struct RunArgs {
     /// The most actions performed before the run stops.
     #[arg(long, value_name = "N", default_value_t = 20)]
     pub max_steps: usize,
-    /// The model that selects actions and writes their arguments.
+    /// An llm catalog (`llm.catalog/1` TOML) in a regular file; a named pipe such as `<(cmd)`, a
+    /// device or a directory is refused. With it, `--model` and `--classifier-model` each name a
+    /// route alias of this catalog instead of a Codex model, both of them; an alias it does not
+    /// declare, or a catalog that cannot be read, stops the run before any model call.
+    #[arg(long, value_name = "PATH")]
+    pub catalog: Option<PathBuf>,
+    /// The model that selects actions and writes their arguments: a Codex model name, or with
+    /// `--catalog` a route alias of that catalog.
     #[arg(long, value_name = "ID", default_value = DEFAULT_MODEL)]
     pub model: String,
-    /// The model that classifies the intent.
+    /// The model that classifies the intent: a Codex model name, or with `--catalog` a route
+    /// alias of that catalog.
     #[arg(long, value_name = "ID", default_value = DEFAULT_MODEL)]
     pub classifier_model: String,
     /// The confidence, from 0 to 1, below which the router refuses its pick.

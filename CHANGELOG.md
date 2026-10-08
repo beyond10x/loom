@@ -23,7 +23,7 @@ under **Unreleased** until the next release.
   `decode_wire_credential` write and read the record as
   `{"reference": …, "kind": "oauth" | "api-key"}`; a decode error names the field and never echoes
   a value. The executor depends on
-  `b10x-llm-credentials` at tag `0.3.1`.
+  `b10x-llm-credentials` at tag `0.4.0`.
 - `b10x-loom run --output jsonl` writes the run as one JSON object per line on standard output
   instead of the human lines, for a process that supervises it. Every line carries
   `schema_version` 1 and a `kind`: `Route`, `Turn`, `ToolCall`, `Usage`, `Approval`, and
@@ -33,8 +33,41 @@ under **Unreleased** until the next release.
   documented on the Run events reference page, which `task docs-check` holds to that
   declaration. Human output stays the default and is unchanged. `SliceRun` gains `approvals`,
   the actions a run stopped to await approval for.
+- `loom_governor::evaluate(&ProtocolCatalog, &EvaluationRequest)` decides a case the caller keeps
+  itself, with no Commission type in its signature and no case store: a protocol named
+  `<name>@<major>` from the host's catalog, a `canon-case/1` snapshot, the `canon-evidence/1`
+  records and an optional trusted time go in; Canon's decision comes out as `CanonGovernor`
+  reports it (each action's status, required capabilities and reasons, claims, obligations, the
+  one legitimate outcome when complete) with the whole `canon-decision/1` document beside it. It
+  runs the governor's own evaluation, holds nothing and reads no clock. An unusable input is
+  refused naming it: the protocol, the snapshot (or a termination the records do not make
+  legitimate), an evidence record by position (unreadable, or repeating an earlier id), or the
+  time. A readable record that does not apply to the case is set aside, as `CanonGovernor` sets
+  it aside, and is not listed in the decision. Unlike `CanonGovernor`, which sets an unreadable
+  record and the later of two records with one id aside and still decides, `evaluate` refuses
+  both (`duplicate-identifier`, the later position). The types are the new `loom.evaluation`
+  domain (`ess/domains/evaluation.yaml`), re-exported as `loom_governor::model`.
+- `b10x-loom evaluate` is the same call over JSON: the request on standard input or from
+  `--input <PATH>`, the decision on standard output (exit 0), or the refusal on standard output
+  with the input named on standard error (exit 3). `--input` must name a regular file: a named
+  pipe, a device or a directory is refused naming the path (exit 1) instead of being waited on.
+- `b10x-loom run --catalog <PATH>` reads an llm catalog (`llm.catalog/1` TOML), and
+  `--model` and `--classifier-model` then each name one of its route aliases instead of a Codex
+  model, both of them. Each model is the port llm's `b10x-llm-models` builds for the route's first
+  target, so a self-hosted Chat Completions, Responses or Messages endpoint can drive a run.
+  Before any model call, the run stops with exit status 1, naming the flag and the alias, on an
+  alias the catalog does not declare, a route that permits fallback to a second target, an
+  account that needs a credential (the command line supplies no credential resolver), or a model
+  that cannot take a forced tool call; a catalog that cannot be read or is not valid is refused
+  naming the file. The catalog must be a regular file: a named pipe, including the one
+  `--catalog <(cmd)` hands the run, a device or a directory is refused naming the path, before
+  it is read. Without `--catalog` both flags name Codex models as before.
 
 ### Changed
+
+- Every llm dependency moves from tag `0.3.1` to `0.4.0`; no existing caller needed a change.
+  `b10x-loom-cli` adds `b10x-llm-models`, `b10x-llm-routing`, `b10x-llm-http` and
+  `b10x-llm-credentials`, and `libc` for opening a named file without waiting on a pipe.
 
 - `harness::wire::CredentialKind` is now the generated `loom.run.CredentialKind`. It no longer
   implements `PartialOrd`, `Ord` or `Hash`.

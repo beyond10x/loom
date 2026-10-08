@@ -1,6 +1,6 @@
 {
   "format": "b10x-status/1",
-  "asOf": "2026-10-07",
+  "asOf": "2026-10-08",
   "source": "Loom's status record, maintained in the repository and checked against main",
   "items": [
     {"label": "Transient model failure recovery", "status": "shipped", "area": "Intake", "detail": "Since 0.4.0: at most three identical model attempts before any stream output, with per-attempt metrics and no effect retries. Persistent provider overload reports Unavailable.", "href": "/docs/guides/system-queries"},
@@ -26,9 +26,11 @@
     {"label": "Fast typed and hybrid selectors; confidence fallback; selection telemetry", "status": "planned", "area": "Selection", "href": "/docs/concepts/fast-selector"},
     {"label": "Canon governor", "status": "shipped", "area": "Governor", "detail": "CanonGovernor evaluates a case's engineering protocol with Canon on every frontier and completion; no clock, network or model call, and no invented authority.", "href": "/docs/concepts/governor-and-intake"},
     {"label": "Hosted governor contracts", "status": "shipped", "area": "Governor", "detail": "Since 0.2.0: host-admitted Canon protocols, trusted freshness callback and fallible case storage. No database backend or automatic protocol adoption.", "href": "/docs/concepts/governor-and-intake"},
+    {"label": "Stateless evaluation", "status": "shipped", "area": "Governor", "detail": "loom_governor::evaluate and b10x-loom evaluate decide a catalog protocol over a caller's canon-case/1 snapshot and canon-evidence/1 records, with an optional trusted time, and return Canon's decision as JSON; no Commission type, no case store, no clock. An unusable input is refused naming it.", "href": "/docs/concepts/governor-and-intake"},
     {"label": "Intent references", "status": "shipped", "area": "Intake", "detail": "Tracker keys, chat permalinks, merge and pull requests and URLs, extracted in order without a model."},
     {"label": "Protocol router", "status": "shipped", "area": "Intake", "detail": "A model picks from the shared catalog of engineering, Loom and explicitly installed custom definitions; a pick outside it or below the threshold is refused."},
     {"label": "Local slice for software-change@1", "status": "shipped", "area": "Intake", "detail": "Edits, inspects and tests a git work tree; evidence only from the test command's exit status; never merges, pushes or deploys. Tests use Substrate by default since 0.2.0.", "href": "/docs/concepts/governor-and-intake"},
+    {"label": "Catalog route models", "status": "shipped", "area": "Use it", "detail": "b10x-loom run --catalog <PATH> reads an llm catalog; --model and --classifier-model then name its route aliases, built through llm's catalog-to-Model port, so a self-hosted endpoint can drive a run. An unknown alias or an unreadable catalog stops before any model call.", "href": "/docs/guides/run-an-intent"},
     {"label": "Run event stream", "status": "shipped", "area": "Intake", "detail": "b10x-loom run --output jsonl writes one JSON record per line, each with schema_version 1: the route, model turns, tool calls, reported usage, approvals, and one terminal record last whose exit_status is the process exit status. Human output stays the default.", "href": "/docs/reference/run-events"},
     {"label": "Executors for other protocols", "status": "planned", "area": "Intake", "detail": "An incident-response slice is on the plan. The CLI executes software-change@1 and clock-compatible query protocols; unsupported bindings stop with NoLocalExecutor."},
     {"label": "Run model generated from ESS", "status": "shipped", "area": "Specification", "detail": "Session, Turn, ActionCatalogue, Selection and ArgumentRequest are synthesized from ess/ and re-exported; Commission's model likewise from ess/commission/.", "href": "/docs/reference/ess"},

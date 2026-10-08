@@ -11,7 +11,32 @@ relations:
 - decomposes: epic:vertical-slices
 - serves: vision:O1
 - serves: vision:governed-autonomy
-revision: 1
+scope:
+- confidence: inferred
+  path: crates/loom-commission-conformance/src/lib.rs
+- confidence: inferred
+  path: crates/loom-commission-testkit/src/fake_authority.rs
+- confidence: inferred
+  path: crates/loom-commission-testkit/tests
+- confidence: cited
+  path: crates/loom-commission/src/ports/authority.rs
+- confidence: cited
+  path: crates/loom-commission/src/ports/mod.rs
+- confidence: inferred
+  path: crates/loom-commission/src/runtime.rs
+- confidence: cited
+  path: crates/loom-executor/src/recovery.rs
+- confidence: cited
+  path: crates/loom-governor/src/lib.rs
+- confidence: inferred
+  path: crates/loom-governor/tests/fixtures/chg-1842.fixture.yaml
+- confidence: inferred
+  path: docs/commission
+- confidence: cited
+  path: ess/commission/domains/responsibility.yaml
+- confidence: inferred
+  path: generated/rust/commission/src
+revision: 13
 ---
 > Re-filed from `beyond10x/commission` `story:approval-suspend-resume-slice` at `e61e4f0` (status there: `draft`) under Atlas ADR 0090
 > (loom `story:import-commission`). Paths below are Commission's: `ess/` is now `ess/commission/`,

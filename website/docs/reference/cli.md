@@ -24,6 +24,7 @@ Generated from the clap definition of the `b10x-loom` command line in [`crates/l
 | [`b10x-loom protocols add`](#b10x-loom-protocols-add) | Validate and snapshot one protocol from a file or a pinned Git repository |
 | [`b10x-loom protocols list`](#b10x-loom-protocols-list) | List bundled and installed definitions, provenance, and available execution bindings |
 | [`b10x-loom protocols remove`](#b10x-loom-protocols-remove) | Remove an installed definition; bundled definitions cannot be removed |
+| [`b10x-loom evaluate`](#b10x-loom-evaluate) | Decide a case snapshot and its evidence under a catalog protocol, and write the decision as JSON. It decides and never acts |
 
 ## `b10x-loom run`
 
@@ -42,8 +43,9 @@ Usage: b10x-loom run [OPTIONS] <INTENT>
 | `--workspace <DIR>` | no | none | Existing Git worktree for software changes; unnecessary for system queries |
 | `--test-cmd <CMD>` | no | `cargo test` | The test command, run in the workspace without a shell: a program and its arguments, split at white space |
 | `--max-steps <N>` | no | `20` | The most actions performed before the run stops |
-| `--model <ID>` | no | `gpt-5.6-sol` | The model that selects actions and writes their arguments |
-| `--classifier-model <ID>` | no | `gpt-5.6-sol` | The model that classifies the intent |
+| `--catalog <PATH>` | no | none | An llm catalog (`llm.catalog/1` TOML) in a regular file; a named pipe such as `<(cmd)`, a device or a directory is refused. With it, `--model` and `--classifier-model` each name a route alias of this catalog instead of a Codex model, both of them; an alias it does not declare, or a catalog that cannot be read, stops the run before any model call |
+| `--model <ID>` | no | `gpt-5.6-sol` | The model that selects actions and writes their arguments: a Codex model name, or with `--catalog` a route alias of that catalog |
+| `--classifier-model <ID>` | no | `gpt-5.6-sol` | The model that classifies the intent: a Codex model name, or with `--catalog` a route alias of that catalog |
 | `--threshold <X>` | no | `0.5` | The confidence, from 0 to 1, below which the router refuses its pick |
 | `--output <FORMAT>` | no | `human` | What standard output carries: lines for a person, or one JSON record per line, the last one the terminal record with the stop reason and the exit status |
 | `<INTENT>` | yes | none | What to do, as given |
@@ -99,3 +101,32 @@ Usage: b10x-loom protocols remove <NAME>
 | Argument | Required | Default | Meaning |
 |---|---|---|---|
 | `<NAME>` | yes | none |  |
+
+## `b10x-loom evaluate`
+
+Decide a case snapshot and its evidence under a catalog protocol, and write the decision as JSON. It decides and never acts
+
+```text
+Usage: b10x-loom evaluate [OPTIONS]
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--input <PATH>` | no | none | Read the request from this regular file instead of standard input; a named pipe, a device or a directory is refused (pipe a request to standard input instead) |
+
+```text
+The request is one JSON object (loom.evaluation.EvaluationRequest):
+  {"protocol": "<name>@<major>", "snapshot": {canon-case/1}, "evidence": [{canon-evidence/1}, ...], "at": "<RFC 3339>"}
+`at` is optional. The protocol comes from this host's catalog (`protocols list`), never from the request.
+A record that is not a readable canon-evidence/1 record, or repeats an earlier record's id, is refused.
+A readable record that does not apply to the case (an undeclared kind or subject, for instance) is set
+aside, as the governor sets it aside, and the decision is made from the rest without listing it.
+Unlike the governor, which sets an unreadable record and a repeated id aside (keeping the first) and
+still decides, evaluate refuses both (a repeated id as duplicate-identifier, naming the later record).
+
+Exit status:
+  0  decided: standard output carries the decision (loom.evaluation.EvaluationDecision)
+  3  refused: standard output carries the refusal (loom.evaluation.EvaluationRefusal), and standard error names the input
+  1  the request or the protocol catalog cannot be read
+  2  the command line is not valid
+```

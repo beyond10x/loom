@@ -11,7 +11,12 @@ relations:
 - decomposes: epic:vertical-slices
 - serves: vision:O1
 - serves: vision:governed-autonomy
-revision: 1
+scope:
+- confidence: inferred
+  path: crates/loom-governor/Cargo.toml
+- confidence: inferred
+  path: crates/loom-governor/tests
+revision: 3
 ---
 > Re-filed from `beyond10x/commission` `story:software-change-slice` at `e61e4f0` (status there: `draft`) under Atlas ADR 0090
 > (loom `story:import-commission`). Paths below are Commission's: `ess/` is now `ess/commission/`,

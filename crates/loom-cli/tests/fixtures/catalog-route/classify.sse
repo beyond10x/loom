@@ -1,0 +1,10 @@
+data: {"id":"chatcmpl-call-classify","object":"chat.completion.chunk","model":"example/Classifier-Model","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call-classify","type":"function","function":{"name":"pick_protocol","arguments":""}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-call-classify","object":"chat.completion.chunk","model":"example/Classifier-Model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"protocol\":\"system-query@1\",\"confidence\":0.99,\"reasons\":[\"asks for the time\"]}"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-call-classify","object":"chat.completion.chunk","model":"example/Classifier-Model","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: {"id":"chatcmpl-call-classify","object":"chat.completion.chunk","model":"example/Classifier-Model","choices":[],"usage":{"prompt_tokens":120,"completion_tokens":7,"total_tokens":127}}
+
+data: [DONE]
+

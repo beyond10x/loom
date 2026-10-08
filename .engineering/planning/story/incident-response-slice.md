@@ -11,7 +11,20 @@ relations:
 - decomposes: epic:vertical-slices
 - serves: vision:O1
 - serves: vision:governed-autonomy
-revision: 1
+scope:
+- confidence: inferred
+  path: crates/loom-commission-testkit
+- confidence: inferred
+  path: crates/loom-governor/tests
+- confidence: inferred
+  path: crates/loom-governor/tests/fixtures/inc-492.fixture.yaml
+- confidence: inferred
+  path: crates/loom-governor/tests/incident_response_slice.rs
+- confidence: inferred
+  path: crates/loom-intake-slice/src/effect.rs
+- confidence: inferred
+  path: crates/loom-intake-slice/src/run.rs
+revision: 7
 ---
 > Re-filed from `beyond10x/commission` `story:incident-response-slice` at `e61e4f0` (status there: `draft`) under Atlas ADR 0090
 > (loom `story:import-commission`). Paths below are Commission's: `ess/` is now `ess/commission/`,
