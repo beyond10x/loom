@@ -6,6 +6,18 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Changed
+
+- Loom builds on `b10x-canon-engineering` `0.3.0` from engineering-protocols (was `0.1.0`) and
+  names Canon by the tag that release names, `b10x-canon` `0.1.0` (was `branch = "main"`). A
+  consumer that adds Canon itself moves to `tag = "0.1.0"`, or it builds a second Canon whose types
+  do not match.
+- `incident.response/1` lists one more obligation, `investigate_cause`: open until a cause analysis
+  of a current revision identifies the cause, and still open once `emergency.leave` is admissible.
+  Callers that read an incident case's frontier or completion see it beside `restore_service`.
+- The engineering registry, and so `ProtocolCatalog::engineering` and `ProtocolCatalog::bundled`,
+  now lists `support-triage@1`; engineering entries carry revision `0.3.0`.
+
 ## [0.10.0] - 2026-10-08
 
 Loom 0.10.0 lets a durable host report a failed write and keep a governor case across a process

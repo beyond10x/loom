@@ -46,11 +46,11 @@ An application that uses several of them can depend on `b10x-loom-sdk` alone; se
 
 - Model calls use [llm](https://beyond10x.github.io/llm/) ([GitHub](https://github.com/beyond10x/llm))
   at release tag `0.3.1`, including the provider overload fix.
-- The engineering protocol registry is `b10x-canon-engineering` `0.1.0` from
+- The engineering protocol registry is `b10x-canon-engineering` `0.3.0` from
   [engineering protocols](https://beyond10x.github.io/engineering-protocols/)
   ([GitHub](https://github.com/beyond10x/engineering-protocols)); it replaces `b10x-els`.
 - [Canon](https://beyond10x.github.io/canon/) ([GitHub](https://github.com/beyond10x/canon)) is
-  the revision `b10x-canon-engineering` names. A consumer that adds Canon itself uses the same
-  reference, or it builds a second Canon whose types do not match.
+  the revision `b10x-canon-engineering` names, tag `0.1.0`. A consumer that adds Canon itself
+  uses the same reference, or it builds a second Canon whose types do not match.
 
 The [crate list](../reference/crates.md) is generated from the workspace and is the current list.

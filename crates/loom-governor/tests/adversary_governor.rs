@@ -326,8 +326,9 @@ fn is_uuid_v8(text: &str) -> bool {
         && matches!(bytes[19], b'8' | b'9' | b'a' | b'b')
 }
 
-/// The incident-response obligation is open until the service is healthy at its current
-/// revision, and open again once the service moves on: the frontier's obligations are Canon's.
+/// The incident-response obligation `restore_service` is open until the service is healthy at its
+/// current revision, and open again once the service moves on, while `investigate_cause` stays open
+/// with no cause analysis: the frontier's obligations are Canon's.
 #[test]
 fn the_frontier_lists_each_obligation_as_canon_decides_it() {
     let governor = Gov::new(MemoryCaseStore::default());
@@ -340,7 +341,10 @@ fn the_frontier_lists_each_obligation_as_canon_decides_it() {
         .expect("opens");
     assert_eq!(
         obligations(&governor, &case),
-        [("restore_service".to_owned(), true)]
+        [
+            ("investigate_cause".to_owned(), true),
+            ("restore_service".to_owned(), true)
+        ]
     );
 
     let healthy = record(
@@ -354,7 +358,10 @@ fn the_frontier_lists_each_obligation_as_canon_decides_it() {
     assert_eq!(claim(&governor, &case, "service.healthy"), "true");
     assert_eq!(
         obligations(&governor, &case),
-        [("restore_service".to_owned(), false)]
+        [
+            ("investigate_cause".to_owned(), true),
+            ("restore_service".to_owned(), false)
+        ]
     );
 
     governor
@@ -363,7 +370,10 @@ fn the_frontier_lists_each_obligation_as_canon_decides_it() {
     assert_eq!(claim(&governor, &case, "service.healthy"), "unknown");
     assert_eq!(
         obligations(&governor, &case),
-        [("restore_service".to_owned(), true)]
+        [
+            ("investigate_cause".to_owned(), true),
+            ("restore_service".to_owned(), true)
+        ]
     );
 }
 

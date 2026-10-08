@@ -16,7 +16,7 @@
 //!
 //! `tests/fixtures/inc-492.fixture.yaml` is a byte-for-byte copy of
 //! `fixtures/incident-response/inc-492.fixture.yaml` in beyond10x/engineering-protocols at tag
-//! `0.1.0`, the release this crate depends on; `b10x-canon-engineering` does not expose its
+//! `0.3.0`, the release this crate depends on; `b10x-canon-engineering` does not expose its
 //! fixtures.
 
 use std::collections::BTreeMap;
@@ -62,6 +62,7 @@ fn rollback_under_a_grant_leaves_emergency_mode_with_the_cause_unknown() {
     let mut grants: Vec<String> = Vec::new();
     let mut rollbacks = 0;
     let mut applied = Vec::new();
+    let mut restored = None;
 
     for state in fixture.states() {
         let id = state["id"].as_str().expect("state id").to_owned();
@@ -86,6 +87,9 @@ fn rollback_under_a_grant_leaves_emergency_mode_with_the_cause_unknown() {
             "state {id}: the frontier is issued for the case revision"
         );
         assert_state(&frontier, &state["expect"], &grants, &id);
+        if id == "service-restored" {
+            restored = Some(frontier);
+        }
         applied.push(id);
     }
     assert_eq!(
@@ -97,13 +101,14 @@ fn rollback_under_a_grant_leaves_emergency_mode_with_the_cause_unknown() {
             "rolled-back",
             "release-observed",
             "service-restored",
+            "cause-identified-after-restore",
         ],
         "every state of inc-492 is applied, in order"
     );
     assert_eq!(rollbacks, 1, "the service is moved once, by the rollback");
 
-    // The acceptance, read off the governor's last frontier.
-    let frontier = governor.frontier(&case).expect("frontier").into_data();
+    // The acceptance, read off the governor's frontier at `service-restored`.
+    let frontier = restored.expect("the frontier at service-restored");
     let claims = claims(&frontier);
     assert_eq!(claims["service.healthy"], Truth::True);
     assert_eq!(claims["impact.bounded"], Truth::True);
@@ -113,11 +118,6 @@ fn rollback_under_a_grant_leaves_emergency_mode_with_the_cause_unknown() {
         actions[LEAVE],
         ActionStatus::Admissible,
         "out of emergency mode: incident.response/1 admits {LEAVE}"
-    );
-    assert_eq!(
-        obligations(&frontier),
-        BTreeMap::from([("restore_service".to_owned(), false)]),
-        "incident.response/1 at 0.1.0 declares `restore_service` only: no investigation obligation"
     );
 }
 

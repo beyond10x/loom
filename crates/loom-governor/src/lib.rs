@@ -62,10 +62,10 @@
 //!
 //! # Dependencies
 //!
-//! Canon is the library `b10x-canon-engineering` uses, `branch = "main"`, pinned by `Cargo.lock`
-//! to commit `d2e09ae` (`66c8d4b` plus a documentation merge), so the protocol model the ELS
-//! registry returns is the one this crate compiles. Commission is pinned to `e61e4f0`, and
-//! `b10x-canon-engineering` to tag `0.1.0` of beyond10x/engineering-protocols.
+//! Canon is the library `b10x-canon-engineering` uses, tag `0.1.0`, pinned by `Cargo.lock` to
+//! commit `761239f`, so the protocol model the ELS registry returns is the one this crate
+//! compiles. Commission is pinned to `e61e4f0`, and `b10x-canon-engineering` to tag `0.3.0` of
+//! beyond10x/engineering-protocols.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
