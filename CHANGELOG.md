@@ -17,8 +17,11 @@ under **Unreleased** until the next release.
   reports that attempt `refused` or `not_attempted`, and an error for everything else: a success
   that names no attempt, an error without a recorded attempt, an unknown outcome, a protocol or
   transport failure. An unknown instance, an unresolvable credential and a service that describes
-  another instance are errors before the operation is invoked. It never falls back to
-  `/v1/invoke` and never resends.
+  another instance are errors before the operation is invoked, and so is an argument number that
+  cannot be sent without changing its value, such as an integer beyond the 64-bit range. A
+  success naming another instance's attempt is an error. It never falls back to `/v1/invoke` and
+  never resends. Known limit: a read operation answers an error, because Connectors `v0.35.0`
+  records no attempt for a read and the port requires an attempt on every `Performed`.
 - `commission.responsibility.ConnectorEndpoint` in `ess/commission/domains/responsibility.yaml`:
   the host's Connectors endpoint for one Connector instance, with its URL
   (`ConnectorEndpointUrl`), a non-secret credential reference (`ConnectorCredentialRef`) and

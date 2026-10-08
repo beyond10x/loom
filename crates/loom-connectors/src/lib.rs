@@ -14,14 +14,18 @@
 //!
 //! | Connectors answers | The invoker answers |
 //! |---|---|
-//! | success with a `mutation` naming its attempt | `Performed`: the result as the report, the attempt's id |
+//! | success with a `mutation` naming its attempt on the bound instance | `Performed`: the result as the report, the attempt's id |
 //! | error with a `mutation` classified `refused` or `not_attempted`, on a valid response | `Refused` |
-//! | anything else: a success naming no attempt, an error with no `mutation`, `unknown`, `applied` without a delivered result, a protocol or transport failure | `Err` |
+//! | anything else: a success naming no attempt or another instance's, an error with no `mutation`, `unknown`, `applied` without a delivered result, a protocol or transport failure | `Err` |
 //!
 //! An error with no `mutation` is no proof that the operation was not dispatched, so it is never
 //! a refusal. An `instance_id` with no endpoint, a credential that does not resolve, a failed
 //! describe and a service that describes another instance are `Err` before the operation is
-//! invoked.
+//! invoked, and so is an argument number that cannot be sent without changing its value (one
+//! beyond the 64-bit integer range, or one whose shortest float text differs from the admitted one).
+//!
+//! Known limit: a read operation answers `Err`, because Connectors v0.35.0 records no attempt
+//! (`mutation`) for a read and the port requires an attempt on every `Performed`.
 //!
 //! `ConnectorInvoker::invoke` is synchronous and the client is async: the invoker owns a Tokio
 //! runtime and runs each invocation on it, so it can be called from any thread, including one
@@ -271,6 +275,13 @@ fn performed(
             "the Connector operation `{operation}` of `{instance}` succeeded and named no attempt"
         )));
     };
+    if attempt.instance != instance {
+        return Err(EffectError::new(format!(
+            "the Connector operation `{operation}` of `{instance}` succeeded and named an attempt \
+             of instance `{}`",
+            attempt.instance
+        )));
+    }
     Ok(EffectOutcome::Performed(EffectOutcomePerformed {
         report: from_serde(&invoked.result),
         attempt: Some(ConnectorAttemptId(attempt.id.as_str().to_owned())),
@@ -314,9 +325,19 @@ fn to_serde(value: &Value) -> Result<serde_json::Value, EffectError> {
         Value::Null => serde_json::Value::Null,
         Value::Bool(flag) => serde_json::Value::Bool(*flag),
         Value::Number(text) => {
-            serde_json::Value::Number(text.parse().map_err(|_| {
+            let number: serde_json::Number = text.parse().map_err(|_| {
                 EffectError::new(format!("the argument number `{text}` is not JSON"))
-            })?)
+            })?;
+            let exact = decimal(text).is_some_and(|admitted| {
+                decimal(&number.to_string()).is_some_and(|sent| sent == admitted)
+            });
+            if !exact {
+                return Err(EffectError::new(format!(
+                    "the argument number `{text}` cannot be sent without changing its value \
+                     (it would be sent as `{number}`)"
+                )));
+            }
+            serde_json::Value::Number(number)
         }
         Value::Text(text) => serde_json::Value::String(text.clone()),
         Value::Array(items) => {
@@ -334,6 +355,40 @@ fn to_serde(value: &Value) -> Result<serde_json::Value, EffectError> {
             serde_json::Value::Object(object)
         }
     })
+}
+
+/// The value a JSON number's text denotes, as (negative, significant digits, exponent): the
+/// number is `digits × 10^exponent`, with no leading or trailing zero in `digits`, and zero is
+/// `(false, "", 0)`. Two texts denote the same value exactly when these are equal. `None` for text
+/// that is no JSON number.
+fn decimal(text: &str) -> Option<(bool, String, i64)> {
+    let (negative, rest) = match text.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, text),
+    };
+    let (mantissa, exponent) = match rest.find(['e', 'E']) {
+        Some(at) => (&rest[..at], rest[at + 1..].parse::<i64>().ok()?),
+        None => (rest, 0),
+    };
+    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    if whole.is_empty()
+        || !whole
+            .bytes()
+            .chain(fraction.bytes())
+            .all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    let digits = format!("{whole}{fraction}");
+    let digits = digits.trim_start_matches('0');
+    let trimmed = digits.trim_end_matches('0');
+    if trimmed.is_empty() {
+        return Some((false, String::new(), 0));
+    }
+    let shift = i64::try_from(digits.len() - trimmed.len()).ok()?;
+    let places = i64::try_from(fraction.len()).ok()?;
+    let exponent = exponent.checked_sub(places)?.checked_add(shift)?;
+    Some((negative, trimmed.to_owned(), exponent))
 }
 
 /// The client's JSON value as Commission's.
