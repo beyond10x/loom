@@ -16,7 +16,8 @@ use b10x_loom_commission::model::responsibility::{
     EffectOutcomePerformed, EffectOutcomeRefused, ExecutorOutcome, ExecutorOutcomeProposedAction,
     ExecutorOutcomeSuspended, Frontier, FrontierAction, FrontierData, FrontierId, GovernorError,
     Observation, ObservationId, PrincipalId, ProposedActionArguments, RunId, RunOutcome,
-    SuspensionReason, Unit, commission_state, frontier_state, observation_state,
+    RunOutcomeCaseMovedOn, SuspensionReason, Unit, commission_state, frontier_state,
+    observation_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -231,9 +232,14 @@ fn adversary_a_refused_effect_does_not_adopt_a_foreign_move() {
         "only the request at the Run's revision may take effect; result {result:?}"
     );
     let end = result.unwrap_or_else(|error| panic!("the loop failed: {error:?}"));
+    // The frontier of 9 admits `inspect`: the run ends `CaseMovedOn`, bound to the Run's 5
+    // (story:moved-run-named-outcome).
     assert_eq!(
         end.outcome,
-        RunOutcome::NoAdmissibleAction(Unit(true)),
+        RunOutcome::CaseMovedOn(RunOutcomeCaseMovedOn {
+            bound_case_revision: 5,
+            current_case_revision: 9,
+        }),
         "a move no effect of this Run made ends it"
     );
 }

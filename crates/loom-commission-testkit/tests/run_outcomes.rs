@@ -424,6 +424,7 @@ fn run_outcome_is_the_generated_type() {
         variants,
         [
             "AwaitingApproval",
+            "CaseMovedOn",
             "Completed",
             "NeedsAuthority",
             "NeedsExternalEvidence",

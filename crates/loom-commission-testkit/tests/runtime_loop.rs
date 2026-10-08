@@ -38,8 +38,9 @@
 //! the next iteration's load ends the run (adversary pass 2, F-A and F-B). It covers
 //! `NoUsefulAction`, `CompletedLocalReasoning` and a refused proposal alike. A Run is bound to the case revision it started against
 //! (`ess/domains/responsibility.yaml:390`): when the case moves to another revision, the loop
-//! admits nothing more and ends with no admissible action, unless the governor holds the case
-//! complete (coordinator decision F1, adversary pass 1).
+//! admits nothing more and ends, unless the governor holds the case complete (coordinator
+//! decision F1, adversary pass 1): `CaseMovedOn` when the frontier current then admits an action
+//! (`story:moved-run-named-outcome`), else with no admissible action.
 //!
 //! The fake governor takes one scripted answer per call, whichever port method is called, so each
 //! script below counts calls in the order above.
@@ -57,7 +58,7 @@ use b10x_loom_commission::model::responsibility::{
     AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData, CommissionId,
     ExecutorOutcome, ExecutorOutcomeProposedAction, ExecutorOutcomeSuspended, Frontier,
     FrontierAction, FrontierId, ObservationId, PrincipalId, ProposedActionArguments,
-    RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeCompleted,
+    RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeCaseMovedOn, RunOutcomeCompleted,
     RunOutcomeNeedsAuthority, RunOutcomeSuspended, RunState, RunStates, SuspensionReason, Unit,
     commission_state, frontier_state,
 };
@@ -790,8 +791,9 @@ fn unchanged_frontier_is_bounded(runs: &mut Generated<RunStore>) {
     // A new case revision ends the run: revision 6, then 7. A Run is bound to the case revision it
     // started against, and a proposal made on another revision is stale
     // (ess/domains/responsibility.yaml:390), so the Run's revision has no admissible action left:
-    // the loop admits nothing more and ends with no admissible action (coordinator decision F1,
-    // adversary pass 1).
+    // the loop admits nothing more and ends (coordinator decision F1, adversary pass 1). The
+    // frontier of 7 is read, and it admits `inspect`, so the run ends `CaseMovedOn`, naming 6 and 7
+    // (story:moved-run-named-outcome).
     let name = "bound: the loop ends at the revision change";
     let case = CaseId("case-moving".to_owned());
     let commission_c = commission(9, &case);
@@ -819,13 +821,16 @@ fn unchanged_frontier_is_bounded(runs: &mut Generated<RunStore>) {
     );
     assert_eq!(
         governor.calls(),
-        [iteration(&case), completed(&case)].concat(),
+        [iteration(&case), iteration(&case)].concat(),
         "{name}: governor calls"
     );
     assert_eq!(executor.at(), [3], "{name}: executor calls");
     assert_eq!(
         end.outcome,
-        RunOutcome::NoAdmissibleAction(Unit(true)),
+        RunOutcome::CaseMovedOn(RunOutcomeCaseMovedOn {
+            bound_case_revision: 6,
+            current_case_revision: 7,
+        }),
         "{name}: outcome"
     );
 }

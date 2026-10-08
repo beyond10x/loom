@@ -352,6 +352,16 @@ fn skeleton_lands_port_vocabulary_and_modules() {
             // story:runtime-merge: the slice's approval gate and its NoLocalExecutor.
             ("AwaitingApproval", "RunOutcomeAwaitingApproval"),
             ("NoPerformableAction", "Unit"),
+            // story:moved-run-named-outcome: the case moved on to a frontier that admits an action.
+            ("CaseMovedOn", "RunOutcomeCaseMovedOn"),
+        ],
+    );
+    assert_struct(
+        &model,
+        "RunOutcomeCaseMovedOn",
+        &[
+            ("bound_case_revision", "Integer"),
+            ("current_case_revision", "Integer"),
         ],
     );
     assert_struct(
