@@ -6,6 +6,17 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-08
+
+Loom 0.7.0 makes Loom usable by a supervisor that is not written in Rust and by a model that is not
+a Codex model. `b10x-loom run --output jsonl` writes the run as a versioned event stream with one
+terminal record. A ported wire can take its credential from an llm credential reference, such as an
+OAuth subscription login, with no secret in any configuration. `loom_governor::evaluate` and
+`b10x-loom evaluate` decide a case snapshot and its evidence against a catalog protocol with no
+Commission type in the signature. `b10x-loom run --catalog` drives a run through llm catalog route
+aliases, for example a self-hosted endpoint. Every llm dependency moves to `0.4.0`.
+`harness::wire::CredentialKind` no longer implements `PartialOrd`, `Ord` or `Hash`.
+
 ### Added
 
 - A ported wire can take its credential from a reference instead of a held value.
