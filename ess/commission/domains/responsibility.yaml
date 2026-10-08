@@ -301,6 +301,18 @@ types:
     kind: newtype
     of: String
 
+  # story:connectors-invoker: the base URL of a Connectors service, as the host configures it.
+  - name: commission.responsibility.ConnectorEndpointUrl
+    kind: newtype
+    of: String
+
+  # story:connectors-invoker: the name under which the host's secret resolver holds the service
+  # credential of an endpoint. A reference, never the secret: the credential itself is resolved by
+  # the host at each invocation and is not modelled here.
+  - name: commission.responsibility.ConnectorCredentialRef
+    kind: newtype
+    of: String
+
   # The id of the connectors.mutations.AttemptRecord an invocation produced; Connectors owns the
   # attempt. An identifier, not a relation: ESS refuses a relation to another system's entity
   # (undeclared_reference).
@@ -498,6 +510,34 @@ entities:
         type: commission.responsibility.ConnectorInstanceId
       - name: operation_id
         type: commission.responsibility.ConnectorOperationId
+    relations:
+      # story:connectors-invoker: the bound operation's instance is served by the one endpoint the
+      # host declares for it.
+      - name: endpoint
+        kind: references
+        target: commission.responsibility.ConnectorEndpoint
+        cardinality: one
+        via: instance_id
+    lifecycle:
+      initial: Declared
+      states: [Declared]
+      terminal: [Declared]
+
+  # story:connectors-invoker: the host's Connectors service for one Connector instance. The
+  # identity holds one endpoint per instance; the invoker describes the endpoint and invokes the
+  # bound operation there. `allow_plaintext` admits an `http` URL, which the client otherwise
+  # refuses. The host's composition declares its endpoints; Connectors owns what they serve.
+  - name: commission.responsibility.ConnectorEndpoint
+    identity:
+      name: instance_id
+      type: commission.responsibility.ConnectorInstanceId
+    fields:
+      - name: url
+        type: commission.responsibility.ConnectorEndpointUrl
+      - name: credential
+        type: commission.responsibility.ConnectorCredentialRef
+      - name: allow_plaintext
+        type: Boolean
     lifecycle:
       initial: Declared
       states: [Declared]
