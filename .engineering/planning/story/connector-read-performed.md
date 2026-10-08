@@ -7,7 +7,7 @@ title: A read through Connectors answers Performed
 relations:
 - serves: vision:O3
 - decomposes: epic:effect-bindings
-revision: 1
+revision: 2
 ---
 ## Outcome
 
@@ -29,3 +29,13 @@ service, answers `Performed` with the operation's result, and a consequential ac
 Decide in `ess/commission/domains/responsibility.yaml` how a read's `Performed` is told apart from
 a write's (the binding's operation kind, or the outcome's `attempt` being required only for
 consequential actions), validate with the newest `ess`, regenerate, then implement.
+
+## Upstream
+
+No Connectors change is needed. Connectors `v0.35.0` anchors every admitted invocation on
+`POST /v1alpha2/invoke`, read or write, in the host's execution audit before dispatch, and its
+Response carries `audit_ref` and `audit_status` (release notes of `v0.35.0`); only an admitted
+`external_write` also records a `mutation` with an attempt. A read's `Performed` can therefore name
+the audit record (`audit_ref`, with `audit_status` `complete`) where a write's names the attempt.
+Which of the two a binding must produce is Loom's to declare, from the operation's effect class in
+`GET /v1/describe`.
