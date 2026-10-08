@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:ess-056-upgrade
 kind: story
-status: draft
+status: implemented
 title: Loom builds, generates and gates on ESS 0.56.0
 relations:
 - decomposes: epic:runtime-consolidation
@@ -31,16 +31,24 @@ scope:
 - confidence: cited
   path: crates/loom-executor/tests/adversary2_ess_gate.rs
 - confidence: cited
+  path: crates/loom-executor/tests/adversary_run_revalidation.rs
+- confidence: cited
+  path: crates/loom-executor/tests/ess_gate.rs
+- confidence: cited
   path: ess/commission/ess-inputs.yaml
+- confidence: cited
+  path: ess/domains/run.yaml
 - confidence: cited
   path: ess/ess-inputs.yaml
 - confidence: cited
   path: ess/intake/ess-inputs.yaml
-- confidence: inferred
-  path: generated/rust/
-- confidence: inferred
-  path: website/docs/reference/
-revision: 17
+- confidence: cited
+  path: website/docs/reference/commission/domain-graph.json
+revision: 27
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-08T02:05:32Z", actor: "human:timo", revision: 18}
+- {from: "proposed", to: "active", at: "2026-10-08T02:05:32Z", actor: "human:timo", revision: 19}
+- {from: "active", to: "implemented", at: "2026-10-08T02:50:10Z", actor: "human:timo", revision: 27, decided_on: {"recorded":{"test_result":2,"verification":1}}}
 ---
 ## Outcome
 
@@ -107,3 +115,19 @@ validated with 0.56.0.
 ## Source
 
 Release notes of beyond10x/ess `0.56.0`; `story:ess-055-upgrade` (the same procedure for 0.55.0).
+
+## Scope confirmed
+
+Read from `git diff --stat 5b57e75 e28dc70` (the unit's three commits, 18 files) at the close of wave
+2026-10-08-w1. Corrections to the `## Scope` section above:
+
+| Scope line | Confidence then | What the unit changed |
+|---|---|---|
+| `generated/rust/` | inferred | nothing: regenerating with 0.56.0 changed no generated Rust |
+| `website/docs/reference/` | inferred | `website/docs/reference/commission/domain-graph.json` (names the 0.56.0 compiler) |
+| every cited line | cited | as cited |
+| not listed | — | `crates/loom-executor/tests/ess_gate.rs` (its version-check text named 0.55.0), comments in `crates/loom-executor/tests/adversary_run_revalidation.rs` and `ess/domains/run.yaml` (no declaration) |
+
+The acceptance `git grep -n '0\.55\.0' -- ':!CHANGELOG.md' ':!.engineering'` prints three lines that
+are not ESS pins: `Cargo.lock:1423` and `:1548` (`gix-discover` and `gix-index` at version 0.55.0) and
+`docs/handoff/2026-10-06-loom.md:49`, a dated record; both left as they are.

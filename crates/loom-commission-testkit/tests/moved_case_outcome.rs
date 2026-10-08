@@ -5,10 +5,16 @@
 //! uses (`crates/loom-commission/src/runtime.rs`, module docs, item 9), instead of on the frontier
 //! the case left.
 //!
+//! Acceptance for `story:moved-run-named-outcome` (`decision-blocker:moved-run-admissible-frontier`,
+//! option A): where that frontier still admits an action, the run ends `CaseMovedOn`, naming the
+//! revision the Run is bound to and the one the runtime loaded, whether the executor reported the
+//! move or the runtime found it on a stale proposal.
+//!
 //! Each case scripts the fake governor per call: the run's load, then the completion and the
 //! frontier of the first iteration, all at revision 7; every later call answers revision 8. The
-//! scripted executor returns `CaseMoved` once, and a second call would panic (its script is used
-//! up), so a case that passes ran the executor exactly once.
+//! scripted executor returns `CaseMoved` (or, on the stale-proposal path, a proposal) once, and a
+//! second call would panic (its script is used up), so a case that passes ran the executor exactly
+//! once.
 
 use std::sync::{Mutex, PoisonError};
 
@@ -18,9 +24,10 @@ use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
     ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, CaseId, Commission,
     CommissionData, CommissionId, EffectOutcome, EffectOutcomePerformed, ExecutorOutcome,
-    ExecutorOutcomeCaseMoved, FrontierAction, FrontierObligation, ObservationId, PrincipalId,
-    RunId, RunOutcome, RunOutcomeCompleted, RunOutcomeNeedsExternalEvidence, Unit,
-    commission_state,
+    ExecutorOutcomeCaseMoved, ExecutorOutcomeProposedAction, FrontierAction, FrontierObligation,
+    ObservationId, PrincipalId, ProposedActionArguments, RevalidateActionRequestOutcome, RunId,
+    RunOutcome, RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeNeedsExternalEvidence,
+    RunOutcomeSuspended, SuspensionReason, Unit, commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -150,6 +157,7 @@ impl EffectPort for Effects {
 #[derive(Debug, Default)]
 struct Context {
     ids: u64,
+    budget: Option<usize>,
 }
 
 impl LoopContext for Context {
@@ -168,13 +176,32 @@ impl LoopContext for Context {
     }
 
     fn step_budget(&self) -> Option<usize> {
-        None
+        self.budget
     }
 }
 
 /// One loop over `governor`, whose executor reports [`case_moved`] once.
 fn run(governor: &FakeGovernor, effects: &Effects) -> (LoopEnd, ScriptedExecutor) {
-    let executor = ScriptedExecutor::new([case_moved()]);
+    run_on(governor, effects, case_moved())
+}
+
+/// One loop over `governor`, whose executor returns `outcome` once.
+fn run_on(
+    governor: &FakeGovernor,
+    effects: &Effects,
+    outcome: ExecutorOutcome,
+) -> (LoopEnd, ScriptedExecutor) {
+    run_budgeted(governor, effects, outcome, None)
+}
+
+/// One loop over `governor` with step budget `budget`, whose executor returns `outcome` once.
+fn run_budgeted(
+    governor: &FakeGovernor,
+    effects: &Effects,
+    outcome: ExecutorOutcome,
+    budget: Option<usize>,
+) -> (LoopEnd, ScriptedExecutor) {
+    let executor = ScriptedExecutor::new([outcome]);
     let mut runs = Generated::new(RunStore::new(|| RunId(uuid(0x500))));
     let end = run_until_blocked(
         governor,
@@ -183,7 +210,7 @@ fn run(governor: &FakeGovernor, effects: &Effects) -> (LoopEnd, ScriptedExecutor
         effects,
         &commission(),
         &mut runs,
-        &mut Context::default(),
+        &mut Context { ids: 0, budget },
     )
     .unwrap_or_else(|error| panic!("the loop failed: {error}"));
     (end, executor)
@@ -283,11 +310,28 @@ fn a_case_completed_under_the_executor_ends_completed() {
     assert_eq!(end.steps, 0);
 }
 
-/// The current frontier admits an action the port performs. The Run holds the case at the revision
-/// it left, so it does not go on at the new one and the executor is not run again: the run ends
-/// with no admissible action, as a moved case does after a stale proposal.
+/// `CaseMovedOn` from the Run's revision [`LEFT`] to [`CURRENT`].
+fn moved_on() -> RunOutcome {
+    RunOutcome::CaseMovedOn(RunOutcomeCaseMovedOn {
+        bound_case_revision: LEFT,
+        current_case_revision: CURRENT,
+    })
+}
+
+/// The executor's proposal of the gated merge the frontier of [`LEFT`] lists.
+fn proposes_merge() -> ExecutorOutcome {
+    ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
+        action: MERGE.to_owned(),
+        arguments: ProposedActionArguments(Value::Null),
+    })
+}
+
+/// story:moved-run-named-outcome, acceptance 1 and 2, the executor-reported move: the current
+/// frontier admits an action the port performs. The Run is bound to the revision it left, so it
+/// does not go on at the new one and the executor is not run again: the run ends `CaseMovedOn`,
+/// naming the Run's revision and the one the runtime loaded.
 #[test]
-fn a_moved_case_whose_current_frontier_admits_an_action_ends_with_no_admissible_action() {
+fn a_reported_move_whose_current_frontier_admits_an_action_ends_case_moved_on() {
     let governor = moved_to(at(
         CURRENT,
         vec![open("tests-pass")],
@@ -296,12 +340,72 @@ fn a_moved_case_whose_current_frontier_admits_an_action_ends_with_no_admissible_
     let effects = Effects::default();
     let (end, executor) = run(&governor, &effects);
 
+    assert_eq!(end.outcome, moved_on(), "{end:#?}");
+    assert_eq!(governor.calls(), [load(), load()].concat());
+    assert_eq!(executor.calls().len(), 1);
+    assert!(effects.invoked().is_empty(), "{:?}", effects.invoked());
+    assert_eq!(end.steps, 0, "the executor call ended the run");
+}
+
+/// story:moved-run-named-outcome, acceptance 1, the stale-proposal path: the executor proposes the
+/// gated merge on the frontier of [`LEFT`], and revalidation finds the case at [`CURRENT`], so the
+/// request is stale. The next iteration loads the case, finds it moved and judges the run on the
+/// frontier current then, as the executor would be handed it: it admits an action the port
+/// performs, so the run ends `CaseMovedOn` and the executor is not run again.
+#[test]
+fn a_stale_proposal_whose_current_frontier_admits_an_action_ends_case_moved_on() {
+    let governor = moved_to(at(
+        CURRENT,
+        vec![open("tests-pass")],
+        vec![admissible(TEST), admissible(PUBLISH)],
+    ));
+    let effects = Effects::default();
+    let (end, executor) = run_on(&governor, &effects, proposes_merge());
+
+    assert_eq!(end.outcome, moved_on(), "{end:#?}");
+    assert_eq!(
+        governor.calls(),
+        [load(), vec![GovernorCall::CurrentRevision(case())], load()].concat(),
+        "one iteration, its stale revalidation, then one load of the moved case and its frontier"
+    );
+    assert_eq!(executor.calls().len(), 1);
+    assert_eq!(end.requests.len(), 1, "{:?}", end.requests);
+    assert!(
+        matches!(
+            end.requests[0].outcome,
+            RevalidateActionRequestOutcome::Stale { .. }
+        ),
+        "{:?}",
+        end.requests
+    );
+    assert!(end.admitted.is_empty(), "{:?}", end.admitted);
+    assert!(effects.invoked().is_empty(), "{:?}", effects.invoked());
+}
+
+/// The stale-proposal path, on a current frontier that admits an action only before the handed
+/// filter: `docs.publish`, which the port does not perform and which needs no authority, is
+/// dropped, and the gated merge is not admitted without authority. As handed, the frontier admits
+/// nothing, so the run does not end `CaseMovedOn`: it ends with no admissible action, as the
+/// stale-proposal path ends on such a frontier (`crates/loom-executor/tests/adversary_w1_runtime_stale.rs`).
+#[test]
+fn a_stale_proposal_whose_handed_current_frontier_admits_nothing_ends_with_no_admissible_action() {
+    let governor = moved_to(at(
+        CURRENT,
+        vec![open("review-approved")],
+        vec![gated(MERGE), admissible(PUBLISH)],
+    ));
+    let effects = Effects::default();
+    let (end, executor) = run_on(&governor, &effects, proposes_merge());
+
     assert_eq!(
         end.outcome,
         RunOutcome::NoAdmissibleAction(Unit(true)),
         "{end:#?}"
     );
-    assert_eq!(governor.calls(), [load(), load()].concat());
+    assert_eq!(
+        governor.calls(),
+        [load(), vec![GovernorCall::CurrentRevision(case())], load()].concat()
+    );
     assert_eq!(executor.calls().len(), 1);
     assert!(effects.invoked().is_empty(), "{:?}", effects.invoked());
 }
@@ -324,4 +428,67 @@ fn a_moved_case_whose_current_frontier_lists_nothing_performable_ends_with_no_pe
     );
     assert_eq!(governor.calls(), [load(), load()].concat());
     assert_eq!(executor.calls().len(), 1);
+}
+
+/// A stale proposal is the run's one budgeted step, but the case did not move: the frontier the
+/// proposal was revalidated against was issued for [`CURRENT`] while the case stayed at [`LEFT`].
+/// The next iteration loads the case first, finds it where the Run holds it, reads the frontier
+/// (at [`LEFT`] again), and only then is the Run suspended for its budget.
+#[test]
+fn a_stale_proposal_on_the_last_budgeted_step_with_no_move_is_suspended_for_its_budget() {
+    let governor = FakeGovernor::new();
+    let held = at(LEFT, vec![open("tests-pass")], vec![admissible(TEST)]);
+    let current = at(CURRENT, vec![open("tests-pass")], vec![admissible(TEST)]);
+    governor.script(
+        case(),
+        [
+            held.clone(),
+            held.clone(),
+            held.clone(),
+            held.clone(),
+            current,
+            held.clone(),
+            held.clone(),
+            held,
+        ],
+    );
+    let effects = Effects::default();
+    let proposal = ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
+        action: TEST.to_owned(),
+        arguments: ProposedActionArguments(Value::Null),
+    });
+    let (end, executor) = run_budgeted(&governor, &effects, proposal, Some(1));
+
+    assert!(
+        matches!(
+            end.requests.first().map(|made| &made.outcome),
+            Some(RevalidateActionRequestOutcome::Stale { .. })
+        ),
+        "{:?}",
+        end.requests
+    );
+    assert_eq!(
+        end.outcome,
+        RunOutcome::Suspended(RunOutcomeSuspended {
+            reason: SuspensionReason::Budget(Value::Object(vec![(
+                "max_steps".to_owned(),
+                Value::Number("1".to_owned()),
+            )])),
+        }),
+        "{end:#?}"
+    );
+    assert_eq!(
+        governor.calls(),
+        [
+            load(),
+            vec![
+                GovernorCall::CurrentRevision(case()),
+                GovernorCall::Frontier(case()),
+            ],
+            load(),
+        ]
+        .concat()
+    );
+    assert_eq!(executor.calls().len(), 1);
+    assert!(effects.invoked().is_empty(), "{:?}", effects.invoked());
 }

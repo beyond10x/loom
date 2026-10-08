@@ -55,8 +55,9 @@ use b10x_loom_commission::model::responsibility::{
     ExecutorOutcome, ExecutorOutcomeProposedAction, Frontier, FrontierAction, FrontierId,
     FrontierObligation, ObservationId, PrincipalId, ProposedActionArguments,
     RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeAwaitingApproval,
-    RunOutcomeCompleted, RunOutcomeNeedsAuthority, RunOutcomeNeedsExternalEvidence,
-    RunOutcomeSuspended, RunState, SuspensionReason, Unit, commission_state, frontier_state,
+    RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeNeedsAuthority,
+    RunOutcomeNeedsExternalEvidence, RunOutcomeSuspended, RunState, SuspensionReason, Unit,
+    commission_state, frontier_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -602,9 +603,14 @@ fn the_run_goes_on_at_the_revision_its_effect_moved_the_case_to() {
     );
     let end = ended(name, result);
     assert!(effects.invoked().is_empty(), "{name}: nothing admitted");
+    // The frontier of 6 admits an action: the run ends `CaseMovedOn`
+    // (story:moved-run-named-outcome).
     assert_eq!(
         end.outcome,
-        RunOutcome::NoAdmissibleAction(Unit(true)),
+        RunOutcome::CaseMovedOn(RunOutcomeCaseMovedOn {
+            bound_case_revision: 5,
+            current_case_revision: 6,
+        }),
         "{name}: a move no effect of the run made ends it"
     );
 }
@@ -708,7 +714,15 @@ fn a_request_not_admitted_is_never_invoked() {
     );
     let end = ended("stale", result);
     assert!(effects.invoked().is_empty(), "stale, yet invoked");
-    assert_eq!(end.outcome, RunOutcome::NoAdmissibleAction(Unit(true)));
+    // The frontier of 8 admits `inspect`: the run ends `CaseMovedOn`
+    // (story:moved-run-named-outcome).
+    assert_eq!(
+        end.outcome,
+        RunOutcome::CaseMovedOn(RunOutcomeCaseMovedOn {
+            bound_case_revision: 7,
+            current_case_revision: 8,
+        })
+    );
 
     // Allowed by the provider: invoked once.
     let case = CaseId("case-allowed".to_owned());

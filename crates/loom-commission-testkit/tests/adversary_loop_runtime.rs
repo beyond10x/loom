@@ -26,7 +26,7 @@ use b10x_loom_commission::model::responsibility::{
     AuthorityVerdictDeny, CaseId, Commission, CommissionData, CommissionId, ExecutorOutcome,
     ExecutorOutcomeNeedsHumanJudgment, ExecutorOutcomeProposedAction, Frontier, FrontierAction,
     HumanDecisionRequest, ObservationId, PrincipalId, ProposedActionArguments,
-    RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeCompleted,
+    RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeCaseMovedOn, RunOutcomeCompleted,
     RunOutcomeNeedsHumanJudgment, RunState, Unit, commission_state, frontier_state,
 };
 use b10x_loom_commission::model::responsibility::{EffectOutcome, EffectOutcomePerformed};
@@ -185,12 +185,16 @@ fn request_is_made_against_its_runs_case_revision() {
         .unwrap_or_else(|error| panic!("the loop failed: {error:?}"));
 
     // Coordinator decision F1 (adversary pass 1): when the governor's current revision differs
-    // from the Run's case_revision, the loop admits nothing more and ends with
-    // NoAdmissibleAction, since the Run's revision has no admissible action left. It ends at the
-    // revision change, before the scripted completion is reached.
+    // from the Run's case_revision, the loop admits nothing more and ends, since the Run's
+    // revision has no admissible action left. It ends at the revision change, before the scripted
+    // completion is reached; the frontier of 8 admits `inspect`, so the run ends `CaseMovedOn`
+    // (story:moved-run-named-outcome), naming the Run's 7 and the current 8.
     assert_eq!(
         end.outcome,
-        RunOutcome::NoAdmissibleAction(Unit(true)),
+        RunOutcome::CaseMovedOn(RunOutcomeCaseMovedOn {
+            bound_case_revision: 7,
+            current_case_revision: 8,
+        }),
         "decision F1: the loop ends at the revision change"
     );
     let held = RunStorage::get(&runs.ports, &end.run_id)

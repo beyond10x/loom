@@ -25,6 +25,7 @@
 //! | --- | --- | --- |
 //! | [`StopReason::ApprovalRequired`] | `NeedsAuthority`, `AwaitingApproval` | Loom proposes an action the frontier lists as needing approval, or a step leaves a frontier that lists one unchanged (every action's status and reasons); the detail names the proposed action, or the awaited actions in frontier order |
 //! | [`StopReason::NothingAdmissible`] | `NoAdmissibleAction`, `NeedsExternalEvidence` | Loom proposes nothing and the frontier lists no admissible action |
+//! | [`StopReason::NothingAdmissible`] | `CaseMovedOn` | the case moved to another revision while the run worked, and its frontier there still admits an action; the run, bound to the revision it left, stops, and the detail names both revisions (`case moved on from revision <bound> to <current>`) |
 //! | [`StopReason::StepBudget`] | `Suspended` for `Budget` | the steps taken reach the request's `max_steps` |
 //! | [`StopReason::NoLocalExecutor`] | `NoPerformableAction` | the pick is not `software-change@1`; the case opens and one frontier is read |
 //! | [`StopReason::Refused`] | none: no case is opened | the router refuses the pick: outside the registry, or unsure |
@@ -552,6 +553,19 @@ fn finish(out: &mut dyn Write, protocol: String, end: LoopEnd) -> Result<SliceRu
         RunOutcome::NoAdmissibleAction(_) | RunOutcome::NeedsExternalEvidence(_) => {
             stop(out, protocol, steps, StopReason::NothingAdmissible, None)
         }
+        RunOutcome::CaseMovedOn(moved) => {
+            let detail = format!(
+                "case moved on from revision {} to {}",
+                moved.bound_case_revision, moved.current_case_revision
+            );
+            stop(
+                out,
+                protocol,
+                steps,
+                StopReason::NothingAdmissible,
+                Some(detail),
+            )
+        }
         RunOutcome::NoPerformableAction(_) => {
             if let Some(frontier) = &end.last_frontier {
                 print_frontier(out, frontier)?;
@@ -951,5 +965,50 @@ fn push_json(out: &mut String, value: &json::Value) {
             }
             out.push('}');
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use b10x_loom_commission::model::primitives::Uuid;
+    use b10x_loom_commission::model::responsibility::{RunId, RunOutcome, RunOutcomeCaseMovedOn};
+    use b10x_loom_commission::runtime::LoopEnd;
+
+    use super::{SliceRun, StopReason, finish};
+
+    /// story:moved-run-named-outcome: a run whose case moved on to a frontier that still admits an
+    /// action stops as one with no admissible action does, a stop that is not a success, and its
+    /// stop line names the revision the run is bound to and the current one.
+    #[test]
+    fn a_run_whose_case_moved_on_stops_nothing_admissible_naming_both_revisions() {
+        let end = LoopEnd {
+            run_id: RunId(Uuid("00000000-0000-4000-8000-000000000001".to_owned())),
+            outcome: RunOutcome::CaseMovedOn(RunOutcomeCaseMovedOn {
+                bound_case_revision: 7,
+                current_case_revision: 8,
+            }),
+            requests: Vec::new(),
+            admitted: Vec::new(),
+            effects: Vec::new(),
+            steps: 2,
+            last_frontier: None,
+        };
+        let mut out = Vec::new();
+
+        let run = finish(&mut out, "software-change@1".to_owned(), end)
+            .unwrap_or_else(|error| panic!("the stop failed: {error}"));
+
+        assert_eq!(
+            run,
+            SliceRun {
+                protocol: "software-change@1".to_owned(),
+                steps: 2,
+                stop_reason: StopReason::NothingAdmissible,
+            }
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&out),
+            "stopped: NothingAdmissible (case moved on from revision 7 to 8)\n"
+        );
     }
 }

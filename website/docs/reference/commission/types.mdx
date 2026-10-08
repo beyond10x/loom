@@ -75,6 +75,7 @@ Tagged by `kind`.
 | Variant | Payload |
 |---|---|
 | `AwaitingApproval` | [`RunOutcomeAwaitingApproval`](#runoutcomeawaitingapproval) |
+| `CaseMovedOn` | [`RunOutcomeCaseMovedOn`](#runoutcomecasemovedon) |
 | `Completed` | [`RunOutcomeCompleted`](#runoutcomecompleted) |
 | `NeedsAuthority` | [`RunOutcomeNeedsAuthority`](#runoutcomeneedsauthority) |
 | `NeedsExternalEvidence` | [`RunOutcomeNeedsExternalEvidence`](#runoutcomeneedsexternalevidence) |
@@ -203,6 +204,13 @@ Tagged by `kind`.
 | Field | Type |
 |---|---|
 | `actions` | list of `string` |
+
+### RunOutcomeCaseMovedOn
+
+| Field | Type |
+|---|---|
+| `bound_case_revision` | `integer` |
+| `current_case_revision` | `integer` |
 
 ### RunOutcomeCompleted
 

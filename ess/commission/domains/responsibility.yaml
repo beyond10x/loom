@@ -194,7 +194,9 @@ types:
   # step left a frontier listing actions that need approval unchanged) and NoPerformableAction
   # (the frontier lists no action the effect port performs, so no executor is run). An empty
   # frontier goes to the executor; only a non-empty frontier none of whose actions the effect port
-  # performs ends NoPerformableAction.
+  # performs ends NoPerformableAction. story:moved-run-named-outcome adds CaseMovedOn (the case
+  # moved to a revision whose frontier still admits an action; the run stays bound to its own
+  # revision, and the caller starts a new run at the current one).
   - name: commission.responsibility.RunOutcome
     kind: union
     tag: kind
@@ -207,6 +209,7 @@ types:
       NoAdmissibleAction: commission.responsibility.Unit
       AwaitingApproval: commission.responsibility.RunOutcomeAwaitingApproval
       NoPerformableAction: commission.responsibility.Unit
+      CaseMovedOn: commission.responsibility.RunOutcomeCaseMovedOn
 
   # The governor's outcome identifier, as the governor reports it.
   - name: commission.responsibility.RunOutcomeCompleted
@@ -238,6 +241,17 @@ types:
     fields:
       - name: requirements
         type: List<String>
+
+  # story:moved-run-named-outcome (decision-blocker:moved-run-admissible-frontier, A): the revision
+  # the run is bound to (the run's case_revision) and the current revision the runtime loaded,
+  # whose frontier still admits an action.
+  - name: commission.responsibility.RunOutcomeCaseMovedOn
+    kind: struct
+    fields:
+      - name: bound_case_revision
+        type: Integer
+      - name: current_case_revision
+        type: Integer
 
   # story:runtime-merge: the actions that need approval, in frontier order, on a frontier a step
   # left unchanged; none of them was denied by an authority verdict in the run.

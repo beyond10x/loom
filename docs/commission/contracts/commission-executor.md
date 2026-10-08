@@ -59,7 +59,9 @@ An executor that finds the case has moved to another revision since the frontier
 returns `CaseMoved`, naming that frontier's revision. The runtime then loads the case again and
 judges the run on the frontier current then; it never takes the revision from the executor. When
 the governor still holds the case at the run's revision, the move is not borne out and the step
-counts as `NoUsefulAction`.
+counts as `NoUsefulAction`. Where the frontier current then would let the run go on, the run ends
+`CaseMovedOn`, naming the Run's revision and the current one: a Run stays bound to its revision,
+and the caller starts a new Run at the current one.
 
 An executor need not notice every move. When it proposes nothing (`CompletedLocalReasoning`,
 `NoUsefulAction`) and the run would end on the outcome derived from the frontier it was handed, the
