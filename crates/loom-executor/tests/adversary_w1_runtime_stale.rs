@@ -9,17 +9,16 @@
 //! case is complete, else with no admissible action."
 //!
 //! A Loom without a governor proposes, Commission finds the request stale, and the run ends as
-//! documented. A Loom with one refuses the selection itself and returns `NoUsefulAction`; the
-//! runtime then derives the run's outcome from the frontier of the revision the case has left
-//! (`outcome::derive`, rule 6) instead of loading the case again. Each case below runs both Looms
-//! on the same scenario: the ungoverned half asserts the outcome Commission documents, and the
-//! governed half asserts today's outcome.
+//! documented. A Loom with one refuses the selection itself (`stale-revision`) and reports the move
+//! as `ExecutorOutcome::CaseMoved` (`story:moved-case-outcome`, the decision of 2026-10-07 on
+//! `decision-blocker:run-stale-outcome`, option C). The runtime then loads the case once more and
+//! judges the run on the frontier current then (module docs, item 9). Until that story the
+//! governed Loom returned `NoUsefulAction`, and the run was judged on the frontier the case had
+//! left: no admissible action for a case that completed, and evidence asked for the superseded
+//! obligation of one that moved.
 //!
-//! No `ExecutorOutcome` or `RunOutcome` can yet say that the case moved during the step, so the
-//! runtime has nothing but the left frontier to judge the governed run on. The governed half
-//! asserts that outcome until the executor port can report a moved case to Commission
-//! (`decision-blocker:run-stale-outcome`), a change to Commission's specification; then each
-//! governed assertion becomes the documented outcome its failure message names.
+//! Each case below runs both Looms on the same scenario: the ungoverned half asserts the outcome
+//! Commission documents for a stale proposal, and the governed half the outcome of a reported move.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -66,19 +65,25 @@ fn commission() -> Commission<commission_state::Assigned> {
 
 /// The case at revision 7, listing one approval-gated action, until `moved`; then at revision 8,
 /// complete with `done` when `completes`, open otherwise. Before the move, its frontier carries
-/// `obligations`; after it, none.
+/// `obligations`; after it, `after`.
 struct Case {
     moved: AtomicBool,
     completes: bool,
     obligations: Vec<FrontierObligation>,
+    after: Vec<FrontierObligation>,
 }
 
 impl Case {
-    fn new(completes: bool, obligations: Vec<FrontierObligation>) -> Self {
+    fn new(
+        completes: bool,
+        obligations: Vec<FrontierObligation>,
+        after: Vec<FrontierObligation>,
+    ) -> Self {
         Self {
             moved: AtomicBool::new(false),
             completes,
             obligations,
+            after,
         }
     }
 
@@ -104,7 +109,7 @@ impl Governor for Case {
             case_revision: if moved { REVISION + 1 } else { REVISION },
             claims: Vec::new(),
             obligations: if moved {
-                Vec::new()
+                self.after.clone()
             } else {
                 self.obligations.clone()
             },
@@ -240,14 +245,18 @@ fn run_loop<E: AgentExecutor>(case: &Case, executor: &E) -> RunOutcome {
 }
 
 /// Both Looms on the same scenario: (without a governor, with one).
-fn both(completes: bool, obligations: Vec<FrontierObligation>) -> (RunOutcome, RunOutcome) {
-    let plain = Case::new(completes, obligations.clone());
+fn both(
+    completes: bool,
+    obligations: Vec<FrontierObligation>,
+    after: Vec<FrontierObligation>,
+) -> (RunOutcome, RunOutcome) {
+    let plain = Case::new(completes, obligations.clone(), after.clone());
     let ungoverned = run_loop(
         &plain,
         &Loom::new(PicksEdit, CaseMovesMeanwhile(&plain), "edit"),
     );
 
-    let governed_case = Case::new(completes, obligations);
+    let governed_case = Case::new(completes, obligations, after);
     let governed = run_loop(
         &governed_case,
         &Loom::new(PicksEdit, CaseMovesMeanwhile(&governed_case), "edit")
@@ -256,13 +265,19 @@ fn both(completes: bool, obligations: Vec<FrontierObligation>) -> (RunOutcome, R
     (ungoverned, governed)
 }
 
+fn open(obligation: &str) -> FrontierObligation {
+    FrontierObligation {
+        obligation: obligation.to_owned(),
+        open: true,
+    }
+}
+
 /// Somebody completes the case while Loom generates arguments. The runtime documents the run as
-/// ending completed; with a governed Loom it ends with no admissible action instead, which the
-/// governed half asserts until the executor port can report a moved case to Commission
-/// (`decision-blocker:run-stale-outcome`).
+/// ending completed, and both Looms end it so: the governed one reports the move, and the runtime's
+/// reload finds the case complete.
 #[test]
-fn a_case_completed_while_arguments_are_generated_is_judged_on_the_left_frontier_when_governed() {
-    let (ungoverned, governed) = both(true, Vec::new());
+fn a_case_completed_while_arguments_are_generated_ends_completed_when_governed() {
+    let (ungoverned, governed) = both(true, Vec::new(), Vec::new());
     let completed = RunOutcome::Completed(RunOutcomeCompleted {
         outcome: "done".to_owned(),
     });
@@ -273,47 +288,43 @@ fn a_case_completed_while_arguments_are_generated_is_judged_on_the_left_frontier
             "without a governor: {ungoverned:?}, expected {completed:?}"
         ));
     }
-    let today = RunOutcome::NoAdmissibleAction(Unit(true));
-    if governed != today {
+    if governed != completed {
         failures.push(format!(
-            "with a governor: {governed:?}, expected {today:?}, the outcome reached until the \
-             executor port can report a moved case to Commission \
-             (decision-blocker:run-stale-outcome); then this assertion becomes {completed:?}"
+            "with a governor: {governed:?}, expected {completed:?}: Loom reports the move \
+             (CaseMoved) and the runtime judges the run on the case as it is now"
         ));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// Somebody moves the case while Loom generates arguments; the revision it left had an open
-/// obligation. The runtime documents the run as ending with no admissible action, since the case
-/// moved; with a governed Loom it ends asking for evidence for the left revision's obligation,
-/// which the governed half asserts until the executor port can report a moved case to Commission
-/// (`decision-blocker:run-stale-outcome`).
+/// Somebody moves the case while Loom generates arguments, past the open `tests-pass` of the
+/// revision it left, to a revision whose frontier holds `review-approved` open. Without a governor
+/// the request is stale and the run ends with no admissible action, as the runtime documents for a
+/// stale proposal. With one, Loom reports the move and the run ends on the obligation the current
+/// frontier holds, `review-approved`, not on the superseded `tests-pass`.
 #[test]
-fn a_case_moved_while_arguments_are_generated_is_judged_on_the_left_frontier_when_governed() {
+fn a_case_moved_while_arguments_are_generated_ends_on_its_current_obligation_when_governed() {
     let (ungoverned, governed) = both(
         false,
-        vec![FrontierObligation {
-            obligation: "tests-pass".to_owned(),
-            open: true,
-        }],
+        vec![open("tests-pass")],
+        vec![open("review-approved")],
     );
-    let moved = RunOutcome::NoAdmissibleAction(Unit(true));
+    let stale = RunOutcome::NoAdmissibleAction(Unit(true));
 
     let mut failures = Vec::new();
-    if ungoverned != moved {
+    if ungoverned != stale {
         failures.push(format!(
-            "without a governor: {ungoverned:?}, expected {moved:?}"
+            "without a governor: {ungoverned:?}, expected {stale:?}"
         ));
     }
-    let today = RunOutcome::NeedsExternalEvidence(RunOutcomeNeedsExternalEvidence {
-        requirements: vec!["tests-pass".to_owned()],
+    let current = RunOutcome::NeedsExternalEvidence(RunOutcomeNeedsExternalEvidence {
+        requirements: vec!["review-approved".to_owned()],
     });
-    if governed != today {
+    if governed != current {
         failures.push(format!(
-            "with a governor: {governed:?}, expected {today:?}, the outcome reached until the \
-             executor port can report a moved case to Commission \
-             (decision-blocker:run-stale-outcome); then this assertion becomes {moved:?}"
+            "with a governor: {governed:?}, expected {current:?}: Loom reports the move \
+             (CaseMoved) and the runtime judges the run on the obligation the current frontier \
+             holds, not on the left revision's tests-pass"
         ));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));

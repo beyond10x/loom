@@ -134,6 +134,7 @@ types:
       Suspended: commission.responsibility.ExecutorOutcomeSuspended
       NoUsefulAction: commission.responsibility.Unit
       CompletedLocalReasoning: commission.responsibility.Unit
+      CaseMoved: commission.responsibility.ExecutorOutcomeCaseMoved
 
   # The action is a FrontierAction's `action`; identity, authority and case revision are not part
   # of a proposal (AGENTS.md § Rules).
@@ -156,6 +157,16 @@ types:
     fields:
       - name: reason
         type: commission.responsibility.SuspensionReason
+
+  # story:moved-case-outcome (decision-blocker:run-stale-outcome, C): the case moved to another
+  # revision while the executor worked, so it proposes nothing. Names the revision of the frontier
+  # it was handed. The runtime reads the current revision and frontier from the governor, never
+  # from this outcome, and judges the run on them.
+  - name: commission.responsibility.ExecutorOutcomeCaseMoved
+    kind: struct
+    fields:
+      - name: expected_case_revision
+        type: Integer
 
   # story:authority-provider-port: what an AuthorityProvider answers at the call. Distinct from the
   # stored AuthorityDecision entity.

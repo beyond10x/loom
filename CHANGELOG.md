@@ -6,6 +6,40 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- Commission's `ExecutorOutcome` has a `CaseMoved` variant (`ExecutorOutcomeCaseMoved`,
+  `expected_case_revision`): an executor reports that the case moved to another revision while it
+  worked, naming the revision of the frontier it was handed. On it, `run_until_blocked` loads the
+  case once more, and the governor decides whether it moved: still at the Run's revision, the step
+  counts as `NoUsefulAction` and the run goes on. Moved, the run is judged on the frontier current
+  then, as the executor would be handed it: a complete case ends the run `Completed`; otherwise
+  the outcome is derived from that frontier, and a frontier that would let the run go on ends it
+  with no admissible action, since the Run holds the case at the revision it left. The executor's
+  revision is observed, never trusted.
+
+### Fixed
+
+- A Loom built with `Loom::with_governor` reports a selection made at a revision the case has left
+  (`stale-revision`) as `CaseMoved` instead of `NoUsefulAction`. Under `run_until_blocked`, a case
+  that moves while the selector selects or while arguments are generated is no longer judged on the
+  frontier it left: a case completed meanwhile ends `Completed`, and a case moved past an open
+  obligation ends on the obligation its current frontier holds. In the governed loop
+  (`Loom::run_loop`) such a selection is still denied to the model, which chooses again from the
+  next turn's catalogue, projected from the governor's current frontier. `LoopExecutor` reports
+  `CaseMoved`, naming the revision of the frontier it was handed, for a run in which a selection
+  was refused `stale-revision` or a turn's catalogue was projected at another revision, when that
+  run ends with a proposal, `CompletedLocalReasoning` or `NoUsefulAction`: no proposal reaches
+  Commission that was not selected and admitted at the revision the Run holds.
+  `run_until_blocked` no longer ends a run on the frontier the case left when an executor proposed
+  nothing without noticing the move: before it ends a run on the outcome derived from the frontier
+  the executor was handed after `CompletedLocalReasoning` or `NoUsefulAction`, it loads the case
+  once more, and judges a case that moved as on a `CaseMoved` the governor bears out.
+- `task docs-check` writes ESS output under the workspace's build directory
+  (`target/loom-docs/<run>/`), a parent each run owns alone, instead of the system temporary
+  directory, where another process's `ess` run held the output lock and failed the check
+  ("output ownership busy", os error 11).
+
 ## [0.4.0] - 2026-10-07
 
 Loom 0.4.0 adds opt-in bounded working context, verified system time queries without a workspace,

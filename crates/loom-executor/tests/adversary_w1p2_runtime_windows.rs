@@ -2,14 +2,16 @@
 //! (`Loom::with_governor`) as the executor of Commission's `run_until_blocked`, outside the window
 //! pass 1 measured (`adversary_w1_runtime_stale.rs`, the case moving while arguments are generated).
 //!
-//! `CHANGELOG.md` (Unreleased) and the site's status row (`website/data/status.json`) state the
-//! limitation for the whole window between Commission reading the frontier and Loom's
-//! revalidation: while the selector selects or while arguments are generated. The selection comes
-//! first and is a model call as well (the slice's `ModelSelector`). The first two cases move the
-//! case while the selector selects, and check that the arguments were generated after the move, so
-//! the move falls in the selector's half of that window. Their governed half asserts the outcome
-//! reached today, as `adversary_w1_runtime_stale.rs` does while
-//! `decision-blocker:run-stale-outcome` is open.
+//! The window between Commission reading the frontier and Loom's revalidation is both model calls:
+//! while the selector selects (the slice's `ModelSelector`) and while arguments are generated.
+//! Until `story:moved-case-outcome` a case that moved in it was judged on the frontier it left.
+//! Now a governed Loom reports the move (`ExecutorOutcome::CaseMoved`, the decision of 2026-10-07
+//! on `decision-blocker:run-stale-outcome`, option C) and the runtime judges the run on the
+//! frontier current after it (`crates/loom-commission/src/runtime.rs`, module docs, item 9). The
+//! first two cases move the case while the selector selects, and check that the arguments were
+//! generated after the move, so the move falls in the selector's half of that window; their
+//! governed half asserts the decided outcome, as `adversary_w1_runtime_stale.rs` does for the
+//! argument half.
 //!
 //! The last two cases are the converse: when nobody else moves the case, a governed Loom ends a
 //! run of several steps, whose effects move the case, exactly as an ungoverned one does.
@@ -75,8 +77,12 @@ fn listed(action: &str, status: ActionStatus, capability: Option<&str>) -> Front
 }
 
 fn obligation(open: bool) -> FrontierObligation {
+    named_obligation("tests-pass", open)
+}
+
+fn named_obligation(name: &str, open: bool) -> FrontierObligation {
     FrontierObligation {
-        obligation: "tests-pass".to_owned(),
+        obligation: name.to_owned(),
         open,
     }
 }
@@ -87,19 +93,25 @@ fn obligation(open: bool) -> FrontierObligation {
 
 /// The case at revision 7, listing one approval-gated action, until `moved`; then at revision 8,
 /// complete with `done` when `completes`, open otherwise. Before the move, its frontier carries
-/// `obligations`; after it, none.
+/// `obligations`; after it, `after`.
 struct Case {
     moved: AtomicBool,
     completes: bool,
     obligations: Vec<FrontierObligation>,
+    after: Vec<FrontierObligation>,
 }
 
 impl Case {
-    fn new(completes: bool, obligations: Vec<FrontierObligation>) -> Self {
+    fn new(
+        completes: bool,
+        obligations: Vec<FrontierObligation>,
+        after: Vec<FrontierObligation>,
+    ) -> Self {
         Self {
             moved: AtomicBool::new(false),
             completes,
             obligations,
+            after,
         }
     }
 
@@ -125,7 +137,7 @@ impl Governor for Case {
             case_revision: if moved { REVISION + 1 } else { REVISION },
             claims: Vec::new(),
             obligations: if moved {
-                Vec::new()
+                self.after.clone()
             } else {
                 self.obligations.clone()
             },
@@ -299,10 +311,14 @@ struct Moved {
 }
 
 /// The same scenario without a governor and with one.
-fn moved_while_selecting(completes: bool, obligations: Vec<FrontierObligation>) -> (Moved, Moved) {
+fn moved_while_selecting(
+    completes: bool,
+    obligations: Vec<FrontierObligation>,
+    after: Vec<FrontierObligation>,
+) -> (Moved, Moved) {
     let authority = StaticAuthorityProvider::new();
 
-    let plain = Case::new(completes, obligations.clone());
+    let plain = Case::new(completes, obligations.clone(), after.clone());
     let plain_arguments = NotesTheMove::new(&plain);
     let ungoverned = run_loop(
         &plain,
@@ -311,7 +327,7 @@ fn moved_while_selecting(completes: bool, obligations: Vec<FrontierObligation>) 
         &Effects(None),
     );
 
-    let governed_case = Case::new(completes, obligations);
+    let governed_case = Case::new(completes, obligations, after);
     let governed_arguments = NotesTheMove::new(&governed_case);
     let governed = run_loop(
         &governed_case,
@@ -343,16 +359,14 @@ impl ArgumentGenerator for &NotesTheMove<'_> {
 }
 
 /// Somebody completes the case while the selector selects; the arguments are generated after the
-/// move. The runtime documents the run as ending completed, and the ungoverned run does. The
-/// governed run ends with no admissible action: judged on the frontier the case left, in the
-/// selector's half of the window the CHANGELOG and the status row name.
+/// move. The runtime documents the run as ending completed, and both runs end so: the governed
+/// Loom reports the move, and the runtime's reload finds the case complete.
 #[test]
-fn a_case_completed_while_the_selector_selects_is_judged_on_the_left_frontier() {
-    let (ungoverned, governed) = moved_while_selecting(true, Vec::new());
+fn a_case_completed_while_the_selector_selects_ends_completed() {
+    let (ungoverned, governed) = moved_while_selecting(true, Vec::new(), Vec::new());
     let completed = RunOutcome::Completed(RunOutcomeCompleted {
         outcome: "done".to_owned(),
     });
-    let today = RunOutcome::NoAdmissibleAction(Unit(true));
 
     let mut failures = Vec::new();
     if governed.moved_at_generation != [true] {
@@ -368,28 +382,32 @@ fn a_case_completed_while_the_selector_selects_is_judged_on_the_left_frontier() 
             ungoverned.outcome
         ));
     }
-    if governed.outcome != today {
+    if governed.outcome != completed {
         failures.push(format!(
-            "with a governor: {:?}, expected {today:?}, the outcome reached while \
-             decision-blocker:run-stale-outcome is open, for a move in the selector's half of \
-             the window CHANGELOG.md and website/data/status.json name",
+            "with a governor: {:?}, expected {completed:?}: for a move in the selector's half of \
+             the window, Loom reports the move (CaseMoved) and the runtime judges the run on the \
+             case as it is now",
             governed.outcome
         ));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// Somebody moves the case while the selector selects; the revision it left had an open
-/// obligation. The runtime documents the run as ending with no admissible action, and the
-/// ungoverned run does. The governed run ends asking for evidence for the left revision's
-/// obligation: judged on the frontier the case left, in the selector's half of the window the
-/// CHANGELOG and the status row name.
+/// Somebody moves the case while the selector selects, past the open `tests-pass` of the revision
+/// it left, to a revision whose frontier holds `review-approved` open. Without a governor the run
+/// ends with no admissible action, as the runtime documents for a stale proposal. With one, Loom
+/// reports the move and the run ends on the obligation the current frontier holds,
+/// `review-approved`, not on the superseded `tests-pass`.
 #[test]
-fn a_case_moved_while_the_selector_selects_is_judged_on_the_left_frontier() {
-    let (ungoverned, governed) = moved_while_selecting(false, vec![obligation(true)]);
-    let moved = RunOutcome::NoAdmissibleAction(Unit(true));
-    let today = RunOutcome::NeedsExternalEvidence(RunOutcomeNeedsExternalEvidence {
-        requirements: vec!["tests-pass".to_owned()],
+fn a_case_moved_while_the_selector_selects_ends_on_its_current_obligation() {
+    let (ungoverned, governed) = moved_while_selecting(
+        false,
+        vec![obligation(true)],
+        vec![named_obligation("review-approved", true)],
+    );
+    let stale = RunOutcome::NoAdmissibleAction(Unit(true));
+    let current = RunOutcome::NeedsExternalEvidence(RunOutcomeNeedsExternalEvidence {
+        requirements: vec!["review-approved".to_owned()],
     });
 
     let mut failures = Vec::new();
@@ -399,17 +417,17 @@ fn a_case_moved_while_the_selector_selects_is_judged_on_the_left_frontier() {
             governed.moved_at_generation
         ));
     }
-    if ungoverned.outcome != moved {
+    if ungoverned.outcome != stale {
         failures.push(format!(
-            "without a governor: {:?}, expected {moved:?}",
+            "without a governor: {:?}, expected {stale:?}",
             ungoverned.outcome
         ));
     }
-    if governed.outcome != today {
+    if governed.outcome != current {
         failures.push(format!(
-            "with a governor: {:?}, expected {today:?}, the outcome reached while \
-             decision-blocker:run-stale-outcome is open, for a move in the selector's half of \
-             the window CHANGELOG.md and website/data/status.json name",
+            "with a governor: {:?}, expected {current:?}: for a move in the selector's half of \
+             the window, Loom reports the move (CaseMoved) and the runtime judges the run on the \
+             obligation the current frontier holds, not on the left revision's tests-pass",
             governed.outcome
         ));
     }

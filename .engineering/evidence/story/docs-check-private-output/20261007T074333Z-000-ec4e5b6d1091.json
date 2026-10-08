@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-07T07:43:33Z",
+  "actor": "human:timo",
+  "artifact": "story:docs-check-private-output",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "task docs-check with another process holding flock -x on TMPDIR",
+    "reference": "VERIFIED: base b8af5c2 exit 1 (output ownership busy, os error 11); impl exit 0, two parallel runs exit 0"
+  }
+}

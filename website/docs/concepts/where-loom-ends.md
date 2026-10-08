@@ -19,6 +19,7 @@ pub enum ExecutorOutcome {
     Suspended(ExecutorOutcomeSuspended),
     NoUsefulAction(Unit),
     CompletedLocalReasoning(Unit),
+    CaseMoved(ExecutorOutcomeCaseMoved),
 }
 ```
 

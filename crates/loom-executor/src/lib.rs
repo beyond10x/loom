@@ -15,8 +15,9 @@
 //! and asks its authority provider (Atlas ADR 0082); Loom never suspends for authority.
 //!
 //! Given a governor ([`Loom::with_governor`]), Loom revalidates each selection against the case's
-//! current frontier before proposing it ([`revalidation`]); Commission still rechecks every
-//! proposal before any effect.
+//! current frontier before proposing it ([`revalidation`]), and reports a selection made at a
+//! revision the case has left as `CaseMoved`; Commission still rechecks every proposal before any
+//! effect.
 //!
 //! [`Loom::run_loop`] runs the ported Harness loop over a commission's frontier instead
 //! ([`harness::governed`]): each turn's tool list is the catalogue projected from the current
@@ -55,8 +56,9 @@ use b10x_loom_commission::admission::admit;
 use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::responsibility::{
     ActionStatus, Admission, CaseId, Commission, CompletionDetermination, ExecutorOutcome,
-    ExecutorOutcomeProposedAction, ExecutorOutcomeSuspended, Frontier, GovernorError,
-    ProposedActionArguments, SuspensionReason, Unit, commission_state, frontier_state,
+    ExecutorOutcomeCaseMoved, ExecutorOutcomeProposedAction, ExecutorOutcomeSuspended, Frontier,
+    GovernorError, ProposedActionArguments, SuspensionReason, Unit, commission_state,
+    frontier_state,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
@@ -351,6 +353,14 @@ fn no_useful_action() -> ExecutorOutcome {
     ExecutorOutcome::NoUsefulAction(Unit(true))
 }
 
+/// The case moved after Loom's catalogue was projected at `expected_case_revision`
+/// (`story:moved-case-outcome`): Commission reloads the case and judges the run on it.
+fn case_moved(expected_case_revision: i64) -> ExecutorOutcome {
+    ExecutorOutcome::CaseMoved(ExecutorOutcomeCaseMoved {
+        expected_case_revision,
+    })
+}
+
 fn outage(error: String) -> ExecutorOutcome {
     ExecutorOutcome::Suspended(ExecutorOutcomeSuspended {
         reason: SuspensionReason::ExternalAvailability(Value::Object(vec![(
@@ -377,9 +387,10 @@ where
     ///
     /// With a governor ([`Loom::with_governor`]), the selection is then revalidated against the
     /// case's current frontier, read from the governor once, before it is proposed: a selection
-    /// made at another case revision, or of an action that frontier's catalogue does not list, is
-    /// `NoUsefulAction`; a governor that cannot answer is `Suspended` with `ExternalAvailability`
-    /// carrying its error.
+    /// made at another case revision is `CaseMoved`, naming the revision of the frontier the run
+    /// was handed, so Commission judges the run on the case as it is now; one of an action that
+    /// frontier's catalogue does not list is `NoUsefulAction`; a governor that cannot answer is
+    /// `Suspended` with `ExternalAvailability` carrying its error.
     fn run(
         &self,
         commission: &Commission<commission_state::Assigned>,
@@ -540,8 +551,9 @@ where
     /// projected from it, so an action it lists but no longer admits is not in it. `Ok` when the
     /// selection is admitted, or when this Loom has no governor; otherwise what the run returns
     /// instead of a proposal. A governor that cannot answer, or answers with another case's
-    /// frontier, is an outage; a refused selection, or any outcome but `admitted`, is
-    /// `NoUsefulAction`, the refusal recorded on the selection and in [`Loom::revalidations`].
+    /// frontier, is an outage; a selection refused `stale-revision` is `CaseMoved`, naming the
+    /// revision it was selected at; any other outcome but `admitted` is `NoUsefulAction`. Every
+    /// refusal is recorded on the selection and in [`Loom::revalidations`].
     fn revalidate(&self, case: &CaseId, selection_id: SelectionId) -> Result<(), ExecutorOutcome> {
         let Some(governor) = &self.governor else {
             return Ok(());
@@ -574,6 +586,9 @@ where
         });
         match revalidated {
             Ok(RevalidateSelectionOutcome::Admitted { .. }) => Ok(()),
+            Ok(RevalidateSelectionOutcome::StaleRevision { selection_stale }) => {
+                Err(case_moved(selection_stale.catalogue_revision))
+            }
             _ => Err(no_useful_action()),
         }
     }

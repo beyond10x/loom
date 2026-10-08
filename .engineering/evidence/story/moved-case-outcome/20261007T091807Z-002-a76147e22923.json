@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-07T09:18:07Z",
+  "actor": "human:timo",
+  "artifact": "story:moved-case-outcome",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adversary-w3-loom-moved-case-outcome-pass-1",
+    "reference": "F3: filed as story:moved-run-named-outcome, decided option A",
+    "review": "review-result:adversary-w3-loom-moved-case-outcome-pass-1",
+    "outcome": "no-op"
+  }
+}

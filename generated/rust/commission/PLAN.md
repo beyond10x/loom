@@ -1,14 +1,14 @@
 <!--
   generated from commission v1
-  model digest b591e8b9ead48953d86efb7e3edde0078b9afa9db83e615afaad0f867d5dfaa3
-  contract digest 351f450a15d041450febd56481b7e3491c7088fd1dfaf030605d6765f5b1c910
+  model digest 43a3c632efbe62d6009e162f9228cf9e37cae5f9d01b17fe7605529448a1ff38
+  contract digest 66bcc392ea844a2f5a3d58c7ee43d70995938794d6d94bc82c744f2b7312e04e
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — commission v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-87 capabilities: **86 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+88 capabilities: **87 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -47,6 +47,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `commission.responsibility.Evidence.State` |
 | domain type | `commission.responsibility.EvidenceId` |
 | domain type | `commission.responsibility.ExecutorOutcome` |
+| domain type | `commission.responsibility.ExecutorOutcomeCaseMoved` |
 | domain type | `commission.responsibility.ExecutorOutcomeNeedsHumanJudgment` |
 | domain type | `commission.responsibility.ExecutorOutcomeProposedAction` |
 | domain type | `commission.responsibility.ExecutorOutcomeSuspended` |

@@ -274,7 +274,7 @@ fn adversary2_contract_doc_prose_writes_outcomes_in_the_generated_shape() {
         .filter(|variant| matches!(variant.fields, syn::Fields::Unnamed(_)))
         .map(|variant| variant.ident.to_string())
         .collect();
-    assert_eq!(tuple_variants.len(), 5, "the generated union changed shape");
+    assert_eq!(tuple_variants.len(), 6, "the generated union changed shape");
 
     let doc = read(DOC);
     let mut in_block = false;

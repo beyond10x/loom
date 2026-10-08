@@ -14,9 +14,10 @@ use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::Uuid as CommissionUuid;
 use b10x_loom_commission::model::responsibility::{
     ActionStatus, AgentRevisionId, AuthorityContext, CaseId, Commission, CommissionData,
-    CommissionId, CompletionDetermination, ExecutorOutcome, ExecutorOutcomeProposedAction,
-    ExecutorOutcomeSuspended, Frontier, FrontierAction, FrontierData, FrontierId, GovernorError,
-    PrincipalId, ProposedActionArguments, SuspensionReason, Unit, commission_state, frontier_state,
+    CommissionId, CompletionDetermination, ExecutorOutcome, ExecutorOutcomeCaseMoved,
+    ExecutorOutcomeProposedAction, ExecutorOutcomeSuspended, Frontier, FrontierAction,
+    FrontierData, FrontierId, GovernorError, PrincipalId, ProposedActionArguments,
+    SuspensionReason, Unit, commission_state, frontier_state,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
@@ -269,9 +270,14 @@ fn revalidation_refuses_before_proposing() {
         }
         None => failures.push("stale revision: no selection was recorded".to_owned()),
     }
-    if stale.outcome != ExecutorOutcome::NoUsefulAction(Unit(true)) {
+    // `story:moved-case-outcome`: nothing is proposed, and the refusal is reported to Commission
+    // as the case having moved from the revision the selection was made at.
+    let moved = ExecutorOutcome::CaseMoved(ExecutorOutcomeCaseMoved {
+        expected_case_revision: REVISION,
+    });
+    if stale.outcome != moved {
         failures.push(format!(
-            "stale revision: Loom returned {:?}, expected NoUsefulAction",
+            "stale revision: Loom returned {:?}, expected {moved:?}",
             stale.outcome
         ));
     }

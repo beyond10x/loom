@@ -2,15 +2,19 @@
 format: aep.planning-md/3
 id: story:docs-check-private-output
 kind: story
-status: draft
+status: implemented
 title: The docs check writes ESS output to a directory it owns alone
 relations:
 - decomposes: epic:loom-native-harness
 - serves: vision:O1
 scope:
-- confidence: inferred
-  path: crates/loom-docs/src/
-revision: 2
+- confidence: cited
+  path: crates/loom-docs/src/main.rs
+revision: 8
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-07T07:33:43Z", actor: "human:timo", revision: 3, executor: "agent:loom", correlation: "wave/2026-10-07-w3"}
+- {from: "proposed", to: "active", at: "2026-10-07T07:33:43Z", actor: "human:timo", revision: 4, executor: "agent:loom", correlation: "wave/2026-10-07-w3"}
+- {from: "active", to: "implemented", at: "2026-10-08T00:33:49Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"test_result":1,"verification":1}}}
 ---
 ## Outcome
 
@@ -38,3 +42,7 @@ No specification change.
 ## Source
 
 The wave 2026-10-07-w2 gate log (pre-existing; the docs generator predates the wave).
+
+## Scope confirmed
+
+Read from `git diff --stat b8af5c2 f544d9f` at the close of wave 2026-10-07-w3: the inferred `crates/loom-docs/src/` is one file, `crates/loom-docs/src/main.rs` (78 insertions, 10 deletions).

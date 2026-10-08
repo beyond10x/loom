@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:moved-case-outcome
 kind: story
-status: draft
+status: implemented
 title: An executor reports a moved case and the run is judged on the current frontier
 relations:
 - decomposes: epic:commission-core
@@ -10,21 +10,35 @@ relations:
 - depends_on: story:ess-055-upgrade
 - depends_on: story:effect-invocation
 scope:
-- confidence: inferred
-  path: crates/loom-commission-testkit/tests/
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/executor_port.rs
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/moved_case_outcome.rs
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/runtime_loop.rs
+- confidence: cited
+  path: crates/loom-commission/src/outcome.rs
 - confidence: cited
   path: crates/loom-commission/src/runtime.rs
-- confidence: inferred
-  path: crates/loom-executor/src/
+- confidence: cited
+  path: crates/loom-executor/src/harness/governed.rs
+- confidence: cited
+  path: crates/loom-executor/src/lib.rs
 - confidence: cited
   path: crates/loom-executor/tests/adversary_w1_runtime_stale.rs
 - confidence: cited
   path: crates/loom-executor/tests/adversary_w1p2_runtime_windows.rs
 - confidence: cited
+  path: docs/commission/contracts/commission-executor.md
+- confidence: cited
   path: ess/commission/domains/responsibility.yaml
 - confidence: cited
   path: generated/rust/commission/
-revision: 3
+revision: 15
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-07T07:33:43Z", actor: "human:timo", revision: 4, executor: "agent:loom", correlation: "wave/2026-10-07-w3"}
+- {from: "proposed", to: "active", at: "2026-10-07T07:33:43Z", actor: "human:timo", revision: 5, executor: "agent:loom", correlation: "wave/2026-10-07-w3"}
+- {from: "active", to: "implemented", at: "2026-10-08T00:33:49Z", actor: "human:timo", revision: 15, decided_on: {"recorded":{"test_result":1,"review_outcome":8,"verification":1}}}
 ---
 ## Outcome
 
@@ -90,3 +104,16 @@ wave; it depends on nothing that story adds.
 
 `decision-blocker:run-stale-outcome` (its Options, the wave 2026-10-06-w1 measurements and the
 decision); `review-result:adversary-w1-loom-selection-revalidation-pass-1` (F1) and pass 2 (D2).
+
+## Scope confirmed
+
+Read from `git diff --stat b8af5c2 eb10aa3` (the unit's five commits, 30 files) at the close of wave
+2026-10-07-w3. Corrections to the `## Scope` section above:
+
+| Scope line | Confidence then | What the unit changed |
+|---|---|---|
+| `crates/loom-executor/src/` | inferred (`src/selection.rs` or the outcome conversion) | `src/lib.rs` (the stale-revision mapping) and `src/harness/governed.rs` (`LoopExecutor`'s move rule); `src/selection.rs` unchanged |
+| `crates/loom-commission-testkit/tests/` | inferred (one new case) | `moved_case_outcome.rs` (new), `adversary_w3_moved_case.rs` (new, adversary pass 1), `executor_port.rs`, `runtime_loop.rs`, `skeleton.rs`, `adversary2_executor_contract_doc.rs` |
+| `crates/loom-commission/src/runtime.rs` | cited | as cited; also `src/outcome.rs` |
+| `ess/commission/domains/responsibility.yaml`, `generated/rust/commission/` | cited | as cited |
+| not listed | — | `docs/commission/contracts/commission-executor.md`, `website/docs/reference/commission/types.mdx` (generated), `crates/loom-executor/tests/adversary_w1_selection_boundaries.rs`, `adversary_w1p2_selection_edges.rs`, `selection_revalidation.rs`, and the adversary files `adversary_w3_moved_case_loop.rs`, `adversary2_w3_moved_case_loop.rs`, `adversary3_w3_moved_case_loop.rs` |
