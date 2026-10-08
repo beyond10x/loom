@@ -61,6 +61,11 @@ judges the run on the frontier current then; it never takes the revision from th
 the governor still holds the case at the run's revision, the move is not borne out and the step
 counts as `NoUsefulAction`.
 
+An executor need not notice every move. When it proposes nothing (`CompletedLocalReasoning`,
+`NoUsefulAction`) and the run would end on the outcome derived from the frontier it was handed, the
+runtime loads the case once more first, and a case that moved is judged as after a `CaseMoved` the
+governor bears out.
+
 The executor does not mark the case complete.
 
 Completion remains a governor/protocol determination.

@@ -26,9 +26,15 @@ under **Unreleased** until the next release.
   frontier it left: a case completed meanwhile ends `Completed`, and a case moved past an open
   obligation ends on the obligation its current frontier holds. In the governed loop
   (`Loom::run_loop`) such a selection is still denied to the model, which chooses again from the
-  next turn's catalogue; `LoopExecutor` reports a run that then ends without a proposal as
-  `CaseMoved`, naming the revision it was handed, instead of `CompletedLocalReasoning` or
-  `NoUsefulAction`.
+  next turn's catalogue, projected from the governor's current frontier. `LoopExecutor` reports
+  `CaseMoved`, naming the revision of the frontier it was handed, for a run in which a selection
+  was refused `stale-revision` or a turn's catalogue was projected at another revision, when that
+  run ends with a proposal, `CompletedLocalReasoning` or `NoUsefulAction`: no proposal reaches
+  Commission that was not selected and admitted at the revision the Run holds.
+  `run_until_blocked` no longer ends a run on the frontier the case left when an executor proposed
+  nothing without noticing the move: before it ends a run on the outcome derived from the frontier
+  the executor was handed after `CompletedLocalReasoning` or `NoUsefulAction`, it loads the case
+  once more, and judges a case that moved as on a `CaseMoved` the governor bears out.
 - `task docs-check` writes ESS output under the workspace's build directory
   (`target/loom-docs/<run>/`), a parent each run owns alone, instead of the system temporary
   directory, where another process's `ess` run held the output lock and failed the check
