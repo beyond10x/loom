@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T10:40:21Z",
+  "actor": "human:timo",
+  "artifact": "epic:commission-core",
+  "kind": "epic",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "loom / task check (runs commission:conform, suite ae7b294) pass on PR 36 head 940e87c (run 37759305968); 3 stories implemented (c8a107b)",
+    "reference": "https://github.com/beyond10x/loom/actions/runs/37759305968"
+  }
+}

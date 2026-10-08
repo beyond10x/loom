@@ -5,7 +5,6 @@ kind: story
 status: draft
 title: A compaction leaves the session at or below its target, or the run stops by name
 relations:
-- decomposes: epic:loom-native-harness
 - serves: vision:O1
 scope:
 - confidence: inferred

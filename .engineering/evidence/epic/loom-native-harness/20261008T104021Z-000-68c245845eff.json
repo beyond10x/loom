@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T10:40:21Z",
+  "actor": "human:timo",
+  "artifact": "epic:loom-native-harness",
+  "kind": "epic",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "loom / task check (runs task conform) pass on PR 36 head 940e87c (run 37759305968); 17 decomposing stories implemented; follow-ups compaction-target-bound, conformance-declared-coverage, revalidation-membership-conformance unrelated as hardening outside the acceptance",
+    "reference": "https://github.com/beyond10x/loom/actions/runs/37759305968"
+  }
+}

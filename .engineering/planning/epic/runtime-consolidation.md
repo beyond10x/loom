@@ -2,14 +2,18 @@
 format: aep.planning-md/3
 id: epic:runtime-consolidation
 kind: epic
-status: draft
+status: implemented
 title: 'Loom is the one runtime repository: commission, governor and intake become crates'
 refs:
 - provider: atlas
   reference: adr:0090
 relations:
 - serves: vision:governed-autonomy
-revision: 1
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-08T10:40:11Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-10-08T10:40:11Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-08T10:40:11Z", actor: "human:timo", revision: 4}
 ---
 ## Outcome
 
