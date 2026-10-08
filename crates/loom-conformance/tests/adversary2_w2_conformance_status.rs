@@ -1,22 +1,20 @@
-//! Adversary pass 2, wave 2026-10-07-w2: named unsupported scenarios keep `task conform` green
-//! while ESS rates the run `failed`.
+//! Adversary pass 2, wave 2026-10-07-w2, revised by `story:conformance-declared-coverage`: named
+//! unsupported scenarios no longer keep `task conform` green while ESS rates the run `failed`.
 //!
 //! The Rust producer reports a scenario the target cannot answer `unsupported`, and ESS's own rule
 //! (ess-conformance `counts.rs`, `execution`) makes any `unsupported` scenario an
-//! `execution_status: failed` and so a `conformance_status: failed`. `tests/conform.rs` accepts an
-//! `unsupported` scenario named in `ess/SKIPPED.md`, and reads the report's two statuses only to
-//! check they agree with its counts, so a report whose every unsupported scenario is named passes
-//! the check with both statuses `failed`. That behaviour was decided to stay (correction round 2
-//! of the wave): acceptance item 4 admits a named scenario, and the `conform` task description and
-//! the `ess/SKIPPED.md` header say so. This case holds the decided behaviour.
+//! `execution_status: failed` and so a `conformance_status: failed`. Wave 2026-10-07-w2 decided
+//! that `tests/conform.rs` passes such a run when every unsupported scenario is named in
+//! `ess/SKIPPED.md`. `story:conformance-declared-coverage` replaced that decision: `task conform`
+//! fails unless the report's `conformance_status` is `passed`, so naming a scenario in
+//! `ess/SKIPPED.md` no longer keeps it green. This case holds the replacement.
 //!
 //! The case builds that report the documented way: a copy of `ess/` whose `ReleaseSession` is sent
 //! by an actor with an attribute (so every step invoking it carries a caller, which `LoomTarget`
-//! answers `unsupported`), and an `ess/SKIPPED.md` naming each such scenario with a reason, as its
-//! header says to for "a scenario Loom cannot answer". It checks that ESS's report rates that run
-//! `failed`, then runs the real `conform` test binary against the copy, by pointing
-//! `CARGO_MANIFEST_DIR` (read at run time, `conform.rs` `root()`) at it, and requires the check to
-//! pass.
+//! answers `unsupported`), and an `ess/SKIPPED.md` naming each such scenario with a reason. It
+//! checks that ESS's report rates that run `failed`, then runs the real `conform` test binary
+//! against the copy, by pointing `CARGO_MANIFEST_DIR` (read at run time, `conform.rs` `root()`) at
+//! it, and requires the check to fail naming `conformance_status`.
 
 use b10x_loom_conformance::run_suite;
 use serde_json::Value;
@@ -50,7 +48,12 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
-/// The `conform` integration-test binary cargo built beside this one, the newest if several.
+/// A case only Loom's `tests/conform.rs` holds. `b10x-loom-commission-conformance` builds a
+/// `conform-<hash>` binary into the same directory, with an `ess_conformance_report` of its own.
+const LOOM_CONFORM_CASE: &str = "taskfile_check_runs_conform: test";
+
+/// Loom's `conform` integration-test binary cargo built beside this one, the newest if several:
+/// a `conform-<hash>` binary whose `--list` names [`LOOM_CONFORM_CASE`].
 fn conform_binary() -> PathBuf {
     let exe = std::env::current_exe().expect("this test's own path");
     let deps = exe.parent().expect("the deps directory");
@@ -63,12 +66,22 @@ fn conform_binary() -> PathBuf {
                 !hash.contains('.') && hash.chars().all(|c| c.is_ascii_hexdigit())
             })
         })
+        .filter(|entry| {
+            Command::new(entry.path())
+                .arg("--list")
+                .output()
+                .is_ok_and(|listed| {
+                    String::from_utf8_lossy(&listed.stdout)
+                        .lines()
+                        .any(|line| line == LOOM_CONFORM_CASE)
+                })
+        })
         .filter_map(|entry| Some((entry.metadata().ok()?.modified().ok()?, entry.path())))
         .max()
         .map(|(_, path)| path)
         .unwrap_or_else(|| {
             panic!(
-                "no `conform-<hash>` test binary in {}: build it first with \
+                "no `conform-<hash>` test binary listing `{LOOM_CONFORM_CASE}` in {}: build it first with \
                  `cargo test --locked -p b10x-loom-conformance --no-run`",
                 deps.display()
             )
@@ -76,8 +89,7 @@ fn conform_binary() -> PathBuf {
 }
 
 #[test]
-fn adversary2_w2_named_unsupported_scenarios_keep_task_conform_green_while_ess_rates_the_run_failed()
- {
+fn adversary2_w2_named_unsupported_scenarios_fail_task_conform_on_conformance_status() {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -101,7 +113,16 @@ fn adversary2_w2_named_unsupported_scenarios_keep_task_conform_green_while_ess_r
     let suite_path = fake.join("suite.json");
     let synthesized = Command::new("ess")
         .current_dir(&fake)
-        .args(["verify", "conform", "synthesize", "--path", "ess", "--out"])
+        .args([
+            "verify",
+            "conform",
+            "synthesize",
+            "--path",
+            "ess",
+            "--suite-format",
+            "5",
+            "--out",
+        ])
         .arg(&suite_path)
         .output()
         .expect("`ess` on PATH");
@@ -154,11 +175,17 @@ fn adversary2_w2_named_unsupported_scenarios_keep_task_conform_green_while_ess_r
         "the filter selected no test:\n{stdout}"
     );
     let _ = fs::remove_dir_all(&fake);
+    // The check fails, and the only shortfall it names is the qualification: every unsupported
+    // scenario is named, so no `expectation` line may appear, and the binary that ran is Loom's
+    // `conform` (Commission's has a test of the same name, which would fail differently).
+    let qualification = "the report's conformance_status is \"failed\"; task conform requires";
     assert!(
-        ran.status.success(),
-        "task conform's check failed a report whose {} unsupported scenario(s) are all named in \
-         ess/SKIPPED.md: a named scenario keeps it green while ESS rates the run `failed` (decided \
-         behaviour): {unsupported:?}\n{stdout}{}",
+        !ran.status.success()
+            && stdout.contains("the conformance report does not pass")
+            && stdout.contains(qualification)
+            && !stdout.contains("expectation "),
+        "task conform's check must fail a report whose {} unsupported scenario(s) are all named in \
+         ess/SKIPPED.md, naming only `{qualification}`: {unsupported:?}\n{stdout}{}",
         unsupported.len(),
         String::from_utf8_lossy(&ran.stderr)
     );

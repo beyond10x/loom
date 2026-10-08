@@ -6,6 +6,14 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Changed
+
+- `task conform` and `task commission:conform` synthesize their suites with declared coverage
+  (`ess verify conform synthesize --suite-format 5`) and fail unless the report's
+  `conformance_status` is `passed`. A run whose scenarios all pass over a suite without a coverage
+  inventory, which ESS rates `inconclusive`, no longer counts as green, and neither does a run with
+  an `unsupported` scenario named in `ess/SKIPPED.md`, which ESS rates `failed`.
+
 ## [0.8.0] - 2026-10-08
 
 Loom 0.8.0 lets a commission's bound actions leave Loom through Connectors. The new crate

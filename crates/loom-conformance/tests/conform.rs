@@ -1,7 +1,7 @@
 //! `task check` holds Loom's ESS specification to its synthesized conformance suite.
 //!
 //! [`ess_conformance_report`] synthesizes the suite from `ess/` with `ess verify conform
-//! synthesize`, runs it against `b10x-loom-executor` through [`LoomTarget`], and reads the verdict
+//! synthesize --suite-format 5`, runs it against `b10x-loom-executor` through [`LoomTarget`], and reads the verdict
 //! from the `ess-conformance-report/2` document, never from an exit code:
 //!
 //! 1. the report records at least one executed scenario (passed or failed);
@@ -19,11 +19,6 @@
 //! refuses `error` outright, since an execution failure hides whatever the scenario would have
 //! shown, and it refuses an `ess/SKIPPED.md` entry naming a scenario the report records as passed.
 //!
-//! So the check passes when every scenario passed or is named in `ess/SKIPPED.md`, and only then.
-//! A named `unsupported` scenario keeps it green while ESS rates the run `failed`: ESS fails the
-//! execution of any run with an unsupported scenario. That is decided, not overlooked: acceptance
-//! item 4 admits a named scenario, and the Rust producer has no other category for one.
-//!
 //! The report's own `execution_status` and `conformance_status` are read too, and each must be the
 //! status its counts and coverage come to by ESS's rule ([`derived_statuses`]); a copy of the
 //! report with either field changed fails the check and names the field. `run_suite` builds the
@@ -31,6 +26,14 @@
 //! this target's own report the check holds by construction. The rule itself is held to ESS's
 //! ratings written out as literals: the self-check copies of expectation 4 carry the statuses ESS
 //! rates them, and [`derived_statuses_rate_reports_as_ess_does`] covers each branch.
+//!
+//! On top of that, the report must qualify: its `conformance_status` must be `passed`
+//! ([`qualification`]), and a copy of a passing report that says `inconclusive` fails the check
+//! naming the field. The suite is synthesized with declared coverage (`--suite-format 5`), so it
+//! carries a complete coverage inventory and a run in which every scenario passed qualifies
+//! `passed`; in the ordinary format the coverage is unknown and the same run is `inconclusive`.
+//! A named `unsupported` scenario therefore no longer keeps the check green: ESS fails the
+//! execution, and so the conformance, of any run with an unsupported scenario.
 //!
 //! [`taskfile_check_runs_conform`] holds the other half of the claim: `task check` runs this test,
 //! through the task `conform`, as a step of its own.
@@ -105,10 +108,20 @@ fn ess(args: &[&str], out: Option<&Path>) -> String {
     String::from_utf8(output.stdout).expect("`ess` prints UTF-8")
 }
 
-/// The suite `ess/` obliges, synthesized fresh.
+/// The suite `ess/` obliges, synthesized fresh with declared coverage (`--suite-format 5`), so the
+/// report can qualify the run `passed` rather than `inconclusive`.
 fn synthesize(out: &Path) -> String {
     ess(
-        &["verify", "conform", "synthesize", "--path", "ess", "--out"],
+        &[
+            "verify",
+            "conform",
+            "synthesize",
+            "--path",
+            "ess",
+            "--suite-format",
+            "5",
+            "--out",
+        ],
         Some(out),
     );
     fs::read_to_string(out).unwrap_or_else(|error| panic!("read {}: {error}", out.display()))
