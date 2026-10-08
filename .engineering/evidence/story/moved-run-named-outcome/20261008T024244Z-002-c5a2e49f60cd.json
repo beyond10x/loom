@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T02:42:44Z",
+  "actor": "human:timo",
+  "artifact": "story:moved-run-named-outcome",
+  "kind": "story",
+  "revision": 11,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "9ed4653: cargo test -p testkit 173, -p commission 47, -p intake-slice 125, -p executor 671, 0 failed; commission:drift, commission:conform, fmt --check, clippy -D warnings exit 0",
+    "reference": "9ed4653"
+  }
+}

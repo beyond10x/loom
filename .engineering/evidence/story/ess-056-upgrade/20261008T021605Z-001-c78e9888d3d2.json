@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T02:16:05Z",
+  "actor": "human:timo",
+  "artifact": "story:ess-056-upgrade",
+  "kind": "story",
+  "revision": 19,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "e28dc70, ess 0.56.0: ess-gate 10 passed, commission:ess-gate 11 passed, drift/commission:drift/intake-drift/docs-check/commission:docs-drift exit 0, cargo test -p on 5 crates 752 passed 0 failed, clippy -D warnings exit 0, fmt --check exit 0",
+    "reference": "e28dc70"
+  }
+}

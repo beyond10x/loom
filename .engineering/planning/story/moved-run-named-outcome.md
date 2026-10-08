@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:moved-run-named-outcome
 kind: story
-status: active
+status: implemented
 title: A run whose case moved on to an admissible frontier ends with an outcome that says so
 relations:
 - decomposes: epic:commission-core
@@ -11,27 +11,28 @@ relations:
 - depends_on: story:ess-056-upgrade
 scope:
 - confidence: cited
-  path: crates/loom-commission-conformance/src/lib.rs
+  path: CHANGELOG.md
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/
 - confidence: cited
   path: crates/loom-commission-testkit/tests/moved_case_outcome.rs
-- confidence: inferred
-  path: crates/loom-commission/src/outcome.rs
 - confidence: cited
   path: crates/loom-commission/src/runtime.rs
 - confidence: cited
   path: crates/loom-intake-slice/src/run.rs
 - confidence: cited
-  path: crates/loom-sdk/examples/software_change.rs
+  path: docs/commission/contracts/commission-executor.md
 - confidence: cited
   path: ess/commission/domains/responsibility.yaml
 - confidence: cited
   path: generated/rust/commission/
 - confidence: cited
   path: website/docs/reference/commission/
-revision: 11
+revision: 19
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-08T02:05:32Z", actor: "human:timo", revision: 10}
 - {from: "proposed", to: "active", at: "2026-10-08T02:05:32Z", actor: "human:timo", revision: 11}
+- {from: "active", to: "implemented", at: "2026-10-08T02:50:11Z", actor: "human:timo", revision: 19, decided_on: {"recorded":{"test_result":2,"review_outcome":1,"verification":1}}}
 ---
 ## Outcome
 
@@ -105,3 +106,18 @@ which it depends; the two run in order, not in one parallel set.
 
 `review-result:adversary-w3-loom-moved-case-outcome-pass-1`, F3;
 `decision-blocker:moved-run-admissible-frontier` (option A).
+
+## Scope confirmed
+
+Read from `git diff --stat f62ce58 9ed4653` (the unit's six commits, the adversary's test commit and
+the correction; 23 files) at the close of wave 2026-10-08-w1. Corrections to the `## Scope` section
+above:
+
+| Scope line | Confidence then | What the unit changed |
+|---|---|---|
+| `crates/loom-commission/src/outcome.rs` | inferred | unchanged; the derivation is in `runtime.rs` (`found_moved`, `moved_outcome`) |
+| `crates/loom-commission-conformance/src/lib.rs` | cited | unchanged: it does not match `RunOutcome` |
+| `crates/loom-sdk/examples/software_change.rs` | cited | unchanged: its `other =>` arm covers the variant |
+| `crates/loom-commission-testkit/tests/moved_case_outcome.rs` | cited | as cited |
+| `crates/loom-commission/src/runtime.rs`, `crates/loom-intake-slice/src/run.rs`, `ess/commission/domains/responsibility.yaml`, `generated/rust/commission/`, `website/docs/reference/commission/` | cited | as cited (`types.mdx`) |
+| not listed | — | `CHANGELOG.md`, `docs/commission/contracts/commission-executor.md`; testkit tests re-pinned to the variant: `adversary_loop_runtime.rs`, `adversary_runtime_effect.rs`, `runtime_effect.rs`, `runtime_loop.rs`, `skeleton.rs`, `run_outcomes.rs`; the adversary's `adversary_w1_moved_run_named_outcome.rs` |

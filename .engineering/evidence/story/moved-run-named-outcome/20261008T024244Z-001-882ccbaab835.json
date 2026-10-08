@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T02:42:44Z",
+  "actor": "human:timo",
+  "artifact": "story:moved-run-named-outcome",
+  "kind": "story",
+  "revision": 11,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-commission-testkit --test moved_case_outcome on f62ce58+tests: 3 failed (NoAdmissibleAction vs CaseMovedOn{7,8}); on 190d685 green; adversary budget case red at 18cc585, green at 9ed4653",
+    "reference": "impl/moved-run-named-outcome 8cb5cb7 vs 9ed4653"
+  }
+}
