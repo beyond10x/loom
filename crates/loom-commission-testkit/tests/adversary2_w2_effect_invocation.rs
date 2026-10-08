@@ -69,6 +69,7 @@ fn binding(id: &CommissionId, action: &str) -> ActionBinding<action_binding_stat
         commission_id: id.clone(),
         instance_id: ConnectorInstanceId("host".to_owned()),
         operation_id: ConnectorOperationId(format!("{action}.op")),
+        effect: b10x_loom_commission::model::responsibility::ConnectorOperationEffect::Write,
     })
 }
 
@@ -162,6 +163,7 @@ impl EffectPort for Performs {
             attempt: self.attempt.map(|attempt| {
                 b10x_loom_commission::model::responsibility::ConnectorAttemptId(attempt.to_owned())
             }),
+            audit: None,
         }))
     }
 }

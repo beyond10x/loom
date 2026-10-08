@@ -127,6 +127,7 @@ impl EffectPort for Effects {
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {
             report: Value::Null,
             attempt: None,
+            audit: None,
         }))
     }
 }

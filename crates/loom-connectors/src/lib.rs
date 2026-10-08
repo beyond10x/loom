@@ -9,23 +9,27 @@
 //! (`POST /v1alpha2/invoke`, `connectors_client::Client::invoke_v1alpha2`) with the admitted
 //! request's arguments. It never falls back to `/v1/invoke` and never resends.
 //!
+//! The binding's `effect` must be the one the service describes for the operation: `Write` for
+//! the `mutation` profile (an `external_write`, for which Connectors records an attempt), `Read`
+//! for every other profile (`story:connector-read-performed`). A binding the service describes
+//! otherwise is `Err`, and the operation is not invoked.
+//!
 //! The answer is read as Connectors states it (compatibility § 5 of the Connectors service
 //! contract):
 //!
 //! | Connectors answers | The invoker answers |
 //! |---|---|
-//! | success with a `mutation` naming its attempt on the bound instance | `Performed`: the result as the report, the attempt's id |
+//! | for a `Write` binding, success with a `mutation` naming its attempt on the bound instance | `Performed`: the result as the report, the attempt's id |
+//! | for a `Read` binding, success with no `mutation` and its audit record `complete` | `Performed`: the result as the report, the audit record's `audit_ref` |
 //! | error with a `mutation` classified `refused` or `not_attempted`, on a valid response | `Refused` |
-//! | anything else: a success naming no attempt or another instance's, an error with no `mutation`, `unknown`, `applied` without a delivered result, a protocol or transport failure | `Err` |
+//! | anything else: a write's success naming no attempt or another instance's, a read's success with a `mutation` or an audit record not `complete`, an error with no `mutation`, `unknown`, `applied` without a delivered result, a protocol or transport failure | `Err` |
 //!
 //! An error with no `mutation` is no proof that the operation was not dispatched, so it is never
 //! a refusal. An `instance_id` with no endpoint, a credential that does not resolve, a failed
-//! describe and a service that describes another instance are `Err` before the operation is
-//! invoked, and so is an argument number that cannot be sent without changing its value (one
-//! beyond the 64-bit integer range, or one whose shortest float text differs from the admitted one).
-//!
-//! Known limit: a read operation answers `Err`, because Connectors v0.35.0 records no attempt
-//! (`mutation`) for a read and the port requires an attempt on every `Performed`.
+//! describe, a service that describes another instance and a binding whose effect is not the one
+//! described are `Err` before the operation is invoked, and so is an argument number that cannot be
+//! sent without changing its value (one beyond the 64-bit integer range, or one whose shortest
+//! float text differs from the admitted one).
 //!
 //! `ConnectorInvoker::invoke` is synchronous and the client is async: the invoker owns a Tokio
 //! runtime and runs each invocation on it, so it can be called from any thread, including one
@@ -37,14 +41,14 @@ use std::sync::{Arc, mpsc};
 
 use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::responsibility::{
-    ActionBindingData, ConnectorAttemptId, ConnectorCredentialRef, ConnectorEndpoint,
-    ConnectorEndpointData, ConnectorInstanceId, EffectOutcome, EffectOutcomePerformed,
-    EffectOutcomeRefused, connector_endpoint_state,
+    ActionBindingData, ConnectorAttemptId, ConnectorAuditRef, ConnectorCredentialRef,
+    ConnectorEndpoint, ConnectorEndpointData, ConnectorInstanceId, ConnectorOperationEffect,
+    EffectOutcome, EffectOutcomePerformed, EffectOutcomeRefused, connector_endpoint_state,
 };
 use b10x_loom_commission::ports::connector::ConnectorInvoker;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError};
 use connectors_client::{Client, Endpoint, Failure, Invoked};
-use connectors_core::v1alpha2::{EffectKnowledge, ErrorCode};
+use connectors_core::v1alpha2::{AuditStatus, EffectKnowledge, ErrorCode};
 
 /// Resolves the credential an endpoint names. The host supplies it; the invoker reads no
 /// credential itself and keeps none between invocations.
@@ -233,6 +237,7 @@ impl ConnectorInvoker for ConnectorsInvoker {
         let input = to_serde(&request.data().arguments.0)?;
         let expected = instance.clone();
         let target = operation.clone();
+        let effect = binding.effect;
         let answered = self.block_on(async move {
             let descriptor = client.describe().await.map_err(|error| {
                 format!(
@@ -246,6 +251,17 @@ impl ConnectorInvoker for ConnectorsInvoker {
                     descriptor.instance
                 ));
             }
+            // An operation the service does not describe fails in the client, before any call.
+            if let Ok(described) = descriptor.operation(&target) {
+                let writes = described.profile == MUTATION_PROFILE;
+                if writes != (effect == ConnectorOperationEffect::Write) {
+                    return Err(format!(
+                        "the operation `{target}` of instance `{expected}` is described with \
+                         profile `{}`, and its binding declares it {effect:?}",
+                        described.profile
+                    ));
+                }
+            }
             Ok(
                 match client.invoke_v1alpha2(&descriptor, &target, input).await {
                     Ok(invoked) => Answered::Invoked(invoked),
@@ -254,13 +270,46 @@ impl ConnectorInvoker for ConnectorsInvoker {
             )
         })?;
         match answered.map_err(EffectError::new)? {
-            Answered::Invoked(invoked) => performed(instance, &operation, invoked),
+            Answered::Invoked(invoked) => match binding.effect {
+                ConnectorOperationEffect::Write => performed(instance, &operation, invoked),
+                ConnectorOperationEffect::Read => read(instance, &operation, invoked),
+            },
             Answered::Failed(failure) => refused(instance, &operation, &failure),
         }
     }
 }
 
-/// A success is `Performed` only when it names the attempt Connectors recorded.
+/// The profile of an operation Connectors records an attempt for: its host declaration includes
+/// `external_write`, and a read profile cannot carry it (Connectors' operations contract § 2, the
+/// effect declaration rule). The v1alpha1 descriptor carries no `effects`; this is the host's own
+/// discriminator.
+const MUTATION_PROFILE: &str = "mutation";
+
+/// A read's success is `Performed` only when Connectors recorded no attempt for it and completed
+/// its audit record; the outcome names that record.
+fn read(instance: &str, operation: &str, invoked: Invoked) -> Result<EffectOutcome, EffectError> {
+    if invoked.mutation.is_some() {
+        return Err(EffectError::new(format!(
+            "the Connector read `{operation}` of `{instance}` succeeded and recorded an attempt"
+        )));
+    }
+    let audit = match (invoked.audit_status, invoked.audit_ref) {
+        (AuditStatus::Complete, Some(audit)) => audit,
+        (status, _) => {
+            return Err(EffectError::new(format!(
+                "the Connector read `{operation}` of `{instance}` succeeded and its audit record is \
+                 {status:?}, not complete"
+            )));
+        }
+    };
+    Ok(EffectOutcome::Performed(EffectOutcomePerformed {
+        report: from_serde(&invoked.result),
+        attempt: None,
+        audit: Some(ConnectorAuditRef(audit)),
+    }))
+}
+
+/// A write's success is `Performed` only when it names the attempt Connectors recorded.
 fn performed(
     instance: &str,
     operation: &str,
@@ -285,6 +334,7 @@ fn performed(
     Ok(EffectOutcome::Performed(EffectOutcomePerformed {
         report: from_serde(&invoked.result),
         attempt: Some(ConnectorAttemptId(attempt.id.as_str().to_owned())),
+        audit: None,
     }))
 }
 

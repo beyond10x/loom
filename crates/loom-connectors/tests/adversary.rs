@@ -310,6 +310,7 @@ fn binding(
         commission_id: id,
         instance_id: ConnectorInstanceId(instance.to_owned()),
         operation_id: ConnectorOperationId(OPERATION.to_owned()),
+        effect: b10x_loom_commission::model::responsibility::ConnectorOperationEffect::Write,
     })
 }
 
