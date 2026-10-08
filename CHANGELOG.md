@@ -6,6 +6,11 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- `FileCaseStore` (`loom_governor`) keeps each governor case in its own file, written atomically
+  as the `loom.governor` domain's `StoredCase`, so a case survives a process restart.
+
 ### Changed
 
 - A run store can report that it cannot write. The commission specification declares the error
