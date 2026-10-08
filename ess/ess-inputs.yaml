@@ -3,4 +3,5 @@ requires: ess 0.56.0
 specification:
   - system.yaml
   - domains/run.yaml
+  - domains/evaluation.yaml
 scenarios: []

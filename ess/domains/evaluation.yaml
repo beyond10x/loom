@@ -1,0 +1,131 @@
+# One evaluation of a protocol over a case the caller keeps itself (story governor-evaluate). Nouns
+# are read from crates/loom-governor/src/lib.rs (CanonGovernor::decide, the frontier and completion
+# it reports) and Canon's canon-case/1, canon-evidence/1 and canon-decision/1 documents. Nothing is
+# held between two evaluations, so the domain declares types only: no entity, no lifecycle.
+domain: loom.evaluation
+
+summary: >-
+  One stateless evaluation: a protocol named from the host's catalog, a canon-case/1 case snapshot,
+  the canon-evidence/1 records that go with it and an optional trusted evaluation time go in;
+  Canon's decision comes out, or a refusal naming the input it could not use. It decides and never
+  acts, reads no clock and calls no network or model.
+
+naming:
+  wire: evaluation
+  display: Evaluation
+
+types:
+  # A protocol as the host's catalog names it, `<name>@<major>` (`software-change@1`). The request
+  # names it and never carries a definition: the catalog the host installed owns it. A typed
+  # name, not a relation: the catalog's protocols are not an entity of this specification.
+  - name: loom.evaluation.ProtocolName
+    kind: newtype
+    of: String
+
+  # One canon-case/1 document, as the caller keeps it.
+  - name: loom.evaluation.CaseSnapshot
+    kind: newtype
+    of: Json
+
+  # One canon-evidence/1 record. The host authenticated it before it asked; the record is read as
+  # the value it is, never as text.
+  - name: loom.evaluation.EvidenceRecord
+    kind: newtype
+    of: Json
+
+  # What one evaluation reads. The records belong to the request and none outlives it. The time is
+  # the host's trusted instant, RFC 3339, never a model's; absent, freshness has no instant.
+  - name: loom.evaluation.EvaluationRequest
+    kind: struct
+    fields:
+      - name: protocol
+        type: loom.evaluation.ProtocolName
+      - name: snapshot
+        type: loom.evaluation.CaseSnapshot
+      - name: evidence
+        type: List<loom.evaluation.EvidenceRecord>
+      - name: at
+        type: Optional<Timestamp>
+
+  # Canon's status of one declared action. An action that requires a capability is at best
+  # ApprovalRequired: the evaluation supplies no authority decision.
+  - name: loom.evaluation.ActionStatus
+    kind: enum
+    variants: [Admissible, ApprovalRequired, Blocked]
+
+  - name: loom.evaluation.ClaimValue
+    kind: enum
+    variants: ['True', 'False', Unknown]
+
+  # One action the protocol declares: Canon's status, every capability it requires, and Canon's
+  # reasons, empty when it is admissible.
+  - name: loom.evaluation.DecidedAction
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: status
+        type: loom.evaluation.ActionStatus
+      - name: requires
+        type: List<String>
+      - name: reasons
+        type: List<Json>
+
+  - name: loom.evaluation.DecidedClaim
+    kind: struct
+    fields:
+      - name: claim
+        type: String
+      - name: value
+        type: loom.evaluation.ClaimValue
+
+  # One obligation, open unless Canon holds it discharged.
+  - name: loom.evaluation.DecidedObligation
+    kind: struct
+    fields:
+      - name: obligation
+        type: String
+      - name: open
+        type: Boolean
+
+  # Canon's decision for the snapshot after the records. `outcome` is present exactly when one
+  # declared outcome is legitimate, the case's completion; absent, the case is open. `canon` is the
+  # whole canon-decision/1 document Canon wrote, the explanation included.
+  - name: loom.evaluation.EvaluationDecision
+    kind: struct
+    fields:
+      - name: protocol
+        type: loom.evaluation.ProtocolName
+      - name: case
+        type: String
+      - name: actions
+        type: List<loom.evaluation.DecidedAction>
+      - name: claims
+        type: List<loom.evaluation.DecidedClaim>
+      - name: obligations
+        type: List<loom.evaluation.DecidedObligation>
+      - name: outcome
+        type: Optional<String>
+      - name: canon
+        type: Json
+
+  # The input a refusal is about: the request document as a whole, the protocol name, the case
+  # snapshot, one evidence record, or the evaluation time.
+  - name: loom.evaluation.EvaluationInput
+    kind: enum
+    variants: [Request, Protocol, Snapshot, Evidence, Time]
+
+  # Why no decision was made. `evidence_index` is the zero-based position of the refused record in
+  # the request's `evidence`, present exactly when `input` is Evidence. `code` is Canon's refusal
+  # code where Canon refused, and otherwise unknown-protocol, invalid-protocol or malformed.
+  - name: loom.evaluation.EvaluationRefusal
+    kind: struct
+    fields:
+      - name: input
+        type: loom.evaluation.EvaluationInput
+      - name: evidence_index
+        type: Optional<Integer>
+      - name: code
+        type: String
+      - name: message
+        type: String
