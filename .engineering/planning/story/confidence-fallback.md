@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:confidence-fallback
 kind: story
-status: draft
+status: active
 title: Low-confidence fast selections fall back to the stronger selector
 summary: Hybrid selector gated by a caller-supplied threshold; no built-in default.
 refs:
@@ -19,18 +19,13 @@ scope:
 - confidence: cited
   path: crates/loom-executor/src/selection.rs
 - confidence: inferred
-  path: crates/loom-executor/tests
-- confidence: inferred
-  path: docs/contracts/loom-action-selection.md
-- confidence: inferred
-  path: docs/design/loom-design.md
+  path: crates/loom-executor/tests/confidence_fallback.rs
 - confidence: inferred
   path: docs/integrations/laya-fast-selection.md
-- confidence: inferred
-  path: ess/domains/run.yaml
-- confidence: inferred
-  path: generated/rust/loom/src/primitives.rs
-revision: 10
+revision: 15
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-08T23:16:39Z", actor: "human:timo", revision: 14}
+- {from: "proposed", to: "active", at: "2026-10-08T23:16:40Z", actor: "human:timo", revision: 15}
 ---
 ## Outcome
 
@@ -46,11 +41,19 @@ It falls back when:
 - the fast selector errs, including naming an action outside the candidates; that selection is rejected
   and never returned.
 
-The threshold is an input, not a constant, and Loom ships no default. The 0.90 and 0.60 in
-`docs/integrations/laya-fast-selection.md` are an example; thresholds are calibrated per domain and
-measured by Metaharness. What a threshold is calibrated per, and who owns the value, is open:
-`decision-blocker:selector-threshold-scope`. How a fallback is recorded is open too:
-`decision-blocker:fallback-selection-record`. Neither answer changes what this story returns.
+The threshold is an input, not a constant, and Loom ships no default. It is calibrated per
+protocol (`decision-blocker:selector-threshold-scope`, option A): the embedding host supplies the
+value for the run's protocol when it builds the hybrid selector. Metaharness calibrates values
+offline and the host loads its output; Loom does not read Metaharness. The 0.90 and 0.60 in
+`docs/integrations/laya-fast-selection.md` are an example only.
+
+A fallback is recorded as two linked selections (`decision-blocker:fallback-selection-record`,
+option B). That recording, and the specification change it needs, is
+`story:fallback-selection-recording`; this story returns the right choice and records nothing new.
+
+The threshold and the confidence are compared as numbers: `Decimal` is a string newtype whose
+derived order is string order (`generated/rust/loom/src/primitives.rs:17-21`), so `0.9` and `0.90`
+must compare equal.
 
 A confidence at any level never skips revalidation and never admits an action the candidates did not
 contain (ADR 0073 § Security consequence).
@@ -58,14 +61,21 @@ contain (ADR 0073 § Security consequence).
 ## Domain relations
 
 - `loom.run.Selection` → `loom.run.ActionCatalogue`, many-to-one, the selection references the catalogue and does not own it — inferable: `ess/domains/run.yaml`, entity `loom.run.Selection`, relation `catalogue`.
-- A selection names exactly one action of the candidate set it was given — inferable (inferred from `crates/loom/src/lib.rs:79-83`, the `frontier.contains_action` check in `Loom::run`; no ess/1 document declares this relation).
+- A selection names exactly one action of the candidate set it was given — inferable (inferred from `crates/loom-executor/src/selection.rs:115-128`, `chosen`, which refuses an action the catalogue does not list; no ess/1 document declares this relation).
 
 ## Acceptance
 
 With scripted fast and stronger selectors, run once for each of two different supplied thresholds, the
 hybrid selector returns the fast choice only when its confidence is at or above that threshold, and the
 stronger choice when the fast confidence is below it, missing, or the fast selector errs or names an
-action outside the candidates.
+action outside the candidates. A confidence outside [0, 1], or one that is not a decimal, counts as
+missing; a confidence equal to the threshold but written differently (`0.9` and `0.90`) counts as
+at the threshold.
+
+## ESS first
+
+No specification change: `loom.run.SelectionStrategy::Hybrid` is declared (`ess/domains/run.yaml:46`).
+The red test is the story's own, `crates/loom-executor/tests/confidence_fallback.rs`.
 
 ## Not in this story
 
@@ -75,8 +85,8 @@ three.
 
 ## Dependencies
 
-The `ActionSelector` contract (TASKBOARD L-005, `epic:loom-native-harness`); no story for it existed
-when this was drafted. Both composed selectors are scripted, so this story does not wait for
+The `ActionSelector` contract (`crates/loom-executor/src/selection.rs:50`, `story:action-selector`,
+implemented). Both composed selectors are scripted, so this story does not wait for
 `story:reasoning-model-selector` or `story:laya-selector`.
 
 ## Source
@@ -86,6 +96,6 @@ TASKBOARD L-009; Atlas ADR 0073; `docs/integrations/laya-fast-selection.md` § C
 
 ## Carried from story:action-selector (adversary pass 1, 2026-10-04)
 
-`Selection.confidence` is copied from the selector unvalidated (`crates/loom/src/selection.rs`). This
+`Selection.confidence` is copied from the selector unvalidated (`crates/loom-executor/src/selection.rs:135`). This
 story is the first whose selector returns a confidence, so it validates the value at the seam: a
 decimal in [0, 1], refused otherwise.
