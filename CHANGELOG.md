@@ -6,6 +6,15 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-08
+
+Loom 0.11.0 builds on engineering-protocols 0.3.0, whose `incident.response/1` keeps an
+investigation open after emergency mode ends: the obligation `investigate_cause` stays open once
+`emergency.leave` is admissible, until a cause analysis identifies the cause. Canon is now named
+by its tag, `b10x-canon` `0.1.0`; a consumer that adds Canon itself moves to that tag, or it builds
+a second Canon whose types do not match. Callers that read an incident case's frontier or
+completion see one more obligation, and the engineering registry lists `support-triage@1`.
+
 ### Changed
 
 - Loom builds on `b10x-canon-engineering` `0.3.0` from engineering-protocols (was `0.1.0`) and
@@ -17,6 +26,10 @@ under **Unreleased** until the next release.
   Callers that read an incident case's frontier or completion see it beside `restore_service`.
 - The engineering registry, and so `ProtocolCatalog::engineering` and `ProtocolCatalog::bundled`,
   now lists `support-triage@1`; engineering entries carry revision `0.3.0`.
+- `SessionFile::load` reads a filed session from its text. engineering-protocols 0.3.0 and Canon
+  0.1.0 turn on `serde_json`'s `arbitrary_precision` in every build that links the governor; read
+  through an untyped value first, a session whose tool call holds an integer above `u64::MAX`
+  would be refused under it.
 
 ## [0.10.0] - 2026-10-08
 

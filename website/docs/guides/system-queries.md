@@ -8,7 +8,7 @@ source: protocols/system-query/1.yaml, crates/loom-protocols/src/lib.rs, crates/
 
 # System queries and custom protocols
 
-System queries and custom protocols ship in 0.4.0. From a checkout of tag `0.10.0`, `task install`
+System queries and custom protocols ship in 0.4.0. From a checkout of tag `0.11.0`, `task install`
 builds and installs `b10x-loom` into `~/.local/bin`; that directory must be on your `PATH`.
 
 ## Read the time
