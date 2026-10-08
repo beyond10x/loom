@@ -9,3 +9,4 @@ domains:
   - intake.context
   - intake.protocols
   - intake.query
+  - intake.events

@@ -36,6 +36,7 @@ pub use loom as model;
 
 pub mod arguments;
 pub mod compaction;
+pub mod credentials;
 pub mod harness;
 pub mod projection;
 pub mod recovery;

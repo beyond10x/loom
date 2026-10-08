@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 10e0941a85d43e690422930dd8850593cb2bee08d738ac2a6e7ffda9505f4b60
-// contract digest 0ebc9eb4e00a223ecca76b7fa83d021e0888f6c4084ae57ce52801a0b027c73c
+// model digest fceae929c72d09b0daae25cf633a1e1ff9f15b5dedb71f4802c193c4cdcb7346
+// contract digest f7a202983357f2892c4cdac99b9d5de1e11fca800c6db3b1671858c0c2e3a6da
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan

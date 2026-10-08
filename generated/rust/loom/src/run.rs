@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 10e0941a85d43e690422930dd8850593cb2bee08d738ac2a6e7ffda9505f4b60
-// contract digest 0ebc9eb4e00a223ecca76b7fa83d021e0888f6c4084ae57ce52801a0b027c73c
+// model digest fceae929c72d09b0daae25cf633a1e1ff9f15b5dedb71f4802c193c4cdcb7346
+// contract digest f7a202983357f2892c4cdac99b9d5de1e11fca800c6db3b1671858c0c2e3a6da
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Run — `loom.run`.
@@ -72,6 +72,19 @@ pub enum CompactionState {
 /// CompactionId — `loom.run.CompactionId`: a distinct wrapper around `Uuid`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompactionId(pub crate::primitives::Uuid);
+
+/// CredentialKind — `loom.run.CredentialKind`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialKind {
+    /// `ApiKey`.
+    ApiKey,
+    /// `Oauth`.
+    Oauth,
+}
+
+/// CredentialReference — `loom.run.CredentialReference`: a distinct wrapper around `String`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CredentialReference(pub String);
 
 /// ReportedUsage — `loom.run.ReportedUsage`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -161,6 +174,15 @@ pub enum TurnState {
 /// TurnId — `loom.run.TurnId`: a distinct wrapper around `Uuid`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnId(pub crate::primitives::Uuid);
+
+/// WireCredential — `loom.run.WireCredential`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WireCredential {
+    /// `reference` — `loom.run.CredentialReference`.
+    pub reference: CredentialReference,
+    /// `kind` — `loom.run.CredentialKind`.
+    pub kind: CredentialKind,
+}
 
 /// What ActionCatalogue — `loom.run.ActionCatalogue` — holds, apart from where it is in its lifecycle.
 ///

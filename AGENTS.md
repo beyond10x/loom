@@ -256,7 +256,11 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   actions inside the given workspace and `system.query/1` through the host clock, never merges, pushes or deploys, and never supplies
   authority on the operator's behalf. It submits evidence from the test command it runs itself.
 - `b10x-loom-cli` is `b10x-loom`. Its clap definition is the library (`src/lib.rs`, `Cli`), which
-  `loom-docs` renders.
+  `loom-docs` renders. The library also holds `exit_status` and `events`, the writer of
+  `run --output jsonl`: one `intake.events` record per line (`ess/intake/domains/events.yaml`),
+  built from the generated types, the terminal record last and exactly once.
+  `crates/loom-cli/tests/run_events.rs` holds it; `loom-docs` checks the hand-written
+  `website/docs/reference/run-events.md` against the declaration.
 
 The injected `TestRunner` defaults to Substrate 0.7.10, with host and wire pinned together.
 Tests get no network, a cleared environment, read-only source and Rust toolchain, writes only
@@ -285,7 +289,8 @@ cancellation-aware backoff and per-attempt context metrics. Model ports stay sin
 effects remain outside this loop. `system_query.rs` exercises recovery in all three request phases. The Codex preset and the forced tool call are
 `codex_model` (the CLI builds its model with it) and `call_tool` (the router calls it). The
 credential is the operator's Codex login (`~/.codex/auth.json`), read and renewed by llm, never by
-Loom code.
+Loom code. The ported wires take theirs from a `loom.run.WireCredential` reference through
+`credentials::ResolvedBearer`, which asks a `SecretResolver` the embedder injects at each call.
 
 ## Planning and waves
 
