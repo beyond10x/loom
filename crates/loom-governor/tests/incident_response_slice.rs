@@ -1,6 +1,7 @@
 //! The incident-response vertical slice (story `incident-response-slice`): the ELS `inc-492` case
 //! of `incident.response/1`, driven through Commission's runtime and the Canon-backed governor,
-//! leaves emergency mode while its cause stays unknown.
+//! leaves emergency mode while its cause stays unknown, and the investigation stays open until a
+//! cause analysis identifies the cause (story `incident-investigation-open`).
 //!
 //! The fixture's states are applied in order. Evidence is submitted through Commission's
 //! `submit_evidence`; the grant of `release.rollback` is the authority provider's answer, never the
@@ -10,13 +11,16 @@
 //! claims, obligations and action statuses.
 //!
 //! `incident.response/1` defines emergency mode by its action `emergency.leave`: the case is out of
-//! emergency mode once that action is admissible. At the pinned release it declares one obligation,
-//! `restore_service`, and no investigation obligation; the last assertion holds the frontier to
-//! that, so it fails when a protocol that names one is pinned.
+//! emergency mode once that action is admissible, first at `service-restored`. Leaving emergency
+//! mode does not close the investigation: there `cause.identified` is unknown, `investigate_cause`
+//! is open and `restore_service` is discharged. `investigate_cause` is discharged only at
+//! `cause-identified-after-restore`, where a cause analysis of the restored service identifies the
+//! cause, and `emergency.leave` is still admissible. The per-state check already holds every state
+//! to the fixture; the closing assertions name these outcomes explicitly.
 //!
 //! `tests/fixtures/inc-492.fixture.yaml` is a byte-for-byte copy of
 //! `fixtures/incident-response/inc-492.fixture.yaml` in beyond10x/engineering-protocols at tag
-//! `0.1.0`, the release this crate depends on; `b10x-canon-engineering` does not expose its
+//! `0.3.0`, the release this crate depends on; `b10x-canon-engineering` does not expose its
 //! fixtures.
 
 use std::collections::BTreeMap;
@@ -51,7 +55,7 @@ const NOW: &str = "2026-10-04T11:30:00Z";
 type Store = CanonGovernor<MemoryCaseStore>;
 
 #[test]
-fn rollback_under_a_grant_leaves_emergency_mode_with_the_cause_unknown() {
+fn leaving_emergency_mode_keeps_the_investigation_open_until_the_cause_is_identified() {
     let fixture = Fixture::load();
     let governor = CanonGovernor::new(MemoryCaseStore::default());
     let case = governor
@@ -62,6 +66,8 @@ fn rollback_under_a_grant_leaves_emergency_mode_with_the_cause_unknown() {
     let mut grants: Vec<String> = Vec::new();
     let mut rollbacks = 0;
     let mut applied = Vec::new();
+    let mut restored = None;
+    let mut first_leave = None;
 
     for state in fixture.states() {
         let id = state["id"].as_str().expect("state id").to_owned();
@@ -86,6 +92,12 @@ fn rollback_under_a_grant_leaves_emergency_mode_with_the_cause_unknown() {
             "state {id}: the frontier is issued for the case revision"
         );
         assert_state(&frontier, &state["expect"], &grants, &id);
+        if first_leave.is_none() && actions(&frontier)[LEAVE] == ActionStatus::Admissible {
+            first_leave = Some(id.clone());
+        }
+        if id == "service-restored" {
+            restored = Some(frontier);
+        }
         applied.push(id);
     }
     assert_eq!(
@@ -97,27 +109,61 @@ fn rollback_under_a_grant_leaves_emergency_mode_with_the_cause_unknown() {
             "rolled-back",
             "release-observed",
             "service-restored",
+            "cause-identified-after-restore",
         ],
         "every state of inc-492 is applied, in order"
     );
     assert_eq!(rollbacks, 1, "the service is moved once, by the rollback");
 
-    // The acceptance, read off the governor's last frontier.
-    let frontier = governor.frontier(&case).expect("frontier").into_data();
-    let claims = claims(&frontier);
-    assert_eq!(claims["service.healthy"], Truth::True);
-    assert_eq!(claims["impact.bounded"], Truth::True);
-    assert_eq!(claims["cause.identified"], Truth::Unknown);
-    let actions = actions(&frontier);
+    // Out of emergency mode, the investigation open: the governor's frontier at
+    // `service-restored`, the first state at which `emergency.leave` is admissible.
     assert_eq!(
-        actions[LEAVE],
-        ActionStatus::Admissible,
-        "out of emergency mode: incident.response/1 admits {LEAVE}"
+        first_leave.as_deref(),
+        Some("service-restored"),
+        "{LEAVE} is first admissible at service-restored"
+    );
+    let frontier = restored.expect("the frontier at service-restored");
+    let restored_claims = claims(&frontier);
+    assert_eq!(restored_claims["service.healthy"], Truth::True);
+    assert_eq!(restored_claims["impact.bounded"], Truth::True);
+    assert_eq!(
+        restored_claims["cause.identified"],
+        Truth::Unknown,
+        "service-restored: the cause is not yet identified"
+    );
+    let restored_obligations = obligations(&frontier);
+    assert_eq!(
+        restored_obligations.get("investigate_cause"),
+        Some(&true),
+        "service-restored: leaving emergency mode leaves `investigate_cause` open"
     );
     assert_eq!(
-        obligations(&frontier),
-        BTreeMap::from([("restore_service".to_owned(), false)]),
-        "incident.response/1 at 0.1.0 declares `restore_service` only: no investigation obligation"
+        restored_obligations.get("restore_service"),
+        Some(&false),
+        "service-restored: `restore_service` is discharged"
+    );
+    assert_eq!(
+        actions(&frontier)[LEAVE],
+        ActionStatus::Admissible,
+        "service-restored: out of emergency mode, incident.response/1 admits {LEAVE}"
+    );
+
+    // The investigation closed: the governor's last frontier, at `cause-identified-after-restore`.
+    let frontier = governor.frontier(&case).expect("frontier").into_data();
+    assert_eq!(
+        claims(&frontier)["cause.identified"],
+        Truth::True,
+        "cause-identified-after-restore: the cause analysis identifies the cause"
+    );
+    assert_eq!(
+        obligations(&frontier).get("investigate_cause"),
+        Some(&false),
+        "cause-identified-after-restore: `investigate_cause` is discharged"
+    );
+    assert_eq!(
+        actions(&frontier)[LEAVE],
+        ActionStatus::Admissible,
+        "cause-identified-after-restore: {LEAVE} is still admissible"
     );
 }
 

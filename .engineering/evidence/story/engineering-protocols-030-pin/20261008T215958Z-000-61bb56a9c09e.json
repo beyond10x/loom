@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-08T21:59:58Z",
+  "actor": "human:timo",
+  "artifact": "story:engineering-protocols-030-pin",
+  "kind": "story",
+  "revision": 21,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adversary-w8-20261008-loom-engineering-protocols-030-pin-pass-1",
+    "reference": "afa7937",
+    "review": "review-result:adversary-w8-20261008-loom-engineering-protocols-030-pin-pass-1",
+    "outcome": "fixed"
+  }
+}

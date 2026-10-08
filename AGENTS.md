@@ -243,10 +243,10 @@ a repeated id is refused. The time and the records are judged once each, never b
 on prefixes. `crates/loom-governor/tests/evaluate.rs` and `evaluate_adversary.rs` hold it against
 `CanonGovernor`; `crates/loom-cli/tests/evaluate.rs` holds the subcommand against the library.
 
-Canon is named by the reference `b10x-canon-engineering` uses (`branch = "main"`), pinned by
+Canon is named by the reference `b10x-canon-engineering` uses (`tag = "0.1.0"`), pinned by
 `Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon with
-`cargo update -p b10x-canon` together with the `b10x-canon-engineering` tag (now `0.1.0`); any other
-crate that adds Canon uses the same reference.
+`cargo update -p b10x-canon -p b10x-canon-engineering` together with the `b10x-canon-engineering`
+tag (now `0.3.0`); any other crate that adds Canon uses the same reference.
 
 ## Connectors
 

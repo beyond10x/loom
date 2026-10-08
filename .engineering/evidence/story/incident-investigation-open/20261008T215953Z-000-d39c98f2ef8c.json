@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T21:59:53Z",
+  "actor": "human:timo",
+  "artifact": "story:incident-investigation-open",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test --locked --no-fail-fast -p b10x-loom-governor -p b10x-loom-protocols -p b10x-loom-intake-router -p b10x-loom-intake-slice -p b10x-loom-executor -p b10x-loom-cli",
+    "reference": "afa7937: exit 0, 971 passed 0 failed; incident_response_slice leaving_emergency_mode_keeps_the_investigation_open_until_the_cause_is_identified ok (assertions commit 930687f)"
+  }
+}

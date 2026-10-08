@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T21:59:53Z",
+  "actor": "human:timo",
+  "artifact": "story:engineering-protocols-030-pin",
+  "kind": "story",
+  "revision": 20,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test --locked --no-fail-fast -p b10x-loom-governor -p b10x-loom-protocols -p b10x-loom-intake-router -p b10x-loom-intake-slice -p b10x-loom-executor -p b10x-loom-cli",
+    "reference": "afa7937: exit 0, 971 passed 0 failed; cargo tree --locked -i shows one b10x-canon (tag 0.1.0) and one b10x-canon-engineering (tag 0.3.0)"
+  }
+}
