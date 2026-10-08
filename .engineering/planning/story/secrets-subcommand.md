@@ -6,7 +6,26 @@ status: draft
 title: b10x-loom secrets re-uses the secrets CLI as a sub-command
 relations:
 - serves: vision:O1
-revision: 1
+scope:
+- confidence: inferred
+  path: Cargo.lock
+- confidence: inferred
+  path: crates/loom-cli/Cargo.toml
+- confidence: cited
+  path: crates/loom-cli/src/lib.rs
+- confidence: cited
+  path: crates/loom-cli/src/main.rs
+- confidence: inferred
+  path: crates/loom-cli/tests/secrets.rs
+- confidence: inferred
+  path: ess/intake/domains/secrets.yaml
+- confidence: inferred
+  path: ess/intake/system.yaml
+- confidence: inferred
+  path: generated/rust/intake
+- confidence: cited
+  path: website/docs/reference/cli.md
+revision: 10
 ---
 ## Outcome
 

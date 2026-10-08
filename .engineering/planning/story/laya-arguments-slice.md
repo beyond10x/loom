@@ -16,7 +16,18 @@ relations:
 - serves: vision:O1
 - serves: vision:O3
 - serves: vision:governed-autonomy
-revision: 1
+scope:
+- confidence: inferred
+  path: crates/loom-commission-testkit/src/fake_governor.rs
+- confidence: cited
+  path: crates/loom-executor
+- confidence: inferred
+  path: crates/loom-executor/Cargo.toml
+- confidence: inferred
+  path: crates/loom-executor/src/lib.rs
+- confidence: inferred
+  path: crates/loom-executor/tests/laya_arguments_slice.rs
+revision: 6
 ---
 ## Outcome
 

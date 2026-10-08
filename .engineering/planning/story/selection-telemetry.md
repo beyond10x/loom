@@ -12,7 +12,26 @@ relations:
 - depends_on: story:confidence-fallback
 - serves: vision:O3
 - serves: vision:governed-autonomy
-revision: 1
+scope:
+- confidence: inferred
+  path: CHANGELOG.md
+- confidence: inferred
+  path: crates/loom-executor/src/harness/governed.rs
+- confidence: inferred
+  path: crates/loom-executor/src/lib.rs
+- confidence: inferred
+  path: crates/loom-executor/src/selection.rs
+- confidence: inferred
+  path: crates/loom-executor/src/session.rs
+- confidence: inferred
+  path: crates/loom-executor/tests/selection_telemetry.rs
+- confidence: inferred
+  path: docs/contracts/loom-action-selection.md
+- confidence: cited
+  path: ess/domains/run.yaml
+- confidence: cited
+  path: generated/rust/loom/src/run.rs
+revision: 10
 ---
 ## Outcome
 

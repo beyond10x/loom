@@ -11,7 +11,18 @@ relations:
 - depends_on: epic:commission-core
 - serves: vision:O1
 - serves: vision:governed-autonomy
-revision: 1
+scope:
+- confidence: inferred
+  path: crates/loom-commission/src/ports
+- confidence: inferred
+  path: crates/loom-sdk/examples
+- confidence: inferred
+  path: crates/loom-sdk/tests/example_runs.rs
+- confidence: inferred
+  path: docs/commission/design/commission-design.md
+- confidence: cited
+  path: ess/commission/domains/responsibility.yaml
+revision: 6
 ---
 > Re-filed from `beyond10x/commission` `story:managed-composition` at `e61e4f0` (status there: `draft`) under Atlas ADR 0090
 > (loom `story:import-commission`). Paths below are Commission's: `ess/` is now `ess/commission/`,
