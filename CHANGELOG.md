@@ -6,6 +6,16 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-08
+
+Loom 0.5.0 judges a run whose case moved under its executor on the case as it is now. Commission's
+`ExecutorOutcome` gains `CaseMoved`, by which an executor reports the move, naming the revision it
+was handed; callers that match `ExecutorOutcome` exhaustively must handle it. The governor decides
+whether the case moved, and `run_until_blocked` reloads it before ending a run that proposed
+nothing, so a case completed meanwhile ends `Completed` instead of asking for evidence it no longer
+needs. `task docs-check` no longer shares ESS output with other processes. This is a source
+release; install or embed it from tag `0.5.0`.
+
 ### Added
 
 - Commission's `ExecutorOutcome` has a `CaseMoved` variant (`ExecutorOutcomeCaseMoved`,
