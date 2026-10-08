@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T18:39:40Z",
+  "actor": "human:timo",
+  "artifact": "story:release-090",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "tag 0.9.0 (annotated, by b10x-bot[bot]) on b8462c9; release run 37824459030 success; loom / task check, common / Security and privacy, Build documentation, publish success on b8462c9; GitHub Release 0.9.0 by b10x-bot[bot], latest, notes = CHANGELOG [0.9.0] entry",
+    "reference": "b8462c9"
+  }
+}
