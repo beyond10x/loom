@@ -6,7 +6,7 @@
 //!
 //! `tests/fixtures/chg-1842.fixture.yaml` is a byte-for-byte copy of
 //! `fixtures/software-change/chg-1842.fixture.yaml` in beyond10x/engineering-protocols at tag
-//! `0.1.0`, the release this crate depends on; `b10x-canon-engineering` does not expose its
+//! `0.3.0`, the release this crate depends on; `b10x-canon-engineering` does not expose its
 //! fixtures.
 
 use std::collections::{BTreeMap, BTreeSet};
