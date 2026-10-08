@@ -132,7 +132,7 @@ changing `ess/`. Every story names that change and that test in its `## ESS firs
 change with no behaviour change is exempt, and its story says so.
 
 `ess_gate.rs` (both copies) reads this section and fails when a phrase it checks is gone; reword
-with the tests open. CI installs `ess` 0.55.0 (`.github/workflows/check.yml`); move that pin when a
+with the tests open. CI installs `ess` 0.56.0 (`.github/workflows/check.yml`); move that pin when a
 newer ESS ships.
 
 ## Gate
