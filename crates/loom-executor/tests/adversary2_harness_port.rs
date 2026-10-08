@@ -49,7 +49,7 @@ const ALLOWED: [(&str, &[&str], &[&str]); 5] = [
     (
         "wire",
         &[],
-        &["httpdate", "serde", "serde_json", "thiserror", "zeroize"],
+        &["httpdate", "loom", "serde", "serde_json", "thiserror", "zeroize"],
     ),
     ("http", &["wire"], &["reqwest", "serde_json", "tokio"]),
     ("responses", &["http", "wire"], &["serde", "serde_json"]),
