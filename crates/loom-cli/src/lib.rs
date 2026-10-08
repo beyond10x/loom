@@ -2,7 +2,8 @@
 //!
 //! The command is the `b10x-loom` binary (`src/main.rs`). This library holds only the definition
 //! of its command line, so `loom-docs` can generate the CLI reference from it, the exit status a
-//! stop reason maps to, and the run event stream `run --output jsonl` writes ([`events`]).
+//! stop reason maps to, the run event stream `run --output jsonl` writes ([`events`]), and the
+//! JSON `evaluate` reads and writes ([`evaluate`]).
 
 use std::path::PathBuf;
 
@@ -21,6 +22,23 @@ pub const EXIT_STATUS: &str = "Exit status:
   1  the run failed
   2  the command line is not valid";
 
+/// What `evaluate --help` says about its input, its output and its exit status.
+pub const EVALUATE_HELP: &str = "The request is one JSON object (loom.evaluation.EvaluationRequest):
+  {\"protocol\": \"<name>@<major>\", \"snapshot\": {canon-case/1}, \"evidence\": [{canon-evidence/1}, ...], \"at\": \"<RFC 3339>\"}
+`at` is optional. The protocol comes from this host's catalog (`protocols list`), never from the request.
+A record that is not a readable canon-evidence/1 record, or repeats an earlier record's id, is refused.
+A readable record that does not apply to the case (an undeclared kind or subject, for instance) is set
+aside, as the governor sets it aside, and the decision is made from the rest without listing it.
+Unlike the governor, which sets an unreadable record and a repeated id aside (keeping the first) and
+still decides, evaluate refuses both (a repeated id as duplicate-identifier, naming the later record).
+
+Exit status:
+  0  decided: standard output carries the decision (loom.evaluation.EvaluationDecision)
+  3  refused: standard output carries the refusal (loom.evaluation.EvaluationRefusal), and standard error names the input
+  1  the request or the protocol catalog cannot be read
+  2  the command line is not valid";
+
+pub mod evaluate;
 pub mod events;
 
 /// The exit status a run that stopped for `reason` returns, as [`EXIT_STATUS`] states it.
@@ -56,6 +74,18 @@ pub enum Command {
     Run(RunArgs),
     /// Install, inspect, or remove protocol definitions available to this host.
     Protocols(ProtocolsArgs),
+    /// Decide a case snapshot and its evidence under a catalog protocol, and write the decision as
+    /// JSON. It decides and never acts.
+    #[command(after_help = EVALUATE_HELP)]
+    Evaluate(EvaluateArgs),
+}
+
+/// The arguments of `b10x-loom evaluate`.
+#[derive(Debug, Args)]
+pub struct EvaluateArgs {
+    /// Read the request from this file instead of standard input.
+    #[arg(long, value_name = "PATH")]
+    pub input: Option<PathBuf>,
 }
 
 /// The arguments of `b10x-loom run`.

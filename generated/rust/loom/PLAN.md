@@ -1,19 +1,31 @@
 <!--
   generated from loom v1
-  model digest fceae929c72d09b0daae25cf633a1e1ff9f15b5dedb71f4802c193c4cdcb7346
-  contract digest f7a202983357f2892c4cdac99b9d5de1e11fca800c6db3b1671858c0c2e3a6da
+  model digest a692f075600414e13e8630c1be4f47574b2bc9231ea39cd7359922d1e6b4bd78
+  contract digest f4cda3d5d8276c9087a6f7913332dd58779d272a3128f3237285955bdfec862d
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-80 capabilities: **79 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+92 capabilities: **91 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
 | capability | source |
 | --- | --- |
+| domain type | `loom.evaluation.ActionStatus` |
+| domain type | `loom.evaluation.CaseSnapshot` |
+| domain type | `loom.evaluation.ClaimValue` |
+| domain type | `loom.evaluation.DecidedAction` |
+| domain type | `loom.evaluation.DecidedClaim` |
+| domain type | `loom.evaluation.DecidedObligation` |
+| domain type | `loom.evaluation.EvaluationDecision` |
+| domain type | `loom.evaluation.EvaluationInput` |
+| domain type | `loom.evaluation.EvaluationRefusal` |
+| domain type | `loom.evaluation.EvaluationRequest` |
+| domain type | `loom.evaluation.EvidenceRecord` |
+| domain type | `loom.evaluation.ProtocolName` |
 | domain type | `loom.run.ActionCatalogue.State` |
 | domain type | `loom.run.ArgumentRequest.State` |
 | domain type | `loom.run.ArgumentRequestId` |

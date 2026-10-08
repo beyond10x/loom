@@ -6,8 +6,11 @@ use std::process::{Command as Process, ExitCode};
 use std::sync::Arc;
 
 use b10x_llm_tool_call::codex_model;
+use b10x_loom_cli::evaluate::{decision_json, refusal_json, refused_input, request_from_json};
 use b10x_loom_cli::events::{EventStream, FAILED};
-use b10x_loom_cli::{Cli, Command, Confinement, Output, ProtocolCommand, RunArgs, exit_status};
+use b10x_loom_cli::{
+    Cli, Command, Confinement, EvaluateArgs, Output, ProtocolCommand, RunArgs, exit_status,
+};
 use b10x_loom_intake_slice::case;
 use b10x_loom_intake_slice::clock::HostClock;
 use b10x_loom_intake_slice::confinement::{
@@ -36,7 +39,60 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => failed(&error),
         },
+        Command::Evaluate(arguments) => evaluate_command(&arguments),
     }
+}
+
+/// The largest request `evaluate` reads.
+const MAX_REQUEST_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Runs `evaluate`: the request from `--input` or standard input, the protocol from this host's
+/// catalog, the decision or the refusal on standard output as `EVALUATE_HELP` states.
+fn evaluate_command(arguments: &EvaluateArgs) -> ExitCode {
+    let text = match read_request(arguments.input.as_deref()) {
+        Ok(text) => text,
+        Err(error) => return failed(&error),
+    };
+    let catalog = match InstallStore::user().and_then(|store| store.catalog()) {
+        Ok(catalog) => catalog,
+        Err(error) => return failed(&error),
+    };
+    let decided =
+        request_from_json(&text).and_then(|request| loom_governor::evaluate(&catalog, &request));
+    let (written, status) = match &decided {
+        Ok(decision) => (decision_json(decision), ExitCode::SUCCESS),
+        Err(refusal) => {
+            eprintln!(
+                "b10x-loom: evaluation refused: {}: {}",
+                refused_input(refusal),
+                printable(&refusal.message)
+            );
+            (refusal_json(refusal), ExitCode::from(3))
+        }
+    };
+    let mut out = std::io::stdout().lock();
+    match out.write_all(written.as_bytes()).and_then(|()| out.flush()) {
+        Ok(()) => status,
+        Err(error) => failed(&format!("the decision cannot be written: {error}")),
+    }
+}
+
+fn read_request(path: Option<&Path>) -> Result<String, String> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    let read = match path {
+        Some(path) => std::fs::File::open(path)
+            .and_then(|file| file.take(MAX_REQUEST_BYTES + 1).read_to_end(&mut bytes)),
+        None => std::io::stdin()
+            .lock()
+            .take(MAX_REQUEST_BYTES + 1)
+            .read_to_end(&mut bytes),
+    };
+    read.map_err(|error| format!("the request cannot be read: {error}"))?;
+    if bytes.len() as u64 > MAX_REQUEST_BYTES {
+        return Err("the request exceeds 16 MiB".into());
+    }
+    String::from_utf8(bytes).map_err(|_| "the request is not UTF-8".into())
 }
 
 fn failed(error: &str) -> ExitCode {
