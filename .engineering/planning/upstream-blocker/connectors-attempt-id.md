@@ -6,7 +6,7 @@ status: open
 title: connectors-client returns no Connector attempt id for an invocation
 relations:
 - blocks: story:connectors-invoker
-revision: 3
+revision: 4
 ---
 ## Waiting on
 
@@ -27,4 +27,4 @@ A Connectors release tag ships the attempt id on a successful invocation;
 
 ## Upstream story
 
-Connectors `story:invoke-returns-attempt-id` (draft in the Connectors store on 2026-10-08) carries the change. `story:connectors-invoker` stays blocked until a Connectors release tag ships it.
+Connectors `story:invoke-returns-attempt-id` (draft in the Connectors store on 2026-10-08) carries the change. Connectors will return the attempt id on the HTTP path through `connectors-client`, in a new v1alpha2 invoke response carrying `MutationObservation`; v1alpha1 stays unchanged. It is its own Connectors wave after connectors 0.34.0, 3-4 units. `story:connectors-invoker` stays blocked until a Connectors release tag ships it.
