@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T17:09:50Z",
+  "actor": "human:timo",
+  "artifact": "story:release-080",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "release workflow run 37812886270 on tag 0.8.0 (6cefbec): success; check and Shared source gates on 6cefbec: success; loom-xtask release-check --tag 0.8.0 exit 0 on 7fac68d; GitHub Release 0.8.0 by b10x-bot[bot] with the CHANGELOG entry as notes, latest",
+    "reference": "6cefbec"
+  }
+}
