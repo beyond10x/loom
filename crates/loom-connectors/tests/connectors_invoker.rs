@@ -4,7 +4,8 @@
 //! naming the attempt the service reported.
 //!
 //! The fake service binds a loopback port inside this process. It answers `GET /v1/describe` with
-//! a bare v1alpha1 descriptor and `POST /v1alpha2/invoke` with the scripted v1alpha2 response, and
+//! a bare v1alpha1 descriptor (the write [`OPERATION`], profile `mutation`, and the read
+//! [`READ_OPERATION`]) and `POST /v1alpha2/invoke` with the scripted v1alpha2 response, and
 //! records every request it receives. The commission's loop is Commission's own
 //! `run_until_blocked` over the testkit's scripted governor and executor; only the runtime makes an
 //! admitted request.
@@ -17,6 +18,10 @@
 //! - `an_instance_resolves_to_exactly_one_endpoint`: an unknown `instance_id` answers `Err` before
 //!   any call; a second endpoint for one instance is refused; a service describing another
 //!   instance is never invoked.
+//! - `an_admitted_read_is_performed_with_its_result_and_names_its_audit_record`: the acceptance of
+//!   `story:connector-read-performed`; `a_read_without_a_complete_audit_record_is_an_error`,
+//!   `a_write_without_a_recorded_attempt_is_still_an_error` and
+//!   `a_binding_the_service_describes_otherwise_is_never_invoked` bound it.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::iter::repeat_n;
@@ -31,11 +36,11 @@ use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
     ActionBinding, ActionBindingData, ActionBindingKey, ActionRequestId, ActionStatus,
     AgentRevisionId, AuthorityContext, CaseId, Commission, CommissionData, CommissionId,
-    ConnectorAttemptId, ConnectorCredentialRef, ConnectorEndpoint, ConnectorEndpointData,
-    ConnectorEndpointUrl, ConnectorInstanceId, ConnectorOperationId, EffectOutcome,
-    ExecutorOutcome, ExecutorOutcomeProposedAction, FrontierAction, ObservationId, PrincipalId,
-    ProposedActionArguments, RunId, action_binding_state, commission_state,
-    connector_endpoint_state,
+    ConnectorAttemptId, ConnectorAuditRef, ConnectorCredentialRef, ConnectorEndpoint,
+    ConnectorEndpointData, ConnectorEndpointUrl, ConnectorInstanceId, ConnectorOperationEffect,
+    ConnectorOperationId, EffectOutcome, ExecutorOutcome, ExecutorOutcomeProposedAction,
+    FrontierAction, ObservationId, PrincipalId, ProposedActionArguments, RunId,
+    action_binding_state, commission_state, connector_endpoint_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::connector::ConnectorEffects;
@@ -54,6 +59,8 @@ const EDIT: &str = "repository.edit";
 const INSTANCE: &str = "source-host";
 /// The operation the action is bound to.
 const OPERATION: &str = "contents.write";
+/// The read operation the service also describes.
+const READ_OPERATION: &str = "contents.read";
 /// The descriptor revision the fake service describes.
 const REVISION: &str = "rev-7";
 /// The credential reference the endpoint names, and the secret the resolver gives for it.
@@ -110,6 +117,13 @@ impl FakeService {
                 "description": "write a file",
                 "contract": "operations/v1alpha1",
                 "profile": "mutation",
+                "input_schema": {"type": "object"},
+                "output_schema": {"type": "object"}
+            }, {
+                "id": READ_OPERATION,
+                "description": "read a file",
+                "contract": "operations/v1alpha1",
+                "profile": "read",
                 "input_schema": {"type": "object"},
                 "output_schema": {"type": "object"}
             }],
@@ -334,6 +348,8 @@ fn commission() -> Commission<commission_state::Assigned> {
 fn binding(
     commission: &Commission<commission_state::Assigned>,
     instance: &str,
+    operation: &str,
+    effect: ConnectorOperationEffect,
 ) -> ActionBinding<action_binding_state::Declared> {
     let id = commission.data().commission_id.clone();
     ActionBinding::new(ActionBindingData {
@@ -343,7 +359,8 @@ fn binding(
         },
         commission_id: id,
         instance_id: ConnectorInstanceId(instance.to_owned()),
-        operation_id: ConnectorOperationId(OPERATION.to_owned()),
+        operation_id: ConnectorOperationId(operation.to_owned()),
+        effect,
     })
 }
 
@@ -417,10 +434,25 @@ impl LoopContext for Context {
     }
 }
 
-/// One loop of the commission on a frontier admitting [`EDIT`]: the executor proposes it once,
-/// the runtime admits it and hands it to `ConnectorEffects` over `invoker`; after the invocation
-/// the case completes.
+/// [`run_bound`] with [`EDIT`] bound to the write [`OPERATION`] of `instance`.
 fn run(invoker: &ConnectorsInvoker, instance: &str) -> Result<LoopEnd, LoopError> {
+    run_bound(
+        invoker,
+        instance,
+        OPERATION,
+        ConnectorOperationEffect::Write,
+    )
+}
+
+/// One loop of the commission on a frontier admitting [`EDIT`], bound to `operation` of
+/// `instance` with `effect`: the executor proposes it once, the runtime admits it and hands it to
+/// `ConnectorEffects` over `invoker`; after the invocation the case completes.
+fn run_bound(
+    invoker: &ConnectorsInvoker,
+    instance: &str,
+    operation: &str,
+    effect: ConnectorOperationEffect,
+) -> Result<LoopEnd, LoopError> {
     let commission = commission();
     let case = commission.data().case_id.clone();
     let open = |revision| {
@@ -446,8 +478,12 @@ fn run(invoker: &ConnectorsInvoker, instance: &str) -> Result<LoopEnd, LoopError
             arguments: ProposedActionArguments(arguments()),
         },
     )]);
-    let effects = ConnectorEffects::new(&commission, [binding(&commission, instance)], invoker)
-        .unwrap_or_else(|error| panic!("the binding is refused: {error}"));
+    let effects = ConnectorEffects::new(
+        &commission,
+        [binding(&commission, instance, operation, effect)],
+        invoker,
+    )
+    .unwrap_or_else(|error| panic!("the binding is refused: {error}"));
     let mut issued = 0u64;
     let mut runs = Generated::new(RunStore::new(move || {
         issued += 1;
@@ -668,4 +704,174 @@ fn an_instance_resolves_to_exactly_one_endpoint() {
         other.invocations().is_empty(),
         "another instance: never invoked"
     );
+}
+
+/// A read's success with `result`, its audit record `audit_ref` in `audit_status`, and the
+/// mutation `mutation` names, or none.
+fn read_answer(
+    result: serde_json::Value,
+    audit_ref: Option<&'static str>,
+    audit_status: &'static str,
+    mutation_classification: Option<&'static str>,
+) -> Answering {
+    Box::new(move |request_id| {
+        let mut body = json!({
+            "version": "v1alpha2",
+            "request_id": request_id,
+            "status": "success",
+            "result": result,
+            "audit_ref": audit_ref,
+            "audit_status": audit_status
+        });
+        if let Some(classification) = mutation_classification {
+            body["mutation"] = mutation(classification, request_id);
+        }
+        (200, body.to_string())
+    })
+}
+
+/// `story:connector-read-performed`: an admitted action bound to a read operation answers
+/// `Performed` with the operation's result, naming the audit record the service completed for the
+/// invocation and no attempt.
+#[test]
+fn an_admitted_read_is_performed_with_its_result_and_names_its_audit_record() {
+    let service = FakeService::start(
+        INSTANCE,
+        read_answer(
+            json!({"path": "src/lib.rs", "text": "fn main() {}"}),
+            Some("aud-7"),
+            "complete",
+            None,
+        ),
+    );
+    let invoker = ConnectorsInvoker::new([endpoint(INSTANCE, &service.url())], Secrets)
+        .expect("one endpoint per instance");
+    let end = run_bound(
+        &invoker,
+        INSTANCE,
+        READ_OPERATION,
+        ConnectorOperationEffect::Read,
+    )
+    .expect("the loop ends");
+
+    assert_eq!(end.admitted.len(), 1, "{:?}", end.admitted);
+    assert_eq!(
+        end.effects,
+        vec![EffectOutcome::Performed(
+            b10x_loom_commission::model::responsibility::EffectOutcomePerformed {
+                report: Value::Object(vec![
+                    ("path".to_owned(), Value::Text("src/lib.rs".to_owned())),
+                    ("text".to_owned(), Value::Text("fn main() {}".to_owned())),
+                ]),
+                attempt: None,
+                audit: Some(ConnectorAuditRef("aud-7".to_owned())),
+            }
+        )],
+        "the operation's result, its audit record and no attempt"
+    );
+    let invocations = service.invocations();
+    assert_eq!(
+        invocations.len(),
+        1,
+        "invoked exactly once: {invocations:?}"
+    );
+    assert_eq!(invocations[0].json()["operation"], READ_OPERATION);
+}
+
+/// A read is `Performed` only when the service completed its audit record and recorded no attempt;
+/// every other answer to a read is `Err`, never a refusal, after the one invocation.
+#[test]
+fn a_read_without_a_complete_audit_record_is_an_error() {
+    let answers: Vec<(&str, Answering)> = vec![
+        (
+            "an incomplete audit record",
+            read_answer(json!({}), Some("aud-7"), "incomplete", None),
+        ),
+        (
+            "an unavailable audit record",
+            read_answer(json!({}), None, "unavailable", None),
+        ),
+        (
+            "a recorded attempt",
+            read_answer(json!({}), Some("aud-7"), "complete", Some("applied")),
+        ),
+        (
+            "an error without a recorded attempt",
+            failed(404, "not_found", None),
+        ),
+    ];
+    for (name, answer) in answers {
+        let service = FakeService::start(INSTANCE, answer);
+        let invoker = ConnectorsInvoker::new([endpoint(INSTANCE, &service.url())], Secrets)
+            .expect("one endpoint per instance");
+        let message = effect_error(
+            name,
+            run_bound(
+                &invoker,
+                INSTANCE,
+                READ_OPERATION,
+                ConnectorOperationEffect::Read,
+            ),
+        );
+        assert!(!message.is_empty(), "{name}");
+        assert_eq!(
+            service.invocations().len(),
+            1,
+            "{name}: invoked once, never resent"
+        );
+    }
+}
+
+/// A consequential action still answers `Err` when the service records no attempt: a write
+/// operation's success that names none is not performed, whatever audit record it carries.
+#[test]
+fn a_write_without_a_recorded_attempt_is_still_an_error() {
+    let service = FakeService::start(
+        INSTANCE,
+        read_answer(json!({"ok": true}), Some("aud-7"), "complete", None),
+    );
+    let invoker = ConnectorsInvoker::new([endpoint(INSTANCE, &service.url())], Secrets)
+        .expect("one endpoint per instance");
+    let message = effect_error("write without an attempt", run(&invoker, INSTANCE));
+    assert!(
+        message.contains("no attempt"),
+        "write without an attempt: {message}"
+    );
+    assert_eq!(service.invocations().len(), 1, "invoked once");
+}
+
+/// A binding whose effect is not the one the service describes for its operation (a write is the
+/// mutation profile) is never invoked: a read binding of a write operation, a write binding of a
+/// read operation, and a binding of an operation the service does not describe answer `Err` after
+/// the describe alone.
+#[test]
+fn a_binding_the_service_describes_otherwise_is_never_invoked() {
+    for (name, operation, effect, names) in [
+        (
+            "read binding of a write operation",
+            OPERATION,
+            ConnectorOperationEffect::Read,
+            "mutation",
+        ),
+        (
+            "write binding of a read operation",
+            READ_OPERATION,
+            ConnectorOperationEffect::Write,
+            "read",
+        ),
+        (
+            "an operation the service does not describe",
+            "contents.delete",
+            ConnectorOperationEffect::Write,
+            "contents.delete",
+        ),
+    ] {
+        let service = FakeService::start(INSTANCE, applied(json!({})));
+        let invoker = ConnectorsInvoker::new([endpoint(INSTANCE, &service.url())], Secrets)
+            .expect("one endpoint per instance");
+        let message = effect_error(name, run_bound(&invoker, INSTANCE, operation, effect));
+        assert!(message.contains(names), "{name}: {message}");
+        let paths: Vec<String> = service.received().into_iter().map(|r| r.path).collect();
+        assert_eq!(paths, ["/v1/describe"], "{name}: described, never invoked");
+    }
 }

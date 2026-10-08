@@ -2,8 +2,8 @@
   "provenance": {
     "system": "commission",
     "specification_version": "v1",
-    "source_digest": "a32c2a6e9e2a197db12e3115b709774d3cd71cf05e85abc4bf84e97964942b17",
-    "contract_digest": "40d66bc15b14d23fcd1d682c020fe0282a937b912f74bc1c3dd8f34410f106f9"
+    "source_digest": "ffb19b60693c5b585ca20e76a24082175bdd8e55c1fc7f3c2cd40a66d6f66e86",
+    "contract_digest": "be195eb875e2d6ae90ca6af7da1be3c6372ed661e48863a8f44c7346a7bccae5"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -187,6 +187,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "commission.responsibility.ConnectorAuditRef",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "commission.responsibility.ConnectorCredentialRef",
       "disposition": {
         "disposition": "generated"
@@ -209,6 +216,13 @@
     {
       "kind": "domain_type",
       "source": "commission.responsibility.ConnectorInstanceId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "commission.responsibility.ConnectorOperationEffect",
       "disposition": {
         "disposition": "generated"
       }

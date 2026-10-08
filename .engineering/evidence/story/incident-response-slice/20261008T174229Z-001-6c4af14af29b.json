@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T17:42:29Z",
+  "actor": "human:timo",
+  "artifact": "story:incident-response-slice",
+  "kind": "story",
+  "revision": 14,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "new test drives all 6 inc-492 states; end state service.healthy True, impact.bounded True, cause.identified Unknown, emergency.leave Admissible, restore_service the only obligation; mutation of cause.identified expectation to True fails at incident_response_slice.rs:110 (exit 101). Investigation-obligation clause split to story:incident-investigation-open",
+    "reference": "edc66ba"
+  }
+}

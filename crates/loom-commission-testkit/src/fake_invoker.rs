@@ -2,16 +2,18 @@
 //!
 //! It records each call with the Connector operation it was asked to invoke and the admitted
 //! request, in call order, and answers the `n`-th call with its scripted answer or, once the script
-//! is used up, `Performed` naming attempt [`RecordingInvoker::attempt`]`(n)` with report
-//! [`RecordingInvoker::report`] of the operation. It reaches no Connector.
+//! is used up, `Performed` with report [`RecordingInvoker::report`] of the operation, naming what its
+//! binding's effect requires: attempt [`RecordingInvoker::attempt`]`(n)` for a write, audit record
+//! [`RecordingInvoker::audit`]`(n)` for a read. It reaches no Connector.
 
 use std::collections::VecDeque;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::responsibility::{
-    ActionBindingData, ActionRequestData, ConnectorAttemptId, ConnectorInstanceId,
-    ConnectorOperationId, EffectOutcome, EffectOutcomePerformed,
+    ActionBindingData, ActionRequestData, ConnectorAttemptId, ConnectorAuditRef,
+    ConnectorInstanceId, ConnectorOperationEffect, ConnectorOperationId, EffectOutcome,
+    EffectOutcomePerformed,
 };
 use b10x_loom_commission::ports::connector::ConnectorInvoker;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError};
@@ -60,9 +62,16 @@ impl RecordingInvoker {
         lock(&self.calls).clone()
     }
 
-    /// The attempt the unscripted answer to the `n`-th call names, counting from 1.
+    /// The attempt the unscripted answer to the `n`-th call names for a write binding, counting
+    /// from 1.
     pub fn attempt(n: usize) -> ConnectorAttemptId {
         ConnectorAttemptId(format!("attempt-{n}"))
+    }
+
+    /// The audit record the unscripted answer to the `n`-th call names for a read binding,
+    /// counting from 1.
+    pub fn audit(n: usize) -> ConnectorAuditRef {
+        ConnectorAuditRef(format!("audit-{n}"))
     }
 
     /// The report of the unscripted answer for the operation `instance`, `operation`.
@@ -92,7 +101,9 @@ impl ConnectorInvoker for RecordingInvoker {
         lock(&self.answers).pop_front().unwrap_or_else(|| {
             Ok(EffectOutcome::Performed(EffectOutcomePerformed {
                 report: Self::report(&binding.instance_id, &binding.operation_id),
-                attempt: Some(Self::attempt(n)),
+                attempt: (binding.effect == ConnectorOperationEffect::Write)
+                    .then(|| Self::attempt(n)),
+                audit: (binding.effect == ConnectorOperationEffect::Read).then(|| Self::audit(n)),
             }))
         })
     }

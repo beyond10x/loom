@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T17:42:30Z",
+  "actor": "human:timo",
+  "artifact": "story:conformance-declared-coverage",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task conform and task commission:conform exit 0; cargo clippy and cargo test -p b10x-loom-conformance -p b10x-loom-commission-conformance --locked: 26 passed, exit 0 (rerun at 3c7bbd8)",
+    "reference": "3c7bbd8"
+  }
+}

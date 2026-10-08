@@ -275,6 +275,7 @@ impl EffectPort for Effects {
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {
             report: CommissionValue::Null,
             attempt: None,
+            audit: None,
         }))
     }
 }

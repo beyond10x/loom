@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T17:42:29Z",
+  "actor": "human:timo",
+  "artifact": "story:incident-response-slice",
+  "kind": "story",
+  "revision": 14,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo clippy -p b10x-loom-governor --all-targets --locked -- -D warnings exit 0; cargo test -p b10x-loom-governor --locked: 46 -> 47 passed, incident_response_slice 1 passed, exit 0; fixture cmp against engineering-protocols a7d02b4 exit 0",
+    "reference": "edc66ba"
+  }
+}

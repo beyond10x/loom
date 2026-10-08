@@ -87,6 +87,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | An executor is never handed an unperformed action that needs no authority; an effect is invoked once, through its binding | `crates/loom-commission-testkit/tests/effect_invocation.rs` (`effect_invoked_only_through_its_binding`) |
 | A consequential action leaves Loom only as a proposal, and the executor links no Connectors crate | `crates/loom-executor/tests/connector_boundary.rs` (`consequential_actions_leave_loom_only_as_a_proposal`) |
 | A Connector invocation is made once, and only Connectors' own "nothing changed" is a refusal | `crates/loom-connectors/tests/connectors_invoker.rs` |
+| A read through Connectors is performed naming its audit record; a write without a recorded attempt is an error | `crates/loom-connectors/tests/connectors_invoker.rs` (`an_admitted_read_is_performed_with_its_result_and_names_its_audit_record`, `a_write_without_a_recorded_attempt_is_still_an_error`), `crates/loom-commission-testkit/tests/effect_invocation.rs` (`a_performed_that_names_another_record_than_its_binding_requires_is_not_answered`) |
 | The executor answers the commands of `ess/` as their synthesized scenarios specify, except `not-in-frontier`, which the conformance target answers | `task conform` (`crates/loom-conformance/tests/conform.rs`, `ess_conformance_report`); the membership rule: `crates/loom-executor/tests/adversary_run_revalidation.rs` (`not_in_frontier_follows_the_frontier_actions`) |
 | The router refuses a pick outside the registry or below the threshold | `crates/loom-intake-router/tests/adversary_classify.rs` |
 | Model or provider JSON nested past 128 levels is refused | `crates/loom-executor/tests/json_depth.rs` |
@@ -251,11 +252,15 @@ links Connectors: `connectors-client` and `connectors-core` at tag `v0.35.0`. Mo
 records (`ess/commission/domains/responsibility.yaml`), one per instance, and a
 `CredentialResolver` the host injects; it reads no credential itself. It describes on
 `GET /v1/describe` and invokes once on `POST /v1alpha2/invoke`, never `/v1/invoke`, and never
-resends. `Refused` is only what Connectors states as nothing changed (`mutation.classification`
-`refused` or `not_attempted` on a valid response); every other failure, a failure without a
-recorded attempt included, is `Err`. The sync port runs on a Tokio runtime the invoker owns.
-`crates/loom-connectors/tests/connectors_invoker.rs` holds it against a fake service on a loopback
-port.
+resends. A binding declares its operation's `effect`: `Write` for the `mutation` profile the
+service describes (Connectors records an attempt), `Read` otherwise; a binding described otherwise
+is `Err` and not invoked. A write's `Performed` names its attempt, a read's the execution audit
+record Connectors completed (`audit`) and no attempt, and `ConnectorEffects` refuses any other
+`Performed` as a failure to answer. `Refused` is only what Connectors states as nothing changed
+(`mutation.classification` `refused` or `not_attempted` on a valid response); every other failure,
+a write without a recorded attempt included, is `Err`. The sync port runs on a Tokio runtime the
+invoker owns. `crates/loom-connectors/tests/connectors_invoker.rs` holds it against a fake service
+on a loopback port.
 
 ## Intake and the command line
 

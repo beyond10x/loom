@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:incident-response-slice
 kind: story
-status: draft
+status: implemented
 title: 'Incident-response vertical slice: leave emergency mode with cause unknown'
 refs:
 - provider: commission
@@ -12,13 +12,15 @@ relations:
 - serves: vision:O1
 - serves: vision:governed-autonomy
 scope:
-- confidence: inferred
-  path: crates/loom-commission-testkit
-- confidence: inferred
+- confidence: cited
   path: crates/loom-governor/tests/fixtures/inc-492.fixture.yaml
-- confidence: inferred
+- confidence: cited
   path: crates/loom-governor/tests/incident_response_slice.rs
-revision: 11
+revision: 17
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-08T17:26:32Z", actor: "human:timo", revision: 12}
+- {from: "proposed", to: "active", at: "2026-10-08T17:26:32Z", actor: "human:timo", revision: 13}
+- {from: "active", to: "implemented", at: "2026-10-08T17:46:56Z", actor: "human:timo", revision: 17, decided_on: {"recorded":{"test_result":1,"verification":1}}}
 ---
 > Re-filed from `beyond10x/commission` `story:incident-response-slice` at `e61e4f0` (status there: `draft`) under Atlas ADR 0090 (loom `story:import-commission`); paths mapped to Loom.
 
@@ -48,11 +50,17 @@ Observable steps (build pack `START-HERE.md`, section Second demonstrator; ELS
 
 ## Acceptance
 
-Driving the ELS `incident.response/1` fixture case through Commission and Loom on the AEP governor,
-after `release.rollback` is executed under a granted authority and fresh health evidence is
-admitted, the governor frontier reports `service_healthy = True`, `customer_impact_bounded = True`
-and `cause_identified = Unknown`, reports the case out of emergency mode as `incident.response/1`
-defines it, and still lists the investigation obligation as open.
+Narrowed 2026-10-08 to what the pinned protocol defines. Driving the ELS `inc-492` fixture case
+through Commission and Loom on the AEP governor at `b10x-canon-engineering` `0.1.0`, after
+`release.rollback` is executed under a granted authority and fresh health evidence is admitted, the
+governor frontier reports `service.healthy` True, `impact.bounded` True and `cause.identified`
+Unknown, and `emergency.leave` (the protocol's way out of emergency mode) is Admissible.
+`restore_service` is the only obligation the protocol declares, and the test asserts that, so it
+fails when a protocol pin adds an investigation obligation.
+
+The clause "the investigation obligation stays open" moved to `story:incident-investigation-open`:
+`incident.response/1` at `0.1.0` declares no investigation obligation
+(`protocols/incident-response/1.yaml`), so it cannot be checked here.
 
 ## Tests
 

@@ -65,8 +65,8 @@
 //!    [`EffectOutcome`] is recorded ([`LoopEnd::effects`]) and delivered as one observation: id and
 //!    time from the context, source [`EFFECT_SOURCE`], subject `<case>@<request revision>`, payload
 //!    `outcome` (`Performed` or `Refused`), `action_request`, `action`, `arguments`, and `report`
-//!    with, when the effect was invoked through a Connector, the one `attempt` the invocation
-//!    produced, or `reason`. It is never evidence.
+//!    with, when the effect was invoked through a Connector, the one `attempt` a write produced or
+//!    the `audit` record of a read, or `reason`. It is never evidence.
 //!    The loop never retries an invocation. Stale: the iteration is a step, and the next iteration
 //!    loads the case, which has moved: it ends the run completed if the case is complete, else
 //!    `CaseMovedOn` or with no admissible action (2). Otherwise, and after an authority answer other than an allow, the run
@@ -907,6 +907,9 @@ fn effect_observation<C: LoopContext + ?Sized>(
             payload.push(("report".to_owned(), performed.report.clone()));
             if let Some(attempt) = &performed.attempt {
                 payload.push(("attempt".to_owned(), text(&attempt.0)));
+            }
+            if let Some(audit) = &performed.audit {
+                payload.push(("audit".to_owned(), text(&audit.0)));
             }
         }
         EffectOutcome::Refused(refused) => {

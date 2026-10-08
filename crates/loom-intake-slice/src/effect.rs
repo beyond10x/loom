@@ -185,6 +185,7 @@ impl<'a, 'o, S: CaseStore> LocalEffects<'a, 'o, S> {
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {
             report: json::Value::Text(report.to_string()),
             attempt: None,
+            audit: None,
         }))
     }
 

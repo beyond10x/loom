@@ -150,6 +150,7 @@ fn performed(report: &str) -> EffectOutcome {
     EffectOutcome::Performed(EffectOutcomePerformed {
         report: Value::Text(report.to_owned()),
         attempt: None,
+        audit: None,
     })
 }
 

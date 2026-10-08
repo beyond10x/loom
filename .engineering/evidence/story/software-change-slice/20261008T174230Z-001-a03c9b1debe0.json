@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T17:42:30Z",
+  "actor": "human:timo",
+  "artifact": "story:software-change-slice",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "one run asserts the 6 acceptance steps on chg-1842; mutations each fail: authority granted (:223), R1 result relabelled R2 (:99), no move to R3 (:255)",
+    "reference": "6486097"
+  }
+}

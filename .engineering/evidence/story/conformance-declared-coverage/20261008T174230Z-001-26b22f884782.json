@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T17:42:30Z",
+  "actor": "human:timo",
+  "artifact": "story:conformance-declared-coverage",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "at 6fe63db (checks added, ordinary suite format) both conform tests fail naming conformance_status inconclusive (exit 101); at 2d39f1e with --suite-format 5 both pass: 46 scenarios for ess/, 13 for ess/commission/, 0 refusals",
+    "reference": "2d39f1e"
+  }
+}

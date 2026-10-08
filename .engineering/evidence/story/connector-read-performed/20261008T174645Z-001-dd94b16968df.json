@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T17:46:45Z",
+  "actor": "human:timo",
+  "artifact": "story:connector-read-performed",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "baseline d8ed131: a read through ConnectorsInvoker answers Err (no attempt); treatment: an_admitted_read_is_performed (connectors_invoker.rs) and a_read_that_names_its_audit_record_is_performed (testkit) pass, red first at 768931b/before 43ab1f0 (6 failed); a Write with no attempt still Err; adversary pass 1 2 red fixed in 3788cc1",
+    "reference": "3788cc1"
+  }
+}

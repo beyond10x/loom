@@ -6,6 +6,23 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Changed
+
+- `task conform` and `task commission:conform` synthesize their suites with declared coverage
+  (`ess verify conform synthesize --suite-format 5`) and fail unless the report's
+  `conformance_status` is `passed`. A run whose scenarios all pass over a suite without a coverage
+  inventory, which ESS rates `inconclusive`, no longer counts as green, and neither does a run with
+  an `unsupported` scenario named in `ess/SKIPPED.md`, which ESS rates `failed`.
+- A read action bound to a Connector read operation answers `Performed` with the operation's
+  result. `ActionBinding` declares the bound operation's `effect` (`Read` or `Write`), and
+  `EffectOutcomePerformed` names the read's execution audit record (`audit`, the `audit_ref`
+  Connectors completed) where a write's names its attempt. `ConnectorEffects` requires exactly the
+  one the binding's effect names; a consequential (`Write`) action still answers an error when
+  Connectors records no attempt. `ConnectorsInvoker` refuses, before invoking, a binding whose
+  effect is not the one the service describes (`Write` for the `mutation` profile, `Read`
+  otherwise). Hosts that build `ActionBindingData` or `EffectOutcomePerformed` add the new field,
+  and `BindingError::OtherCommission` now boxes the binding it names.
+
 ## [0.8.0] - 2026-10-08
 
 Loom 0.8.0 lets a commission's bound actions leave Loom through Connectors. The new crate

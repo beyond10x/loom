@@ -147,6 +147,7 @@ impl EffectPort for Effects {
             .unwrap_or(EffectOutcome::Performed(EffectOutcomePerformed {
                 report: Value::Null,
                 attempt: None,
+                audit: None,
             })))
     }
 }
@@ -309,6 +310,7 @@ impl EffectPort for Bumps<'_> {
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {
             report: Value::Null,
             attempt: None,
+            audit: None,
         }))
     }
 }

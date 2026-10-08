@@ -1,0 +1,180 @@
+format: els-fixture/1
+id: inc-492
+protocol: protocols/incident-response/1.yaml
+at: "2026-10-04T12:00:00Z"
+
+case:
+  format: canon-case/1
+  id: INC-492
+  protocol: incident.response
+  artifacts:
+    service: {revision: s1}
+    release: {revision: r42}
+
+states:
+  - id: initial
+    add_authority: []
+    add_evidence:
+      - observed_at: "2026-10-04T11:00:00Z"
+        record:
+          format: canon-evidence/1
+          id: health-1
+          kind: operational_observation
+          result: unhealthy
+          subject: service
+          subject_revision: s1
+      - observed_at: "2026-10-04T11:05:00Z"
+        record:
+          format: canon-evidence/1
+          id: impact-1
+          kind: impact_assessment
+          result: bounded
+          subject: service
+          subject_revision: s1
+    expect:
+      claims:
+        impact.bounded: true
+        service.healthy: false
+        cause.identified: unknown
+      obligations:
+        restore_service: open
+      actions:
+        metrics.inspect: admissible
+        logs.search: admissible
+        release.inspect: admissible
+        traffic.shift: approval-required
+        release.rollback: approval-required
+        emergency.leave: blocked
+
+  - id: cause-identified
+    add_authority: []
+    add_evidence:
+      - observed_at: "2026-10-04T11:20:00Z"
+        record:
+          format: canon-evidence/1
+          id: cause-1
+          kind: cause_analysis
+          result: identified
+          subject: service
+          subject_revision: s1
+    expect:
+      claims:
+        impact.bounded: true
+        service.healthy: false
+        cause.identified: true
+      obligations:
+        restore_service: open
+      actions:
+        metrics.inspect: admissible
+        logs.search: admissible
+        release.inspect: admissible
+        traffic.shift: approval-required
+        release.rollback: approval-required
+        emergency.leave: blocked
+
+  - id: rollback-approved
+    add_authority:
+      - {capability: release.rollback, decision: granted}
+    add_evidence: []
+    expect:
+      claims:
+        impact.bounded: true
+        service.healthy: false
+        cause.identified: true
+      obligations:
+        restore_service: open
+      actions:
+        metrics.inspect: admissible
+        logs.search: admissible
+        release.inspect: admissible
+        traffic.shift: approval-required
+        release.rollback: admissible
+        emergency.leave: blocked
+
+  - id: rolled-back
+    set_revisions:
+      service: s2
+    add_authority: []
+    add_evidence: []
+    expect:
+      claims:
+        impact.bounded: unknown
+        service.healthy: unknown
+        cause.identified: unknown
+      obligations:
+        restore_service: open
+      actions:
+        metrics.inspect: admissible
+        logs.search: admissible
+        release.inspect: admissible
+        traffic.shift: approval-required
+        release.rollback: admissible
+        emergency.leave: blocked
+
+  - id: release-observed
+    add_authority: []
+    add_evidence:
+      - observed_at: "2026-10-04T11:35:00Z"
+        record:
+          format: canon-evidence/1
+          id: release-health-1
+          kind: operational_observation
+          result: healthy
+          subject: release
+          subject_revision: r42
+      - observed_at: "2026-10-04T11:36:00Z"
+        record:
+          format: canon-evidence/1
+          id: release-impact-1
+          kind: impact_assessment
+          result: bounded
+          subject: release
+          subject_revision: r42
+    expect:
+      claims:
+        impact.bounded: unknown
+        service.healthy: unknown
+        cause.identified: unknown
+      obligations:
+        restore_service: open
+      actions:
+        metrics.inspect: admissible
+        logs.search: admissible
+        release.inspect: admissible
+        traffic.shift: approval-required
+        release.rollback: admissible
+        emergency.leave: blocked
+
+  - id: service-restored
+    add_authority: []
+    add_evidence:
+      - observed_at: "2026-10-04T11:40:00Z"
+        record:
+          format: canon-evidence/1
+          id: health-2
+          kind: operational_observation
+          result: healthy
+          subject: service
+          subject_revision: s2
+      - observed_at: "2026-10-04T11:45:00Z"
+        record:
+          format: canon-evidence/1
+          id: impact-2
+          kind: impact_assessment
+          result: bounded
+          subject: service
+          subject_revision: s2
+    expect:
+      claims:
+        impact.bounded: true
+        service.healthy: true
+        cause.identified: unknown
+      obligations:
+        restore_service: discharged
+      actions:
+        metrics.inspect: admissible
+        logs.search: admissible
+        release.inspect: admissible
+        traffic.shift: approval-required
+        release.rollback: admissible
+        emergency.leave: admissible
