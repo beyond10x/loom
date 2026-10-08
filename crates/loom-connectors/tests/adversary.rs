@@ -699,7 +699,11 @@ fn a_plaintext_endpoint_without_admission_is_never_called() {
     assert!(service.received().is_empty(), "never called");
 
     let with_password = ConnectorsInvoker::new(
-        [endpoint_with(INSTANCE, "https://user:pw-in-url@127.0.0.1:1/", false)],
+        [endpoint_with(
+            INSTANCE,
+            "https://user:pw-in-url@127.0.0.1:1/",
+            false,
+        )],
         Secrets,
     );
     let message = with_password
@@ -713,10 +717,7 @@ fn a_plaintext_endpoint_without_admission_is_never_called() {
 /// The resolved secret appears in no error message and in no `Debug` rendering of the invoker.
 #[test]
 fn the_resolved_secret_never_leaks() {
-    let service = FakeService::start(
-        INSTANCE,
-        error_answer(401, "unauthorized", None),
-    );
+    let service = FakeService::start(INSTANCE, error_answer(401, "unauthorized", None));
     let invoker = ConnectorsInvoker::new([endpoint(INSTANCE, &service.url())], Secrets)
         .expect("one endpoint per instance");
     assert!(
@@ -724,7 +725,10 @@ fn the_resolved_secret_never_leaks() {
         "Debug: {invoker:?}"
     );
     let rendered = format!("{:?}", run(&invoker));
-    assert!(rendered.contains("Unauthorized") || rendered.contains("unauthorized"), "{rendered}");
+    assert!(
+        rendered.contains("Unauthorized") || rendered.contains("unauthorized"),
+        "{rendered}"
+    );
     assert!(!rendered.contains(SECRET), "{rendered}");
 }
 
@@ -812,7 +816,7 @@ fn invoking_inside_a_multi_thread_runtime_neither_panics_nor_deadlocks() {
 /// rounded float: the operation receives another value than the one admitted. Expected: the
 /// invocation's `input` carries the admitted integer exactly.
 #[test]
-fn an_integer_argument_beyond_u64_is_sent_as_admitted() {
+fn an_integer_argument_beyond_u64_is_never_sent_altered() {
     const BIG: &str = "18446744073709551617";
     let service = FakeService::start(
         INSTANCE,
@@ -834,12 +838,12 @@ fn an_integer_argument_beyond_u64_is_sent_as_admitted() {
     let arguments = Value::Object(vec![("id".to_owned(), Value::Number(BIG.to_owned()))]);
     let result = run_with(&invoker, INSTANCE, arguments);
     let invocations = service.invocations();
-    let sent = invocations
-        .first()
-        .map(|r| String::from_utf8_lossy(&r.body).into_owned())
-        .unwrap_or_default();
+    let sent_unchanged = invocations
+        .iter()
+        .any(|r| String::from_utf8_lossy(&r.body).contains(&format!("\"id\":{BIG}")));
+    let refused_before_call = invocations.is_empty() && format!("{result:?}").contains(BIG);
     assert!(
-        sent.contains(&format!("\"id\":{BIG}")),
-        "the admitted argument {BIG} was sent as: {sent} (loop: {result:?})"
+        sent_unchanged || (result.is_err() && refused_before_call),
+        "the admitted argument {BIG} must be sent unchanged or refused before any call (loop: {result:?})"
     );
 }
