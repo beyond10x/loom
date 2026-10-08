@@ -274,8 +274,13 @@ types:
   # What the effect did, as the effect port reports it. Commission declares no structure for it.
   # story:effect-invocation (decision-blocker:invocation-attempt-record, A): the one Connector
   # attempt the invocation produced, present exactly when the effect was invoked through a
-  # Connector; an effect port that reaches no Connector names none. A request refused at the
-  # recheck is never invoked and names none; a retry is a new action request.
+  # Connector operation whose binding's effect is Write; an effect port that reaches no Connector
+  # names none. A request refused at the recheck is never invoked and names none; a retry is a new
+  # action request.
+  # story:connector-read-performed: Connectors records an attempt only for a write. The
+  # invocation of a binding whose effect is Read names, instead of an attempt, the execution audit
+  # record Connectors completed for it; `audit` is present exactly then. A Performed of a Connector
+  # binding names exactly one of the two, the one its binding's effect requires.
   - name: commission.responsibility.EffectOutcomePerformed
     kind: struct
     fields:
@@ -283,6 +288,8 @@ types:
         type: Json
       - name: attempt
         type: Optional<commission.responsibility.ConnectorAttemptId>
+      - name: audit
+        type: Optional<commission.responsibility.ConnectorAuditRef>
 
   # The effect port did not perform the request, and changed nothing; why.
   - name: commission.responsibility.EffectOutcomeRefused
@@ -319,6 +326,21 @@ types:
   - name: commission.responsibility.ConnectorAttemptId
     kind: newtype
     of: String
+
+  # story:connector-read-performed: the public `audit_ref` of the execution audit record
+  # Connectors completed for one admitted invocation (`audit_status` `complete`). Connectors owns
+  # the record; an identifier, not a relation.
+  - name: commission.responsibility.ConnectorAuditRef
+    kind: newtype
+    of: String
+
+  # story:connector-read-performed: what a bound Connector operation does. Write is an operation
+  # Connectors describes with the mutation profile (`external_write`), for which it records an
+  # attempt; Read is every other operation, for which it records none. The host declares it on the
+  # binding, and an operation the service describes otherwise is not invoked.
+  - name: commission.responsibility.ConnectorOperationEffect
+    kind: enum
+    variants: [Read, Write]
 
   # What identifies an ActionBinding: one per action id of a commission.
   - name: commission.responsibility.ActionBindingKey
@@ -510,6 +532,10 @@ entities:
         type: commission.responsibility.ConnectorInstanceId
       - name: operation_id
         type: commission.responsibility.ConnectorOperationId
+      # story:connector-read-performed: whether the bound operation is a read or a write, which
+      # decides what its Performed names (an attempt for Write, an audit record for Read).
+      - name: effect
+        type: commission.responsibility.ConnectorOperationEffect
     relations:
       # story:connectors-invoker: the bound operation's instance is served by the one endpoint the
       # host declares for it.
