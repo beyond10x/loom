@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:ess-056-upgrade
 kind: story
-status: draft
+status: active
 title: Loom builds, generates and gates on ESS 0.56.0
 relations:
 - decomposes: epic:runtime-consolidation
@@ -40,7 +40,10 @@ scope:
   path: generated/rust/
 - confidence: inferred
   path: website/docs/reference/
-revision: 17
+revision: 19
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-08T02:05:32Z", actor: "human:timo", revision: 18}
+- {from: "proposed", to: "active", at: "2026-10-08T02:05:32Z", actor: "human:timo", revision: 19}
 ---
 ## Outcome
 

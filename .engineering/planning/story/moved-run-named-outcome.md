@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:moved-run-named-outcome
 kind: story
-status: draft
+status: active
 title: A run whose case moved on to an admissible frontier ends with an outcome that says so
 relations:
 - decomposes: epic:commission-core
@@ -28,7 +28,10 @@ scope:
   path: generated/rust/commission/
 - confidence: cited
   path: website/docs/reference/commission/
-revision: 9
+revision: 11
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-08T02:05:32Z", actor: "human:timo", revision: 10}
+- {from: "proposed", to: "active", at: "2026-10-08T02:05:32Z", actor: "human:timo", revision: 11}
 ---
 ## Outcome
 
