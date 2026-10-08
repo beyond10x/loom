@@ -303,6 +303,7 @@ dependencies = [
 name = "b10x-loom-executor"
 version = "0.6.0"
 dependencies = [
+ "b10x-llm-credentials",
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
  "httpdate",

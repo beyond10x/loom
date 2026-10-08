@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "10e0941a85d43e690422930dd8850593cb2bee08d738ac2a6e7ffda9505f4b60",
-    "contract_digest": "0ebc9eb4e00a223ecca76b7fa83d021e0888f6c4084ae57ce52801a0b027c73c"
+    "source_digest": "fceae929c72d09b0daae25cf633a1e1ff9f15b5dedb71f4802c193c4cdcb7346",
+    "contract_digest": "f7a202983357f2892c4cdac99b9d5de1e11fca800c6db3b1671858c0c2e3a6da"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -75,6 +75,20 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.run.CredentialKind",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.run.CredentialReference",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.run.ReportedUsage",
       "disposition": {
         "disposition": "generated"
@@ -132,6 +146,13 @@
     {
       "kind": "domain_type",
       "source": "loom.run.TurnId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.run.WireCredential",
       "disposition": {
         "disposition": "generated"
       }
