@@ -6,6 +6,15 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-08
+
+Loom 0.6.0 names the outcome of a run whose case moved on. Commission's `RunOutcome` gains
+`CaseMovedOn`, which names the Run's revision and the current one when the case moved to a revision
+whose frontier still admits an action; before, such a run ended `NoAdmissibleAction`, which read the
+same as an empty frontier. A Run stays bound to one revision, so the caller starts a new Run at the
+current one. Callers that match `RunOutcome` exhaustively must handle the new variant. Loom now
+requires ESS 0.56.0. This is a source release; install or embed it from tag `0.6.0`.
+
 ### Added
 
 - Commission's `RunOutcome` has a `CaseMovedOn` variant (`RunOutcomeCaseMovedOn`,

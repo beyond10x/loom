@@ -18,7 +18,7 @@ Nothing is on a registry. Depend on the release tag:
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.5.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.6.0" }
 ```
 
 Rust code uses it as `loom_sdk`. It re-exports, under stable module names:
