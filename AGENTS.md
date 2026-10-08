@@ -285,7 +285,8 @@ cancellation-aware backoff and per-attempt context metrics. Model ports stay sin
 effects remain outside this loop. `system_query.rs` exercises recovery in all three request phases. The Codex preset and the forced tool call are
 `codex_model` (the CLI builds its model with it) and `call_tool` (the router calls it). The
 credential is the operator's Codex login (`~/.codex/auth.json`), read and renewed by llm, never by
-Loom code.
+Loom code. The ported wires take theirs from a `loom.run.WireCredential` reference through
+`credentials::ResolvedBearer`, which asks a `SecretResolver` the embedder injects at each call.
 
 ## Planning and waves
 

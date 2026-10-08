@@ -90,6 +90,30 @@ types:
       - name: cache_creation_input_tokens
         type: Optional<Integer>
 
+  # A non-secret, operator-defined lookup name for one wire's credential (llm-credentials
+  # SecretRef). The resolver the embedder injects owns the secret; the reference may name a secret
+  # that does not exist yet.
+  - name: loom.run.CredentialReference
+    kind: newtype
+    of: String
+
+  # What kind of secret a credential reference answers with, so a wire can present it the way its
+  # route wants: a long-lived key issued to a program, or a short-lived token obtained on a
+  # person's behalf and renewed elsewhere.
+  - name: loom.run.CredentialKind
+    kind: enum
+    variants: [ApiKey, Oauth]
+
+  # Where one wire takes its credential from, held in the run configuration beside the endpoint,
+  # never inside it. It carries no secret value.
+  - name: loom.run.WireCredential
+    kind: struct
+    fields:
+      - name: reference
+        type: loom.run.CredentialReference
+      - name: kind
+        type: loom.run.CredentialKind
+
 entities:
   # Session and transcript state for one run (loom-design.md § Owns). Filed outside the workspace
   # whether the run answered or failed; a resume continues the same session by id (Harness

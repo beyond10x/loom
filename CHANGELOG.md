@@ -6,6 +6,30 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- A ported wire can take its credential from a reference instead of a held value.
+  `credentials::ResolvedBearer` is a `BearerSource` that resolves a `WireCredential` (a
+  `CredentialReference` and a `CredentialKind`, declared in `ess/domains/run.yaml` as
+  `loom.run.WireCredential`) through an llm `b10x-llm-credentials` `SecretResolver` the embedder
+  injects, at each call. A run can use an OAuth subscription login, such as a Codex login through
+  llm's `CodexAuthFile`, with no secret value in any configuration. A missing reference or a
+  resolver refusal stops the call with an `Unauthorized` error that names the reference and never
+  the value, and so does a resolved secret that is empty, not UTF-8 or contains a control
+  character (a key file written with `echo` ends in a newline and is refused); none is retried.
+  Each call blocks the calling thread until the resolver answers or `credentials::RESOLVE_BOUND`
+  (30 s) passes, then refuses; on a current-thread runtime, a resolver that needs that runtime
+  cannot finish, so call the wire from `spawn_blocking`. `credentials::encode_wire_credential` and
+  `decode_wire_credential` write and read the record as
+  `{"reference": …, "kind": "oauth" | "api-key"}`; a decode error names the field and never echoes
+  a value. The executor depends on
+  `b10x-llm-credentials` at tag `0.3.1`.
+
+### Changed
+
+- `harness::wire::CredentialKind` is now the generated `loom.run.CredentialKind`. It no longer
+  implements `PartialOrd`, `Ord` or `Hash`.
+
 ## [0.6.0] - 2026-10-08
 
 Loom 0.6.0 names the outcome of a run whose case moved on. Commission's `RunOutcome` gains
