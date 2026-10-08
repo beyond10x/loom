@@ -2,8 +2,8 @@
   "provenance": {
     "system": "commission",
     "specification_version": "v1",
-    "source_digest": "ffb19b60693c5b585ca20e76a24082175bdd8e55c1fc7f3c2cd40a66d6f66e86",
-    "contract_digest": "be195eb875e2d6ae90ca6af7da1be3c6372ed661e48863a8f44c7346a7bccae5"
+    "source_digest": "1ba42c043f9934dcbbb38e6d540f230eda0871defa63756e7c3db7d01b3050c3",
+    "contract_digest": "9f2ffaa60ef43fd8f3ad719e5f980e33a4fc329e9ba4c5a990bbcfa1579a3135"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -600,7 +600,12 @@
       "kind": "command_behavior",
       "source": "commission.responsibility.StartRun",
       "disposition": {
-        "disposition": "generated"
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "the fields of error `commission.responsibility.RunStorageFailed`, which the specification gives no source, in `storage-failed`"
+        },
+        "contract": "given `commission.responsibility.StartRun` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `started` otherwise, creates `commission.responsibility.Run`, emits `commission.responsibility.RunStarted`; `storage-failed` externally decided (the run store cannot hold the new run), error `commission.responsibility.RunStorageFailed`"
       }
     },
     {
@@ -614,7 +619,12 @@
       "kind": "command_behavior",
       "source": "commission.responsibility.SuspendRun",
       "disposition": {
-        "disposition": "generated"
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "the fields of error `commission.responsibility.RunStorageFailed`, which the specification gives no source, in `storage-failed`"
+        },
+        "contract": "given `commission.responsibility.SuspendRun` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `suspended` otherwise, takes `suspend` of `commission.responsibility.Run`, emits `commission.responsibility.RunSuspended`; `wrong-state` from a state no declared move starts in, error `commission.responsibility.RunStateConflict`, and for an instance no record carries, without the error's fields; `storage-failed` externally decided (the run store cannot record the suspension), error `commission.responsibility.RunStorageFailed`"
       }
     },
     {
@@ -662,6 +672,13 @@
     {
       "kind": "error_type",
       "source": "commission.responsibility.RunStateConflict",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "commission.responsibility.RunStorageFailed",
       "disposition": {
         "disposition": "generated"
       }

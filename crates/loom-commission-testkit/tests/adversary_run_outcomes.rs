@@ -252,13 +252,16 @@ fn counter_store() -> Generated<RunStore> {
 }
 
 fn start(runs: &mut Generated<RunStore>, revision: i64) -> RunId {
-    let StartRunOutcome::Started { run_started } = runs
+    match runs
         .start_run(StartRun {
             commission_id: CommissionId(uuid(1)),
             case_revision: revision,
         })
-        .expect("start");
-    run_started.run_id
+        .expect("start")
+    {
+        StartRunOutcome::Started { run_started } => run_started.run_id,
+        other => panic!("start: {other:?}"),
+    }
 }
 
 /// Two runs are two runs: suspending one leaves the other running, and resume finds the one it
