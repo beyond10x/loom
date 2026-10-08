@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T19:28:03Z",
+  "actor": "human:timo",
+  "artifact": "story:control-plane-storage",
+  "kind": "story",
+  "revision": 36,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "package gates of 15 crates on 817d3c2: fmt, clippy -D warnings, cargo test --no-fail-fast 1315 passed 0 failed in 207 binaries; task spec, ess-gate, drift, no-hand-model, commission:spec/ess-gate/drift/docs-drift/no-hand-model, conform, commission:conform, docs-check all exit 0; durable_run_storage 2 new cases ok",
+    "reference": "817d3c2"
+  }
+}
