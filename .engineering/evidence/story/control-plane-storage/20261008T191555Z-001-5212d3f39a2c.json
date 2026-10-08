@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T19:15:55Z",
+  "actor": "human:timo",
+  "artifact": "story:control-plane-storage",
+  "kind": "story",
+  "revision": 34,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p loom-commission-testkit --locked --test durable_run_storage",
+    "reference": "new behaviour: failed_durable_run_start_invokes_no_effect and durable_run_suspend_failure_is_reported_not_obligation red on 7a48bb5+spec (E0005 at runtime.rs:337; NotSuspended vs RunStorage), green on ebfd13e"
+  }
+}

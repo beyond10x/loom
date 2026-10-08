@@ -9,15 +9,16 @@
 //!
 //! Source paths are read when the test runs (`CARGO_MANIFEST_DIR`), never baked in at build time.
 
-use b10x_loom_commission::model::behaviour::{Context, Generated, RunStorage};
+use b10x_loom_commission::model::behaviour::{Generated, RunStorage};
 use b10x_loom_commission::model::json::{self, Value};
+use b10x_loom_commission::model::obligation::UnmetObligation;
 use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::obligations::{
     ResumeRunBehavior, RunStatesQuery, StartRunBehavior, SuspendRunBehavior,
 };
 use b10x_loom_commission::model::responsibility::{
-    CommissionId, ResumeRun, ResumeRunOutcome, RunId, RunSnapshot, RunState, StartRun,
-    StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionReason,
+    CommissionId, ResumeRun, ResumeRunOutcome, RunId, RunSnapshot, RunState, RunStorageFailed,
+    StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionReason,
 };
 use b10x_loom_commission::outcome::RunStore;
 use std::collections::BTreeMap;
@@ -127,6 +128,25 @@ fn is_uuid(value: &Value) -> bool {
             .all(|group| group.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
+/// What a run command answered.
+type Answered = (&'static str, Vec<Event>, Option<(String, Option<RunState>)>);
+
+/// `storage-failed`, emitting nothing and carrying `RunStorageFailed`, when the failure is the one
+/// the scenario injected.
+fn storage_failed(error: &RunStorageFailed, injected: &str) -> Result<Answered, String> {
+    if error.reason != injected {
+        return Err(format!(
+            "storage-failed with `{}`, which the scenario did not inject",
+            error.reason
+        ));
+    }
+    Ok((
+        "storage-failed",
+        Vec::new(),
+        Some((format!("{NS}RunStorageFailed"), None)),
+    ))
+}
+
 #[derive(Debug, Clone)]
 struct Event {
     name: String,
@@ -144,8 +164,73 @@ struct Executed {
     before: Option<RunState>,
 }
 
+/// The external cause a `configure_external_outcome` step injects: the run store cannot write.
+const FORCED_STORAGE_FAILURE: &str = "the scenario injected a run store failure";
+
+/// The ports under test, with the run store failure a scenario injects: an armed command answers
+/// `storage-failed` once, before reaching the ports, which it leaves untouched.
+struct Forcing<P> {
+    ports: P,
+    /// `StartRun` or `SuspendRun`, when armed.
+    armed: Option<String>,
+}
+
+impl<P> Forcing<P> {
+    fn fires(&mut self, command: &str) -> bool {
+        if self.armed.as_deref() == Some(command) {
+            self.armed = None;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+fn forced_failure() -> RunStorageFailed {
+    RunStorageFailed {
+        reason: FORCED_STORAGE_FAILURE.to_owned(),
+    }
+}
+
+impl<P: RunStorage> RunStorage for Forcing<P> {
+    fn get(&self, identity: &RunId) -> Option<RunSnapshot> {
+        self.ports.get(identity)
+    }
+    fn put(&mut self, snapshot: RunSnapshot) {
+        self.ports.put(snapshot);
+    }
+    fn delete(&mut self, identity: &RunId) {
+        self.ports.delete(identity);
+    }
+    fn list(&self) -> Vec<RunSnapshot> {
+        self.ports.list()
+    }
+}
+
+impl<P: StartRunBehavior> StartRunBehavior for Forcing<P> {
+    fn start_run(&mut self, input: StartRun) -> Result<StartRunOutcome, UnmetObligation> {
+        if self.fires("StartRun") {
+            return Ok(StartRunOutcome::StorageFailed {
+                error: forced_failure(),
+            });
+        }
+        self.ports.start_run(input)
+    }
+}
+
+impl<P: SuspendRunBehavior> SuspendRunBehavior for Forcing<P> {
+    fn suspend_run(&mut self, input: SuspendRun) -> Result<SuspendRunOutcome, UnmetObligation> {
+        if self.fires("SuspendRun") {
+            return Ok(SuspendRunOutcome::StorageFailed {
+                error: forced_failure(),
+            });
+        }
+        self.ports.suspend_run(input)
+    }
+}
+
 struct Runner<P> {
-    runs: Generated<P>,
+    runs: Generated<Forcing<P>>,
     instances: BTreeMap<String, Value>,
     history: Vec<Event>,
     last: Option<Executed>,
@@ -153,10 +238,10 @@ struct Runner<P> {
     subject: Option<(Value, Option<Value>)>,
 }
 
-impl<P: RunStorage + Context> Runner<P> {
+impl<P: RunStorage + StartRunBehavior + SuspendRunBehavior> Runner<P> {
     fn new(ports: P) -> Self {
         Self {
-            runs: Generated::new(ports),
+            runs: Generated::new(Forcing { ports, armed: None }),
             instances: BTreeMap::new(),
             history: Vec::new(),
             last: None,
@@ -226,28 +311,38 @@ impl<P: RunStorage + Context> Runner<P> {
                         as i64,
                     other => return Err(format!("case_revision is {other:?}")),
                 };
-                let StartRunOutcome::Started { run_started } = self
+                let outcome = self
                     .runs
                     .start_run(StartRun {
                         commission_id: CommissionId(Uuid(commission)),
                         case_revision: revision,
                     })
                     .map_err(|unmet| format!("StartRun unmet: {unmet}"))?;
+                let (outcome, events, error) = match outcome {
+                    StartRunOutcome::Started { run_started } => (
+                        "started",
+                        vec![Event {
+                            name: format!("{NS}RunStarted"),
+                            payload: object(vec![
+                                ("run_id", text(&run_started.run_id.0.0)),
+                                ("commission_id", text(&run_started.commission_id.0.0)),
+                                (
+                                    "case_revision",
+                                    Value::Number(run_started.case_revision.to_string()),
+                                ),
+                            ]),
+                        }],
+                        None,
+                    ),
+                    StartRunOutcome::StorageFailed { error } => {
+                        storage_failed(&error, FORCED_STORAGE_FAILURE)?
+                    }
+                };
                 Executed {
                     command: command.to_owned(),
-                    outcome: "started".to_owned(),
-                    events: vec![Event {
-                        name: format!("{NS}RunStarted"),
-                        payload: object(vec![
-                            ("run_id", text(&run_started.run_id.0.0)),
-                            ("commission_id", text(&run_started.commission_id.0.0)),
-                            (
-                                "case_revision",
-                                Value::Number(run_started.case_revision.to_string()),
-                            ),
-                        ]),
-                    }],
-                    error: None,
+                    outcome: outcome.to_owned(),
+                    events,
+                    error,
                     before: None,
                 }
             }
@@ -281,6 +376,9 @@ impl<P: RunStorage + Context> Runner<P> {
                         Vec::new(),
                         Some((format!("{NS}RunStateConflict"), None)),
                     ),
+                    SuspendRunOutcome::StorageFailed { error } => {
+                        storage_failed(&error, FORCED_STORAGE_FAILURE)?
+                    }
                 };
                 Executed {
                     command: command.to_owned(),
@@ -392,6 +490,22 @@ impl<P: RunStorage + Context> Runner<P> {
             other => Err(format!("`{field}` is {other:?}")),
         };
         match kind.as_str() {
+            "configure_external_outcome" => {
+                let force = step.member("force").ok_or("no force")?;
+                let (Some(Value::Text(command)), Some(Value::Text(outcome))) =
+                    (force.member("command"), force.member("outcome"))
+                else {
+                    return Err("force without command and outcome".to_owned());
+                };
+                let short = command.strip_prefix(NS).unwrap_or(command);
+                if outcome != "storage-failed" || !matches!(short, "StartRun" | "SuspendRun") {
+                    return Err(format!(
+                        "no external cause to inject for {command}/{outcome}"
+                    ));
+                }
+                self.runs.ports.armed = Some(short.to_owned());
+                Ok(())
+            }
             "execute_command" => {
                 let command = name("command")?;
                 let input = step.member("input").cloned().unwrap_or(Value::Null);
@@ -489,7 +603,8 @@ impl<P: RunStorage + Context> Runner<P> {
                 let last = self.last()?;
                 match &last.error {
                     Some((name, state)) if *name == error => {
-                        if *state != last.before {
+                        let conflict = *name == format!("{NS}RunStateConflict");
+                        if conflict && *state != last.before {
                             Err(format!(
                                 "`{error}` carries {state:?}, but the run was in {:?}",
                                 last.before
@@ -560,7 +675,7 @@ const RUN_SCENARIO_PREFIXES: [&str; 4] = [
 ];
 
 /// Runs every Run scenario of `suite` against fresh ports from `ports`: `(scenarios, failures)`.
-fn run_suite<P: RunStorage + Context>(
+fn run_suite<P: RunStorage + StartRunBehavior + SuspendRunBehavior>(
     suite: &Value,
     ports: impl Fn() -> P,
 ) -> (usize, Vec<String>) {
@@ -595,7 +710,11 @@ fn run_suite<P: RunStorage + Context>(
 #[test]
 fn adversary2_run_the_synthesized_run_scenarios_pass_against_run_store() {
     let (count, failures) = run_suite(&suite("synthesized_run_scenarios_pass"), store);
-    assert_eq!(count, 9, "the brief names 9 synthesized scenarios");
+    assert_eq!(
+        count, 11,
+        "the brief names 9 synthesized scenarios, and story:control-plane-storage adds the two \
+         storage-failed ones"
+    );
     assert!(
         failures.is_empty(),
         "{} of {count} scenarios failed:\n{}",
@@ -660,9 +779,22 @@ impl RunStorage for ForgetsSuspension {
     }
 }
 
-impl Context for ForgetsSuspension {
-    fn generate_commission_responsibility_run_id(&mut self) -> RunId {
-        self.0.generate_commission_responsibility_run_id()
+impl StartRunBehavior for ForgetsSuspension {
+    fn start_run(&mut self, input: StartRun) -> Result<StartRunOutcome, UnmetObligation> {
+        self.0.start_run(input)
+    }
+}
+
+/// `RunStore` answers `SuspendRun` itself, writing to its own map; the mutant then drops that
+/// write, as its storage drops every write of a suspended run.
+impl SuspendRunBehavior for ForgetsSuspension {
+    fn suspend_run(&mut self, input: SuspendRun) -> Result<SuspendRunOutcome, UnmetObligation> {
+        let before = self.0.get(&input.run_id);
+        let outcome = self.0.suspend_run(input)?;
+        if let Some(before) = before {
+            self.put(before);
+        }
+        Ok(outcome)
     }
 }
 
@@ -684,9 +816,15 @@ impl RunStorage for ListsNothing {
     }
 }
 
-impl Context for ListsNothing {
-    fn generate_commission_responsibility_run_id(&mut self) -> RunId {
-        self.0.generate_commission_responsibility_run_id()
+impl StartRunBehavior for ListsNothing {
+    fn start_run(&mut self, input: StartRun) -> Result<StartRunOutcome, UnmetObligation> {
+        self.0.start_run(input)
+    }
+}
+
+impl SuspendRunBehavior for ListsNothing {
+    fn suspend_run(&mut self, input: SuspendRun) -> Result<SuspendRunOutcome, UnmetObligation> {
+        self.0.suspend_run(input)
     }
 }
 

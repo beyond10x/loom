@@ -257,6 +257,7 @@ Lifecycle: states `Running`, `Suspended`; initial `Running`; terminal none.
 | Outcome | When | Effect | Emits | Error |
 |---|---|---|---|---|
 | `started` | otherwise | creates Run | `RunStarted` | none |
+| `storage-failed` | external | none | none | `RunStorageFailed` |
 
 #### SuspendRun
 
@@ -269,6 +270,7 @@ Lifecycle: states `Running`, `Suspended`; initial `Running`; terminal none.
 |---|---|---|---|---|
 | `suspended` | otherwise | moves Run by `suspend`, from `Running` to `Suspended` | `RunSuspended` | none |
 | `wrong-state` | wrong state | refused | none | `RunStateConflict` |
+| `storage-failed` | external | none | none | `RunStorageFailed` |
 
 ### Events
 
@@ -321,6 +323,12 @@ Lifecycle: states `Running`, `Suspended`; initial `Running`; terminal none.
 | Field | Type |
 |---|---|
 | `state` | `Run.State` |
+
+#### RunStorageFailed
+
+| Field | Type |
+|---|---|
+| `reason` | `string` |
 
 ### Views
 

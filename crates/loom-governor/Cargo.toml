@@ -17,6 +17,7 @@ b10x-loom-commission = { path = "../loom-commission" }
 loom = { path = "../../generated/rust/loom" }
 b10x-canon-engineering = { git = "https://github.com/beyond10x/engineering-protocols", tag = "0.1.0" }
 serde_yaml_ng = "0.10"
+sha2 = "0.11.0"
 
 [dev-dependencies]
 b10x-loom-commission-testkit = { path = "../loom-commission-testkit" }

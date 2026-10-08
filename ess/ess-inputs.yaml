@@ -4,4 +4,5 @@ specification:
   - system.yaml
   - domains/run.yaml
   - domains/evaluation.yaml
+  - domains/governor.yaml
 scenarios: []

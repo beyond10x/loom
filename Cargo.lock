@@ -394,6 +394,7 @@ dependencies = [
  "loom",
  "serde_json",
  "serde_yaml_ng",
+ "sha2 0.11.0",
 ]
 
 [[package]]

@@ -10,3 +10,4 @@ summary: >-
 domains:
   - loom.run
   - loom.evaluation
+  - loom.governor

@@ -6,8 +6,10 @@
 //!
 //! Every command is answered by `b10x-loom-commission`:
 //!
-//! * `StartRun`, `SuspendRun` and `ResumeRun` by the generated behaviours
-//!   (`b10x_loom_commission::model::behaviour::Generated`) over `b10x_loom_commission::outcome::RunStore`;
+//! * `StartRun`, `SuspendRun` and `ResumeRun` through the generated behaviours
+//!   (`b10x_loom_commission::model::behaviour::Generated`) over `b10x_loom_commission::outcome::RunStore`,
+//!   which answers `StartRun` and `SuspendRun` itself, held in [`store`]: their `storage-failed`
+//!   is the store failing the write a scenario forced;
 //! * `RevalidateActionRequest` by `b10x_loom_commission::action_request::revalidate`, against the
 //!   governor in [`governor`];
 //! * the view `RunStates` by the generated query over the same store.
@@ -21,6 +23,7 @@
 
 pub mod codec;
 pub mod governor;
+pub mod store;
 
 use std::cell::RefCell;
 
@@ -33,7 +36,7 @@ use b10x_loom_commission::model::responsibility::obligations::{
 use b10x_loom_commission::model::responsibility::{
     ActionRequest, ActionRequestData, ActionRequestId, CaseId, CommissionId,
     ProposedActionArguments, ResumeRun, ResumeRunOutcome, RevalidateActionRequestOutcome, RunId,
-    RunStateConflict, StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome,
+    RunStateConflict, RunStorageFailed, StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome,
 };
 use b10x_loom_commission::outcome::RunStore;
 use ess_conformance::scenario::{CommandRef, ErrorRef, EventRef, OutcomeRef};
@@ -50,6 +53,7 @@ use ess_primitives::node::Node;
 
 use crate::codec::Input;
 use crate::governor::{Condition, ScenarioGovernor};
+use crate::store::{ScenarioStore, Unwritable};
 
 /// The name this implementation is reported under.
 pub const IMPLEMENTATION: &str = "b10x-loom-commission";
@@ -65,12 +69,14 @@ const RUN_STATE_CONFLICT: &str = "commission.responsibility.RunStateConflict";
 const ACTION_REQUEST_STALE: &str = "commission.responsibility.ActionRequestStale";
 const ACTION_NOT_ADMITTED: &str = "commission.responsibility.ActionNotAdmitted";
 const ACTION_NEEDS_AUTHORITY: &str = "commission.responsibility.ActionNeedsAuthority";
+const RUN_STORAGE_FAILED: &str = "commission.responsibility.RunStorageFailed";
+const STORAGE_FAILED: &str = "storage-failed";
 const RUN_STATES: &str = "commission.responsibility.RunStates";
 
 /// One scenario's state.
 struct Live {
     /// The runs, behind the generated behaviours.
-    runs: Generated<RunStore>,
+    runs: Generated<ScenarioStore>,
     /// Every event published in this scenario, in order.
     log: Vec<ObservedEvent>,
     /// The external condition armed for the next revalidation.
@@ -87,7 +93,7 @@ impl Live {
             RunId(Uuid(format!("00000000-0000-4000-9000-{next:012}")))
         };
         Self {
-            runs: Generated::new(RunStore::new(ids)),
+            runs: Generated::new(ScenarioStore::new(RunStore::new(ids))),
             log: Vec::new(),
             forced: None,
             sequence: 0,
@@ -220,17 +226,22 @@ impl ConformanceTarget for CommissionTarget {
         request: ExternalOutcomeControl,
     ) -> Result<(), TargetError> {
         let forced = request.force.to_string();
-        let condition = forced
-            .strip_prefix(REVALIDATE)
-            .and_then(|rest| rest.strip_prefix('/'))
-            .and_then(Condition::forcing)
-            .ok_or_else(|| {
-                TargetError::unavailable(
-                    format!("forcing `{forced}`"),
-                    "the specification declares no such external outcome",
-                )
-            })?;
-        self.live.borrow_mut().forced = Some(condition);
+        let undeclared = || {
+            TargetError::unavailable(
+                format!("forcing `{forced}`"),
+                "the specification declares no such external outcome",
+            )
+        };
+        let (command, outcome) = forced.split_once('/').ok_or_else(undeclared)?;
+        let mut live = self.live.borrow_mut();
+        match (command, outcome) {
+            (REVALIDATE, outcome) => {
+                live.forced = Some(Condition::forcing(outcome).ok_or_else(undeclared)?);
+            }
+            (START_RUN, STORAGE_FAILED) => live.runs.ports.fail_next(Unwritable::StartRun),
+            (SUSPEND_RUN, STORAGE_FAILED) => live.runs.ports.fail_next(Unwritable::SuspendRun),
+            _ => return Err(undeclared()),
+        }
         Ok(())
     }
 
@@ -299,7 +310,14 @@ fn start_run(
             );
             Some(took(START_RUN, "started").emitting(published))
         }
+        StartRunOutcome::StorageFailed { error } => Some(storage_failed(START_RUN, error)),
     }
+}
+
+/// `storage-failed` with the store's reason.
+fn storage_failed(command: &str, failed: RunStorageFailed) -> SemanticCommandResult {
+    took(command, STORAGE_FAILED)
+        .with_error(error(RUN_STORAGE_FAILED).with("reason", Node::Text(failed.reason)))
 }
 
 fn suspend_run(
@@ -326,6 +344,7 @@ fn suspend_run(
         }
         SuspendRunOutcome::WrongState { error } => wrong_state(SUSPEND_RUN, Some(error)),
         SuspendRunOutcome::WrongStateUnknownInstance => wrong_state(SUSPEND_RUN, None),
+        SuspendRunOutcome::StorageFailed { error } => storage_failed(SUSPEND_RUN, error),
     })
 }
 

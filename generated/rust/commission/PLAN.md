@@ -1,14 +1,14 @@
 <!--
   generated from commission v1
-  model digest ffb19b60693c5b585ca20e76a24082175bdd8e55c1fc7f3c2cd40a66d6f66e86
-  contract digest be195eb875e2d6ae90ca6af7da1be3c6372ed661e48863a8f44c7346a7bccae5
+  model digest 1ba42c043f9934dcbbb38e6d540f230eda0871defa63756e7c3db7d01b3050c3
+  contract digest 9f2ffaa60ef43fd8f3ad719e5f980e33a4fc329e9ba4c5a990bbcfa1579a3135
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — commission v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-95 capabilities: **94 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+96 capabilities: **93 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -96,9 +96,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command behaviour | `commission.responsibility.ResumeRun` |
 | command contract | `commission.responsibility.RevalidateActionRequest` |
 | command contract | `commission.responsibility.StartRun` |
-| command behaviour | `commission.responsibility.StartRun` |
 | command contract | `commission.responsibility.SuspendRun` |
-| command behaviour | `commission.responsibility.SuspendRun` |
 | event type | `commission.responsibility.RunResumed` |
 | event type | `commission.responsibility.RunStarted` |
 | event type | `commission.responsibility.RunSuspended` |
@@ -106,6 +104,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | error type | `commission.responsibility.ActionNotAdmitted` |
 | error type | `commission.responsibility.ActionRequestStale` |
 | error type | `commission.responsibility.RunStateConflict` |
+| error type | `commission.responsibility.RunStorageFailed` |
 | view type | `commission.responsibility.RunStates` |
 | view query | `commission.responsibility.RunStates` |
 
@@ -123,6 +122,8 @@ What the specification fully determines is generated; what it cannot determine i
 | capability | source | why not generated | contract |
 | --- | --- | --- | --- |
 | command behaviour | `commission.responsibility.RevalidateActionRequest` | kept an obligation by the fields of error `commission.responsibility.ActionRequestStale`, which the specification gives no source, in `stale` | given `commission.responsibility.RevalidateActionRequest` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `stale` externally decided (the governor's current revision of the case is not the request's expected case revision), error `commission.responsibility.ActionRequestStale`; `not-admitted` externally decided (the current frontier refuses the action), error `commission.responsibility.ActionNotAdmitted`; `needs-authority` externally decided (the current frontier lists the action as ApprovalRequired, naming one capability), error `commission.responsibility.ActionNeedsAuthority`; `admitted` otherwise |
+| command behaviour | `commission.responsibility.StartRun` | kept an obligation by the fields of error `commission.responsibility.RunStorageFailed`, which the specification gives no source, in `storage-failed` | given `commission.responsibility.StartRun` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `started` otherwise, creates `commission.responsibility.Run`, emits `commission.responsibility.RunStarted`; `storage-failed` externally decided (the run store cannot hold the new run), error `commission.responsibility.RunStorageFailed` |
+| command behaviour | `commission.responsibility.SuspendRun` | kept an obligation by the fields of error `commission.responsibility.RunStorageFailed`, which the specification gives no source, in `storage-failed` | given `commission.responsibility.SuspendRun` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `suspended` otherwise, takes `suspend` of `commission.responsibility.Run`, emits `commission.responsibility.RunSuspended`; `wrong-state` from a state no declared move starts in, error `commission.responsibility.RunStateConflict`, and for an instance no record carries, without the error's fields; `storage-failed` externally decided (the run store cannot record the suspension), error `commission.responsibility.RunStorageFailed` |
 
 ## Refused — not represented by this synthesis
 

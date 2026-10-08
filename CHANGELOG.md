@@ -6,6 +6,24 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- `FileCaseStore` (`loom_governor`) keeps each governor case in its own file, written atomically
+  as the `loom.governor` domain's `StoredCase`, so a case survives a process restart.
+
+### Changed
+
+- A run store can report that it cannot write. The commission specification declares the error
+  `RunStorageFailed` and a `storage-failed` outcome on `StartRun` and `SuspendRun`, so
+  `StartRunOutcome` and `SuspendRunOutcome` gain `StorageFailed`. `run_until_blocked` reports it
+  as the new `LoopFailure::RunStorage`: a failed start ends the loop with no Run named before any
+  executor, authority or effect call, and a failed suspension is carried in
+  `LoopError::suspension`, no longer as `NotSuspended`. Callers that match these enums
+  exhaustively add the arm. `StartRun` and `SuspendRun` are now host obligations: `RunStore`
+  implements both, so `Generated<RunStore>` is unchanged, but the generated commission crate no
+  longer has `Context`, `TryContext` or `unmet_context`, and other ports under `Generated` implement
+  `StartRunBehavior` and `SuspendRunBehavior` themselves.
+
 ## [0.9.0] - 2026-10-08
 
 Loom 0.9.0 lets a read leave Loom through Connectors. A read action bound to a Connector read

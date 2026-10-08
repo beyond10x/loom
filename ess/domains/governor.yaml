@@ -1,0 +1,97 @@
+# The case the governor holds, as a durable store keeps it (story governor-restart-durability).
+# Nouns are read from crates/loom-governor/src/lib.rs (CaseState, HeldEvidence, the observations a
+# FallibleCaseStore keeps) and Commission's commission.responsibility.Evidence and Observation,
+# which this domain mirrors field for field rather than naming across systems. A store writes one
+# StoredCase per case and the StoredObservation list beside it; reading them back must give the
+# governor the same case, so every Json value is kept as it arrived, members in order and numbers
+# in their spelling. Protocol definitions are not stored: the host registers them again.
+domain: loom.governor
+
+summary: >-
+  The governor's held case as a store writes it: the case id, the protocol that governs it, the
+  case revision, the current revision of every declared artifact, and every evidence record
+  received with whether it applies; and the observations kept beside the cases.
+
+naming:
+  wire: governor
+  display: Governor
+
+types:
+  # A case id the governor issued: Commission's commission.responsibility.CaseId.
+  - name: loom.governor.StoredCaseId
+    kind: newtype
+    of: String
+
+  # The current revision of one artifact the case's protocol declares.
+  - name: loom.governor.StoredArtifact
+    kind: struct
+    fields:
+      - name: artifact
+        type: String
+      - name: revision
+        type: String
+
+  # One evidence record as submit_evidence admitted it: Commission's
+  # commission.responsibility.Evidence data, field for field.
+  - name: loom.governor.StoredEvidenceData
+    kind: struct
+    fields:
+      - name: evidence_id
+        type: Uuid
+      - name: case_id
+        type: loom.governor.StoredCaseId
+      - name: kind
+        type: String
+      - name: subject_revision
+        type: Integer
+      - name: producer
+        type: String
+      - name: observation_ids
+        type: List<Uuid>
+      - name: facts
+        type: Json
+      - name: provenance
+        type: Json
+
+  # One evidence record received for the case, and whether it applies: decided once, when it
+  # arrived, and never again.
+  - name: loom.governor.StoredEvidence
+    kind: struct
+    fields:
+      - name: data
+        type: loom.governor.StoredEvidenceData
+      - name: applies
+        type: Boolean
+
+  # One held case. `protocol` is the registered name, `<name>@<major>`; `revision` is 1 when
+  # opened and one more with each artifact revision recorded; `artifacts` are in artifact order;
+  # `evidence` is every record received, in the order received.
+  - name: loom.governor.StoredCase
+    kind: struct
+    fields:
+      - name: id
+        type: loom.governor.StoredCaseId
+      - name: protocol
+        type: String
+      - name: revision
+        type: Integer
+      - name: artifacts
+        type: List<loom.governor.StoredArtifact>
+      - name: evidence
+        type: List<loom.governor.StoredEvidence>
+
+  # One observation kept: Commission's commission.responsibility.Observation data, field for field.
+  # Never evidence (Atlas ADR 0074).
+  - name: loom.governor.StoredObservation
+    kind: struct
+    fields:
+      - name: observation_id
+        type: Uuid
+      - name: source
+        type: String
+      - name: subject
+        type: String
+      - name: observed_at
+        type: Timestamp
+      - name: payload
+        type: Json

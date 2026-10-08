@@ -772,6 +772,11 @@ errors:
       - name: capability
         type: String
 
+  - name: commission.responsibility.RunStorageFailed
+    fields:
+      - name: reason
+        type: String
+
 commands:
   - name: commission.responsibility.StartRun
     input:
@@ -792,6 +797,9 @@ commands:
             run_id: {generated: true}
             commission_id: input.commission_id
             case_revision: input.case_revision
+      - name: storage-failed
+        external: the run store cannot hold the new run
+        error: commission.responsibility.RunStorageFailed
 
   # The reason is reported, not stored on Run: where a suspension is kept is open
   # (decision-blocker:suspension-durable-record).
@@ -813,6 +821,9 @@ commands:
       - name: wrong-state
         wrong_state: true
         error: commission.responsibility.RunStateConflict
+      - name: storage-failed
+        external: the run store cannot record the suspension
+        error: commission.responsibility.RunStorageFailed
 
   - name: commission.responsibility.ResumeRun
     input:
