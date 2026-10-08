@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:incident-investigation-open
 kind: story
-status: active
+status: implemented
 title: Leaving emergency mode keeps the investigation obligation open
 relations:
 - decomposes: epic:vertical-slices
@@ -13,10 +13,11 @@ scope:
   path: crates/loom-governor/tests/fixtures/inc-492.fixture.yaml
 - confidence: cited
   path: crates/loom-governor/tests/incident_response_slice.rs
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-08T21:28:06Z", actor: "human:timo", revision: 5}
 - {from: "proposed", to: "active", at: "2026-10-08T21:28:06Z", actor: "human:timo", revision: 6}
+- {from: "active", to: "implemented", at: "2026-10-08T21:59:53Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 

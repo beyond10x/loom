@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:engineering-protocols-030-pin
 kind: story
-status: active
+status: implemented
 title: Loom builds on engineering-protocols 0.3.0 and Canon 0.1.0
 relations:
 - decomposes: epic:vertical-slices
@@ -42,10 +42,11 @@ scope:
   path: crates/loom-protocols/src/lib.rs
 - confidence: cited
   path: website/docs/guides/move-to-loom.md
-revision: 20
+revision: 21
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-08T21:28:06Z", actor: "human:timo", revision: 19}
 - {from: "proposed", to: "active", at: "2026-10-08T21:28:06Z", actor: "human:timo", revision: 20}
+- {from: "active", to: "implemented", at: "2026-10-08T21:59:53Z", actor: "human:timo", revision: 21, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 
