@@ -55,17 +55,21 @@ executor, such as a human tool or a workflow, would need its own effect path.
   over a Connectors service, pinned at Connectors `v0.35.0`. The host declares one
   `ConnectorEndpoint` per Connector instance (`ess/commission/domains/responsibility.yaml`): its URL,
   a credential reference its own resolver turns into the service credential, and whether plain
-  `http` is admitted. `ConnectorsInvoker` describes the endpoint, invokes the bound operation once
-  on `POST /v1alpha2/invoke`, never falls back and never resends.
+  `http` is admitted. Each binding declares its operation's effect: `Write` for an operation the
+  service describes with the `mutation` profile, `Read` otherwise. `ConnectorsInvoker` describes
+  the endpoint, invokes the bound operation once on `POST /v1alpha2/invoke`, never falls back and
+  never resends.
 
 | Connectors answers | The invoker answers |
 |---|---|
-| success, with the attempt it recorded | `Performed`, naming that attempt |
+| a write's success, with the attempt it recorded | `Performed`, naming that attempt |
+| a read's success, with no attempt and its audit record `complete` | `Performed`, naming that audit record |
 | an error whose recorded attempt is `refused` or `not_attempted` | `Refused` |
-| anything else: a success naming no attempt, an error without a recorded attempt, an unknown outcome, a protocol or transport failure | `Err` |
+| anything else: a write's success naming no attempt, a read's success with an attempt or an audit record that is not `complete`, an error without a recorded attempt, an unknown outcome, a protocol or transport failure | `Err` |
 
-An instance with no declared endpoint, a credential that does not resolve, and a service that
-describes another instance are `Err` before the operation is invoked.
+An instance with no declared endpoint, a credential that does not resolve, a service that
+describes another instance, and a binding whose effect is not the one the service describes are
+`Err` before the operation is invoked.
 
 :::caution[Planned]
 An effect port for Substrate is not decided. Whether a released Connectors provider offers the
