@@ -561,7 +561,11 @@ fn no_admissible_action(runs: &mut Generated<RunStore>) {
     // the executor was handed (`story:moved-case-outcome`): the case is still at 9.
     assert_eq!(
         governor.calls(),
-        [iteration(&case), vec![GovernorCall::CurrentRevision(case.clone())]].concat(),
+        [
+            iteration(&case),
+            vec![GovernorCall::CurrentRevision(case.clone())]
+        ]
+        .concat(),
         "{name}: governor calls"
     );
     assert_eq!(executor.at(), [3], "{name}: executor calls");
