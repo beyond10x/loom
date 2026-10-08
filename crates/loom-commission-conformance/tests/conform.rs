@@ -162,7 +162,22 @@ fn violations(report: &Value, named: &BTreeSet<String>) -> Vec<String> {
         }
     }
 
+    if report["conformance_status"] != "passed" {
+        found.push(format!(
+            "expectation 5: the report's conformance_status is {}; task commission:conform \
+             requires `passed`",
+            report["conformance_status"]
+        ));
+    }
+
     found
+}
+
+/// A copy of `report` whose `conformance_status` is `status`.
+fn with_conformance_status(report: &Value, status: &str) -> Value {
+    let mut copy = report.clone();
+    copy["conformance_status"] = Value::from(status);
+    copy
 }
 
 /// A copy of `report` that records `scenario` as one more skipped scenario.
@@ -228,7 +243,24 @@ fn ess_conformance_report() {
          check naming it, and only it; it added {added:?}"
     );
 
-    // Expectations 1, 2 and 3, on the report itself.
+    // Expectation 6: a copy of a passing report that says `conformance_status: inconclusive` fails
+    // the check naming the field, and only it.
+    let passing = with_conformance_status(&report, "passed");
+    let before: BTreeSet<String> = violations(&passing, &named).into_iter().collect();
+    let after: BTreeSet<String> =
+        violations(&with_conformance_status(&passing, "inconclusive"), &named)
+            .into_iter()
+            .collect();
+    let added: Vec<&String> = after.difference(&before).collect();
+    assert!(
+        added.len() == 1
+            && added[0].contains("conformance_status")
+            && added[0].contains("inconclusive"),
+        "expectation 6: a copy of a passing report with conformance_status `inconclusive` must \
+         fail the check naming conformance_status, and only it; it added {added:?}"
+    );
+
+    // Expectations 1, 2, 3 and 5, on the report itself.
     let found = violations(&report, &named);
     assert!(
         found.is_empty(),
