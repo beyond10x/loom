@@ -267,6 +267,7 @@ impl EffectPort for Effects {
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {
             report: Value::Null,
             attempt: None,
+            audit: None,
         }))
     }
 }
@@ -414,6 +415,7 @@ fn order_refusal_admission_completion(runs: &mut Generated<RunStore>) {
         vec![EffectOutcome::Performed(EffectOutcomePerformed {
             report: Value::Null,
             attempt: None,
+            audit: None,
         })],
         "{name}: 4. the one effect"
     );

@@ -8,29 +8,32 @@
 //! performs exactly the actions they bind, and nothing else; which Connection serves an operation
 //! is Connectors' choice.
 //!
-//! An admitted request is handed to the [`ConnectorInvoker`] port once, with its binding. The
-//! invoker's `Performed` names the one Connector attempt the invocation produced
-//! (`decision-blocker:invocation-attempt-record`, A): every `Performed` this port returns carries
-//! an attempt, and one without is a failure to answer. Nothing here retries, since a retry is a new
-//! action request, rechecked. Read and consequential actions take this one path
-//! (`decision-blocker:read-action-effect-path`, A). Commission depends on no Connectors crate: the
-//! invoker is a port the host fills.
+//! An admitted request is handed to the [`ConnectorInvoker`] port once, with its binding. What the
+//! invoker's `Performed` names depends on the binding's effect (`story:connector-read-performed`):
+//! for a `Write` binding, the one Connector attempt the invocation produced
+//! (`decision-blocker:invocation-attempt-record`, A) and no audit record; for a `Read` binding,
+//! which Connectors records no attempt for, the execution audit record it completed and no attempt.
+//! Every `Performed` this port returns names exactly the one its binding requires, and any other is
+//! a failure to answer. Nothing here retries, since a retry is a new action request, rechecked.
+//! Read and consequential actions take this one path (`decision-blocker:read-action-effect-path`,
+//! A). Commission depends on no Connectors crate: the invoker is a port the host fills.
 
 use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::model::responsibility::Commission;
 use crate::model::responsibility::{
-    ActionBinding, ActionBindingData, CommissionId, EffectOutcome, EffectOutcomeRefused,
-    action_binding_state, commission_state,
+    ActionBinding, ActionBindingData, CommissionId, ConnectorOperationEffect, EffectOutcome,
+    EffectOutcomeRefused, action_binding_state, commission_state,
 };
 use crate::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 
 /// Invokes one Connector operation.
 pub trait ConnectorInvoker {
-    /// Invokes the operation `binding` names, once, for `request`. `Performed` names the one
-    /// attempt the invocation produced; `Refused` says the operation was not performed and nothing
-    /// changed. An `Err` is a failure to answer, never a refusal.
+    /// Invokes the operation `binding` names, once, for `request`. `Performed` names what the
+    /// binding's effect requires: for `Write`, the one attempt the invocation produced; for `Read`,
+    /// the audit record Connectors completed for it. `Refused` says the operation was not
+    /// performed and nothing changed. An `Err` is a failure to answer, never a refusal.
     fn invoke(
         &self,
         binding: &ActionBindingData,
@@ -52,7 +55,7 @@ impl<T: ConnectorInvoker + ?Sized> ConnectorInvoker for &T {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BindingError {
     /// A binding of another commission, by its key or its `commission_id`.
-    OtherCommission(ActionBindingData),
+    OtherCommission(Box<ActionBindingData>),
     /// A second binding for this action id.
     Duplicate(String),
 }
@@ -95,7 +98,7 @@ impl<I> ConnectorEffects<I> {
         for binding in bindings {
             let data = binding.into_data();
             if data.commission_id != commission_id || data.binding.commission_id != commission_id {
-                return Err(BindingError::OtherCommission(data));
+                return Err(BindingError::OtherCommission(Box::new(data)));
             }
             let action = data.binding.action.clone();
             if bound.insert(action.clone(), data).is_some() {
@@ -123,7 +126,8 @@ impl<I: ConnectorInvoker> EffectPort for ConnectorEffects<I> {
 
     /// Hands `request` to the invoker once, with its action's binding. An unbound action is
     /// refused and nothing is invoked; a commission other than the one the bindings belong to, and
-    /// an invoker's `Performed` that names no attempt, are failures to answer.
+    /// an invoker's `Performed` that does not name exactly what its binding's effect requires (an
+    /// attempt for `Write`, an audit record for `Read`), are failures to answer.
     fn invoke(
         &self,
         commission: &Commission<commission_state::Assigned>,
@@ -143,13 +147,28 @@ impl<I: ConnectorInvoker> EffectPort for ConnectorEffects<I> {
             }));
         };
         match self.invoker.invoke(binding, request)? {
-            EffectOutcome::Performed(performed) if performed.attempt.is_none() => {
-                Err(EffectError::new(format!(
-                    "the Connector operation `{}` of `{}` performed `{action}` and named no attempt",
-                    binding.operation_id.0, binding.instance_id.0
-                )))
+            EffectOutcome::Performed(performed) => {
+                let named = match (binding.effect, &performed.attempt, &performed.audit) {
+                    (ConnectorOperationEffect::Write, Some(_), None)
+                    | (ConnectorOperationEffect::Read, None, Some(_)) => None,
+                    (ConnectorOperationEffect::Write, None, _) => Some("named no attempt"),
+                    (ConnectorOperationEffect::Write, Some(_), Some(_)) => {
+                        Some("named an audit record beside its attempt")
+                    }
+                    (ConnectorOperationEffect::Read, None, None) => Some("named no audit record"),
+                    (ConnectorOperationEffect::Read, Some(_), _) => {
+                        Some("is a read and named an attempt")
+                    }
+                };
+                match named {
+                    None => Ok(EffectOutcome::Performed(performed)),
+                    Some(named) => Err(EffectError::new(format!(
+                        "the Connector operation `{}` of `{}` performed `{action}` and {named}",
+                        binding.operation_id.0, binding.instance_id.0
+                    ))),
+                }
             }
-            answered => Ok(answered),
+            refused => Ok(refused),
         }
     }
 }

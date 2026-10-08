@@ -62,8 +62,8 @@ through `b10x-loom run --catalog`; a ported wire can take its credential from an
 reference.
 
 Since `0.8.0` `b10x-loom-connectors` (`loom_sdk::connectors`) performs a commission's bound
-actions through a Connectors service at `v0.35.0`, answering each effect with the Connector attempt
-it produced; a read operation through it answers an error until Connectors records reads.
+actions through a Connectors service at `v0.35.0`, answering a write with the Connector attempt it
+produced and a read with the execution audit record Connectors completed for it.
 
 ## Run the command line
 

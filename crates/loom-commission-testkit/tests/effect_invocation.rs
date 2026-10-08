@@ -25,11 +25,12 @@ use b10x_loom_commission::model::responsibility::{
     ActionBinding, ActionBindingData, ActionBindingKey, ActionRequestId, ActionStatus,
     AgentRevisionId, AuthorityContext, AuthorityVerdict, AuthorityVerdictApprovalRequired,
     AuthorityVerdictDeny, CaseId, Commission, CommissionData, CommissionId, ConnectorAttemptId,
-    ConnectorInstanceId, ConnectorOperationId, EffectOutcome, EffectOutcomePerformed,
-    ExecutorOutcome, ExecutorOutcomeProposedAction, Frontier, FrontierAction, FrontierData,
-    ObservationData, ObservationId, PrincipalId, ProposedActionArguments,
-    RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeAwaitingApproval,
-    RunOutcomeCompleted, RunOutcomeNeedsAuthority, Unit, commission_state, frontier_state,
+    ConnectorAuditRef, ConnectorInstanceId, ConnectorOperationEffect, ConnectorOperationId,
+    EffectOutcome, EffectOutcomePerformed, ExecutorOutcome, ExecutorOutcomeProposedAction,
+    Frontier, FrontierAction, FrontierData, ObservationData, ObservationId, PrincipalId,
+    ProposedActionArguments, RevalidateActionRequestOutcome, RunId, RunOutcome,
+    RunOutcomeAwaitingApproval, RunOutcomeCompleted, RunOutcomeNeedsAuthority, Unit,
+    commission_state, frontier_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
@@ -81,6 +82,7 @@ fn binding(
     action: &str,
     instance: &str,
     operation: &str,
+    effect: ConnectorOperationEffect,
 ) -> ActionBinding<b10x_loom_commission::model::responsibility::action_binding_state::Declared> {
     ActionBinding::new(ActionBindingData {
         binding: ActionBindingKey {
@@ -90,6 +92,7 @@ fn binding(
         commission_id: commission.clone(),
         instance_id: ConnectorInstanceId(instance.to_owned()),
         operation_id: ConnectorOperationId(operation.to_owned()),
+        effect,
     })
 }
 
@@ -101,9 +104,27 @@ fn bindings(
 {
     let id = &commission.data().commission_id;
     vec![
-        binding(id, INSPECT, "source-host", "contents.read"),
-        binding(id, EDIT, "source-host", "contents.write"),
-        binding(id, DEPLOY, "deployer", "rollout.start"),
+        binding(
+            id,
+            INSPECT,
+            "source-host",
+            "contents.read",
+            ConnectorOperationEffect::Read,
+        ),
+        binding(
+            id,
+            EDIT,
+            "source-host",
+            "contents.write",
+            ConnectorOperationEffect::Write,
+        ),
+        binding(
+            id,
+            DEPLOY,
+            "deployer",
+            "rollout.start",
+            ConnectorOperationEffect::Write,
+        ),
     ]
 }
 
@@ -367,6 +388,20 @@ fn performed(n: usize, instance: &str, operation: &str) -> EffectOutcome {
             &ConnectorOperationId(operation.to_owned()),
         ),
         attempt: Some(RecordingInvoker::attempt(n)),
+        audit: None,
+    })
+}
+
+/// The `Performed` outcome the recording invoker answers its `n`-th call with, for a read binding:
+/// the audit record, and no attempt.
+fn read(n: usize, instance: &str, operation: &str) -> EffectOutcome {
+    EffectOutcome::Performed(EffectOutcomePerformed {
+        report: RecordingInvoker::report(
+            &ConnectorInstanceId(instance.to_owned()),
+            &ConnectorOperationId(operation.to_owned()),
+        ),
+        attempt: None,
+        audit: Some(RecordingInvoker::audit(n)),
     })
 }
 
@@ -588,10 +623,32 @@ fn read_action_takes_the_path_of_a_consequential_one() {
     assert_eq!(
         end.effects,
         vec![
-            performed(1, "source-host", "contents.read"),
+            read(1, "source-host", "contents.read"),
             performed(2, "source-host", "contents.write")
         ],
-        "{name}: one attempt each"
+        "{name}: the read names its audit record, the write its attempt"
+    );
+    let effect: Vec<_> = ran
+        .observations
+        .iter()
+        .filter(|observed| observed.source == "effect")
+        .collect();
+    assert_eq!(effect.len(), 2, "{name}: {:?}", ran.observations);
+    assert_eq!(
+        (
+            effect[0].payload.member("audit"),
+            effect[0].payload.member("attempt")
+        ),
+        (Some(&Value::Text("audit-1".to_owned())), None),
+        "{name}: the read's observation names its audit record"
+    );
+    assert_eq!(
+        (
+            effect[1].payload.member("audit"),
+            effect[1].payload.member("attempt")
+        ),
+        (None, Some(&Value::Text("attempt-2".to_owned()))),
+        "{name}: the write's observation names its attempt"
     );
     assert!(ran.asked.is_empty(), "{name}: {:?}", ran.asked);
 }
@@ -766,10 +823,13 @@ fn bindings_are_one_per_action_of_their_own_commission() {
         assert_eq!(effects.performs(listed), performs, "{listed}");
     }
 
-    let twice =
-        bindings(&own)
-            .into_iter()
-            .chain([binding(id, EDIT, "mirror-host", "contents.write")]);
+    let twice = bindings(&own).into_iter().chain([binding(
+        id,
+        EDIT,
+        "mirror-host",
+        "contents.write",
+        ConnectorOperationEffect::Write,
+    )]);
     assert_eq!(
         ConnectorEffects::new(&own, twice, &invoker).err(),
         Some(BindingError::Duplicate(EDIT.to_owned())),
@@ -781,19 +841,27 @@ fn bindings_are_one_per_action_of_their_own_commission() {
         SEARCH,
         "log-store",
         "query.run",
+        ConnectorOperationEffect::Read,
     )
     .into_data();
     assert_eq!(
         ConnectorEffects::new(&own, [ActionBinding::new(foreign.clone())], &invoker).err(),
-        Some(BindingError::OtherCommission(foreign)),
+        Some(BindingError::OtherCommission(Box::new(foreign))),
         "a binding of another commission"
     );
 
-    let mut split = binding(id, SEARCH, "log-store", "query.run").into_data();
+    let mut split = binding(
+        id,
+        SEARCH,
+        "log-store",
+        "query.run",
+        ConnectorOperationEffect::Read,
+    )
+    .into_data();
     split.commission_id = other.data().commission_id.clone();
     assert_eq!(
         ConnectorEffects::new(&own, [ActionBinding::new(split.clone())], &invoker).err(),
-        Some(BindingError::OtherCommission(split)),
+        Some(BindingError::OtherCommission(Box::new(split))),
         "a binding whose commission is not its key's"
     );
     assert!(invoker.calls().is_empty());
@@ -824,24 +892,27 @@ fn an_invocation_for_another_commission_is_not_answered() {
     assert!(ran.invoked.is_empty(), "{name}: {:?}", ran.invoked);
 }
 
-/// Every `Performed` that `ConnectorEffects` returns names its attempt: an invoker that reports a
-/// performed operation without one has failed to answer, so the run is suspended with the effect
-/// failure and no effect is recorded as performed.
-#[test]
-fn a_performed_operation_that_names_no_attempt_is_not_answered() {
-    let name = "no attempt";
-    let case = CaseId("case-unattempted".to_owned());
+/// What one loop left behind when the invoker answered `answer` for an admitted request of
+/// `action`, one of the actions [`bindings`] binds.
+struct Answered {
+    result: Result<LoopEnd, LoopError>,
+    invoked: usize,
+    observations: Vec<ObservationData>,
+}
+
+fn answered_with(case: &str, action: &str, answer: EffectOutcomePerformed) -> Answered {
+    let case = CaseId(case.to_owned());
     let own = commission(&case);
     let governor = FakeGovernor::new();
-    governor.script(case.clone(), [listing(1, vec![admissible(INSPECT)])]);
-    let executor = ScriptedExecutor::new([proposal(INSPECT), idle(), idle()]);
-    let invoker =
-        RecordingInvoker::new().answering([Ok(EffectOutcome::Performed(EffectOutcomePerformed {
-            report: Value::Null,
-            attempt: None,
-        }))]);
+    let open = listing(1, vec![admissible(action)]);
+    governor.script(
+        case.clone(),
+        repeat_n(open.clone(), 5).chain([open.complete("done")]),
+    );
+    let executor = ScriptedExecutor::new([proposal(action), idle(), idle()]);
+    let invoker = RecordingInvoker::new().answering([Ok(EffectOutcome::Performed(answer))]);
     let effects = ConnectorEffects::new(&own, bindings(&own), &invoker)
-        .unwrap_or_else(|error| panic!("{name}: the bindings are refused: {error}"));
+        .unwrap_or_else(|error| panic!("{case:?}: the bindings are refused: {error}"));
     let mut issued = 0u64;
     let mut runs = Generated::new(RunStore::new(move || {
         issued += 1;
@@ -856,21 +927,122 @@ fn a_performed_operation_that_names_no_attempt_is_not_answered() {
         &mut runs,
         &mut Context::default(),
     );
-    let Err(error) = &result else {
-        panic!("{name}: the loop ended: {result:?}");
+    Answered {
+        result,
+        invoked: invoker.calls().len(),
+        observations: governor.observations(),
+    }
+}
+
+/// Asserts the run was suspended with the effect failure after one invocation, and that no effect
+/// was recorded as performed.
+fn not_answered(name: &str, ran: &Answered) {
+    let Err(error) = &ran.result else {
+        panic!("{name}: the loop ended: {:?}", ran.result);
     };
     assert!(
         matches!(error.failure, LoopFailure::Effect(_)),
         "{name}: {error:?}"
     );
     assert!(error.suspension_reason.is_some(), "{name}: {error:?}");
-    assert_eq!(invoker.calls().len(), 1, "{name}: invoked once");
+    assert_eq!(ran.invoked, 1, "{name}: invoked once");
     assert!(
-        governor
-            .observations()
+        ran.observations
             .iter()
             .all(|observed| observed.source != "effect"),
         "{name}: an effect was observed: {:?}",
-        governor.observations()
+        ran.observations
     );
+}
+
+/// Every `Performed` that `ConnectorEffects` returns for a write binding names its attempt: an
+/// invoker that reports a performed consequential operation without one has failed to answer, so
+/// the run is suspended with the effect failure and no effect is recorded as performed.
+#[test]
+fn a_performed_operation_that_names_no_attempt_is_not_answered() {
+    let ran = answered_with(
+        "case-unattempted",
+        EDIT,
+        EffectOutcomePerformed {
+            report: Value::Null,
+            attempt: None,
+            audit: None,
+        },
+    );
+    not_answered("no attempt", &ran);
+}
+
+/// `story:connector-read-performed`: an admitted read action bound to a read operation answers
+/// `Performed` with the operation's result when the invoker names the audit record Connectors
+/// completed for it and no attempt; the effect's observation carries the report and the audit
+/// record.
+#[test]
+fn a_read_that_names_its_audit_record_is_performed() {
+    let name = "read";
+    let report = Value::Object(vec![(
+        "contents".to_owned(),
+        Value::Text("fn main".to_owned()),
+    )]);
+    let ran = answered_with(
+        "case-read-performed",
+        INSPECT,
+        EffectOutcomePerformed {
+            report: report.clone(),
+            attempt: None,
+            audit: Some(ConnectorAuditRef("audit-7".to_owned())),
+        },
+    );
+    let end = ran
+        .result
+        .as_ref()
+        .unwrap_or_else(|error| panic!("{name}: the loop failed: {error:?}"));
+    assert_eq!(
+        end.effects,
+        vec![EffectOutcome::Performed(EffectOutcomePerformed {
+            report: report.clone(),
+            attempt: None,
+            audit: Some(ConnectorAuditRef("audit-7".to_owned())),
+        })],
+        "{name}: performed with the operation's result"
+    );
+    let effect: Vec<_> = ran
+        .observations
+        .iter()
+        .filter(|observed| observed.source == "effect")
+        .collect();
+    assert_eq!(effect.len(), 1, "{name}: {:?}", ran.observations);
+    assert_eq!(effect[0].payload.member("report"), Some(&report), "{name}");
+    assert_eq!(
+        effect[0].payload.member("audit"),
+        Some(&Value::Text("audit-7".to_owned())),
+        "{name}: the observation names the audit record"
+    );
+    assert_eq!(effect[0].payload.member("attempt"), None, "{name}");
+}
+
+/// A `Performed` that does not name exactly the record its binding's effect requires is a failure
+/// to answer: a read names its audit record and no attempt, a write its attempt and no audit
+/// record. Each other combination suspends the run with the effect failure.
+#[test]
+fn a_performed_that_names_another_record_than_its_binding_requires_is_not_answered() {
+    let attempt = || Some(ConnectorAttemptId("attempt-9".to_owned()));
+    let audit = || Some(ConnectorAuditRef("audit-9".to_owned()));
+    for (name, action, attempt, audit) in [
+        ("read naming nothing", INSPECT, None, None),
+        ("read naming an attempt", INSPECT, attempt(), None),
+        ("read naming both", INSPECT, attempt(), audit()),
+        ("write naming an audit record", EDIT, None, audit()),
+        ("write naming both", EDIT, attempt(), audit()),
+    ] {
+        let ran = answered_with(
+            &format!("case-{}", name.replace(' ', "-")),
+            action,
+            EffectOutcomePerformed {
+                report: Value::Null,
+                attempt,
+                audit,
+            },
+        );
+        not_answered(name, &ran);
+    }
 }

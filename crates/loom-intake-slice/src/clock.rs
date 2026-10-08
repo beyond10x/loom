@@ -216,6 +216,7 @@ impl<'a, 'o, S: CaseStore> ClockEffects<'a, 'o, S> {
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {
             report: as_json(&report.value)?,
             attempt: None,
+            audit: None,
         }))
     }
 }

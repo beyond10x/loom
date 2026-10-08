@@ -69,6 +69,7 @@ fn binding(
         commission_id: field.clone(),
         instance_id: ConnectorInstanceId("source-host".to_owned()),
         operation_id: ConnectorOperationId(format!("{action}.op")),
+        effect: b10x_loom_commission::model::responsibility::ConnectorOperationEffect::Write,
     })
 }
 
@@ -387,7 +388,7 @@ fn a_binding_keyed_to_another_commission_is_refused_whatever_its_commission_fiel
     let data = keyed.data().clone();
     assert_eq!(
         ConnectorEffects::new(&own, [keyed], &invoker).err(),
-        Some(BindingError::OtherCommission(data)),
+        Some(BindingError::OtherCommission(Box::new(data))),
         "a binding whose key names another commission"
     );
 }

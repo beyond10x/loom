@@ -20,6 +20,10 @@
         {
           "name": "operation_id",
           "type": "ConnectorOperationId"
+        },
+        {
+          "name": "effect",
+          "type": "ConnectorOperationEffect"
         }
       ],
       "id": "commission.responsibility.ActionBinding",
