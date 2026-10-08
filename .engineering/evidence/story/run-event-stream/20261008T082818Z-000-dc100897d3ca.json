@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T08:28:18Z",
+  "actor": "human:timo",
+  "artifact": "story:run-event-stream",
+  "kind": "story",
+  "revision": 18,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test -p b10x-loom-cli --locked at 6f28fd2: exit 0, run_events 4 passed; loom-docs 17 passed",
+    "reference": "crates/loom-cli/tests/run_events.rs"
+  }
+}

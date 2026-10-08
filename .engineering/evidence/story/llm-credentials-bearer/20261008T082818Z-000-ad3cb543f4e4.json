@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T08:28:18Z",
+  "actor": "human:timo",
+  "artifact": "story:llm-credentials-bearer",
+  "kind": "story",
+  "revision": 13,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test -p b10x-loom-executor --locked at 989b6bf: 687 passed, 0 failed (wire_credential 8, adversary_w2_20261008_credentials 6)",
+    "reference": "crates/loom-executor/tests/wire_credential.rs"
+  }
+}

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:run-event-stream
 kind: story
-status: active
+status: implemented
 title: b10x-loom run writes a versioned JSONL event stream on stdout when asked
 relations:
 - decomposes: epic:downstream-adoption
@@ -30,10 +30,11 @@ scope:
   path: website/docs/reference/cli.md
 - confidence: inferred
   path: website/docs/reference/run-events.md
-revision: 18
+revision: 19
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-08T07:47:45Z", actor: "human:timo", revision: 17}
 - {from: "proposed", to: "active", at: "2026-10-08T07:47:45Z", actor: "human:timo", revision: 18}
+- {from: "active", to: "implemented", at: "2026-10-08T08:28:18Z", actor: "human:timo", revision: 19, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 

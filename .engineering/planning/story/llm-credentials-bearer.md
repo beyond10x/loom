@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:llm-credentials-bearer
 kind: story
-status: active
+status: implemented
 title: A wire takes its credential from an llm-credentials reference
 relations:
 - decomposes: epic:downstream-adoption
@@ -24,10 +24,11 @@ scope:
   path: ess/domains/run.yaml
 - confidence: inferred
   path: generated/rust/loom/
-revision: 13
+revision: 14
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-08T07:47:45Z", actor: "human:timo", revision: 12}
 - {from: "proposed", to: "active", at: "2026-10-08T07:47:45Z", actor: "human:timo", revision: 13}
+- {from: "active", to: "implemented", at: "2026-10-08T08:28:18Z", actor: "human:timo", revision: 14, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 
