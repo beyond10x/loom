@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "a692f075600414e13e8630c1be4f47574b2bc9231ea39cd7359922d1e6b4bd78",
-    "contract_digest": "f4cda3d5d8276c9087a6f7913332dd58779d272a3128f3237285955bdfec862d"
+    "source_digest": "394821f0396bb3a17570338485b73d8deca7ebb2683022f51d2a1bfd9ff6b071",
+    "contract_digest": "13338a26fdf5612984f1fb0d4081af14c5d2dfeb6c2a7cb563fdb3f59f0c9697"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -90,6 +90,48 @@
     {
       "kind": "domain_type",
       "source": "loom.evaluation.ProtocolName",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.governor.StoredArtifact",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.governor.StoredCase",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.governor.StoredCaseId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.governor.StoredEvidence",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.governor.StoredEvidenceData",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.governor.StoredObservation",
       "disposition": {
         "disposition": "generated"
       }
