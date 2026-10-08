@@ -35,8 +35,8 @@
 //!    and that needs no authority (`story:effect-invocation`), action by action: an action with an
 //!    entry listed `ApprovalRequired`, or an entry naming a capability, stays with all its entries,
 //!    performed or not, so a run still stops at its gate, and a kept action is admitted as the
-//!    governor's frontier admits it. The gate (5) and the run outcome (8, 9) read this handed
-//!    frontier, or after a move (9) the reloaded one as it would be handed, so an action the
+//!    governor's frontier admits it. The gate (5) and the run outcome (8-10) read this handed
+//!    frontier, or after a move (9, 10) the reloaded one as it would be handed, so an action the
 //!    executor was never offered neither keeps a run going nor takes it off its gate; the request
 //!    (8) and [`LoopEnd::last_frontier`] read the frontier as the governor issued it. The step is
 //!    reported to the [`ObservationPort`] as one observation: its id and time come from the
@@ -63,21 +63,29 @@
 //!    The loop never retries an invocation. Stale: the iteration is a step, and the next iteration
 //!    loads the case, which has moved: it ends the run completed if the case is complete, else with
 //!    no admissible action. Otherwise, and after an authority answer other than an allow, the run
-//!    outcome is derived ([`derive`]) from the frontier the executor was handed;
+//!    outcome is derived ([`derive`]) from the frontier the executor was handed, and the case is
+//!    not loaded again;
 //! 9. on `CaseMoved`, by which the executor reports that the case moved while it worked, naming
 //!    the revision of the frontier it was handed (`story:moved-case-outcome`), the governor decides
 //!    whether it moved: the case is loaded once more ([`Governor::current_revision`]). At the
 //!    revision the loop holds it at, the move is not borne out, and the step is taken as
-//!    `NoUsefulAction`: the run goes on as on that outcome. At another, the run ends judged on the
-//!    case as the governor holds it now, and the executor is not run again
-//!    ([`Governor::completion`], then [`Governor::frontier`]): a case the governor holds complete
-//!    ends the run completed, with no frontier read; a frontier for another revision than the one
-//!    just loaded ends it with no admissible action; one that lists actions, none of which the
-//!    effect port performs, with `NoPerformableAction` (4). Otherwise the outcome is derived from
-//!    that frontier as the executor would be handed it (6), and where it would let the run go on,
-//!    the run ends with no admissible action: the Run holds the case at the revision it left. The
-//!    reported revision is observed (6), never trusted. On any other outcome, the run outcome is
-//!    derived from the frontier the executor was handed.
+//!    `NoUsefulAction`: the run goes on as on that outcome, but the case is not loaded again for
+//!    it (10). At another, the run ends judged on the case as the governor holds it now, and the
+//!    executor is not run again ([`Governor::completion`], then [`Governor::frontier`]): a case the
+//!    governor holds complete ends the run completed, with no frontier read; a frontier for another
+//!    revision than the one just loaded ends it with no admissible action; one that lists actions,
+//!    none of which the effect port performs, with `NoPerformableAction` (4). Otherwise the outcome
+//!    is derived from that frontier as the executor would be handed it (6), and where it would let
+//!    the run go on, the run ends with no admissible action: the Run holds the case at the revision
+//!    it left. The reported revision is observed (6), never trusted;
+//! 10. on `CompletedLocalReasoning` or `NoUsefulAction`, the run outcome is derived from the
+//!     frontier the executor was handed. Where that would end the run, the case is first loaded
+//!     once more ([`Governor::current_revision`]): an executor can propose nothing without having
+//!     read a move that happened while it worked. At the revision the loop holds it at, the run
+//!     ends on the derived outcome; at another, it ends as on a `CaseMoved` the governor bears out
+//!     (9). A governor that fails on that read fails the loop as on item 9's. Where the derivation
+//!     lets the run go on, the case is not loaded here: the next iteration loads it (1). On any
+//!     other outcome, the run outcome is derived from the frontier the executor was handed.
 //!
 //! Without a step budget the loop is bounded where the frontier does not change: two iterations in
 //! a row that are idle end the run with no admissible action. An iteration is idle when it admits
@@ -87,8 +95,10 @@
 //! `CompletedLocalReasoning`, a refused proposal, an authority answer other than an allow and a
 //! repeated admission alike, and a `CaseMoved` the governor does not bear out counts as
 //! `NoUsefulAction`; a stale proposal is not counted, since the next iteration ends the run, and a
-//! `CaseMoved` the governor bears out ends it at once (9). A loop that keeps making progress is
-//! ended by [`UNBUDGETED_STEP_LIMIT`]. With a step budget, the budget alone bounds the loop.
+//! `CaseMoved` the governor bears out ends it at once (9). The idle bound ends a run whose
+//! derivation would let it go on, so the case is not loaded again before it (10). A loop that
+//! keeps making progress is ended by [`UNBUDGETED_STEP_LIMIT`]. With a step budget, the budget
+//! alone bounds the loop.
 //!
 //! A failure that leaves no run outcome is a [`LoopError`]. Once the Run is started, the error
 //! names it. When the governor, its observation port or the effect port fails after the Run
@@ -500,6 +510,11 @@ where
             };
         }
         observed?;
+        // An outcome that proposes nothing ends the run only once the case is loaded again (10).
+        let proposes_nothing = matches!(
+            outcome,
+            ExecutorOutcome::CompletedLocalReasoning(_) | ExecutorOutcome::NoUsefulAction(_)
+        );
         let outcome = match outcome {
             ExecutorOutcome::CaseMoved(_) => {
                 match moved_outcome(governor, effects, case, held, &outcome)? {
@@ -579,8 +594,14 @@ where
                     capability,
                     verdict,
                 });
-            if let Derived::Ended(outcome) = derive(&determination, &handed, &outcome, counted) {
-                return Ok(track.end(run_id, outcome));
+            if let Derived::Ended(derived) = derive(&determination, &handed, &outcome, counted) {
+                // The case may have moved while the executor worked without its reading it (10).
+                if proposes_nothing
+                    && let Some(ended) = moved_outcome(governor, effects, case, held, &outcome)?
+                {
+                    return Ok(track.end(run_id, ended));
+                }
+                return Ok(track.end(run_id, derived));
             }
         }
 
@@ -632,11 +653,11 @@ fn performs_none<F: EffectPort + ?Sized>(
             .any(|listed| effects.performs(&listed.action))
 }
 
-/// How a run ends after its executor reported `CaseMoved` (item 9), or `None` when the governor
-/// does not bear the move out: it holds `case` at `held`, the revision the loop holds it at. A
-/// moved case is judged on the frontier current then, as the executor would be handed it. The Run
-/// holds the case at the revision it left, so a frontier that would let the run go on ends it with
-/// no admissible action.
+/// How a run ends after its executor reported `CaseMoved` (item 9), or proposed nothing on a
+/// frontier that would end the run (item 10), or `None` when the governor does not bear a move
+/// out: it holds `case` at `held`, the revision the loop holds it at. A moved case is judged on the
+/// frontier current then, as the executor would be handed it. The Run holds the case at the
+/// revision it left, so a frontier that would let the run go on ends it with no admissible action.
 fn moved_outcome<G, F>(
     governor: &G,
     effects: &F,
