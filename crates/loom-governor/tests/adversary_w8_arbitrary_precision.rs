@@ -140,7 +140,6 @@ fn items_read_back_from_json_text_keep_their_numeric_arguments_and_outputs() {
 /// `Value` (`session.rs:498`, `:527`). A tool call whose arguments hold an integer one past
 /// `u64::MAX` must not make the session unreadable.
 #[test]
-#[ignore = "red: under arbitrary_precision SessionFile::parse (session.rs:527, from_value) refuses a session whose items hold an integer above u64::MAX: serde's buffer for the internally tagged Item has no visit_u128"]
 fn a_filed_session_whose_tool_call_holds_a_large_integer_loads() {
     let root = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
         .join(format!("adversary_w8_ap_{}", std::process::id()));

@@ -524,7 +524,10 @@ impl SessionFile {
                 path.display()
             )));
         }
-        serde_json::from_value(value).map_err(|error| {
+        // From the text, not from `value`: a build that unifies serde_json's `arbitrary_precision`
+        // hands an integer above `u64::MAX` in a `Value` to the internally tagged items as a
+        // `u128`, which serde's buffer for them refuses; read from the text, it stays a number.
+        serde_json::from_str(text).map_err(|error| {
             refused(format!(
                 "`{}` is not a session file: {error}",
                 path.display()
