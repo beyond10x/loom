@@ -37,6 +37,10 @@ Identity: `binding`, [`ActionBindingKey`](./types.mdx#actionbindingkey).
 
 Lifecycle: states `Declared`; initial `Declared`; terminal `Declared`.
 
+| Relation | Kind | Target | Cardinality | Via |
+|---|---|---|---|---|
+| `endpoint` | references | [ConnectorEndpoint](#connectorendpoint) | one | `instance_id` |
+
 ### ActionRequest
 
 Identity: `action_request_id`, [`ActionRequestId`](./types.mdx#actionrequestid).
@@ -126,6 +130,18 @@ Lifecycle: states `Assigned`; initial `Assigned`; terminal `Assigned`.
 | `case` | references | [Case](#case) | one | `case_id` |
 | `runs` | owns | [Run](#run) | many | `commission_id` |
 | `bindings` | owns | [ActionBinding](#actionbinding) | many | `commission_id` |
+
+### ConnectorEndpoint
+
+Identity: `instance_id`, [`ConnectorInstanceId`](./types.mdx#connectorinstanceid).
+
+| Field | Type |
+|---|---|
+| `url` | [`ConnectorEndpointUrl`](./types.mdx#connectorendpointurl) |
+| `credential` | [`ConnectorCredentialRef`](./types.mdx#connectorcredentialref) |
+| `allow_plaintext` | `boolean` |
+
+Lifecycle: states `Declared`; initial `Declared`; terminal `Declared`.
 
 ### Evidence
 

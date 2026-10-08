@@ -26,6 +26,7 @@ Rust code uses it as `loom_sdk`. It re-exports, under stable module names:
 | Module | Package | What it is for |
 |---|---|---|
 | `loom_sdk::commission` | `b10x-loom-commission` | The generated responsibility model, the ports, and the runtime loop |
+| `loom_sdk::connectors` | `b10x-loom-connectors` | `ConnectorsInvoker`, Commission's `ConnectorInvoker` over a Connectors service |
 | `loom_sdk::loom` | `b10x-loom-executor` | The executor and the `ActionSelector` and `ArgumentGenerator` traits |
 | `loom_sdk::governor` | `b10x-loom-governor` | `CanonGovernor` over a `CaseStore` |
 | `loom_sdk::intake::router`, `loom_sdk::intake::slice` | `b10x-loom-intake-router`, `b10x-loom-intake-slice` | Routing an intent; the slice's case opening, local executor, verifier and local effect adapter |
