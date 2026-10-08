@@ -55,8 +55,10 @@
 //! as the frontier and completion are, with the whole `canon-decision/1` document beside it. It
 //! holds nothing, names no Commission type, and refuses an input it cannot use naming that input:
 //! the protocol, the snapshot, the evidence record by its position, or the time. A readable record
-//! that does not apply to the case is set aside, as the governor sets it aside; an unreadable one
-//! and a repeated id are refused. The protocol comes only from the catalog, never from the caller.
+//! that does not apply to the case is set aside, as the governor sets it aside. Unlike the
+//! governor, which sets aside an unreadable record and the later of two records with one id and
+//! still decides, `evaluate` refuses both. The protocol comes only from the catalog, never from
+//! the caller.
 //!
 //! # Dependencies
 //!
@@ -1039,6 +1041,11 @@ fn completed(decision: &Decision) -> Option<String> {
 /// A record that reads as a `canon-evidence/1` record but that Canon refuses for this case (a kind
 /// or subject the protocol does not declare, for instance) is set aside, as `CanonGovernor` sets it
 /// aside when it arrives, and the decision is made from the rest; the decision does not list it.
+///
+/// Two inputs differ from `CanonGovernor`: a record that is not a readable `canon-evidence/1`
+/// record, and a record repeating an earlier record's id. The governor sets either aside (for a
+/// repeated id it keeps the first record) and still decides; `evaluate` refuses the request,
+/// naming the record (`duplicate-identifier` and the later position for a repeated id).
 ///
 /// A refusal names the input it is about: an unknown or uncompilable protocol; a snapshot that is
 /// not a `canon-case/1` document, that Canon refuses for the protocol, or whose termination the

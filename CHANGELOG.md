@@ -43,7 +43,9 @@ under **Unreleased** until the next release.
   refused naming it: the protocol, the snapshot (or a termination the records do not make
   legitimate), an evidence record by position (unreadable, or repeating an earlier id), or the
   time. A readable record that does not apply to the case is set aside, as `CanonGovernor` sets
-  it aside, and is not listed in the decision. The types are the new `loom.evaluation`
+  it aside, and is not listed in the decision. Unlike `CanonGovernor`, which sets an unreadable
+  record and the later of two records with one id aside and still decides, `evaluate` refuses
+  both (`duplicate-identifier`, the later position). The types are the new `loom.evaluation`
   domain (`ess/domains/evaluation.yaml`), re-exported as `loom_governor::model`.
 - `b10x-loom evaluate` is the same call over JSON: the request on standard input or from
   `--input <PATH>`, the decision on standard output (exit 0), or the refusal on standard output
