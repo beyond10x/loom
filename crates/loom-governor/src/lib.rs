@@ -54,9 +54,9 @@
 //! `canon-evidence/1` records and an optional trusted time, and returns Canon's decision, projected
 //! as the frontier and completion are, with the whole `canon-decision/1` document beside it. It
 //! holds nothing, names no Commission type, and refuses an input it cannot use naming that input:
-//! the protocol, the snapshot, the evidence record by its position, or the time. Where the
-//! governor sets a record that does not apply aside, `evaluate` refuses it, since the caller sent
-//! it for this one evaluation. The protocol comes only from the catalog, never from the caller.
+//! the protocol, the snapshot, the evidence record by its position, or the time. A readable record
+//! that does not apply to the case is set aside, as the governor sets it aside; an unreadable one
+//! and a repeated id are refused. The protocol comes only from the catalog, never from the caller.
 //!
 //! # Dependencies
 //!
@@ -65,7 +65,7 @@
 //! registry returns is the one this crate compiles. Commission is pinned to `e61e4f0`, and
 //! `b10x-canon-engineering` to tag `0.1.0` of beyond10x/engineering-protocols.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -1036,10 +1036,15 @@ fn completed(decision: &Decision) -> Option<String> {
 /// optional trusted instant. Nothing is held, no clock is read and no authority decision is
 /// supplied; the decision is reported as [`CanonGovernor`] reports its frontier and completion.
 ///
-/// A refusal names the input it is about: an unknown or uncompilable protocol, a snapshot that is
-/// not a `canon-case/1` document or that Canon refuses for the protocol, a record that is not a
-/// `canon-evidence/1` record or that Canon refuses beside the records before it (by its position
-/// in `evidence`), or a time Canon cannot read.
+/// A record that reads as a `canon-evidence/1` record but that Canon refuses for this case (a kind
+/// or subject the protocol does not declare, for instance) is set aside, as `CanonGovernor` sets it
+/// aside when it arrives, and the decision is made from the rest; the decision does not list it.
+///
+/// A refusal names the input it is about: an unknown or uncompilable protocol; a snapshot that is
+/// not a `canon-case/1` document, that Canon refuses for the protocol, or whose termination the
+/// records do not make legitimate; a record that is not a readable `canon-evidence/1` record, or
+/// that repeats an earlier record's id (by its position in `evidence`, the later one); or a time
+/// Canon cannot read. The time and the records are judged before the decision is made, once each.
 pub fn evaluate(
     catalog: &ProtocolCatalog,
     request: &EvaluationRequest,
@@ -1088,9 +1093,42 @@ pub fn evaluate(
                 })
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let mut seen = BTreeSet::new();
+    for (index, record) in records.iter().enumerate() {
+        if !seen.insert(record.id.as_str()) {
+            return Err(refused(
+                EvaluationInput::Evidence,
+                Some(index),
+                "duplicate-identifier",
+                format!("evidence `{}` is given more than once", record.id.as_str()),
+            ));
+        }
+    }
     let at = request.at.as_ref().map(|at| at.0.as_str());
-    let decision =
-        decide_case(&ir, &case, &records, at).map_err(|_| attribute(&ir, &case, &records, at))?;
+    // The snapshot and then the time, each judged before any record and on the snapshot without its
+    // termination, whose legitimacy only the records can establish.
+    let open = Case {
+        termination: None,
+        ..case.clone()
+    };
+    decide_case(&ir, &open, &[], None)
+        .map_err(|refusal| canon_refused(EvaluationInput::Snapshot, None, &refusal))?;
+    decide_case(&ir, &open, &[], at)
+        .map_err(|refusal| canon_refused(EvaluationInput::Time, None, &refusal))?;
+    let decision = match decide_case(&ir, &case, &records, at) {
+        Ok(decision) => decision,
+        Err(_) => {
+            // As `CanonGovernor` does on arrival, a record Canon refuses for this case is set
+            // aside; what Canon still refuses with the rest is the snapshot's termination.
+            let applying: Vec<EvidenceRecord> = records
+                .iter()
+                .filter(|record| decide_case(&ir, &open, std::slice::from_ref(record), at).is_ok())
+                .cloned()
+                .collect();
+            decide_case(&ir, &case, &applying, at)
+                .map_err(|refusal| canon_refused(EvaluationInput::Snapshot, None, &refusal))?
+        }
+    };
     let unrepresentable = |problem: &str| {
         refused(
             EvaluationInput::Protocol,
@@ -1148,35 +1186,6 @@ pub fn evaluate(
         outcome: completed(&decision),
         canon: as_json(&render(&decision))?,
     })
-}
-
-/// The input Canon's refusal of the whole request is about: the snapshot when Canon refuses it with
-/// no records and no time, the time when it refuses the snapshot at that time, and otherwise the
-/// first record Canon refuses beside the records before it. Canon reads the records in any order,
-/// so a record refused as a second use of an id is the second one.
-fn attribute(
-    ir: &Ir,
-    case: &Case,
-    records: &[EvidenceRecord],
-    at: Option<&str>,
-) -> EvaluationRefusal {
-    if let Err(refusal) = decide_case(ir, case, &[], None) {
-        return canon_refused(EvaluationInput::Snapshot, None, &refusal);
-    }
-    if let Err(refusal) = decide_case(ir, case, &[], at) {
-        return canon_refused(EvaluationInput::Time, None, &refusal);
-    }
-    for index in 0..records.len() {
-        if let Err(refusal) = decide_case(ir, case, &records[..=index], at) {
-            return canon_refused(EvaluationInput::Evidence, Some(index), &refusal);
-        }
-    }
-    refused(
-        EvaluationInput::Request,
-        None,
-        "refused",
-        "Canon refuses the request as a whole".into(),
-    )
 }
 
 fn refused(

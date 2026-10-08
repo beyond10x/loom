@@ -231,9 +231,11 @@ snapshot and `canon-evidence/1` records under a protocol of the host catalog, ne
 the caller. Its request, decision and refusal are the `loom.evaluation` domain
 (`ess/domains/evaluation.yaml`); its signature names no Commission type. It goes through the
 private `decide_case` and `project` that `CanonGovernor` uses, never a second evaluator, and a
-refusal names the input (protocol, snapshot, evidence record by position, time).
-`crates/loom-governor/tests/evaluate.rs` holds it against `CanonGovernor`;
-`crates/loom-cli/tests/evaluate.rs` holds the subcommand against the library.
+refusal names the input (protocol, snapshot, evidence record by position, time). A readable
+record that does not apply is set aside as `CanonGovernor` sets it aside; an unreadable record or
+a repeated id is refused. The time and the records are judged once each, never by re-running Canon
+on prefixes. `crates/loom-governor/tests/evaluate.rs` and `evaluate_adversary.rs` hold it against
+`CanonGovernor`; `crates/loom-cli/tests/evaluate.rs` holds the subcommand against the library.
 
 Canon is named by the reference `b10x-canon-engineering` uses (`branch = "main"`), pinned by
 `Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon with

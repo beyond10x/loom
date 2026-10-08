@@ -26,6 +26,9 @@ pub const EXIT_STATUS: &str = "Exit status:
 pub const EVALUATE_HELP: &str = "The request is one JSON object (loom.evaluation.EvaluationRequest):
   {\"protocol\": \"<name>@<major>\", \"snapshot\": {canon-case/1}, \"evidence\": [{canon-evidence/1}, ...], \"at\": \"<RFC 3339>\"}
 `at` is optional. The protocol comes from this host's catalog (`protocols list`), never from the request.
+A record that is not a readable canon-evidence/1 record, or repeats an earlier record's id, is refused.
+A readable record that does not apply to the case (an undeclared kind or subject, for instance) is set
+aside, as the governor sets it aside, and the decision is made from the rest without listing it.
 
 Exit status:
   0  decided: standard output carries the decision (loom.evaluation.EvaluationDecision)

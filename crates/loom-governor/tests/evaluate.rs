@@ -217,13 +217,9 @@ fn each_unusable_input_is_refused_naming_it() {
     for (index, bad) in [
         json!({"format": "canon-evidence/1"}),
         json!(["not", "a", "record"]),
-        record(
-            "clock-2",
-            "undeclared_kind",
-            "observed",
-            "intent",
-            "query-1",
-        ),
+        json!({"format": "canon-evidence/1", "id": "clock-2", "kind": "system_time"}),
+        json!({"format": "canon-evidence/1", "id": "clock-2", "kind": "system_time",
+               "result": ["observed"], "subject": "intent", "subject_revision": "query-1"}),
         record("clock-1", "system_time", "observed", "intent", "query-1"),
     ]
     .into_iter()
@@ -263,6 +259,119 @@ fn each_unusable_input_is_refused_naming_it() {
     )
     .expect_err("a time that is not an instant is refused");
     assert_eq!(refusal.input, EvaluationInput::Time, "{refusal:?}");
+}
+
+/// A readable record Canon refuses for the case is set aside, as `CanonGovernor` sets it aside: the
+/// decision is the one made without it.
+#[test]
+fn a_record_that_does_not_apply_is_set_aside() {
+    let catalog = ProtocolCatalog::bundled().expect("the bundled catalog");
+    let revisions = BTreeMap::from([("intent".to_owned(), "query-1".to_owned())]);
+    let good = record("clock-1", "system_time", "observed", "intent", "query-1");
+    let without = evaluate(
+        &catalog,
+        &request(
+            "system-query@1",
+            snapshot("system.query", &revisions),
+            std::slice::from_ref(&good),
+            None,
+        ),
+    )
+    .expect("decided");
+    for stray in [
+        record("stray", "undeclared_kind", "observed", "intent", "query-1"),
+        record(
+            "stray",
+            "system_time",
+            "observed",
+            "no_such_artifact",
+            "query-1",
+        ),
+        record(
+            "stray",
+            "system_time",
+            "observed",
+            "intent",
+            "not an identifier",
+        ),
+    ] {
+        for records in [
+            vec![good.clone(), stray.clone()],
+            vec![stray.clone(), good.clone()],
+        ] {
+            let decision = evaluate(
+                &catalog,
+                &request(
+                    "system-query@1",
+                    snapshot("system.query", &revisions),
+                    &records,
+                    None,
+                ),
+            )
+            .unwrap_or_else(|refusal| panic!("{stray}: refused {refusal:?}"));
+            assert_eq!(
+                (&decision.actions, &decision.claims, &decision.outcome),
+                (&without.actions, &without.claims, &without.outcome),
+                "{stray}"
+            );
+        }
+    }
+}
+
+/// Over a terminated snapshot, every refusal still names its own input; the termination itself is
+/// the snapshot's, refused only when the records do not make it legitimate.
+#[test]
+fn refusals_over_a_terminated_snapshot_name_their_input() {
+    let catalog = ProtocolCatalog::bundled().expect("the bundled catalog");
+    let revisions = BTreeMap::from([("intent".to_owned(), "query-1".to_owned())]);
+    let mut terminated = snapshot("system.query", &revisions);
+    terminated["termination"] = json!("answered");
+    let good = record("clock-1", "system_time", "observed", "intent", "query-1");
+    let stray = record("stray", "undeclared_kind", "observed", "intent", "query-1");
+    let run = |case: &Value, records: &[Value], at: Option<&str>| {
+        evaluate(
+            &catalog,
+            &request("system-query@1", case.clone(), records, at),
+        )
+    };
+
+    let decided = run(&terminated, std::slice::from_ref(&good), None).expect("legitimate");
+    assert_eq!(decided.outcome.as_deref(), Some("answered"));
+    let decided = run(&terminated, &[stray.clone(), good.clone()], None).expect("set aside");
+    assert_eq!(decided.outcome.as_deref(), Some("answered"));
+
+    for records in [vec![], vec![stray.clone()]] {
+        let refusal = run(&terminated, &records, None).expect_err("illegitimate termination");
+        assert_eq!(
+            (refusal.input, refusal.evidence_index, refusal.code.as_str()),
+            (EvaluationInput::Snapshot, None, "illegitimate-termination"),
+            "{refusal:?}"
+        );
+    }
+
+    let refusal = run(
+        &terminated,
+        &[good.clone(), json!({"format": "canon-evidence/1"})],
+        None,
+    )
+    .expect_err("unreadable record");
+    assert_eq!(
+        (refusal.input, refusal.evidence_index),
+        (EvaluationInput::Evidence, Some(1)),
+        "{refusal:?}"
+    );
+
+    let refusal = run(&terminated, &[], Some("yesterday")).expect_err("unreadable time");
+    assert_eq!(refusal.input, EvaluationInput::Time, "{refusal:?}");
+
+    let mut undeclared = terminated.clone();
+    undeclared["termination"] = json!("no_such_outcome");
+    let refusal = run(&undeclared, std::slice::from_ref(&good), None).expect_err("undeclared");
+    assert_eq!(
+        (refusal.input, refusal.evidence_index),
+        (EvaluationInput::Snapshot, None),
+        "{refusal:?}"
+    );
 }
 
 /// The evaluation reads no clock: the same request gives the same decision, a supplied instant is

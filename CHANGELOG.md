@@ -40,8 +40,10 @@ under **Unreleased** until the next release.
   reports it (each action's status, required capabilities and reasons, claims, obligations, the
   one legitimate outcome when complete) with the whole `canon-decision/1` document beside it. It
   runs the governor's own evaluation, holds nothing and reads no clock. An unusable input is
-  refused naming it: the protocol, the snapshot, an evidence record by position, or the time; a
-  record `CanonGovernor` would set aside is refused. The types are the new `loom.evaluation`
+  refused naming it: the protocol, the snapshot (or a termination the records do not make
+  legitimate), an evidence record by position (unreadable, or repeating an earlier id), or the
+  time. A readable record that does not apply to the case is set aside, as `CanonGovernor` sets
+  it aside, and is not listed in the decision. The types are the new `loom.evaluation`
   domain (`ess/domains/evaluation.yaml`), re-exported as `loom_governor::model`.
 - `b10x-loom evaluate` is the same call over JSON: the request on standard input or from
   `--input <PATH>`, the decision on standard output (exit 0), or the refusal on standard output

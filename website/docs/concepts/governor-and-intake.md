@@ -76,9 +76,12 @@ b10x-loom evaluate --input request.json | jq -c '{outcome, actions}'
 ```
 
 An input it cannot use is refused with exit status 3, naming the input: the protocol (the catalog
-has no such name), the snapshot, an evidence record by its position, or the time. Where
-`CanonGovernor` sets a record that does not apply aside, `evaluate` refuses it, because the caller
-sent it for this one evaluation:
+has no such name), the snapshot (including a termination the records do not make legitimate), an
+evidence record by its position, or the time. A record is refused when it is not a readable
+`canon-evidence/1` record or repeats an earlier record's id. A readable record that does not apply
+to the case, such as one of a kind the protocol does not declare, is set aside exactly as
+`CanonGovernor` sets it aside, and the decision is made from the rest; the decision does not list
+it. An unreadable record:
 
 ```text
 b10x-loom: evaluation refused: evidence record 0: evidence `clock-1` is not a canon-evidence/1 document: missing field `kind`
