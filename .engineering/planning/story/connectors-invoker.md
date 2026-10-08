@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:connectors-invoker
 kind: story
-status: active
+status: implemented
 title: A Connectors client fills ConnectorInvoker
 relations:
 - decomposes: epic:downstream-adoption
@@ -24,10 +24,11 @@ scope:
   path: ess/commission/domains/responsibility.yaml
 - confidence: inferred
   path: generated/rust/commission/
-revision: 16
+revision: 17
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-08T15:55:36Z", actor: "human:timo", revision: 14}
 - {from: "proposed", to: "active", at: "2026-10-08T15:55:37Z", actor: "human:timo", revision: 15}
+- {from: "active", to: "implemented", at: "2026-10-08T16:21:57Z", actor: "human:timo", revision: 17, decided_on: {"recorded":{"test_result":1,"verification":1}}}
 ---
 ## Outcome
 

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T16:21:57Z",
+  "actor": "human:timo",
+  "artifact": "story:connectors-invoker",
+  "kind": "story",
+  "revision": 16,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo fmt --all --check; cargo clippy -p b10x-loom-connectors --all-targets --locked -- -D warnings; cargo test -p b10x-loom-connectors --locked: connectors_invoker 4 passed, adversary 15 passed, EXIT 0 at 1696397; at f61e67f: b10x-loom-commission 47, b10x-loom-sdk 3, b10x-loom-executor 687 passed (1 ignored), task commission:ess-gate, commission:drift, commission:deps-guard, docs-check, commission:docs-drift exit 0",
+    "reference": "1696397"
+  }
+}

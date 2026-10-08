@@ -5,7 +5,6 @@ kind: story
 status: draft
 title: A Loom run can be placed on a remote Mantle node (later)
 relations:
-- decomposes: epic:effect-bindings
 - informed_by: architecture-design:effect-isolation
 scope:
 - confidence: inferred
