@@ -2,18 +2,52 @@
 format: aep.planning-md/3
 id: story:cli-catalog-model-route
 kind: story
-status: draft
+status: implemented
 title: b10x-loom --model and --classifier-model take an llm catalog route
 relations:
 - serves: vision:O3
 scope:
-- confidence: inferred
+- confidence: cited
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
   path: Cargo.lock
-- confidence: inferred
+- confidence: cited
+  path: README.md
+- confidence: cited
   path: crates/loom-cli/Cargo.toml
-- confidence: inferred
+- confidence: cited
+  path: crates/loom-cli/src/lib.rs
+- confidence: cited
   path: crates/loom-cli/src/main.rs
-revision: 3
+- confidence: cited
+  path: crates/loom-cli/src/model_catalog.rs
+- confidence: cited
+  path: crates/loom-cli/src/regular_file.rs
+- confidence: cited
+  path: crates/loom-cli/tests/catalog_route.rs
+- confidence: cited
+  path: crates/loom-cli/tests/catalog_route_adversary.rs
+- confidence: cited
+  path: crates/loom-cli/tests/fixtures/catalog-route
+- confidence: cited
+  path: crates/loom-executor/Cargo.toml
+- confidence: cited
+  path: crates/loom-intake-router/Cargo.toml
+- confidence: cited
+  path: crates/loom-intake-slice/Cargo.toml
+- confidence: cited
+  path: website/data/status.json
+- confidence: cited
+  path: website/docs/guides/run-an-intent.md
+- confidence: cited
+  path: website/docs/reference/cli.md
+revision: 24
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-08T09:20:19Z", actor: "human:timo", revision: 4}
+- {from: "proposed", to: "active", at: "2026-10-08T09:20:19Z", actor: "human:timo", revision: 5}
+- {from: "active", to: "implemented", at: "2026-10-08T09:48:06Z", actor: "human:timo", revision: 24, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}}
 ---
 ## Outcome
 

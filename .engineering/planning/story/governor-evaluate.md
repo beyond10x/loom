@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:governor-evaluate
 kind: story
-status: active
+status: implemented
 title: One call evaluates a protocol over a case snapshot and evidence, without Commission types
 relations:
 - decomposes: epic:downstream-adoption
@@ -10,30 +10,59 @@ relations:
 - depends_on: story:run-event-stream
 - depends_on: story:llm-credentials-bearer
 scope:
-- confidence: inferred
+- confidence: cited
+  path: AGENTS.md
+- confidence: cited
   path: CHANGELOG.md
-- confidence: inferred
+- confidence: cited
+  path: Cargo.lock
+- confidence: cited
+  path: README.md
+- confidence: cited
+  path: crates/loom-cli/src/evaluate.rs
+- confidence: cited
   path: crates/loom-cli/src/lib.rs
-- confidence: inferred
+- confidence: cited
   path: crates/loom-cli/src/main.rs
-- confidence: inferred
+- confidence: cited
+  path: crates/loom-cli/tests/evaluate.rs
+- confidence: cited
+  path: crates/loom-cli/tests/evaluate_adversary.rs
+- confidence: cited
   path: crates/loom-governor/Cargo.toml
-- confidence: inferred
+- confidence: cited
   path: crates/loom-governor/src/lib.rs
-- confidence: inferred
+- confidence: cited
   path: crates/loom-governor/tests/
-- confidence: inferred
+- confidence: cited
+  path: crates/loom-governor/tests/evaluate.rs
+- confidence: cited
+  path: crates/loom-governor/tests/evaluate_adversary.rs
+- confidence: cited
+  path: crates/loom-governor/tests/evaluate_adversary_2.rs
+- confidence: cited
   path: ess/domains/evaluation.yaml
-- confidence: inferred
+- confidence: cited
+  path: ess/ess-inputs.yaml
+- confidence: cited
   path: ess/system.yaml
-- confidence: inferred
+- confidence: cited
   path: generated/rust/loom/
-- confidence: inferred
+- confidence: cited
+  path: website/data/ess/loom-evaluation.domain-graph.json
+- confidence: cited
+  path: website/data/status.json
+- confidence: cited
+  path: website/docs/concepts/governor-and-intake.md
+- confidence: cited
   path: website/docs/reference/cli.md
-revision: 16
+- confidence: cited
+  path: website/docs/reference/ess
+revision: 41
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-08T08:47:51Z", actor: "human:timo", revision: 15}
 - {from: "proposed", to: "active", at: "2026-10-08T08:47:52Z", actor: "human:timo", revision: 16}
+- {from: "active", to: "implemented", at: "2026-10-08T09:48:06Z", actor: "human:timo", revision: 41, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}}
 ---
 ## Outcome
 

@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-08T09:45:15Z",
+  "actor": "human:timo",
+  "artifact": "story:cli-catalog-model-route",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adversary-w3-20261008-loom-cli-catalog-model-route-pass-1",
+    "review": "review-result:adversary-w3-20261008-loom-cli-catalog-model-route-pass-1",
+    "outcome": "fixed"
+  }
+}

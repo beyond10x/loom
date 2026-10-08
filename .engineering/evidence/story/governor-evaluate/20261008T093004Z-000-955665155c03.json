@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T09:30:04Z",
+  "actor": "human:timo",
+  "artifact": "story:governor-evaluate",
+  "kind": "story",
+  "revision": 16,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-governor -p b10x-loom-cli --locked --test evaluate (EXIT=0, 3+7 passed at c85c1cd)",
+    "reference": "baseline 22ed935 has no Evaluate subcommand (crates/loom-cli/src/lib.rs) vs treatment c85c1cd: VERIFIED"
+  }
+}

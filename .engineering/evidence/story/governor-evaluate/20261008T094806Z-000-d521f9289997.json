@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-08T09:48:06Z",
+  "actor": "human:timo",
+  "artifact": "story:governor-evaluate",
+  "kind": "story",
+  "revision": 40,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "package gate on 5538bdf: fmt, drift, docs-check, clippy -D warnings and cargo test --locked --no-fail-fast for b10x-loom-governor (46), -cli (64), -executor (687), -intake-router (12), -intake-slice (125), commission ess_gate; every step exit 0"
+  }
+}

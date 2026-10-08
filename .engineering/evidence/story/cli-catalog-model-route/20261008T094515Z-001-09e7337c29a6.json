@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T09:45:15Z",
+  "actor": "human:timo",
+  "artifact": "story:cli-catalog-model-route",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-cli --locked --no-fail-fast (exit 0, 64 passed at 4d719a8)",
+    "reference": "baseline 80c405d: run --catalog refused as unexpected argument (red run of 9cb9acf) vs treatment 4d719a8: catalog route aliases drive both models; VERIFIED"
+  }
+}
