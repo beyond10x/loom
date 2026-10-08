@@ -21,7 +21,7 @@ scope:
   path: ess/domains/run.yaml
 - confidence: cited
   path: generated/rust/loom
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-08T23:16:40Z", actor: "human:timo", revision: 6}
 - {from: "proposed", to: "active", at: "2026-10-08T23:16:40Z", actor: "human:timo", revision: 7}
@@ -45,8 +45,10 @@ the target on `main` at 5e3d0cb (`crates/loom-executor/src/harness/turn_loop/mod
 3. an empty summary leaves the items as they were (`:3155-3162`);
 4. a fold too small to summarise, or with no end, is skipped (`:3092-3098`, a no-op at `:3024`).
 
-On each, the loop elides the items it would fold behind `ELISION_MARKER`, and keeps a summary only
-when it is smaller than that elision. The parts never removed (the task item, reasoning items, the
+On each, the loop keeps a summary when the session after folding it is at or below the target;
+otherwise it keeps the smaller of the summary and the elision of the folded items behind
+`ELISION_MARKER` (in practice the elision; the note is about 340 bytes). A summary no smaller than
+the items it replaces is never kept. The parts never removed (the task item, reasoning items, the
 protected tail, the newest item, and the instructions and tool schemas in the provider's reported
 input) can leave the session above the target; when the session is then still above the trigger,
 the run ends with a new `LoopStop` variant naming the window, the target and the occupied tokens,
@@ -55,7 +57,8 @@ and no further request is sent. A failed or empty summary is still not a failed 
 ## Acceptance
 
 Each of the four paths has a case in `crates/loom-executor/tests/` asserting that after the
-compaction the next request carries the elided session at or below the target; one case whose
+compaction the next request carries the elided session at or below the target; a summary that
+brings the session to or below the target is kept, not elided; one case whose
 unremovable parts exceed the trigger asserts the run ends with the new `LoopStop` variant, files its
 session as `Stopped`, and sends no request after the compaction. `CHANGELOG.md` (**Unreleased**)
 names the variant as a breaking change for exhaustive `LoopStop` matches.
@@ -64,10 +67,11 @@ names the variant as a breaking change for exhaustive `LoopStop` matches.
 
 `ess/domains/run.yaml` declares how a run ends (`loom.run.RunEnding`, `[Answered, Stopped,
 Failed]`, `:63-69`); the new stop is a `Stopped` ending. The unit's first commit changes only
-`ess/`: the `RunEnding` declaration names the cause (the session stays above its compaction trigger
-after compaction), regenerated through `task generate` with `task drift` clean. If the
-specification cannot express the cause, the unit stops and reports. The red test is the story's
-new case for the stop. `loom.run.RecordCompaction` keeps its shape.
+`ess/`: the comment of the `RunEnding` declaration names the cause (the session stays above its
+compaction trigger after compaction), with `task drift` clean. The cause is not typed: a stop-cause
+enum beside the hand-written `LoopStop` would be a second model; declaring `LoopStop` in ESS is
+`story:loop-stop-model`. The red test is the story's new case for the stop.
+`loom.run.RecordCompaction` keeps its shape.
 
 ## Source
 
