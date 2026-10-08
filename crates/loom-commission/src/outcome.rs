@@ -140,8 +140,9 @@ fn from_frontier<S: frontier_state::Marker>(frontier: &Frontier<S>) -> Derived {
     }
 }
 
-/// The runs, in memory, with the source of new run ids: the storage and context ports of the
-/// generated run commands.
+/// The runs, in memory, with the source of new run ids. It implements the `StartRun` and
+/// `SuspendRun` obligations itself, and is the storage port of the generated `ResumeRun`
+/// behaviour and `RunStates` query.
 pub struct RunStore {
     runs: BTreeMap<Uuid, RunSnapshot>,
     ids: Box<dyn FnMut() -> RunId + Send>,
