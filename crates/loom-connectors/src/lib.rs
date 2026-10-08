@@ -20,9 +20,9 @@
 //! | Connectors answers | The invoker answers |
 //! |---|---|
 //! | for a `Write` binding, success with a `mutation` naming its attempt on the bound instance | `Performed`: the result as the report, the attempt's id |
-//! | for a `Read` binding, success with no `mutation` and its audit record `complete` | `Performed`: the result as the report, the audit record's `audit_ref` |
-//! | error with a `mutation` classified `refused` or `not_attempted`, on a valid response | `Refused` |
-//! | anything else: a write's success naming no attempt or another instance's, a read's success with a `mutation` or an audit record not `complete`, an error with no `mutation`, `unknown`, `applied` without a delivered result, a protocol or transport failure | `Err` |
+//! | for a `Read` binding, success with no `mutation` and its audit record `complete`, with a non-empty `audit_ref` | `Performed`: the result as the report, the audit record's `audit_ref` |
+//! | for a `Write` binding, error with a `mutation` classified `refused` or `not_attempted`, on a valid response | `Refused` |
+//! | anything else: a write's success naming no attempt or another instance's, a read's answer with a `mutation` (success or error), a read's audit record not `complete` or with an empty `audit_ref`, an error with no `mutation`, `unknown`, `applied` without a delivered result, a protocol or transport failure | `Err` |
 //!
 //! An error with no `mutation` is no proof that the operation was not dispatched, so it is never
 //! a refusal. An `instance_id` with no endpoint, a credential that does not resolve, a failed
@@ -274,7 +274,7 @@ impl ConnectorInvoker for ConnectorsInvoker {
                 ConnectorOperationEffect::Write => performed(instance, &operation, invoked),
                 ConnectorOperationEffect::Read => read(instance, &operation, invoked),
             },
-            Answered::Failed(failure) => refused(instance, &operation, &failure),
+            Answered::Failed(failure) => refused(binding.effect, instance, &operation, &failure),
         }
     }
 }
@@ -293,8 +293,14 @@ fn read(instance: &str, operation: &str, invoked: Invoked) -> Result<EffectOutco
             "the Connector read `{operation}` of `{instance}` succeeded and recorded an attempt"
         )));
     }
+    // An empty `audit_ref` names no record: absence is never an opaque reference.
     let audit = match (invoked.audit_status, invoked.audit_ref) {
-        (AuditStatus::Complete, Some(audit)) => audit,
+        (AuditStatus::Complete, Some(audit)) if !audit.is_empty() => audit,
+        (AuditStatus::Complete, _) => {
+            return Err(EffectError::new(format!(
+                "the Connector read `{operation}` of `{instance}` succeeded and named no audit record"
+            )));
+        }
         (status, _) => {
             return Err(EffectError::new(format!(
                 "the Connector read `{operation}` of `{instance}` succeeded and its audit record is \
@@ -338,9 +344,12 @@ fn performed(
     }))
 }
 
-/// A failure is `Refused` only when a valid response says the recorded attempt was refused or not
-/// attempted; every other failure is an `Err`.
+/// A failure is `Refused` only when a valid response says the recorded attempt of a write was
+/// refused or not attempted; every other failure is an `Err`. Connectors records no attempt for a
+/// read, so a read's failure is never `Refused`: one that carries a `mutation` contradicts the
+/// describe its binding was checked against, as a read's success carrying one does.
 fn refused(
+    effect: ConnectorOperationEffect,
     instance: &str,
     operation: &str,
     failure: &Failure,
@@ -356,11 +365,15 @@ fn refused(
             EffectKnowledge::Refused | EffectKnowledge::NotAttempted
         )
     });
-    let said = format!(
+    let mut said = format!(
         "the Connector operation `{operation}` of `{instance}` answered {:?}: {}",
         failure.error.code, failure.error.message
     );
-    if answered && nothing_changed {
+    let read = effect == ConnectorOperationEffect::Read;
+    if read && failure.mutation.is_some() {
+        said.push_str(" (a read, and it recorded an attempt)");
+    }
+    if answered && nothing_changed && !read {
         Ok(EffectOutcome::Refused(EffectOutcomeRefused {
             reason: said,
         }))
