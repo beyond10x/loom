@@ -24,6 +24,15 @@ under **Unreleased** until the next release.
   `{"reference": …, "kind": "oauth" | "api-key"}`; a decode error names the field and never echoes
   a value. The executor depends on
   `b10x-llm-credentials` at tag `0.3.1`.
+- `b10x-loom run --output jsonl` writes the run as one JSON object per line on standard output
+  instead of the human lines, for a process that supervises it. Every line carries
+  `schema_version` 1 and a `kind`: `Route`, `Turn`, `ToolCall`, `Usage`, `Approval`, and
+  exactly one `Terminal` record, last, with `stop_reason` and `exit_status`, the status the
+  process exits with; a failed run's terminal record has `exit_status` 1 and its `error`. The
+  records are declared as the `intake.events` domain (`ess/intake/domains/events.yaml`) and
+  documented on the Run events reference page, which `task docs-check` holds to that
+  declaration. Human output stays the default and is unchanged. `SliceRun` gains `approvals`,
+  the actions a run stopped to await approval for.
 
 ### Changed
 

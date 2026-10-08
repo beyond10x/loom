@@ -1,0 +1,121 @@
+domain: intake.events
+
+summary: >-
+  The machine-readable record of one b10x-loom run, written as one JSON object per line on
+  standard output when the operator asks for it. Every line carries the stream's schema version.
+  The records project what the run already does: the route it took, each model turn, each tool
+  call a model made, the usage a provider reported, the approvals the run stopped for, and exactly
+  one terminal record, last, with the stop reason and the process exit status. A record adds no
+  authority and is not evidence.
+
+naming:
+  wire: events
+  display: Run events
+
+types:
+  # The version of the line format. A consumer refuses a line whose version it does not know.
+  - name: intake.events.SchemaVersion
+    kind: enum
+    variants: [V1]
+
+  # One line of the stream: the schema version and one record, its kind the record's tag.
+  - name: intake.events.RunEventLine
+    kind: struct
+    fields:
+      - name: schema_version
+        type: intake.events.SchemaVersion
+      - name: event
+        type: intake.events.RunEvent
+
+  # The record kinds. Terminal is written exactly once per run, and last.
+  - name: intake.events.RunEvent
+    kind: union
+    tag: kind
+    variants:
+      Route: intake.events.RouteEvent
+      Turn: intake.events.TurnEvent
+      ToolCall: intake.events.ToolCallEvent
+      Usage: intake.events.UsageEvent
+      Approval: intake.events.ApprovalEvent
+      Terminal: intake.events.TerminalEvent
+
+  # The protocol the router picked, and whether the run went on to execute it. A refused pick
+  # names the protocol it refused.
+  - name: intake.events.RouteEvent
+    kind: struct
+    fields:
+      - name: protocol
+        type: String
+      - name: accepted
+        type: Boolean
+
+  # One model turn: which request it answered, the model's binding and the provider's turn stop.
+  - name: intake.events.TurnEvent
+    kind: struct
+    fields:
+      - name: turn
+        type: Integer
+      - name: phase
+        type: intake.context.RequestPhase
+      - name: model
+        type: String
+      - name: turn_stop
+        type: String
+
+  # One tool call a model made in a turn, its arguments as the model wrote them, in JSON text.
+  - name: intake.events.ToolCallEvent
+    kind: struct
+    fields:
+      - name: turn
+        type: Integer
+      - name: call_id
+        type: String
+      - name: name
+        type: String
+      - name: arguments
+        type: String
+
+  # The counters a provider reported for one turn. A counter the provider did not report is
+  # absent, never zero; `final_usage` false marks a partial snapshot.
+  - name: intake.events.UsageEvent
+    kind: struct
+    fields:
+      - name: turn
+        type: Integer
+      - name: model
+        type: String
+      - name: input_tokens
+        type: Optional<Integer>
+      - name: output_tokens
+        type: Optional<Integer>
+      - name: cached_input_tokens
+        type: Optional<Integer>
+      - name: cache_creation_input_tokens
+        type: Optional<Integer>
+      - name: reasoning_output_tokens
+        type: Optional<Integer>
+      - name: final_usage
+        type: Boolean
+
+  # The actions the run stopped to await approval for, in frontier order.
+  - name: intake.events.ApprovalEvent
+    kind: struct
+    fields:
+      - name: actions
+        type: List<String>
+
+  # The one last record: why the run stopped and the exit status the process returns. A run that
+  # failed has no stop reason, exit status 1 and the failure's message.
+  - name: intake.events.TerminalEvent
+    kind: struct
+    fields:
+      - name: stop_reason
+        type: Optional<intake.routing.StopReason>
+      - name: exit_status
+        type: Integer
+      - name: protocol
+        type: Optional<String>
+      - name: steps
+        type: Optional<Integer>
+      - name: error
+        type: Optional<String>

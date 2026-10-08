@@ -65,6 +65,10 @@ The lines below are from the [live run of 2026-10-05][live], abbreviated.
 | `evidence: test_result pass` | Evidence the verifier submitted from the test command's exit status. A model's words are never evidence |
 | `stopped: ApprovalRequired (repository.merge)` | Why the run ended |
 
+For a program rather than a person, `--output jsonl` writes one JSON record per line instead,
+ending with one terminal record that carries the stop reason and the exit status: see
+[Run events](../reference/run-events.md).
+
 ## Why it stopped
 
 | `stopped:` | When | Exit status |

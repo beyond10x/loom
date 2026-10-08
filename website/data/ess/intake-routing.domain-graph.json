@@ -113,6 +113,10 @@
         {
           "name": "stop_reason",
           "type": "StopReason"
+        },
+        {
+          "name": "approvals",
+          "type": "List<string>"
         }
       ],
       "id": "intake.routing.SliceRun",

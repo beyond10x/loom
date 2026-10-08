@@ -2,8 +2,8 @@
   "provenance": {
     "system": "intake",
     "specification_version": "v1",
-    "source_digest": "b3281773ee88313834099ce04aab0b9af436baedbe62ff1a432c305c3ed756d4",
-    "contract_digest": "eba8d734a7767f27148ac6b7d3a96ad427989af6d293d3c3496fba405caae95a"
+    "source_digest": "0dcbb44891d966a08164d0845cc89345f20e9da1a2bff9d8412d32181f207f99",
+    "contract_digest": "03a4eba225331c590679bbbce8fd69d4e4f51fa6589d185caf24c7551cb770fd"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -104,6 +104,69 @@
     {
       "kind": "domain_type",
       "source": "intake.context.WorkingState",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.events.ApprovalEvent",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.events.RouteEvent",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.events.RunEvent",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.events.RunEventLine",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.events.SchemaVersion",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.events.TerminalEvent",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.events.ToolCallEvent",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.events.TurnEvent",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.events.UsageEvent",
       "disposition": {
         "disposition": "generated"
       }

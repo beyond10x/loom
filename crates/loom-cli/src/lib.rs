@@ -1,11 +1,13 @@
 //! The b10x-loom command line: its clap definition.
 //!
 //! The command is the `b10x-loom` binary (`src/main.rs`). This library holds only the definition
-//! of its command line, so `loom-docs` can generate the CLI reference from it.
+//! of its command line, so `loom-docs` can generate the CLI reference from it, the exit status a
+//! stop reason maps to, and the run event stream `run --output jsonl` writes ([`events`]).
 
 use std::path::PathBuf;
 
 pub use b10x_loom_intake_slice::context_metrics::ContextPolicy;
+use b10x_loom_intake_slice::run::StopReason;
 use clap::builder::TypedValueParser;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
@@ -18,6 +20,20 @@ pub const EXIT_STATUS: &str = "Exit status:
   3  the run stopped for another reason (NothingAdmissible, StepBudget, NoLocalExecutor, Refused, ConfinementUnavailable)
   1  the run failed
   2  the command line is not valid";
+
+pub mod events;
+
+/// The exit status a run that stopped for `reason` returns, as [`EXIT_STATUS`] states it.
+pub fn exit_status(reason: StopReason) -> u8 {
+    match reason {
+        StopReason::Completed | StopReason::ApprovalRequired => 0,
+        StopReason::NothingAdmissible
+        | StopReason::StepBudget
+        | StopReason::NoLocalExecutor
+        | StopReason::ConfinementUnavailable
+        | StopReason::Refused => 3,
+    }
+}
 
 /// The `b10x-loom` command line.
 #[derive(Debug, Parser)]
@@ -79,6 +95,10 @@ pub struct RunArgs {
     /// The confidence, from 0 to 1, below which the router refuses its pick.
     #[arg(long, value_name = "X", default_value_t = 0.5)]
     pub threshold: f64,
+    /// What standard output carries: lines for a person, or one JSON record per line, the last
+    /// one the terminal record with the stop reason and the exit status.
+    #[arg(long, value_enum, value_name = "FORMAT", default_value_t = Output::Human)]
+    pub output: Output,
     /// What to do, as given.
     pub intent: String,
 }
@@ -129,6 +149,15 @@ pub struct AddProtocolArgs {
     pub replace: bool,
 }
 
+/// What `run` writes on standard output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Output {
+    /// The human lines: references, the pick, each step, and the stop reason last.
+    Human,
+    /// The run event stream, one JSON object per line (`intake.events`).
+    Jsonl,
+}
+
 /// The operator's requested test execution policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Confinement {
@@ -141,6 +170,21 @@ pub enum Confinement {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_stop_reason_has_its_exit_status() {
+        assert_eq!(exit_status(StopReason::Completed), 0);
+        assert_eq!(exit_status(StopReason::ApprovalRequired), 0);
+        for reason in [
+            StopReason::NothingAdmissible,
+            StopReason::StepBudget,
+            StopReason::NoLocalExecutor,
+            StopReason::Refused,
+            StopReason::ConfinementUnavailable,
+        ] {
+            assert_eq!(exit_status(reason), 3);
+        }
+    }
 
     #[test]
     fn context_policy_is_opt_in_and_report_destination_is_optional() {

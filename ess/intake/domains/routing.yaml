@@ -103,6 +103,10 @@ entities:
         type: Integer
       - name: stop_reason
         type: intake.routing.StopReason
+      # The actions the run awaits approval for, in frontier order; empty unless it stopped
+      # ApprovalRequired.
+      - name: approvals
+        type: List<String>
     relations:
       - name: intent
         kind: references

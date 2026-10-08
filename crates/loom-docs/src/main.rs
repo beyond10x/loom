@@ -13,9 +13,15 @@
 //!
 //! Commission's own system (`ess/commission/`) has its reference pages from
 //! `loom-commission-docs`.
+//!
+//! It also checks one hand-written page, `reference/run-events.md`, against the `intake.events`
+//! declaration it documents ([`run_events`]), in both modes: the page carries pasted output, so it
+//! is not generated, and it fails the run when it leaves out a record kind, a field or the schema
+//! version.
 mod cli;
 mod crates;
 mod graph;
+mod run_events;
 
 use std::{
     collections::BTreeMap,
@@ -438,6 +444,35 @@ fn ess_outputs(root: &Path, ess: &Path) -> Result<Outputs> {
     Ok(Outputs::from([(ESS_REFERENCE, pages), (ESS_DATA, data)]))
 }
 
+/// Fails unless [`run_events::PAGE`] names everything `intake.events` declares.
+fn check_run_events(root: &Path, ess: &Path) -> Result<()> {
+    let spec = root.join(run_events::SYSTEM);
+    let model: serde_json::Value = serde_json::from_slice(&run(
+        ess,
+        &[
+            "specify".as_ref(),
+            "compile".as_ref(),
+            "--path".as_ref(),
+            spec.as_os_str(),
+            "--format".as_ref(),
+            "json".as_ref(),
+        ],
+    )?)
+    .with_context(|| format!("parsing the compiled ESS model of {}", run_events::SYSTEM))?;
+    let page = fs::read_to_string(root.join(run_events::PAGE))
+        .with_context(|| format!("{} is missing", run_events::PAGE))?;
+    let missing = run_events::problems(&model, &page, b10x_loom_cli::events::SCHEMA_VERSION)?;
+    if !missing.is_empty() {
+        bail!(
+            "{} does not document {}",
+            run_events::PAGE,
+            missing.join(", ")
+        );
+    }
+    println!("{}: documents every run event kind", run_events::PAGE);
+    Ok(())
+}
+
 /// Generated pages that stand alone, keyed by path relative to the repository root.
 fn single_pages(root: &Path) -> Result<Pages> {
     Ok(Pages::from([
@@ -519,6 +554,7 @@ fn main() -> Result<()> {
                     println!("{relative}: written");
                 }
             }
+            check_run_events(&root, &ess)?;
         }
         Action::Provenance { site, commit } => {
             write_provenance(&site, &commit)?;

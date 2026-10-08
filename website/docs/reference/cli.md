@@ -45,6 +45,7 @@ Usage: b10x-loom run [OPTIONS] <INTENT>
 | `--model <ID>` | no | `gpt-5.6-sol` | The model that selects actions and writes their arguments |
 | `--classifier-model <ID>` | no | `gpt-5.6-sol` | The model that classifies the intent |
 | `--threshold <X>` | no | `0.5` | The confidence, from 0 to 1, below which the router refuses its pick |
+| `--output <FORMAT>` | no | `human` | What standard output carries: lines for a person, or one JSON record per line, the last one the terminal record with the stop reason and the exit status |
 | `<INTENT>` | yes | none | What to do, as given |
 
 ```text

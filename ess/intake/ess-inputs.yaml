@@ -8,4 +8,5 @@ specification:
   - domains/context.yaml
   - domains/protocols.yaml
   - domains/query.yaml
+  - domains/events.yaml
 scenarios: []
