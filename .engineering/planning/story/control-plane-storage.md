@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:control-plane-storage
 kind: story
-status: active
+status: implemented
 title: Fallible storage and distinct execution identities for durable hosts
 relations:
 - serves: vision:O1
@@ -11,6 +11,8 @@ scope:
   path: CHANGELOG.md
 - confidence: inferred
   path: crates/loom-commission-conformance/src/lib.rs
+- confidence: cited
+  path: crates/loom-commission-conformance/src/store.rs
 - confidence: inferred
   path: crates/loom-commission-testkit/tests
 - confidence: cited
@@ -18,23 +20,26 @@ scope:
 - confidence: cited
   path: crates/loom-commission-testkit/tests/adversary_run_outcomes.rs
 - confidence: cited
+  path: crates/loom-commission-testkit/tests/durable_run_storage.rs
+- confidence: cited
   path: crates/loom-commission-testkit/tests/run_outcomes.rs
+- confidence: cited
+  path: crates/loom-commission-xtask/tests/checks.rs
 - confidence: inferred
   path: crates/loom-commission/src/outcome.rs
 - confidence: cited
   path: crates/loom-commission/src/runtime.rs
-- confidence: inferred
-  path: ess/commission/SKIPPED.md
 - confidence: cited
   path: ess/commission/domains/responsibility.yaml
 - confidence: cited
   path: generated/rust/commission
 - confidence: inferred
   path: website/docs/reference/commission
-revision: 34
+revision: 37
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-08T18:56:45Z", actor: "human:timo", revision: 33}
 - {from: "proposed", to: "active", at: "2026-10-08T18:56:45Z", actor: "human:timo", revision: 34}
+- {from: "active", to: "implemented", at: "2026-10-08T19:28:03Z", actor: "human:timo", revision: 37, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}}
 ---
 ## Outcome
 
@@ -89,33 +94,24 @@ Commission specification, not added as a hand-written fallible trait.
 
 ## Scope
 
-Scoped 2026-10-08 with `story-scoper`, for the declared outcome.
+Scoped 2026-10-08 with `story-scoper`; confirmed by the wave 2026-10-08-w7 implementor. Every
+inferred line was checked; `ess/commission/SKIPPED.md` was not needed (the conformance runner forces
+the `storage-failed` outcome instead).
 
-- Primary surface: `crates/loom-commission/src/runtime.rs` (cited): `LoopFailure` :199-209 and its
-  `Display` :211-220 gain the storage-failure variant; `suspend` :298-310 routes `StorageFailed` to
-  it instead of `NotSuspended` (:308); `run_until_blocked` :313-338, the `let StartRunOutcome::Started`
-  at :333 becomes refutable and ends with `run_id: None` before any executor step.
-- Spec: `ess/commission/domains/responsibility.yaml` (errors :743, `StartRun` :776-796, `SuspendRun`
-  :798-815), cited.
-- Regenerated, never hand-edited: `generated/rust/commission/` (`responsibility.rs`,
-  `behaviour.rs`, `PLAN.md`, `plan.json`), cited.
-- Host obligation: `crates/loom-commission/src/outcome.rs` `RunStore` :138-193 implements
-  `StartRunBehavior` and `SuspendRunBehavior`, inferred.
-- Conformance runner: `crates/loom-commission-conformance/src/lib.rs` (`start_run` :291-302,
-  `suspend_run` :314-328 match exhaustively; `configure_external_outcome` :218-234 forces only
-  `RevalidateActionRequest`): a forcing arm for `storage-failed`, or an entry in
-  `ess/commission/SKIPPED.md`. Inferred.
-- Testkit tests that break on the new variants (cited): `run_outcomes.rs` :308,
-  `adversary_run_outcomes.rs` :255, `adversary2_run_conformance.rs` :157, :229, :263-283 (its test
-  ports `ForgetsSuspension` :646 and `ListsNothing` :672 need the new obligations). New tests in
-  `crates/loom-commission-testkit/tests/`.
-- Documents: `website/docs/reference/commission/` through `task commission:docs`; `CHANGELOG.md`
-  names the new `StartRunOutcome`/`SuspendRunOutcome`/`LoopFailure` variants for callers that match
-  them exhaustively. Inferred.
+- `ess/commission/domains/responsibility.yaml`: changed.
+- `generated/rust/commission/`: regenerated; it no longer has `Context`, `TryContext` or
+  `unmet_context`.
+- `crates/loom-commission/src/runtime.rs` (`LoopFailure::RunStorage`, `run_until_blocked`,
+  `suspend`) and `src/outcome.rs` (`RunStore` implements the `StartRun` and `SuspendRun`
+  obligations): changed.
+- `crates/loom-commission-conformance/src/lib.rs` and new `src/store.rs` (forced storage failure):
+  changed.
+- `crates/loom-commission-testkit/tests/`: new `durable_run_storage.rs`; `run_outcomes.rs`,
+  `adversary_run_outcomes.rs`, `adversary2_run_conformance.rs` changed.
+- `crates/loom-commission-xtask/tests/checks.rs:266` (not scoped; found by adversary pass 1).
+- `website/docs/reference/commission/` (regenerated), `CHANGELOG.md`.
 - Unchanged: `crates/loom-commission/src/ports/mod.rs`, `crates/loom-intake-slice/src/run.rs`,
   `crates/loom-sdk/examples/software_change.rs`.
-- Collides with any unit touching `loom-commission`, `ess/commission/`, `generated/rust/commission/`
-  or `loom-commission-conformance`. Does not touch `crates/loom-governor/src`.
 
 ## Authorization
 Operator approved the control-plane plan and instructed Implement the plan. This is its bounded foundation prerequisite. All running code is Rust; command lines use clap derive. Coordinator owns all planning mutations.

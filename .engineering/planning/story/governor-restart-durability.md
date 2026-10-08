@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:governor-restart-durability
 kind: story
-status: active
+status: implemented
 title: A governor case survives a process restart
 relations:
 - decomposes: epic:governor
@@ -18,10 +18,17 @@ scope:
   path: crates/loom-governor/tests/fixtures/chg-1842.fixture.yaml
 - confidence: inferred
   path: crates/loom-governor/tests/restart_durability.rs
-revision: 8
+- confidence: cited
+  path: crates/loom-governor/tests/restart_durability_adversary.rs
+- confidence: cited
+  path: ess/domains/governor.yaml
+- confidence: cited
+  path: generated/rust/loom
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-08T18:56:45Z", actor: "human:timo", revision: 7}
 - {from: "proposed", to: "active", at: "2026-10-08T18:56:45Z", actor: "human:timo", revision: 8}
+- {from: "active", to: "implemented", at: "2026-10-08T19:28:03Z", actor: "human:timo", revision: 11, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}}
 ---
 ## Outcome
 
@@ -67,16 +74,17 @@ Constraints the test must hold:
 
 ## Scope
 
-Scoped 2026-10-08 with `story-scoper`.
+Scoped 2026-10-08 with `story-scoper`; confirmed by the wave 2026-10-08-w7 implementor.
 
-- Primary surface: `crates/loom-governor` (cited).
-- `crates/loom-governor/src/lib.rs`: `CaseState` :104, `HeldEvidence` :119, `CaseStore` :127,
-  `FallibleCaseStore` :152, `MemoryCaseStore` :214 as the pattern; `Governor::current_revision`
-  :634, `frontier` :638, `completion` :683 (cited).
-- New, inferred: `crates/loom-governor/src/file_store.rs` (`FileCaseStore` and the codec, re-exported
-  from `lib.rs`); `crates/loom-governor/tests/restart_durability.rs` (the test re-runs its own binary
-  as the child process over the `chg-1842` fixture,
-  `crates/loom-governor/tests/fixtures/chg-1842.fixture.yaml`, cited); `crates/loom-governor/Cargo.toml`
-  only if a dependency is needed.
-- Collides with any unit changing `CaseState`, `HeldEvidence`, `CaseStore` or `FallibleCaseStore`.
-  Does not touch `crates/loom-commission`, `generated/` or `ess/`.
+- `ess/domains/governor.yaml` (new domain `loom.governor`: `StoredCase`, `StoredEvidence`,
+  `StoredEvidenceData`, `StoredArtifact`, `StoredCaseId`, `StoredObservation`), `ess/system.yaml`,
+  `ess/ess-inputs.yaml`: changed. The scoping said the story touches no `ess/`; the spec-first
+  condition made it.
+- `generated/rust/loom/`: regenerated only.
+- `crates/loom-governor/src/file_store.rs` (inferred, confirmed: created), `src/lib.rs` (module and
+  re-export), `Cargo.toml` (inferred "only if needed": changed, adds `sha2`), `Cargo.lock` (one line).
+- `crates/loom-governor/tests/restart_durability.rs` (inferred, confirmed: created) and
+  `tests/restart_durability_adversary.rs` (adversary pass 1).
+- `crates/loom-governor/tests/fixtures/chg-1842.fixture.yaml`: read only.
+- `AGENTS.md` § ESS and § Governor; `website/docs/reference/ess/` and
+  `website/data/ess/loom-governor.domain-graph.json`; `CHANGELOG.md`.

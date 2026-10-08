@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-08T19:23:14Z",
+  "actor": "human:timo",
+  "artifact": "story:governor-restart-durability",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-governor --locked --test restart_durability",
+    "reference": "new behaviour: unresolved import loom_governor::FileCaseStore (E0432) on 1dbeb2e+cea0829; a_case_survives_a_process_restart green on aaf35d2 (5 passed), lossy-number mutation turns it red"
+  }
+}
