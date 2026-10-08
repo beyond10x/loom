@@ -33,9 +33,9 @@ the whole boundary.
 
 ## Status
 
-Version `0.9.0`, released from source at the tag `0.9.0`
-([release](https://github.com/beyond10x/loom/releases/tag/0.9.0)). Nothing is on a registry: you
-install from the tag or depend on it with `tag = "0.9.0"`. `b10x-loom run` completed a live run
+Version `0.10.0`, released from source at the tag `0.10.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.10.0)). Nothing is on a registry: you
+install from the tag or depend on it with `tag = "0.10.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -70,6 +70,11 @@ Since `0.9.0` a read answers with the execution audit record Connectors complete
 carries the read's `audit`. Hosts that build either record add the new field. `task conform`
 passes only when ESS rates the run `passed`.
 
+Since `0.10.0` a run store can report a failed write: `StartRun` and `SuspendRun` declare a
+`storage-failed` outcome, and `run_until_blocked` reports it as `LoopFailure::RunStorage` before any
+executor or effect call. `FileCaseStore` keeps a governor case across a process restart. Callers
+that match `StartRunOutcome`, `SuspendRunOutcome` or `LoopFailure` exhaustively add an arm.
+
 ## Run the command line
 
 Since `0.4.0`, Loom supports opt-in `--context-policy bounded` and `--context-report PATH`.
@@ -80,14 +85,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.9.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.10.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.9.0
+b10x-loom 0.10.0
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -144,7 +149,7 @@ A supervisor that keeps its own case record calls `loom_governor::evaluate` (or 
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.9.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.10.0" }
 ```
 
 The example below

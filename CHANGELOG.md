@@ -6,6 +6,18 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-08
+
+Loom 0.10.0 lets a durable host report a failed write and keep a governor case across a process
+restart. The commission specification declares a `storage-failed` outcome on `StartRun` and
+`SuspendRun`: a run store that cannot write says so, `run_until_blocked` ends a failed start before
+any executor, authority or effect call, and a failed suspension is reported as
+`LoopFailure::RunStorage`, never as an obligation. `FileCaseStore` keeps each governor case in its
+own file as the new `loom.governor` domain's `StoredCase`, so a case opened before a restart answers
+the same revision, frontier and completion after it. Hosts that match `StartRunOutcome`,
+`SuspendRunOutcome` or `LoopFailure` exhaustively add an arm, and ports other than `RunStore` under
+the generated commission behaviour implement `StartRunBehavior` and `SuspendRunBehavior` themselves.
+
 ### Added
 
 - `FileCaseStore` (`loom_governor`) keeps each governor case in its own file, written atomically
