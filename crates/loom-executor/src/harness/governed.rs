@@ -84,7 +84,8 @@ use crate::model::run::{
 use crate::recovery::{Held, Pending};
 use crate::selection::{ActionSelector, Choice, SelectionContext, SelectorError};
 use crate::{
-    Loom, admits_nothing, has_deciding_entry, loom_id, no_useful_action, outage, projection,
+    Loom, admits_nothing, case_moved, has_deciding_entry, loom_id, no_useful_action, outage,
+    projection,
 };
 
 /// The name a frontier action is published under: its id with every character outside
@@ -194,6 +195,20 @@ where
         frontier: &Frontier<frontier_state::Issued>,
         start: Start,
     ) -> LoopRun {
+        self.governed(session, ports, commission, frontier, start).0
+    }
+
+    /// [`Loom::governed_run`], and whether the case moved off `frontier` in this run: a turn's
+    /// catalogue was projected at another case revision than `frontier`'s, or the pipeline refused
+    /// a selection `stale-revision` (`CaseMoved`, denied to the model).
+    fn governed(
+        &self,
+        session: &SessionData,
+        ports: LoopPorts<'_>,
+        commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
+        start: Start,
+    ) -> (LoopRun, bool) {
         let LoopPorts {
             model,
             config,
@@ -215,19 +230,11 @@ where
             .with_admitted(None);
         let case = &commission.data().case_id;
         if frontier.data().case_id != *case || admits_nothing(frontier) {
-            return LoopRun {
-                outcome: no_useful_action(),
-                run: None,
-            };
+            return (unbuilt(no_useful_action()), false);
         }
         let holder = match self.claim_session(session, model.wire()) {
             Ok(holder) => holder,
-            Err(refused) => {
-                return LoopRun {
-                    outcome: refused,
-                    run: None,
-                };
-            }
+            Err(refused) => return (unbuilt(refused), false),
         };
         let id = &session.session_id;
         let taken = self.started(id, start);
@@ -235,7 +242,7 @@ where
             .as_ref()
             .and_then(|held| held.refuses(case, admits.as_deref()))
         {
-            return self.refused_resume(id, &holder, taken, changed);
+            return (self.refused_resume(id, &holder, taken, changed), false);
         }
         let (checkpoint, resuming) = taken
             .clone()
@@ -262,6 +269,7 @@ where
             cancel: holder.cancel.clone(),
             resuming,
             ended: None,
+            stale_refused: false,
         };
         let mut model = Recording {
             model,
@@ -301,7 +309,12 @@ where
             Ok(answered) => stopped(answered, approvals.ended.take(), (id, case, admits)),
             Err(error) => (outage(error.to_string()), None),
         };
-        self.ended_run(id, &holder, run, stopped_at, kept)
+        let handed = frontier.data().case_revision;
+        let moved = approvals.stale_refused
+            || offers
+                .all()
+                .any(|offered| offered.frontier.data().case_revision != handed);
+        (self.ended_run(id, &holder, run, stopped_at, kept), moved)
     }
 
     /// What a run that ended with `run` answers: `outcome`, unless the run was interrupted. The
@@ -505,6 +518,11 @@ struct Holder {
     cancel: LoopCancel,
 }
 
+/// A run refused before its loop was built, answering `outcome`.
+fn unbuilt(outcome: ExecutorOutcome) -> LoopRun {
+    LoopRun { outcome, run: None }
+}
+
 /// Whether a resumed run has not answered the call it resumed from: the call was never put to the
 /// pipeline, and the model was not asked again, which the loop does only once every call of the
 /// checkpoint's turn has its answer. False for a run that resumed from no checkpoint.
@@ -587,13 +605,16 @@ struct Offers {
 }
 
 impl Offers {
+    /// Every catalogue offered in this run, in order.
+    fn all(&self) -> impl Iterator<Item = &Offered> {
+        std::iter::successors(self.first.get().map(Box::as_ref), |at| {
+            at.next.get().map(Box::as_ref)
+        })
+    }
+
     /// The catalogue offered for the latest turn.
     fn latest(&self) -> Option<&Offered> {
-        let mut at = self.first.get()?;
-        while let Some(next) = at.next.get() {
-            at = next;
-        }
-        Some(at)
+        self.all().last()
     }
 
     /// Offers the next turn's catalogue.
@@ -762,6 +783,9 @@ struct Proposer<'r, S, G, V> {
     resuming: Option<(ToolCall, Pending)>,
     /// The checkpoint the run stopped at.
     ended: Option<Ended>,
+    /// Whether the pipeline refused a selection of this run `stale-revision` (`CaseMoved`): the
+    /// case moved after the revision it was selected at.
+    stale_refused: bool,
 }
 
 /// The checkpoint a run stopped at, what Loom returns for it, and the call it holds for a run that
@@ -859,8 +883,9 @@ where
     V::Target: Governor,
 {
     /// Ends the run at `checkpoint` with `outcome`, holding `pending` when the outcome proposes it;
-    /// a selection the pipeline refused (`NoUsefulAction`) is denied to the model instead, which
-    /// chooses again.
+    /// a selection the pipeline refused (`NoUsefulAction`, or `CaseMoved` for one made at a
+    /// revision the case has left, which is noted) is denied to the model instead, which chooses
+    /// again from the next turn's catalogue, projected from the frontier current then.
     fn answer(
         &mut self,
         checkpoint: String,
@@ -868,7 +893,13 @@ where
         pending: Option<Pending>,
         action: &str,
     ) -> ApprovalDecision {
-        if matches!(outcome, ExecutorOutcome::NoUsefulAction(_)) {
+        if matches!(outcome, ExecutorOutcome::CaseMoved(_)) {
+            self.stale_refused = true;
+        }
+        if matches!(
+            outcome,
+            ExecutorOutcome::NoUsefulAction(_) | ExecutorOutcome::CaseMoved(_)
+        ) {
             return ApprovalDecision::denied(format!(
                 "`{action}` was not proposed: the case's current frontier does not admit it as it \
                  was selected; choose from the tools of the next turn"
@@ -916,7 +947,7 @@ where
         if pending.in_flight {
             match self.loom.revalidate(self.case, pending.selection.clone()) {
                 Ok(()) => {}
-                Err(ExecutorOutcome::NoUsefulAction(_)) => {
+                Err(ExecutorOutcome::NoUsefulAction(_) | ExecutorOutcome::CaseMoved(_)) => {
                     return ApprovalDecision::denied(self.refused(&pending.selection, &action));
                 }
                 Err(unanswered) => return self.defer(checkpoint, unanswered, Some(pending)),
@@ -1116,24 +1147,40 @@ where
     V::Target: Governor,
     M: ModelPort,
 {
-    /// [`Loom::run_loop`]'s outcome. Runs take the model one at a time.
+    /// [`Loom::run_loop`]'s outcome, unless the case moved off `frontier` while the loop ran: a
+    /// turn's catalogue, projected from the governor's frontier current then, was at another case
+    /// revision than `frontier`'s, or the pipeline refused one of the run's selections
+    /// `stale-revision` (the model was told and chose again). A run that then ends with a
+    /// proposal, `CompletedLocalReasoning` or `NoUsefulAction` is `CaseMoved`, naming `frontier`'s
+    /// revision, so Commission judges it on the case as it is now (`story:moved-case-outcome`): no
+    /// proposal leaves that was not selected and admitted at the revision of the frontier the run
+    /// was handed. A suspension is returned as it is. Runs take the model one at a time.
     fn run(
         &self,
         commission: &Commission<commission_state::Assigned>,
         frontier: &Frontier<frontier_state::Issued>,
     ) -> ExecutorOutcome {
         let mut model = self.model.lock().unwrap_or_else(PoisonError::into_inner);
-        self.loom
-            .run_loop(
-                &self.session,
-                LoopPorts {
-                    model: &mut *model,
-                    config: self.config.clone(),
-                    sink: &mut NullLoopSink,
-                },
-                commission,
-                frontier,
-            )
-            .outcome
+        let (run, moved) = self.loom.governed(
+            &self.session,
+            LoopPorts {
+                model: &mut *model,
+                config: self.config.clone(),
+                sink: &mut NullLoopSink,
+            },
+            commission,
+            frontier,
+            Start::Fresh,
+        );
+        match run.outcome {
+            ExecutorOutcome::ProposedAction(_)
+            | ExecutorOutcome::CompletedLocalReasoning(_)
+            | ExecutorOutcome::NoUsefulAction(_)
+                if moved =>
+            {
+                case_moved(frontier.data().case_revision)
+            }
+            outcome => outcome,
+        }
     }
 }

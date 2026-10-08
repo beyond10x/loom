@@ -21,7 +21,9 @@
 //!    Admitted: the request is recorded as admitted, and the loop reads the frontier again. Stale:
 //!    the loop reads the frontier again. Needs authority: the provider is asked for the capability
 //!    the frontier names. Otherwise the run outcome is derived (`outcome::derive`);
-//! 7. otherwise the run outcome is derived.
+//! 7. otherwise the run outcome is derived. Where it ends the run after `NoUsefulAction` or
+//!    `CompletedLocalReasoning`, the case is first loaded once more (`current_revision`), and a
+//!    case that moved meanwhile is judged as the governor holds it (`story:moved-case-outcome`).
 //!
 //! Every request is recorded with its revalidation outcome, admitted or not. Since
 //! `story:runtime-merge` (Atlas ADR 0082) every admitted request is handed to the effect port once,
@@ -555,7 +557,13 @@ fn no_admissible_action(runs: &mut Generated<RunStore>) {
 
     let end = drive(runs, name, &commission, &governor, &executor, &authority, 9);
 
-    assert_eq!(governor.calls(), iteration(&case), "{name}: governor calls");
+    // The iteration, then the load before the run ends on the outcome derived from the frontier
+    // the executor was handed (`story:moved-case-outcome`): the case is still at 9.
+    assert_eq!(
+        governor.calls(),
+        [iteration(&case), vec![GovernorCall::CurrentRevision(case.clone())]].concat(),
+        "{name}: governor calls"
+    );
     assert_eq!(executor.at(), [3], "{name}: executor calls");
     assert_eq!(
         end.outcome,
