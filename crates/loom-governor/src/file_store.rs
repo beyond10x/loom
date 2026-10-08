@@ -1,13 +1,15 @@
 //! [`FileCaseStore`]: a [`FallibleCaseStore`] in a directory, so a held case outlives the process
 //! that held it.
 //!
-//! Each case is one file, `case-<hex of its id>.json`, holding the case as the `loom.governor`
-//! domain declares it ([`StoredCase`], `ess/domains/governor.yaml`); the observations are one file
-//! beside them, `observations.json`, a list of [`StoredObservation`]. Every write goes to a fresh
-//! temporary file in the same directory, is synced, and is renamed over its target, so a reader sees
-//! the previous document or the next one and never part of one. A write that fails returns
-//! [`FileStoreError`] and leaves the previous document in place, including when an update's change
-//! already ran: the change is applied to a copy.
+//! Each case is one file, `case-<hex of its id>.json`, or `case-sha256-<hex of its digest>.json`
+//! for an id over 100 bytes, holding the case as the `loom.governor` domain declares it
+//! ([`StoredCase`], `ess/domains/governor.yaml`); the observations are one file beside them,
+//! `observations.json`, a list of [`StoredObservation`]. Every write goes to a fresh temporary file
+//! in the same directory, is synced, and is renamed over its target, so a reader sees the previous
+//! document or the next one and never part of one. A write that fails returns [`FileStoreError`]
+//! and leaves the previous document in place, including when an update's change already ran: the
+//! change is applied to a copy. Temporary files a dead process left are removed when a store opens.
+//! A document naming a member its declaration does not, or one member twice, is refused on read.
 //!
 //! Every operation holds an exclusive lock on `<dir>/.lock` for its duration, so two stores over
 //! one directory, in one process or in two, never interleave a read and a write of the same file.
@@ -17,6 +19,11 @@
 //! would not come back exactly (a hand-built number spelling no reader accepts, or nesting past the
 //! reader's limit) is refused rather than written. JSON values keep their member order and number
 //! spelling, so the frontier id, which hashes the decision bytes, is the same after a restart.
+//!
+//! Known divergence from [`MemoryCaseStore`](crate::MemoryCaseStore): the generated reader refuses
+//! a document nested past 64 levels, and evidence `facts` sit inside a case document, so a record
+//! whose facts nest past 61 levels is refused here (the governor answers
+//! `GovernorUnavailable`) where the memory store keeps it.
 //!
 //! Protocol definitions are not stored: the host registers the same protocols before it reads.
 
@@ -42,11 +49,26 @@ use loom::json::{
 };
 use loom::primitives::{Timestamp, Uuid};
 
+use sha2::{Digest as _, Sha256};
+
 use crate::{CaseState, FallibleCaseStore, HeldEvidence};
 
 const OBSERVATIONS: &str = "observations.json";
 const LOCK: &str = ".lock";
 const TEMPORARY: &str = ".tmp-";
+
+/// The longest id, in bytes, whose file is named by its hex: `case-` and 200 hex digits and
+/// `.json` is 210 bytes, under the 255 a file name may have.
+const HEX_NAMED: usize = 100;
+
+/// How many temporary names in use one write skips before it reports the last as its error.
+const TEMPORARY_ATTEMPTS: u32 = 1024;
+
+fn push_hex(out: &mut String, bytes: &[u8]) {
+    for byte in bytes {
+        out.push_str(&format!("{byte:02x}"));
+    }
+}
 
 /// Temporary file names this process has used, so two writes in one process never share one.
 static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
@@ -86,7 +108,8 @@ impl FileCaseStore {
     ///
     /// # Errors
     ///
-    /// [`FileStoreError`] when the directory or its lock file cannot be created.
+    /// [`FileStoreError`] when the directory or its lock file cannot be created, or a temporary
+    /// file an earlier life left behind cannot be removed.
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self, FileStoreError> {
         let dir = dir.into();
         fs::create_dir_all(&dir).map_err(|error| failed(&dir, error))?;
@@ -97,7 +120,24 @@ impl FileCaseStore {
             .write(true)
             .open(&lock)
             .map_err(|error| failed(&lock, error))?;
-        Ok(Self { dir })
+        let store = Self { dir };
+        store.locked(|| store.remove_stale_temporaries())?;
+        Ok(store)
+    }
+
+    /// Removes every temporary file in the directory. Only called holding the lock, when no write
+    /// of any store over the directory is in progress, so each one was left by a write that died
+    /// before its rename and holds nothing the store's state depends on.
+    fn remove_stale_temporaries(&self) -> Result<(), FileStoreError> {
+        let entries = fs::read_dir(&self.dir).map_err(|error| failed(&self.dir, error))?;
+        for entry in entries {
+            let entry = entry.map_err(|error| failed(&self.dir, error))?;
+            if entry.file_name().to_string_lossy().starts_with(TEMPORARY) {
+                let path = entry.path();
+                fs::remove_file(&path).map_err(|error| failed(&path, error))?;
+            }
+        }
+        Ok(())
     }
 
     /// The directory the store keeps its files in.
@@ -105,11 +145,18 @@ impl FileCaseStore {
         &self.dir
     }
 
-    /// The file that holds `case`: its id hex-encoded, so no id names a file outside the store.
+    /// The file that holds `case`, named so no id names a file outside the store and no name
+    /// passes the 255 bytes a file name may have: `case-<hex of the id>.json` for an id of up to
+    /// [`HEX_NAMED`] bytes, and `case-sha256-<hex of its SHA-256>.json` for a longer one. The two
+    /// forms never meet: a hex name has no `s` after `case-`. The file carries the full id, and a
+    /// read refuses a file whose id is not the one asked for.
     fn case_path(&self, case: &CaseId) -> PathBuf {
         let mut name = String::from("case-");
-        for byte in case.0.bytes() {
-            name.push_str(&format!("{byte:02x}"));
+        if case.0.len() <= HEX_NAMED {
+            push_hex(&mut name, case.0.as_bytes());
+        } else {
+            name.push_str("sha256-");
+            push_hex(&mut name, &Sha256::digest(case.0.as_bytes()));
         }
         name.push_str(".json");
         self.dir.join(name)
@@ -216,16 +263,31 @@ impl FileCaseStore {
     /// Writes `text` to a new temporary file in the store's directory, syncs it, and renames it
     /// over `path`. On any failure the temporary file is removed and `path` is untouched.
     fn replace(&self, path: &Path, text: &str) -> Result<(), FileStoreError> {
-        let temporary = self.dir.join(format!(
-            "{TEMPORARY}{}-{}",
-            std::process::id(),
-            NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)
-        ));
-        let written = (|| -> io::Result<()> {
-            let mut file = OpenOptions::new()
+        // A name in use, left by an earlier life with the same process id, is skipped for the
+        // next one rather than reported: it says nothing about this write.
+        let mut attempts = 0;
+        let (temporary, mut file) = loop {
+            let temporary = self.dir.join(format!(
+                "{TEMPORARY}{}-{}",
+                std::process::id(),
+                NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)
+            ));
+            match OpenOptions::new()
                 .write(true)
                 .create_new(true)
-                .open(&temporary)?;
+                .open(&temporary)
+            {
+                Ok(file) => break (temporary, file),
+                Err(error)
+                    if error.kind() == io::ErrorKind::AlreadyExists
+                        && attempts < TEMPORARY_ATTEMPTS =>
+                {
+                    attempts += 1;
+                }
+                Err(error) => return Err(failed(&temporary, error)),
+            }
+        };
+        let written = (|| -> io::Result<()> {
             file.write_all(text.as_bytes())?;
             file.sync_all()
         })()
@@ -260,7 +322,24 @@ impl FallibleCaseStore for FileCaseStore {
         self.locked(|| {
             let path = self.case_path(&state.id);
             match fs::symlink_metadata(&path) {
-                Ok(_) => return Ok(false),
+                // Held, unless the file is a readable case under another id: two long ids whose
+                // digests meet. That is the store's failure, never "already held".
+                Ok(_) => {
+                    let other = read_if_present(&path)
+                        .ok()
+                        .flatten()
+                        .and_then(|text| json::parse(&text).ok())
+                        .and_then(|value| decode_case(&value).ok())
+                        .map(|stored| stored.id.0)
+                        .filter(|id| *id != state.id.0);
+                    return match other {
+                        Some(id) => Err(failed(
+                            &path,
+                            format!("holds case `{id}`, not `{}`", state.id.0),
+                        )),
+                        None => Ok(false),
+                    };
+                }
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {}
                 Err(error) => return Err(failed(&path, error)),
             }
@@ -528,13 +607,46 @@ fn text_member(value: &Value, at: &str, name: &str) -> Result<String, DecodeErro
     text_at(member_at(value, at, name)?, &nested(at, name), "a string").map(str::to_owned)
 }
 
+/// Refuses an object of the codec's own shapes that names a member `declared` does not, or one
+/// member twice: such a document was not written by this store, and reading the first of two
+/// members, or past an unknown one, would read a different case than the file says. Absence of a
+/// declared member is refused by [`member_at`] where it is read. `facts`, `provenance` and
+/// `payload` are `Json` and are kept as they arrived, duplicates included; this is never applied
+/// inside them.
+fn exactly(value: &Value, at: &str, declared: &[&str]) -> Result<(), DecodeError> {
+    let members = json::members_at(value, at, "an object")?;
+    for (index, (name, _)) in members.iter().enumerate() {
+        if !declared.contains(&name.as_str()) {
+            return Err(DecodeError {
+                at: nested(at, name),
+                expected: "no member: `loom.governor` declares none by this name".to_owned(),
+                found: "a member".to_owned(),
+            });
+        }
+        if members[..index].iter().any(|(earlier, _)| earlier == name) {
+            return Err(DecodeError {
+                at: nested(at, name),
+                expected: "one member by this name".to_owned(),
+                found: "a second".to_owned(),
+            });
+        }
+    }
+    Ok(())
+}
+
 fn decode_case(value: &Value) -> Result<StoredCase, DecodeError> {
     let at = "";
+    exactly(
+        value,
+        at,
+        &["id", "protocol", "revision", "artifacts", "evidence"],
+    )?;
     let artifacts = items_at(member_at(value, at, "artifacts")?, "artifacts", "an array")?
         .iter()
         .enumerate()
         .map(|(index, item)| {
             let at = format!("artifacts[{index}]");
+            exactly(item, &at, &["artifact", "revision"])?;
             Ok(StoredArtifact {
                 artifact: text_member(item, &at, "artifact")?,
                 revision: text_member(item, &at, "revision")?,
@@ -546,6 +658,7 @@ fn decode_case(value: &Value) -> Result<StoredCase, DecodeError> {
         .enumerate()
         .map(|(index, item)| {
             let at = format!("evidence[{index}]");
+            exactly(item, &at, &["data", "applies"])?;
             Ok(StoredEvidence {
                 data: decode_evidence_data(member_at(item, &at, "data")?, &nested(&at, "data"))?,
                 applies: bool_at(
@@ -567,6 +680,20 @@ fn decode_case(value: &Value) -> Result<StoredCase, DecodeError> {
 
 fn decode_evidence_data(value: &Value, at: &str) -> Result<StoredEvidenceData, DecodeError> {
     let ids_at = nested(at, "observation_ids");
+    exactly(
+        value,
+        at,
+        &[
+            "evidence_id",
+            "case_id",
+            "kind",
+            "subject_revision",
+            "producer",
+            "observation_ids",
+            "facts",
+            "provenance",
+        ],
+    )?;
     Ok(StoredEvidenceData {
         evidence_id: Uuid(text_member(value, at, "evidence_id")?),
         case_id: StoredCaseId(text_member(value, at, "case_id")?),
@@ -594,6 +721,17 @@ fn decode_evidence_data(value: &Value, at: &str) -> Result<StoredEvidenceData, D
 }
 
 fn decode_observation(value: &Value, at: &str) -> Result<StoredObservation, DecodeError> {
+    exactly(
+        value,
+        at,
+        &[
+            "observation_id",
+            "source",
+            "subject",
+            "observed_at",
+            "payload",
+        ],
+    )?;
     Ok(StoredObservation {
         observation_id: Uuid(text_member(value, at, "observation_id")?),
         source: text_member(value, at, "source")?,

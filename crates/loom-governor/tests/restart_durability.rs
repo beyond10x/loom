@@ -313,6 +313,40 @@ fn file_names(dir: &Path) -> Vec<String> {
     names
 }
 
+/// A long id is held under a digest-named file; a file there holding another id, as two ids whose
+/// digests met would leave, is the store's error on insert and on read, never "already held".
+#[test]
+fn a_digest_named_file_holding_another_id_is_an_error() {
+    let dir = store_dir("digest-other-id");
+    let store = FileCaseStore::open(&dir).expect("the store opens");
+    let long = CaseId("c".repeat(300));
+    assert_eq!(
+        store.insert(sample_state(&long)).map_err(|e| e.to_string()),
+        Ok(true)
+    );
+    let files: Vec<String> = file_names(&dir)
+        .into_iter()
+        .filter(|name| name.starts_with("case-"))
+        .collect();
+    assert_eq!(files.len(), 1, "{files:?}");
+    assert!(
+        files[0].starts_with("case-sha256-") && files[0].len() < 255,
+        "{files:?}"
+    );
+    let path = dir.join(&files[0]);
+    let text = read(&path);
+    std::fs::write(&path, text.replacen(&long.0, "case-other", 1)).unwrap();
+
+    assert!(
+        store.get(&long).is_err(),
+        "a file holding another id is not this case"
+    );
+    assert!(
+        store.insert(sample_state(&long)).is_err(),
+        "a file holding another id is not \"already held\""
+    );
+}
+
 fn sample_state(case: &CaseId) -> loom_governor::CaseState {
     loom_governor::CaseState {
         id: case.clone(),
