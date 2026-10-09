@@ -5,7 +5,6 @@
 
 use std::collections::VecDeque;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -50,6 +49,20 @@ pub fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../loom-connectors/tests/fixtures/connectors")
 }
 
+/// Installs `source` as the executable `target` through `install(1)`, in a child process, so this
+/// process never holds a writable descriptor on a program a test runs. A child that a test running
+/// in parallel forks inherits every descriptor open at that moment; while it holds one on the
+/// program, executing the program fails with "Text file busy".
+pub fn install_program(source: &Path, target: &Path) {
+    let status = std::process::Command::new("/usr/bin/install")
+        .args(["-m", "755"])
+        .arg(source)
+        .arg(target)
+        .status()
+        .unwrap();
+    assert!(status.success(), "install {}: {status}", target.display());
+}
+
 /// One test's directory: the fake program, its `--state-dir` (`connectors-state`), `HOME`, and a
 /// directory for the plugin's own state (`plugin-state`).
 pub struct Fixture {
@@ -69,8 +82,7 @@ impl Fixture {
             fs::create_dir_all(root.join(directory)).unwrap();
         }
         let fake = root.join("connectors");
-        fs::copy(fixtures().join("fake-connectors"), &fake).unwrap();
-        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+        install_program(&fixtures().join("fake-connectors"), &fake);
         let fixture = Self { root };
         fixture.answer("describe", LIST, "describe-list.json");
         fixture.answer("describe", SEARCH, "describe-search.json");

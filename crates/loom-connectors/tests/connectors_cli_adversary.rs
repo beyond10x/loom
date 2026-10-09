@@ -7,7 +7,6 @@
 //! a directory of the test.
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
@@ -40,8 +39,7 @@ impl Fixture {
             fs::create_dir_all(root.join(directory)).unwrap();
         }
         let fake = root.join("connectors");
-        fs::copy(fixtures().join("fake-connectors"), &fake).unwrap();
-        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+        install_program(&fixtures().join("fake-connectors"), &fake);
         fs::write(root.join("connectors.toml"), "# not read by the fake\n").unwrap();
         Self { root }
     }
@@ -118,6 +116,20 @@ fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/connectors")
 }
 
+/// Installs `source` as the executable `target` through `install(1)`, in a child process, so this
+/// process never holds a writable descriptor on a program a test runs. A child that a test running
+/// in parallel forks inherits every descriptor open at that moment; while it holds one on the
+/// program, executing the program fails with "Text file busy".
+fn install_program(source: &Path, target: &Path) {
+    let status = std::process::Command::new("/usr/bin/install")
+        .args(["-m", "755"])
+        .arg(source)
+        .arg(target)
+        .status()
+        .unwrap();
+    assert!(status.success(), "install {}: {status}", target.display());
+}
+
 fn adapter() -> AdapterAlias {
     AdapterAlias(ADAPTER.to_owned())
 }
@@ -143,15 +155,16 @@ fn a_program_that_never_answers_does_not_block_the_read() {
     // The program records its pid before it becomes `sleep`, so the test can ask whether it
     // still runs once the read returned.
     let pid_file = fixture.root.join("connectors.pid");
+    let script = fixture.root.join("connectors.sh");
     fs::write(
-        &program,
+        &script,
         format!(
             "#!/bin/sh\necho $$ > '{}'\nexec sleep 60\n",
             pid_file.display()
         ),
     )
     .unwrap();
-    fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+    install_program(&script, &program);
     let cli = ConnectorsCli::new(
         ConnectorsCliConfig {
             timeout_seconds: Some(1),

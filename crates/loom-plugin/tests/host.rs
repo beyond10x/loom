@@ -15,7 +15,7 @@ use b10x_loom_plugin::{
     SourceRead, decode_record_line, encode_record_line, run_plugin, run_plugin_on,
 };
 use serde_json::json;
-use support::{FakePlugin, Fixture, Recorded, chat, item};
+use support::{FakePlugin, Fixture, Recorded, chat, install_program, item};
 
 /// A turn that reads chat's list, then proposes `text`.
 fn read_then_propose(text: &str) -> Vec<(&'static str, serde_json::Value)> {
@@ -853,16 +853,13 @@ fn a_connectors_timeout_stops_no_item() {
     let config = fixture.config(vec![chat()]);
     // Describes as the fake does; an invoke outlives the one-second bound and is stopped.
     let slow = fixture.root.join("slow-connectors");
+    let script = fixture.root.join("slow-connectors.sh");
     fs::write(
-        &slow,
+        &script,
         "#!/bin/sh\ncase \" $* \" in *\" invoke \"*) exec sleep 5 ;; esac\nexec \"$(dirname \"$0\")/connectors\" \"$@\"\n",
     )
     .unwrap();
-    fs::set_permissions(
-        &slow,
-        <fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o755),
-    )
-    .unwrap();
+    install_program(&script, &slow);
     let mut timing_out = config.clone();
     timing_out.connectors.program = slow.display().to_string();
     timing_out.connectors.timeout_seconds = Some(1);
