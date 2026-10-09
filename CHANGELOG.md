@@ -6,6 +6,14 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- `crates/loom-selector-laya/tests/laya_arguments_slice.rs` holds the Laya selection slice end to
+  end: Loom runs as Commission's executor on a scripted three-action frontier, selects with the
+  Laya selector behind the confidence fallback to the reasoning-model selector, generates
+  arguments once and only for the finally selected action, and an action outside the frontier
+  (`release.rollback`) never reaches argument generation or revalidation.
+
 ### Changed
 
 - **Breaking:** `LoopStop` is generated from `loom.run.LoopStop` in `ess/domains/run.yaml` (format
