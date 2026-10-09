@@ -13,7 +13,6 @@
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::thread::JoinHandle;
@@ -344,12 +343,10 @@ impl Scratch {
         }
         let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let fake = root.join("connectors");
-        fs::copy(
-            crates.join("loom-connectors/tests/fixtures/connectors/fake-connectors"),
+        install_program(
+            &crates.join("loom-connectors/tests/fixtures/connectors/fake-connectors"),
             &fake,
-        )
-        .unwrap();
-        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let fixtures = crates.join("loom-plugin-slack/tests/fixtures");
         for verb in ["describe", "invoke"] {
             for operation in [
@@ -556,4 +553,18 @@ fn complete(request: &[u8]) -> bool {
             .and_then(|value| value.trim().parse::<usize>().ok())
             .is_some_and(|length| rest.len() >= length)
     })
+}
+
+/// Installs `source` as the executable `target` through `install(1)`, in a child process, so this
+/// process never holds a writable descriptor on a program a test runs. A child that a test running
+/// in parallel forks inherits every descriptor open at that moment; while it holds one on the
+/// program, executing the program fails with "Text file busy".
+fn install_program(source: &Path, target: &Path) {
+    let status = std::process::Command::new("/usr/bin/install")
+        .args(["-m", "755"])
+        .arg(source)
+        .arg(target)
+        .status()
+        .unwrap();
+    assert!(status.success(), "install {}: {status}", target.display());
 }
