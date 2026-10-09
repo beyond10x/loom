@@ -6,6 +6,21 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Changed
+
+- A compaction of a declared context window leaves the session at or below its target (50 % of
+  the window) wherever removing what may be removed can reach it. Wherever a fold is not replaced
+  by a summary (the summary turn failed on the wire, wrote nothing, or wrote a summary that would
+  leave the session above its target, or the fold was too small to be worth a summary turn), its
+  items are elided behind one `ELISION_MARKER` item that says how many, how many bytes and why. A
+  summary is kept when the session it leaves is at or below the target; above it, only when it is
+  smaller than that note. A failed or empty summary is still not a failed run.
+- **Breaking:** `LoopStop` gains `ContextAboveTrigger { window, target, occupied }`, all in tokens.
+  When what no compaction removes (the task, provider reasoning items, the newest turn group and
+  protected tail, and the instruction and tool schemas the provider counts) leaves the session at
+  or above its compaction trigger (80 % of the window), the run ends with it and sends no further
+  request; its session is filed `Stopped`. Callers that match `LoopStop` exhaustively add the arm.
+
 ## [0.11.0] - 2026-10-08
 
 Loom 0.11.0 builds on engineering-protocols 0.3.0, whose `incident.response/1` keeps an

@@ -174,6 +174,20 @@ pub enum LoopStop {
     Unstructured {
         asked_again: u32,
     },
+    /// The session was still at or above its compaction trigger after compaction, so the next
+    /// request was not sent.
+    ///
+    /// All three figures are tokens: the declared [`LoopConfig::context_window`], the target a
+    /// compaction aims for ([`COMPACTION_TARGET_PERCENT`] of it), and what the session occupied
+    /// once compaction had removed everything it may. What is never removed — the task, provider
+    /// reasoning items, the newest turn group and protected tail, and the instruction and tool
+    /// schemas the provider counts — can fill the window on its own; a request sent anyway would be
+    /// refused at the wall or compacted again before every turn.
+    ContextAboveTrigger {
+        window: u64,
+        target: u64,
+        occupied: u64,
+    },
 }
 
 impl LoopStop {
@@ -955,9 +969,9 @@ pub const COMPACTION_TARGET_PERCENT: u64 = 50;
 /// The fewest bytes worth spending a whole model turn to fold into a summary.
 ///
 /// A summary turn costs a replay of what it folds plus the tokens it writes, so folding a few
-/// hundred bytes spends more than it recovers. Below this the loop keeps the elided conversation
-/// and says nothing, which is also what stops a run whose weight is all in the protected tail from
-/// buying a summary turn every turn.
+/// hundred bytes spends more than it recovers. Below this no turn is spent: those items are elided
+/// behind one [`ELISION_MARKER`] item instead, which is also what stops a run whose weight is all
+/// in the protected tail from buying a summary turn every turn.
 pub const SUMMARY_MIN_FOLD_BYTES: usize = 8 * 1024;
 
 /// The first line of the item a summary is folded into.
@@ -967,11 +981,13 @@ pub const SUMMARY_MIN_FOLD_BYTES: usize = 8 * 1024;
 pub const SUMMARY_MARKER: &str =
     "[Earlier turns were summarised by the harness; the summary follows.]";
 
-/// The first line of the item that stands where a failed summary's items were elided.
+/// The first line of the item that stands where the items of a fold were elided.
 ///
-/// A summary no shorter than the items it would replace is not kept; those items are dropped
-/// instead, and this item says so, how many and how many bytes. Fixed text for the same reason as
-/// [`SUMMARY_MARKER`]: it is the harness's own words, never a person's.
+/// Wherever a fold is not replaced by a summary — the summary turn failed, wrote nothing, or wrote
+/// a summary that would leave the session above its target and is no smaller than this item; or
+/// the fold was too small to be worth a turn — its items are dropped instead, and this item says
+/// so, how many, how many bytes and why. Fixed text for the same reason as [`SUMMARY_MARKER`]: it
+/// is the harness's own words, never a person's.
 pub const ELISION_MARKER: &str =
     "[Earlier turns were elided by the harness; what went is stated below.]";
 
@@ -1386,16 +1402,96 @@ fn fold(items: &mut Vec<Item>, end: usize, replacement: Item, opaque: Vec<Item>)
     items.extend(tail);
 }
 
+/// Why the items of a fold were elided rather than summarised, in the words the note gives.
+#[derive(Debug, Clone, Copy)]
+enum Elision {
+    /// Under [`SUMMARY_MIN_FOLD_BYTES`]: no turn was spent.
+    TooSmall,
+    /// The summary turn failed on the wire.
+    SummaryFailed,
+    /// The summary turn answered with no text.
+    SummaryEmpty,
+    /// The summary would have left the session above its target, and was no smaller than the
+    /// note; or it was no smaller than what it folds.
+    SummaryLarger,
+}
+
+impl Elision {
+    fn reason(self) -> &'static str {
+        match self {
+            Self::TooSmall => "because they were too few to be worth a summary turn",
+            Self::SummaryFailed => "because the summary turn asked to fold them failed",
+            Self::SummaryEmpty => "because the summary turn asked to fold them wrote nothing",
+            Self::SummaryLarger => {
+                "because the summary written of them would have left it above its target"
+            }
+        }
+    }
+}
+
+/// The item that stands where the `dropped` items of a fold, `bytes` of them, were elided.
+fn elision_notice(dropped: usize, bytes: usize, why: Elision) -> Item {
+    Item::user(format!(
+        "{ELISION_MARKER}\n{dropped} earlier item(s) of this conversation, {bytes} bytes, were \
+         dropped to keep it inside its context window, {reason}. The task above is unchanged; \
+         anything else they held has to be read again.",
+        reason = why.reason(),
+    ))
+}
+
+/// The reasoning items among `folded`, which this loop carries verbatim and never rewrites.
+fn opaque_of(folded: &[Item]) -> Vec<Item> {
+    folded
+        .iter()
+        .filter(|item| matches!(item, Item::Opaque { .. }))
+        .cloned()
+        .collect()
+}
+
+/// Elides the items from [`FIRST_KEPT_ITEM`] to `end` behind one [`ELISION_MARKER`] item, the
+/// reasoning items among them kept after it, and returns how many items went.
+///
+/// Zero, and nothing changed, where the note and the kept reasoning would not be smaller than what
+/// they stand for: a compaction never leaves the conversation larger than it found it.
+fn elide_fold(items: &mut Vec<Item>, end: usize, why: Elision) -> usize {
+    let folded = &items[FIRST_KEPT_ITEM..end];
+    let replaced = measure(folded);
+    let opaque = opaque_of(folded);
+    let kept = measure(&opaque);
+    let dropped = folded.len() - opaque.len();
+    let notice = elision_notice(dropped, replaced.saturating_sub(kept), why);
+    if dropped == 0 || measure_one(&notice) + kept >= replaced {
+        return 0;
+    }
+    fold(items, end, notice, opaque);
+    dropped
+}
+
+/// The end of a `summary-failed` warning: what became of the items the summary was to fold.
+fn what_was_elided(gone: usize) -> String {
+    if gone == 0 {
+        "the conversation keeps its elided form".to_owned()
+    } else {
+        format!("the {gone} item(s) it was to fold were elided instead")
+    }
+}
+
 /// What a summary attempt did. A spent turn carries what the provider reported for it.
 enum Summarised {
-    /// Nothing was folded: too little to be worth a turn, or all of it protected.
+    /// Nothing changed and no turn was spent: nothing could be folded, or a note saying what was
+    /// elided would not have been smaller than what it stood for.
     Skipped,
+    /// No turn was spent: the fold was too small to be worth one, so this many items were elided
+    /// behind one [`ELISION_MARKER`] item.
+    Elided(usize),
     /// The prefix is now one summary item, in place of this many.
     Folded(usize, Option<Usage>),
-    /// A turn was spent and produced nothing usable. Where it answered with a summary no shorter
-    /// than what it would replace, those items were elided behind one [`ELISION_MARKER`] item;
-    /// otherwise the elided conversation stands.
-    Failed(Option<Usage>),
+    /// A turn was spent and no summary was kept: it failed on the wire, wrote nothing, or wrote a
+    /// summary that would leave the session above its target and is no smaller than the note.
+    /// The items it was to fold were elided behind one
+    /// [`ELISION_MARKER`] item; the count says how many, zero where even the note would not have
+    /// been smaller.
+    Failed(Option<Usage>, usize),
     /// The caller cancelled. The run is over.
     Cancelled,
 }
@@ -2972,9 +3068,24 @@ impl<'a> AgentLoop<'a> {
     /// is in things elision may not touch — user and assistant text, and the opaque reasoning items
     /// this loop carries verbatim across every tool round trip.
     ///
-    /// Returns a stop only when the caller cancelled inside the summary turn. A summary that fails
-    /// on the wire is a warning: the conversation is merely larger than wanted, and ending the run
-    /// over that would reintroduce the defect this exists to remove.
+    /// Whatever a fold does not replace with a summary is elided: a summary that failed on the
+    /// wire, came back empty, or would leave the session above its target while no smaller than
+    /// the note saying what was elided, and a fold too small to be worth a turn, all leave one
+    /// [`ELISION_MARKER`] item where the items were. So the session ends at or below the target
+    /// wherever removing what may be removed can reach it.
+    ///
+    /// # When the run ends instead
+    ///
+    /// Some of a session is never removed: the task, provider reasoning items, the newest turn
+    /// group and the protected tail, and the instruction and tool schemas the provider counts in
+    /// its reported input. When what is left after compaction is still at or above the trigger,
+    /// the run ends with [`LoopStop::ContextAboveTrigger`] before the next request: sent anyway,
+    /// that request is one the provider may refuse at the wall, and every turn after it would
+    /// compact again and gain nothing. Otherwise a failed or empty summary is a warning, never a
+    /// failed run, and the run goes on.
+    ///
+    /// Also returns a stop when the caller cancelled inside the summary turn, or when a bound left
+    /// no turn to spend on it.
     fn compact_run(
         &mut self,
         state: &mut RunState,
@@ -2990,20 +3101,23 @@ impl<'a> AgentLoop<'a> {
         // schemas, which are not in `items` at all, so it is the larger figure and the one nearer
         // the wall. The estimate is the fallback for a provider that reports nothing.
         let occupied = estimated_tokens(before).max(state.reported_input.unwrap_or(0));
-        if occupied < window.saturating_mul(COMPACTION_TRIGGER_PERCENT) / 100 {
+        let trigger = window.saturating_mul(COMPACTION_TRIGGER_PERCENT) / 100;
+        if occupied < trigger {
             return None;
         }
+        let target_tokens = window.saturating_mul(COMPACTION_TARGET_PERCENT) / 100;
         // Expressed as *how many bytes to free* rather than as a size to reach, because what this
         // loop can shrink is `items` and the count that triggered may have measured more than
         // that. Freeing the overshoot is the same arithmetic in both cases, and with no reported
         // count it is exactly "leave the conversation at half the window".
         let free = occupied
-            .saturating_sub(window.saturating_mul(COMPACTION_TARGET_PERCENT) / 100)
+            .saturating_sub(target_tokens)
             .saturating_mul(ESTIMATED_BYTES_PER_TOKEN);
         let target = before.saturating_sub(usize::try_from(free).unwrap_or(usize::MAX));
         let elided = elide(&mut state.items, target, protected_bytes(target));
 
         let mut summarised = 0_usize;
+        let mut noted = 0_usize;
         let mut summary_turn = false;
         let mut usage = None;
         if measure(&state.items) > target {
@@ -3017,39 +3131,64 @@ impl<'a> AgentLoop<'a> {
                     summary_turn = true;
                     usage = reported;
                 }
-                Summarised::Failed(reported) => {
+                Summarised::Failed(reported, gone) => {
+                    noted = gone;
                     summary_turn = true;
                     usage = reported;
                 }
+                Summarised::Elided(gone) => noted = gone,
                 Summarised::Skipped => {}
             }
         }
-        if elided.count == 0 && summarised == 0 && !summary_turn {
-            return None;
-        }
 
         let after = measure(&state.items);
-        // Said out loud, for the same reason the byte rule says it: a model that suddenly cannot
-        // see a file it read has a right to a reason, and so does anyone reading the record.
+        if elided.count > 0 || summarised > 0 || noted > 0 || summary_turn {
+            // Said out loud, for the same reason the byte rule says it: a model that suddenly
+            // cannot see a file it read has a right to a reason, and so does anyone reading the
+            // record.
+            sink.emit(LoopEvent::Warning {
+                code: "conversation-compacted".to_owned(),
+                message: format!(
+                    "the conversation reached {occupied} tokens of the {window} declared, so \
+                     {count} old tool result(s) were elided, {noted} earlier item(s) were elided \
+                     behind a note and {summarised} item(s) folded into a summary; {before} bytes \
+                     became {after}.",
+                    count = elided.count,
+                ),
+            });
+            sink.emit(LoopEvent::Compacted {
+                elided_results: elided.count,
+                elided_bytes: elided.freed,
+                summarised_items: summarised,
+                bytes_before: before,
+                bytes_after: after,
+                summary_turn,
+                usage,
+            });
+        }
+
+        // What the session occupies now: the provider's count less what was freed, where that is
+        // the larger figure, because the part of it that is not `items` (the instruction and the
+        // tool schemas) is still there; the estimate of what is left otherwise.
+        let freed = estimated_tokens(before.saturating_sub(after));
+        let left = estimated_tokens(after).max(occupied.saturating_sub(freed));
+        if left < trigger {
+            return None;
+        }
         sink.emit(LoopEvent::Warning {
-            code: "conversation-compacted".to_owned(),
+            code: "context-above-trigger".to_owned(),
             message: format!(
-                "the conversation reached {occupied} tokens of the {window} declared, so {count} \
-                 old tool result(s) were elided and {summarised} item(s) folded into a summary; \
-                 {before} bytes became {after}.",
-                count = elided.count,
+                "after compaction the session still occupies {left} tokens of the {window} \
+                 declared, at or above its trigger of {trigger} and above its target of \
+                 {target_tokens}; what is left is what no compaction removes, so the run stops \
+                 before another request"
             ),
         });
-        sink.emit(LoopEvent::Compacted {
-            elided_results: elided.count,
-            elided_bytes: elided.freed,
-            summarised_items: summarised,
-            bytes_before: before,
-            bytes_after: after,
-            summary_turn,
-            usage,
-        });
-        None
+        Some(LoopStop::ContextAboveTrigger {
+            window,
+            target: target_tokens,
+            occupied: left,
+        })
     }
 
     /// Spends one turn folding the earlier part of the conversation into a single item.
@@ -3073,16 +3212,22 @@ impl<'a> AgentLoop<'a> {
     /// because every model request consumes the same finite budget regardless of why the loop
     /// made it.
     ///
-    /// # A summary that does not shrink is a failed summary
+    /// # A summary is kept where it reaches the target, or is smaller than eliding
     ///
     /// The summary is model-authored and its length is the model's choice. Folded whatever its
     /// size, one longer than the items it replaced grew the conversation it was asked to shrink:
     /// 14,596 bytes became 17,170, 4,292 tokens of a 4,000-token window, and the next request
-    /// was still sent. So a summary no shorter than those items is not kept. They are elided
-    /// instead, behind one [`ELISION_MARKER`] item that says how many and how many bytes, and the
-    /// result is [`Summarised::Failed`] carrying what the provider reported, because the turn was
-    /// still paid for. Where even that item would not be shorter, the items stand: a compaction
-    /// never leaves the conversation larger than it found it.
+    /// was still sent; one merely shorter than those items could still leave the session above its
+    /// target. So the items are elided wherever no summary replaces them, behind one
+    /// [`ELISION_MARKER`] item that says how many, how many bytes and why. A summary smaller than
+    /// what it folds is kept when the session it leaves is at or below the target; above it, only
+    /// when it is still smaller than that item, which in practice it is not. Otherwise the result
+    /// is [`Summarised::Failed`] carrying what the provider reported, because the turn was still
+    /// paid for, and so is a turn that failed on the wire or wrote nothing, whose items are elided
+    /// the same way. A fold under
+    /// [`SUMMARY_MIN_FOLD_BYTES`] spends no turn and is elided at once ([`Summarised::Elided`]).
+    /// Where even the note would not be smaller, the items stand: a compaction never leaves the
+    /// conversation larger than it found it.
     fn summarise(
         &mut self,
         state: &mut RunState,
@@ -3094,7 +3239,12 @@ impl<'a> AgentLoop<'a> {
         };
         let folded: Vec<Item> = state.items[FIRST_KEPT_ITEM..end].to_vec();
         if measure(&folded) < SUMMARY_MIN_FOLD_BYTES {
-            return Summarised::Skipped;
+            // Too little to be worth a turn, and still more than the session can carry above its
+            // target: elided, with no turn spent.
+            return match elide_fold(&mut state.items, end, Elision::TooSmall) {
+                0 => Summarised::Skipped,
+                gone => Summarised::Elided(gone),
+            };
         }
         if self.cancel.is_cancelled() {
             return Summarised::Cancelled;
@@ -3127,14 +3277,15 @@ impl<'a> AgentLoop<'a> {
                     return Summarised::Cancelled;
                 }
                 Err(error) => {
+                    let gone = elide_fold(&mut state.items, end, Elision::SummaryFailed);
                     sink.emit(LoopEvent::Warning {
                         code: "summary-failed".to_owned(),
                         message: format!(
-                            "the summary turn failed ({error}), so the conversation keeps its \
-                             elided form and the run goes on"
+                            "the summary turn failed ({error}), so {}",
+                            what_was_elided(gone)
                         ),
                     });
-                    return Summarised::Failed(None);
+                    return Summarised::Failed(None, gone);
                 }
             }
         };
@@ -3153,54 +3304,55 @@ impl<'a> AgentLoop<'a> {
             })
             .collect();
         if summary.trim().is_empty() {
+            let gone = elide_fold(&mut state.items, end, Elision::SummaryEmpty);
             sink.emit(LoopEvent::Warning {
                 code: "summary-failed".to_owned(),
-                message: "the summary turn answered with no text, so nothing could replace the \
-                          conversation it was asked to fold"
-                    .to_owned(),
+                message: format!(
+                    "the summary turn answered with no text, so nothing could replace the \
+                     conversation it was asked to fold; {}",
+                    what_was_elided(gone)
+                ),
             });
-            return Summarised::Failed(reported);
+            return Summarised::Failed(reported, gone);
         }
 
-        let opaque: Vec<Item> = state.items[FIRST_KEPT_ITEM..end]
-            .iter()
-            .filter(|item| matches!(item, Item::Opaque { .. }))
-            .cloned()
-            .collect();
+        let opaque = opaque_of(&folded);
+        let kept = measure(&opaque);
         let count = end - FIRST_KEPT_ITEM;
         let replaced = measure(&folded);
         let summarised = Item::user(format!("{SUMMARY_MARKER}\n{summary}"));
         let written = measure_one(&summarised);
-        if written + measure(&opaque) < replaced {
+        // The note eliding would leave, measured exactly as `elide_fold` would write it.
+        let noted = measure_one(&elision_notice(
+            folded.len() - opaque.len(),
+            replaced.saturating_sub(kept),
+            Elision::SummaryLarger,
+        ));
+        // Never kept when it is no smaller than what it folds: it would grow the conversation.
+        // Otherwise kept when the session it leaves is at or below the target, and above the
+        // target only when it is still smaller than the note.
+        let shrinks = written + kept < replaced;
+        let session = measure(&state.items) - replaced + written + kept;
+        if shrinks && (session <= target || written < noted) {
             fold(&mut state.items, end, summarised, opaque);
             return Summarised::Folded(count, reported);
         }
 
-        // A summary no shorter than what it would replace is a failed summary: folded in, it grows
-        // the conversation it was asked to shrink, and the next request goes out above the target.
-        let notice = Item::user(format!(
-            "{ELISION_MARKER}\n{count} earlier item(s) of this conversation, {replaced} bytes, \
-             were dropped to keep it inside its context window, because the summary written of \
-             them was no shorter than they were. The task above is unchanged; anything else they \
-             held has to be read again."
-        ));
-        let elided = measure_one(&notice) + measure(&opaque) < replaced;
-        if elided {
-            fold(&mut state.items, end, notice, opaque);
-        }
+        // Folded in, this summary would leave the session above its target and larger than
+        // eliding does, or larger than it found it; the items are elided instead.
+        let gone = elide_fold(&mut state.items, end, Elision::SummaryLarger);
         sink.emit(LoopEvent::Warning {
             code: "summary-failed".to_owned(),
             message: format!(
-                "the summary turn answered with {written} bytes, no fewer than the {replaced} \
-                 bytes of the {count} item(s) it was to replace, so the summary was not kept {}",
-                if elided {
-                    "and those items were elided instead"
-                } else {
-                    "and the conversation keeps its elided form"
-                }
+                "the summary turn answered with {written} bytes, which would have left the \
+                 conversation at {session} bytes, above its target of {target}, without being \
+                 smaller than the {noted}-byte note saying what was elided, or would not have \
+                 been smaller than the {replaced} bytes of the {count} item(s) it was to replace, \
+                 so the summary was not kept; {}",
+                what_was_elided(gone)
             ),
         });
-        Summarised::Failed(reported)
+        Summarised::Failed(reported, gone)
     }
 
     /// What a run that would stop with `stop` actually does: ends with it, or turns again.
