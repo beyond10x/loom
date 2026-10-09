@@ -13,3 +13,4 @@ domains:
   - loom.governor
   - loom.datasource
   - loom.plugin
+  - loom.slack
