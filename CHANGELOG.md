@@ -6,6 +6,17 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-09
+
+Loom 0.12.0 adds two action selectors and bounds compaction. `ReasoningModelSelector` asks any
+model port to choose one of the given candidates; `HybridSelector` takes a fast selector's choice
+at or above a confidence threshold the host supplies, else the stronger selector's; and the
+experimental `b10x-loom-selector-laya` crate is a fast selector over a Laya endpoint. A compaction
+of a declared context window now leaves the session at or below its target wherever removing what
+may be removed can reach it, and a run whose session stays at or above its trigger ends with the
+new `LoopStop::ContextAboveTrigger` instead of sending another request. Callers that match
+`LoopStop` exhaustively add the arm.
+
 ### Added
 
 - `ReasoningModelSelector`, an `ActionSelector` with strategy `ReasoningModel`: one turn of any
