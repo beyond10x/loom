@@ -6,6 +6,16 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-09
+
+Loom 0.13.0 adds a plugin layer: an unattended agent is a Loom plugin, hooks around a governed
+run. `b10x-loom-plugin` hosts a plugin in a loop with state, retries and a model budget per turn;
+every turn runs on the new read-only protocol `inbound-answer@1`; `loom_connectors::cli` reads data
+sources through the `connectors` command line and refuses writes; and `b10x-loom plugin run
+slack-handler` walks a bot's Slack channels and records proposed answers to unanswered messages,
+posting nothing. New crates add no breaking change to existing ones; the minor version moves for
+the new commands and domains.
+
 ### Added
 
 - `protocols/inbound-answer/1.yaml`, registered `inbound-answer@1`: a read-only protocol that
