@@ -68,6 +68,12 @@ const ALLOWED: [(&str, &[&str], &[&str]); 5] = [
     ),
 ];
 
+/// What of the rest of Loom a ported module may name, beyond its Harness manifest: one entry per
+/// grant, `(module, Loom module)`. `turn_loop` names the generated model (`crate::model`) because
+/// `LoopStop`, which it constructs and matches, is declared in `ess/domains/run.yaml` and
+/// generated; no other module of Loom is granted.
+const LOOM_GRANTS: [(&str, &str); 1] = [("turn_loop", "model")];
+
 /// Every crate `crates/loom-executor/Cargo.toml` makes nameable inside the crate, read from the manifest
 /// so that a dependency added later is refused to every ported module that was not granted it.
 fn loom_extern_crates() -> BTreeSet<String> {
@@ -513,7 +519,9 @@ fn crossings(rel: &Path, src: &str, externs: &BTreeSet<String>) -> Vec<String> {
             Some(m) => modules.contains(&m.trim_end_matches('`')),
             None => match what.strip_prefix("crate `") {
                 Some(c) => crates.contains(&c.trim_end_matches('`')),
-                None => false,
+                None => LOOM_GRANTS
+                    .iter()
+                    .any(|(m, loom)| *m == own && what == format!("Loom's `crate::{loom}`")),
             },
         };
         if !allowed {
@@ -638,7 +646,7 @@ fn each_ported_module_names_only_what_its_harness_manifest_allowed() {
             scanned += 1;
         }
     }
-    assert_eq!(scanned, 36, "the five ported modules hold 36 files");
+    assert_eq!(scanned, 37, "the five ported modules hold 37 files");
     assert!(
         found.is_empty(),
         "a ported module names what its Harness crate could not depend on:\n{}",
