@@ -12,3 +12,4 @@ domains:
   - loom.evaluation
   - loom.governor
   - loom.datasource
+  - loom.plugin
