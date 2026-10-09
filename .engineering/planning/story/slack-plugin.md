@@ -39,7 +39,7 @@ scope:
   path: website/docs/reference/cli.md
 - confidence: cited
   path: website/docs/reference/crates.md
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-09T17:33:44Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":8}}}
 - {from: "proposed", to: "active", at: "2026-10-09T17:33:44Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":8}}}
@@ -47,7 +47,7 @@ transitions:
 ---
 ## Why
 
-The first plugin (the operator's approved plan (conductor `charters/loom.md`, DSP-20261009-05)): a Slack walk under long-horizon objectives ("learn about dev stack",
+The first plugin (the operator's approved plan, 2026-10-09): a Slack walk under long-horizon objectives ("learn about dev stack",
 "help people with cheap lookups", "respond in slack when being tagged"), read-only. The operator:
 "find recent unanswered - basically random walk", which the age rule and the seeded walk below
 implement.
@@ -102,7 +102,7 @@ Crate `b10x-loom-plugin-slack` (`crates/loom-plugin-slack`), polling through
 `ess/domains/slack.yaml` (new), `ess/system.yaml`, `generated/rust/loom/`,
 `crates/loom-plugin-slack/` (new), `crates/loom-cli/src/`, `crates/loom-cli/Cargo.toml`,
 `crates/loom-cli/tests/plugin.rs` (new), `website/docs/reference/cli.md` (generated), `Cargo.lock`, `crates/loom-executor/tests/crate_names.rs`, `website/docs/reference/crates.md` (generated), `README.md`, `AGENTS.md`, `CHANGELOG.md`, `website/data/status.json`.
-Wave `2026-10-09-w1` also lands on `generated/rust/loom/` (`story:compaction-target-bound`), `AGENTS.md` and the new-crate files (`story:laya-selector`). The wave that merges into `main` second rebases, then runs `task generate` and `task docs-generate` and commits their output (conductor DSP-20261009-05).
+Wave `2026-10-09-w1` also lands on `generated/rust/loom/` (`story:compaction-target-bound`), `AGENTS.md` and the new-crate files (`story:laya-selector`). The wave that merges into `main` second rebases, then runs `task generate` and `task docs-generate` and commits their output.
 
 ## Carried from story:plugin-host
 

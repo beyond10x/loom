@@ -34,7 +34,7 @@ scope:
   path: website/data/status.json
 - confidence: cited
   path: website/docs/reference/crates.md
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-09T16:33:55Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":6}}}
 - {from: "proposed", to: "active", at: "2026-10-09T16:33:55Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":6}}}
@@ -107,7 +107,7 @@ where the first registered plugin exists.
 ## Scope
 
 `ess/domains/plugin.yaml` (new), `ess/system.yaml`, `generated/rust/loom/`, `crates/loom-plugin/`
-(new), `crates/loom-sdk/src/lib.rs`, `Cargo.lock`, `crates/loom-executor/tests/crate_names.rs`, `website/docs/reference/crates.md` (generated), `README.md`, `AGENTS.md`, `CHANGELOG.md`, `website/data/status.json`. Wave `2026-10-09-w1` also lands on `generated/rust/loom/` (`story:compaction-target-bound`), `AGENTS.md` and the new-crate files (`story:laya-selector`). The wave that merges into `main` second rebases, then runs `task generate` and `task docs-generate` and commits their output (conductor DSP-20261009-05).
+(new), `crates/loom-sdk/src/lib.rs`, `Cargo.lock`, `crates/loom-executor/tests/crate_names.rs`, `website/docs/reference/crates.md` (generated), `README.md`, `AGENTS.md`, `CHANGELOG.md`, `website/data/status.json`. Wave `2026-10-09-w1` also lands on `generated/rust/loom/` (`story:compaction-target-bound`), `AGENTS.md` and the new-crate files (`story:laya-selector`). The wave that merges into `main` second rebases, then runs `task generate` and `task docs-generate` and commits their output.
 
 ## Deviations accepted by the coordinator (implementation, 2026-10-09)
 

@@ -10,6 +10,8 @@ relations:
 - serves: vision:O1
 - informed_by: story:yaml-only-plugin
 - depends_on: story:plugin-host
+- informed_by: architecture-decision-record:plugin-hooks
+- informed_by: story:plugin-measurement
 revision: 1
 ---
 ## Idea

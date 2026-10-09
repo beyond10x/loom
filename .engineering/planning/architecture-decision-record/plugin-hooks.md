@@ -4,7 +4,7 @@ id: architecture-decision-record:plugin-hooks
 kind: architecture-decision-record
 status: accepted
 title: Loom hosts plugins through hooks around a governed run
-revision: 3
+revision: 4
 transitions:
 - {from: "proposed", to: "accepted", at: "2026-10-09T07:07:46Z", actor: "human:timo", revision: 2}
 ---
@@ -34,7 +34,7 @@ generlizable parts and express in YAML protocol+canon"; writes: "Read-only first
 "input -> classify(intent -> ask|request|task|find, tools=[...]) -> tool+datasource projection ->
 [begin agent_turn] ..agent loop with reasoning + tool-calls... [end] -> result"; data sources: "list
 them, get entities + schema, list, search, get them". He approved the plan and then asked
-conductor-dev to implement it ("mh, you should implement it now").
+an agent to implement it ("mh, you should implement it now").
 
 ## Consequences
 

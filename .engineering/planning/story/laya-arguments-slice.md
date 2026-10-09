@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:laya-arguments-slice
 kind: story
-status: draft
+status: active
 title: Laya picks the action, the reasoning model writes only its arguments
 summary: TASKBOARD I-004 vertical slice through selection, fallback, argument generation and revalidation.
 refs:
@@ -18,16 +18,21 @@ relations:
 - serves: vision:governed-autonomy
 scope:
 - confidence: inferred
-  path: crates/loom-commission-testkit/src/fake_governor.rs
-- confidence: cited
-  path: crates/loom-executor
+  path: AGENTS.md
 - confidence: inferred
-  path: crates/loom-executor/Cargo.toml
+  path: CHANGELOG.md
 - confidence: inferred
-  path: crates/loom-executor/src/lib.rs
+  path: Cargo.lock
 - confidence: inferred
-  path: crates/loom-executor/tests/laya_arguments_slice.rs
-revision: 6
+  path: crates/loom-selector-laya
+- confidence: inferred
+  path: crates/loom-selector-laya/Cargo.toml
+- confidence: inferred
+  path: crates/loom-selector-laya/tests/laya_arguments_slice.rs
+revision: 11
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-09T19:23:53Z", actor: "human:timo", revision: 10}
+- {from: "proposed", to: "active", at: "2026-10-09T19:23:53Z", actor: "human:timo", revision: 11}
 ---
 ## Outcome
 
@@ -79,3 +84,24 @@ From `epic:loom-native-harness`: revalidation before execution (TASKBOARD L-004)
 
 TASKBOARD I-004; `epic:fast-selector` Acceptance; Atlas ADR 0073; `docs/integrations/laya-fast-selection.md`;
 `docs/examples/laya-fast-selection.md`.
+
+## ESS first
+
+No specification change: the story composes types `ess/domains/run.yaml` already declares
+(`loom.run.Selection`, `loom.run.ArgumentRequest`, `SelectionStrategy`). Its red test is its own new
+test, `crates/loom-selector-laya/tests/laya_arguments_slice.rs`, failing before the slice is wired.
+
+Scoping notes (2026-10-09):
+
+- The test lives in `crates/loom-selector-laya/tests/` with `b10x-loom-commission` and
+  `b10x-loom-commission-testkit` as dev-dependencies. A test in `loom-executor` would need a
+  dev-dependency on the Laya selector, which `no_product_crate_depends_on_the_selector`
+  (`crates/loom-selector-laya/tests/laya_selector.rs`) refuses, because the CLI and the SDK reach
+  `loom-executor`.
+- The model-backed argument generator (`ModelArguments`, `harness/governed.rs`) is private; the
+  test counts calls through its own scripted `ArgumentGenerator`, which is what the acceptance
+  checks.
+- The membership check the domain relations cite is now `selection::select`
+  (`crates/loom-executor/src/selection.rs`); `crates/loom/src/lib.rs` no longer exists.
+- `decision-blocker:selection-telemetry-record` is cleared (2026-10-04) and built by
+  `story:selection-telemetry`; it is still out of this story.
