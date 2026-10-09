@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-09T07:12:12Z",
+  "actor": "human:timo",
+  "artifact": "story:plugin-measurement",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "plugin-layer plan revision 2",
+    "review": "review-result:plugin-layer-parallel-round-1",
+    "outcome": "fixed"
+  }
+}
