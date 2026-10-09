@@ -34,6 +34,12 @@
 //! `ConnectorInvoker::invoke` is synchronous and the client is async: the invoker owns a Tokio
 //! runtime and runs each invocation on it, so it can be called from any thread, including one
 //! inside another runtime.
+//!
+//! [`cli`] is a separate read client over the operator's `connectors` command line, for reads
+//! outside a run and inside one: it needs no admitted request and no binding, reads no
+//! credential and refuses every operation Connectors describes as a write.
+
+pub mod cli;
 
 use std::collections::BTreeMap;
 use std::fmt;

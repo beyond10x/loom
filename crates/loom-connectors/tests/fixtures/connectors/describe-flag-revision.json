@@ -1,0 +1,1 @@
+{"ok":true,"result":{"adapter":"chat","revision":"--approval-file","schema":"sch-get-1","operation":{"id":"message.get","description":"One message and its thread.","contract":"operations/v1alpha1","profile":"generic-http","input_schema":"{\"type\":\"object\"}","output_schema":"{\"type\":\"object\"}"},"source":"cached","stale":true}}

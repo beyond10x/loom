@@ -274,6 +274,27 @@ a write without a recorded attempt included, is `Err`. The sync port runs on a T
 invoker owns. `crates/loom-connectors/tests/connectors_invoker.rs` holds it against a fake service
 on a loopback port.
 
+`loom_connectors::cli::ConnectorsCli` is the other path: a plain read client over the operator's
+`connectors` command line, for a host polling a `loom.datasource` source outside a run and for a
+plugin turn's `source.read` inside one. It needs no `AdmittedRequest` and no binding. Each read is
+`operations describe`, then exactly one `operations invoke --input-stdin`, with `--output json` and
+the configured `--config` and `--state-dir`; argv holds only those flags and their ids. It reads
+no credential: the CLI's own keyring custody holds it, and the program starts with only the
+variables `cli::INHERITED` names, never a token. Writes are refused twice. The client refuses an
+operation `operations describe` reports with the `mutation` profile (`cli::WRITE_PROFILES`) before
+any invoke; `describe` prints no effect, and adapters publish other profiles, `resource` among
+them, for reads, which are read. Connectors refuses any write without `--approval-file` (connectors
+`v0.38.0`, `crates/connectors-host/src/local/owner/mutation/execution.rs:161`), which this client
+never passes (`no_invoke_ever_carries_an_approval_file`); that second check is what holds a write an
+adapter publishes under another profile. A kind the source declares no operation for starts no
+process. Each command is bounded by the configuration's `timeout_seconds` (60 when absent) and the
+process it started is killed and reaped past it; a process that process forked is not killed, and
+outlives the read. A Connectors refusal is a
+`ReadRefusal` naming the source, never retried; `not_granted`'s names the remedy, `connectors
+connections revalidate --adapter <alias>`, which the client never runs.
+`crates/loom-connectors/tests/connectors_cli.rs` and `connectors_cli_adversary.rs` hold it against
+the fake `tests/fixtures/connectors/fake-connectors`, which logs its argv.
+
 ## Intake and the command line
 
 The CLI's `Briefing` owns single-intent working context. `--context-policy bounded` is opt-in;
