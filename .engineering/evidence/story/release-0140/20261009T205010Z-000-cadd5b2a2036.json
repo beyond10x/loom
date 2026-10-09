@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-09T20:50:10Z",
+  "actor": "human:timo",
+  "artifact": "story:release-0140",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "tag 0.14.0 on 9aa9333 by b10x-bot[bot]; release run 37988490967 success; check 37987124458 and Shared source gates 37987124961 success on 9aa9333; GitHub Release https://github.com/beyond10x/loom/releases/tag/0.14.0 by b10x-bot[bot], latest"
+  }
+}
