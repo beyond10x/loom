@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:reasoning-model-selector
 kind: story
-status: active
+status: implemented
 title: Reasoning-model selector chooses one action from the given candidates
 summary: ActionSelector backed by the reasoning model; the stronger path fast selection falls back to.
 refs:
@@ -15,21 +15,20 @@ relations:
 - serves: vision:governed-autonomy
 scope:
 - confidence: cited
-  path: crates/loom-executor
-- confidence: inferred
-  path: crates/loom-executor/src/harness/governed.rs
-- confidence: inferred
-  path: crates/loom-executor/src/harness/wire/port.rs
-- confidence: inferred
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
   path: crates/loom-executor/src/lib.rs
 - confidence: cited
   path: crates/loom-executor/src/selection.rs
-- confidence: inferred
+- confidence: cited
   path: crates/loom-executor/tests/reasoning_model_selector.rs
-revision: 10
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-08T23:16:39Z", actor: "human:timo", revision: 9}
 - {from: "proposed", to: "active", at: "2026-10-08T23:16:39Z", actor: "human:timo", revision: 10}
+- {from: "active", to: "implemented", at: "2026-10-09T16:30:02Z", actor: "human:timo", revision: 12, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 

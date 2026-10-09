@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:confidence-fallback
 kind: story
-status: active
+status: implemented
 title: Low-confidence fast selections fall back to the stronger selector
 summary: Hybrid selector gated by a caller-supplied threshold; no built-in default.
 refs:
@@ -14,18 +14,27 @@ relations:
 - serves: vision:O3
 - serves: vision:governed-autonomy
 scope:
-- confidence: inferred
+- confidence: cited
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
   path: crates/loom-executor/src/lib.rs
 - confidence: cited
   path: crates/loom-executor/src/selection.rs
-- confidence: inferred
+- confidence: cited
+  path: crates/loom-executor/tests/adversary_w1_20261009_confidence_fallback.rs
+- confidence: cited
+  path: crates/loom-executor/tests/adversary_w1p2_20261009_confidence_fallback.rs
+- confidence: cited
   path: crates/loom-executor/tests/confidence_fallback.rs
-- confidence: inferred
+- confidence: cited
   path: docs/integrations/laya-fast-selection.md
-revision: 15
+revision: 18
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-08T23:16:39Z", actor: "human:timo", revision: 14}
 - {from: "proposed", to: "active", at: "2026-10-08T23:16:40Z", actor: "human:timo", revision: 15}
+- {from: "active", to: "implemented", at: "2026-10-09T16:30:02Z", actor: "human:timo", revision: 18, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 
@@ -99,3 +108,14 @@ TASKBOARD L-009; Atlas ADR 0073; `docs/integrations/laya-fast-selection.md` § C
 `Selection.confidence` is copied from the selector unvalidated (`crates/loom-executor/src/selection.rs:135`). This
 story is the first whose selector returns a confidence, so it validates the value at the seam: a
 decimal in [0, 1], refused otherwise.
+
+## Delivered
+
+## Delivered
+
+- The carried item above says a confidence outside a decimal in [0, 1] is "refused". As built,
+  `select` drops such a confidence and records the selection without one, so it counts as missing
+  (the acceptance's rule) and the hybrid falls back; the selection itself is not refused
+  (`crates/loom-executor/src/selection.rs`, `Confidence::parse` and `select`).
+- `select_action` still copies the confidence unchecked, as `ess/domains/run.yaml` specifies it.
+- Adversary pass 1 found leading-zero confidences accepted (fixed 6ca6a2b); pass 2 found nothing.

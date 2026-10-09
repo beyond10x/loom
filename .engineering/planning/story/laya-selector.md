@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:laya-selector
 kind: story
-status: active
+status: implemented
 title: Laya selector experiment behind the ActionSelector seam
 summary: FastTyped selector adapter for a local or hosted Laya endpoint, in its own crate.
 refs:
@@ -18,7 +18,7 @@ scope:
   path: AGENTS.md
 - confidence: cited
   path: CHANGELOG.md
-- confidence: inferred
+- confidence: cited
   path: Cargo.lock
 - confidence: cited
   path: README.md
@@ -26,16 +26,23 @@ scope:
   path: crates/loom-executor/tests/crate_names.rs
 - confidence: inferred
   path: crates/loom-selector-laya
-- confidence: inferred
+- confidence: cited
+  path: crates/loom-selector-laya/Cargo.toml
+- confidence: cited
+  path: crates/loom-selector-laya/src/lib.rs
+- confidence: cited
+  path: crates/loom-selector-laya/tests/laya_selector.rs
+- confidence: cited
   path: docs/contracts/loom-action-selection.md
-- confidence: inferred
+- confidence: cited
   path: docs/integrations/laya-fast-selection.md
 - confidence: cited
   path: website/docs/reference/crates.md
-revision: 9
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-08T23:16:40Z", actor: "human:timo", revision: 8}
 - {from: "proposed", to: "active", at: "2026-10-08T23:16:40Z", actor: "human:timo", revision: 9}
+- {from: "active", to: "implemented", at: "2026-10-09T16:30:02Z", actor: "human:timo", revision: 11, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 

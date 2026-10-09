@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:stale-governor-comments
 kind: story
-status: active
+status: implemented
 title: Two governor doc comments describe code that has since changed
 relations:
 - serves: vision:O1
@@ -11,10 +11,11 @@ scope:
   path: crates/loom-governor/src/lib.rs
 - confidence: cited
   path: crates/loom-governor/tests/adversary_w8_arbitrary_precision.rs
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-08T23:16:41Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-08T23:16:41Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-09T16:30:02Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 
