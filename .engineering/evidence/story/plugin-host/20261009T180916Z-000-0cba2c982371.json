@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-09T18:09:16Z",
+  "actor": "human:timo",
+  "artifact": "story:plugin-host",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check on wave/2026-10-09-w2 668d2d1: exit 0, 1564 passed, 0 failed, 8 ignored; task plan, task website exit 0"
+  }
+}

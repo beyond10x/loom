@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-09T18:01:28Z",
+  "actor": "human:timo",
+  "artifact": "story:slack-plugin",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-plugin-slack (19) and -p b10x-loom-cli (70, plugin 4 + sigterm) on impl/slack-plugin; base has no loom-plugin-slack and no plugin subcommand (red: task drift, stubbed dispatch)"
+  }
+}

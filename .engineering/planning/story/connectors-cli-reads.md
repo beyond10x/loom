@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:connectors-cli-reads
 kind: story
-status: active
+status: implemented
 title: Connectors reads run through a plain CLI client
 relations:
 - decomposes: epic:plugin-layer
@@ -28,10 +28,11 @@ scope:
   path: ess/system.yaml
 - confidence: cited
   path: generated/rust/loom
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-09T16:08:17Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":6}}}
 - {from: "proposed", to: "active", at: "2026-10-09T16:08:17Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":6}}}
+- {from: "active", to: "implemented", at: "2026-10-09T18:09:16Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":10,"verification":1}}}
 ---
 ## Why
 

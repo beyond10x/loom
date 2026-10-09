@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:plugin-host
 kind: story
-status: active
+status: implemented
 title: Loom hosts a plugin in a loop with hooks around a governed run
 relations:
 - decomposes: epic:plugin-layer
@@ -34,10 +34,11 @@ scope:
   path: website/data/status.json
 - confidence: cited
   path: website/docs/reference/crates.md
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-09T16:33:55Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":6}}}
 - {from: "proposed", to: "active", at: "2026-10-09T16:33:55Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":6}}}
+- {from: "active", to: "implemented", at: "2026-10-09T18:09:16Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":17,"verification":1}}}
 ---
 ## Why
 

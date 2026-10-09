@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:inbound-answer-protocol
 kind: story
-status: active
+status: implemented
 title: A read-only protocol answers an inbound item from data sources
 relations:
 - decomposes: epic:plugin-layer
@@ -16,10 +16,11 @@ scope:
   path: crates/loom-protocols/tests/inbound_answer.rs
 - confidence: cited
   path: protocols/inbound-answer/1.yaml
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-09T07:13:32Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"review_outcome":2}}}
 - {from: "proposed", to: "active", at: "2026-10-09T07:13:32Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"review_outcome":2}}}
+- {from: "active", to: "implemented", at: "2026-10-09T18:09:15Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":4,"verification":1}}}
 ---
 ## Why
 

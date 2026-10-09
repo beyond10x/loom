@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:slack-plugin
 kind: story
-status: draft
+status: implemented
 title: The slack-handler plugin finds unanswered Slack messages and proposes answers
 relations:
 - decomposes: epic:plugin-layer
@@ -39,7 +39,11 @@ scope:
   path: website/docs/reference/cli.md
 - confidence: cited
   path: website/docs/reference/crates.md
-revision: 6
+revision: 9
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-09T17:33:44Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":8}}}
+- {from: "proposed", to: "active", at: "2026-10-09T17:33:44Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":8}}}
+- {from: "active", to: "implemented", at: "2026-10-09T18:09:16Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":8,"verification":1}}}
 ---
 ## Why
 

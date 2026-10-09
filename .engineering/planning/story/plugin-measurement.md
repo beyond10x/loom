@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:plugin-measurement
 kind: story
-status: draft
+status: implemented
 title: A page measures the plugin layer and names what can become YAML
 relations:
 - decomposes: epic:plugin-layer
@@ -13,7 +13,11 @@ scope:
   path: docs/qualification/plugin-layer-measurement.md
 - confidence: cited
   path: docs/qualification/plugin-layer-measurement.sh
-revision: 5
+revision: 8
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-09T18:02:33Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":5}}}
+- {from: "proposed", to: "active", at: "2026-10-09T18:02:33Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":5}}}
+- {from: "active", to: "implemented", at: "2026-10-09T18:09:16Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"test_result":1,"review_outcome":5}}}
 ---
 ## Why
 
