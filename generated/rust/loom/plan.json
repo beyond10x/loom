@@ -2,14 +2,84 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "394821f0396bb3a17570338485b73d8deca7ebb2683022f51d2a1bfd9ff6b071",
-    "contract_digest": "13338a26fdf5612984f1fb0d4081af14c5d2dfeb6c2a7cb563fdb3f59f0c9697"
+    "source_digest": "e1bb43210be65dc6d79dc74d2c988eabf79b6c4dc3b946e02758171a1ad72c2a",
+    "contract_digest": "381342ab4314fb0e17b8c1c01145eb7abb6bd79a86ff290d77fac2b2d3aa1a10"
   },
   "scope": {
     "profile": "component-skeletons",
     "layout": "crate"
   },
   "capabilities": [
+    {
+      "kind": "domain_type",
+      "source": "loom.datasource.AdapterAlias",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.datasource.ConnectionId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.datasource.ConnectorsCliConfig",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.datasource.DataSource",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.datasource.OperationId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.datasource.ReadKind",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.datasource.ReadRefusal",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.datasource.ReadResult",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.datasource.SourceEntity",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.datasource.SourceName",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
     {
       "kind": "domain_type",
       "source": "loom.evaluation.ActionStatus",

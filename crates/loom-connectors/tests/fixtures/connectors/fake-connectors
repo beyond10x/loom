@@ -1,0 +1,52 @@
+#!/bin/sh
+# A fake `connectors` command line for the tests of `loom_connectors::cli`.
+#
+# Every run appends its argv to `<state-dir>/argv.log`, one line per run, arguments separated by a
+# tab; writes its environment to `<state-dir>/env.log`; and, for `operations invoke --input-stdin`,
+# appends the document it read on stdin to `<state-dir>/stdin.log`. The test names the log by the
+# `--state-dir` it passes.
+#
+# It answers `operations <verb>` with `<state-dir>/<verb>.<operation>.json`, else
+# `<state-dir>/<verb>.json`, copied there by the test from the JSON fixture files beside this
+# script. `<state-dir>/<verb>.exit`, when present, holds the exit status; a non-zero answer is
+# printed on stderr with stdout empty, as `connectors` prints a refusal.
+state=
+operation=
+verb=
+previous=
+for argument in "$@"; do
+    case "$previous" in
+        --state-dir) state=$argument ;;
+        --operation) operation=$argument ;;
+        operations) verb=$argument ;;
+    esac
+    previous=$argument
+done
+if [ -z "$state" ]; then
+    echo '{"ok":false,"error":{"code":"failure","data":{"code":"invalid_input","kind":"fake"}}}' >&2
+    exit 2
+fi
+line=
+for argument in "$@"; do
+    line="$line$argument	"
+done
+printf '%s\n' "$line" >>"$state/argv.log"
+env >"$state/env.log"
+if [ "$verb" = invoke ]; then
+    cat >>"$state/stdin.log"
+    printf '\n' >>"$state/stdin.log"
+fi
+answer="$state/$verb.$operation.json"
+[ -f "$answer" ] || answer="$state/$verb.json"
+if [ ! -f "$answer" ]; then
+    echo '{"ok":false,"error":{"code":"failure","data":{"code":"not_found","kind":"fake"}}}' >&2
+    exit 1
+fi
+status=0
+[ -f "$state/$verb.exit" ] && status=$(cat "$state/$verb.exit")
+if [ "$status" -eq 0 ]; then
+    cat "$answer"
+else
+    cat "$answer" >&2
+fi
+exit "$status"

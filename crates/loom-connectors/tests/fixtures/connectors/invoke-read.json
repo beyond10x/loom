@@ -1,0 +1,1 @@
+{"ok":true,"result":{"adapter":"chat","operation":"channel.history","revision":"rev-1","result":{"messages":[{"channel":"C0FIXTURE1","ts":"1700000000.000100","user":"U0ALICE","text":"Is the deploy finished?"}],"has_more":false}}}

@@ -400,6 +400,7 @@ dependencies = [
  "b10x-loom-commission-testkit",
  "connectors-client",
  "connectors-core",
+ "loom",
  "serde_json",
  "tokio",
 ]

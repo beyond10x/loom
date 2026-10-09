@@ -1,0 +1,1 @@
+{"ok":true,"result":{"adapter":"chat","operation":"channel.history","revision":"rev-1","result":{"messages":[],"has_more":false},"request_id":"00000000-0000-4000-8000-000000000001","source_audit":{"instance":"chat-fixture","audit_ref":"00000000-0000-4000-8000-0000000a0d17","audit_status":"complete"}}}
