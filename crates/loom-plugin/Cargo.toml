@@ -1,0 +1,20 @@
+[package]
+name = "b10x-loom-plugin"
+description = "The plugin host: runs a plugin's poll, classify, project, turn and result hooks in a loop, each turn a governed read-only run over Connectors data sources, and keeps one record line per handled item."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "b10x_loom_plugin"
+
+[dependencies]
+b10x-loom-sdk = { path = "../loom-sdk" }
+b10x-llm-tool-call = { git = "https://github.com/beyond10x/llm", tag = "0.4.0" }
+chrono = "0.4"
+llm-core = { package = "b10x-llm-core", git = "https://github.com/beyond10x/llm", tag = "0.4.0" }
+loom = { path = "../../generated/rust/loom" }
+serde_json = "1"
+tokio = { version = "1.53", features = ["rt"] }

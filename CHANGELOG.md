@@ -16,6 +16,25 @@ under **Unreleased** until the next release.
   once one of the two is recorded, the other action is blocked.
 - `ProtocolCatalog::plugins()`, the plugin host's catalog, holds `inbound-answer@1`.
   `ProtocolCatalog::bundled()`, which routing and `protocols list` read, does not.
+- `b10x-loom-plugin`, the plugin host, and the `loom.plugin` ESS domain it is written against. A
+  `Plugin` has the hooks `poll`, `classify`, `project`, `turn`, `result` and `objectives`, and
+  `run_plugin(plugin, config, state, stop)` runs them in a loop until `stop` is set (a `stop`
+  already set runs one cycle). The default `classify` makes one forced `classify_item` call; an
+  item below `classify_threshold` (default 0.5) is recorded `unclassified` and gets no turn. The
+  default `project` admits `source.read`, `reply.propose` and `reply.decline` over configured
+  sources for ask, find and request, and nothing for a task, which records the protocol the
+  router picks from `ProtocolCatalog::bundled()` as a proposed case. A turn runs Commission's
+  `run_until_blocked` on `inbound-answer@1` with Loom's governed model loop, an authority
+  provider granting only `datasource.read` and `reply.propose`, and `DataSourceEffects`, which
+  reads through the Connectors command line, refuses a read outside the turn's projection and
+  submits one `source_read` evidence per performed read. A turn sends at most 8 model requests,
+  retries included. A proposal is written to the record and never sent. An item whose hook fails
+  is kept in the state and retried each cycle, and its third unsuccessful attempt records it
+  `stopped`; an outage that is not about the item counts against none. Each handled item adds
+  one line to `record.jsonl`, which also decides what is handled, and a torn last line is
+  dropped; `state.json` is written through a temporary file and a rename. One host holds a state
+  directory at a time, and a state directory inside a configured workspace root or checkout is
+  refused.
 
 ## [0.11.0] - 2026-10-08
 
