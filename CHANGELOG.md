@@ -6,6 +6,17 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- `protocols/inbound-answer/1.yaml`, registered `inbound-answer@1`: a read-only protocol that
+  answers an inbound item from data sources. It offers `source.read` (`effect: read`, capability
+  `datasource.read`), `reply.propose` (`effect: none`, capability `reply.propose`; records a
+  proposal and never sends) and `reply.decline` (`effect: none`, no capability). It is `proposed`
+  only with a proposed reply and at least one source read, and `declined` with a recorded decline;
+  once one of the two is recorded, the other action is blocked.
+- `ProtocolCatalog::plugins()`, the plugin host's catalog, holds `inbound-answer@1`.
+  `ProtocolCatalog::bundled()`, which routing and `protocols list` read, does not.
+
 ## [0.11.0] - 2026-10-08
 
 Loom 0.11.0 builds on engineering-protocols 0.3.0, whose `incident.response/1` keeps an

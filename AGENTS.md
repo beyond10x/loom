@@ -51,6 +51,14 @@ not model output; only Canon completion makes a query successful. The integratio
 holds this path in both context modes. `protocols add/list/remove` manage user installations;
 `--replace` is explicit and bundled definitions cannot be shadowed. The SDK exports the catalog.
 
+Loom also owns `protocols/inbound-answer/1.yaml` (`inbound-answer@1`), the read-only protocol a
+plugin turn answers an inbound item under: `source.read` reads (capability `datasource.read`),
+`reply.propose` records a proposal and `reply.decline` a decline, and neither sends anything. It
+is the one exception to a single catalog: a plugin host admits on `ProtocolCatalog::plugins()`,
+which holds it, while routing, `protocols list` and a plugin's task path read `bundled()`, which
+does not. A plugin protocol is never routed to, and a routed protocol is never run by a plugin
+turn. `crates/loom-protocols/tests/inbound_answer.rs` holds both catalogs.
+
 ## Rules
 
 - Model-visible actions derive from the current frontier and runtime capability. Nothing
