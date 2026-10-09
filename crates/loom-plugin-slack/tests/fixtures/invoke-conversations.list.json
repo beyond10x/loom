@@ -1,0 +1,8 @@
+{"ok":true,"result":{"adapter":"slack","operation":"conversations.list","revision":"rev-1","result":{
+  "ok": true,
+  "channels": [
+    {"id": "C0FIXTURE1", "name": "fixture-help", "is_channel": true, "is_member": true, "is_archived": false, "created": 1690000000, "num_members": 12},
+    {"id": "C0OUTSIDE", "name": "fixture-elsewhere", "is_channel": true, "is_member": false, "is_archived": false, "created": 1690000000, "num_members": 40}
+  ],
+  "response_metadata": {"next_cursor": ""}
+}}}

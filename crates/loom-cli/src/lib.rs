@@ -3,8 +3,9 @@
 //! The command is the `b10x-loom` binary (`src/main.rs`). This library holds only the definition
 //! of its command line, so `loom-docs` can generate the CLI reference from it, the exit status a
 //! stop reason maps to, the run event stream `run --output jsonl` writes ([`events`]), the
-//! JSON `evaluate` reads and writes ([`evaluate`]), and the llm catalog `run --catalog` reads
-//! ([`model_catalog`]).
+//! JSON `evaluate` reads and writes ([`evaluate`]), the llm catalog `run --catalog` reads
+//! ([`model_catalog`]), the bridge that runs a plugin turn on an llm model ([`model_port`]), and
+//! the lines `plugin run --once` and `plugin report` print ([`plugin`]).
 
 use std::path::PathBuf;
 
@@ -42,6 +43,8 @@ Exit status:
 pub mod evaluate;
 pub mod events;
 pub mod model_catalog;
+pub mod model_port;
+pub mod plugin;
 pub mod regular_file;
 
 /// The exit status a run that stopped for `reason` returns, as [`EXIT_STATUS`] states it.
@@ -81,6 +84,99 @@ pub enum Command {
     /// JSON. It decides and never acts.
     #[command(after_help = EVALUATE_HELP)]
     Evaluate(EvaluateArgs),
+    /// Host a plugin, or print what it proposed. A plugin reads and proposes; it never sends.
+    Plugin(PluginArgs),
+}
+
+/// What `plugin run --help` says about the configuration, the models, the output and the exit
+/// status.
+pub const PLUGIN_RUN_HELP: &str = "The configuration is the plugin's JSON configuration file. For slack-handler it is
+loom.slack.SlackConfig: the host's plugin configuration under \"plugin\" (the connectors command line,
+the data sources a turn may read, the objectives, the classification threshold, the poll interval),
+the Slack adapter, connection and read operations, the bot's user id, min_age_minutes, the seed,
+lookback_minutes and the objectives each channel serves. It is checked before anything runs.
+
+Each cycle polls, classifies every new item, answers a question in a governed read-only turn over the
+data sources and records the proposed reply, records a task's proposed case, and appends one line per
+handled item to record.jsonl in the state directory. Nothing is sent. With --once it runs one cycle
+and prints one line per proposal it recorded. Without it, it polls every poll_interval_seconds until
+SIGTERM or SIGINT, which end it after the item being handled (a second one ends it at once, exit
+status 130), and then prints one line per proposal it recorded.
+
+Exit status:
+  0  the cycles ran
+  1  the configuration, the models or the state directory cannot be used, or the last cycle's poll
+     failed (a failed poll is otherwise retried after poll_interval_seconds)
+  2  the command line is not valid (an unknown plugin name among them)
+  130  a second SIGTERM or SIGINT ended it at once";
+
+/// The plugins `plugin` hosts, by the name the command line takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PluginName {
+    /// Walks the Slack channels the bot is a member of and proposes answers to unanswered
+    /// messages, mentions first.
+    #[value(name = "slack-handler")]
+    SlackHandler,
+}
+
+/// The arguments of `b10x-loom plugin`.
+#[derive(Debug, Args)]
+pub struct PluginArgs {
+    #[command(subcommand)]
+    pub command: PluginCommand,
+}
+
+/// The commands of `b10x-loom plugin`.
+#[derive(Debug, Subcommand)]
+pub enum PluginCommand {
+    /// Host a plugin: poll, classify and answer each new item in a governed read-only turn, and
+    /// record one line per handled item. Nothing is sent.
+    #[command(after_help = PLUGIN_RUN_HELP)]
+    Run(PluginRunArgs),
+    /// Print one line per proposal a plugin recorded in its state directory: a proposed reply or
+    /// a proposed case.
+    Report(PluginReportArgs),
+}
+
+/// The arguments of `b10x-loom plugin run`.
+#[derive(Debug, Args)]
+pub struct PluginRunArgs {
+    /// The plugin to host.
+    #[arg(value_enum, value_name = "PLUGIN")]
+    pub plugin: PluginName,
+    /// The plugin's JSON configuration file.
+    #[arg(long, value_name = "PATH")]
+    pub config: PathBuf,
+    /// The plugin's state directory: its cursors and record. It must lie outside every
+    /// workspace root and checkout the configuration names; one host holds it at a time.
+    #[arg(long, value_name = "DIR")]
+    pub state: PathBuf,
+    /// Run one cycle and stop.
+    #[arg(long)]
+    pub once: bool,
+    /// An llm catalog (`llm.catalog/1` TOML) in a regular file. With it, `--model` and
+    /// `--classifier-model` each name a route alias of this catalog instead of a Codex model; an
+    /// alias it does not declare, or a catalog that cannot be read, stops before any model call.
+    #[arg(long, value_name = "PATH")]
+    pub catalog: Option<PathBuf>,
+    /// The model each turn runs on: a Codex model name, or with `--catalog` a route alias.
+    #[arg(long, value_name = "ID", default_value = DEFAULT_MODEL)]
+    pub model: String,
+    /// The model that classifies each item and picks a task's protocol: a Codex model name, or
+    /// with `--catalog` a route alias.
+    #[arg(long, value_name = "ID", default_value = DEFAULT_MODEL)]
+    pub classifier_model: String,
+}
+
+/// The arguments of `b10x-loom plugin report`.
+#[derive(Debug, Args)]
+pub struct PluginReportArgs {
+    /// The plugin whose record is read.
+    #[arg(value_enum, value_name = "PLUGIN")]
+    pub plugin: PluginName,
+    /// The plugin's state directory.
+    #[arg(long, value_name = "DIR")]
+    pub state: PathBuf,
 }
 
 /// The arguments of `b10x-loom evaluate`.
@@ -226,6 +322,16 @@ mod tests {
         ] {
             assert_eq!(exit_status(reason), 3);
         }
+    }
+
+    #[test]
+    fn each_plugin_name_is_the_name_its_crate_registers() {
+        let names: Vec<String> = PluginName::value_variants()
+            .iter()
+            .filter_map(|name| name.to_possible_value())
+            .map(|value| value.get_name().to_owned())
+            .collect();
+        assert_eq!(names, [b10x_loom_plugin_slack::NAME]);
     }
 
     #[test]

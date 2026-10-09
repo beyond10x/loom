@@ -20,6 +20,9 @@ serde_json = "1"
 b10x-loom-governor = { path = "../loom-governor" }
 b10x-llm-tool-call = { git = "https://github.com/beyond10x/llm", tag = "0.4.0" }
 b10x-loom-intake-slice = { path = "../loom-intake-slice" }
+b10x-loom-plugin = { path = "../loom-plugin" }
+b10x-loom-plugin-slack = { path = "../loom-plugin-slack" }
+b10x-loom-sdk = { path = "../loom-sdk" }
 b10x-llm-core = { git = "https://github.com/beyond10x/llm", tag = "0.4.0" }
 b10x-llm-models = { git = "https://github.com/beyond10x/llm", tag = "0.4.0" }
 b10x-llm-routing = { git = "https://github.com/beyond10x/llm", tag = "0.4.0" }
@@ -29,6 +32,7 @@ intake_model = { package = "intake", path = "../../generated/rust/intake" }
 clap = { version = "4.6", features = ["derive"] }
 tempfile = "3"
 libc = "0.2"
+tokio = { version = "1.53", features = ["rt", "signal", "macros"] }
 
 [dev-dependencies]
 b10x-loom-commission = { path = "../loom-commission" }

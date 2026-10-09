@@ -98,6 +98,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | A consequential action leaves Loom only as a proposal, and the executor links no Connectors crate | `crates/loom-executor/tests/connector_boundary.rs` (`consequential_actions_leave_loom_only_as_a_proposal`) |
 | A Connector invocation is made once, and only Connectors' own "nothing changed" is a refusal | `crates/loom-connectors/tests/connectors_invoker.rs` |
 | A plugin turn reads only the sources and kinds of its projection, and a proposal is recorded, never sent | `crates/loom-plugin/tests/effects.rs` (`effects_refuse_an_undeclared_read`, `propose_writes_the_record_only`) |
+| A slack-handler run describes and invokes only the three configured Slack reads and the turns' data-source reads, and records one line per item it proposes for; nothing is sent | `crates/loom-plugin-slack/tests/run.rs` (`fixture_run_invokes_no_write`, `fixture_run_records_three_proposals`) |
 | A read through Connectors is performed naming its audit record; a write without a recorded attempt is an error | `crates/loom-connectors/tests/connectors_invoker.rs` (`an_admitted_read_is_performed_with_its_result_and_names_its_audit_record`, `a_write_without_a_recorded_attempt_is_still_an_error`), `crates/loom-commission-testkit/tests/effect_invocation.rs` (`a_performed_that_names_another_record_than_its_binding_requires_is_not_answered`) |
 | The executor answers the commands of `ess/` as their synthesized scenarios specify, except `not-in-frontier`, which the conformance target answers | `task conform` (`crates/loom-conformance/tests/conform.rs`, `ess_conformance_report`); the membership rule: `crates/loom-executor/tests/adversary_run_revalidation.rs` (`not_in_frontier_follows_the_frontier_actions`) |
 | The router refuses a pick outside the registry or below the threshold | `crates/loom-intake-router/tests/adversary_classify.rs` |
@@ -322,15 +323,51 @@ retries the failing items from the state before it polls, and the third attempt 
 succeed records it `stopped`. A failure that is not about the item (`PluginError::Unavailable`:
 sources that cannot be described, a read whose connectors program timed out or that Connectors
 refused `not_granted`, a model that cannot be reached, the router's model or catalog) counts
-against none and ends the cycle without saving the poll's cursors. The state directory
+against none and ends the cycle without saving the poll's cursors. A poll that fails is such an
+outage of the whole host: the cycle saves no cursor and the host polls again after its interval;
+`run_plugin` returns the poll's failure only when `stop` ends it after that cycle (`once`). A
+`stop` set while the host runs ends it after the item being handled, leaving the poll's other items
+and its cursors to the next host; a `stop` already set at start (`once`) runs its whole cycle
+(`crates/loom-plugin/tests/host.rs`, `a_poll_outage_does_not_stop_the_host`,
+`a_stop_ends_the_host_after_the_current_item`). The state directory
 holds `state.json`, written to a temporary file and renamed, and `record.jsonl`, the source of
 truth for handled items, whose torn last line is dropped under the lock. One host holds it at a
 time: `run_plugin` takes an exclusive lock on the record before anything else, and a second host
 is refused once the lock stayed held for `LOCK_WAIT`. One inside a configured workspace root or
 checkout is refused by comparing paths, with no git command. The tests in
 `crates/loom-plugin/tests/` use a recorded classifier, a scripted model port and the fake
-`connectors` of `loom-connectors`. The command line (`b10x-loom plugin run|report`) is not wired
-yet.
+`connectors` of `loom-connectors`. The command line hosts registered plugins through
+`b10x-loom plugin run|report` (§ Slack handler).
+
+## Slack handler
+
+`b10x-loom-plugin-slack` (`crates/loom-plugin-slack`) is the slack-handler plugin, the one
+`b10x-loom plugin run` registers (`PluginName`, held to the crate's `NAME` by a unit test of
+`b10x-loom-cli`). Its configuration is the `loom.slack` domain's `SlackConfig`
+(`ess/domains/slack.yaml`), which holds the host's `PluginConfig`; `config::read` decodes it from
+JSON, refuses an unknown member, and `config::check` refuses one without the bot's user id, the
+Slack adapter or connection before anything runs. Its own hook is the poll; classification,
+projection, the turn and the record are the host's defaults. The poll reads only through
+`ConnectorsCli::invoke_read` on the configured adapter and connection, with the three configured
+read operations, and never a write: the channel list, each member channel's history from its
+stored `ts`, and a thread only for a message with replies. The walk orders channels by objective
+weight, staleness, member count, then a seeded draw. A message younger than `min_age_minutes`, a
+bot's, a system message (`subtype` other than `file_share`), one the bot reacted to or one with a
+thread reply from anybody but its poster is no item; mentions of the bot come first. A channel's
+cursor never passes a message too young to judge. The tests in `crates/loom-plugin-slack/tests/`
+reuse `crates/loom-plugin/tests/support/mod.rs` by path and answer Slack-shaped JSON from
+`tests/fixtures/` through the fake `connectors`; ids there are synthetic.
+
+`b10x-loom plugin run` settles both models before any read: with `--catalog` from route aliases
+(`model_catalog`), otherwise Codex models, as `run` does. A turn runs on
+`model_port::LlmModelPort`, the bridge from an llm `Model` to the harness `ModelPort`: one
+`Model::turn` per port turn, no retry and no other target, an opaque item carried back under the
+wire id `llm-model` only. Without `--once`, the first SIGTERM or SIGINT sets the host's stop, so
+a systemd stop ends it after the item being handled; a second one exits at once with 130
+(`plugin_run_stops_on_sigterm`). `plugin report` reads `record.jsonl` without the lock and drops a torn
+last line. `crates/loom-cli/tests/plugin.rs` runs the binary against the fake `connectors` and the
+fixture catalog at a loopback socket replaying recorded responses.
+
 ## Laya selector
 
 `b10x-loom-selector-laya` (`crates/loom-selector-laya`) is an experimental `FastTyped`

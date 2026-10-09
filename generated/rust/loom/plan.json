@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "f3af5c9e850163e564232367b8200696d02f52deb9b2fe97676b33525d970bd0",
-    "contract_digest": "b22a63cd15b4b14521a04844fc21145ce4639632cccce11fd691fe08e65f0bec"
+    "source_digest": "866bbd9d47246b4227f3631ebb34d83e265512af496b4fe99b0098c8cc298c10",
+    "contract_digest": "08c02cd39830806f4c6eaa95dfea4ecf631c548ae35d9b4e43d6ab0db1b725ec"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -468,6 +468,20 @@
     {
       "kind": "domain_type",
       "source": "loom.run.WireCredential",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.slack.ChannelObjectives",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.slack.SlackConfig",
       "disposition": {
         "disposition": "generated"
       }

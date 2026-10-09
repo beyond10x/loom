@@ -1,0 +1,8 @@
+{"ok":true,"result":{"adapter":"slack","operation":"conversations.replies","revision":"rev-1","result":{
+  "ok": true,
+  "messages": [
+    {"type": "message", "user": "U0DAVE", "text": "Who owns the billing service?", "ts": "1700000300.000300", "thread_ts": "1700000300.000300", "reply_count": 1, "latest_reply": "1700000350.000350"},
+    {"type": "message", "user": "U0ERIN", "text": "The payments team does.", "ts": "1700000350.000350", "thread_ts": "1700000300.000300", "parent_user_id": "U0DAVE"}
+  ],
+  "has_more": false
+}}}

@@ -446,6 +446,219 @@ fn a_held_state_directory_refuses_a_second_host() {
     StateDir::open(&state, &config).expect("released once the first host is gone");
 }
 
+/// A plugin whose poll fails while `failures` is above 0, counting down, then answers `items` and
+/// a cursor naming the poll's number; its turn sets `stop`.
+struct Flaky {
+    items: Vec<b10x_loom_plugin::InboundItem>,
+    classifier: Recorded,
+    failures: std::sync::atomic::AtomicUsize,
+    polls: std::sync::atomic::AtomicUsize,
+    stop: Arc<AtomicBool>,
+}
+
+impl b10x_loom_plugin::Plugin for Flaky {
+    fn name(&self) -> &str {
+        "flaky"
+    }
+
+    fn poll(
+        &self,
+        _host: &b10x_loom_plugin::Host<'_>,
+        _state: &PluginState,
+        _objectives: &[b10x_loom_plugin::Objective],
+    ) -> Result<b10x_loom_plugin::Poll, PluginError> {
+        let n = self.polls.fetch_add(1, Ordering::SeqCst) + 1;
+        if self.failures.load(Ordering::SeqCst) > 0 {
+            self.failures.fetch_sub(1, Ordering::SeqCst);
+            return Err(PluginError::Poll(format!("poll {n}: the source is down")));
+        }
+        Ok(b10x_loom_plugin::Poll {
+            items: self.items.clone(),
+            cursors: vec![Cursor {
+                name: "C0FIXTURE1".to_owned(),
+                value: format!("poll-{n}"),
+            }],
+        })
+    }
+
+    fn classifier(&self) -> Result<&dyn llm_core::Model, PluginError> {
+        Ok(&self.classifier)
+    }
+
+    fn turn_model(&self) -> Result<b10x_loom_plugin::TurnModel<'_>, PluginError> {
+        self.stop.store(true, Ordering::SeqCst);
+        Ok(
+            support::Scripted::new(read_then_propose("Yes, it finished."))
+                .0
+                .into_turn_model(),
+        )
+    }
+}
+
+/// A poll that fails is a host-wide outage: the cycle records nothing for the poll and saves no
+/// cursor, and the host polls again after its interval instead of stopping. With `once` it
+/// returns the poll's failure after that one cycle.
+#[test]
+fn a_poll_outage_does_not_stop_the_host() {
+    let fixture = Fixture::new("host", "poll-outage");
+    let config = fixture.config(vec![chat()]);
+    let stop = Arc::new(AtomicBool::new(false));
+    let plugin = Flaky {
+        items: vec![item("item-1")],
+        classifier: Recorded::classifying("ask", &["chat"], 0.9),
+        failures: std::sync::atomic::AtomicUsize::new(1),
+        polls: std::sync::atomic::AtomicUsize::new(0),
+        stop: Arc::clone(&stop),
+    };
+
+    let lines = run_plugin_on(
+        &plugin,
+        &fixture.host(&config),
+        &fixture.plugin_state(),
+        &stop,
+    )
+    .expect("the host outlives a failed poll");
+
+    assert_eq!(plugin.polls.load(Ordering::SeqCst), 2, "polled again");
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(lines[0].outcome, RecordOutcome::Proposed, "{lines:?}");
+    let held = StateDir::open(&fixture.plugin_state(), &config).unwrap();
+    assert_eq!(held.record().unwrap().len(), 1, "the item is recorded once");
+    assert_eq!(
+        held.load().unwrap().cursors,
+        vec![Cursor {
+            name: "C0FIXTURE1".to_owned(),
+            value: "poll-2".to_owned()
+        }],
+        "only the poll that answered moved a cursor"
+    );
+    drop(held);
+
+    let once = Fixture::new("host", "poll-outage-once");
+    let config = once.config(vec![chat()]);
+    let plugin = Flaky {
+        items: vec![item("item-1")],
+        classifier: Recorded::classifying("ask", &["chat"], 0.9),
+        failures: std::sync::atomic::AtomicUsize::new(1),
+        polls: std::sync::atomic::AtomicUsize::new(0),
+        stop: Arc::new(AtomicBool::new(false)),
+    };
+    let ended = run_plugin_on(
+        &plugin,
+        &once.host(&config),
+        &once.plugin_state(),
+        &AtomicBool::new(true),
+    );
+    match ended {
+        Err(PluginError::Poll(why)) => assert!(why.contains("the source is down"), "{why}"),
+        other => panic!("once returns the poll's failure, not {other:?}"),
+    }
+    assert_eq!(plugin.polls.load(Ordering::SeqCst), 1, "one cycle");
+    let held = StateDir::open(&once.plugin_state(), &config).unwrap();
+    assert!(held.record().unwrap().is_empty(), "nothing is recorded");
+    assert!(
+        held.load().unwrap().cursors.is_empty(),
+        "no cursor is saved"
+    );
+}
+
+/// A plugin answering `items` on every poll whose turn sets `stop`, as a stop signal arriving
+/// while an item is handled does.
+struct StopsInTurn {
+    items: Vec<b10x_loom_plugin::InboundItem>,
+    classifier: Recorded,
+    turns: std::sync::atomic::AtomicUsize,
+    stop: Arc<AtomicBool>,
+}
+
+impl b10x_loom_plugin::Plugin for StopsInTurn {
+    fn name(&self) -> &str {
+        "stops-in-turn"
+    }
+
+    fn poll(
+        &self,
+        _host: &b10x_loom_plugin::Host<'_>,
+        _state: &PluginState,
+        _objectives: &[b10x_loom_plugin::Objective],
+    ) -> Result<b10x_loom_plugin::Poll, PluginError> {
+        Ok(b10x_loom_plugin::Poll {
+            items: self.items.clone(),
+            cursors: vec![Cursor {
+                name: "C0FIXTURE1".to_owned(),
+                value: "polled".to_owned(),
+            }],
+        })
+    }
+
+    fn classifier(&self) -> Result<&dyn llm_core::Model, PluginError> {
+        Ok(&self.classifier)
+    }
+
+    fn turn_model(&self) -> Result<b10x_loom_plugin::TurnModel<'_>, PluginError> {
+        self.turns.fetch_add(1, Ordering::SeqCst);
+        self.stop.store(true, Ordering::SeqCst);
+        Ok(
+            support::Scripted::new(read_then_propose("Yes, it finished."))
+                .0
+                .into_turn_model(),
+        )
+    }
+}
+
+/// A stop set while an item is handled ends the host after that item: the rest of the poll's
+/// items wait, unhandled, and the poll's cursors are not saved, so the next host polls them again.
+/// A stop already set when the host starts (`once`) still runs its whole cycle.
+#[test]
+fn a_stop_ends_the_host_after_the_current_item() {
+    let fixture = Fixture::new("host", "stop-after-item");
+    let config = fixture.config(vec![chat()]);
+    let stop = Arc::new(AtomicBool::new(false));
+    let plugin = StopsInTurn {
+        items: vec![item("item-1"), item("item-2"), item("item-3")],
+        classifier: Recorded::classifying("ask", &["chat"], 0.9),
+        turns: std::sync::atomic::AtomicUsize::new(0),
+        stop: Arc::clone(&stop),
+    };
+    let host = fixture.host(&config);
+
+    let stopped =
+        run_plugin_on(&plugin, &host, &fixture.plugin_state(), &stop).expect("the host stops");
+
+    let ids = |lines: &[RecordLine]| -> Vec<String> {
+        lines.iter().map(|line| line.item.0.clone()).collect()
+    };
+    assert_eq!(ids(&stopped), ["item-1"], "the current item is finished");
+    assert_eq!(
+        plugin.turns.load(Ordering::SeqCst),
+        1,
+        "no further item began"
+    );
+    let held = StateDir::open(&fixture.plugin_state(), &config).unwrap();
+    assert!(
+        held.load().unwrap().cursors.is_empty(),
+        "the poll's cursors wait for its unhandled items"
+    );
+    drop(held);
+
+    let once = run_plugin_on(
+        &plugin,
+        &host,
+        &fixture.plugin_state(),
+        &AtomicBool::new(true),
+    )
+    .expect("one cycle");
+
+    assert_eq!(
+        ids(&once),
+        ["item-2", "item-3"],
+        "once runs its whole cycle"
+    );
+    let held = StateDir::open(&fixture.plugin_state(), &config).unwrap();
+    assert_eq!(ids(&held.record().unwrap()), ["item-1", "item-2", "item-3"]);
+    assert_eq!(held.load().unwrap().cursors.len(), 1);
+}
+
 /// A plugin whose classify panics, as a host killed mid-attempt does, while `crash` is set.
 struct Crashing {
     items: Vec<b10x_loom_plugin::InboundItem>,
