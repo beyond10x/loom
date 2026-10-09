@@ -348,6 +348,7 @@ pub enum LoopEvent {
     /// The delegate inside `call_id` ended, however it ended.
     DelegateFinished {
         call_id: CallId,
+        #[serde(with = "super::stop_codec")]
         stop: LoopStop,
         turns: u64,
     },
@@ -368,6 +369,7 @@ pub enum LoopEvent {
         decision: HookDecision,
     },
     Finished {
+        #[serde(with = "super::stop_codec")]
         stop: LoopStop,
         /// How many model turns the run took, counting the first.
         ///
@@ -439,6 +441,7 @@ impl LoopSink for NullLoopSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::harness::turn_loop::LoopStopMaxTurns;
 
     #[test]
     fn a_vec_sink_reassembles_text_and_lists_warnings() {
@@ -599,7 +602,7 @@ mod tests {
             call_id: call_id.clone(),
             event: Box::new(LoopEvent::DelegateFinished {
                 call_id: call_id.clone(),
-                stop: LoopStop::MaxTurns { limit: 20 },
+                stop: LoopStop::MaxTurns(LoopStopMaxTurns { limit: 20 }),
                 turns: 20,
             }),
         };

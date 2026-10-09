@@ -6,6 +6,19 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `LoopStop` is generated from `loom.run.LoopStop` in `ess/domains/run.yaml` (format
+  `ess/22`); the hand-written enum is gone. Its variants are tuple variants over payload structs
+  (`LoopStopMaxTurns`, `LoopStopMaxInputTokens`, `LoopStopMaxOutputTokens`, `LoopStopMaxCost`,
+  `LoopStopBudgetUnobservable`, `LoopStopDeadline`, `LoopStopCancelled`, `LoopStopAwaitingApproval`,
+  `LoopStopProviderIncomplete`, `LoopStopUnstructured`, `LoopStopContextAboveTrigger`), re-exported
+  from `harness::turn_loop`; `Completed` stays a unit variant. Every count field is `i64` (was
+  `u64`, and `u32` for `asked_again`). `LoopStop::is_completed` is removed; compare with
+  `LoopStop::Completed`. `LoopStop` no longer implements `Serialize`/`Deserialize` on its own;
+  `LoopOutcome` and `LoopEvent` write the same JSON as before. Reading is stricter: a `completed`
+  stop with extra fields is refused, as are negative, fractional or out-of-range numbers.
+
 ## [0.13.0] - 2026-10-09
 
 Loom 0.13.0 adds a plugin layer: an unattended agent is a Loom plugin, hooks around a governed

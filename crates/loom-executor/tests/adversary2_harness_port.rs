@@ -68,6 +68,12 @@ const ALLOWED: [(&str, &[&str], &[&str]); 5] = [
     ),
 ];
 
+/// What of the rest of Loom a ported module may name, beyond its Harness manifest: one entry per
+/// grant, `(module, Loom module)`. `turn_loop` names the generated model (`crate::model`) because
+/// `LoopStop`, which it constructs and matches, is declared in `ess/domains/run.yaml` and
+/// generated; no other module of Loom is granted.
+const LOOM_GRANTS: [(&str, &str); 1] = [("turn_loop", "model")];
+
 /// Every crate `crates/loom-executor/Cargo.toml` makes nameable inside the crate, read from the manifest
 /// so that a dependency added later is refused to every ported module that was not granted it.
 fn loom_extern_crates() -> BTreeSet<String> {
@@ -513,7 +519,9 @@ fn crossings(rel: &Path, src: &str, externs: &BTreeSet<String>) -> Vec<String> {
             Some(m) => modules.contains(&m.trim_end_matches('`')),
             None => match what.strip_prefix("crate `") {
                 Some(c) => crates.contains(&c.trim_end_matches('`')),
-                None => false,
+                None => LOOM_GRANTS
+                    .iter()
+                    .any(|(m, loom)| *m == own && what == format!("Loom's `crate::{loom}`")),
             },
         };
         if !allowed {
@@ -623,6 +631,66 @@ fn the_allowlist_scan_finds_every_form_a_crate_boundary_refused() {
     }
 }
 
+/// `LOOM_GRANTS` admits `crate::model` to `turn_loop` alone, and nothing else of Loom to it: run on
+/// planted sources, since no ported module but `turn_loop` names the model today and the grant
+/// had no case that showed it can refuse (adversary pass 1 on `story:loop-stop-model`).
+#[test]
+fn the_model_grant_admits_turn_loop_alone_and_the_model_alone() {
+    let externs = loom_extern_crates();
+    let refused = [
+        ("wire/turn.rs", "use crate::model::run::LoopStop;\n"),
+        (
+            "messages/mod.rs",
+            "fn f() -> crate::model::run::LoopStop { todo!() }\n",
+        ),
+        (
+            "responses/mod.rs",
+            "use crate::model as m;\nuse m::run::LoopStop;\n",
+        ),
+        (
+            "http/sse.rs",
+            "use super::super::super::model::run::LoopStop;\n",
+        ),
+        ("turn_loop/mod.rs", "use crate::session::SessionFile;\n"),
+        (
+            "turn_loop/stop_codec.rs",
+            "use crate::compaction::CompactionRecorder;\n",
+        ),
+        (
+            "turn_loop/mod.rs",
+            "use super::super::session::SessionFile;\n",
+        ),
+        ("turn_loop/mod.rs", "use crate::modelling::X;\n"),
+        ("turn_loop/mod.rs", "use loom::run::LoopStop;\n"),
+    ];
+    for (rel, src) in refused {
+        assert!(
+            !crossings(Path::new(rel), src, &externs).is_empty(),
+            "the scan let `{}` in {rel} through",
+            src.trim()
+        );
+    }
+    let allowed = [
+        (
+            "turn_loop/stop_codec.rs",
+            "use crate::model::run::{LoopStop, LoopStopMaxTurns};\n",
+        ),
+        ("turn_loop/mod.rs", "pub use crate::model::run::LoopStop;\n"),
+        (
+            "turn_loop/tests.rs",
+            "fn f() -> super::super::super::model::run::LoopStop { todo!() }\n",
+        ),
+    ];
+    for (rel, src) in allowed {
+        assert_eq!(
+            crossings(Path::new(rel), src, &externs),
+            Vec::<String>::new(),
+            "the scan refused `{}` in {rel}",
+            src.trim()
+        );
+    }
+}
+
 /// Each ported module names only the siblings and crates its Harness crate's manifest listed.
 #[test]
 fn each_ported_module_names_only_what_its_harness_manifest_allowed() {
@@ -638,7 +706,7 @@ fn each_ported_module_names_only_what_its_harness_manifest_allowed() {
             scanned += 1;
         }
     }
-    assert_eq!(scanned, 36, "the five ported modules hold 36 files");
+    assert_eq!(scanned, 37, "the five ported modules hold 37 files");
     assert!(
         found.is_empty(),
         "a ported module names what its Harness crate could not depend on:\n{}",

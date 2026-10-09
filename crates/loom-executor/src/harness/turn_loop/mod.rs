@@ -75,6 +75,7 @@ mod memory;
 mod parallel;
 mod price;
 mod skill;
+mod stop_codec;
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -123,82 +124,29 @@ pub use skill::{DEFAULT_SKILL_NAME, SKILL_DESCRIPTION, Skill, Skills};
 /// `stop-hook-exhausted` and the run ends as the model asked.
 pub const MAX_STOP_HOOK_CONTINUES: u32 = 3;
 
-/// Why the loop stopped or suspended. Every variant is a real state, not an exception.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
-pub enum LoopStop {
-    /// The model answered and asked for nothing further.
-    Completed,
-    MaxTurns {
-        limit: u64,
-    },
-    MaxInputTokens {
-        limit: u64,
-        reported: u64,
-    },
-    MaxOutputTokens {
-        limit: u64,
-        reported: u64,
-    },
-    /// A spend ceiling bound. Reachable only for a run whose rate card prices its model — an
-    /// unpriced run cannot be held to a figure nobody could compute.
-    MaxCost {
-        limit_micro_usd: u64,
-        spent_micro_usd: u64,
-    },
-    /// A declared ceiling could no longer be observed after a provider omitted or contradicted
-    /// the accounting needed to enforce it.
-    BudgetUnobservable {
-        name: String,
-        reason: String,
-    },
-    Deadline {
-        limit_ms: u64,
-    },
-    Cancelled {
-        reason: String,
-    },
-    /// The run is suspended before an exact effect until its checkpoint is resumed.
-    AwaitingApproval {
-        checkpoint_id: String,
-    },
-    /// The provider ended a turn early for a reason it named.
-    ProviderIncomplete {
-        reason: String,
-    },
-    /// The run was asked for a structured answer and the model ended in prose instead.
-    ///
-    /// Not `Completed`: a consumer reading stdout as JSON must not get prose with a success
-    /// status. `asked_again` is how many nudges were spent first — see
-    /// [`MAX_ANSWER_NUDGES`].
-    Unstructured {
-        asked_again: u32,
-    },
-    /// The session was still at or above its compaction trigger after compaction, so the next
-    /// request was not sent.
-    ///
-    /// All three figures are tokens: the declared [`LoopConfig::context_window`], the target a
-    /// compaction aims for ([`COMPACTION_TARGET_PERCENT`] of it), and what the session occupied
-    /// once compaction had removed everything it may. What is never removed — the task, provider
-    /// reasoning items, the newest turn group and protected tail, and the instruction and tool
-    /// schemas the provider counts — can fill the window on its own; a request sent anyway would be
-    /// refused at the wall or compacted again before every turn.
-    ContextAboveTrigger {
-        window: u64,
-        target: u64,
-        occupied: u64,
-    },
-}
+/// Why the loop stopped or suspended: `loom.run.LoopStop`, declared in `ess/domains/run.yaml` and
+/// generated. Every variant is a real state, not an exception.
+///
+/// Its JSON is written by the `stop_codec` module, the `#[serde(with = …)]` of every field that
+/// carries one.
+pub use crate::model::run::{
+    LoopStop, LoopStopAwaitingApproval, LoopStopBudgetUnobservable, LoopStopCancelled,
+    LoopStopContextAboveTrigger, LoopStopDeadline, LoopStopMaxCost, LoopStopMaxInputTokens,
+    LoopStopMaxOutputTokens, LoopStopMaxTurns, LoopStopProviderIncomplete, LoopStopUnstructured,
+};
 
-impl LoopStop {
-    pub fn is_completed(&self) -> bool {
-        matches!(self, Self::Completed)
-    }
+/// A count the loop keeps as `u64` (or `u32`), as the `Integer` a [`LoopStop`] carries.
+///
+/// Saturates at `i64::MAX`: no run reaches a turn, token, millisecond or micro-USD count that
+/// large, and a figure that did would still read as past any declared limit.
+fn figure(count: impl Into<u64>) -> i64 {
+    i64::try_from(count.into()).unwrap_or(i64::MAX)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LoopOutcome {
+    #[serde(with = "stop_codec")]
     pub stop: LoopStop,
     /// The final assistant text. Empty when the run stopped before the model answered.
     pub text: String,
@@ -702,17 +650,19 @@ pub const MAX_TURN_RETRY_BACKOFF: Duration = Duration::from_secs(8);
 const CANCEL_POLL: Duration = Duration::from_millis(25);
 
 fn cancelled() -> LoopStop {
-    LoopStop::Cancelled {
+    LoopStop::Cancelled(LoopStopCancelled {
         reason: "the caller cancelled".to_owned(),
-    }
+    })
 }
 
 fn terminal_stop(reason: StopReason) -> LoopStop {
     match reason {
-        StopReason::MaxOutputTokens => LoopStop::ProviderIncomplete {
+        StopReason::MaxOutputTokens => LoopStop::ProviderIncomplete(LoopStopProviderIncomplete {
             reason: "max_output_tokens".to_owned(),
-        },
-        StopReason::Incomplete { reason } => LoopStop::ProviderIncomplete { reason },
+        }),
+        StopReason::Incomplete { reason } => {
+            LoopStop::ProviderIncomplete(LoopStopProviderIncomplete { reason })
+        }
         StopReason::EndTurn | StopReason::ToolCalls => LoopStop::Completed,
     }
 }
@@ -1696,15 +1646,17 @@ fn absorb_children(
 fn child_result(call: &ToolCall, end: ChildEnd, child: &RunState) -> (LoopStop, ToolOutcome) {
     match end {
         ChildEnd::Stopped(stop) => {
+            // Written as the record writes it; the loop makes no stop with a negative figure.
+            let written = stop_codec::to_value(&stop).expect("a stop the loop made is written");
             let result = ToolOutcome {
                 output: serde_json::json!({
-                    "stop": stop,
+                    "stop": written,
                     "turns": child.turns,
                     "text": child.text,
                 }),
                 // A bound the child hit, a wire error, a cancellation: the parent has to learn the
                 // sub-task did not finish, or it reads a half-answer as a whole one.
-                failed: !stop.is_completed(),
+                failed: stop != LoopStop::Completed,
                 // A delegate is not refused by a rule of the run's; whatever refusals happened
                 // inside it were already reported as the child's own events.
                 refusal: None,
@@ -1719,9 +1671,9 @@ fn child_result(call: &ToolCall, end: ChildEnd, child: &RunState) -> (LoopStop, 
         // reader of the record needs, and inventing a variant would put a state in `LoopStop` that
         // no run can actually stop in.
         ChildEnd::Broke(reason) => (
-            LoopStop::ProviderIncomplete {
+            LoopStop::ProviderIncomplete(LoopStopProviderIncomplete {
                 reason: reason.clone(),
-            },
+            }),
             ToolOutcome::failed(format!("the delegate could not run: {reason}")),
         ),
     }
@@ -2416,7 +2368,7 @@ impl<'a> AgentLoop<'a> {
             Some(stop) => stop,
             None => self.drive(&mut state, deadline, sink)?,
         };
-        if !matches!(stop, LoopStop::AwaitingApproval { .. }) {
+        if !matches!(stop, LoopStop::AwaitingApproval(_)) {
             sink.emit(LoopEvent::Finished {
                 stop: stop.clone(),
                 turns: state.turns,
@@ -2440,7 +2392,7 @@ impl<'a> AgentLoop<'a> {
         sink: &mut dyn LoopSink,
     ) -> Result<LoopStop, LoopError> {
         let stop = self.drive_run(state, sink)?;
-        if !matches!(stop, LoopStop::AwaitingApproval { .. }) {
+        if !matches!(stop, LoopStop::AwaitingApproval(_)) {
             sink.emit(LoopEvent::Finished {
                 stop: stop.clone(),
                 turns: state.turns,
@@ -3003,7 +2955,9 @@ impl<'a> AgentLoop<'a> {
         if let Some(limit) = self.config.budget.max_turns
             && state.turns >= limit
         {
-            return Some(LoopStop::MaxTurns { limit });
+            return Some(LoopStop::MaxTurns(LoopStopMaxTurns {
+                limit: figure(limit),
+            }));
         }
         self.deadline_passed(deadline)
     }
@@ -3015,56 +2969,58 @@ impl<'a> AgentLoop<'a> {
         else {
             return None;
         };
-        (Instant::now() >= deadline).then_some(LoopStop::Deadline { limit_ms })
+        (Instant::now() >= deadline).then_some(LoopStop::Deadline(LoopStopDeadline {
+            limit_ms: figure(limit_ms),
+        }))
     }
 
     /// Token ceilings bind after a turn, because that is when the provider reports.
     fn stop_after_tokens(&self, state: &RunState) -> Option<LoopStop> {
         if self.config.budget.max_cost_microunits.is_some() && state.cost_unobservable {
-            return Some(LoopStop::BudgetUnobservable {
+            return Some(LoopStop::BudgetUnobservable(LoopStopBudgetUnobservable {
                 name: "max_cost_microunits".to_owned(),
                 reason: "a model request omitted usage or reported usage the declared rate card cannot price"
                     .to_owned(),
-            });
+            }));
         }
         if state.usage_unobservable {
             if self.config.budget.max_input_tokens.is_some() {
-                return Some(LoopStop::BudgetUnobservable {
+                return Some(LoopStop::BudgetUnobservable(LoopStopBudgetUnobservable {
                     name: "max_input_tokens".to_owned(),
                     reason: "a model request omitted usage".to_owned(),
-                });
+                }));
             }
             if self.config.budget.max_output_tokens.is_some() {
-                return Some(LoopStop::BudgetUnobservable {
+                return Some(LoopStop::BudgetUnobservable(LoopStopBudgetUnobservable {
                     name: "max_output_tokens".to_owned(),
                     reason: "a model request omitted usage".to_owned(),
-                });
+                }));
             }
         }
         if let (Some(limit), Some(spent)) =
             (self.config.budget.max_cost_microunits, state.cost_total)
             && spent >= limit
         {
-            return Some(LoopStop::MaxCost {
-                limit_micro_usd: limit,
-                spent_micro_usd: spent,
-            });
+            return Some(LoopStop::MaxCost(LoopStopMaxCost {
+                limit_micro_usd: figure(limit),
+                spent_micro_usd: figure(spent),
+            }));
         }
         if let Some(limit) = self.config.budget.max_input_tokens
             && state.input_total >= limit
         {
-            return Some(LoopStop::MaxInputTokens {
-                limit,
-                reported: state.input_total,
-            });
+            return Some(LoopStop::MaxInputTokens(LoopStopMaxInputTokens {
+                limit: figure(limit),
+                reported: figure(state.input_total),
+            }));
         }
         if let Some(limit) = self.config.budget.max_output_tokens
             && state.output_total >= limit
         {
-            return Some(LoopStop::MaxOutputTokens {
-                limit,
-                reported: state.output_total,
-            });
+            return Some(LoopStop::MaxOutputTokens(LoopStopMaxOutputTokens {
+                limit: figure(limit),
+                reported: figure(state.output_total),
+            }));
         }
         None
     }
@@ -3223,11 +3179,11 @@ impl<'a> AgentLoop<'a> {
                  before another request"
             ),
         });
-        Some(LoopStop::ContextAboveTrigger {
-            window,
-            target: target_tokens,
-            occupied: left,
-        })
+        Some(LoopStop::ContextAboveTrigger(LoopStopContextAboveTrigger {
+            window: figure(window),
+            target: figure(target_tokens),
+            occupied: figure(left),
+        }))
     }
 
     /// Spends one turn folding the earlier part of the conversation into a single item.
@@ -3409,11 +3365,11 @@ impl<'a> AgentLoop<'a> {
         state: &mut RunState,
         sink: &mut dyn LoopSink,
     ) -> Option<LoopStop> {
-        if !stop.is_completed() {
+        if stop != LoopStop::Completed {
             return Some(stop);
         }
         let stop = self.answer_or_nudge(stop, state, sink)?;
-        if !stop.is_completed() {
+        if stop != LoopStop::Completed {
             return Some(stop);
         }
         self.stop_hook(stop, state, sink)
@@ -3435,9 +3391,9 @@ impl<'a> AgentLoop<'a> {
             return Some(stop);
         }
         if state.nudged >= MAX_ANSWER_NUDGES {
-            return Some(LoopStop::Unstructured {
-                asked_again: state.nudged,
-            });
+            return Some(LoopStop::Unstructured(LoopStopUnstructured {
+                asked_again: figure(state.nudged),
+            }));
         }
         state.nudged += 1;
         sink.emit(LoopEvent::Warning {
@@ -3568,9 +3524,9 @@ impl<'a> AgentLoop<'a> {
             let result = self.invoke(call, deadline, sink);
             if let Some(deferred) = self.deferred.as_mut() {
                 deferred.remaining_calls = calls[next + 1..].to_vec();
-                return Some(LoopStop::AwaitingApproval {
+                return Some(LoopStop::AwaitingApproval(LoopStopAwaitingApproval {
                     checkpoint_id: deferred.checkpoint_id.clone(),
-                });
+                }));
             }
             complete(call, result, state, sink);
             next += 1;
