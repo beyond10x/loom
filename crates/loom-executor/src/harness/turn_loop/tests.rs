@@ -1385,9 +1385,9 @@ fn cancellation_between_tool_calls_stops_before_the_next_effect() {
 /// race the machine rather than test the loop — and 40 ms raced a shared CI runner, where one
 /// scheduling stall between the deadline being set and the first call being checked is enough to
 /// skip the call the test expects to see run.
-const DEADLINE_MS: u64 = 200;
+const DEADLINE_MS: u64 = DEADLINE_MS_FIGURE.unsigned_abs();
 /// [`DEADLINE_MS`] as the `Integer` a `LoopStop` carries.
-const DEADLINE_MS_FIGURE: i64 = DEADLINE_MS as i64;
+const DEADLINE_MS_FIGURE: i64 = 200;
 const SLOW_CALL: Duration = Duration::from_millis(300);
 
 fn deadlined() -> Budget {

@@ -68,7 +68,7 @@ pub(crate) fn serialize<S: Serializer>(stop: &LoopStop, serializer: S) -> Result
     match stop {
         LoopStop::Completed => {}
         LoopStop::MaxTurns(LoopStopMaxTurns { limit }) => {
-            write_figure(&mut map, tag, "limit", *limit)?
+            write_figure(&mut map, tag, "limit", *limit)?;
         }
         LoopStop::MaxInputTokens(LoopStopMaxInputTokens { limit, reported })
         | LoopStop::MaxOutputTokens(LoopStopMaxOutputTokens { limit, reported }) => {
@@ -83,7 +83,7 @@ pub(crate) fn serialize<S: Serializer>(stop: &LoopStop, serializer: S) -> Result
             write_figure(&mut map, tag, "spent_micro_usd", *spent_micro_usd)?;
         }
         LoopStop::Deadline(LoopStopDeadline { limit_ms }) => {
-            write_figure(&mut map, tag, "limit_ms", *limit_ms)?
+            write_figure(&mut map, tag, "limit_ms", *limit_ms)?;
         }
         LoopStop::Unstructured(LoopStopUnstructured { asked_again }) => {
             write_figure(&mut map, tag, "asked_again", *asked_again)?;

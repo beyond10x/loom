@@ -139,9 +139,7 @@ where
 fn assert_case(stop: &str) {
     let (value, text) = causes()
         .into_iter()
-        .find(|(_, text)| {
-            serde_json::from_str::<Value>(text).expect("json")["kind"] == Value::from(stop)
-        })
+        .find(|(_, text)| serde_json::from_str::<Value>(text).expect("json")["kind"] == stop)
         .unwrap_or_else(|| panic!("no case for `{stop}`"));
     round_trip(&finished(value.clone()), &finished_text(text));
     round_trip(
