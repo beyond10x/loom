@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 866bbd9d47246b4227f3631ebb34d83e265512af496b4fe99b0098c8cc298c10
-// contract digest 08c02cd39830806f4c6eaa95dfea4ecf631c548ae35d9b4e43d6ab0db1b725ec
+// model digest cee559ad7b98c0f74aa2bb607bd073e52902527033f7f7fd8d1292410f7f2e17
+// contract digest 874974d029ad4c9d989fd20452dec290f5ffb7299a164b44350cf9fe1e61f737
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Run — `loom.run`.
@@ -85,6 +85,124 @@ pub enum CredentialKind {
 /// CredentialReference — `loom.run.CredentialReference`: a distinct wrapper around `String`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CredentialReference(pub String);
+
+/// LoopStop — `loom.run.LoopStop`: one of a fixed set of shapes, tagged on the wire by `kind`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoopStop {
+    /// Tagged `awaiting-approval` — `loom.run.LoopStopAwaitingApproval`.
+    AwaitingApproval(LoopStopAwaitingApproval),
+    /// Tagged `budget-unobservable` — `loom.run.LoopStopBudgetUnobservable`.
+    BudgetUnobservable(LoopStopBudgetUnobservable),
+    /// Tagged `cancelled` — `loom.run.LoopStopCancelled`.
+    Cancelled(LoopStopCancelled),
+    /// Tagged `completed`, carrying nothing.
+    Completed,
+    /// Tagged `context-above-trigger` — `loom.run.LoopStopContextAboveTrigger`.
+    ContextAboveTrigger(LoopStopContextAboveTrigger),
+    /// Tagged `deadline` — `loom.run.LoopStopDeadline`.
+    Deadline(LoopStopDeadline),
+    /// Tagged `max-cost` — `loom.run.LoopStopMaxCost`.
+    MaxCost(LoopStopMaxCost),
+    /// Tagged `max-input-tokens` — `loom.run.LoopStopMaxInputTokens`.
+    MaxInputTokens(LoopStopMaxInputTokens),
+    /// Tagged `max-output-tokens` — `loom.run.LoopStopMaxOutputTokens`.
+    MaxOutputTokens(LoopStopMaxOutputTokens),
+    /// Tagged `max-turns` — `loom.run.LoopStopMaxTurns`.
+    MaxTurns(LoopStopMaxTurns),
+    /// Tagged `provider-incomplete` — `loom.run.LoopStopProviderIncomplete`.
+    ProviderIncomplete(LoopStopProviderIncomplete),
+    /// Tagged `unstructured` — `loom.run.LoopStopUnstructured`.
+    Unstructured(LoopStopUnstructured),
+}
+
+/// LoopStopAwaitingApproval — `loom.run.LoopStopAwaitingApproval`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoopStopAwaitingApproval {
+    /// `checkpoint_id` — `String`.
+    pub checkpoint_id: String,
+}
+
+/// LoopStopBudgetUnobservable — `loom.run.LoopStopBudgetUnobservable`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoopStopBudgetUnobservable {
+    /// `name` — `String`.
+    pub name: String,
+    /// `reason` — `String`.
+    pub reason: String,
+}
+
+/// LoopStopCancelled — `loom.run.LoopStopCancelled`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoopStopCancelled {
+    /// `reason` — `String`.
+    pub reason: String,
+}
+
+/// LoopStopContextAboveTrigger — `loom.run.LoopStopContextAboveTrigger`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoopStopContextAboveTrigger {
+    /// `window` — `Integer`.
+    pub window: i64,
+    /// `target` — `Integer`.
+    pub target: i64,
+    /// `occupied` — `Integer`.
+    pub occupied: i64,
+}
+
+/// LoopStopDeadline — `loom.run.LoopStopDeadline`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoopStopDeadline {
+    /// `limit_ms` — `Integer`.
+    pub limit_ms: i64,
+}
+
+/// LoopStopMaxCost — `loom.run.LoopStopMaxCost`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoopStopMaxCost {
+    /// `limit_micro_usd` — `Integer`.
+    pub limit_micro_usd: i64,
+    /// `spent_micro_usd` — `Integer`.
+    pub spent_micro_usd: i64,
+}
+
+/// LoopStopMaxInputTokens — `loom.run.LoopStopMaxInputTokens`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoopStopMaxInputTokens {
+    /// `limit` — `Integer`.
+    pub limit: i64,
+    /// `reported` — `Integer`.
+    pub reported: i64,
+}
+
+/// LoopStopMaxOutputTokens — `loom.run.LoopStopMaxOutputTokens`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoopStopMaxOutputTokens {
+    /// `limit` — `Integer`.
+    pub limit: i64,
+    /// `reported` — `Integer`.
+    pub reported: i64,
+}
+
+/// LoopStopMaxTurns — `loom.run.LoopStopMaxTurns`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoopStopMaxTurns {
+    /// `limit` — `Integer`.
+    pub limit: i64,
+}
+
+/// LoopStopProviderIncomplete — `loom.run.LoopStopProviderIncomplete`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoopStopProviderIncomplete {
+    /// `reason` — `String`.
+    pub reason: String,
+}
+
+/// LoopStopUnstructured — `loom.run.LoopStopUnstructured`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoopStopUnstructured {
+    /// `asked_again` — `Integer`.
+    pub asked_again: i64,
+}
 
 /// ReportedUsage — `loom.run.ReportedUsage`.
 #[derive(Debug, Clone, PartialEq, Eq)]

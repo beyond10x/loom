@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "866bbd9d47246b4227f3631ebb34d83e265512af496b4fe99b0098c8cc298c10",
-    "contract_digest": "08c02cd39830806f4c6eaa95dfea4ecf631c548ae35d9b4e43d6ab0db1b725ec"
+    "source_digest": "cee559ad7b98c0f74aa2bb607bd073e52902527033f7f7fd8d1292410f7f2e17",
+    "contract_digest": "874974d029ad4c9d989fd20452dec290f5ffb7299a164b44350cf9fe1e61f737"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -398,6 +398,90 @@
     {
       "kind": "domain_type",
       "source": "loom.run.CredentialReference",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.run.LoopStop",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.run.LoopStopAwaitingApproval",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.run.LoopStopBudgetUnobservable",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.run.LoopStopCancelled",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.run.LoopStopContextAboveTrigger",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.run.LoopStopDeadline",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.run.LoopStopMaxCost",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.run.LoopStopMaxInputTokens",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.run.LoopStopMaxOutputTokens",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.run.LoopStopMaxTurns",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.run.LoopStopProviderIncomplete",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.run.LoopStopUnstructured",
       "disposition": {
         "disposition": "generated"
       }
