@@ -545,6 +545,8 @@ version = "0.13.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-http",
+ "b10x-loom-commission",
+ "b10x-loom-commission-testkit",
  "b10x-loom-executor",
  "serde_json",
  "tokio",
