@@ -64,7 +64,8 @@
 //!
 //! Canon is the library `b10x-canon-engineering` uses, tag `0.1.0`, pinned by `Cargo.lock` to
 //! commit `761239f`, so the protocol model the ELS registry returns is the one this crate
-//! compiles. Commission is pinned to `e61e4f0`, and `b10x-canon-engineering` to tag `0.3.0` of
+//! compiles. Commission is the path dependency `b10x-loom-commission`, built from this
+//! repository's own tree, and `b10x-canon-engineering` is pinned to tag `0.3.0` of
 //! beyond10x/engineering-protocols.
 
 use std::collections::{BTreeMap, BTreeSet};

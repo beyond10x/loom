@@ -79,6 +79,8 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 |---|---|
 | The catalogue follows the frontier | `crates/loom-executor/tests/frontier_projection.rs` (`projection_follows_frontier`), `crates/loom-executor/tests/harness_loop_port.rs` (`ported_loop_round_trip`) |
 | A selector cannot leave the catalogue | `crates/loom-executor/tests/action_selector.rs` (`selector_cannot_leave_catalogue`) |
+| The reasoning-model selector offers the model only its candidates, through any `ModelPort`, and an answer outside them is never a selection | `crates/loom-executor/tests/reasoning_model_selector.rs` (`an_action_outside_the_candidate_set_is_a_selection_error_and_never_a_selection`) |
+| Low confidence falls back to the stronger selector, at a host-supplied threshold compared as a number | `crates/loom-executor/tests/confidence_fallback.rs` (`the_fast_choice_is_returned_only_at_or_above_the_supplied_threshold`) |
 | A blocked or merge-seeking pick is never proposed | `crates/loom-executor/tests/adversary_executor_admission.rs` |
 | A stale or unlisted request is refused at revalidation | `crates/loom-commission-testkit/tests/action_request.rs`, `crates/loom-executor/tests/adversary_run_revalidation.rs`, `crates/loom-executor/tests/selection_revalidation.rs` |
 | Unknown capabilities and panicking authority providers yield no grant | `crates/loom-commission-testkit/tests/adversary_authority_fail_closed.rs` |
@@ -265,6 +267,20 @@ record Connectors completed (`audit`) and no attempt, and `ConnectorEffects` ref
 a write without a recorded attempt included, is `Err`. The sync port runs on a Tokio runtime the
 invoker owns. `crates/loom-connectors/tests/connectors_invoker.rs` holds it against a fake service
 on a loopback port.
+
+## Laya selector
+
+`b10x-loom-selector-laya` (`crates/loom-selector-laya`) is an experimental `FastTyped`
+`ActionSelector`, never the default. It sends the goal and the candidate action ids as one
+`choice` question to a Laya endpoint (`POST <base>/v1/systemone`, the wire of the Laya README at
+commit `1adc59f`) through llm's `b10x-llm-http` `HttpClient::post_json`, on a runtime the selector
+owns, and reports `answer_confidence` as the confidence, never `confidence`. A choice outside the
+candidates, a non-2xx status, a timeout, malformed or over-deep JSON, or a probability outside
+[0, 1] is `SelectorError::Unavailable`; more than 100 candidates is refused before sending. The
+wire stays in this crate until Laya becomes a default selector, when it moves to llm. No product
+crate (`b10x-loom-cli`, `b10x-loom-sdk`) depends on it, so Loom builds and runs with no Laya code;
+`crates/loom-selector-laya/tests/laya_selector.rs` holds both, the dependency rule over the
+resolved graph `cargo metadata` reports.
 
 ## Intake and the command line
 

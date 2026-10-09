@@ -7,10 +7,15 @@
 //! elides old tool results and, where that is not enough, spends one summary request folding the
 //! earlier conversation into one item, aiming at 50 % of the window
 //! ([`COMPACTION_TARGET_PERCENT`](crate::harness::turn_loop::COMPACTION_TARGET_PERCENT)). A
-//! summary no shorter than the items it would replace is not kept: those items are elided instead,
-//! behind one item beginning with
-//! [`ELISION_MARKER`](crate::harness::turn_loop::ELISION_MARKER), so a compaction never leaves the
-//! conversation larger than it found it. Without a declared window it keeps the byte rule
+//! summary is kept when the session it leaves is at or below that target, and above it only when
+//! it is smaller than the note eliding would leave; otherwise, and when the summary request fails,
+//! answers with no text or the fold is too small to be worth one, the items are elided behind one
+//! item beginning with
+//! [`ELISION_MARKER`](crate::harness::turn_loop::ELISION_MARKER), and a compaction never leaves
+//! the conversation larger than it found it. A session still at or above the trigger after that
+//! ends the run with
+//! [`LoopStop::ContextAboveTrigger`](crate::harness::turn_loop::LoopStop::ContextAboveTrigger)
+//! before another request. Without a declared window it keeps the byte rule
 //! ([`MAX_CONVERSATION_BYTES`](crate::harness::turn_loop::MAX_CONVERSATION_BYTES),
 //! [`COMPACTED_TARGET_BYTES`](crate::harness::turn_loop::COMPACTED_TARGET_BYTES)) and only elides.
 //! What a governed run adds:

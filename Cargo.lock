@@ -511,6 +511,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "b10x-loom-selector-laya"
+version = "0.11.0"
+dependencies = [
+ "b10x-llm-core",
+ "b10x-llm-http",
+ "b10x-loom-executor",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "b10x-substrate-host"
 version = "0.7.10"
 source = "git+https://github.com/beyond10x/substrate?rev=65304edf6ebdf4a95f9c2c6138b0c20ea47d157e#65304edf6ebdf4a95f9c2c6138b0c20ea47d157e"

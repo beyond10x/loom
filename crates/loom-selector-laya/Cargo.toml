@@ -1,0 +1,15 @@
+[package]
+name = "b10x-loom-selector-laya"
+description = "An experimental fast typed action selector: asks a local or hosted Laya endpoint to choose one action of the candidate set and reports its probability as confidence, never as authority."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+b10x-loom-executor = { path = "../loom-executor" }
+b10x-llm-core = { git = "https://github.com/beyond10x/llm", tag = "0.4.0" }
+b10x-llm-http = { git = "https://github.com/beyond10x/llm", tag = "0.4.0" }
+serde_json = "1"
+tokio = { version = "1.53", features = ["rt-multi-thread"] }
