@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest e1bb43210be65dc6d79dc74d2c988eabf79b6c4dc3b946e02758171a1ad72c2a
-  contract digest 381342ab4314fb0e17b8c1c01145eb7abb6bd79a86ff290d77fac2b2d3aa1a10
+  model digest f3af5c9e850163e564232367b8200696d02f52deb9b2fe97676b33525d970bd0
+  contract digest b22a63cd15b4b14521a04844fc21145ce4639632cccce11fd691fe08e65f0bec
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-108 capabilities: **107 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+125 capabilities: **124 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -42,6 +42,23 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.governor.StoredEvidence` |
 | domain type | `loom.governor.StoredEvidenceData` |
 | domain type | `loom.governor.StoredObservation` |
+| domain type | `loom.plugin.Classification` |
+| domain type | `loom.plugin.Cursor` |
+| domain type | `loom.plugin.InboundItem` |
+| domain type | `loom.plugin.Intent` |
+| domain type | `loom.plugin.ItemFailures` |
+| domain type | `loom.plugin.ItemId` |
+| domain type | `loom.plugin.Objective` |
+| domain type | `loom.plugin.PluginConfig` |
+| domain type | `loom.plugin.PluginState` |
+| domain type | `loom.plugin.Poll` |
+| domain type | `loom.plugin.Projection` |
+| domain type | `loom.plugin.Proposal` |
+| domain type | `loom.plugin.ProposedCase` |
+| domain type | `loom.plugin.RecordLine` |
+| domain type | `loom.plugin.RecordOutcome` |
+| domain type | `loom.plugin.SourceRead` |
+| domain type | `loom.plugin.TurnResult` |
 | domain type | `loom.run.ActionCatalogue.State` |
 | domain type | `loom.run.ArgumentRequest.State` |
 | domain type | `loom.run.ArgumentRequestId` |

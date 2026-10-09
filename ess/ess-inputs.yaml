@@ -6,4 +6,5 @@ specification:
   - domains/evaluation.yaml
   - domains/governor.yaml
   - domains/datasource.yaml
+  - domains/plugin.yaml
 scenarios: []
