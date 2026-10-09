@@ -9,9 +9,11 @@ use b10x_llm_tool_call::codex_model;
 use b10x_loom_cli::evaluate::{decision_json, refusal_json, refused_input, request_from_json};
 use b10x_loom_cli::events::{EventStream, FAILED};
 use b10x_loom_cli::model_catalog::ModelCatalog;
+use b10x_loom_cli::plugin::{is_proposal, recorded, report_line, turn_models};
 use b10x_loom_cli::regular_file;
 use b10x_loom_cli::{
-    Cli, Command, Confinement, EvaluateArgs, Output, ProtocolCommand, RunArgs, exit_status,
+    Cli, Command, Confinement, EvaluateArgs, Output, PluginCommand, PluginName, ProtocolCommand,
+    RunArgs, exit_status,
 };
 use b10x_loom_intake_slice::case;
 use b10x_loom_intake_slice::clock::HostClock;
@@ -24,12 +26,14 @@ use b10x_loom_intake_slice::intent::{
     IntentRequest, Preparation, PreparedIntent, prepare_intent, run_prepared_intent,
 };
 use b10x_loom_intake_slice::run::{LOCAL_PROTOCOL, RunOptions, SliceRun, StopReason, printable};
+use b10x_loom_plugin_slack::{SlackHandler, config as slack_config};
 use clap::Parser;
 use llm_core::Model;
 use llm_models::Port;
 use loom_governor::{CanonGovernor, MemoryCaseStore};
 use loom_protocols::InstallStore;
 use serde_json::{Value, json};
+use std::sync::atomic::AtomicBool;
 
 const REEXEC_MARKER: &str = "B10X_LOOM_CONFINEMENT_REEXEC";
 const REEXEC_READY: &str = "B10X_LOOM_CONFINEMENT_READY";
@@ -43,7 +47,97 @@ fn main() -> ExitCode {
             Err(error) => failed(&error),
         },
         Command::Evaluate(arguments) => evaluate_command(&arguments),
+        Command::Plugin(arguments) => match plugin_command(arguments.command) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => failed(&error),
+        },
     }
+}
+
+/// Runs `plugin run` or `plugin report`, as `PLUGIN_RUN_HELP` states.
+fn plugin_command(command: PluginCommand) -> Result<(), String> {
+    match command {
+        PluginCommand::Run(arguments) => {
+            let PluginName::SlackHandler = arguments.plugin;
+            let config = slack_config::read(&arguments.config).map_err(|e| e.to_string())?;
+            // Both models are settled here, before any model call or read.
+            let (classifier, agent): (Box<dyn Model>, Arc<dyn Model>) = match &arguments.catalog {
+                Some(path) => {
+                    let models = ModelCatalog::read(path)?;
+                    (
+                        Box::new(models.model("--classifier-model", &arguments.classifier_model)?),
+                        Arc::new(models.model("--model", &arguments.model)?),
+                    )
+                }
+                None => (
+                    chosen_model(None, &arguments.classifier_model)?,
+                    Arc::from(chosen_model(None, &arguments.model)?),
+                ),
+            };
+            let plugin = SlackHandler::new(config)
+                .map_err(|e| e.to_string())?
+                .with_classifier(classifier)
+                .with_turn_models(turn_models(agent));
+            let stop = Arc::new(AtomicBool::new(arguments.once));
+            if !arguments.once {
+                stop_on_signals(Arc::clone(&stop))?;
+            }
+            let lines = plugin
+                .run(&arguments.state, &stop)
+                .map_err(|e| e.to_string())?;
+            print_proposals(&lines)
+        }
+        PluginCommand::Report(arguments) => {
+            let PluginName::SlackHandler = arguments.plugin;
+            print_proposals(&recorded(&arguments.state)?)
+        }
+    }
+}
+
+/// Sets `stop` on the first SIGTERM or SIGINT, so the host ends after the item it is handling;
+/// a second one ends the process at once (exit status 130). The signals are taken before this
+/// returns; a thread waits for them.
+fn stop_on_signals(stop: Arc<AtomicBool>) -> Result<(), String> {
+    use tokio::signal::unix::{SignalKind, signal};
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("no runtime for the stop signals: {e}"))?;
+    let (mut terminate, mut interrupt) = {
+        let _entered = runtime.enter();
+        let taken = |kind: SignalKind, name: &str| {
+            signal(kind).map_err(|e| format!("{name} cannot be handled: {e}"))
+        };
+        (
+            taken(SignalKind::terminate(), "SIGTERM")?,
+            taken(SignalKind::interrupt(), "SIGINT")?,
+        )
+    };
+    std::thread::spawn(move || {
+        runtime.block_on(async {
+            tokio::select! {
+                _ = terminate.recv() => {}
+                _ = interrupt.recv() => {}
+            }
+            stop.store(true, std::sync::atomic::Ordering::SeqCst);
+            eprintln!("b10x-loom: stopping after the current item");
+            tokio::select! {
+                _ = terminate.recv() => {}
+                _ = interrupt.recv() => {}
+            }
+            std::process::exit(130);
+        });
+    });
+    Ok(())
+}
+
+/// Prints one line per proposal of `lines`.
+fn print_proposals(lines: &[b10x_loom_plugin::RecordLine]) -> Result<(), String> {
+    let mut out = std::io::stdout().lock();
+    for line in lines.iter().filter(|line| is_proposal(line)) {
+        writeln!(out, "{}", report_line(line)).map_err(|e| e.to_string())?;
+    }
+    out.flush().map_err(|e| e.to_string())
 }
 
 /// The largest request `evaluate` reads.

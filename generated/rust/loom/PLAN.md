@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest f3af5c9e850163e564232367b8200696d02f52deb9b2fe97676b33525d970bd0
-  contract digest b22a63cd15b4b14521a04844fc21145ce4639632cccce11fd691fe08e65f0bec
+  model digest 866bbd9d47246b4227f3631ebb34d83e265512af496b4fe99b0098c8cc298c10
+  contract digest 08c02cd39830806f4c6eaa95dfea4ecf631c548ae35d9b4e43d6ab0db1b725ec
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-125 capabilities: **124 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+127 capabilities: **126 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -80,6 +80,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.run.Turn.State` |
 | domain type | `loom.run.TurnId` |
 | domain type | `loom.run.WireCredential` |
+| domain type | `loom.slack.ChannelObjectives` |
+| domain type | `loom.slack.SlackConfig` |
 | entity lifecycle | `loom.run.ActionCatalogue` |
 | entity lifecycle | `loom.run.ArgumentRequest` |
 | entity lifecycle | `loom.run.Compaction` |

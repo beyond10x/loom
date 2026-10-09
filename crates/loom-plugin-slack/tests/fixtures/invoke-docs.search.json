@@ -1,0 +1,1 @@
+{"ok":true,"result":{"adapter":"docs","operation":"docs.search","revision":"rev-1","result":{"matches":[{"title":"Rotating the deploy key","path":"runbooks/deploy-key.md"},{"title":"Staging database runbook","path":"runbooks/staging-database.md"}]}}}

@@ -349,12 +349,16 @@ dependencies = [
  "b10x-loom-governor",
  "b10x-loom-intake-references",
  "b10x-loom-intake-slice",
+ "b10x-loom-plugin",
+ "b10x-loom-plugin-slack",
  "b10x-loom-protocols",
+ "b10x-loom-sdk",
  "clap",
  "intake",
  "libc",
  "serde_json",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -496,6 +500,17 @@ dependencies = [
  "loom",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "b10x-loom-plugin-slack"
+version = "0.12.0"
+dependencies = [
+ "b10x-llm-core",
+ "b10x-loom-plugin",
+ "b10x-loom-sdk",
+ "loom",
+ "serde_json",
 ]
 
 [[package]]

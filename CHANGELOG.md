@@ -30,11 +30,34 @@ under **Unreleased** until the next release.
   submits one `source_read` evidence per performed read. A turn sends at most 8 model requests,
   retries included. A proposal is written to the record and never sent. An item whose hook fails
   is kept in the state and retried each cycle, and its third unsuccessful attempt records it
-  `stopped`; an outage that is not about the item counts against none. Each handled item adds
-  one line to `record.jsonl`, which also decides what is handled, and a torn last line is
-  dropped; `state.json` is written through a temporary file and a rename. One host holds a state
+  `stopped`; an outage that is not about the item counts against none. A poll that fails is an
+  outage of the whole host: the cycle saves no cursor and the host polls again after
+  `poll_interval_seconds`, returning the failure only when `stop` ends it after that cycle
+  (`once`). A `stop` set while the host runs ends it after the item being handled. Each handled
+  item adds one line to `record.jsonl`, which also decides what is handled, and a torn last line
+  is dropped; `state.json` is written through a temporary file and a rename. One host holds a state
   directory at a time, and a state directory inside a configured workspace root or checkout is
   refused.
+- `b10x-loom-plugin-slack`, the slack-handler plugin, and the `loom.slack` ESS domain of its
+  configuration (`SlackConfig`, which holds the host's `PluginConfig`). Its poll reads through the
+  Connectors command line only, with the configured Slack adapter, connection and three read
+  operations (`conversations.list`, `conversations.history`, `conversations.replies`). It walks the
+  channels the bot is a member of, ordered by the heaviest objective each serves, then by how long
+  ago the newest message stored for it was posted, then by member count, then by a draw from the
+  configured seed; reads each history from the channel's stored `ts` (a channel never read from
+  `lookback_minutes` ago, default 1440); and reads a thread only for a message with replies. A
+  message is an item once it has aged `min_age_minutes` and when it is no bot's, no system
+  message, has no reaction by the bot and no thread reply from anybody but its poster; items
+  naming the bot come first. A configuration without the bot's user id, the Slack adapter or
+  connection is refused before anything runs.
+- `b10x-loom plugin run <PLUGIN> --config <file> --state <dir> [--once]` hosts a registered plugin
+  (`slack-handler`), with `--catalog`, `--model` and `--classifier-model` as `run` takes them;
+  `b10x-loom plugin report <PLUGIN> --state <dir>` prints one line per recorded proposal. An unknown
+  plugin name is refused naming the registered ones. A plugin turn runs an llm model through
+  `model_port::LlmModelPort`, the bridge from an llm `Model` to the harness `ModelPort` Loom's
+  governed loop calls. Without `--once`, SIGTERM or SIGINT ends the host after the item being
+  handled; a second one exits at once with status 130.
+
 ## [0.12.0] - 2026-10-09
 
 Loom 0.12.0 adds two action selectors and bounds compaction. `ReasoningModelSelector` asks any

@@ -19,9 +19,11 @@
 //! cycle retries the failing items from the state before it polls. The [`MAX_FAILURES`]th
 //! attempt that does not succeed records the item `stopped` with the last reason. A failure that
 //! is not about the item ([`PluginError::Unavailable`]) counts against none: the cycle ends there,
-//! without saving the poll's cursors, and the next cycle tries again. Every handled item adds one
-//! line to the record and its id to the state; an id already handled is skipped, so polling the
-//! same items again adds no line.
+//! without saving the poll's cursors, and the next cycle tries again. A poll that fails is such a
+//! failure for the whole host: the cycle records nothing for it and saves no cursor, and the host
+//! polls again after its interval; only a host that is stopping returns the failure. Every handled
+//! item adds one line to the record and its id to the state; an id already handled is skipped, so
+//! polling the same items again adds no line.
 //!
 //! The turn is a thin caller of Commission's `run_until_blocked` through `loom_sdk`: a
 //! `CanonGovernor` over [`ProtocolCatalog::plugins`](loom_sdk::ProtocolCatalog::plugins) on
@@ -221,7 +223,8 @@ pub trait Plugin {
     /// ids already handled; `objectives` weigh this poll.
     ///
     /// # Errors
-    /// Any failure to poll; [`run_plugin`] stops with it.
+    /// Any failure to poll. [`run_plugin`] takes it as an outage of the whole host: it records
+    /// nothing for the poll, saves no cursor and polls again after its interval.
     fn poll(
         &self,
         host: &Host<'_>,
@@ -336,11 +339,16 @@ pub fn record_line(
 /// record line per handled item and saving the state after each attempt and the cursors after the
 /// cycle. It then checks `stop`: set, the call returns; otherwise it waits
 /// `poll_interval_seconds`, checking `stop` meanwhile, and starts the next cycle. A `stop` already
-/// set runs exactly one cycle (`once`).
+/// set runs exactly one cycle (`once`); a `stop` set while the host runs ends it after the item
+/// being handled, leaving the rest of the poll's items and its cursors to the next host. A cycle
+/// whose poll fails saves no cursor and handles no
+/// polled item; the host waits and polls again as after any cycle.
 ///
 /// # Errors
-/// A state directory refused, held by another host or unusable, an unusable configuration, or a
-/// failed poll. A failing item or an unavailable service is no error (see the crate docs).
+/// A state directory refused, held by another host or unusable, or an unusable configuration.
+/// The failure of the poll of the last cycle, when `stop` ends the host after it (with `once`,
+/// after its one cycle). A failing item or an unavailable service is no error (see the crate
+/// docs).
 pub fn run_plugin<P: Plugin + ?Sized>(
     plugin: &P,
     config: &PluginConfig,
@@ -377,11 +385,17 @@ pub fn run_plugin_on<P: Plugin + ?Sized>(
         held: &held,
         threshold,
         recorded: Vec::new(),
+        // A stop already set is `once`: its one cycle runs whole. One set later ends the host
+        // after the item being handled.
+        stop: (!stop.load(Ordering::SeqCst)).then_some(stop),
     };
     loop {
-        cycle.run()?;
+        let outage = cycle.run()?;
         if stopped_within(stop, interval) {
-            return Ok(cycle.recorded);
+            return match outage {
+                Some(failed) => Err(failed),
+                None => Ok(cycle.recorded),
+            };
         }
     }
 }
@@ -402,11 +416,15 @@ struct Cycle<'c, 'h, P: ?Sized> {
     held: &'c state::StateDir,
     threshold: f64,
     recorded: Vec<RecordLine>,
+    /// The stop that ends a cycle between two items; `None` for `once`.
+    stop: Option<&'c AtomicBool>,
 }
 
 impl<P: Plugin + ?Sized> Cycle<'_, '_, P> {
-    /// One cycle: the failing items of the state, then the poll's items, then the cursors.
-    fn run(&mut self) -> Result<(), PluginError> {
+    /// One cycle: the failing items of the state, then the poll's items, then the cursors. A
+    /// poll that fails is an outage of the whole host: the cycle ends there, saving no cursor, and
+    /// answers the failure as `Some`.
+    fn run(&mut self) -> Result<Option<PluginError>, PluginError> {
         let mut current = self.held.load()?;
         let failing: Vec<InboundItem> = current
             .failing
@@ -415,21 +433,31 @@ impl<P: Plugin + ?Sized> Cycle<'_, '_, P> {
             .collect();
         let mut tried: Vec<ItemId> = Vec::new();
         for item in &failing {
+            if self.stopping() {
+                return Ok(None);
+            }
             tried.push(item.id.clone());
             if self.attempt(&mut current, item)? == Attempted::Unavailable {
-                return Ok(());
+                return Ok(None);
             }
         }
         let objectives = self.plugin.objectives(self.host.config());
-        let poll = self.plugin.poll(self.host, &current, &objectives)?;
+        let poll = match self.plugin.poll(self.host, &current, &objectives) {
+            Ok(poll) => poll,
+            Err(failed) => return Ok(Some(failed)),
+        };
         for item in &poll.items {
             if current.handled.contains(&item.id) || tried.contains(&item.id) {
                 continue;
             }
+            if self.stopping() {
+                // The poll's cursors are not saved, so the next poll answers the items left.
+                return Ok(None);
+            }
             tried.push(item.id.clone());
             if self.attempt(&mut current, item)? == Attempted::Unavailable {
                 // The poll's cursors are not saved, so the next poll answers what this one did.
-                return Ok(());
+                return Ok(None);
             }
         }
         for cursor in poll.cursors {
@@ -442,7 +470,13 @@ impl<P: Plugin + ?Sized> Cycle<'_, '_, P> {
                 None => current.cursors.push(cursor),
             }
         }
-        self.held.save(&current)
+        self.held.save(&current)?;
+        Ok(None)
+    }
+
+    /// Whether a stop set after the host started ends the cycle before the next item.
+    fn stopping(&self) -> bool {
+        self.stop.is_some_and(|stop| stop.load(Ordering::SeqCst))
     }
 
     /// One attempt on `item`, counted in the state before it starts.

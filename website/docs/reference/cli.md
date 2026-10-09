@@ -25,6 +25,9 @@ Generated from the clap definition of the `b10x-loom` command line in [`crates/l
 | [`b10x-loom protocols list`](#b10x-loom-protocols-list) | List bundled and installed definitions, provenance, and available execution bindings |
 | [`b10x-loom protocols remove`](#b10x-loom-protocols-remove) | Remove an installed definition; bundled definitions cannot be removed |
 | [`b10x-loom evaluate`](#b10x-loom-evaluate) | Decide a case snapshot and its evidence under a catalog protocol, and write the decision as JSON. It decides and never acts |
+| [`b10x-loom plugin`](#b10x-loom-plugin) | Host a plugin, or print what it proposed. A plugin reads and proposes; it never sends |
+| [`b10x-loom plugin run`](#b10x-loom-plugin-run) | Host a plugin: poll, classify and answer each new item in a governed read-only turn, and record one line per handled item. Nothing is sent |
+| [`b10x-loom plugin report`](#b10x-loom-plugin-report) | Print one line per proposal a plugin recorded in its state directory: a proposed reply or a proposed case |
 
 ## `b10x-loom run`
 
@@ -130,3 +133,64 @@ Exit status:
   1  the request or the protocol catalog cannot be read
   2  the command line is not valid
 ```
+
+## `b10x-loom plugin`
+
+Host a plugin, or print what it proposed. A plugin reads and proposes; it never sends
+
+```text
+Usage: b10x-loom plugin <COMMAND>
+```
+
+## `b10x-loom plugin run`
+
+Host a plugin: poll, classify and answer each new item in a governed read-only turn, and record one line per handled item. Nothing is sent
+
+```text
+Usage: b10x-loom plugin run [OPTIONS] --config <PATH> --state <DIR> <PLUGIN>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `<PLUGIN>` | yes | none | The plugin to host |
+| `--config <PATH>` | yes | none | The plugin's JSON configuration file |
+| `--state <DIR>` | yes | none | The plugin's state directory: its cursors and record. It must lie outside every workspace root and checkout the configuration names; one host holds it at a time |
+| `--once` | no | `false` | Run one cycle and stop |
+| `--catalog <PATH>` | no | none | An llm catalog (`llm.catalog/1` TOML) in a regular file. With it, `--model` and `--classifier-model` each name a route alias of this catalog instead of a Codex model; an alias it does not declare, or a catalog that cannot be read, stops before any model call |
+| `--model <ID>` | no | `gpt-5.6-sol` | The model each turn runs on: a Codex model name, or with `--catalog` a route alias |
+| `--classifier-model <ID>` | no | `gpt-5.6-sol` | The model that classifies each item and picks a task's protocol: a Codex model name, or with `--catalog` a route alias |
+
+```text
+The configuration is the plugin's JSON configuration file. For slack-handler it is
+loom.slack.SlackConfig: the host's plugin configuration under "plugin" (the connectors command line,
+the data sources a turn may read, the objectives, the classification threshold, the poll interval),
+the Slack adapter, connection and read operations, the bot's user id, min_age_minutes, the seed,
+lookback_minutes and the objectives each channel serves. It is checked before anything runs.
+
+Each cycle polls, classifies every new item, answers a question in a governed read-only turn over the
+data sources and records the proposed reply, records a task's proposed case, and appends one line per
+handled item to record.jsonl in the state directory. Nothing is sent. With --once it runs one cycle
+and prints one line per proposal it recorded. Without it, it polls every poll_interval_seconds until
+SIGTERM or SIGINT, which end it after the item being handled (a second one ends it at once, exit
+status 130), and then prints one line per proposal it recorded.
+
+Exit status:
+  0  the cycles ran
+  1  the configuration, the models or the state directory cannot be used, or the last cycle's poll
+     failed (a failed poll is otherwise retried after poll_interval_seconds)
+  2  the command line is not valid (an unknown plugin name among them)
+  130  a second SIGTERM or SIGINT ended it at once
+```
+
+## `b10x-loom plugin report`
+
+Print one line per proposal a plugin recorded in its state directory: a proposed reply or a proposed case
+
+```text
+Usage: b10x-loom plugin report --state <DIR> <PLUGIN>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `<PLUGIN>` | yes | none | The plugin whose record is read |
+| `--state <DIR>` | yes | none | The plugin's state directory |

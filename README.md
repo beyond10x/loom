@@ -143,6 +143,14 @@ a credential helper, an SSH command and the like).
 the output; the [CLI reference](https://beyond10x.github.io/loom/docs/reference/cli) lists every
 flag.
 
+`b10x-loom plugin run slack-handler --config <file> --state <dir>` hosts the slack-handler plugin:
+it walks the Slack channels the bot is a member of through the Connectors command line, read only,
+and for each message nobody answered records a proposed reply read from the configured data
+sources, or a proposed case for a task. Nothing is sent. `--once` runs one cycle and prints one
+line per proposal; `b10x-loom plugin report slack-handler --state <dir>` prints them again. The
+configuration is `loom.slack.SlackConfig` as JSON; `plugin run --help` names its members, and
+`--catalog` takes route aliases as `run` does.
+
 ## Embed the runtime
 
 An application depends on one crate, `b10x-loom-sdk` (library `loom_sdk`). It re-exports
@@ -201,6 +209,7 @@ its code.
 | `b10x-loom-commission` | Commission's contracts and runtime loop, generated from its ESS specification |
 | `b10x-loom-connectors` | Commission's `ConnectorInvoker` over a Connectors service (Connectors `v0.35.0`) |
 | `b10x-loom-plugin` | The plugin host: polls a plugin, classifies each item and answers it in a governed read-only turn over Connectors data sources, one record line per item |
+| `b10x-loom-plugin-slack` | The slack-handler plugin: walks the Slack channels the bot is a member of, read only, and proposes answers to the messages nobody answered; `b10x-loom plugin run slack-handler` hosts it |
 | `b10x-loom-governor` | Evaluates a case's protocol with Canon and issues the frontier; executes nothing |
 | `b10x-loom-selector-laya` | Experimental: a fast typed action selector over a local or hosted Laya endpoint (`POST /v1/systemone`); no product crate links it |
 | `b10x-loom-intake-router`, `-references`, `-slice` | Route an intent to a protocol, extract its references, and run the local slice over a git work tree |
