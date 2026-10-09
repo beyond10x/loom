@@ -61,9 +61,11 @@ types:
         type: loom.run.CatalogueEntryStatus
 
   # How the run a session is filed after ended: it answered; it stopped short of an answer without
-  # an error (a budget bound, a cancel, a provider cut the turn short, an approval is awaited); or
-  # it failed (the endpoint dropped the connection, the stream broke, the loop panicked). A session
-  # is filed in every case.
+  # an error (a budget bound, a cancel, a provider cut the turn short, an approval is awaited, or
+  # the session stayed above its compaction trigger after compaction, so no further request was
+  # sent); or it failed (the endpoint dropped the connection, the stream broke, the loop panicked).
+  # A summary turn that fails or writes nothing is not a failed run. A session is filed in every
+  # case.
   - name: loom.run.RunEnding
     kind: enum
     variants: [Answered, Stopped, Failed]
