@@ -79,6 +79,13 @@ revalidate frontier + revision + authority
 execute
 ```
 
+As built, the "Laya typed choice" step is `b10x-loom-selector-laya` (`LayaSelector`,
+`SelectionStrategy::FastTyped`). It asks one `choice` question whose criteria are the candidate ids,
+reads `answer_confidence` as the probability, and answers `SelectorError::Unavailable` for a choice
+outside the candidates or any transport or answer failure, so the step below it can fall back. The
+threshold step is not built yet. See
+[Laya integration § As built](../integrations/laya-fast-selection.md#as-built).
+
 ## Safety rules
 
 1. Candidate labels originate from the current frontier.

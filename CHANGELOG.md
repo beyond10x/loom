@@ -17,6 +17,10 @@ under **Unreleased** until the next release.
   `InvalidThreshold` unless a decimal in [0, 1]), else the stronger selector's answer. `Confidence`
   compares a confidence as a number, so `0.9` equals `0.90`. `select` now drops, for every
   selector, a confidence that is not a decimal in [0, 1] and records the selection without one.
+- `b10x-loom-selector-laya`, an experimental `FastTyped` action selector that asks a Laya
+  endpoint (`POST /v1/systemone`) to choose one candidate and reports its `answer_confidence` as
+  the selection's confidence; a choice outside the candidates, a failure or a timeout is a
+  selection error, and neither `b10x-loom-cli` nor `b10x-loom-sdk` links it.
 
 ## [0.11.0] - 2026-10-08
 
