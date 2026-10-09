@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:laya-arguments-slice
 kind: story
-status: active
+status: implemented
 title: Laya picks the action, the reasoning model writes only its arguments
 summary: TASKBOARD I-004 vertical slice through selection, fallback, argument generation and revalidation.
 refs:
@@ -29,10 +29,11 @@ scope:
   path: crates/loom-selector-laya/Cargo.toml
 - confidence: inferred
   path: crates/loom-selector-laya/tests/laya_arguments_slice.rs
-revision: 11
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-09T19:23:53Z", actor: "human:timo", revision: 10}
 - {from: "proposed", to: "active", at: "2026-10-09T19:23:53Z", actor: "human:timo", revision: 11}
+- {from: "active", to: "implemented", at: "2026-10-09T20:04:09Z", actor: "human:timo", revision: 12, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 

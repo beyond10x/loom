@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:loop-stop-model
 kind: story
-status: active
+status: implemented
 title: 'LoopStop has one model: its causes declared in ESS, the enum generated'
 relations:
 - serves: vision:O1
@@ -48,10 +48,11 @@ scope:
   path: website/data/ess/loom-run.domain-graph.json
 - confidence: inferred
   path: website/docs/reference/ess/loom-run.md
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-09T19:23:53Z", actor: "human:timo", revision: 6}
 - {from: "proposed", to: "active", at: "2026-10-09T19:23:53Z", actor: "human:timo", revision: 7}
+- {from: "active", to: "implemented", at: "2026-10-09T20:04:09Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 
