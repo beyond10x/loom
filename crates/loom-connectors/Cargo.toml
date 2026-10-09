@@ -11,6 +11,7 @@ publish = false
 b10x-loom-commission = { path = "../loom-commission" }
 connectors-client = { git = "https://github.com/beyond10x/connectors", tag = "v0.35.0" }
 connectors-core = { git = "https://github.com/beyond10x/connectors", tag = "v0.35.0" }
+loom = { path = "../../generated/rust/loom" }
 serde_json = "1"
 tokio = { version = "1.53", features = ["rt-multi-thread"] }
 

@@ -9,6 +9,7 @@ tags:
 relations:
 - serves: vision:O1
 - informed_by: story:yaml-only-plugin
+- depends_on: story:plugin-host
 revision: 1
 ---
 ## Idea

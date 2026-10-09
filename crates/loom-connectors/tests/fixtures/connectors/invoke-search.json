@@ -1,0 +1,1 @@
+{"ok":true,"result":{"adapter":"chat","operation":"message.search","revision":"rev-1","result":{"matches":[{"channel":"C0FIXTURE1","ts":"1700000000.000100","user":"U0ALICE"}]}}}

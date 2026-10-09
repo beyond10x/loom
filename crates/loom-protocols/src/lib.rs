@@ -14,6 +14,8 @@ pub use store::InstallStore;
 pub const MAX_PROTOCOL_BYTES: usize = 1024 * 1024;
 /// Loom's built-in read-only clock protocol.
 pub const SYSTEM_QUERY_YAML: &str = include_str!("../../../protocols/system-query/1.yaml");
+/// Loom's read-only protocol a plugin turn answers an inbound item under. Plugin catalog only.
+pub const INBOUND_ANSWER_YAML: &str = include_str!("../../../protocols/inbound-answer/1.yaml");
 
 /// A definition and its validated Canon model. Definition availability grants no authority.
 #[derive(Debug, Clone)]
@@ -98,6 +100,22 @@ impl ProtocolCatalog {
                 location: "loom".into(),
                 revision: env!("CARGO_PKG_VERSION").into(),
                 path: "protocols/system-query/1.yaml".into(),
+            },
+        )?;
+        Ok(catalog)
+    }
+    /// The plugin host's catalog: `inbound-answer@1` only. Routing and `protocols list` read
+    /// [`Self::bundled`], which does not hold it.
+    pub fn plugins() -> Result<Self, String> {
+        let mut catalog = Self::default();
+        catalog.add_yaml(
+            "inbound-answer@1",
+            INBOUND_ANSWER_YAML,
+            ProtocolSource {
+                kind: SourceKind::Loom,
+                location: "loom".into(),
+                revision: env!("CARGO_PKG_VERSION").into(),
+                path: "protocols/inbound-answer/1.yaml".into(),
             },
         )?;
         Ok(catalog)

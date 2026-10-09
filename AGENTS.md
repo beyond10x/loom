@@ -51,6 +51,14 @@ not model output; only Canon completion makes a query successful. The integratio
 holds this path in both context modes. `protocols add/list/remove` manage user installations;
 `--replace` is explicit and bundled definitions cannot be shadowed. The SDK exports the catalog.
 
+Loom also owns `protocols/inbound-answer/1.yaml` (`inbound-answer@1`), the read-only protocol a
+plugin turn answers an inbound item under: `source.read` reads (capability `datasource.read`),
+`reply.propose` records a proposal and `reply.decline` a decline, and neither sends anything. It
+is the one exception to a single catalog: a plugin host admits on `ProtocolCatalog::plugins()`,
+which holds it, while routing, `protocols list` and a plugin's task path read `bundled()`, which
+does not. A plugin protocol is never routed to, and a routed protocol is never run by a plugin
+turn. `crates/loom-protocols/tests/inbound_answer.rs` holds both catalogs.
+
 ## Rules
 
 - Model-visible actions derive from the current frontier and runtime capability. Nothing
@@ -89,6 +97,8 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | An executor is never handed an unperformed action that needs no authority; an effect is invoked once, through its binding | `crates/loom-commission-testkit/tests/effect_invocation.rs` (`effect_invoked_only_through_its_binding`) |
 | A consequential action leaves Loom only as a proposal, and the executor links no Connectors crate | `crates/loom-executor/tests/connector_boundary.rs` (`consequential_actions_leave_loom_only_as_a_proposal`) |
 | A Connector invocation is made once, and only Connectors' own "nothing changed" is a refusal | `crates/loom-connectors/tests/connectors_invoker.rs` |
+| A plugin turn reads only the sources and kinds of its projection, and a proposal is recorded, never sent | `crates/loom-plugin/tests/effects.rs` (`effects_refuse_an_undeclared_read`, `propose_writes_the_record_only`) |
+| A slack-handler run describes and invokes only the three configured Slack reads and the turns' data-source reads, and records one line per item it proposes for; nothing is sent | `crates/loom-plugin-slack/tests/run.rs` (`fixture_run_invokes_no_write`, `fixture_run_records_three_proposals`) |
 | A read through Connectors is performed naming its audit record; a write without a recorded attempt is an error | `crates/loom-connectors/tests/connectors_invoker.rs` (`an_admitted_read_is_performed_with_its_result_and_names_its_audit_record`, `a_write_without_a_recorded_attempt_is_still_an_error`), `crates/loom-commission-testkit/tests/effect_invocation.rs` (`a_performed_that_names_another_record_than_its_binding_requires_is_not_answered`) |
 | The executor answers the commands of `ess/` as their synthesized scenarios specify, except `not-in-frontier`, which the conformance target answers | `task conform` (`crates/loom-conformance/tests/conform.rs`, `ess_conformance_report`); the membership rule: `crates/loom-executor/tests/adversary_run_revalidation.rs` (`not_in_frontier_follows_the_frontier_actions`) |
 | The router refuses a pick outside the registry or below the threshold | `crates/loom-intake-router/tests/adversary_classify.rs` |
@@ -267,6 +277,96 @@ record Connectors completed (`audit`) and no attempt, and `ConnectorEffects` ref
 a write without a recorded attempt included, is `Err`. The sync port runs on a Tokio runtime the
 invoker owns. `crates/loom-connectors/tests/connectors_invoker.rs` holds it against a fake service
 on a loopback port.
+
+`loom_connectors::cli::ConnectorsCli` is the other path: a plain read client over the operator's
+`connectors` command line, for a host polling a `loom.datasource` source outside a run and for a
+plugin turn's `source.read` inside one. It needs no `AdmittedRequest` and no binding. Each read is
+`operations describe`, then exactly one `operations invoke --input-stdin`, with `--output json` and
+the configured `--config` and `--state-dir`; argv holds only those flags and their ids. It reads
+no credential: the CLI's own keyring custody holds it, and the program starts with only the
+variables `cli::INHERITED` names, never a token. Writes are refused twice. The client refuses an
+operation `operations describe` reports with the `mutation` profile (`cli::WRITE_PROFILES`) before
+any invoke; `describe` prints no effect, and adapters publish other profiles, `resource` among
+them, for reads, which are read. Connectors refuses any write without `--approval-file` (connectors
+`v0.38.0`, `crates/connectors-host/src/local/owner/mutation/execution.rs:161`), which this client
+never passes (`no_invoke_ever_carries_an_approval_file`); that second check is what holds a write an
+adapter publishes under another profile. A kind the source declares no operation for starts no
+process. Each command is bounded by the configuration's `timeout_seconds` (60 when absent) and the
+process it started is killed and reaped past it; a process that process forked is not killed, and
+outlives the read. A Connectors refusal is a
+`ReadRefusal` naming the source, never retried; `not_granted`'s names the remedy, `connectors
+connections revalidate --adapter <alias>`, which the client never runs.
+`crates/loom-connectors/tests/connectors_cli.rs` and `connectors_cli_adversary.rs` hold it against
+the fake `tests/fixtures/connectors/fake-connectors`, which logs its argv.
+
+## Plugin host
+
+`b10x-loom-plugin` (`crates/loom-plugin`) hosts a plugin (ADR `plugin-hooks`): a crate linked at
+build time implementing `Plugin` (`poll`, `classify`, `project`, `turn`, `result`, `objectives`),
+run by `run_plugin(plugin, config, state, stop)`. Its nouns are the `loom.plugin` domain
+(`ess/domains/plugin.yaml`); a plugin's own configuration extends `PluginConfig`. The plugin hooks
+sit outside a run and grant nothing. A turn is a thin caller of `run_until_blocked` through
+`loom_sdk`, on `inbound-answer@1` from `ProtocolCatalog::plugins()`, with Loom's governed model loop
+(`LoopExecutor`), `PluginAuthority` (grants `datasource.read` and `reply.propose`, denies every
+other capability) and `DataSourceEffects`, which reads through `loom_connectors::cli`, refuses a
+`{source, kind}` outside the projection before any command, and submits one `source_read` evidence
+per performed read. Commission ends a Run `AwaitingApproval` after every performed read there, since
+both gated actions stay gated; the turn starts the next Run only when every awaited action needs a
+capability `PluginAuthority` grants and the Run performed an effect, within `TURN_STEP_BUDGET`.
+Model requests are bounded per turn: `TURN_MODEL_BUDGET` counts every request sent, wire retries
+included, across all Runs; the port the turn lends refuses any past it. A classifier hint that
+names no configured source is dropped before anything prints it. Nothing is sent: a reply is a
+proposal in the record. A task gets no turn: the router's pick from `ProtocolCatalog::bundled()`
+is recorded as a proposed case. An attempt on an item is counted in the state, which keeps the
+item, before it starts; a classify or turn hook that fails leaves it unhandled, each cycle
+retries the failing items from the state before it polls, and the third attempt that does not
+succeed records it `stopped`. A failure that is not about the item (`PluginError::Unavailable`:
+sources that cannot be described, a read whose connectors program timed out or that Connectors
+refused `not_granted`, a model that cannot be reached, the router's model or catalog) counts
+against none and ends the cycle without saving the poll's cursors. A poll that fails is such an
+outage of the whole host: the cycle saves no cursor and the host polls again after its interval;
+`run_plugin` returns the poll's failure only when `stop` ends it after that cycle (`once`). A
+`stop` set while the host runs ends it after the item being handled, leaving the poll's other items
+and its cursors to the next host; a `stop` already set at start (`once`) runs its whole cycle
+(`crates/loom-plugin/tests/host.rs`, `a_poll_outage_does_not_stop_the_host`,
+`a_stop_ends_the_host_after_the_current_item`). The state directory
+holds `state.json`, written to a temporary file and renamed, and `record.jsonl`, the source of
+truth for handled items, whose torn last line is dropped under the lock. One host holds it at a
+time: `run_plugin` takes an exclusive lock on the record before anything else, and a second host
+is refused once the lock stayed held for `LOCK_WAIT`. One inside a configured workspace root or
+checkout is refused by comparing paths, with no git command. The tests in
+`crates/loom-plugin/tests/` use a recorded classifier, a scripted model port and the fake
+`connectors` of `loom-connectors`. The command line hosts registered plugins through
+`b10x-loom plugin run|report` (§ Slack handler).
+
+## Slack handler
+
+`b10x-loom-plugin-slack` (`crates/loom-plugin-slack`) is the slack-handler plugin, the one
+`b10x-loom plugin run` registers (`PluginName`, held to the crate's `NAME` by a unit test of
+`b10x-loom-cli`). Its configuration is the `loom.slack` domain's `SlackConfig`
+(`ess/domains/slack.yaml`), which holds the host's `PluginConfig`; `config::read` decodes it from
+JSON, refuses an unknown member, and `config::check` refuses one without the bot's user id, the
+Slack adapter or connection before anything runs. Its own hook is the poll; classification,
+projection, the turn and the record are the host's defaults. The poll reads only through
+`ConnectorsCli::invoke_read` on the configured adapter and connection, with the three configured
+read operations, and never a write: the channel list, each member channel's history from its
+stored `ts`, and a thread only for a message with replies. The walk orders channels by objective
+weight, staleness, member count, then a seeded draw. A message younger than `min_age_minutes`, a
+bot's, a system message (`subtype` other than `file_share`), one the bot reacted to or one with a
+thread reply from anybody but its poster is no item; mentions of the bot come first. A channel's
+cursor never passes a message too young to judge. The tests in `crates/loom-plugin-slack/tests/`
+reuse `crates/loom-plugin/tests/support/mod.rs` by path and answer Slack-shaped JSON from
+`tests/fixtures/` through the fake `connectors`; ids there are synthetic.
+
+`b10x-loom plugin run` settles both models before any read: with `--catalog` from route aliases
+(`model_catalog`), otherwise Codex models, as `run` does. A turn runs on
+`model_port::LlmModelPort`, the bridge from an llm `Model` to the harness `ModelPort`: one
+`Model::turn` per port turn, no retry and no other target, an opaque item carried back under the
+wire id `llm-model` only. Without `--once`, the first SIGTERM or SIGINT sets the host's stop, so
+a systemd stop ends it after the item being handled; a second one exits at once with 130
+(`plugin_run_stops_on_sigterm`). `plugin report` reads `record.jsonl` without the lock and drops a torn
+last line. `crates/loom-cli/tests/plugin.rs` runs the binary against the fake `connectors` and the
+fixture catalog at a loopback socket replaying recorded responses.
 
 ## Laya selector
 

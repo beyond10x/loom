@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-09T07:12:11Z",
+  "actor": "human:timo",
+  "artifact": "story:slack-plugin",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "plugin-layer plan revision 2",
+    "review": "review-result:plugin-layer-scope-round-1",
+    "outcome": "fixed"
+  }
+}

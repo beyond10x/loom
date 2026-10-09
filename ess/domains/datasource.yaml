@@ -1,0 +1,121 @@
+# A data source a plugin reads through the Connectors command line (story connectors-cli-reads).
+# Nouns are read from the `connectors` CLI as it answers `--output json`: `operations describe`
+# answers the operation's schema identity (`schema`), the descriptor `revision` and the operation
+# with its `profile` and `input_schema`; `operations invoke` answers `result` and, where the
+# owner recorded one, `source_audit.audit_ref`. A source is configuration the host reads: it has no
+# lifecycle, so the domain declares types only.
+domain: loom.datasource
+
+summary: >-
+  A data source read through the Connectors command line: the configured source (a Connectors
+  adapter alias, a connection and the read operation it declares for each kind of read), how the
+  command line is run, what `operations describe` reports for an operation and what one read
+  answers. A read never carries a credential and never runs an operation Connectors describes
+  as a mutation.
+
+naming:
+  wire: datasource
+  display: Data source
+
+types:
+  # The host's name for a configured source; a refusal names it.
+  - name: loom.datasource.SourceName
+    kind: newtype
+    of: String
+
+  # A configured Connectors adapter, as `--adapter` names it.
+  - name: loom.datasource.AdapterAlias
+    kind: newtype
+    of: String
+
+  # A Connectors connection, as `--connection` names it.
+  - name: loom.datasource.ConnectionId
+    kind: newtype
+    of: String
+
+  # An operation of the adapter's descriptor, as `--operation` names it.
+  - name: loom.datasource.OperationId
+    kind: newtype
+    of: String
+
+  # The three kinds of read a plugin asks a source for.
+  - name: loom.datasource.ReadKind
+    kind: enum
+    variants: [List, Search, Get]
+
+  # One configured source: the adapter and connection every read of it uses, and the read
+  # operation it declares for each kind. A kind with no operation is not read.
+  - name: loom.datasource.DataSource
+    kind: struct
+    fields:
+      - name: name
+        type: loom.datasource.SourceName
+      - name: adapter
+        type: loom.datasource.AdapterAlias
+      - name: connection
+        type: loom.datasource.ConnectionId
+      - name: list
+        type: Optional<loom.datasource.OperationId>
+      - name: search
+        type: Optional<loom.datasource.OperationId>
+      - name: get
+        type: Optional<loom.datasource.OperationId>
+
+  # How the command line is run: the program, and the `--config` file and `--state-dir`
+  # directory passed to every command when given (Connectors' defaults otherwise).
+  # `timeout_seconds` bounds each command, describe and invoke alike: one still running after it
+  # is killed and reaped, and the read fails naming the timeout. Absent, the bound is 60 seconds.
+  - name: loom.datasource.ConnectorsCliConfig
+    kind: struct
+    fields:
+      - name: program
+        type: String
+      - name: config
+        type: Optional<String>
+      - name: state_dir
+        type: Optional<String>
+      - name: timeout_seconds
+        type: Optional<Integer>
+
+  # What `operations describe` reports for one read operation: its exact schema identity (the
+  # value `operations invoke --schema` takes), its input schema as a JSON Schema document and the
+  # descriptor revision (`--revision`).
+  - name: loom.datasource.SourceEntity
+    kind: struct
+    fields:
+      - name: operation
+        type: loom.datasource.OperationId
+      - name: schema
+        type: String
+      - name: input_schema
+        type: Json
+      - name: revision
+        type: String
+
+  # What one read answers: the provider's answer as a JSON value, and the execution audit
+  # record Connectors names for it (`source_audit.audit_ref`), absent when the CLI names none.
+  - name: loom.datasource.ReadResult
+    kind: struct
+    fields:
+      - name: body
+        type: Json
+      - name: audit_ref
+        type: Optional<String>
+
+  # A read that was not made, or that Connectors refused. `code` is `undeclared-kind` (the
+  # source declares no operation for the kind; no process started), `write-operation` (the
+  # operation is described with the `mutation` profile; not invoked), or Connectors' own failure
+  # code (`not_granted`, `not_found`, …). `source` is present when the read named a source.
+  - name: loom.datasource.ReadRefusal
+    kind: struct
+    fields:
+      - name: source
+        type: Optional<loom.datasource.SourceName>
+      - name: adapter
+        type: loom.datasource.AdapterAlias
+      - name: operation
+        type: Optional<loom.datasource.OperationId>
+      - name: code
+        type: String
+      - name: message
+        type: String

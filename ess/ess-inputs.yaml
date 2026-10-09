@@ -5,4 +5,7 @@ specification:
   - domains/run.yaml
   - domains/evaluation.yaml
   - domains/governor.yaml
+  - domains/datasource.yaml
+  - domains/plugin.yaml
+  - domains/slack.yaml
 scenarios: []

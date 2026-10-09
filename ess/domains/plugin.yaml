@@ -1,0 +1,222 @@
+# A plugin of Loom, hosted in a loop (story plugin-host, ADR plugin-hooks). Nouns are read from the
+# ADR's hooks: a poll answers new items and the cursors after them, a classification names the
+# item's intent and hints, a projection the actions and data sources a turn may use, a turn ends in
+# a result, and each handled item becomes one line of the plugin's record. A plugin's own
+# configuration extends `PluginConfig`. The host keeps its state in a directory outside any
+# workspace; nothing here is an entity with a lifecycle, so the domain declares types only.
+domain: loom.plugin
+
+summary: >-
+  A plugin hosted by Loom: what its poll answers, how an item is classified and projected onto the
+  actions and data sources a governed turn may use, what the turn ends with, the line the host
+  records for each handled item and the state it keeps between polls. A turn proposes a reply or
+  declines; it sends nothing.
+
+naming:
+  wire: plugin
+  display: Plugin
+
+types:
+  # The plugin's id of one inbound item. The host handles an id once.
+  - name: loom.plugin.ItemId
+    kind: newtype
+    of: String
+
+  # One inbound item a poll found: its id, its revision (it moves when the item itself changes;
+  # the turn's case holds it as the revision of the artifact `item`), its text, and whatever else
+  # the plugin keeps about it, as a JSON value. The text and the details are untrusted data.
+  - name: loom.plugin.InboundItem
+    kind: struct
+    fields:
+      - name: id
+        type: loom.plugin.ItemId
+      - name: revision
+        type: String
+      - name: text
+        type: String
+      - name: details
+        type: Json
+
+  # Where a poll of one stream stopped, in the plugin's own terms: the stream's name and the
+  # opaque value the next poll starts after.
+  - name: loom.plugin.Cursor
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: value
+        type: String
+
+  # What one poll answers: the items found and the cursors after them. A cursor the poll does not
+  # name keeps its value.
+  - name: loom.plugin.Poll
+    kind: struct
+    fields:
+      - name: items
+        type: List<loom.plugin.InboundItem>
+      - name: cursors
+        type: List<loom.plugin.Cursor>
+
+  # What an item asks for: a question (`Ask`), something done for the asker (`Request`), work
+  # that needs its own case (`Task`), or something to look up (`Find`).
+  - name: loom.plugin.Intent
+    kind: enum
+    variants: [Ask, Request, Task, Find]
+
+  # The classifier's answer for one item: the intent, the hints it gives (names of configured
+  # data sources likely to answer it) and its confidence from 0 to 1, a proposal and never
+  # authority.
+  - name: loom.plugin.Classification
+    kind: struct
+    fields:
+      - name: intent
+        type: loom.plugin.Intent
+      - name: hints
+        type: List<String>
+      - name: confidence
+        type: Decimal
+
+  # What a turn may use: the action ids of `inbound-answer@1` it admits, and the configured data
+  # sources it may read. The sources are always a subset of the configuration's.
+  - name: loom.plugin.Projection
+    kind: struct
+    fields:
+      - name: actions
+        type: List<String>
+      - name: sources
+        type: List<loom.datasource.SourceName>
+
+  # One objective the plugin weighs its next poll by.
+  - name: loom.plugin.Objective
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: weight
+        type: Decimal
+
+  # The host's configuration of one plugin: the Connectors command line and the data sources it
+  # reads, the objectives, the classification threshold (below it an item is recorded
+  # unclassified and gets no turn; absent, 0.5, as `loom-intake-router`'s `--threshold`), the
+  # seconds between two polls, and the workspace roots and checkouts the state directory must lie
+  # outside of.
+  - name: loom.plugin.PluginConfig
+    kind: struct
+    fields:
+      - name: connectors
+        type: loom.datasource.ConnectorsCliConfig
+      - name: sources
+        type: List<loom.datasource.DataSource>
+      - name: objectives
+        type: List<loom.plugin.Objective>
+      - name: classify_threshold
+        type: Optional<Decimal>
+      - name: poll_interval_seconds
+        type: Integer
+      - name: workspace_roots
+        type: List<String>
+      - name: checkouts
+        type: List<String>
+
+  # A reply a turn proposed for an item. It is recorded and never sent.
+  - name: loom.plugin.Proposal
+    kind: struct
+    fields:
+      - name: item
+        type: loom.plugin.ItemId
+      - name: text
+        type: String
+
+  # The case a task item would need: the protocol the router picks for it from the bundled
+  # catalog, the router's confidence and its reasons. Nothing opens it.
+  - name: loom.plugin.ProposedCase
+    kind: struct
+    fields:
+      - name: protocol
+        type: String
+      - name: confidence
+        type: Decimal
+      - name: reasons
+        type: List<String>
+
+  # One read a turn performed: the source and the kind of read.
+  - name: loom.plugin.SourceRead
+    kind: struct
+    fields:
+      - name: source
+        type: loom.datasource.SourceName
+      - name: kind
+        type: loom.datasource.ReadKind
+
+  # How the host handled an item: a reply proposed, the item declined, a case proposed for a task,
+  # a classification below the threshold (no turn ran), or a turn or hook that stopped without
+  # either.
+  - name: loom.plugin.RecordOutcome
+    kind: enum
+    variants: [Proposed, Declined, ProposedCase, Unclassified, Stopped]
+
+  # What one turn ended with: its outcome, the reads it performed, the proposal's text or the
+  # proposed case, and the detail of a decline or a stop.
+  - name: loom.plugin.TurnResult
+    kind: struct
+    fields:
+      - name: outcome
+        type: loom.plugin.RecordOutcome
+      - name: reads
+        type: List<loom.plugin.SourceRead>
+      - name: proposal
+        type: Optional<String>
+      - name: proposed_case
+        type: Optional<loom.plugin.ProposedCase>
+      - name: detail
+        type: Optional<String>
+
+  # One line of the plugin's record, one per handled item: the item, the classified intent and
+  # confidence (absent when classification failed), the outcome, the reads performed, the
+  # proposal's text or the proposed case, and the detail of a decline or a stop.
+  - name: loom.plugin.RecordLine
+    kind: struct
+    fields:
+      - name: item
+        type: loom.plugin.ItemId
+      - name: intent
+        type: Optional<loom.plugin.Intent>
+      - name: confidence
+        type: Optional<Decimal>
+      - name: outcome
+        type: loom.plugin.RecordOutcome
+      - name: reads
+        type: List<loom.plugin.SourceRead>
+      - name: proposal
+        type: Optional<String>
+      - name: proposed_case
+        type: Optional<loom.plugin.ProposedCase>
+      - name: detail
+        type: Optional<String>
+
+  # How often handling one item was attempted and did not finish, and the last failure's text. The
+  # item itself is kept, so the host retries it from the state whatever its poll answers next. The
+  # count is raised before an attempt starts, so an attempt that never returns counts too. The item
+  # stays unhandled and gets no record line until its third failure, which records it stopped.
+  - name: loom.plugin.ItemFailures
+    kind: struct
+    fields:
+      - name: item
+        type: loom.plugin.InboundItem
+      - name: failures
+        type: Integer
+      - name: last_failure
+        type: String
+
+  # What the host keeps between polls: the cursors, the ids of the items it handled, and the
+  # failures of items not handled yet. It is written to a temporary file and renamed into place.
+  # Every item the record holds a line for counts as handled too.
+  - name: loom.plugin.PluginState
+    kind: struct
+    fields:
+      - name: cursors
+        type: List<loom.plugin.Cursor>
+      - name: handled
+        type: List<loom.plugin.ItemId>
+      - name: failing
+        type: List<loom.plugin.ItemFailures>

@@ -1,0 +1,20 @@
+[package]
+name = "b10x-loom-plugin-slack"
+description = "The slack-handler plugin: walks the Slack channels the bot is a member of through the Connectors command line, read only, and hands the host the messages nobody answered, mentions first."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "b10x_loom_plugin_slack"
+
+[dependencies]
+b10x-loom-plugin = { path = "../loom-plugin" }
+b10x-loom-sdk = { path = "../loom-sdk" }
+llm-core = { package = "b10x-llm-core", git = "https://github.com/beyond10x/llm", tag = "0.4.0" }
+loom = { path = "../../generated/rust/loom" }
+
+[dev-dependencies]
+serde_json = "1"

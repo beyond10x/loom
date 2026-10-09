@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-09T16:33:23Z",
+  "actor": "human:timo",
+  "artifact": "story:connectors-cli-reads",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "loom w2 U2 correction round 1 (finding 4 of 4), verified by the coordinator",
+    "review": "review-result:adv-w2-u2-pass-1",
+    "outcome": "fixed"
+  }
+}

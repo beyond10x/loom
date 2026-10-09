@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-09T07:18:17Z",
+  "actor": "human:timo",
+  "artifact": "story:connectors-cli-reads",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "plugin-layer plan revision 3 (the last)",
+    "review": "review-result:plugin-layer-design-round-2",
+    "outcome": "fixed"
+  }
+}

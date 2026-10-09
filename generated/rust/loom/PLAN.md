@@ -1,19 +1,29 @@
 <!--
   generated from loom v1
-  model digest 394821f0396bb3a17570338485b73d8deca7ebb2683022f51d2a1bfd9ff6b071
-  contract digest 13338a26fdf5612984f1fb0d4081af14c5d2dfeb6c2a7cb563fdb3f59f0c9697
+  model digest 866bbd9d47246b4227f3631ebb34d83e265512af496b4fe99b0098c8cc298c10
+  contract digest 08c02cd39830806f4c6eaa95dfea4ecf631c548ae35d9b4e43d6ab0db1b725ec
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-98 capabilities: **97 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+127 capabilities: **126 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
 | capability | source |
 | --- | --- |
+| domain type | `loom.datasource.AdapterAlias` |
+| domain type | `loom.datasource.ConnectionId` |
+| domain type | `loom.datasource.ConnectorsCliConfig` |
+| domain type | `loom.datasource.DataSource` |
+| domain type | `loom.datasource.OperationId` |
+| domain type | `loom.datasource.ReadKind` |
+| domain type | `loom.datasource.ReadRefusal` |
+| domain type | `loom.datasource.ReadResult` |
+| domain type | `loom.datasource.SourceEntity` |
+| domain type | `loom.datasource.SourceName` |
 | domain type | `loom.evaluation.ActionStatus` |
 | domain type | `loom.evaluation.CaseSnapshot` |
 | domain type | `loom.evaluation.ClaimValue` |
@@ -32,6 +42,23 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.governor.StoredEvidence` |
 | domain type | `loom.governor.StoredEvidenceData` |
 | domain type | `loom.governor.StoredObservation` |
+| domain type | `loom.plugin.Classification` |
+| domain type | `loom.plugin.Cursor` |
+| domain type | `loom.plugin.InboundItem` |
+| domain type | `loom.plugin.Intent` |
+| domain type | `loom.plugin.ItemFailures` |
+| domain type | `loom.plugin.ItemId` |
+| domain type | `loom.plugin.Objective` |
+| domain type | `loom.plugin.PluginConfig` |
+| domain type | `loom.plugin.PluginState` |
+| domain type | `loom.plugin.Poll` |
+| domain type | `loom.plugin.Projection` |
+| domain type | `loom.plugin.Proposal` |
+| domain type | `loom.plugin.ProposedCase` |
+| domain type | `loom.plugin.RecordLine` |
+| domain type | `loom.plugin.RecordOutcome` |
+| domain type | `loom.plugin.SourceRead` |
+| domain type | `loom.plugin.TurnResult` |
 | domain type | `loom.run.ActionCatalogue.State` |
 | domain type | `loom.run.ArgumentRequest.State` |
 | domain type | `loom.run.ArgumentRequestId` |
@@ -53,6 +80,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.run.Turn.State` |
 | domain type | `loom.run.TurnId` |
 | domain type | `loom.run.WireCredential` |
+| domain type | `loom.slack.ChannelObjectives` |
+| domain type | `loom.slack.SlackConfig` |
 | entity lifecycle | `loom.run.ActionCatalogue` |
 | entity lifecycle | `loom.run.ArgumentRequest` |
 | entity lifecycle | `loom.run.Compaction` |

@@ -8,6 +8,7 @@ tags:
 - idea
 relations:
 - serves: vision:O1
+- informed_by: story:plugin-measurement
 revision: 1
 ---
 ## Idea

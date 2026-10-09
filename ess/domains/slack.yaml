@@ -1,0 +1,62 @@
+# The slack-handler plugin (story slack-plugin): a read-only walk over the Slack channels the bot
+# is a member of, finding recent messages nobody answered. Its configuration extends the host's
+# `PluginConfig` by holding it, and adds the Slack adapter and connection the poll reads through
+# the Connectors command line, the three read operations it invokes (`conversations.list`,
+# `conversations.history`, `conversations.replies` as the adapter names them), the bot's user id,
+# the age a message must reach before it is an item, the seed of the walk, how far back a channel
+# never read before is read, and which objectives each channel serves. It is configuration the
+# host reads: it has no lifecycle, so the domain declares types only.
+domain: loom.slack
+
+summary: >-
+  The slack-handler plugin's configuration: the host's plugin configuration, the Slack adapter,
+  connection and read operations its poll invokes, the bot's user id, the age rule, the walk's
+  seed and lookback, and the objectives each channel serves. Nothing here writes to Slack.
+
+naming:
+  wire: slack
+  display: Slack
+
+types:
+  # A channel and the objectives it serves. `channel` is a channel id or a channel name without
+  # `#`; `objectives` name objectives of the plugin configuration. A channel weighs as the
+  # heaviest objective it serves, and one no entry names weighs 0.
+  - name: loom.slack.ChannelObjectives
+    kind: struct
+    fields:
+      - name: channel
+        type: String
+      - name: objectives
+        type: List<String>
+
+  # The slack-handler's configuration: the host's `PluginConfig` (`plugin`), the Slack adapter and
+  # connection every poll read uses, the read operations of the channel list
+  # (`list_channels`), of a channel's history (`history`) and of a thread's replies (`replies`),
+  # the bot's user id, the minutes a message must have aged before it is an item, the seed that
+  # orders channels the walk cannot tell apart otherwise, the minutes a channel read for the first
+  # time is read back (absent, 1440), and the objectives each channel serves.
+  - name: loom.slack.SlackConfig
+    kind: struct
+    fields:
+      - name: plugin
+        type: loom.plugin.PluginConfig
+      - name: adapter
+        type: loom.datasource.AdapterAlias
+      - name: connection
+        type: loom.datasource.ConnectionId
+      - name: list_channels
+        type: loom.datasource.OperationId
+      - name: history
+        type: loom.datasource.OperationId
+      - name: replies
+        type: loom.datasource.OperationId
+      - name: bot_user_id
+        type: String
+      - name: min_age_minutes
+        type: Integer
+      - name: seed
+        type: Integer
+      - name: lookback_minutes
+        type: Optional<Integer>
+      - name: channels
+        type: List<loom.slack.ChannelObjectives>
