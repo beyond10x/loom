@@ -7,7 +7,7 @@ title: 'Unattended agents are Loom plugins: a Slack handler first'
 relations:
 - serves: vision:O1
 - implements: architecture-decision-record:plugin-hooks
-revision: 3
+revision: 4
 ---
 ## Outcome
 
@@ -49,4 +49,4 @@ The ADR's last step, expressing what generalises as YAML (a YAML-only plugin, an
 enrichment before a turn), is not in this epic. It follows the measurement page; the idea stories
 `yaml-only-plugin` and `reference-enrichment` (filed on wave `2026-10-09-w1`) carry it.
 
-Source: the operator's approved plan (conductor `charters/loom.md`, DSP-20261009-05); `architecture-decision-record:plugin-hooks`.
+Source: the operator's approved plan (2026-10-09); `architecture-decision-record:plugin-hooks`.

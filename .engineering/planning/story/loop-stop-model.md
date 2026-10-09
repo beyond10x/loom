@@ -2,19 +2,57 @@
 format: aep.planning-md/3
 id: story:loop-stop-model
 kind: story
-status: draft
+status: implemented
 title: 'LoopStop has one model: its causes declared in ESS, the enum generated'
 relations:
 - serves: vision:O1
 - depends_on: story:compaction-target-bound
 scope:
+- confidence: inferred
+  path: CHANGELOG.md
+- confidence: cited
+  path: README.md
+- confidence: inferred
+  path: crates/loom-executor/src/compaction.rs
+- confidence: cited
+  path: crates/loom-executor/src/harness/governed.rs
+- confidence: inferred
+  path: crates/loom-executor/src/harness/turn_loop/answer.rs
+- confidence: cited
+  path: crates/loom-executor/src/harness/turn_loop/event.rs
 - confidence: cited
   path: crates/loom-executor/src/harness/turn_loop/mod.rs
 - confidence: cited
+  path: crates/loom-executor/src/harness/turn_loop/tests.rs
+- confidence: cited
+  path: crates/loom-executor/tests/adversary_w2_harness_loop_port.rs
+- confidence: cited
+  path: crates/loom-executor/tests/adversary_w3_compaction_contract.rs
+- confidence: cited
+  path: crates/loom-executor/tests/adversary_w4_20261009_compaction_target_bound.rs
+- confidence: cited
+  path: crates/loom-executor/tests/compaction_contract.rs
+- confidence: cited
+  path: crates/loom-executor/tests/compaction_target_bound.rs
+- confidence: cited
+  path: crates/loom-executor/tests/harness_loop_port.rs
+- confidence: cited
+  path: crates/loom-governor/tests/adversary_w8_arbitrary_precision.rs
+- confidence: cited
   path: ess/domains/run.yaml
 - confidence: cited
+  path: ess/system.yaml
+- confidence: cited
   path: generated/rust/loom
-revision: 2
+- confidence: inferred
+  path: website/data/ess/loom-run.domain-graph.json
+- confidence: inferred
+  path: website/docs/reference/ess/loom-run.md
+revision: 8
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-09T19:23:53Z", actor: "human:timo", revision: 6}
+- {from: "proposed", to: "active", at: "2026-10-09T19:23:53Z", actor: "human:timo", revision: 7}
+- {from: "active", to: "implemented", at: "2026-10-09T20:04:09Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 
@@ -41,8 +79,28 @@ hand-written enum shadows the declared one) or the story's round-trip case.
 
 ## Open at drafting
 
-Whether the generated enum keeps the internal `kind` tag and `deny_unknown_fields` the hand-written
-one has; settle it at scoping, before the specification changes.
+Settled at scoping (2026-10-09), from a trial on a copy of `ess/` with `ess` 0.56.0:
+
+- **Declaration.** `loom.run.LoopStop` is a `kind: union` with `tag: kind`, one variant per cause
+  keyed by its kebab-case tag (`max-turns`, `context-above-trigger`, …), each naming a payload
+  struct `loom.run.LoopStop<Cause>` with the cause's fields; `completed` has no payload. A union
+  variant with no payload needs `format: ess/22`, so `ess/system.yaml` moves from `ess/20` to
+  `ess/22`; nothing else in the generated crate or the conformance suite changes but digests.
+  `validate --strict-requires`, `compile` and `verify conform synthesize` exit 0 on the trial.
+- **What ESS cannot say.** The generated enum derives no serde and has no codec; a union takes no
+  `closed`; variants cannot carry inline fields; there is no unsigned integer (`Integer` is `i64`).
+- **Decision.** The generated enum is the one model: `turn_loop` re-exports it and every match
+  uses it (variants become tuple variants over the payload structs; `u64`/`u32` fields become
+  `i64`, a breaking change the CHANGELOG names). The JSON of `LoopOutcome.stop`,
+  `LoopEvent::Finished.stop` and `LoopEvent::DelegateFinished.stop` stays byte-for-byte what it
+  is: a hand-written serde codec module, used through `#[serde(with = …)]` on those three fields,
+  writes and reads the internal `kind` tag and the field names, refuses unknown fields, unknown
+  tags and negative numbers. The codec declares no type of its own that mirrors the causes (no
+  second enum), so it is a wire codec of the declared type, not a second model.
+- **Not affected.** A filed session stores only `RunEnding` (`crates/loom-executor/src/session.rs`,
+  `Ending`), not `LoopStop`.
+- **Red test of the ESS-only first commit:** `task no-hand-model` (the declared name
+  `loom.run.LoopStop` shadows the hand-written enum at `turn_loop/mod.rs`), and `task drift`.
 
 ## Source
 

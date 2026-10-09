@@ -167,7 +167,7 @@ fn adversary_w2_with_delegation_configured_no_delegate_is_published_and_the_call
         stop_of(&run)
     );
     assert!(
-        matches!(stop_of(&run), Some(LoopStop::AwaitingApproval { .. })),
+        matches!(stop_of(&run), Some(LoopStop::AwaitingApproval(_))),
         "{:?}",
         stop_of(&run)
     );
@@ -389,7 +389,7 @@ fn adversary_w2_without_a_governor_the_handed_frontier_is_the_catalogue() {
         proposed(TESTS_RUN, json_object("suite", "unit"))
     );
     assert!(
-        matches!(stop_of(&run), Some(LoopStop::AwaitingApproval { .. })),
+        matches!(stop_of(&run), Some(LoopStop::AwaitingApproval(_))),
         "{:?}",
         stop_of(&run)
     );

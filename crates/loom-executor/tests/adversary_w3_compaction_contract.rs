@@ -31,7 +31,8 @@ use b10x_loom_commission_testkit::fake_governor::{Answer, FakeGovernor};
 use b10x_loom_executor::harness::governed::{LoopExecutor, LoopPorts, LoopRun, tool_name};
 use b10x_loom_executor::harness::responses;
 use b10x_loom_executor::harness::turn_loop::{
-    LoopConfig, LoopEvent, LoopSink, LoopStop, SUMMARY_MARKER, VecLoopSink,
+    LoopConfig, LoopEvent, LoopSink, LoopStop, LoopStopContextAboveTrigger, SUMMARY_MARKER,
+    VecLoopSink,
 };
 use b10x_loom_executor::harness::wire::{
     CallId, Item, ModelPort, StopReason, StreamSink, ToolCall, ToolName, TurnOutcome, TurnRequest,
@@ -56,6 +57,8 @@ const RUN: &str = "00000000-0000-4000-8000-0000000ad3ff";
 /// The declared context window, in tokens: 80 % is 3 200 tokens, 12 800 bytes by the loop's
 /// estimate of four bytes a token; 50 % is 2 000 tokens, 8 000 bytes.
 const WINDOW: u64 = 4_000;
+/// [`WINDOW`] as the `Integer` a `LoopStop` carries.
+const WINDOW_FIGURE: i64 = WINDOW as i64;
 const BYTES_PER_TOKEN: u64 = 4;
 
 // --- two compactions in one run -----------------------------------------------------------------
@@ -735,8 +738,8 @@ fn adversary_w3_a_fold_of_reasoning_items_alone_never_leaves_the_session_larger(
     assert!(
         matches!(
             stop_of(&run),
-            Some(LoopStop::ContextAboveTrigger { window: WINDOW, target, occupied })
-                if target == WINDOW / 2 && occupied * 100 >= WINDOW * 80
+            Some(LoopStop::ContextAboveTrigger(LoopStopContextAboveTrigger { window: WINDOW_FIGURE, target, occupied }))
+                if target == WINDOW_FIGURE / 2 && occupied * 100 >= WINDOW_FIGURE * 80
         ),
         "the session stays above its trigger, so the run ends by name: {:?}",
         run.run

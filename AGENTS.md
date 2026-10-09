@@ -89,6 +89,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | A selector cannot leave the catalogue | `crates/loom-executor/tests/action_selector.rs` (`selector_cannot_leave_catalogue`) |
 | The reasoning-model selector offers the model only its candidates, through any `ModelPort`, and an answer outside them is never a selection | `crates/loom-executor/tests/reasoning_model_selector.rs` (`an_action_outside_the_candidate_set_is_a_selection_error_and_never_a_selection`) |
 | Low confidence falls back to the stronger selector, at a host-supplied threshold compared as a number | `crates/loom-executor/tests/confidence_fallback.rs` (`the_fast_choice_is_returned_only_at_or_above_the_supplied_threshold`) |
+| Laya selects behind the confidence fallback; arguments are generated once, only for the finally selected action, and an action outside the frontier never reaches argument generation or revalidation | `crates/loom-selector-laya/tests/laya_arguments_slice.rs` (`a_choice_outside_the_frontier_is_rejected_and_never_reaches_arguments_or_revalidation`) |
 | A blocked or merge-seeking pick is never proposed | `crates/loom-executor/tests/adversary_executor_admission.rs` |
 | A stale or unlisted request is refused at revalidation | `crates/loom-commission-testkit/tests/action_request.rs`, `crates/loom-executor/tests/adversary_run_revalidation.rs`, `crates/loom-executor/tests/selection_revalidation.rs` |
 | Unknown capabilities and panicking authority providers yield no grant | `crates/loom-commission-testkit/tests/adversary_authority_fail_closed.rs` |
@@ -104,7 +105,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | The router refuses a pick outside the registry or below the threshold | `crates/loom-intake-router/tests/adversary_classify.rs` |
 | Model or provider JSON nested past 128 levels is refused | `crates/loom-executor/tests/json_depth.rs` |
 | No hand-written type shadows an ESS-declared one | `task no-hand-model`, `task commission:no-hand-model` |
-| Ported Harness modules keep the import limits their crates had | `crates/loom-executor/tests/adversary_harness_port_boundaries.rs` (`the_boundaries_harness_enforced_by_crate_still_hold_between_modules`) |
+| Ported Harness modules keep the import limits their crates had; `turn_loop` alone may also name the generated model (`crate::model`), for `LoopStop` | `crates/loom-executor/tests/adversary_harness_port_boundaries.rs` (`the_boundaries_harness_enforced_by_crate_still_hold_between_modules`), `crates/loom-executor/tests/adversary2_harness_port.rs` (`each_ported_module_names_only_what_its_harness_manifest_allowed`) |
 | Package and library names are the `loom-` names | `crates/loom-executor/tests/crate_names.rs` |
 | No manifest names an archived Commission, governor or intake repository | `crates/loom-executor/tests/governor_import.rs`, `intake_import.rs`, `commission_import.rs` |
 | A release tag equals the workspace version and has a CHANGELOG entry | `loom-xtask release-check`, run by `release.yml` (`crates/loom-xtask/tests/release_check.rs`) |

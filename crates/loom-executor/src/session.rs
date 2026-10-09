@@ -92,7 +92,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::harness::turn_loop::{
-    AgentLoop, ApprovalPort, LoopConfig, LoopError, LoopEvent, LoopOutcome, LoopSink, RunLedger,
+    AgentLoop, ApprovalPort, LoopConfig, LoopError, LoopEvent, LoopOutcome, LoopSink, LoopStop,
+    RunLedger,
 };
 use crate::harness::wire::{Item, ModelPort, ToolPort, Usage, WireId};
 use crate::model::behaviour::{
@@ -985,7 +986,7 @@ pub fn run_and_file(
     let ending = match &run {
         Ok(outcome) => {
             session.extend(outcome);
-            if outcome.stop.is_completed() {
+            if outcome.stop == LoopStop::Completed {
                 RunEnding::Answered
             } else {
                 RunEnding::Stopped

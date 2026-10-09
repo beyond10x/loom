@@ -9,6 +9,7 @@ tags:
 relations:
 - serves: vision:O1
 - informed_by: story:plugin-measurement
+- informed_by: architecture-decision-record:plugin-hooks
 revision: 1
 ---
 ## Idea

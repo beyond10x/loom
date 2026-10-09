@@ -61,14 +61,130 @@ types:
         type: loom.run.CatalogueEntryStatus
 
   # How the run a session is filed after ended: it answered; it stopped short of an answer without
-  # an error (a budget bound, a cancel, a provider cut the turn short, an approval is awaited, or
-  # the session stayed above its compaction trigger after compaction, so no further request was
-  # sent); or it failed (the endpoint dropped the connection, the stream broke, the loop panicked).
-  # A summary turn that fails or writes nothing is not a failed run. A session is filed in every
-  # case.
+  # an error, for one of the causes loom.run.LoopStop declares; or it failed (the endpoint dropped
+  # the connection, the stream broke, the loop panicked). A summary turn that fails or writes
+  # nothing is not a failed run. A session is filed in every case.
   - name: loom.run.RunEnding
     kind: enum
     variants: [Answered, Stopped, Failed]
+
+  # Why the governed loop stopped or suspended (crates/loom-executor/src/harness/turn_loop). Every
+  # variant is a real state, not an exception. A loop outcome and the loop's finished events carry
+  # it; a filed session stores only its RunEnding. On the wire the tag is `kind` and each cause's
+  # fields sit beside it.
+  - name: loom.run.LoopStop
+    kind: union
+    tag: kind
+    variants:
+      # The model answered and asked for nothing further.
+      completed:
+      max-turns: loom.run.LoopStopMaxTurns
+      max-input-tokens: loom.run.LoopStopMaxInputTokens
+      max-output-tokens: loom.run.LoopStopMaxOutputTokens
+      max-cost: loom.run.LoopStopMaxCost
+      budget-unobservable: loom.run.LoopStopBudgetUnobservable
+      deadline: loom.run.LoopStopDeadline
+      cancelled: loom.run.LoopStopCancelled
+      awaiting-approval: loom.run.LoopStopAwaitingApproval
+      provider-incomplete: loom.run.LoopStopProviderIncomplete
+      unstructured: loom.run.LoopStopUnstructured
+      context-above-trigger: loom.run.LoopStopContextAboveTrigger
+
+  # The run reached its turn ceiling.
+  - name: loom.run.LoopStopMaxTurns
+    kind: struct
+    fields:
+      - name: limit
+        type: Integer
+
+  # The input tokens the endpoint reported reached the declared ceiling.
+  - name: loom.run.LoopStopMaxInputTokens
+    kind: struct
+    fields:
+      - name: limit
+        type: Integer
+      - name: reported
+        type: Integer
+
+  # The output tokens the endpoint reported reached the declared ceiling.
+  - name: loom.run.LoopStopMaxOutputTokens
+    kind: struct
+    fields:
+      - name: limit
+        type: Integer
+      - name: reported
+        type: Integer
+
+  # A spend ceiling bound, in micro-USD. Reachable only for a run whose rate card prices its model:
+  # an unpriced run cannot be held to a figure nobody could compute.
+  - name: loom.run.LoopStopMaxCost
+    kind: struct
+    fields:
+      - name: limit_micro_usd
+        type: Integer
+      - name: spent_micro_usd
+        type: Integer
+
+  # A declared ceiling could no longer be observed after a provider omitted or contradicted the
+  # accounting needed to enforce it.
+  - name: loom.run.LoopStopBudgetUnobservable
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: reason
+        type: String
+
+  # The run's wall-clock deadline, in milliseconds, passed.
+  - name: loom.run.LoopStopDeadline
+    kind: struct
+    fields:
+      - name: limit_ms
+        type: Integer
+
+  # The run was cancelled, for the reason given.
+  - name: loom.run.LoopStopCancelled
+    kind: struct
+    fields:
+      - name: reason
+        type: String
+
+  # The run is suspended before an exact effect until its checkpoint is resumed.
+  - name: loom.run.LoopStopAwaitingApproval
+    kind: struct
+    fields:
+      - name: checkpoint_id
+        type: String
+
+  # The provider ended a turn early for a reason it named.
+  - name: loom.run.LoopStopProviderIncomplete
+    kind: struct
+    fields:
+      - name: reason
+        type: String
+
+  # The run was asked for a structured answer and the model ended in prose instead; asked_again is
+  # how many nudges were spent first. Not `completed`: a consumer reading the answer as JSON must
+  # not get prose with a success status.
+  - name: loom.run.LoopStopUnstructured
+    kind: struct
+    fields:
+      - name: asked_again
+        type: Integer
+
+  # The session was still at or above its compaction trigger after compaction, so the next request
+  # was not sent. All three figures are tokens: the declared context window, the target a
+  # compaction aims for, and what the session occupied once compaction had removed everything it
+  # may.
+  - name: loom.run.LoopStopContextAboveTrigger
+    kind: struct
+    fields:
+      - name: window
+        type: Integer
+      - name: target
+        type: Integer
+      - name: occupied
+        type: Integer
 
   - name: loom.run.CompactionId
     kind: newtype

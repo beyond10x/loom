@@ -28,7 +28,7 @@ scope:
   path: ess/system.yaml
 - confidence: cited
   path: generated/rust/loom
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-09T16:08:17Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":6}}}
 - {from: "proposed", to: "active", at: "2026-10-09T16:08:17Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":6}}}
@@ -84,4 +84,4 @@ fake `connectors` script that logs its argv:
 `crates/loom-connectors/src/cli.rs` (new), `crates/loom-connectors/src/lib.rs`,
 `crates/loom-connectors/Cargo.toml`, `Cargo.lock`, `crates/loom-connectors/tests/connectors_cli.rs`
 (new), `crates/loom-connectors/tests/fixtures/` (the fake `connectors`, shared by the later
-stories), `AGENTS.md`. Wave `2026-10-09-w1` also lands on `generated/rust/loom/` (`story:compaction-target-bound`), `AGENTS.md` and the new-crate files (`story:laya-selector`). The wave that merges into `main` second rebases, then runs `task generate` and `task docs-generate` and commits their output (conductor DSP-20261009-05).
+stories), `AGENTS.md`. Wave `2026-10-09-w1` also lands on `generated/rust/loom/` (`story:compaction-target-bound`), `AGENTS.md` and the new-crate files (`story:laya-selector`). The wave that merges into `main` second rebases, then runs `task generate` and `task docs-generate` and commits their output.

@@ -6,7 +6,7 @@ status: implemented
 title: Release Loom 0.13.0
 relations:
 - serves: vision:O1
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-09T18:20:59Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-09T18:20:59Z", actor: "human:timo", revision: 3}
@@ -15,7 +15,7 @@ transitions:
 ## Why
 
 Wave 2026-10-09-w2 (the plugin layer and the slack-handler) merged into `main` (PR 56,
-`dba2a7d`). Conductor decided the release (DEC-20261009-27): no merged work stays unreleased for
+`dba2a7d`). The release was decided on the release cadence: no merged work stays unreleased for
 more than a day, and the plugin layer is the operator's priority.
 
 ## Acceptance
