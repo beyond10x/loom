@@ -9,6 +9,9 @@
 //!
 //! [`ReasoningModelSelector`] is the selector whose strategy is `ReasoningModel`: it asks a model
 //! through the provider-neutral [`ModelPort`] to choose among exactly the candidates it was given.
+//! [`HybridSelector`] is the selector whose strategy is `Hybrid`: it returns a fast selector's
+//! choice only at or above a confidence threshold the host supplies, and otherwise the stronger
+//! selector's.
 //!
 //! [`select_action`] is `loom.run.SelectAction` as a command over stored catalogues and
 //! selections: the one behaviour ESS leaves to Loom (`generated/rust/loom/PLAN.md`), answered by
@@ -242,18 +245,146 @@ impl<P: ModelPort> ActionSelector for ReasoningModelSelector<P> {
     }
 }
 
+/// A confidence compared as the number it writes: a decimal in [0, 1].
+///
+/// [`Decimal`] orders by its rendering, so `0.9` sorts below `0.90`; a `Confidence` is the value
+/// itself, so the two are equal. The rendering is digits with an optional fraction, optionally
+/// signed `-` (only `-0` and its spellings are in range); anything else, including an exponent, is
+/// not a decimal here.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Confidence {
+    /// Whether the value is exactly 1. Ordered first, so 1 is above every fraction.
+    one: bool,
+    /// The fractional digits of a value below 1, without trailing zeros: with them gone, the
+    /// digit strings order as the fractions they write.
+    fraction: String,
+}
+
+impl Confidence {
+    /// The value `decimal` writes, when it is a decimal in [0, 1]; `None` otherwise.
+    pub fn parse(decimal: &Decimal) -> Option<Self> {
+        let text = decimal.0.as_str();
+        let (negative, unsigned) = match text.strip_prefix('-') {
+            Some(rest) => (true, rest),
+            None => (false, text),
+        };
+        let (whole, fraction) = unsigned.split_once('.').unwrap_or((unsigned, ""));
+        let digits = |part: &str| part.bytes().all(|byte| byte.is_ascii_digit());
+        if whole.is_empty()
+            || !digits(whole)
+            || !digits(fraction)
+            || (unsigned.contains('.') && fraction.is_empty())
+        {
+            return None;
+        }
+        let whole = whole.trim_start_matches('0');
+        let fraction = fraction.trim_end_matches('0');
+        let confidence = match whole {
+            "" => Self {
+                one: false,
+                fraction: fraction.to_owned(),
+            },
+            "1" if fraction.is_empty() => Self {
+                one: true,
+                fraction: String::new(),
+            },
+            _ => return None,
+        };
+        if negative && confidence != Self::zero() {
+            return None;
+        }
+        Some(confidence)
+    }
+
+    fn zero() -> Self {
+        Self {
+            one: false,
+            fraction: String::new(),
+        }
+    }
+}
+
+/// The threshold given to [`HybridSelector::new`] is not a decimal in [0, 1].
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("the confidence threshold `{}` is not a decimal in [0, 1]", .0.0)]
+pub struct InvalidThreshold(pub Decimal);
+
+/// The selector whose strategy is `Hybrid`: a fast selector, and a stronger one it falls back to
+/// (Atlas ADR 0073 § Fallback).
+///
+/// The fast choice is returned only when it names one of the candidates with a confidence at or
+/// above the threshold. Otherwise the stronger selector is asked and its answer, choice or error,
+/// is the hybrid's: when the fast confidence is below the threshold, missing, or not a decimal in
+/// [0, 1] (which counts as missing), and when the fast selector errs or names an action outside the
+/// candidates, which is never returned.
+///
+/// The threshold has no default: it is calibrated per protocol and supplied by the embedding host
+/// for the run's protocol. Confidence and threshold compare as numbers ([`Confidence`]). A
+/// confidence decides only which selector's choice is proposed; the choice still passes Loom's
+/// membership rule ([`select`]) and revalidation like every other.
+pub struct HybridSelector<F, S> {
+    fast: F,
+    stronger: S,
+    threshold: Confidence,
+}
+
+impl<F: ActionSelector, S: ActionSelector> HybridSelector<F, S> {
+    /// A hybrid of `fast` and `stronger` that accepts a fast choice at or above `threshold`;
+    /// refused when `threshold` is not a decimal in [0, 1].
+    pub fn new(fast: F, stronger: S, threshold: &Decimal) -> Result<Self, InvalidThreshold> {
+        let threshold =
+            Confidence::parse(threshold).ok_or_else(|| InvalidThreshold(threshold.clone()))?;
+        Ok(Self {
+            fast,
+            stronger,
+            threshold,
+        })
+    }
+
+    /// Whether `choice`, the fast selector's, is the hybrid's answer from `candidates`.
+    fn accepts(&self, choice: &Choice, candidates: &[CatalogueEntry]) -> bool {
+        candidates.iter().any(|entry| entry.action == choice.action)
+            && choice
+                .confidence
+                .as_ref()
+                .and_then(Confidence::parse)
+                .is_some_and(|confidence| confidence >= self.threshold)
+    }
+}
+
+impl<F: ActionSelector, S: ActionSelector> ActionSelector for HybridSelector<F, S> {
+    fn select(
+        &self,
+        context: &SelectionContext,
+        candidates: &[CatalogueEntry],
+    ) -> Result<Choice, SelectorError> {
+        match self.fast.select(context, candidates) {
+            Ok(choice) if self.accepts(&choice, candidates) => Ok(choice),
+            _ => self.stronger.select(context, candidates),
+        }
+    }
+
+    fn strategy(&self) -> SelectionStrategy {
+        SelectionStrategy::Hybrid
+    }
+}
+
 /// `selector`'s choice from `catalogue`, as the selection `selection_id`: refused when the selector
 /// picks nothing or names an action `catalogue` does not list. The selection names the catalogue
-/// and carries its case revision.
+/// and carries its case revision, and the selector's confidence only when it is a decimal in
+/// [0, 1] ([`Confidence`]); any other is recorded as none.
 pub fn select(
     selector: &impl ActionSelector,
     context: &SelectionContext,
     catalogue: &ActionCatalogue<action_catalogue_state::Projected>,
     selection_id: SelectionId,
 ) -> Result<Selection<selection_state::Selected>, SelectionRefusal> {
-    let choice = selector
+    let mut choice = selector
         .select(context, &catalogue.data().entries)
         .map_err(SelectionRefusal::Selector)?;
+    choice.confidence = choice
+        .confidence
+        .filter(|confidence| Confidence::parse(confidence).is_some());
     chosen(catalogue, choice, selector.strategy(), selection_id)
         .map_err(SelectionRefusal::NotInCatalogue)
 }

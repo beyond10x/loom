@@ -66,7 +66,8 @@ use b10x_loom_commission::ports::governor::Governor;
 
 pub use arguments::{ArgumentContext, ArgumentGenerator, EmptyObjectArguments};
 pub use selection::{
-    ActionSelector, FirstAdmissibleSelector, ReasoningModelSelector, SelectorError,
+    ActionSelector, Confidence, FirstAdmissibleSelector, HybridSelector, InvalidThreshold,
+    ReasoningModelSelector, SelectorError,
 };
 
 use arguments::RequestRecord;

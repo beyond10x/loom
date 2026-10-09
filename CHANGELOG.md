@@ -12,6 +12,7 @@ under **Unreleased** until the next release.
   `ModelPort`, held to a single tool whose only argument is a fixed choice of the candidate ids; an
   action outside them is refused as `not-in-catalogue`, and an answer naming none is
   `SelectorError::Unavailable`.
+- `HybridSelector`: the fast choice at or above a host-supplied threshold, else the stronger one's.
 
 ## [0.11.0] - 2026-10-08
 
