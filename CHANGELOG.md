@@ -6,6 +6,15 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-09
+
+Loom 0.14.0 generates `LoopStop` from its ESS declaration. `loom.run.LoopStop` in
+`ess/domains/run.yaml` (format `ess/22`) declares every cause the governed loop stops for, and
+the enum the loop uses is generated from it; a codec keeps the JSON of loop outcomes and events
+byte for byte. This is breaking for embedders that match `LoopStop`: its variants are tuple
+variants over payload structs, counts are `i64`, and `is_completed` is removed. A new test holds
+the Laya selection slice end to end.
+
 ### Added
 
 - `crates/loom-selector-laya/tests/laya_arguments_slice.rs` holds the Laya selection slice end to
