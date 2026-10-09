@@ -17,7 +17,10 @@
 //! consumer does, and asserts it survives.
 
 use b10x_loom_executor::harness::responses;
-use b10x_loom_executor::harness::turn_loop::{LoopEvent, LoopStop};
+use b10x_loom_executor::harness::turn_loop::{
+    LoopEvent, LoopStop, LoopStopContextAboveTrigger, LoopStopDeadline, LoopStopMaxCost,
+    LoopStopMaxInputTokens, LoopStopMaxOutputTokens, LoopStopMaxTurns, LoopStopUnstructured,
+};
 use b10x_loom_executor::harness::wire::{CallId, Item, ToolCall, ToolName};
 use b10x_loom_executor::model::primitives::Uuid;
 use b10x_loom_executor::model::run::{CommissionRunId, RunEnding, SessionData, SessionId};
@@ -102,17 +105,54 @@ fn a_cost_read_back_from_the_record_keeps_its_figure() {
     );
 }
 
-/// `LoopStop` is internally tagged with integer limits; it is how a run says why it ended.
+/// A `LoopStop` is written inside an internally tagged event with integer figures; it is how a run
+/// says why it ended. Its JSON is the executor's own codec, which reads every figure as a JSON
+/// number: each cause with a figure, carried by both events that hold a stop, must read back.
 #[test]
-fn a_stop_read_back_from_json_text_keeps_its_limit() {
-    let stop = LoopStop::MaxTurns { limit: 20 };
-    let text = serde_json::to_string(&stop).expect("serializes");
-    let read = serde_json::from_str::<LoopStop>(&text);
-    assert_eq!(
-        read.as_ref().ok(),
-        Some(&stop),
-        "{text} reads back as {read:?}"
-    );
+fn a_stop_read_back_from_json_text_keeps_its_figures() {
+    let stops = [
+        LoopStop::MaxTurns(LoopStopMaxTurns { limit: 20 }),
+        LoopStop::MaxInputTokens(LoopStopMaxInputTokens {
+            limit: 1000,
+            reported: 1200,
+        }),
+        LoopStop::MaxOutputTokens(LoopStopMaxOutputTokens {
+            limit: 500,
+            reported: 512,
+        }),
+        LoopStop::MaxCost(LoopStopMaxCost {
+            limit_micro_usd: 250_000,
+            spent_micro_usd: i64::MAX,
+        }),
+        LoopStop::Deadline(LoopStopDeadline { limit_ms: 60_000 }),
+        LoopStop::Unstructured(LoopStopUnstructured { asked_again: 2 }),
+        LoopStop::ContextAboveTrigger(LoopStopContextAboveTrigger {
+            window: 200_000,
+            target: 100_000,
+            occupied: 190_000,
+        }),
+    ];
+    for stop in stops {
+        for event in [
+            LoopEvent::Finished {
+                stop: stop.clone(),
+                turns: 3,
+            },
+            LoopEvent::DelegateFinished {
+                call_id: CallId::new("call-1").expect("valid"),
+                stop: stop.clone(),
+                turns: 3,
+            },
+        ] {
+            let text = serde_json::to_string(&event).expect("serializes");
+            let read = serde_json::from_str::<LoopEvent>(&text);
+            assert_eq!(
+                read.as_ref().ok(),
+                Some(&event),
+                "{text} reads back as {read:?}"
+            );
+        }
+    }
 }
 
 /// The conversation as JSON text: `Item` is internally tagged and its tool calls and results carry

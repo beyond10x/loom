@@ -20,7 +20,7 @@ use std::time::Duration;
 use b10x_loom_executor::harness::responses;
 use b10x_loom_executor::harness::turn_loop::{
     AgentLoop, ApproveAll, ELISION_MARKER, LoopConfig, LoopError, LoopEvent, LoopOutcome, LoopStop,
-    SUMMARY_MARKER, VecLoopSink,
+    LoopStopContextAboveTrigger, SUMMARY_MARKER, VecLoopSink,
 };
 use b10x_loom_executor::harness::wire::{
     Approval, CallId, Envelope, Item, ModelPort, StopReason, StreamSink, ToolCall, ToolName,
@@ -36,6 +36,8 @@ const INSTRUCTIONS: &str = "INSTRUCTIONS-standing";
 /// The window most cases declare, in tokens: the trigger is 800 tokens (3 200 bytes by the loop's
 /// estimate of four bytes a token) and the target 500 tokens (2 000 bytes).
 const WINDOW: u64 = 1_000;
+/// [`WINDOW`] as the `Integer` a `LoopStop` carries.
+const WINDOW_FIGURE: i64 = WINDOW as i64;
 const BYTES_PER_TOKEN: u64 = 4;
 const RUN: &str = "00000000-0000-4000-8000-0000000c7b01";
 
@@ -264,11 +266,11 @@ fn a_session_whose_unremovable_parts_exceed_the_trigger_stops_by_name_and_is_fil
     let outcome = filed.run.expect("a stop is an outcome, not an error");
     assert_eq!(
         outcome.stop,
-        LoopStop::ContextAboveTrigger {
-            window: WINDOW,
-            target: WINDOW / 2,
+        LoopStop::ContextAboveTrigger(LoopStopContextAboveTrigger {
+            window: WINDOW_FIGURE,
+            target: WINDOW_FIGURE / 2,
             occupied: 950,
-        }
+        })
     );
     assert_eq!(
         model.requests.len(),
@@ -311,17 +313,17 @@ fn a_session_whose_reasoning_alone_exceeds_the_trigger_stops_after_the_summary_r
     );
     let outcome = outcome.expect("a stop is an outcome, not an error");
 
-    let LoopStop::ContextAboveTrigger {
+    let LoopStop::ContextAboveTrigger(LoopStopContextAboveTrigger {
         window,
         target,
         occupied,
-    } = outcome.stop
+    }) = outcome.stop
     else {
         panic!("the run did not stop by name: {:?}", outcome.stop);
     };
-    assert_eq!((window, target), (WINDOW, WINDOW / 2));
+    assert_eq!((window, target), (WINDOW_FIGURE, WINDOW_FIGURE / 2));
     assert!(
-        occupied * 100 >= WINDOW * 80,
+        occupied * 100 >= WINDOW_FIGURE * 80,
         "the stop names what was left, at or above the trigger: {occupied}"
     );
     assert_eq!(

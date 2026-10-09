@@ -17,7 +17,8 @@ use std::time::Duration;
 
 use b10x_loom_executor::harness::responses;
 use b10x_loom_executor::harness::turn_loop::{
-    AgentLoop, ApproveAll, LoopConfig, LoopError, LoopOutcome, LoopStop, VecLoopSink,
+    AgentLoop, ApproveAll, LoopConfig, LoopError, LoopOutcome, LoopStop,
+    LoopStopContextAboveTrigger, VecLoopSink,
 };
 use b10x_loom_executor::harness::wire::{
     Approval, CallId, Envelope, Item, ModelPort, StopReason, StreamSink, ToolCall, ToolName,
@@ -163,11 +164,11 @@ fn a_session_exactly_at_its_trigger_with_nothing_to_remove_stops() {
         .expect("a stop is an outcome");
     assert_eq!(
         outcome.stop,
-        LoopStop::ContextAboveTrigger {
+        LoopStop::ContextAboveTrigger(LoopStopContextAboveTrigger {
             window: 1_000,
             target: 500,
             occupied: 800
-        }
+        })
     );
     assert_eq!(model.requests.len(), 1);
 }

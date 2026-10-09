@@ -782,9 +782,9 @@ fn a_deferred_approval_serializes_and_resumes_on_fresh_ports() {
 
     assert_eq!(
         suspended.stop,
-        LoopStop::AwaitingApproval {
+        LoopStop::AwaitingApproval(LoopStopAwaitingApproval {
             checkpoint_id: "approval-1".to_owned()
-        }
+        })
     );
     assert!(first_tools.calls.is_empty(), "nothing runs before approval");
     assert!(
@@ -1182,7 +1182,10 @@ fn raising_the_ceiling_stops_the_asking() {
             harness = harness.unattended_above(ceiling);
         }
         let (outcome, sink) = harness.run();
-        assert!(outcome.expect("both arms are outcomes").stop.is_completed());
+        assert_eq!(
+            outcome.expect("both arms are outcomes").stop,
+            LoopStop::Completed
+        );
         (harness.tools.calls.len(), approvals(&sink))
     }
 
@@ -1241,7 +1244,10 @@ fn a_turn_ceiling_stops_the_loop_and_names_itself() {
     let (outcome, _) = harness.run();
     let outcome = outcome.expect("a bound that binds is an outcome");
 
-    assert_eq!(outcome.stop, LoopStop::MaxTurns { limit: 2 });
+    assert_eq!(
+        outcome.stop,
+        LoopStop::MaxTurns(LoopStopMaxTurns { limit: 2 })
+    );
     assert_eq!(outcome.turns, 2);
 }
 
@@ -1261,10 +1267,10 @@ fn an_input_token_ceiling_stops_the_loop() {
     let (outcome, _) = harness.run();
     assert_eq!(
         outcome.expect("bound binds").stop,
-        LoopStop::MaxInputTokens {
+        LoopStop::MaxInputTokens(LoopStopMaxInputTokens {
             limit: 10,
             reported: 10
-        }
+        })
     );
     assert_eq!(
         harness.model.seen.len(),
@@ -1289,10 +1295,10 @@ fn an_output_token_ceiling_stops_the_loop() {
     let (outcome, _) = harness.run();
     assert_eq!(
         outcome.expect("bound binds").stop,
-        LoopStop::MaxOutputTokens {
+        LoopStop::MaxOutputTokens(LoopStopMaxOutputTokens {
             limit: 5,
             reported: 5
-        }
+        })
     );
     assert_eq!(
         harness.model.seen.len(),
@@ -1340,7 +1346,7 @@ fn cancellation_between_turns_ends_the_run() {
     let (outcome, _) = harness.run();
     let outcome = outcome.expect("cancellation is an outcome");
 
-    assert!(matches!(outcome.stop, LoopStop::Cancelled { .. }));
+    assert!(matches!(outcome.stop, LoopStop::Cancelled(_)));
     assert_eq!(
         harness.model.seen.len(),
         1,
@@ -1365,7 +1371,7 @@ fn cancellation_between_tool_calls_stops_before_the_next_effect() {
 
     assert!(matches!(
         outcome.expect("cancellation is an outcome").stop,
-        LoopStop::Cancelled { .. }
+        LoopStop::Cancelled(_)
     ));
     assert_eq!(
         harness.tools.calls.len(),
@@ -1380,6 +1386,8 @@ fn cancellation_between_tool_calls_stops_before_the_next_effect() {
 /// scheduling stall between the deadline being set and the first call being checked is enough to
 /// skip the call the test expects to see run.
 const DEADLINE_MS: u64 = 200;
+/// [`DEADLINE_MS`] as the `Integer` a `LoopStop` carries.
+const DEADLINE_MS_FIGURE: i64 = DEADLINE_MS as i64;
 const SLOW_CALL: Duration = Duration::from_millis(300);
 
 fn deadlined() -> Budget {
@@ -1415,9 +1423,9 @@ fn the_deadline_ends_the_run_between_turns() {
 
     assert_eq!(
         outcome.stop,
-        LoopStop::Deadline {
-            limit_ms: DEADLINE_MS
-        }
+        LoopStop::Deadline(LoopStopDeadline {
+            limit_ms: DEADLINE_MS_FIGURE
+        })
     );
     assert_eq!(
         harness.tools.calls.len(),
@@ -1445,9 +1453,9 @@ fn the_deadline_is_checked_between_calls_in_one_turn() {
 
     assert_eq!(
         outcome.stop,
-        LoopStop::Deadline {
-            limit_ms: DEADLINE_MS
-        }
+        LoopStop::Deadline(LoopStopDeadline {
+            limit_ms: DEADLINE_MS_FIGURE
+        })
     );
     assert_eq!(
         harness.tools.calls.len(),
@@ -1574,10 +1582,10 @@ fn a_token_ceiling_stops_by_name_when_a_turn_omits_usage() {
 
     assert_eq!(
         outcome.expect("an unobservable budget is an outcome").stop,
-        LoopStop::BudgetUnobservable {
+        LoopStop::BudgetUnobservable(LoopStopBudgetUnobservable {
             name: "max_input_tokens".to_owned(),
             reason: "a model request omitted usage".to_owned(),
-        }
+        })
     );
 }
 
@@ -1680,9 +1688,9 @@ fn a_provider_cut_turn_is_reported_with_its_reason() {
     let (outcome, _) = harness.run();
     assert_eq!(
         outcome.expect("completes").stop,
-        LoopStop::ProviderIncomplete {
+        LoopStop::ProviderIncomplete(LoopStopProviderIncomplete {
             reason: "max_output_tokens".to_owned()
-        }
+        })
     );
 }
 
@@ -1766,11 +1774,11 @@ fn a_cancelled_model_read_is_an_outcome_rather_than_a_failure() {
     let (outcome, sink) = harness.run();
     let outcome = outcome.expect("a cancelled read is not an error");
 
-    assert!(matches!(outcome.stop, LoopStop::Cancelled { .. }));
+    assert!(matches!(outcome.stop, LoopStop::Cancelled(_)));
     assert!(
         sink.events()
             .iter()
-            .any(|event| matches!(event, LoopEvent::Finished { stop, .. } if matches!(stop, LoopStop::Cancelled { .. }))),
+            .any(|event| matches!(event, LoopEvent::Finished { stop, .. } if matches!(stop, LoopStop::Cancelled(_)))),
         "the terminal event says cancelled: {:?}",
         sink.events()
     );
@@ -1788,7 +1796,7 @@ fn a_cancelled_read_after_a_tool_call_still_reports_the_work_done() {
     let (outcome, _) = harness.run();
     let outcome = outcome.expect("a cancelled read is not an error");
 
-    assert!(matches!(outcome.stop, LoopStop::Cancelled { .. }));
+    assert!(matches!(outcome.stop, LoopStop::Cancelled(_)));
     assert_eq!(outcome.turns, 2);
     assert_eq!(
         harness.tools.calls.len(),
@@ -1924,10 +1932,10 @@ fn a_spend_ceiling_ends_the_run_once_the_declared_rates_say_it_was_reached() {
 
     assert_eq!(
         outcome.stop,
-        LoopStop::MaxCost {
+        LoopStop::MaxCost(LoopStopMaxCost {
             limit_micro_usd: 15,
             spent_micro_usd: 20,
-        }
+        })
     );
     assert_eq!(outcome.turns, 1, "it stops after the turn that crossed");
 }
@@ -2363,7 +2371,7 @@ fn cancelling_during_the_pause_between_attempts_ends_the_run_as_cancelled() {
 
     assert!(matches!(
         outcome.expect("cancellation is an outcome").stop,
-        LoopStop::Cancelled { .. }
+        LoopStop::Cancelled(_)
     ));
     assert_eq!(
         retried(&sink),
@@ -2540,7 +2548,7 @@ fn a_cancel_raised_inside_a_batch_is_honoured_before_the_next_call() {
     let (outcome, _) = harness.run();
     let outcome = outcome.expect("cancellation is an outcome");
 
-    assert!(matches!(outcome.stop, LoopStop::Cancelled { .. }));
+    assert!(matches!(outcome.stop, LoopStop::Cancelled(_)));
     assert_eq!(harness.tools.batches, vec![2]);
     assert_eq!(
         harness.tools.calls.len(),
@@ -3078,10 +3086,10 @@ fn a_spend_ceiling_the_summary_turn_crosses_ends_the_run_before_the_next_turn() 
 
     assert_eq!(
         outcome.stop,
-        LoopStop::MaxCost {
+        LoopStop::MaxCost(LoopStopMaxCost {
             limit_micro_usd: 25,
             spent_micro_usd: 40,
-        },
+        }),
         "20 µ$ for the turn and 20 µ$ for the summary that followed it"
     );
     assert_eq!(
@@ -3173,7 +3181,7 @@ fn cancelling_during_the_summary_turn_ends_the_run_as_cancelled() {
     let (outcome, _) = harness.run();
     let outcome = outcome.expect("cancellation is an outcome");
 
-    assert!(matches!(outcome.stop, LoopStop::Cancelled { .. }));
+    assert!(matches!(outcome.stop, LoopStop::Cancelled(_)));
     assert_replayable(&outcome.items, "the conversation a cancelled summary left");
     assert_eq!(
         harness.model.seen.len(),
@@ -4422,7 +4430,10 @@ fn prose_twice_stops_unstructured_rather_than_completed_and_carries_no_answer() 
     let (outcome, _) = harness.run();
     let outcome = outcome.expect("an unstructured stop is an outcome, not an error");
 
-    assert_eq!(outcome.stop, LoopStop::Unstructured { asked_again: 1 });
+    assert_eq!(
+        outcome.stop,
+        LoopStop::Unstructured(LoopStopUnstructured { asked_again: 1 })
+    );
     assert_eq!(outcome.structured, None);
     assert_eq!(outcome.turns, 2, "one nudge, and no second one");
     assert_eq!(outcome.text, "really, it is green");
@@ -4884,18 +4895,18 @@ fn a_delegate_gets_what_is_left_of_the_parents_token_ceiling_and_the_parent_gets
         .expect("the delegate finished, however it finished");
     assert_eq!(
         finished,
-        LoopStop::MaxInputTokens {
+        LoopStop::MaxInputTokens(LoopStopMaxInputTokens {
             limit: 90,
             reported: 200
-        },
+        }),
         "100 the parent set, less the 10 it had already spent"
     );
     assert_eq!(
         outcome.stop,
-        LoopStop::MaxInputTokens {
+        LoopStop::MaxInputTokens(LoopStopMaxInputTokens {
             limit: 100,
             reported: 210
-        },
+        }),
         "the parent absorbs what the child spent, so its own ceiling binds on the sum"
     );
     assert_eq!(
@@ -4928,10 +4939,10 @@ fn a_parent_with_nothing_left_stops_before_starting_a_child() {
     let outcome = outcome.expect("a budget that binds is an outcome");
     assert_eq!(
         outcome.stop,
-        LoopStop::MaxInputTokens {
+        LoopStop::MaxInputTokens(LoopStopMaxInputTokens {
             limit: 10,
             reported: 10,
-        },
+        }),
         "the exact ceiling binds before an effectful child is started"
     );
     assert_eq!(
@@ -4971,9 +4982,9 @@ fn a_cancel_raised_inside_a_delegate_ends_the_child_and_then_the_parent() {
 
     assert_eq!(
         outcome.stop,
-        LoopStop::Cancelled {
+        LoopStop::Cancelled(LoopStopCancelled {
             reason: "the caller cancelled".to_owned()
-        }
+        })
     );
     let (failed, output) = result_of(&outcome, "call-1");
     assert!(failed);
@@ -5135,15 +5146,15 @@ fn a_child_that_failed_still_spent_the_parents_budget_and_the_next_carve_knows_i
     );
     let stops = delegate_stops(&sink);
     assert!(
-        matches!(&stops[0], LoopStop::ProviderIncomplete { reason } if reason.contains("the stream closed mid-answer")),
+        matches!(&stops[0], LoopStop::ProviderIncomplete(LoopStopProviderIncomplete { reason }) if reason.contains("the stream closed mid-answer")),
         "{stops:?}"
     );
     assert_eq!(
         stops[1],
-        LoopStop::MaxInputTokens {
+        LoopStop::MaxInputTokens(LoopStopMaxInputTokens {
             limit: 40,
             reported: 45
-        },
+        }),
         "the second delegate's carve is what the first one left, however the first one ended"
     );
     assert_eq!(
@@ -5159,10 +5170,10 @@ fn a_child_that_failed_still_spent_the_parents_budget_and_the_next_carve_knows_i
     );
     assert_eq!(
         outcome.stop,
-        LoopStop::MaxInputTokens {
+        LoopStop::MaxInputTokens(LoopStopMaxInputTokens {
             limit: 100,
             reported: 105
-        },
+        }),
         "the parent's own ceiling binds on the sum, before its next turn"
     );
     assert_eq!(
@@ -6803,10 +6814,10 @@ fn a_budget_that_will_not_divide_runs_delegates_in_order_and_binds_on_the_first_
     );
     assert_eq!(
         outcome.stop,
-        LoopStop::MaxInputTokens {
+        LoopStop::MaxInputTokens(LoopStopMaxInputTokens {
             limit: 11,
             reported: 20,
-        }
+        })
     );
 }
 

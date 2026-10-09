@@ -20,7 +20,9 @@ use std::time::Duration;
 
 use b10x_loom_executor::harness::messages::{self, MessagesClient};
 use b10x_loom_executor::harness::responses::{self, ResponsesClient};
-use b10x_loom_executor::harness::turn_loop::{ApproveAll, LoopConfig, LoopEvent, LoopSink};
+use b10x_loom_executor::harness::turn_loop::{
+    ApproveAll, LoopConfig, LoopEvent, LoopSink, LoopStop,
+};
 use b10x_loom_executor::harness::wire::{
     Approval, Item, ModelPort, StaticBearer, ToolCall, ToolName, ToolOutcome, ToolPort, ToolSpec,
 };
@@ -75,7 +77,7 @@ fn session_transcript_streaming() {
         &mut sink,
     );
     let answered = filed.run.expect("the first run answers");
-    assert!(answered.stop.is_completed(), "{:?}", answered.stop);
+    assert!(answered.stop == LoopStop::Completed, "{:?}", answered.stop);
     let path = filed.filed.expect("the answered run files its session");
 
     // 1. Each streamed delta reaches the stream sink before the endpoint emits the next one.

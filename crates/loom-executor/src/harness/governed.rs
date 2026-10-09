@@ -63,8 +63,8 @@ use crate::arguments::{ArgumentContext, ArgumentGenerator};
 use crate::compaction::CompactionRecorder;
 use crate::harness::turn_loop::{
     AgentLoop, ApprovalDecision, ApprovalPort, ContextPackage, EnvironmentError, LoopCancel,
-    LoopConfig, LoopError, LoopOutcome, LoopSink, LoopStop, NullLoopSink, TurnEnvironment,
-    TurnEnvironmentProvider, TurnEnvironmentRequest,
+    LoopConfig, LoopError, LoopOutcome, LoopSink, LoopStop, LoopStopAwaitingApproval, NullLoopSink,
+    TurnEnvironment, TurnEnvironmentProvider, TurnEnvironmentRequest,
 };
 use crate::harness::wire::{
     Approval, Effect, Envelope, Idempotency, InvalidId, Item, ModelPort, Risk, StreamSink,
@@ -328,7 +328,7 @@ where
         kept: Option<Held>,
     ) -> LoopRun {
         let ending = match &run {
-            Ok(answered) if answered.stop.is_completed() => RunEnding::Answered,
+            Ok(answered) if answered.stop == LoopStop::Completed => RunEnding::Answered,
             Ok(_) => RunEnding::Stopped,
             Err(_) => RunEnding::Failed,
         };
@@ -543,7 +543,7 @@ fn stopped(
     (session, case, admits): (&SessionId, &CaseId, Option<Vec<ToolName>>),
 ) -> (ExecutorOutcome, Option<Held>) {
     match (&answered.stop, deferred) {
-        (LoopStop::AwaitingApproval { checkpoint_id }, Some(ended))
+        (LoopStop::AwaitingApproval(LoopStopAwaitingApproval { checkpoint_id }), Some(ended))
             if *checkpoint_id == ended.checkpoint =>
         {
             let held =

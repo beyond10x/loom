@@ -10,7 +10,9 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
-use b10x_loom_executor::harness::turn_loop::{ApproveAll, LoopConfig, LoopEvent, LoopSink};
+use b10x_loom_executor::harness::turn_loop::{
+    ApproveAll, LoopConfig, LoopEvent, LoopSink, LoopStop,
+};
 use b10x_loom_executor::harness::wire::{
     Item, ModelPort, StopReason, StreamEvent, StreamSink, ToolCall, ToolOutcome, ToolPort,
     ToolSpec, TurnOutcome, TurnRequest, WireError, WireId,
@@ -168,7 +170,7 @@ fn a_run_the_provider_cut_short_is_not_filed_as_answered() {
     let filed = run(&mut model, &mut session, &sessions, "QUESTION");
     let outcome = filed.run.expect("the loop returns the stop as an outcome");
     assert!(
-        !outcome.stop.is_completed(),
+        outcome.stop != LoopStop::Completed,
         "precondition: {:?}",
         outcome.stop
     );
