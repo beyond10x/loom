@@ -71,7 +71,7 @@ p < 0.60
     use full planner / ask for clarification / no-op
 ```
 
-Exact thresholds must be calibrated per domain and measured by Metaharness.
+Exact thresholds must be calibrated per protocol and measured by Metaharness; the embedding host supplies the value for the run's protocol, and Loom ships no default.
 
 ## Large catalogues
 
