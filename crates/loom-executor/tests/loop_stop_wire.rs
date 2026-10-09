@@ -211,7 +211,8 @@ fn context_above_trigger_round_trips_unchanged() {
 
 #[test]
 fn every_cause_has_a_pinned_case() {
-    // Twelve causes, twelve distinct tags: a cause added without a pinned literal fails here.
+    // Twelve pinned literals with twelve distinct tags. A cause added to the ESS union fails
+    // `every_cause_the_ess_union_declares_reads_and_writes_back_under_its_declared_names`.
     let tags: std::collections::BTreeSet<String> = causes()
         .iter()
         .map(|(_, text)| {
