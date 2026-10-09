@@ -1,0 +1,80 @@
+format: protocol/1
+protocol:
+  id: inbound.answer
+  revision: 1
+  description: >-
+    Answer one inbound item from data sources: read at least one source about the item, then
+    propose a reply, or decline the item. A proposal is recorded in the case and never sent;
+    nothing here posts, sends or changes anything outside the case.
+artifacts:
+  item:
+    description: >-
+      the inbound item a case answers, referenced by its id; its revision moves when the item
+      itself changes. The case stores no item text
+evidence_kinds:
+  source_read:
+    description: a verified read of one configured data source, made for the item
+  reply_proposed:
+    description: a reply proposed for the item, recorded in the case and never sent
+  reply_declined:
+    description: the record that the item gets no proposed reply, recorded in the case
+claims:
+  item.sourced:
+    description: at least one data source was read for the current item revision
+    true_when:
+      evidence:
+        kind: source_read
+        subject: item
+  reply.proposed:
+    description: a reply is proposed for the current item revision
+    true_when:
+      evidence:
+        kind: reply_proposed
+        subject: item
+  reply.declined:
+    description: the current item revision is declined
+    true_when:
+      evidence:
+        kind: reply_declined
+        subject: item
+actions:
+  source.read:
+    description: read one configured data source for the item
+    effect: read
+    requires:
+      - capability: datasource.read
+    may_produce:
+      - evidence: source_read
+  reply.propose:
+    description: >-
+      record a proposed reply to the item in the case; never sends it. Not once the item is
+      declined
+    effect: none
+    precondition:
+      claim: reply.declined
+      is: unknown
+    requires:
+      - capability: reply.propose
+    may_produce:
+      - evidence: reply_proposed
+  reply.decline:
+    description: >-
+      record in the case that the item gets no proposed reply; sends nothing. Not once a reply is
+      proposed
+    effect: none
+    precondition:
+      claim: reply.proposed
+      is: unknown
+    may_produce:
+      - evidence: reply_declined
+outcomes:
+  proposed:
+    description: a reply is proposed for the item, from at least one source read
+    requires:
+      all:
+        - claim: reply.proposed
+        - claim: item.sourced
+  declined:
+    description: the item is declined and gets no proposed reply
+    requires:
+      claim: reply.declined
