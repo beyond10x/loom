@@ -2700,16 +2700,23 @@ fn a_declared_window_compacts_on_the_count_the_provider_reported() {
     // and a longer run met the provider's wall as a hard error. This conversation is 12 kB and
     // would never have crossed it; what fires is the provider's own count of the window.
     //
-    // 81_000 rather than the 85_000 this case first reported: the 6 kB the elision frees is about
-    // 1_500 tokens, which takes 81_000 back under the 80_000 trigger and leaves 85_000 above it,
-    // where the run now stops by name (`story:compaction-target-bound`, held in
-    // `tests/compaction_target_bound.rs`). The compaction this case is about is the same.
+    // The 81_000 is counted on the request that carries the 6 kB result, and the turn after it
+    // adds only a small one. Counted on the first request, which carries nothing but the task,
+    // 81_000 would be instruction and tool schemas alone: no compaction can take that under the
+    // 80_000 trigger, and the run stops by name instead (`story:compaction-target-bound`, held in
+    // `tests/compaction_target_bound.rs` and `tests/adversary_w4_20261009_*`). Here the elision
+    // frees about 1_500 tokens of what was counted, which takes the session back under it.
     let mut harness = Harness::new(
         ScriptedModel::new(vec![
-            Ok(reporting(two_fat_calls(), 81_000)),
+            Ok(asks_for(&[("call-1", "a", json!({}))])),
+            Ok(reporting(asks_for(&[("call-2", "b", json!({}))]), 81_000)),
             Ok(answer("done")),
         ]),
-        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]).answering("a", fat_answer()),
+        ScriptedTools::new(vec![
+            spec("a", Approval::NotRequired),
+            spec("b", Approval::NotRequired),
+        ])
+        .answering("a", fat_answer()),
     )
     .windowed(100_000);
     let (outcome, sink) = harness.run();
@@ -2721,12 +2728,12 @@ fn a_declared_window_compacts_on_the_count_the_provider_reported() {
         "one old result elided, and no turn spent: the weight was in tool output"
     );
     assert_eq!(
-        elided(&harness.model.seen[1].items),
+        elided(&harness.model.seen[2].items),
         1,
         "and the request the model saw is the compacted one"
     );
-    assert_replayable(&harness.model.seen[1].items, "the compacted request");
-    assert_eq!(outcome.turns, 2);
+    assert_replayable(&harness.model.seen[2].items, "the compacted request");
+    assert_eq!(outcome.turns, 3);
 }
 
 #[test]

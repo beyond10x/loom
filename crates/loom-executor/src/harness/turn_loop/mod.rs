@@ -737,7 +737,20 @@ struct RunState {
     /// Not `usage.last()`: a summary turn is charged to the same run but its input count measures
     /// the prefix it was handed, not the conversation. Reading it would tell the next compaction
     /// the window had emptied and stop it firing again.
+    ///
+    /// Cleared by a compaction that changed the conversation: the count measured a conversation
+    /// that no longer exists, and one turn that omits usage must not let it decide the next check.
+    /// From then until the next count, the session is [`RunState::overhead`] plus the estimate.
     reported_input: Option<u64>,
+    /// What the provider counts that is not `items` — the instruction and the tool schemas — in
+    /// tokens: the last conversation turn's reported input less the estimate of the items that
+    /// request carried, never below zero.
+    ///
+    /// Carried across compactions, because a compaction removes items and never the instruction:
+    /// judging what is left by the items alone would send a request the provider counts above the
+    /// trigger.
+    #[serde(default)]
+    overhead: u64,
     text: String,
     /// The `answer` call's arguments, once the model has made it.
     structured: Option<serde_json::Value>,
@@ -767,6 +780,7 @@ impl RunState {
             usage_unobservable: false,
             cost_unobservable: false,
             reported_input: None,
+            overhead: 0,
             text: String::new(),
             structured: None,
             nudged: 0,
@@ -825,6 +839,10 @@ impl RunState {
     ) -> (Vec<ToolCall>, StopReason) {
         if let Some(reported) = outcome.usage.as_ref() {
             self.reported_input = Some(reported.input_tokens);
+            // `items` is still exactly what the request carried: the turn's own items join below.
+            self.overhead = reported
+                .input_tokens
+                .saturating_sub(estimated_tokens(measure(&self.items)));
         }
         self.absorb_usage(outcome.usage, prices, sink);
 
@@ -3064,6 +3082,11 @@ impl<'a> AgentLoop<'a> {
     /// With a window declared, the trigger is tokens. It fires at
     /// [`COMPACTION_TRIGGER_PERCENT`] of the window, measured by the provider's own last reported
     /// input count where there is one and by [`ESTIMATED_BYTES_PER_TOKEN`] where there is not.
+    /// That count includes the instruction and the tool schemas, which no compaction removes, so
+    /// the part of it that is not items is carried ([`RunState::overhead`]) and added to the
+    /// estimate wherever the count does not stand for the session: in sizing the items to the
+    /// target, in judging what is left, and after a compaction, which clears the count it acted
+    /// on.
     /// Elision goes first, because it costs nothing; a summary turn is spent only where the weight
     /// is in things elision may not touch — user and assistant text, and the opaque reasoning items
     /// this loop carries verbatim across every tool round trip.
@@ -3097,20 +3120,29 @@ impl<'a> AgentLoop<'a> {
             return None;
         };
         let before = measure(&state.items);
-        // The provider's own count wherever there is one: it includes the instruction and the tool
-        // schemas, which are not in `items` at all, so it is the larger figure and the one nearer
-        // the wall. The estimate is the fallback for a provider that reports nothing.
-        let occupied = estimated_tokens(before).max(state.reported_input.unwrap_or(0));
+        // The session as the provider would count it: the items, estimated, plus what it counts
+        // that is not items at all (the instruction and the tool schemas, carried in `overhead`).
+        let overhead = state.overhead;
+        let session = |bytes: usize| estimated_tokens(bytes).saturating_add(overhead);
+        // What the trigger reads: the provider's own count of the last conversation request
+        // wherever it still stands for the session, and the estimate where it does not — a
+        // provider that reported nothing, or a compaction since (which clears the count).
+        let occupied = match state.reported_input {
+            Some(reported) => estimated_tokens(before).max(reported),
+            None => session(before),
+        };
         let trigger = window.saturating_mul(COMPACTION_TRIGGER_PERCENT) / 100;
         if occupied < trigger {
             return None;
         }
         let target_tokens = window.saturating_mul(COMPACTION_TARGET_PERCENT) / 100;
         // Expressed as *how many bytes to free* rather than as a size to reach, because what this
-        // loop can shrink is `items` and the count that triggered may have measured more than
-        // that. Freeing the overshoot is the same arithmetic in both cases, and with no reported
-        // count it is exactly "leave the conversation at half the window".
-        let free = occupied
+        // loop can shrink is `items` and the session holds more than that: the instruction and
+        // the tool schemas stay, so the items are sized to leave room for them under the target.
+        // `session(before)` is never below `occupied`: the count measured the request's items plus
+        // the overhead, and items have only been added since.
+        let free = session(before)
+            .max(occupied)
             .saturating_sub(target_tokens)
             .saturating_mul(ESTIMATED_BYTES_PER_TOKEN);
         let target = before.saturating_sub(usize::try_from(free).unwrap_or(usize::MAX));
@@ -3167,11 +3199,18 @@ impl<'a> AgentLoop<'a> {
             });
         }
 
-        // What the session occupies now: the provider's count less what was freed, where that is
-        // the larger figure, because the part of it that is not `items` (the instruction and the
-        // tool schemas) is still there; the estimate of what is left otherwise.
-        let freed = estimated_tokens(before.saturating_sub(after));
-        let left = estimated_tokens(after).max(occupied.saturating_sub(freed));
+        // What the session occupies now. Where compaction changed nothing, what the trigger read.
+        // Otherwise the estimate of what is left plus the overhead, because the instruction and
+        // the tool schemas are still there: judged by the items alone, a request the provider
+        // counts above the trigger went out. The count that triggered no longer stands for this
+        // conversation, so it is cleared; until the next turn reports one, the session is that
+        // estimate, and a turn that omits usage cannot hand the next check a stale count.
+        let left = if after == before {
+            occupied
+        } else {
+            state.reported_input = None;
+            session(after)
+        };
         if left < trigger {
             return None;
         }
@@ -3220,7 +3259,9 @@ impl<'a> AgentLoop<'a> {
     /// was still sent; one merely shorter than those items could still leave the session above its
     /// target. So the items are elided wherever no summary replaces them, behind one
     /// [`ELISION_MARKER`] item that says how many, how many bytes and why. A summary smaller than
-    /// what it folds is kept when the session it leaves is at or below the target; above it, only
+    /// what it folds is kept when the session it leaves is at or below the target (`target` is in
+    /// item bytes, already net of the instruction and tool schemas the provider counts, so the
+    /// comparison is of the session as the provider counts it); above it, only
     /// when it is still smaller than that item, which in practice it is not. Otherwise the result
     /// is [`Summarised::Failed`] carrying what the provider reported, because the turn was still
     /// paid for, and so is a turn that failed on the wire or wrote nothing, whose items are elided
