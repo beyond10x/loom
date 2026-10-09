@@ -6,6 +6,13 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- `ReasoningModelSelector`, an `ActionSelector` with strategy `ReasoningModel`: one turn of any
+  `ModelPort`, held to a single tool whose only argument is a fixed choice of the candidate ids; an
+  action outside them is refused as `not-in-catalogue`, and an answer naming none is
+  `SelectorError::Unavailable`.
+
 ## [0.11.0] - 2026-10-08
 
 Loom 0.11.0 builds on engineering-protocols 0.3.0, whose `incident.response/1` keeps an
