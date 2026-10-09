@@ -631,6 +631,66 @@ fn the_allowlist_scan_finds_every_form_a_crate_boundary_refused() {
     }
 }
 
+/// `LOOM_GRANTS` admits `crate::model` to `turn_loop` alone, and nothing else of Loom to it: run on
+/// planted sources, since no ported module but `turn_loop` names the model today and the grant
+/// had no case that showed it can refuse (adversary pass 1 on `story:loop-stop-model`).
+#[test]
+fn the_model_grant_admits_turn_loop_alone_and_the_model_alone() {
+    let externs = loom_extern_crates();
+    let refused = [
+        ("wire/turn.rs", "use crate::model::run::LoopStop;\n"),
+        (
+            "messages/mod.rs",
+            "fn f() -> crate::model::run::LoopStop { todo!() }\n",
+        ),
+        (
+            "responses/mod.rs",
+            "use crate::model as m;\nuse m::run::LoopStop;\n",
+        ),
+        (
+            "http/sse.rs",
+            "use super::super::super::model::run::LoopStop;\n",
+        ),
+        ("turn_loop/mod.rs", "use crate::session::SessionFile;\n"),
+        (
+            "turn_loop/stop_codec.rs",
+            "use crate::compaction::CompactionRecorder;\n",
+        ),
+        (
+            "turn_loop/mod.rs",
+            "use super::super::session::SessionFile;\n",
+        ),
+        ("turn_loop/mod.rs", "use crate::modelling::X;\n"),
+        ("turn_loop/mod.rs", "use loom::run::LoopStop;\n"),
+    ];
+    for (rel, src) in refused {
+        assert!(
+            !crossings(Path::new(rel), src, &externs).is_empty(),
+            "the scan let `{}` in {rel} through",
+            src.trim()
+        );
+    }
+    let allowed = [
+        (
+            "turn_loop/stop_codec.rs",
+            "use crate::model::run::{LoopStop, LoopStopMaxTurns};\n",
+        ),
+        ("turn_loop/mod.rs", "pub use crate::model::run::LoopStop;\n"),
+        (
+            "turn_loop/tests.rs",
+            "fn f() -> super::super::super::model::run::LoopStop { todo!() }\n",
+        ),
+    ];
+    for (rel, src) in allowed {
+        assert_eq!(
+            crossings(Path::new(rel), src, &externs),
+            Vec::<String>::new(),
+            "the scan refused `{}` in {rel}",
+            src.trim()
+        );
+    }
+}
+
 /// Each ported module names only the siblings and crates its Harness crate's manifest listed.
 #[test]
 fn each_ported_module_names_only_what_its_harness_manifest_allowed() {
