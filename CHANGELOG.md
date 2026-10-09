@@ -6,6 +6,11 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+- Added `b10x-loom-selector-laya`, an experimental `FastTyped` action selector that asks a Laya
+  endpoint (`POST /v1/systemone`) to choose one candidate and reports its `answer_confidence` as
+  the selection's confidence; a choice outside the candidates, a failure or a timeout is a
+  selection error, and neither `b10x-loom-cli` nor `b10x-loom-sdk` links it.
+
 ## [0.11.0] - 2026-10-08
 
 Loom 0.11.0 builds on engineering-protocols 0.3.0, whose `incident.response/1` keeps an

@@ -266,6 +266,20 @@ a write without a recorded attempt included, is `Err`. The sync port runs on a T
 invoker owns. `crates/loom-connectors/tests/connectors_invoker.rs` holds it against a fake service
 on a loopback port.
 
+## Laya selector
+
+`b10x-loom-selector-laya` (`crates/loom-selector-laya`) is an experimental `FastTyped`
+`ActionSelector`, never the default. It sends the goal and the candidate action ids as one
+`choice` question to a Laya endpoint (`POST <base>/v1/systemone`, the wire of the Laya README at
+commit `1adc59f`) through llm's `b10x-llm-http` `HttpClient::post_json`, on a runtime the selector
+owns, and reports `answer_confidence` as the confidence, never `confidence`. A choice outside the
+candidates, a non-2xx status, a timeout, malformed or over-deep JSON, or a probability outside
+[0, 1] is `SelectorError::Unavailable`; more than 100 candidates is refused before sending. The
+wire stays in this crate until Laya becomes a default selector, when it moves to llm. No product
+crate (`b10x-loom-cli`, `b10x-loom-sdk`) depends on it, so Loom builds and runs with no Laya code;
+`crates/loom-selector-laya/tests/laya_selector.rs` holds both, the dependency rule over the
+resolved graph `cargo metadata` reports.
+
 ## Intake and the command line
 
 The CLI's `Briefing` owns single-intent working context. `--context-policy bounded` is opt-in;
