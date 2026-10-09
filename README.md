@@ -33,9 +33,9 @@ the whole boundary.
 
 ## Status
 
-Version `0.13.0`, released from source at the tag `0.13.0`
-([release](https://github.com/beyond10x/loom/releases/tag/0.13.0)). Nothing is on a registry: you
-install from the tag or depend on it with `tag = "0.13.0"`. `b10x-loom run` completed a live run
+Version `0.14.0`, released from source at the tag `0.14.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.14.0)). Nothing is on a registry: you
+install from the tag or depend on it with `tag = "0.14.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -80,6 +80,10 @@ a consumer that adds Canon itself pins the same tag). `incident.response/1` keep
 `investigate_cause` open after `emergency.leave` becomes admissible, until a cause analysis
 identifies the cause.
 
+Since `0.14.0` `LoopStop` is generated from its ESS declaration (`loom.run.LoopStop`): its
+variants carry payload structs and `i64` counts, while the JSON of loop outcomes and events is
+unchanged.
+
 Since `0.13.0` Loom hosts plugins (ADR `plugin-hooks`): `b10x-loom-plugin` runs an unattended
 agent as hooks around a governed run on the read-only protocol `inbound-answer@1`, reading data
 sources through the `connectors` command line, and `b10x-loom plugin run slack-handler` walks the
@@ -105,14 +109,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.13.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.14.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.13.0
+b10x-loom 0.14.0
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -177,7 +181,7 @@ A supervisor that keeps its own case record calls `loom_governor::evaluate` (or 
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.13.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.14.0" }
 ```
 
 The example below
