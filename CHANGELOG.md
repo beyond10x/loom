@@ -12,7 +12,11 @@ under **Unreleased** until the next release.
   `ModelPort`, held to a single tool whose only argument is a fixed choice of the candidate ids; an
   action outside them is refused as `not-in-catalogue`, and an answer naming none is
   `SelectorError::Unavailable`.
-- `HybridSelector`: the fast choice at or above a host-supplied threshold, else the stronger one's.
+- `HybridSelector`, an `ActionSelector` with strategy `Hybrid`: the fast selector's choice when it
+  names a candidate at or above a confidence threshold the host supplies (no default; refused as
+  `InvalidThreshold` unless a decimal in [0, 1]), else the stronger selector's answer. `Confidence`
+  compares a confidence as a number, so `0.9` equals `0.90`. `select` now drops, for every
+  selector, a confidence that is not a decimal in [0, 1] and records the selection without one.
 
 ## [0.11.0] - 2026-10-08
 

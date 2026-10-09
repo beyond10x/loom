@@ -26,6 +26,7 @@ use crate::harness::wire::{
     VecSink,
 };
 use crate::model::behaviour::{ActionCatalogueStorage, SelectionStorage};
+use crate::model::json::{Value, decimal_at};
 use crate::model::primitives::Decimal;
 use crate::model::run::{
     ActionCatalogue, ActionNotInCatalogue, ActionSelected, AnyActionCatalogue, AnySelection,
@@ -248,9 +249,10 @@ impl<P: ModelPort> ActionSelector for ReasoningModelSelector<P> {
 /// A confidence compared as the number it writes: a decimal in [0, 1].
 ///
 /// [`Decimal`] orders by its rendering, so `0.9` sorts below `0.90`; a `Confidence` is the value
-/// itself, so the two are equal. The rendering is digits with an optional fraction, optionally
-/// signed `-` (only `-0` and its spellings are in range); anything else, including an exponent, is
-/// not a decimal here.
+/// itself, so the two are equal. A decimal is what the specification's published `Decimal` pattern
+/// accepts ([`decimal_at`]): an optional `-`, digits without a leading zero, then an optional `.`
+/// and digits. Only `-0` and its spellings are in range among the signed; anything else, including
+/// a leading zero or an exponent, is not a decimal here.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Confidence {
     /// Whether the value is exactly 1. Ordered first, so 1 is above every fraction.
@@ -264,23 +266,16 @@ impl Confidence {
     /// The value `decimal` writes, when it is a decimal in [0, 1]; `None` otherwise.
     pub fn parse(decimal: &Decimal) -> Option<Self> {
         let text = decimal.0.as_str();
+        // The one definition of a decimal: the pattern the generated decoders apply.
+        decimal_at(&Value::Text(text.to_owned()), "confidence", "a decimal").ok()?;
         let (negative, unsigned) = match text.strip_prefix('-') {
             Some(rest) => (true, rest),
             None => (false, text),
         };
         let (whole, fraction) = unsigned.split_once('.').unwrap_or((unsigned, ""));
-        let digits = |part: &str| part.bytes().all(|byte| byte.is_ascii_digit());
-        if whole.is_empty()
-            || !digits(whole)
-            || !digits(fraction)
-            || (unsigned.contains('.') && fraction.is_empty())
-        {
-            return None;
-        }
-        let whole = whole.trim_start_matches('0');
         let fraction = fraction.trim_end_matches('0');
         let confidence = match whole {
-            "" => Self {
+            "0" => Self {
                 one: false,
                 fraction: fraction.to_owned(),
             },

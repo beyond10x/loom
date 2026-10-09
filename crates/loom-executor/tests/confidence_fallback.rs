@@ -182,14 +182,14 @@ fn the_fast_choice_is_returned_only_at_or_above_the_supplied_threshold() {
 
 #[test]
 fn equal_values_written_differently_are_at_the_threshold() {
-    // String order puts "0.9" below "0.90" and "00.95" below "0.9"; numbers do not.
+    // String order puts "0.9" below "0.90" and "-0" below "0"; numbers do not.
     for (confidence, threshold) in [
         ("0.9", "0.90"),
         ("0.90", "0.9"),
         ("0.6", "0.600"),
         ("1", "1.0"),
         ("0", "0.00"),
-        ("00.95", "0.9"),
+        ("-0", "0"),
     ] {
         let fast = Scripted::names(FAST, Some(confidence));
         assert_eq!(
@@ -216,6 +216,8 @@ fn a_confidence_outside_zero_to_one_or_not_a_decimal_counts_as_missing() {
     for confidence in [
         "1.5", "1.0001", "2", "-0.1", "-1", "abc", "", ".", "0.9.1", "NaN", "inf", "9e-1", "0,95",
         " 0.95", "0.95 ", "+0.95", "0x1",
+        // A leading zero is not a decimal in the published pattern.
+        "00", "01", "00.95", "000.5", "01.0",
     ] {
         // A threshold of 0 admits every confidence there is, so only a missing one falls back.
         for threshold in THRESHOLDS.iter().chain(&["0"]) {
@@ -272,7 +274,7 @@ fn the_stronger_selectors_error_is_the_hybrid_answer_on_a_fallback() {
 fn a_threshold_that_is_not_a_decimal_in_zero_to_one_is_refused() {
     let fast = Scripted::names(FAST, Some("1"));
     let stronger = Scripted::stronger();
-    for threshold in ["1.5", "-0.1", "abc", "", "NaN", "9e-1"] {
+    for threshold in ["1.5", "-0.1", "abc", "", "NaN", "9e-1", "00.5", "01"] {
         assert_eq!(
             HybridSelector::new(&fast, &stronger, &decimal(threshold)).err(),
             Some(InvalidThreshold(decimal(threshold))),
@@ -303,7 +305,7 @@ fn a_confident_hybrid_choice_still_passes_loom_membership_and_records_hybrid() {
 #[test]
 fn a_selectors_confidence_is_validated_at_the_seam() {
     // A selector's confidence outside [0, 1], or not a decimal, is not recorded on the selection.
-    for confidence in ["1.5", "-0.2", "abc", "9e-1"] {
+    for confidence in ["1.5", "-0.2", "abc", "9e-1", "00.95"] {
         let fast = Scripted::names(FAST, Some(confidence));
         let selection = select(&&fast, &context(), &catalogue(), selection_id())
             .expect("a candidate is selected")
