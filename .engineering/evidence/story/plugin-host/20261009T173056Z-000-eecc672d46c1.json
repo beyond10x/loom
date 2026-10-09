@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-09T17:30:56Z",
+  "actor": "human:timo",
+  "artifact": "story:plugin-host",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-plugin --locked: 31 passed incl. 8 adversary cases; base has no loom-plugin crate (task drift red on the spec-only change)"
+  }
+}

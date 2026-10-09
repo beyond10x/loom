@@ -4,7 +4,7 @@ id: architecture-decision-record:plugin-hooks
 kind: architecture-decision-record
 status: accepted
 title: Loom hosts plugins through hooks around a governed run
-revision: 2
+revision: 3
 transitions:
 - {from: "proposed", to: "accepted", at: "2026-10-09T07:07:46Z", actor: "human:timo", revision: 2}
 ---
@@ -43,3 +43,14 @@ conductor-dev to implement it ("mh, you should implement it now").
 - A plugin never publishes a write to a turn in this version.
 - Nothing is discovered from a workspace: plugins are linked, configuration is a path the operator
   gives.
+
+## Amendment, 2026-10-09 (plan critics, round 1 and 2)
+
+Reads do not go behind Commission's `ConnectorInvoker`. They go through a plain Connectors CLI
+client (`loom_connectors::cli`) behind `DataSourceEffects`, a Commission `EffectPort` in
+`loom-plugin`. Reasons: the poll runs outside any run, where no `AdmittedRequest` exists; and a
+turn's `source.read` names its source and kind per call, where an `ActionBinding` is fixed per
+commission. The governance holds: `source.read` and `reply.propose` are frontier actions of
+`inbound.answer/1`, each requiring a capability the host's authority provider grants, and the
+effect port refuses any pair outside the turn's projection. A read's result carries the audit
+reference the CLI returns.

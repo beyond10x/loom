@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:reasoning-model-selector
 kind: story
-status: draft
+status: implemented
 title: Reasoning-model selector chooses one action from the given candidates
 summary: ActionSelector backed by the reasoning model; the stronger path fast selection falls back to.
 refs:
@@ -15,14 +15,20 @@ relations:
 - serves: vision:governed-autonomy
 scope:
 - confidence: cited
-  path: crates/loom-executor
-- confidence: inferred
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
   path: crates/loom-executor/src/lib.rs
-- confidence: inferred
+- confidence: cited
   path: crates/loom-executor/src/selection.rs
-- confidence: inferred
+- confidence: cited
   path: crates/loom-executor/tests/reasoning_model_selector.rs
-revision: 5
+revision: 12
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-08T23:16:39Z", actor: "human:timo", revision: 9}
+- {from: "proposed", to: "active", at: "2026-10-08T23:16:39Z", actor: "human:timo", revision: 10}
+- {from: "active", to: "implemented", at: "2026-10-09T16:30:02Z", actor: "human:timo", revision: 12, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 
@@ -44,7 +50,7 @@ Rules this story holds:
 ## Domain relations
 
 - `loom.run.Selection` → `loom.run.ActionCatalogue`, many-to-one, the selection references the catalogue and does not own it — inferable: `ess/domains/run.yaml`, entity `loom.run.Selection`, relation `catalogue`.
-- A selection names exactly one action of the candidate set it was given — inferable (inferred from `crates/loom/src/lib.rs:79-83`, the `frontier.contains_action` check in `Loom::run`; no ess/1 document declares this relation).
+- A selection names exactly one action of the candidate set it was given — inferable (inferred from `crates/loom-executor/src/selection.rs:115-128`, `chosen`, which refuses an action the catalogue does not list, reached through `selection::select` at `crates/loom-executor/src/lib.rs:254` and `:475`; no ess/1 document declares this relation).
 
 ## Acceptance
 
@@ -54,9 +60,26 @@ names an action outside the set.
 
 ## Dependencies
 
-The `ActionSelector` contract (TASKBOARD L-005) and the model client ported from Harness, both in
-`epic:loom-native-harness`. No story for either existed when this was drafted; until one does, the
-edge is the epic-level `epic:fast-selector depends_on epic:loom-native-harness`.
+Met on `main` at 5e3d0cb: the `ActionSelector` contract (`crates/loom-executor/src/selection.rs:50`,
+`story:action-selector`, implemented) and the provider-neutral model client `ModelPort`
+(`crates/loom-executor/src/harness/wire/port.rs:93`, `story:harness-crate-port`, implemented).
+
+## ESS first
+
+No specification change: `loom.run.SelectionStrategy::ReasoningModel` (`ess/domains/run.yaml:44-46`)
+and the out-of-set refusal (`loom.run.ActionNotInCatalogue`, `run.yaml:303`; `SelectAction` outcome
+`not-in-catalogue`) are declared. The red test is the story's own,
+`crates/loom-executor/tests/reasoning_model_selector.rs`.
+
+## Implementation notes (scoping, 2026-10-09)
+
+- `ActionSelector::select` takes `&self` and `ModelPort::turn` takes `&mut self`; hold the port
+  behind interior mutability rather than changing the trait.
+- `crates/loom-executor/src/harness/governed.rs:1022-1043` (`ModelSelection`) already records the
+  governed loop's model tool call as a `ReasoningModel` selection; reuse or leave it, never
+  duplicate it.
+- The fixed choice is a forced tool call (`ToolChoice`, `harness/wire/turn.rs:125-168`) over the
+  candidate ids only.
 
 ## Source
 

@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-09T16:33:23Z",
+  "actor": "human:timo",
+  "artifact": "story:connectors-cli-reads",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-connectors --locked: connectors_cli 12 and connectors_cli_adversary 6 passed; base has no loom_connectors::cli (E0433 on the red run)"
+  }
+}

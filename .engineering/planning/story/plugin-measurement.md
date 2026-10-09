@@ -11,7 +11,9 @@ relations:
 scope:
 - confidence: cited
   path: docs/qualification/plugin-layer-measurement.md
-revision: 3
+- confidence: cited
+  path: docs/qualification/plugin-layer-measurement.sh
+revision: 5
 ---
 ## Why
 
@@ -26,13 +28,18 @@ No behaviour change; exempt.
 ## Acceptance
 
 - `docs/qualification/plugin-layer-measurement.md` gives non-blank, non-comment lines per crate
-  (`loom-plugin`, `loom-plugin-slack`, the `cli` module of `loom-connectors`) and per hook, with
-  the command that counted them and its output.
-- The page has a table with one row per Rust module of those crates, each marked mechanism (stays
-  Rust) or policy (could be YAML), with the YAML shape a policy row would take. A check compares
-  the table's module list with `find crates/loom-plugin crates/loom-plugin-slack -name '*.rs'`
-  and the page states that both lists are equal.
+  (`crates/loom-plugin/src`, `crates/loom-plugin-slack/src`, `crates/loom-connectors/src/cli.rs`),
+  counted by a script `docs/qualification/plugin-layer-measurement.sh` the page names; per hook,
+  the lines of the module that implements it. Check: `measurement_counts_match`, the script rerun
+  on the merge commit prints the page's numbers (the coordinator runs it at the wave close and
+  pastes the output).
+- The page has one row per `.rs` file under `crates/loom-plugin/src`, `crates/loom-plugin-slack/src`
+  and `crates/loom-connectors/src/cli.rs`, each marked mechanism (stays Rust) or policy (could be
+  YAML), with the YAML shape a policy row would take. Check: `measurement_table_is_complete`, the
+  script's `--files` mode lists the same files as the table (the coordinator runs it at the wave
+  close).
 
 ## Scope
 
-`docs/qualification/plugin-layer-measurement.md` (new).
+`docs/qualification/plugin-layer-measurement.md` (new), `docs/qualification/plugin-layer-measurement.sh`
+(new).

@@ -7,7 +7,7 @@ title: 'Unattended agents are Loom plugins: a Slack handler first'
 relations:
 - serves: vision:O1
 - implements: architecture-decision-record:plugin-hooks
-revision: 2
+revision: 3
 ---
 ## Outcome
 
@@ -20,18 +20,28 @@ Slack.
 
 ## Acceptance
 
-Each line is decided by the test the named story lists:
-- the fixture run records 3 proposals (`story:slack-plugin`, `fixture_run_records_three_proposals`);
-- the same fixture run posts nothing: the fake `connectors` saw no write operation
-  (`story:slack-plugin`, `fixture_run_invokes_no_write`);
-- a second run over the same fixtures records no new line (`story:slack-plugin`,
-  `second_run_records_nothing_new`);
-- the inbound protocol offers no write action (`story:inbound-answer-protocol`,
-  `frontier_offers_no_write`);
-- the data-source effect port refuses a pair outside the configured sources (`story:plugin-host`,
-  `effects_refuse_an_undeclared_read`);
-- the measurement page gives line counts per crate (`story:plugin-measurement`);
-- the measurement page classifies every module as mechanism or policy (`story:plugin-measurement`).
+Each line is decided by the named test of the named story:
+- the fixture run records 3 proposals: `story:slack-plugin`, `fixture_run_records_three_proposals`;
+- it posts nothing: `story:slack-plugin`, `fixture_run_invokes_no_write`;
+- a second run adds no line: `story:slack-plugin`, `second_run_records_nothing_new`;
+- `plugin run slack-handler` resolves through the CLI: `story:slack-plugin`,
+  `plugin_run_slack_handler_once`;
+- the protocol offers no write action: `story:inbound-answer-protocol`, `frontier_offers_no_write`;
+- a read outside the turn's projection is refused and invokes nothing: `story:plugin-host`,
+  `effects_refuse_an_undeclared_read` (the projection never exceeds the configured sources:
+  `project_stays_within_configured_sources`);
+- the measurement page's counts equal a recount on the merge commit:
+  `story:plugin-measurement`, `measurement_counts_match`;
+- every module of the measured crates has a row: `story:plugin-measurement`,
+  `measurement_table_is_complete`.
+
+## Deviation from the ADR, recorded
+
+`architecture-decision-record:plugin-hooks` said reads go behind Commission's `ConnectorInvoker`.
+They go through a plain Connectors CLI client behind `DataSourceEffects`, a Commission `EffectPort`:
+the poll runs outside any run (an `AdmittedRequest` exists only inside one), and a turn's read names
+its operation per call where a binding is fixed per commission (design critic, round 1). The ADR
+body carries the amendment.
 
 ## Deferred
 

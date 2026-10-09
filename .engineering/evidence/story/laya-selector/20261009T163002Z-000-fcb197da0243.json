@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-09T16:30:02Z",
+  "actor": "human:timo",
+  "artifact": "story:laya-selector",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test --locked --no-fail-fast -p b10x-loom-executor -p b10x-loom-governor -p b10x-loom-selector-laya -p b10x-loom-sdk -p b10x-loom-intake-slice -p b10x-loom-conformance (64358d8: exit 0, 944 passed 0 failed, 132 binaries; clippy -D warnings exit 0; task docs-check exit 0)"
+  }
+}

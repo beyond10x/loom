@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-09T17:15:12Z",
+  "actor": "human:timo",
+  "artifact": "story:plugin-host",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "loom w2 U3 correction round 1 (finding 2 of 5)",
+    "review": "review-result:adv-w2-u3-pass-1",
+    "outcome": "fixed"
+  }
+}

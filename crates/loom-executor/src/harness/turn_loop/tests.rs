@@ -2699,12 +2699,24 @@ fn a_declared_window_compacts_on_the_count_the_provider_reported() {
     // The byte rule is 192 KiB — about 50k tokens — so about 60 % of a 128k window was unreachable
     // and a longer run met the provider's wall as a hard error. This conversation is 12 kB and
     // would never have crossed it; what fires is the provider's own count of the window.
+    //
+    // The 81_000 is counted on the request that carries the 6 kB result, and the turn after it
+    // adds only a small one. Counted on the first request, which carries nothing but the task,
+    // 81_000 would be instruction and tool schemas alone: no compaction can take that under the
+    // 80_000 trigger, and the run stops by name instead (`story:compaction-target-bound`, held in
+    // `tests/compaction_target_bound.rs` and `tests/adversary_w4_20261009_*`). Here the elision
+    // frees about 1_500 tokens of what was counted, which takes the session back under it.
     let mut harness = Harness::new(
         ScriptedModel::new(vec![
-            Ok(reporting(two_fat_calls(), 85_000)),
+            Ok(asks_for(&[("call-1", "a", json!({}))])),
+            Ok(reporting(asks_for(&[("call-2", "b", json!({}))]), 81_000)),
             Ok(answer("done")),
         ]),
-        ScriptedTools::new(vec![spec("a", Approval::NotRequired)]).answering("a", fat_answer()),
+        ScriptedTools::new(vec![
+            spec("a", Approval::NotRequired),
+            spec("b", Approval::NotRequired),
+        ])
+        .answering("a", fat_answer()),
     )
     .windowed(100_000);
     let (outcome, sink) = harness.run();
@@ -2716,12 +2728,12 @@ fn a_declared_window_compacts_on_the_count_the_provider_reported() {
         "one old result elided, and no turn spent: the weight was in tool output"
     );
     assert_eq!(
-        elided(&harness.model.seen[1].items),
+        elided(&harness.model.seen[2].items),
         1,
         "and the request the model saw is the compacted one"
     );
-    assert_replayable(&harness.model.seen[1].items, "the compacted request");
-    assert_eq!(outcome.turns, 2);
+    assert_replayable(&harness.model.seen[2].items, "the compacted request");
+    assert_eq!(outcome.turns, 3);
 }
 
 #[test]
@@ -3082,8 +3094,9 @@ fn a_spend_ceiling_the_summary_turn_crosses_ends_the_run_before_the_next_turn() 
 
 #[test]
 fn a_summary_turn_that_fails_on_the_wire_leaves_the_run_alive() {
-    // A compaction that fails leaves a conversation that is merely larger than wanted. Ending a
-    // long run over that would be the defect this whole change exists to remove.
+    // A summary turn that fails is not a failed run. What it was to fold is elided instead, so the
+    // conversation still comes down to its target; only a session that stays at or above its
+    // trigger after that ends the run, and this one does not.
     let mut harness = Harness::new(
         ScriptedModel::new(vec![
             Ok(says_and_asks(
@@ -3112,17 +3125,33 @@ fn a_summary_turn_that_fails_on_the_wire_leaves_the_run_alive() {
         vec![(0, 0, true)],
         "a turn was spent and nothing was folded, and the record says so"
     );
+    let next = &harness.model.seen[2].items;
     assert!(
-        harness.model.seen[2]
-            .items
+        !next
             .iter()
             .any(|item| matches!(item, Item::AssistantText { text } if text.len() > 8_000)),
-        "the conversation kept the form elision left it in"
+        "the argument the failed summary was to fold is elided, not left above the target"
     );
-    assert_replayable(
-        &harness.model.seen[2].items,
-        "the conversation a failed summary left",
+    assert_eq!(
+        next.iter()
+            .filter(
+                |item| matches!(item, Item::UserText { text } if text.starts_with(ELISION_MARKER))
+            )
+            .count(),
+        1,
+        "one note says what was elided: {next:?}"
     );
+    assert_eq!(
+        next[0],
+        Item::user("do the thing"),
+        "the task is never elided"
+    );
+    let tokens = u64::try_from(measure(next)).expect("small") / ESTIMATED_BYTES_PER_TOKEN;
+    assert!(
+        tokens * 100 <= 1_000 * COMPACTION_TARGET_PERCENT,
+        "the request after the failed summary is {tokens} tokens of a 1000-token window"
+    );
+    assert_replayable(next, "the conversation a failed summary left");
 }
 
 #[test]

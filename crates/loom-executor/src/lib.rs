@@ -65,7 +65,10 @@ use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
 
 pub use arguments::{ArgumentContext, ArgumentGenerator, EmptyObjectArguments};
-pub use selection::{ActionSelector, FirstAdmissibleSelector, SelectorError};
+pub use selection::{
+    ActionSelector, Confidence, FirstAdmissibleSelector, HybridSelector, InvalidThreshold,
+    ReasoningModelSelector, SelectorError,
+};
 
 use arguments::RequestRecord;
 use model::behaviour::SelectionStorage;

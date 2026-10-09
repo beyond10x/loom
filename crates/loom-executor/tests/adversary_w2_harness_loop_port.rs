@@ -423,7 +423,10 @@ fn adversary_w2_a_summary_turn_is_not_a_turn_of_the_session() {
         Loom::new(FirstAdmissibleSelector, EmptyObjectArguments, PROMPT).with_governor(&governor);
     let handed = issued(&governor, &case);
     // Two calls of an unpublished name, each with 40 KB of arguments: refused before the selector,
-    // and heavy enough that a 10 000-token window folds the first into a summary before turn 3.
+    // and heavy enough that a 20 000-token window folds the first into a summary before turn 3.
+    // Not 10 000: each call's 40 KB is about 10 000 tokens, above that window's 8 000-token
+    // trigger, and the newest turn group is never folded, so the run would now stop by name
+    // after turn 1 (`story:compaction-target-bound`).
     let pad = "x".repeat(40 * 1024);
     let first = call("call_1", "no_such_tool", json!({"pad": pad}));
     let second = call("call_2", "no_such_tool", json!({"pad": pad}));
@@ -438,7 +441,7 @@ fn adversary_w2_a_summary_turn_is_not_a_turn_of_the_session() {
         &session(responses::WIRE),
         LoopPorts {
             model: &mut model,
-            config: config().with_context_window(Some(10_000)),
+            config: config().with_context_window(Some(20_000)),
             sink: &mut sink,
         },
         &commission(&case),

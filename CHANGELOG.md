@@ -35,6 +35,47 @@ under **Unreleased** until the next release.
   dropped; `state.json` is written through a temporary file and a rename. One host holds a state
   directory at a time, and a state directory inside a configured workspace root or checkout is
   refused.
+## [0.12.0] - 2026-10-09
+
+Loom 0.12.0 adds two action selectors and bounds compaction. `ReasoningModelSelector` asks any
+model port to choose one of the given candidates; `HybridSelector` takes a fast selector's choice
+at or above a confidence threshold the host supplies, else the stronger selector's; and the
+experimental `b10x-loom-selector-laya` crate is a fast selector over a Laya endpoint. A compaction
+of a declared context window now leaves the session at or below its target wherever removing what
+may be removed can reach it, and a run whose session stays at or above its trigger ends with the
+new `LoopStop::ContextAboveTrigger` instead of sending another request. Callers that match
+`LoopStop` exhaustively add the arm.
+
+### Added
+
+- `ReasoningModelSelector`, an `ActionSelector` with strategy `ReasoningModel`: one turn of any
+  `ModelPort`, held to a single tool whose only argument is a fixed choice of the candidate ids; an
+  action outside them is refused as `not-in-catalogue`, and an answer naming none is
+  `SelectorError::Unavailable`.
+- `HybridSelector`, an `ActionSelector` with strategy `Hybrid`: the fast selector's choice when it
+  names a candidate at or above a confidence threshold the host supplies (no default; refused as
+  `InvalidThreshold` unless a decimal in [0, 1]), else the stronger selector's answer. `Confidence`
+  compares a confidence as a number, so `0.9` equals `0.90`. `select` now drops, for every
+  selector, a confidence that is not a decimal in [0, 1] and records the selection without one.
+- `b10x-loom-selector-laya`, an experimental `FastTyped` action selector that asks a Laya
+  endpoint (`POST /v1/systemone`) to choose one candidate and reports its `answer_confidence` as
+  the selection's confidence; a choice outside the candidates, a failure or a timeout is a
+  selection error, and neither `b10x-loom-cli` nor `b10x-loom-sdk` links it.
+
+### Changed
+
+- A compaction of a declared context window leaves the session at or below its target (50 % of
+  the window) wherever removing what may be removed can reach it. Wherever a fold is not replaced
+  by a summary (the summary turn failed on the wire, wrote nothing, or wrote a summary that would
+  leave the session above its target, or the fold was too small to be worth a summary turn), its
+  items are elided behind one `ELISION_MARKER` item that says how many, how many bytes and why. A
+  summary is kept when the session it leaves is at or below the target; above it, only when it is
+  smaller than that note. A failed or empty summary is still not a failed run.
+- **Breaking:** `LoopStop` gains `ContextAboveTrigger { window, target, occupied }`, all in tokens.
+  When what no compaction removes (the task, provider reasoning items, the newest turn group and
+  protected tail, and the instruction and tool schemas the provider counts) leaves the session at
+  or above its compaction trigger (80 % of the window), the run ends with it and sends no further
+  request; its session is filed `Stopped`. Callers that match `LoopStop` exhaustively add the arm.
 
 ## [0.11.0] - 2026-10-08
 

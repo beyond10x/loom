@@ -33,9 +33,9 @@ the whole boundary.
 
 ## Status
 
-Version `0.11.0`, released from source at the tag `0.11.0`
-([release](https://github.com/beyond10x/loom/releases/tag/0.11.0)). Nothing is on a registry: you
-install from the tag or depend on it with `tag = "0.11.0"`. `b10x-loom run` completed a live run
+Version `0.12.0`, released from source at the tag `0.12.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.12.0)). Nothing is on a registry: you
+install from the tag or depend on it with `tag = "0.12.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -80,6 +80,15 @@ a consumer that adds Canon itself pins the same tag). `incident.response/1` keep
 `investigate_cause` open after `emergency.leave` becomes admissible, until a cause analysis
 identifies the cause.
 
+Since `0.12.0` the executor offers two more action selectors: `ReasoningModelSelector` asks any
+model port to choose one of the given candidates, and `HybridSelector` takes a fast selector's
+choice at or above a confidence threshold the host supplies, else the stronger selector's. The
+experimental `b10x-loom-selector-laya` crate is a fast selector over a Laya endpoint. A compaction
+of a declared context window now leaves the session at or below its target where it can; when what
+it cannot remove keeps the session at or above its trigger, the run ends with
+`LoopStop::ContextAboveTrigger` and sends no further request. Callers that match `LoopStop`
+exhaustively add an arm.
+
 ## Run the command line
 
 Since `0.4.0`, Loom supports opt-in `--context-policy bounded` and `--context-report PATH`.
@@ -90,14 +99,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.11.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.12.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.11.0
+b10x-loom 0.12.0
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -154,7 +163,7 @@ A supervisor that keeps its own case record calls `loom_governor::evaluate` (or 
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.11.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.12.0" }
 ```
 
 The example below
@@ -193,6 +202,7 @@ its code.
 | `b10x-loom-connectors` | Commission's `ConnectorInvoker` over a Connectors service (Connectors `v0.35.0`) |
 | `b10x-loom-plugin` | The plugin host: polls a plugin, classifies each item and answers it in a governed read-only turn over Connectors data sources, one record line per item |
 | `b10x-loom-governor` | Evaluates a case's protocol with Canon and issues the frontier; executes nothing |
+| `b10x-loom-selector-laya` | Experimental: a fast typed action selector over a local or hosted Laya endpoint (`POST /v1/systemone`); no product crate links it |
 | `b10x-loom-intake-router`, `-references`, `-slice` | Route an intent to a protocol, extract its references, and run the local slice over a git work tree |
 
 The [crate reference](https://beyond10x.github.io/loom/docs/reference/crates) lists all

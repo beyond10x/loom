@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-09T17:08:49Z",
+  "actor": "human:timo",
+  "artifact": "story:release-0120",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "loom-xtask release-check --tag 0.12.0 exit 0 on 34cd8d2; release run 37962623386 green on 81e79d1"
+  }
+}

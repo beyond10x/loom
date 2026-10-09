@@ -704,6 +704,11 @@ fn adversary_w3_a_summary_longer_than_the_items_it_replaces_leaves_the_session_a
 /// verbatim and never rewrites, so neither a summary nor a note saying what was elided can be
 /// shorter than what it would stand in for. Nothing is folded and nothing is elided, the reasoning
 /// item survives byte for byte, and the summary request is still recorded at its reported usage.
+///
+/// Re-pinned for `story:compaction-target-bound`: the reasoning item alone keeps the session above
+/// its trigger after the compaction, so the run now ends by name
+/// ([`LoopStop::ContextAboveTrigger`]) instead of sending turn 2. What it held before is held on
+/// the conversation the run hands back, where turn 2's request used to be read.
 #[test]
 fn adversary_w3_a_fold_of_reasoning_items_alone_never_leaves_the_session_larger() {
     let reasoning = Item::Opaque {
@@ -719,17 +724,34 @@ fn adversary_w3_a_fold_of_reasoning_items_alone_never_leaves_the_session_larger(
         ],
         usage: usage(7, 100, 0, None),
     };
-    let (records, sink, sent) =
-        one_compaction_after(first, Ok(prose("SUMMARY-short", usage(1_111, 11, 0, None))));
+    let (records, sink, sent, run) =
+        one_compaction_run(first, Ok(prose("SUMMARY-short", usage(1_111, 11, 0, None))));
 
     let (bytes_before, bytes_after) = sizes(&sink);
     assert!(
         bytes_after <= bytes_before,
         "a compaction never leaves the session larger: {bytes_before} bytes became {bytes_after}"
     );
-    let after = sent.last().expect("a request after the compaction");
+    assert!(
+        matches!(
+            stop_of(&run),
+            Some(LoopStop::ContextAboveTrigger { window: WINDOW, target, occupied })
+                if target == WINDOW / 2 && occupied * 100 >= WINDOW * 80
+        ),
+        "the session stays above its trigger, so the run ends by name: {:?}",
+        run.run
+    );
     assert_eq!(
-        after
+        sent.len(),
+        2,
+        "turn 1 and the summary request, and nothing after"
+    );
+    assert!(is_summary(&sent[1]), "the second request is the summary");
+    let Some(Ok(answered)) = &run.run else {
+        panic!("the run answered no outcome: {:?}", run.run);
+    };
+    assert_eq!(
+        answered
             .items
             .iter()
             .filter(|item| **item == reasoning)
@@ -738,9 +760,12 @@ fn adversary_w3_a_fold_of_reasoning_items_alone_never_leaves_the_session_larger(
         "the reasoning item is carried verbatim"
     );
     assert!(
-        after.items.iter().all(|item| !serde_json::to_string(item)
-            .expect("encodes")
-            .contains("SUMMARY-short")),
+        answered
+            .items
+            .iter()
+            .all(|item| !serde_json::to_string(item)
+                .expect("encodes")
+                .contains("SUMMARY-short")),
         "a summary no shorter than what it would replace is not folded into the conversation"
     );
     assert_eq!(
@@ -790,6 +815,23 @@ fn one_compaction_after(
     first: TurnOutcome,
     summary: Result<TurnOutcome, WireError>,
 ) -> (Vec<CompactionSnapshot>, VecLoopSink, Vec<TurnRequest>) {
+    let (records, sink, sent, run) = one_compaction_run(first, summary);
+    assert_eq!(stop_of(&run), Some(LoopStop::Completed), "{:?}", run.run);
+    assert_eq!(sent.len(), 3, "turn 1, the summary request, turn 2");
+    assert!(is_summary(&sent[1]), "the second request is the summary");
+    (records, sink, sent)
+}
+
+/// The same run, however it ended: the records, the events, every request sent, and the run.
+fn one_compaction_run(
+    first: TurnOutcome,
+    summary: Result<TurnOutcome, WireError>,
+) -> (
+    Vec<CompactionSnapshot>,
+    VecLoopSink,
+    Vec<TurnRequest>,
+    LoopRun,
+) {
     let case = CaseId(CASE.to_owned());
     let governor = FakeGovernor::new();
     governor.script(
@@ -819,11 +861,8 @@ fn one_compaction_after(
         &commission(&case),
         &handed,
     );
-    assert_eq!(stop_of(&run), Some(LoopStop::Completed), "{:?}", run.run);
     let sent = requests.lock().expect("lock").clone();
-    assert_eq!(sent.len(), 3, "turn 1, the summary request, turn 2");
-    assert!(is_summary(&sent[1]), "the second request is the summary");
-    (loom.compactions(), sink, sent)
+    (loom.compactions(), sink, sent, run)
 }
 
 // --- the scripted model -------------------------------------------------------------------------
