@@ -6,6 +6,17 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-10
+
+Loom 0.15.0 records how a selection was made. A confidence fallback is recorded as two
+selections: the fast one, now `Overruled` and naming the selection that replaced it, and the
+stronger selector's, each with the strategy of the selector that made it. Every selection gets
+a `loom.run.SelectionRecord` (strategy, candidates, chosen action, confidence, the strategy a
+fallback went to, latency and tokens), and a governed run counts the selections refused at the
+execution boundary. Loom now requires ESS 0.57.0. This is breaking for callers that expect one
+`Hybrid` selection on a fallback, and for code that builds `SessionData` or
+`selection::Pick`.
+
 ### Added
 
 - Selection telemetry for Metaharness. Every selection Loom records gets one
