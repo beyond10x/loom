@@ -147,10 +147,10 @@ impl RequestRecord {
     }
 }
 
-/// The record, as the storage port of a generated behaviour.
-struct Selections<'r>(&'r mut RequestRecord);
+/// The record, as the storage port of the generated `OverruleSelection`.
+struct Overruling<'r>(&'r mut RequestRecord);
 
-impl SelectionStorage for Selections<'_> {
+impl SelectionStorage for Overruling<'_> {
     fn get(&self, identity: &SelectionId) -> Option<SelectionSnapshot> {
         SelectionStorage::get(self.0, identity)
     }
@@ -176,7 +176,7 @@ impl OverruleSelectionBehavior for RequestRecord {
         &mut self,
         input: OverruleSelection,
     ) -> Result<OverruleSelectionOutcome, UnmetObligation> {
-        Generated::new(Selections(self)).overrule_selection(input)
+        Generated::new(Overruling(self)).overrule_selection(input)
     }
 }
 
