@@ -276,6 +276,7 @@ fn selector_cannot_leave_catalogue() {
             confidence: None,
             strategy: SelectionStrategy::Rule,
             case_revision: REVISION,
+            replaced_by: None,
         }
     );
 

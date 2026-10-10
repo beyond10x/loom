@@ -131,6 +131,7 @@ impl SelectActionBehavior for SpecPorts {
             confidence: input.confidence.clone(),
             strategy: input.strategy,
             case_revision: input.case_revision,
+            replaced_by: None,
         };
         SelectionStorage::put(
             self,

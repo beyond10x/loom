@@ -167,6 +167,7 @@ fn adversary_w2_a_selection_keeps_the_confidence_and_strategy_it_was_made_with()
                 confidence: Some(Decimal("0.25".to_owned())),
                 strategy: SelectionStrategy::FastTyped,
                 case_revision: CATALOGUE_REVISION,
+                replaced_by: None,
             },
         )]
     );
