@@ -166,12 +166,71 @@
     {
       "fields": [
         {
+          "name": "selection_id",
+          "type": "SelectionId"
+        },
+        {
+          "name": "strategy",
+          "type": "SelectionStrategy"
+        },
+        {
+          "name": "candidate_count",
+          "type": "integer"
+        },
+        {
+          "name": "chosen_action",
+          "type": "string"
+        },
+        {
+          "name": "confidence",
+          "type": "Optional<decimal>"
+        },
+        {
+          "name": "fell_back_to",
+          "type": "Optional<SelectionStrategy>"
+        },
+        {
+          "name": "latency_ms",
+          "type": "integer"
+        },
+        {
+          "name": "input_tokens",
+          "type": "integer"
+        },
+        {
+          "name": "output_tokens",
+          "type": "integer"
+        }
+      ],
+      "id": "loom.run.SelectionRecord",
+      "identity": {
+        "name": "selection_record_id",
+        "type": "SelectionRecordId"
+      },
+      "lifecycle": {
+        "initial": "Recorded",
+        "states": [
+          "Recorded"
+        ],
+        "terminal": [
+          "Recorded"
+        ]
+      },
+      "name": "SelectionRecord"
+    },
+    {
+      "fields": [
+        {
           "name": "commission_run",
           "type": "CommissionRunId"
         },
         {
           "name": "wire",
           "type": "string"
+        },
+        {
+          "name": "boundary_refusals",
+          "type": "integer"
         }
       ],
       "id": "loom.run.Session",
@@ -215,6 +274,13 @@
             ],
             "name": "interrupt",
             "to": "Interrupted"
+          },
+          {
+            "from": [
+              "Active"
+            ],
+            "name": "count_refusal",
+            "to": "Active"
           }
         ]
       },
@@ -277,6 +343,14 @@
       "name": "replacement",
       "to": "loom.run.Selection",
       "via": "replaced_by"
+    },
+    {
+      "cardinality": "one",
+      "from": "loom.run.Selection",
+      "kind": "owns",
+      "name": "telemetry",
+      "to": "loom.run.SelectionRecord",
+      "via": "selection_id"
     },
     {
       "cardinality": "many",

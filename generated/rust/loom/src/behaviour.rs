@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 661401844e582bd43becacc2018c2e17e03abd6db5247a31d68efc412baadd64
-// contract digest 6085f971d79bcae6071aef5103a63bf925d279df28713c5dd4a816f29b50f01e
+// model digest 300dc2d9cea4ebe03da46be3740cd2be006c06099199c740b4db2b22e0ef540b
+// contract digest 8d8c474b54c7be5a40b1ec49641cdc66e85f8f3e768698010015dd595b0fce5e
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -82,6 +82,24 @@ pub trait SelectionStorage {
     /// Every stored instance, in the order the store keeps them: the order a generated query
     /// answers an unordered view in.
     fn list(&self) -> Vec<crate::run::SelectionSnapshot>;
+}
+
+/// Where `loom.run.SelectionRecord` is stored — a port the implementor provides.
+///
+/// Keyed by the identity `selection_record_id`. Generated network entries supply an ephemeral implementation; durable storage remains a port.
+pub trait SelectionRecordStorage {
+    /// The instance with this identity, or `None` where none is stored.
+    fn get(&self, identity: &crate::run::SelectionRecordId) -> Option<crate::run::SelectionRecordSnapshot>;
+
+    /// Stores this instance under its identity, replacing what was held.
+    fn put(&mut self, snapshot: crate::run::SelectionRecordSnapshot);
+
+    /// Removes the instance with this identity.
+    fn delete(&mut self, identity: &crate::run::SelectionRecordId);
+
+    /// Every stored instance, in the order the store keeps them: the order a generated query
+    /// answers an unordered view in.
+    fn list(&self) -> Vec<crate::run::SelectionRecordSnapshot>;
 }
 
 /// Where `loom.run.Session` is stored — a port the implementor provides.
@@ -178,6 +196,32 @@ impl<P> Generated<P> {
     }
 }
 
+/// `loom.run.CountBoundaryRefusal`, generated: every outcome is one the specification fully determines.
+impl<P> crate::run::obligations::CountBoundaryRefusalBehavior for Generated<P>
+where
+    P: SessionStorage,
+{
+    fn count_boundary_refusal(&mut self, input: crate::run::CountBoundaryRefusal) -> Result<crate::run::CountBoundaryRefusalOutcome, UnmetObligation> {
+        let _ = &input;
+        // `counted`: the default.
+        let Some(held) = SessionStorage::get(&self.ports, &input.session_id) else {
+            return Ok(crate::run::CountBoundaryRefusalOutcome::WrongStateUnknownInstance);
+        };
+        let _ = &held;
+        let held_state = held.state;
+        let before = held.data.clone();
+        let moved = match held.refine() {
+            crate::run::AnySession::Active(instance) => crate::run::AnySession::Active(instance.count_refusal()),
+            _ => return Ok(crate::run::CountBoundaryRefusalOutcome::WrongState { error: crate::run::SessionStateConflict { state: held_state } }),
+        };
+        let mut next = moved.snapshot();
+        next.data.boundary_refusals = before.boundary_refusals + 1;
+        let answer = crate::run::CountBoundaryRefusalOutcome::Counted { boundary_refusal_counted: crate::run::BoundaryRefusalCounted { session_id: input.session_id.clone() } };
+        SessionStorage::put(&mut self.ports, next);
+        return Ok(answer);
+    }
+}
+
 /// `loom.run.FileSession`, generated: every outcome is one the specification fully determines.
 impl<P> crate::run::obligations::FileSessionBehavior for Generated<P>
 where
@@ -243,6 +287,7 @@ where
             session_id: identity.clone(),
             commission_run: input.commission_run.clone(),
             wire: input.wire.clone(),
+            boundary_refusals: 0,
         };
         let answer = crate::run::OpenSessionOutcome::Opened { session_opened: crate::run::SessionOpened { session_id: identity.clone(), commission_run: input.commission_run.clone(), wire: input.wire.clone() } };
         SessionStorage::put(&mut self.ports, crate::run::AnySession::Active(crate::run::Session::new(data)).snapshot());
@@ -332,6 +377,46 @@ where
         };
         let answer = crate::run::RecordCompactionOutcome::Recorded { session_compacted: crate::run::SessionCompacted { compaction_id: identity.clone(), session_id: input.session_id.clone(), usage: input.usage.clone() } };
         CompactionStorage::put(&mut self.ports, crate::run::AnyCompaction::Recorded(crate::run::Compaction::new(data)).snapshot());
+        return Ok(answer);
+    }
+}
+
+/// `loom.run.RecordSelection`, generated: every outcome is one the specification fully determines.
+impl<P> crate::run::obligations::RecordSelectionBehavior for Generated<P>
+where
+    P: SelectionStorage + SelectionRecordStorage,
+{
+    fn record_selection(&mut self, input: crate::run::RecordSelection) -> Result<crate::run::RecordSelectionOutcome, UnmetObligation> {
+        let _ = &input;
+        // `record-exists`: an identity a record already carries, before any branch is taken.
+        if SelectionRecordStorage::get(&self.ports, &input.selection_record_id).is_some() {
+            return Ok(crate::run::RecordSelectionOutcome::RecordExists { error: crate::run::SelectionRecordExists { selection_record_id: input.selection_record_id.clone() } });
+        }
+        // `when_related:` reads the `loom.run.Selection` row `input.selection_id` names, through its storage port; an absent
+        // reference reads no row and selects no related branch.
+        let reference = Some(&input.selection_id);
+        let related = reference.and_then(|identity| SelectionStorage::get(&self.ports, identity));
+        // `selection-unknown`: the reference names an identity no row carries.
+        if reference.is_some() && related.is_none() {
+            return Ok(crate::run::RecordSelectionOutcome::SelectionUnknown { error: crate::run::SelectionNotFound { selection_id: input.selection_id.clone() } });
+        }
+        let _ = &related;
+        // `recorded`: the default.
+        let identity: crate::run::SelectionRecordId = input.selection_record_id.clone();
+        let data = crate::run::SelectionRecordData {
+            selection_record_id: identity.clone(),
+            selection_id: input.selection_id.clone(),
+            strategy: input.strategy.clone(),
+            candidate_count: input.candidate_count.clone(),
+            chosen_action: input.chosen_action.clone(),
+            confidence: input.confidence.clone(),
+            fell_back_to: input.fell_back_to.clone(),
+            latency_ms: input.latency_ms.clone(),
+            input_tokens: input.input_tokens.clone(),
+            output_tokens: input.output_tokens.clone(),
+        };
+        let answer = crate::run::RecordSelectionOutcome::Recorded { selection_recorded: crate::run::SelectionRecorded { selection_record_id: identity.clone(), selection_id: input.selection_id.clone(), strategy: input.strategy.clone(), fell_back_to: input.fell_back_to.clone() } };
+        SelectionRecordStorage::put(&mut self.ports, crate::run::AnySelectionRecord::Recorded(crate::run::SelectionRecord::new(data)).snapshot());
         return Ok(answer);
     }
 }
@@ -551,6 +636,31 @@ where
     }
 }
 
+/// `loom.run.SelectionRecords`, generated: every row is one the specification fully determines from the stored `loom.run.SelectionRecord`s.
+impl<P> crate::run::obligations::SelectionRecordsQuery for Generated<P>
+where
+    P: SelectionRecordStorage,
+{
+    fn selection_records(&self) -> Result<Vec<crate::run::SelectionRecords>, UnmetObligation> {
+        let admitted = SelectionRecordStorage::list(&self.ports);
+        Ok(admitted
+            .into_iter()
+            .map(|held| crate::run::SelectionRecords {
+                selection_record_id: held.data.selection_record_id,
+                selection_id: held.data.selection_id,
+                strategy: held.data.strategy,
+                candidate_count: held.data.candidate_count,
+                chosen_action: held.data.chosen_action,
+                fell_back_to: held.data.fell_back_to,
+                latency_ms: held.data.latency_ms,
+                input_tokens: held.data.input_tokens,
+                output_tokens: held.data.output_tokens,
+                state: held.state,
+            })
+            .collect())
+    }
+}
+
 /// `loom.run.Selections`, generated: every row is one the specification fully determines from the stored `loom.run.Selection`s.
 impl<P> crate::run::obligations::SelectionsQuery for Generated<P>
 where
@@ -586,6 +696,7 @@ where
                 session_id: held.data.session_id,
                 commission_run: held.data.commission_run,
                 wire: held.data.wire,
+                boundary_refusals: held.data.boundary_refusals,
                 state: held.state,
             })
             .collect())
