@@ -83,8 +83,33 @@ As built, the "Laya typed choice" step is `b10x-loom-selector-laya` (`LayaSelect
 `SelectionStrategy::FastTyped`). It asks one `choice` question whose criteria are the candidate ids,
 reads `answer_confidence` as the probability, and answers `SelectorError::Unavailable` for a choice
 outside the candidates or any transport or answer failure, so the step below it can fall back. The
-threshold step is not built yet. See
+threshold step is `HybridSelector` (see [Recording a fallback](#recording-a-fallback)). See
 [Laya integration § As built](../integrations/laya-fast-selection.md#as-built).
+
+## Recording a fallback
+
+`HybridSelector` is the threshold step: it accepts the fast choice at or above a threshold the host
+supplies, and otherwise asks the stronger selector. A fallback is recorded as two
+`loom.run.Selection`s (`ess/domains/run.yaml`):
+
+1. the fast selection, with the fast selector's strategy and confidence, moved to `Overruled` by
+   `loom.run.OverruleSelection` and naming the stronger selector's selection in `replaced_by`;
+2. the stronger selector's selection, with its own strategy, which alone reaches argument
+   generation and revalidation.
+
+An accepted fast choice is one selection with the fast selector's strategy and no `replaced_by`. A
+fast selector that errs or names an action outside the candidates leaves no fast selection: Loom's
+membership rule refuses it before a `Selection` exists. An overruled selection is never given
+arguments (`RequestArguments` answers `selection-not-selected`) and never revalidated
+(`RevalidateSelection` answers `wrong-state`). `ActionSelector::resolve` returns the chosen pick and
+the overruled one; its default overrules nothing, so other selectors are unchanged. `Loom::select`
+returns the chosen pick under its own selector's strategy, as a run records it, never `Hybrid`.
+
+The host overrules through `RequestRecord::overrule`, which refuses, recording nothing, a replacement
+the record does not hold, the selection itself, a replacement no longer `Selected` and one made from
+another catalogue (`OverruleRefused`). ESS refuses a guard on the replacement beside `wrong_state`
+(`ESS-COMMAND-004`), so these checks are the host's; `loom.run.OverruleSelection` as specified,
+which the conformance suite holds, checks only the overruled selection's state.
 
 ## Safety rules
 

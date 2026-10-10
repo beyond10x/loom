@@ -113,6 +113,10 @@
         {
           "name": "case_revision",
           "type": "integer"
+        },
+        {
+          "name": "replaced_by",
+          "type": "Optional<SelectionId>"
         }
       ],
       "id": "loom.run.Selection",
@@ -124,11 +128,13 @@
         "initial": "Selected",
         "states": [
           "Admitted",
+          "Overruled",
           "Refused",
           "Selected"
         ],
         "terminal": [
           "Admitted",
+          "Overruled",
           "Refused"
         ],
         "transitions": [
@@ -145,6 +151,13 @@
             ],
             "name": "refuse",
             "to": "Refused"
+          },
+          {
+            "from": [
+              "Selected"
+            ],
+            "name": "overrule",
+            "to": "Overruled"
           }
         ]
       },
@@ -256,6 +269,14 @@
       "name": "catalogue",
       "to": "loom.run.ActionCatalogue",
       "via": "catalogue_id"
+    },
+    {
+      "cardinality": "one",
+      "from": "loom.run.Selection",
+      "kind": "references",
+      "name": "replacement",
+      "to": "loom.run.Selection",
+      "via": "replaced_by"
     },
     {
       "cardinality": "many",

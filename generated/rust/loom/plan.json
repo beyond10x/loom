@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "cee559ad7b98c0f74aa2bb607bd073e52902527033f7f7fd8d1292410f7f2e17",
-    "contract_digest": "874974d029ad4c9d989fd20452dec290f5ffb7299a164b44350cf9fe1e61f737"
+    "source_digest": "661401844e582bd43becacc2018c2e17e03abd6db5247a31d68efc412baadd64",
+    "contract_digest": "6085f971d79bcae6071aef5103a63bf925d279df28713c5dd4a816f29b50f01e"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -656,6 +656,20 @@
     },
     {
       "kind": "command_contract",
+      "source": "loom.run.OverruleSelection",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.run.OverruleSelection",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
       "source": "loom.run.ProjectCatalogue",
       "disposition": {
         "disposition": "generated"
@@ -802,6 +816,13 @@
     {
       "kind": "event_type",
       "source": "loom.run.SelectionNotInFrontier",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.run.SelectionOverruled",
       "disposition": {
         "disposition": "generated"
       }

@@ -11,7 +11,8 @@
 //! through the provider-neutral [`ModelPort`] to choose among exactly the candidates it was given.
 //! [`HybridSelector`] is the selector whose strategy is `Hybrid`: it returns a fast selector's
 //! choice only at or above a confidence threshold the host supplies, and otherwise the stronger
-//! selector's.
+//! selector's. Its [`ActionSelector::resolve`] also names the fast pick it overruled, so Loom
+//! records a fallback as two selections, each with its own selector's strategy ([`resolve`]).
 //!
 //! [`select_action`] is `loom.run.SelectAction` as a command over stored catalogues and
 //! selections: the one behaviour ESS leaves to Loom (`generated/rust/loom/PLAN.md`), answered by
@@ -61,6 +62,26 @@ pub enum SelectorError {
     Unavailable(String),
 }
 
+/// One selector's pick: its choice, and the strategy of the selector that made it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pick {
+    /// What the selector chose.
+    pub choice: Choice,
+    /// How the selector that made the choice chooses.
+    pub strategy: SelectionStrategy,
+}
+
+/// What a selector's answer resolved to: the pick it chose and, when a stronger selector overruled
+/// a fast one to make it, the fast pick it overruled (`story:fallback-selection-recording`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Resolution {
+    /// The pick the selector answers with.
+    pub chosen: Pick,
+    /// The fast pick a confidence fallback overruled, when there was one. It may name an action
+    /// outside the candidates; Loom's membership rule refuses it before it becomes a selection.
+    pub overruled: Option<Pick>,
+}
+
 /// Picks the action Loom proposes next, from the projected catalogue only.
 pub trait ActionSelector {
     /// One of `candidates`, chosen in `context`.
@@ -72,6 +93,24 @@ pub trait ActionSelector {
 
     /// How this selector chooses, recorded on every selection it makes.
     fn strategy(&self) -> SelectionStrategy;
+
+    /// [`ActionSelector::select`]'s choice as a pick made with this selector's strategy, and the
+    /// pick it overruled, if any. By default nothing is overruled; [`HybridSelector`] answers with
+    /// the pick of the selector that made its choice and, on a fallback, the fast pick.
+    fn resolve(
+        &self,
+        context: &SelectionContext,
+        candidates: &[CatalogueEntry],
+    ) -> Result<Resolution, SelectorError> {
+        let choice = self.select(context, candidates)?;
+        Ok(Resolution {
+            chosen: Pick {
+                choice,
+                strategy: self.strategy(),
+            },
+            overruled: None,
+        })
+    }
 }
 
 /// Why Loom made no selection.
@@ -362,6 +401,28 @@ impl<F: ActionSelector, S: ActionSelector> ActionSelector for HybridSelector<F, 
     fn strategy(&self) -> SelectionStrategy {
         SelectionStrategy::Hybrid
     }
+
+    /// The fast selector's resolution when it is accepted, as [`ActionSelector::select`] decides;
+    /// otherwise the stronger selector's pick, with the fast pick as the one it overruled when the
+    /// fast selector answered at all. Each pick carries its own selector's strategy, never
+    /// `Hybrid`. Only one overruled pick is kept: a fallback inside the stronger selector is not.
+    fn resolve(
+        &self,
+        context: &SelectionContext,
+        candidates: &[CatalogueEntry],
+    ) -> Result<Resolution, SelectorError> {
+        let fast = self.fast.resolve(context, candidates);
+        if let Ok(resolution) = &fast
+            && self.accepts(&resolution.chosen.choice, candidates)
+        {
+            return fast;
+        }
+        let stronger = self.stronger.resolve(context, candidates)?;
+        Ok(Resolution {
+            chosen: stronger.chosen,
+            overruled: fast.ok().map(|resolution| resolution.chosen),
+        })
+    }
 }
 
 /// `selector`'s choice from `catalogue`, as the selection `selection_id`: refused when the selector
@@ -374,14 +435,71 @@ pub fn select(
     catalogue: &ActionCatalogue<action_catalogue_state::Projected>,
     selection_id: SelectionId,
 ) -> Result<Selection<selection_state::Selected>, SelectionRefusal> {
-    let mut choice = selector
+    let choice = selector
         .select(context, &catalogue.data().entries)
         .map_err(SelectionRefusal::Selector)?;
+    chosen(
+        catalogue,
+        in_range(choice),
+        selector.strategy(),
+        selection_id,
+    )
+    .map_err(SelectionRefusal::NotInCatalogue)
+}
+
+/// The selection a selector's resolution made, and the fast selection it overruled to make it.
+pub struct Resolved {
+    /// The selection made from the pick the selector chose, under its selector's strategy.
+    pub selection: Selection<selection_state::Selected>,
+    /// The selection made from the fast pick a confidence fallback overruled, under the fast
+    /// selector's strategy: none when nothing was overruled, and none when the fast pick named an
+    /// action the catalogue does not list, which never becomes a selection.
+    pub overruled: Option<Selection<selection_state::Selected>>,
+}
+
+/// `selector`'s resolution from `catalogue` ([`ActionSelector::resolve`]): the chosen pick as the
+/// selection `selection_id`, and an overruled fast pick as the selection `overruled_id`. Each
+/// carries the strategy of the selector that made it, and its confidence by the rule [`select`]
+/// applies. Refused as [`select`] refuses: when the selector picks nothing or its chosen pick names
+/// an action `catalogue` does not list. The overruled selection is still `Selected`: the caller
+/// records it overruled by the chosen one (`loom.run.OverruleSelection`).
+pub fn resolve(
+    selector: &impl ActionSelector,
+    context: &SelectionContext,
+    catalogue: &ActionCatalogue<action_catalogue_state::Projected>,
+    (selection_id, overruled_id): (SelectionId, SelectionId),
+) -> Result<Resolved, SelectionRefusal> {
+    let resolution = selector
+        .resolve(context, &catalogue.data().entries)
+        .map_err(SelectionRefusal::Selector)?;
+    let selection = chosen(
+        catalogue,
+        in_range(resolution.chosen.choice),
+        resolution.chosen.strategy,
+        selection_id,
+    )
+    .map_err(SelectionRefusal::NotInCatalogue)?;
+    let overruled = resolution.overruled.and_then(|pick| {
+        chosen(
+            catalogue,
+            in_range(pick.choice),
+            pick.strategy,
+            overruled_id,
+        )
+        .ok()
+    });
+    Ok(Resolved {
+        selection,
+        overruled,
+    })
+}
+
+/// `choice` with its confidence only when that is a decimal in [0, 1] ([`Confidence`]).
+fn in_range(mut choice: Choice) -> Choice {
     choice.confidence = choice
         .confidence
         .filter(|confidence| Confidence::parse(confidence).is_some());
-    chosen(catalogue, choice, selector.strategy(), selection_id)
-        .map_err(SelectionRefusal::NotInCatalogue)
+    choice
 }
 
 /// `choice` from `catalogue`, as the selection `selection_id` made by `strategy`: refused, naming
@@ -410,6 +528,7 @@ fn chosen(
         confidence: choice.confidence,
         strategy,
         case_revision: data.case_revision,
+        replaced_by: None,
     }))
 }
 

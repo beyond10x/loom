@@ -12,14 +12,14 @@
 
 use b10x_loom_commission::model::json::Value;
 
-use crate::model::behaviour::SelectionStorage;
+use crate::model::behaviour::{Generated, SelectionStorage};
 use crate::model::obligation::UnmetObligation;
-use crate::model::run::obligations::RequestArgumentsBehavior;
+use crate::model::run::obligations::{OverruleSelectionBehavior, RequestArgumentsBehavior};
 use crate::model::run::{
     AnyArgumentRequest, ArgumentRequest, ArgumentRequestData, ArgumentRequestSnapshot,
-    ArgumentsRequested, CatalogueEntry, RequestArguments, RequestArgumentsOutcome,
-    RevalidateSelectionOutcome, SelectionId, SelectionNotFound, SelectionNotSelected,
-    SelectionSnapshot, SelectionState,
+    ArgumentsRequested, CatalogueEntry, CatalogueId, OverruleSelection, OverruleSelectionOutcome,
+    RequestArguments, RequestArgumentsOutcome, RevalidateSelectionOutcome, SelectionId,
+    SelectionNotFound, SelectionNotSelected, SelectionSnapshot, SelectionState,
 };
 
 /// What a generator is told besides the selected entry.
@@ -115,6 +115,108 @@ impl SelectionStorage for RequestRecord {
     }
 }
 
+/// Why [`RequestRecord::overrule`] overruled nothing. Every refusal but [`OverruleRefused::Unmet`]
+/// is the host's, made before the generated behaviour runs, and leaves the record as it was.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OverruleRefused {
+    /// The record holds no selection under the replacement's id, which this names.
+    ReplacementNotFound(SelectionNotFound),
+    /// The replacement is the selection to be overruled, whose id this names: no selection
+    /// replaces itself.
+    ReplacementIsTheSelection(SelectionId),
+    /// The replacement, which this names, is no longer `Selected`: an `Overruled`, `Admitted` or
+    /// `Refused` selection replaces nothing.
+    ReplacementNotSelected(SelectionNotSelected),
+    /// The replacement was made from another catalogue than the selection it would overrule, so
+    /// it is not that selection's turn's: names the replacement and the catalogue it was made from.
+    ReplacementFromAnotherCatalogue {
+        /// The replacement's id.
+        replacement_id: SelectionId,
+        /// The catalogue the replacement was made from.
+        catalogue_id: CatalogueId,
+    },
+    /// The generated behaviour refused the request as one the specification declares no outcome
+    /// for.
+    Unmet(UnmetObligation),
+}
+
+impl RequestRecord {
+    /// `loom.run.OverruleSelection` as Loom records a confidence fallback: refused, naming the
+    /// replacement, when the record holds no selection under `input.replacement_id`, when the
+    /// replacement is the selection itself, when it is no longer `Selected`, or when it was made
+    /// from another catalogue than a held selection it would overrule; otherwise the generated
+    /// behaviour's outcome ([`OverruleSelectionBehavior`]). A refusal records nothing.
+    ///
+    /// ESS refuses a `when_related` guard on the replacement beside `wrong_state`
+    /// (`ESS-COMMAND-004`), so the specification's behaviour, which the conformance suite holds,
+    /// overrules whatever replacement it is named; these checks are the host's, made before it.
+    pub fn overrule(
+        &mut self,
+        input: OverruleSelection,
+    ) -> Result<OverruleSelectionOutcome, OverruleRefused> {
+        let Some(replacement) = SelectionStorage::get(self, &input.replacement_id) else {
+            return Err(OverruleRefused::ReplacementNotFound(SelectionNotFound {
+                selection_id: input.replacement_id,
+            }));
+        };
+        if input.replacement_id == input.selection_id {
+            return Err(OverruleRefused::ReplacementIsTheSelection(
+                input.replacement_id,
+            ));
+        }
+        if replacement.state != SelectionState::Selected {
+            return Err(OverruleRefused::ReplacementNotSelected(
+                SelectionNotSelected {
+                    selection_id: input.replacement_id,
+                },
+            ));
+        }
+        if let Some(overruled) = SelectionStorage::get(self, &input.selection_id)
+            && overruled.data.catalogue_id != replacement.data.catalogue_id
+        {
+            return Err(OverruleRefused::ReplacementFromAnotherCatalogue {
+                replacement_id: input.replacement_id,
+                catalogue_id: replacement.data.catalogue_id,
+            });
+        }
+        self.overrule_selection(input)
+            .map_err(OverruleRefused::Unmet)
+    }
+}
+
+/// The record, as the storage port of the generated `OverruleSelection`.
+struct Overruling<'r>(&'r mut RequestRecord);
+
+impl SelectionStorage for Overruling<'_> {
+    fn get(&self, identity: &SelectionId) -> Option<SelectionSnapshot> {
+        SelectionStorage::get(self.0, identity)
+    }
+
+    fn put(&mut self, snapshot: SelectionSnapshot) {
+        SelectionStorage::put(self.0, snapshot);
+    }
+
+    fn delete(&mut self, identity: &SelectionId) {
+        SelectionStorage::delete(self.0, identity);
+    }
+
+    fn list(&self) -> Vec<SelectionSnapshot> {
+        SelectionStorage::list(self.0)
+    }
+}
+
+/// `loom.run.OverruleSelection`, generated, over this record: a `Selected` selection is moved to
+/// `Overruled` naming the replacement in `replaced_by` (`overruled`); any other is refused
+/// `wrong-state`. It does not check that the replacement is held: [`RequestRecord::overrule`] does.
+impl OverruleSelectionBehavior for RequestRecord {
+    fn overrule_selection(
+        &mut self,
+        input: OverruleSelection,
+    ) -> Result<OverruleSelectionOutcome, UnmetObligation> {
+        Generated::new(Overruling(self)).overrule_selection(input)
+    }
+}
+
 /// `loom.run.RequestArguments`: refused for a selection the record does not hold
 /// (`selection-unknown`) or one no longer `Selected` (`selection-not-selected`); otherwise the
 /// `loom.run.ArgumentRequest` is recorded against the selection (`requested`).
@@ -180,6 +282,7 @@ mod tests {
             confidence: None,
             strategy: SelectionStrategy::Rule,
             case_revision: 1,
+            replaced_by: None,
         })
     }
 

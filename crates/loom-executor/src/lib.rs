@@ -64,7 +64,7 @@ use b10x_loom_commission::model::responsibility::{
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
 
-pub use arguments::{ArgumentContext, ArgumentGenerator, EmptyObjectArguments};
+pub use arguments::{ArgumentContext, ArgumentGenerator, EmptyObjectArguments, OverruleRefused};
 pub use selection::{
     ActionSelector, Confidence, FirstAdmissibleSelector, HybridSelector, InvalidThreshold,
     ReasoningModelSelector, SelectorError,
@@ -75,9 +75,10 @@ use model::behaviour::SelectionStorage;
 use model::run::obligations::{RequestArgumentsBehavior, RevalidateSelectionBehavior};
 use model::run::{
     ActionCatalogue, ActionCatalogueSnapshot, AnySelection, ArgumentRequestId,
-    ArgumentRequestSnapshot, CatalogueId, CompactionSnapshot, RequestArguments,
-    RequestArgumentsOutcome, RevalidateSelection, RevalidateSelectionOutcome, Selection,
-    SelectionId, SelectionSnapshot, TurnId, TurnSnapshot, action_catalogue_state, selection_state,
+    ArgumentRequestSnapshot, CatalogueId, CompactionSnapshot, OverruleSelection,
+    OverruleSelectionOutcome, RequestArguments, RequestArgumentsOutcome, RevalidateSelection,
+    RevalidateSelectionOutcome, Selection, SelectionId, SelectionSnapshot, TurnId, TurnSnapshot,
+    action_catalogue_state, selection_state,
 };
 use recovery::Recovery;
 use selection::{SelectionContext, SelectionRefusal};
@@ -189,7 +190,9 @@ impl<S, G, V> Loom<S, G, V> {
     pub fn catalogues(&self) -> Vec<ActionCatalogueSnapshot> {
         self.turn_record().catalogues().to_vec()
     }
-    /// Every selection this Loom has made, one per run that selected, in the order it made them.
+    /// Every selection this Loom has made, in the order it made them: one per run that selected,
+    /// and two for a run whose confidence fallback overruled a fast selection, the fast one first,
+    /// `Overruled` and naming the one that replaced it.
     pub fn selections(&self) -> Vec<SelectionSnapshot> {
         self.record().selections().to_vec()
     }
@@ -244,8 +247,12 @@ impl<S, G, V> Loom<S, G, V> {
 }
 
 impl<S: ActionSelector, G, V> Loom<S, G, V> {
-    /// The selector's choice from `catalogue`, as the selection `selection_id`. An action the
-    /// catalogue does not list is refused and named, whatever the selector's confidence.
+    /// The selector's choice from `catalogue`, as the selection `selection_id`, under the strategy
+    /// of the selector that made the pick ([`selection::resolve`]), as a run records it:
+    /// a [`HybridSelector`] that fell back answers with the stronger selector's strategy, one
+    /// that accepted the fast pick with the fast selector's, never `Hybrid`. A fast pick a
+    /// fallback overruled is not returned. An action the catalogue does not list is refused and
+    /// named, whatever the selector's confidence.
     pub fn select(
         &self,
         catalogue: &ActionCatalogue<action_catalogue_state::Projected>,
@@ -254,7 +261,20 @@ impl<S: ActionSelector, G, V> Loom<S, G, V> {
         let context = SelectionContext {
             prompt: self.prompt.clone(),
         };
-        selection::select(&self.selector, &context, catalogue, selection_id)
+        // The overruled fast pick's id is minted as `Loom::prepare` mints it; the pick is dropped.
+        let overruled_id = SelectionId(loom_id(
+            &self.instance,
+            "overruled-selection",
+            &selection_id.0.0,
+            0,
+        ));
+        selection::resolve(
+            &self.selector,
+            &context,
+            catalogue,
+            (selection_id, overruled_id),
+        )
+        .map(|resolved| resolved.selection)
     }
 }
 
@@ -462,6 +482,11 @@ impl<S, G, V> Loom<S, G, V> {
     /// Every selection made is recorded; for one Commission does not refuse, the argument request
     /// is recorded against it before the generator is handed the selected catalogue entry. What it
     /// returns instead of a prepared selection is what [`AgentExecutor::run`] documents.
+    ///
+    /// A fast selection a confidence fallback overruled ([`ActionSelector::resolve`]) is recorded
+    /// too, before the selection that replaced it, and then overruled by it
+    /// (`loom.run.OverruleSelection`): it never reaches argument generation or revalidation. Each
+    /// selection carries the strategy of the selector that made it.
     fn prepare(
         &self,
         selector: &impl ActionSelector,
@@ -475,20 +500,48 @@ impl<S, G, V> Loom<S, G, V> {
         let context = SelectionContext {
             prompt: self.prompt.clone(),
         };
-        let selection = match selection::select(selector, &context, catalogue, selection_id) {
-            Ok(selection) => selection,
-            Err(SelectionRefusal::NotInCatalogue(_))
-            | Err(SelectionRefusal::Selector(SelectorError::NothingAdmissible)) => {
-                return Err(no_useful_action());
-            }
-            Err(SelectionRefusal::Selector(SelectorError::Unavailable(error))) => {
-                return Err(outage(error));
-            }
-        };
+        // A fast selection a confidence fallback overruled gets an id of its own, minted beside the
+        // chosen selection's (`story:fallback-selection-recording`).
+        let overruled_id = SelectionId(loom_id(
+            &self.instance,
+            "overruled-selection",
+            &selection_id.0.0,
+            0,
+        ));
+        let resolved =
+            match selection::resolve(selector, &context, catalogue, (selection_id, overruled_id)) {
+                Ok(resolved) => resolved,
+                Err(SelectionRefusal::NotInCatalogue(_))
+                | Err(SelectionRefusal::Selector(SelectorError::NothingAdmissible)) => {
+                    return Err(no_useful_action());
+                }
+                Err(SelectionRefusal::Selector(SelectorError::Unavailable(error))) => {
+                    return Err(outage(error));
+                }
+            };
+        let selection = resolved.selection;
         let selection_id = selection.data().selection_id.clone();
         let selected = selection.data().action.clone();
-        self.record()
-            .put(AnySelection::Selected(selection).snapshot());
+        {
+            // The overruled fast selection, then the selection that replaced it, then the
+            // overrule: only the replacement goes on to arguments and revalidation.
+            let mut record = self.record();
+            let overruled = resolved.overruled.map(|overruled| {
+                let id = overruled.data().selection_id.clone();
+                record.put(AnySelection::Selected(overruled).snapshot());
+                id
+            });
+            record.put(AnySelection::Selected(selection).snapshot());
+            if let Some(overruled) = overruled {
+                let outcome = record.overrule(OverruleSelection {
+                    selection_id: overruled,
+                    replacement_id: selection_id.clone(),
+                });
+                if !matches!(outcome, Ok(OverruleSelectionOutcome::Overruled { .. })) {
+                    return Err(no_useful_action());
+                }
+            }
+        }
 
         // Safety invariant: only what Commission admits, or admits once authorized, is proposed.
         // An action outside the catalogue was refused above; Commission decides the rest.

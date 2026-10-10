@@ -11,7 +11,10 @@
 //!   `b10x_loom_executor::session::TurnRecord`;
 //! * `SelectAction` by `b10x_loom_executor::selection::select_action`, from the catalogues the
 //!   `TurnRecord` holds into the selections of a `b10x_loom_executor::arguments::RequestRecord`;
-//! * `RequestArguments` and `RevalidateSelection` by the behaviours of that `RequestRecord`;
+//! * `RequestArguments`, `RevalidateSelection` and `OverruleSelection` by the behaviours of that
+//!   `RequestRecord`; `OverruleSelection` by its generated behaviour, which overrules whatever
+//!   replacement it is named, not by `RequestRecord::overrule`, the host's check that the
+//!   replacement is held (ESS refuses that guard beside `wrong_state`, `ESS-COMMAND-004`);
 //! * the views `Sessions`, `Catalogues` and `Selections` from what the two records hold.
 //!
 //! This crate translates values and records what was published. It decides no outcome: each
@@ -39,18 +42,18 @@ use std::cell::RefCell;
 use b10x_loom_executor::arguments::RequestRecord;
 use b10x_loom_executor::model::behaviour::SelectionStorage;
 use b10x_loom_executor::model::run::obligations::{
-    FileSessionBehavior, InterruptSessionBehavior, OpenSessionBehavior, ProjectCatalogueBehavior,
-    RecordCompactionBehavior, RecordTurnBehavior, ReleaseSessionBehavior, RequestArgumentsBehavior,
-    ResumeSessionBehavior, RevalidateSelectionBehavior,
+    FileSessionBehavior, InterruptSessionBehavior, OpenSessionBehavior, OverruleSelectionBehavior,
+    ProjectCatalogueBehavior, RecordCompactionBehavior, RecordTurnBehavior, ReleaseSessionBehavior,
+    RequestArgumentsBehavior, ResumeSessionBehavior, RevalidateSelectionBehavior,
 };
 use b10x_loom_executor::model::run::{
     ArgumentRequestId, CatalogueId, CommissionRunId, CompactionId, FileSession, FileSessionOutcome,
-    InterruptSession, InterruptSessionOutcome, OpenSession, OpenSessionOutcome, ProjectCatalogue,
-    ProjectCatalogueOutcome, RecordCompaction, RecordCompactionOutcome, RecordTurn,
-    RecordTurnOutcome, ReleaseSession, ReleaseSessionOutcome, RequestArguments,
-    RequestArgumentsOutcome, ResumeSession, ResumeSessionOutcome, RevalidateSelection,
-    RevalidateSelectionOutcome, SelectAction, SelectActionOutcome, SelectionId, SelectionState,
-    SessionId, SessionState, TurnId,
+    InterruptSession, InterruptSessionOutcome, OpenSession, OpenSessionOutcome, OverruleSelection,
+    OverruleSelectionOutcome, ProjectCatalogue, ProjectCatalogueOutcome, RecordCompaction,
+    RecordCompactionOutcome, RecordTurn, RecordTurnOutcome, ReleaseSession, ReleaseSessionOutcome,
+    RequestArguments, RequestArgumentsOutcome, ResumeSession, ResumeSessionOutcome,
+    RevalidateSelection, RevalidateSelectionOutcome, SelectAction, SelectActionOutcome,
+    SelectionId, SelectionState, SessionId, SessionState, TurnId,
 };
 use b10x_loom_executor::selection::select_action;
 use b10x_loom_executor::session::TurnRecord;
@@ -82,6 +85,7 @@ const PROJECT_CATALOGUE: &str = "loom.run.ProjectCatalogue";
 const SELECT_ACTION: &str = "loom.run.SelectAction";
 const REQUEST_ARGUMENTS: &str = "loom.run.RequestArguments";
 const REVALIDATE_SELECTION: &str = "loom.run.RevalidateSelection";
+const OVERRULE_SELECTION: &str = "loom.run.OverruleSelection";
 
 const SESSION_OPENED: &str = "loom.run.SessionOpened";
 const TURN_RECORDED: &str = "loom.run.TurnRecorded";
@@ -96,6 +100,7 @@ const ARGUMENTS_REQUESTED: &str = "loom.run.ArgumentsRequested";
 const SELECTION_STALE: &str = "loom.run.SelectionStale";
 const SELECTION_NOT_IN_FRONTIER: &str = "loom.run.SelectionNotInFrontier";
 const SELECTION_ADMITTED: &str = "loom.run.SelectionAdmitted";
+const SELECTION_OVERRULED: &str = "loom.run.SelectionOverruled";
 
 const SESSION_EXISTS: &str = "loom.run.SessionExists";
 const SESSION_NOT_FOUND: &str = "loom.run.SessionNotFound";
@@ -199,6 +204,7 @@ impl ConformanceTarget for LoomTarget {
             SELECT_ACTION => select(&mut live, input, correlation),
             REQUEST_ARGUMENTS => request_arguments(&mut live, input, correlation),
             REVALIDATE_SELECTION => revalidate_selection(&mut live, input, correlation),
+            OVERRULE_SELECTION => overrule_selection(&mut live, input, correlation),
             other => {
                 return Err(TargetError::unavailable(
                     format!("invoking `{other}`"),
@@ -272,6 +278,13 @@ impl ConformanceTarget for LoomTarget {
                         (
                             "case_revision".to_owned(),
                             codec::number(held.data.case_revision),
+                        ),
+                        (
+                            "replaced_by".to_owned(),
+                            held.data
+                                .replaced_by
+                                .as_ref()
+                                .map_or(Node::Null, |id| codec::id(&id.0)),
                         ),
                         ("state".to_owned(), codec::selection_state(held.state)),
                     ])
@@ -363,9 +376,9 @@ fn session_wrong_state(command: &str, state: Option<SessionState>) -> SemanticCo
 
 /// `wrong-state` with the selection's actual state, or with no field for a selection no record
 /// holds.
-fn selection_wrong_state(state: Option<SelectionState>) -> SemanticCommandResult {
+fn selection_wrong_state(command: &str, state: Option<SelectionState>) -> SemanticCommandResult {
     let declared = error(SELECTION_STATE_CONFLICT);
-    took(REVALIDATE_SELECTION, "wrong-state").with_error(match state {
+    took(command, "wrong-state").with_error(match state {
         Some(state) => declared.with("state", codec::selection_state(state)),
         None => declared,
     })
@@ -823,9 +836,48 @@ fn revalidate_selection(
             took(REVALIDATE_SELECTION, "admitted").emitting(published)
         }
         RevalidateSelectionOutcome::WrongState { error } => {
-            selection_wrong_state(Some(error.state))
+            selection_wrong_state(REVALIDATE_SELECTION, Some(error.state))
         }
-        RevalidateSelectionOutcome::WrongStateUnknownInstance => selection_wrong_state(None),
+        RevalidateSelectionOutcome::WrongStateUnknownInstance => {
+            selection_wrong_state(REVALIDATE_SELECTION, None)
+        }
+    })
+}
+
+/// `OverruleSelection`, by the generated behaviour of the `RequestRecord`.
+fn overrule_selection(
+    live: &mut Live,
+    input: &Input,
+    correlation: &CorrelationId,
+) -> Option<SemanticCommandResult> {
+    let command = OverruleSelection {
+        selection_id: SelectionId(codec::uuid(input, "selection_id")?),
+        replacement_id: SelectionId(codec::uuid(input, "replacement_id")?),
+    };
+    Some(match live.requests.overrule_selection(command).ok()? {
+        OverruleSelectionOutcome::Overruled {
+            selection_overruled,
+        } => {
+            let published = live.publish(
+                event(SELECTION_OVERRULED)
+                    .with(
+                        "selection_id",
+                        codec::id(&selection_overruled.selection_id.0),
+                    )
+                    .with(
+                        "replacement_id",
+                        codec::id(&selection_overruled.replacement_id.0),
+                    ),
+                correlation,
+            );
+            took(OVERRULE_SELECTION, "overruled").emitting(published)
+        }
+        OverruleSelectionOutcome::WrongState { error } => {
+            selection_wrong_state(OVERRULE_SELECTION, Some(error.state))
+        }
+        OverruleSelectionOutcome::WrongStateUnknownInstance => {
+            selection_wrong_state(OVERRULE_SELECTION, None)
+        }
     })
 }
 

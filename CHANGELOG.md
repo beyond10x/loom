@@ -8,6 +8,22 @@ under **Unreleased** until the next release.
 
 ### Changed
 
+- **Breaking:** a selection on a confidence fallback is now recorded as two selections, each with
+  its own selector's strategy, where there was one `Hybrid` selection. `Loom::selections` holds the
+  fast selection first, in the new terminal state `Overruled` and naming the stronger selector's
+  selection in the new field `replaced_by`, then that selection, which alone reaches argument
+  generation and revalidation. A fast choice that is accepted is recorded as one selection with the
+  fast selector's strategy and no replacement; a fast selector that errs or names an action outside
+  the candidates leaves no fast selection. `loom.run.Selection` gains `replaced_by` and `Overruled`,
+  and the new command `loom.run.OverruleSelection` emits `loom.run.SelectionOverruled`
+  (`ess/domains/run.yaml`). `ActionSelector` gains the provided method `resolve`, which
+  `HybridSelector` overrides; `RequestRecord::overrule` refuses, recording nothing, a replacement
+  the record does not hold (`SelectionNotFound`), the selection itself, a replacement no longer
+  `Selected` and one made from another catalogue (`OverruleRefused`). `Loom::select` returns the
+  pick under the strategy of the selector that made it, as `Loom::run` records it, never `Hybrid`;
+  `selection::select` still records the strategy of the selector it is handed. Callers that expect
+  one `Hybrid` selection per run, or `Hybrid` from `Loom::select`, must read the strategies instead.
+
 - Loom requires ESS 0.57.0: the Loom, Commission and intake specifications require it, the
   conformance targets build on the 0.57.0 `ess-conformance` and `ess-primitives`, and CI installs
   the 0.57.0 `ess`. Every specification validates under 0.57.0's new refusals (a wire name
