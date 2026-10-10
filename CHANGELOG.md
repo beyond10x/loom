@@ -6,6 +6,15 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Changed
+
+- Loom requires ESS 0.57.0: the Loom, Commission and intake specifications require it, the
+  conformance targets build on the 0.57.0 `ess-conformance` and `ess-primitives`, and CI installs
+  the 0.57.0 `ess`. Every specification validates under 0.57.0's new refusals (a wire name
+  containing `/`, a refusal whose `when:` always holds) without change. Regenerating changed only
+  documentation: a doc comment on the generated Commission `Generated` type, and the Commission
+  domain graph page, which names the new compiler.
+
 ## [0.14.0] - 2026-10-09
 
 Loom 0.14.0 generates `LoopStop` from its ESS declaration. `loom.run.LoopStop` in

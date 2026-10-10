@@ -10,7 +10,7 @@
 //! The expectations come from `story:selection-revalidation` § Acceptance items 1 and 2, which
 //! rely on these declarations and do not change `ess/`.
 //!
-//! `not-in-frontier` stays an `external:` outcome: ess 0.56.0 has no predicate for
+//! `not-in-frontier` stays an `external:` outcome: ess 0.57.0 has no predicate for
 //! membership in `frontier_actions` (ESS-SPEC-012). Its answer is therefore the executor's, and
 //! `not_in_frontier_follows_the_frontier_actions` revalidates through the executor's
 //! `RequestRecord`, whose context decides it from the command input, rather than through
