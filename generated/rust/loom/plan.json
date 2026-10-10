@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "661401844e582bd43becacc2018c2e17e03abd6db5247a31d68efc412baadd64",
-    "contract_digest": "6085f971d79bcae6071aef5103a63bf925d279df28713c5dd4a816f29b50f01e"
+    "source_digest": "300dc2d9cea4ebe03da46be3740cd2be006c06099199c740b4db2b22e0ef540b",
+    "contract_digest": "8d8c474b54c7be5a40b1ec49641cdc66e85f8f3e768698010015dd595b0fce5e"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -516,6 +516,20 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.run.SelectionRecord.State",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.run.SelectionRecordId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.run.SelectionStrategy",
       "disposition": {
         "disposition": "generated"
@@ -600,6 +614,13 @@
     },
     {
       "kind": "entity_lifecycle",
+      "source": "loom.run.SelectionRecord",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "entity_lifecycle",
       "source": "loom.run.Session",
       "disposition": {
         "disposition": "generated"
@@ -614,6 +635,20 @@
     },
     {
       "kind": "command_contract",
+      "source": "loom.run.CountBoundaryRefusal",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.run.CountBoundaryRefusal",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
       "source": "loom.run.FileSession",
       "disposition": {
         "disposition": "generated"
@@ -692,6 +727,20 @@
     {
       "kind": "command_behavior",
       "source": "loom.run.RecordCompaction",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.run.RecordSelection",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.run.RecordSelection",
       "disposition": {
         "disposition": "generated"
       }
@@ -801,6 +850,13 @@
     },
     {
       "kind": "event_type",
+      "source": "loom.run.BoundaryRefusalCounted",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
       "source": "loom.run.CatalogueProjected",
       "disposition": {
         "disposition": "generated"
@@ -823,6 +879,13 @@
     {
       "kind": "event_type",
       "source": "loom.run.SelectionOverruled",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.run.SelectionRecorded",
       "disposition": {
         "disposition": "generated"
       }
@@ -927,6 +990,13 @@
     },
     {
       "kind": "error_type",
+      "source": "loom.run.SelectionRecordExists",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
       "source": "loom.run.SelectionStateConflict",
       "disposition": {
         "disposition": "generated"
@@ -977,6 +1047,20 @@
     {
       "kind": "view_query",
       "source": "loom.run.Catalogues",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_type",
+      "source": "loom.run.SelectionRecords",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_query",
+      "source": "loom.run.SelectionRecords",
       "disposition": {
         "disposition": "generated"
       }

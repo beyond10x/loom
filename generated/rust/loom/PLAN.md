@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest 661401844e582bd43becacc2018c2e17e03abd6db5247a31d68efc412baadd64
-  contract digest 6085f971d79bcae6071aef5103a63bf925d279df28713c5dd4a816f29b50f01e
+  model digest 300dc2d9cea4ebe03da46be3740cd2be006c06099199c740b4db2b22e0ef540b
+  contract digest 8d8c474b54c7be5a40b1ec49641cdc66e85f8f3e768698010015dd595b0fce5e
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-142 capabilities: **141 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+154 capabilities: **153 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -86,6 +86,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.run.RunEnding` |
 | domain type | `loom.run.Selection.State` |
 | domain type | `loom.run.SelectionId` |
+| domain type | `loom.run.SelectionRecord.State` |
+| domain type | `loom.run.SelectionRecordId` |
 | domain type | `loom.run.SelectionStrategy` |
 | domain type | `loom.run.Session.State` |
 | domain type | `loom.run.SessionId` |
@@ -98,8 +100,11 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | entity lifecycle | `loom.run.ArgumentRequest` |
 | entity lifecycle | `loom.run.Compaction` |
 | entity lifecycle | `loom.run.Selection` |
+| entity lifecycle | `loom.run.SelectionRecord` |
 | entity lifecycle | `loom.run.Session` |
 | entity lifecycle | `loom.run.Turn` |
+| command contract | `loom.run.CountBoundaryRefusal` |
+| command behaviour | `loom.run.CountBoundaryRefusal` |
 | command contract | `loom.run.FileSession` |
 | command behaviour | `loom.run.FileSession` |
 | command contract | `loom.run.InterruptSession` |
@@ -112,6 +117,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command behaviour | `loom.run.ProjectCatalogue` |
 | command contract | `loom.run.RecordCompaction` |
 | command behaviour | `loom.run.RecordCompaction` |
+| command contract | `loom.run.RecordSelection` |
+| command behaviour | `loom.run.RecordSelection` |
 | command contract | `loom.run.RecordTurn` |
 | command behaviour | `loom.run.RecordTurn` |
 | command contract | `loom.run.ReleaseSession` |
@@ -125,10 +132,12 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command contract | `loom.run.SelectAction` |
 | event type | `loom.run.ActionSelected` |
 | event type | `loom.run.ArgumentsRequested` |
+| event type | `loom.run.BoundaryRefusalCounted` |
 | event type | `loom.run.CatalogueProjected` |
 | event type | `loom.run.SelectionAdmitted` |
 | event type | `loom.run.SelectionNotInFrontier` |
 | event type | `loom.run.SelectionOverruled` |
+| event type | `loom.run.SelectionRecorded` |
 | event type | `loom.run.SelectionStale` |
 | event type | `loom.run.SessionCompacted` |
 | event type | `loom.run.SessionFiled` |
@@ -143,6 +152,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | error type | `loom.run.CatalogueRevisionMismatch` |
 | error type | `loom.run.SelectionNotFound` |
 | error type | `loom.run.SelectionNotSelected` |
+| error type | `loom.run.SelectionRecordExists` |
 | error type | `loom.run.SelectionStateConflict` |
 | error type | `loom.run.SessionExists` |
 | error type | `loom.run.SessionNotActive` |
@@ -151,6 +161,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | error type | `loom.run.SessionWireMismatch` |
 | view type | `loom.run.Catalogues` |
 | view query | `loom.run.Catalogues` |
+| view type | `loom.run.SelectionRecords` |
+| view query | `loom.run.SelectionRecords` |
 | view type | `loom.run.Selections` |
 | view query | `loom.run.Selections` |
 | view type | `loom.run.Sessions` |

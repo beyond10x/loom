@@ -86,6 +86,7 @@ fn ported_loop_round_trip() {
         session_id: SessionId(Uuid(SESSION.to_owned())),
         commission_run: CommissionRunId(Uuid(RUN.to_owned())),
         wire: responses::WIRE.to_owned(),
+        boundary_refusals: 0,
     };
     // The Loom's own selector and generator serve `AgentExecutor::run` on `Loom`; in the wired loop
     // the model's tool call is the selection and carries the arguments.
@@ -306,6 +307,7 @@ fn ported_loop_publishes_no_loop_owned_tool() {
             session_id: SessionId(Uuid("00000000-0000-4000-8000-00000000c013".to_owned())),
             commission_run: CommissionRunId(Uuid(RUN.to_owned())),
             wire: responses::WIRE.to_owned(),
+            boundary_refusals: 0,
         },
         LoopPorts {
             model: &mut client,

@@ -72,16 +72,20 @@ pub use selection::{
 
 use arguments::RequestRecord;
 use model::behaviour::SelectionStorage;
-use model::run::obligations::{RequestArgumentsBehavior, RevalidateSelectionBehavior};
+use model::run::obligations::{
+    CountBoundaryRefusalBehavior, RecordSelectionBehavior, RequestArgumentsBehavior,
+    RevalidateSelectionBehavior,
+};
 use model::run::{
     ActionCatalogue, ActionCatalogueSnapshot, AnySelection, ArgumentRequestId,
-    ArgumentRequestSnapshot, CatalogueId, CompactionSnapshot, OverruleSelection,
-    OverruleSelectionOutcome, RequestArguments, RequestArgumentsOutcome, RevalidateSelection,
-    RevalidateSelectionOutcome, Selection, SelectionId, SelectionSnapshot, TurnId, TurnSnapshot,
-    action_catalogue_state, selection_state,
+    ArgumentRequestSnapshot, CatalogueId, CompactionSnapshot, CountBoundaryRefusal,
+    OverruleSelection, OverruleSelectionOutcome, RecordSelection, RequestArguments,
+    RequestArgumentsOutcome, RevalidateSelection, RevalidateSelectionOutcome, Selection,
+    SelectionId, SelectionRecordId, SelectionRecordSnapshot, SelectionSnapshot, SelectionStrategy,
+    SessionId, TurnId, TurnSnapshot, action_catalogue_state, selection_state,
 };
 use recovery::Recovery;
-use selection::{SelectionContext, SelectionRefusal};
+use selection::{Pick, SelectionContext, SelectionRefusal};
 use session::TurnRecord;
 
 /// Loom as Commission's agent executor: a selector, an argument generator and the run's prompt,
@@ -195,6 +199,19 @@ impl<S, G, V> Loom<S, G, V> {
     /// `Overruled` and naming the one that replaced it.
     pub fn selections(&self) -> Vec<SelectionSnapshot> {
         self.record().selections().to_vec()
+    }
+
+    /// The telemetry of every selection this Loom has made (`loom.run.SelectionRecord`), one per
+    /// selection, in the order it made them: the strategy of the selector that made it, how many
+    /// candidates it was offered, the action it chose and its confidence, on a fast selection a
+    /// confidence fallback overruled the strategy of the selector that replaced it
+    /// (`fell_back_to`), and how long the pick took and the tokens its selector reported for it.
+    /// In a governed run ([`Loom::run_loop`]) the first selection of a turn carries that turn's
+    /// latency and tokens and a later one of the same turn 0. A selection refused at the execution
+    /// boundary keeps the record written when it was made. For Metaharness; never evidence (Atlas
+    /// ADR 0074).
+    pub fn selection_records(&self) -> Vec<SelectionRecordSnapshot> {
+        self.record().selection_records().to_vec()
     }
 
     /// Every argument request this Loom has recorded, in the order it recorded them, each naming
@@ -446,11 +463,70 @@ where
                     run,
                 )),
             ),
+            None,
         );
         match prepared {
-            Ok(prepared) => self.finish(&commission.data().case_id, prepared),
+            Ok(prepared) => self.finish(&commission.data().case_id, prepared, None),
             Err(outcome) => outcome,
         }
+    }
+}
+
+/// The session a governed run holds and the run's number: where a selection refused at the
+/// execution boundary is counted (`loom.run.CountBoundaryRefusal`). A run with no session, as
+/// [`AgentExecutor::run`] is, counts nothing.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Boundary<'s> {
+    pub(crate) session: &'s SessionId,
+    pub(crate) run: u64,
+}
+
+impl<S, G, V> Loom<S, G, V> {
+    /// Counts one boundary refusal on the session `at` names, while its run still holds it: a
+    /// session another run resumed, or one an interrupt moved out of `Active`, is not counted.
+    pub(crate) fn count_refusal(&self, at: Option<Boundary<'_>>) {
+        let Some(at) = at else {
+            return;
+        };
+        // The recovery lock before the turn record, as everywhere both are held.
+        let recovery = self.recovery();
+        if recovery.holds(at.session, at.run) {
+            let _ = self
+                .turn_record()
+                .count_boundary_refusal(CountBoundaryRefusal {
+                    session_id: at.session.clone(),
+                });
+        }
+    }
+
+    /// Records the telemetry of `selection`, made from `pick` out of `candidates` candidates
+    /// (`loom.run.RecordSelection`); `fell_back_to` is the strategy of the selector that replaced
+    /// it, on a fast selection a confidence fallback overruled. Telemetry decides nothing, so a
+    /// record that could not be written changes nothing about the run.
+    fn record_telemetry(
+        record: &mut RequestRecord,
+        selection: &SelectionSnapshot,
+        (pick, candidates, fell_back_to): (&Pick, usize, Option<SelectionStrategy>),
+        instance: &str,
+    ) {
+        let selection_id = selection.data.selection_id.clone();
+        let _ = record.record_selection(RecordSelection {
+            selection_record_id: SelectionRecordId(loom_id(
+                instance,
+                "selection-record",
+                &selection_id.0.0,
+                0,
+            )),
+            selection_id,
+            strategy: selection.data.strategy,
+            candidate_count: i64::try_from(candidates).unwrap_or(i64::MAX),
+            chosen_action: selection.data.action.clone(),
+            confidence: selection.data.confidence.clone(),
+            fell_back_to,
+            latency_ms: pick.latency_ms,
+            input_tokens: pick.input_tokens,
+            output_tokens: pick.output_tokens,
+        });
     }
 }
 
@@ -487,6 +563,11 @@ impl<S, G, V> Loom<S, G, V> {
     /// too, before the selection that replaced it, and then overruled by it
     /// (`loom.run.OverruleSelection`): it never reaches argument generation or revalidation. Each
     /// selection carries the strategy of the selector that made it.
+    ///
+    /// Each selection recorded gets its telemetry as it is recorded (`loom.run.RecordSelection`,
+    /// [`Loom::selection_records`]); the overruled fast one names the strategy of the selection
+    /// that replaced it. A selection Commission's admission refuses is counted on the
+    /// session of the run `at` names, if any ([`Loom::count_refusal`]).
     fn prepare(
         &self,
         selector: &impl ActionSelector,
@@ -496,6 +577,7 @@ impl<S, G, V> Loom<S, G, V> {
             &ActionCatalogue<action_catalogue_state::Projected>,
         ),
         (selection_id, argument_request_id): (SelectionId, ArgumentRequestId),
+        at: Option<Boundary<'_>>,
     ) -> Result<Prepared, ExecutorOutcome> {
         let context = SelectionContext {
             prompt: self.prompt.clone(),
@@ -522,16 +604,36 @@ impl<S, G, V> Loom<S, G, V> {
         let selection = resolved.selection;
         let selection_id = selection.data().selection_id.clone();
         let selected = selection.data().action.clone();
+        let candidates = catalogue.data().entries.len();
+        let strategy = selection.data().strategy;
         {
-            // The overruled fast selection, then the selection that replaced it, then the
-            // overrule: only the replacement goes on to arguments and revalidation.
+            // The overruled fast selection, then the selection that replaced it, each with its
+            // telemetry, then the overrule: only the replacement goes on to arguments and
+            // revalidation.
             let mut record = self.record();
-            let overruled = resolved.overruled.map(|overruled| {
-                let id = overruled.data().selection_id.clone();
-                record.put(AnySelection::Selected(overruled).snapshot());
-                id
-            });
-            record.put(AnySelection::Selected(selection).snapshot());
+            let overruled =
+                resolved
+                    .overruled
+                    .zip(resolved.overruled_pick)
+                    .map(|(overruled, pick)| {
+                        let snapshot = AnySelection::Selected(overruled).snapshot();
+                        record.put(snapshot.clone());
+                        Self::record_telemetry(
+                            &mut record,
+                            &snapshot,
+                            (&pick, candidates, Some(strategy)),
+                            &self.instance,
+                        );
+                        snapshot.data.selection_id
+                    });
+            let snapshot = AnySelection::Selected(selection).snapshot();
+            record.put(snapshot.clone());
+            Self::record_telemetry(
+                &mut record,
+                &snapshot,
+                (&resolved.pick, candidates, None),
+                &self.instance,
+            );
             if let Some(overruled) = overruled {
                 let outcome = record.overrule(OverruleSelection {
                     selection_id: overruled,
@@ -549,6 +651,7 @@ impl<S, G, V> Loom<S, G, V> {
         if matches!(admission, Admission::Refused(_))
             || !has_deciding_entry(frontier, &selected, &admission)
         {
+            self.count_refusal(at);
             return Err(no_useful_action());
         }
         // The generator is handed the one entry the selection names, never the rest of the
@@ -587,11 +690,17 @@ where
     V::Target: Governor,
 {
     /// The proposal of what [`Loom::prepare`] prepared, once revalidated against the governor's
-    /// current frontier of `case`; what [`Loom::revalidate`] returns instead when it is refused.
-    fn finish(&self, case: &CaseId, prepared: Prepared) -> ExecutorOutcome {
+    /// current frontier of `case`; what [`Loom::revalidate`] returns instead when it is refused,
+    /// a refusal counted on the session of the run `at` names.
+    fn finish(
+        &self,
+        case: &CaseId,
+        prepared: Prepared,
+        at: Option<Boundary<'_>>,
+    ) -> ExecutorOutcome {
         // Revalidation is the last step before the proposal (Atlas ADR 0072): it moves the
         // selection out of `Selected`, which the argument request above requires.
-        if let Err(refused) = self.revalidate(case, prepared.selection_id.clone()) {
+        if let Err(refused) = self.revalidate(case, prepared.selection_id.clone(), at) {
             return refused;
         }
         ExecutorOutcome::ProposedAction(prepared.proposal())
@@ -610,8 +719,15 @@ where
     /// instead of a proposal. A governor that cannot answer, or answers with another case's
     /// frontier, is an outage; a selection refused `stale-revision` is `CaseMoved`, naming the
     /// revision it was selected at; any other outcome but `admitted` is `NoUsefulAction`. Every
-    /// refusal is recorded on the selection and in [`Loom::revalidations`].
-    fn revalidate(&self, case: &CaseId, selection_id: SelectionId) -> Result<(), ExecutorOutcome> {
+    /// refusal is recorded on the selection and in [`Loom::revalidations`]; a `stale-revision` or
+    /// `not-in-frontier` refusal is counted on the session of the run `at` names, if any
+    /// ([`Loom::count_refusal`]).
+    fn revalidate(
+        &self,
+        case: &CaseId,
+        selection_id: SelectionId,
+        at: Option<Boundary<'_>>,
+    ) -> Result<(), ExecutorOutcome> {
         let Some(governor) = &self.governor else {
             return Ok(());
         };
@@ -644,7 +760,12 @@ where
         match revalidated {
             Ok(RevalidateSelectionOutcome::Admitted { .. }) => Ok(()),
             Ok(RevalidateSelectionOutcome::StaleRevision { selection_stale }) => {
+                self.count_refusal(at);
                 Err(case_moved(selection_stale.catalogue_revision))
+            }
+            Ok(RevalidateSelectionOutcome::NotInFrontier { .. }) => {
+                self.count_refusal(at);
+                Err(no_useful_action())
             }
             _ => Err(no_useful_action()),
         }

@@ -97,6 +97,7 @@ fn compaction_contract() {
         session_id: SessionId(Uuid(SESSION.to_owned())),
         commission_run: CommissionRunId(Uuid(RUN.to_owned())),
         wire: responses::WIRE.to_owned(),
+        boundary_refusals: 0,
     };
     let loom =
         Loom::new(FirstAdmissibleSelector, EmptyObjectArguments, PROMPT).with_governor(&governor);

@@ -48,6 +48,7 @@ use std::cell::{Cell, OnceCell};
 use std::ops::Deref;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::sync::{Mutex, PoisonError};
+use std::time::Instant;
 
 use b10x_loom_commission::admission::admit;
 use b10x_loom_commission::model::json;
@@ -82,10 +83,12 @@ use crate::model::run::{
     SessionData, SessionId, SessionSnapshot, SessionState, TurnId, action_catalogue_state,
 };
 use crate::recovery::{Held, Pending};
-use crate::selection::{ActionSelector, Choice, SelectionContext, SelectorError};
+use crate::selection::{
+    ActionSelector, Choice, Pick, Resolution, SelectionContext, SelectorError, elapsed_ms, tokens,
+};
 use crate::{
-    Loom, admits_nothing, case_moved, has_deciding_entry, loom_id, no_useful_action, outage,
-    projection,
+    Boundary, Loom, admits_nothing, case_moved, has_deciding_entry, loom_id, no_useful_action,
+    outage, projection,
 };
 
 /// The name a frontier action is published under: its id with every character outside
@@ -265,6 +268,8 @@ where
         let mut approvals = Proposer {
             loom: self,
             case,
+            session: id,
+            run: holder.run,
             offers: &offers,
             cancel: holder.cancel.clone(),
             resuming,
@@ -397,7 +402,8 @@ impl<S, G, V> Loom<S, G, V> {
     }
 
     /// Takes `session` for a run on `wire`: opens it (`loom.run.OpenSession`), or resumes it when
-    /// this Loom holds it `Filed` or `Interrupted` with the same data (`loom.run.ResumeSession`). A
+    /// this Loom holds it `Filed` or `Interrupted` with the same data, its count of boundary
+    /// refusals aside, which carries on (`loom.run.ResumeSession`). A
     /// session another run holds `Active` is `session-exists`, and the run proposes nothing
     /// (`NoUsefulAction`); one on another wire, or held with other data, is refused as an outage.
     /// Answers the run that took it, noted as the session's holder under the same lock
@@ -428,7 +434,7 @@ impl<S, G, V> Loom<S, G, V> {
                     Some(held) if held.state == SessionState::Active => {
                         return Err(no_useful_action());
                     }
-                    Some(held) if held.data == *session => {
+                    Some(held) if same_session(&held.data, session) => {
                         match record.resume_session(ResumeSession {
                             session_id: session.session_id.clone(),
                             wire: session.wire.clone(),
@@ -518,6 +524,15 @@ struct Holder {
     cancel: LoopCancel,
 }
 
+/// Whether `held` and `session` are one session on one wire for one commission run, whatever
+/// either counts of boundary refusals: the count is the session's telemetry, which a resume
+/// carries on, not part of what the caller names.
+fn same_session(held: &SessionData, session: &SessionData) -> bool {
+    held.session_id == session.session_id
+        && held.commission_run == session.commission_run
+        && held.wire == session.wire
+}
+
 /// A run refused before its loop was built, answering `outcome`.
 fn unbuilt(outcome: ExecutorOutcome) -> LoopRun {
     LoopRun { outcome, run: None }
@@ -576,6 +591,10 @@ struct Offered {
     index: i64,
     /// Whether the turn was recorded: a turn is recorded once.
     recorded: Cell<bool>,
+    /// How long the turn took and the input and output tokens its provider reported, until the
+    /// first selection of the turn takes them: a later selection of the same turn records 0, so
+    /// the totals of a turn are not counted twice.
+    spent: Cell<Option<Spent>>,
     next: OnceCell<Box<Offered>>,
 }
 
@@ -683,6 +702,7 @@ where
             turn,
             index: i64::try_from(index).unwrap_or(i64::MAX),
             recorded: Cell::new(false),
+            spent: Cell::new(None),
             next: OnceCell::new(),
         });
         Ok(TurnEnvironment {
@@ -775,6 +795,9 @@ impl ToolPort for CatalogueTools<'_> {
 struct Proposer<'r, S, G, V> {
     loom: &'r Loom<S, G, V>,
     case: &'r CaseId,
+    /// The session the run holds and the run's number: where a refusal at the boundary is counted.
+    session: &'r SessionId,
+    run: u64,
     offers: &'r Offers,
     /// The run's cancel: once [`Loom::interrupt`] raised it, nothing leaves the pipeline.
     cancel: LoopCancel,
@@ -844,6 +867,7 @@ where
         let prepared = self.loom.prepare(
             &ModelSelection {
                 action: entry.action.clone(),
+                spent: offered.spent.take().unwrap_or_default(),
             },
             &arguments,
             (&offered.frontier, &offered.catalogue),
@@ -851,6 +875,7 @@ where
                 selection_id,
                 ArgumentRequestId(loom_id(instance, "argument-request", scope, number)),
             ),
+            Some(self.boundary()),
         );
         if arguments.uncarried.get() {
             // Arguments the model wrote that Commission cannot carry end the run with no proposal:
@@ -871,7 +896,7 @@ where
             // leave Loom. The run that resumes the session revalidates it.
             return self.defer(checkpoint, no_useful_action(), Some(pending));
         }
-        let outcome = self.loom.finish(self.case, prepared);
+        let outcome = self.loom.finish(self.case, prepared, Some(self.boundary()));
         pending.in_flight = false;
         self.answer(checkpoint, outcome, Some(pending), &entry.action)
     }
@@ -882,6 +907,14 @@ where
     V: Deref,
     V::Target: Governor,
 {
+    /// Where this run counts a selection refused at the execution boundary: its session.
+    fn boundary(&self) -> Boundary<'_> {
+        Boundary {
+            session: self.session,
+            run: self.run,
+        }
+    }
+
     /// Ends the run at `checkpoint` with `outcome`, holding `pending` when the outcome proposes it;
     /// a selection the pipeline refused (`NoUsefulAction`, or `CaseMoved` for one made at a
     /// revision the case has left, which is noted) is denied to the model instead, which chooses
@@ -945,7 +978,10 @@ where
             ));
         };
         if pending.in_flight {
-            match self.loom.revalidate(self.case, pending.selection.clone()) {
+            match self
+                .loom
+                .revalidate(self.case, pending.selection.clone(), Some(self.boundary()))
+            {
                 Ok(()) => {}
                 Err(ExecutorOutcome::NoUsefulAction(_) | ExecutorOutcome::CaseMoved(_)) => {
                     return ApprovalDecision::denied(self.refused(&pending.selection, &action));
@@ -957,13 +993,17 @@ where
         // flight gets every check an admitted one does.
         let frontier = &offered.frontier;
         let current = frontier.data().case_revision;
+        // Either refusal is one at the execution boundary, of a selection made before, and is
+        // counted on the session.
         if current != selected.data.case_revision {
+            self.loom.count_refusal(Some(self.boundary()));
             return ApprovalDecision::denied(stale(&action, selected.data.case_revision, current));
         }
         let admission = admit(frontier, &action);
         if matches!(admission, Admission::Refused(_))
             || !has_deciding_entry(frontier, &action, &admission)
         {
+            self.loom.count_refusal(Some(self.boundary()));
             return ApprovalDecision::denied(not_admitted(&action));
         }
         let outcome = ExecutorOutcome::ProposedAction(pending.proposal.clone());
@@ -1017,10 +1057,21 @@ fn not_admitted(action: &str) -> String {
     )
 }
 
+/// How long a model turn took and the input and output tokens its provider reported for it, 0 for
+/// a count it did not report.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Spent {
+    latency_ms: i64,
+    input_tokens: i64,
+    output_tokens: i64,
+}
+
 /// The model's call as the selector: it names the action the call names. Membership in the
-/// catalogue is still checked by the selection, as for any selector.
+/// catalogue is still checked by the selection, as for any selector. What it spent is the turn's,
+/// for the first selection of a turn, and nothing for a later one.
 struct ModelSelection {
     action: String,
+    spent: Spent,
 }
 
 impl ActionSelector for ModelSelection {
@@ -1037,6 +1088,24 @@ impl ActionSelector for ModelSelection {
 
     fn strategy(&self) -> SelectionStrategy {
         SelectionStrategy::ReasoningModel
+    }
+
+    /// The call's action, as a pick that cost what the turn spent on it ([`ModelSelection`]).
+    fn resolve(
+        &self,
+        context: &SelectionContext,
+        candidates: &[CatalogueEntry],
+    ) -> Result<Resolution, SelectorError> {
+        Ok(Resolution {
+            chosen: Pick {
+                choice: self.select(context, candidates)?,
+                strategy: self.strategy(),
+                latency_ms: self.spent.latency_ms,
+                input_tokens: self.spent.input_tokens,
+                output_tokens: self.spent.output_tokens,
+            },
+            overruled: None,
+        })
     }
 }
 
@@ -1087,21 +1156,33 @@ impl<S, G, V> ModelPort for Recording<'_, '_, S, G, V> {
         sink: &mut dyn StreamSink,
     ) -> Result<TurnOutcome, WireError> {
         self.asked = true;
+        let started = Instant::now();
         let outcome = self.model.turn(request, sink)?;
+        let latency_ms = elapsed_ms(started);
         // Only into a session this run still holds: an interrupted run whose session another run
         // resumed records nothing there. While it holds it, the session is `Active` unless an
         // interrupt moved it, so the turn is `recorded` or refused `session-not-active`.
         let recovery = self.loom.recovery();
         if let Some(offered) = self.offers.latest()
             && !offered.recorded.replace(true)
-            && recovery.holds(self.session, self.run)
         {
-            let _ = self.loom.turn_record().record_turn(RecordTurn {
-                turn_id: offered.turn.clone(),
-                session_id: self.session.clone(),
-                index: offered.index,
-                items: outcome.items.iter().map(encoded).collect(),
+            // What the turn spent goes to the first selection of its calls.
+            let (input_tokens, output_tokens) = outcome.usage.as_ref().map_or((0, 0), |usage| {
+                (tokens(usage.input_tokens), tokens(usage.output_tokens))
             });
+            offered.spent.set(Some(Spent {
+                latency_ms,
+                input_tokens,
+                output_tokens,
+            }));
+            if recovery.holds(self.session, self.run) {
+                let _ = self.loom.turn_record().record_turn(RecordTurn {
+                    turn_id: offered.turn.clone(),
+                    session_id: self.session.clone(),
+                    index: offered.index,
+                    items: outcome.items.iter().map(encoded).collect(),
+                });
+            }
         }
         drop(recovery);
         Ok(outcome)
