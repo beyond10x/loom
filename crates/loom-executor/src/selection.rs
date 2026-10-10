@@ -19,12 +19,13 @@
 //! the same membership rule as [`select`].
 
 use std::sync::{Mutex, PoisonError};
+use std::time::Instant;
 
 use serde_json::json;
 
 use crate::harness::wire::{
     Approval, Envelope, Item, ModelPort, Sampling, ToolChoice, ToolName, ToolSpec, TurnRequest,
-    VecSink,
+    Usage, VecSink,
 };
 use crate::model::behaviour::{ActionCatalogueStorage, SelectionStorage};
 use crate::model::json::{Value, decimal_at};
@@ -62,13 +63,31 @@ pub enum SelectorError {
     Unavailable(String),
 }
 
-/// One selector's pick: its choice, and the strategy of the selector that made it.
+/// One selector's pick: its choice, the strategy of the selector that made it, and what making it
+/// cost, which Loom records as the selection's telemetry (`loom.run.SelectionRecord`). Telemetry
+/// is never evidence (Atlas ADR 0074) and decides nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pick {
     /// What the selector chose.
     pub choice: Choice,
     /// How the selector that made the choice chooses.
     pub strategy: SelectionStrategy,
+    /// How long the selector took to make the pick, in milliseconds.
+    pub latency_ms: i64,
+    /// The input tokens the selector reported spending on the pick; 0 when it reported none.
+    pub input_tokens: i64,
+    /// The output tokens the selector reported spending on the pick; 0 when it reported none.
+    pub output_tokens: i64,
+}
+
+/// The milliseconds since `started`, saturating.
+pub(crate) fn elapsed_ms(started: Instant) -> i64 {
+    i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX)
+}
+
+/// A token count as the run model's `Integer`, saturating.
+pub(crate) fn tokens(count: u64) -> i64 {
+    i64::try_from(count).unwrap_or(i64::MAX)
 }
 
 /// What a selector's answer resolved to: the pick it chose and, when a stronger selector overruled
@@ -95,18 +114,24 @@ pub trait ActionSelector {
     fn strategy(&self) -> SelectionStrategy;
 
     /// [`ActionSelector::select`]'s choice as a pick made with this selector's strategy, and the
-    /// pick it overruled, if any. By default nothing is overruled; [`HybridSelector`] answers with
-    /// the pick of the selector that made its choice and, on a fallback, the fast pick.
+    /// pick it overruled, if any. By default nothing is overruled, the pick's latency is the time
+    /// `select` took and it reports no tokens; [`HybridSelector`] answers with the pick of the
+    /// selector that made its choice and, on a fallback, the fast pick, and
+    /// [`ReasoningModelSelector`] reports the tokens of its turn.
     fn resolve(
         &self,
         context: &SelectionContext,
         candidates: &[CatalogueEntry],
     ) -> Result<Resolution, SelectorError> {
+        let started = Instant::now();
         let choice = self.select(context, candidates)?;
         Ok(Resolution {
             chosen: Pick {
                 choice,
                 strategy: self.strategy(),
+                latency_ms: elapsed_ms(started),
+                input_tokens: 0,
+                output_tokens: 0,
             },
             overruled: None,
         })
@@ -241,6 +266,47 @@ impl<P: ModelPort> ActionSelector for ReasoningModelSelector<P> {
         context: &SelectionContext,
         candidates: &[CatalogueEntry],
     ) -> Result<Choice, SelectorError> {
+        self.ask(context, candidates).map(|(choice, _)| choice)
+    }
+
+    fn strategy(&self) -> SelectionStrategy {
+        SelectionStrategy::ReasoningModel
+    }
+
+    /// The pick [`ActionSelector::select`] makes, with the time the selection turn took and the
+    /// input and output tokens the provider reported for it; 0 for a count it did not report.
+    fn resolve(
+        &self,
+        context: &SelectionContext,
+        candidates: &[CatalogueEntry],
+    ) -> Result<Resolution, SelectorError> {
+        let started = Instant::now();
+        let (choice, usage) = self.ask(context, candidates)?;
+        let latency_ms = elapsed_ms(started);
+        let (input_tokens, output_tokens) = usage.map_or((0, 0), |usage| {
+            (tokens(usage.input_tokens), tokens(usage.output_tokens))
+        });
+        Ok(Resolution {
+            chosen: Pick {
+                choice,
+                strategy: self.strategy(),
+                latency_ms,
+                input_tokens,
+                output_tokens,
+            },
+            overruled: None,
+        })
+    }
+}
+
+impl<P: ModelPort> ReasoningModelSelector<P> {
+    /// One selection turn: the action the model named, and the usage the provider reported for the
+    /// turn, when it reported one.
+    fn ask(
+        &self,
+        context: &SelectionContext,
+        candidates: &[CatalogueEntry],
+    ) -> Result<(Choice, Option<Usage>), SelectorError> {
         if candidates.is_empty() {
             return Err(SelectorError::NothingAdmissible);
         }
@@ -274,14 +340,13 @@ impl<P: ModelPort> ActionSelector for ReasoningModelSelector<P> {
                     "the reasoning model's selection call names no action".to_owned(),
                 )
             })?;
-        Ok(Choice {
-            action: action.to_owned(),
-            confidence: None,
-        })
-    }
-
-    fn strategy(&self) -> SelectionStrategy {
-        SelectionStrategy::ReasoningModel
+        Ok((
+            Choice {
+                action: action.to_owned(),
+                confidence: None,
+            },
+            outcome.usage.clone(),
+        ))
     }
 }
 
@@ -455,6 +520,10 @@ pub struct Resolved {
     /// selector's strategy: none when nothing was overruled, and none when the fast pick named an
     /// action the catalogue does not list, which never becomes a selection.
     pub overruled: Option<Selection<selection_state::Selected>>,
+    /// The pick `selection` was made from: its latency and tokens are the selection's telemetry.
+    pub pick: Pick,
+    /// The pick `overruled` was made from, exactly when there is an `overruled` selection.
+    pub overruled_pick: Option<Pick>,
 }
 
 /// `selector`'s resolution from `catalogue` ([`ActionSelector::resolve`]): the chosen pick as the
@@ -474,23 +543,29 @@ pub fn resolve(
         .map_err(SelectionRefusal::Selector)?;
     let selection = chosen(
         catalogue,
-        in_range(resolution.chosen.choice),
+        in_range(resolution.chosen.choice.clone()),
         resolution.chosen.strategy,
         selection_id,
     )
     .map_err(SelectionRefusal::NotInCatalogue)?;
-    let overruled = resolution.overruled.and_then(|pick| {
-        chosen(
-            catalogue,
-            in_range(pick.choice),
-            pick.strategy,
-            overruled_id,
-        )
-        .ok()
-    });
+    let (overruled, overruled_pick) = resolution
+        .overruled
+        .and_then(|pick| {
+            chosen(
+                catalogue,
+                in_range(pick.choice.clone()),
+                pick.strategy,
+                overruled_id,
+            )
+            .ok()
+            .map(|selection| (selection, pick))
+        })
+        .unzip();
     Ok(Resolved {
         selection,
         overruled,
+        pick: resolution.chosen,
+        overruled_pick,
     })
 }
 

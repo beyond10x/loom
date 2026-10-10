@@ -224,6 +224,7 @@ fn session_carries_commission_run_id() {
         commission_run: run.clone(),
         // The wire the session's items come from (story:session-transcript-streaming).
         wire: "openai-responses".to_owned(),
+        boundary_refusals: 0,
     });
 
     assert_eq!(session.state(), SessionState::Active);

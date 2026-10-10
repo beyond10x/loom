@@ -433,6 +433,7 @@ impl<S: loom_sdk::governor::FallibleCaseStore> AgentExecutor for Steps<'_, '_, S
             session_id: SessionId(loom::primitives::Uuid(self.ids.next('e').0)),
             commission_run: CommissionRunId(loom::primitives::Uuid(self.ids.next('e').0)),
             wire: port.wire().as_str().to_owned(),
+            boundary_refusals: 0,
         };
         let config = LoopConfig::new(self.model.clone(), INSTRUCTIONS)
             .with_admitted(Some(self.admits.clone()))

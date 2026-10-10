@@ -47,10 +47,10 @@
 //! those turns, the catalogue each turn was offered and the compactions made in them, in memory
 //! (`loom.run.OpenSession`, `loom.run.ResumeSession`, `loom.run.FileSession`,
 //! `loom.run.InterruptSession`, `loom.run.ReleaseSession`, `loom.run.RecordTurn`,
-//! `loom.run.RecordCompaction`, `loom.run.ProjectCatalogue`, generated). It
-//! is the run's record of what each completed turn added and what each compaction cost, not a
-//! transcript a following run replays; the session file above is that, and its format does not
-//! carry compactions or the `Interrupted` state.
+//! `loom.run.RecordCompaction`, `loom.run.CountBoundaryRefusal`, `loom.run.ProjectCatalogue`,
+//! generated). It is the run's record of what each completed turn added and what each compaction
+//! cost, not a transcript a following run replays; the session file above is that, and its format
+//! does not carry compactions, the `Interrupted` state or a session's count of boundary refusals.
 //!
 //! # Recovering a session by hand
 //!
@@ -102,16 +102,18 @@ use crate::model::behaviour::{
 use crate::model::obligation::UnmetObligation;
 use crate::model::primitives::Uuid;
 use crate::model::run::obligations::{
-    FileSessionBehavior, InterruptSessionBehavior, OpenSessionBehavior, ProjectCatalogueBehavior,
-    RecordCompactionBehavior, RecordTurnBehavior, ReleaseSessionBehavior, ResumeSessionBehavior,
+    CountBoundaryRefusalBehavior, FileSessionBehavior, InterruptSessionBehavior,
+    OpenSessionBehavior, ProjectCatalogueBehavior, RecordCompactionBehavior, RecordTurnBehavior,
+    ReleaseSessionBehavior, ResumeSessionBehavior,
 };
 use crate::model::run::{
     ActionCatalogueSnapshot, CatalogueId, CommissionRunId, CompactionId, CompactionSnapshot,
-    FileSession, FileSessionOutcome, InterruptSession, InterruptSessionOutcome, OpenSession,
-    OpenSessionOutcome, ProjectCatalogue, ProjectCatalogueOutcome, RecordCompaction,
-    RecordCompactionOutcome, RecordTurn, RecordTurnOutcome, ReleaseSession, ReleaseSessionOutcome,
-    ResumeSession, ResumeSessionOutcome, RunEnding, SessionData, SessionExists, SessionId,
-    SessionSnapshot, SessionState, SessionStateConflict, SessionWireMismatch, TurnId, TurnSnapshot,
+    CountBoundaryRefusal, CountBoundaryRefusalOutcome, FileSession, FileSessionOutcome,
+    InterruptSession, InterruptSessionOutcome, OpenSession, OpenSessionOutcome, ProjectCatalogue,
+    ProjectCatalogueOutcome, RecordCompaction, RecordCompactionOutcome, RecordTurn,
+    RecordTurnOutcome, ReleaseSession, ReleaseSessionOutcome, ResumeSession, ResumeSessionOutcome,
+    RunEnding, SessionData, SessionExists, SessionId, SessionSnapshot, SessionState,
+    SessionStateConflict, SessionWireMismatch, TurnId, TurnSnapshot,
 };
 
 /// The shape this module writes and the only one it reads.
@@ -308,6 +310,9 @@ impl SessionFile {
             session_id: SessionId(Uuid(self.id.clone())),
             commission_run: CommissionRunId(Uuid(self.commission_run.clone())),
             wire: self.wire.as_str().to_owned(),
+            // The file does not carry the count of boundary refusals: it is the run record's
+            // telemetry, and a session read back from its file has none.
+            boundary_refusals: 0,
         }
     }
 
@@ -638,10 +643,10 @@ impl Drop for Claim {
 ///
 /// `loom.run.OpenSession`, `loom.run.ResumeSession`, `loom.run.FileSession`,
 /// `loom.run.InterruptSession`, `loom.run.ReleaseSession`, `loom.run.RecordTurn`,
-/// `loom.run.RecordCompaction` and `loom.run.ProjectCatalogue` are the generated behaviour over
-/// this record: a session opened under an identity it already holds is refused `session-exists`,
-/// only a `Filed` or `Interrupted` session resumes, only an `Active` one is filed, interrupted or
-/// released, a turn or a compaction is refused for a session it does not hold or one no longer
+/// `loom.run.RecordCompaction`, `loom.run.CountBoundaryRefusal` and `loom.run.ProjectCatalogue`
+/// are the generated behaviour over this record: a session opened under an identity it already
+/// holds is refused `session-exists`, only a `Filed` or `Interrupted` session resumes, only an
+/// `Active` one is filed, interrupted, released or has a boundary refusal counted, a turn or a compaction is refused for a session it does not hold or one no longer
 /// `Active`, and a catalogue projected under an identity it already holds is refused
 /// `catalogue-exists`. A session, a turn or a compaction stored under an identity already held
 /// replaces it. Catalogues a governed run offers are kept as they were offered, one per offer,
@@ -893,6 +898,17 @@ impl ResumeSessionBehavior for TurnRecord {
         input: ResumeSession,
     ) -> Result<ResumeSessionOutcome, UnmetObligation> {
         self.generated(|generated| generated.resume_session(input))
+    }
+}
+
+/// `loom.run.CountBoundaryRefusal`, generated, over this record: only an `Active` session's count
+/// of boundary refusals goes up, by one.
+impl CountBoundaryRefusalBehavior for TurnRecord {
+    fn count_boundary_refusal(
+        &mut self,
+        input: CountBoundaryRefusal,
+    ) -> Result<CountBoundaryRefusalOutcome, UnmetObligation> {
+        self.generated(|generated| generated.count_boundary_refusal(input))
     }
 }
 

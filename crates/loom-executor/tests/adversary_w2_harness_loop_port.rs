@@ -708,6 +708,7 @@ fn session(wire: &str) -> SessionData {
         session_id: SessionId(Uuid(SESSION.to_owned())),
         commission_run: CommissionRunId(Uuid(RUN.to_owned())),
         wire: wire.to_owned(),
+        boundary_refusals: 0,
     }
 }
 

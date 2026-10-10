@@ -29,8 +29,8 @@ use b10x_loom_commission::model::json::Value as CommissionValue;
 use b10x_loom_commission::model::primitives::Uuid as CommissionUuid;
 use b10x_loom_commission::model::responsibility::{
     ActionStatus, AgentRevisionId, AuthorityContext, CaseId, Commission, CommissionData,
-    CommissionId, CompletionDetermination, ExecutorOutcome, Frontier, FrontierAction,
-    FrontierData, FrontierId, GovernorError, PrincipalId, Unit, commission_state, frontier_state,
+    CommissionId, CompletionDetermination, ExecutorOutcome, Frontier, FrontierAction, FrontierData,
+    FrontierId, GovernorError, PrincipalId, Unit, commission_state, frontier_state,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
@@ -220,7 +220,10 @@ fn three_selections_write_three_records() {
             record.data.chosen_action, selection.data.action,
             "(1) the chosen action"
         );
-        assert_eq!(record.data.strategy, selection.data.strategy, "(1) strategy");
+        assert_eq!(
+            record.data.strategy, selection.data.strategy,
+            "(1) strategy"
+        );
         assert_eq!(
             record.data.strategy,
             SelectionStrategy::FastTyped,

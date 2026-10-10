@@ -12,14 +12,17 @@
 
 use b10x_loom_commission::model::json::Value;
 
-use crate::model::behaviour::{Generated, SelectionStorage};
+use crate::model::behaviour::{Generated, SelectionRecordStorage, SelectionStorage};
 use crate::model::obligation::UnmetObligation;
-use crate::model::run::obligations::{OverruleSelectionBehavior, RequestArgumentsBehavior};
+use crate::model::run::obligations::{
+    OverruleSelectionBehavior, RecordSelectionBehavior, RequestArgumentsBehavior,
+};
 use crate::model::run::{
     AnyArgumentRequest, ArgumentRequest, ArgumentRequestData, ArgumentRequestSnapshot,
     ArgumentsRequested, CatalogueEntry, CatalogueId, OverruleSelection, OverruleSelectionOutcome,
-    RequestArguments, RequestArgumentsOutcome, RevalidateSelectionOutcome, SelectionId,
-    SelectionNotFound, SelectionNotSelected, SelectionSnapshot, SelectionState,
+    RecordSelection, RecordSelectionOutcome, RequestArguments, RequestArgumentsOutcome,
+    RevalidateSelectionOutcome, SelectionId, SelectionNotFound, SelectionNotSelected,
+    SelectionRecordId, SelectionRecordSnapshot, SelectionSnapshot, SelectionState,
 };
 
 /// What a generator is told besides the selected entry.
@@ -51,12 +54,14 @@ impl ArgumentGenerator for EmptyObjectArguments {
     }
 }
 
-/// The selections Loom made, the argument requests that serve them and the outcome of every
-/// revalidation of them ([`crate::revalidation`]), in the order they were recorded. A selection or
+/// The selections Loom made, the telemetry of each (`loom.run.SelectionRecord`), the argument
+/// requests that serve them and the outcome of every revalidation of them
+/// ([`crate::revalidation`]), in the order they were recorded. A selection, selection record or
 /// argument request stored under an identity already held replaces it.
 #[derive(Debug, Default)]
 pub struct RequestRecord {
     selections: Vec<SelectionSnapshot>,
+    selection_records: Vec<SelectionRecordSnapshot>,
     argument_requests: Vec<ArgumentRequestSnapshot>,
     revalidations: Vec<RevalidateSelectionOutcome>,
 }
@@ -66,6 +71,13 @@ impl RequestRecord {
     #[must_use]
     pub fn selections(&self) -> &[SelectionSnapshot] {
         &self.selections
+    }
+
+    /// Every recorded selection's telemetry, in the order recorded. Never evidence (Atlas ADR
+    /// 0074).
+    #[must_use]
+    pub fn selection_records(&self) -> &[SelectionRecordSnapshot] {
+        &self.selection_records
     }
 
     /// Every recorded argument request.
@@ -214,6 +226,72 @@ impl OverruleSelectionBehavior for RequestRecord {
         input: OverruleSelection,
     ) -> Result<OverruleSelectionOutcome, UnmetObligation> {
         Generated::new(Overruling(self)).overrule_selection(input)
+    }
+}
+
+/// The record, as the storage ports of the generated `RecordSelection`: the selections a record
+/// names, and the records. Only through it is the record a store of selection records,
+/// so a caller holding both storage traits never finds two `put`s on [`RequestRecord`].
+struct Telemetry<'r>(&'r mut RequestRecord);
+
+impl SelectionStorage for Telemetry<'_> {
+    fn get(&self, identity: &SelectionId) -> Option<SelectionSnapshot> {
+        SelectionStorage::get(self.0, identity)
+    }
+
+    fn put(&mut self, snapshot: SelectionSnapshot) {
+        SelectionStorage::put(self.0, snapshot);
+    }
+
+    fn delete(&mut self, identity: &SelectionId) {
+        SelectionStorage::delete(self.0, identity);
+    }
+
+    fn list(&self) -> Vec<SelectionSnapshot> {
+        SelectionStorage::list(self.0)
+    }
+}
+
+impl SelectionRecordStorage for Telemetry<'_> {
+    fn get(&self, identity: &SelectionRecordId) -> Option<SelectionRecordSnapshot> {
+        self.0
+            .selection_records
+            .iter()
+            .find(|held| &held.data.selection_record_id == identity)
+            .cloned()
+    }
+
+    fn put(&mut self, snapshot: SelectionRecordSnapshot) {
+        let records = &mut self.0.selection_records;
+        match records
+            .iter_mut()
+            .find(|held| held.data.selection_record_id == snapshot.data.selection_record_id)
+        {
+            Some(held) => *held = snapshot,
+            None => records.push(snapshot),
+        }
+    }
+
+    fn delete(&mut self, identity: &SelectionRecordId) {
+        self.0
+            .selection_records
+            .retain(|held| &held.data.selection_record_id != identity);
+    }
+
+    fn list(&self) -> Vec<SelectionRecordSnapshot> {
+        self.0.selection_records.clone()
+    }
+}
+
+/// `loom.run.RecordSelection`, generated, over this record: a record identity is recorded once
+/// (`record-exists`), only for a selection the record holds (`selection-unknown`); otherwise the
+/// `loom.run.SelectionRecord` is stored `Recorded` (`recorded`).
+impl RecordSelectionBehavior for RequestRecord {
+    fn record_selection(
+        &mut self,
+        input: RecordSelection,
+    ) -> Result<RecordSelectionOutcome, UnmetObligation> {
+        Generated::new(Telemetry(self)).record_selection(input)
     }
 }
 

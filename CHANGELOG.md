@@ -6,7 +6,28 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- Selection telemetry for Metaharness. Every selection Loom records gets one
+  `loom.run.SelectionRecord`, written with it and returned by `Loom::selection_records`: the
+  strategy of the selector that made it, the number of candidates, the chosen action, its
+  confidence, the selector's latency in milliseconds and the input and output tokens it reported.
+  On a confidence fallback, `fell_back_to` is on the record of the overruled fast selection and
+  names the strategy of the selector that replaced it; the replacement's record has none. A
+  selection refused at the execution boundary after it was made, by Commission's admission or by
+  revalidation, raises its governed run's `Session.boundary_refusals` by one and adds no record.
+  Neither is evidence. `ess/domains/run.yaml` gains the entity `loom.run.SelectionRecord`, owned by
+  `loom.run.Selection`, the commands `loom.run.RecordSelection` and `loom.run.CountBoundaryRefusal`,
+  their events, the view `loom.run.SelectionRecords`, and `Session.boundary_refusals`.
+
 ### Changed
+
+- **Breaking:** the generated `SessionData` gains `boundary_refusals`. A caller that builds the
+  session it hands `Loom::run_loop` or `LoopExecutor` sets it to `0`; a resume compares the session
+  without it. The filed session file keeps its format and does not carry the count.
+- **Breaking:** `selection::Pick` gains `latency_ms`, `input_tokens` and `output_tokens`, and
+  `selection::Resolved` gains `pick` and `overruled_pick`. A selector that overrides
+  `ActionSelector::resolve` fills them; the default `resolve` times `select` and reports no tokens.
 
 - **Breaking:** a selection on a confidence fallback is now recorded as two selections, each with
   its own selector's strategy, where there was one `Hybrid` selection. `Loom::selections` holds the
