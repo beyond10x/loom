@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest cee559ad7b98c0f74aa2bb607bd073e52902527033f7f7fd8d1292410f7f2e17
-// contract digest 874974d029ad4c9d989fd20452dec290f5ffb7299a164b44350cf9fe1e61f737
+// model digest 661401844e582bd43becacc2018c2e17e03abd6db5247a31d68efc412baadd64
+// contract digest 6085f971d79bcae6071aef5103a63bf925d279df28713c5dd4a816f29b50f01e
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -250,6 +250,31 @@ where
     }
 }
 
+/// `loom.run.OverruleSelection`, generated: every outcome is one the specification fully determines.
+impl<P> crate::run::obligations::OverruleSelectionBehavior for Generated<P>
+where
+    P: SelectionStorage,
+{
+    fn overrule_selection(&mut self, input: crate::run::OverruleSelection) -> Result<crate::run::OverruleSelectionOutcome, UnmetObligation> {
+        let _ = &input;
+        // `overruled`: the default.
+        let Some(held) = SelectionStorage::get(&self.ports, &input.selection_id) else {
+            return Ok(crate::run::OverruleSelectionOutcome::WrongStateUnknownInstance);
+        };
+        let _ = &held;
+        let held_state = held.state;
+        let moved = match held.refine() {
+            crate::run::AnySelection::Selected(instance) => crate::run::AnySelection::Overruled(instance.overrule()),
+            _ => return Ok(crate::run::OverruleSelectionOutcome::WrongState { error: crate::run::SelectionStateConflict { state: held_state } }),
+        };
+        let mut next = moved.snapshot();
+        next.data.replaced_by = Some(input.replacement_id.clone());
+        let answer = crate::run::OverruleSelectionOutcome::Overruled { selection_overruled: crate::run::SelectionOverruled { selection_id: input.selection_id.clone(), replacement_id: input.replacement_id.clone() } };
+        SelectionStorage::put(&mut self.ports, next);
+        return Ok(answer);
+    }
+}
+
 /// `loom.run.ProjectCatalogue`, generated: every outcome is one the specification fully determines.
 impl<P> crate::run::obligations::ProjectCatalogueBehavior for Generated<P>
 where
@@ -389,7 +414,7 @@ where
         let _ = &related;
         // `selection-not-selected`: selected by the present related row, in declaration order.
         if let Some(related) = &related {
-        if decided(equal(Some(&related.state).map(|value| match value { crate::run::SelectionState::Admitted => "Admitted", crate::run::SelectionState::Refused => "Refused", crate::run::SelectionState::Selected => "Selected" }.to_owned()), Some("Selected".to_owned())).map(|value| !value), "loom.run.RequestArguments")? {
+        if decided(equal(Some(&related.state).map(|value| match value { crate::run::SelectionState::Admitted => "Admitted", crate::run::SelectionState::Overruled => "Overruled", crate::run::SelectionState::Refused => "Refused", crate::run::SelectionState::Selected => "Selected" }.to_owned()), Some("Selected".to_owned())).map(|value| !value), "loom.run.RequestArguments")? {
             return Ok(crate::run::RequestArgumentsOutcome::SelectionNotSelected { error: crate::run::SelectionNotSelected { selection_id: input.selection_id.clone() } });
         }
         }
@@ -541,6 +566,7 @@ where
                 action: held.data.action,
                 strategy: held.data.strategy,
                 case_revision: held.data.case_revision,
+                replaced_by: held.data.replaced_by,
                 state: held.state,
             })
             .collect())

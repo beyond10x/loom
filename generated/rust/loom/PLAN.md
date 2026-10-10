@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest cee559ad7b98c0f74aa2bb607bd073e52902527033f7f7fd8d1292410f7f2e17
-  contract digest 874974d029ad4c9d989fd20452dec290f5ffb7299a164b44350cf9fe1e61f737
+  model digest 661401844e582bd43becacc2018c2e17e03abd6db5247a31d68efc412baadd64
+  contract digest 6085f971d79bcae6071aef5103a63bf925d279df28713c5dd4a816f29b50f01e
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-139 capabilities: **138 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+142 capabilities: **141 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -106,6 +106,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command behaviour | `loom.run.InterruptSession` |
 | command contract | `loom.run.OpenSession` |
 | command behaviour | `loom.run.OpenSession` |
+| command contract | `loom.run.OverruleSelection` |
+| command behaviour | `loom.run.OverruleSelection` |
 | command contract | `loom.run.ProjectCatalogue` |
 | command behaviour | `loom.run.ProjectCatalogue` |
 | command contract | `loom.run.RecordCompaction` |
@@ -126,6 +128,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | event type | `loom.run.CatalogueProjected` |
 | event type | `loom.run.SelectionAdmitted` |
 | event type | `loom.run.SelectionNotInFrontier` |
+| event type | `loom.run.SelectionOverruled` |
 | event type | `loom.run.SelectionStale` |
 | event type | `loom.run.SessionCompacted` |
 | event type | `loom.run.SessionFiled` |

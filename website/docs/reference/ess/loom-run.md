@@ -290,21 +290,24 @@ It holds:
 - `confidence` — `Optional<Decimal>`, which may be absent
 - `strategy` — `loom.run.SelectionStrategy`
 - `case_revision` — `Integer`
+- `replaced_by` — `Optional<loom.run.SelectionId>`, which may be absent
 
-It references at most one [`ActionCatalogue`](#actioncatalogue), as `catalogue`, carried by `Selection.catalogue_id`.
+It references at most one [`ActionCatalogue`](#actioncatalogue), as `catalogue`, carried by `Selection.catalogue_id`. It references at most one [`Selection`](#selection), as `replacement`, carried by `Selection.replaced_by`.
 
 No invariant is declared, so nothing here constrains an instance at rest.
 
-Its state is a `loom.run.Selection.State`, one of `Admitted`, `Refused` and `Selected`. That enum is synthesised from the lifecycle rather than declared beside it, so the states a view's filter compares and the states drawn below cannot disagree.
+Its state is a `loom.run.Selection.State`, one of `Admitted`, `Overruled`, `Refused` and `Selected`. That enum is synthesised from the lifecycle rather than declared beside it, so the states a view's filter compares and the states drawn below cannot disagree.
 
-An instance is created in `Selected`. `Admitted` and `Refused` are terminal, so an instance may rest there forever. That is declared rather than inferred from having no way out: an entity that cannot leave a state is either finished or stuck, and only its author knows which.
+An instance is created in `Selected`. `Admitted`, `Overruled` and `Refused` are terminal, so an instance may rest there forever. That is declared rather than inferred from having no way out: an entity that cannot leave a state is either finished or stuck, and only its author knows which.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Selected
     Selected --> Admitted: admit (RevalidateSelection)
     Selected --> Refused: refuse (RevalidateSelection)
+    Selected --> Overruled: overrule (OverruleSelection)
     Admitted --> [*]
+    Overruled --> [*]
     Refused --> [*]
 ```
 
@@ -312,14 +315,20 @@ Each move is taken by a declared command outcome, and a move nothing takes is re
 
 - `admit` — taken by `loom.run.RevalidateSelection` on its `admitted` outcome
 - `refuse` — taken by `loom.run.RevalidateSelection` on its `stale-revision` outcome and `loom.run.RevalidateSelection` on its `not-in-frontier` outcome
+- `overrule` — taken by `loom.run.OverruleSelection` on its `overruled` outcome
 
 An instance is brought into existence by `loom.run.SelectAction` on its `selected` outcome.
 
 Illegal transitions are illegal by absence: no rule forbids them, there is simply no arrow, because a rule would be a second place for the same truth to live. A diagram cannot show an absence, so the pairs it does not connect are listed here, derived from the same transitions — anything named below is a move this specification does not permit.
 
+- `Admitted` may not become `Overruled`
 - `Admitted` may not become `Refused`
 - `Admitted` may not become `Selected`
+- `Overruled` may not become `Admitted`
+- `Overruled` may not become `Refused`
+- `Overruled` may not become `Selected`
 - `Refused` may not become `Admitted`
+- `Refused` may not become `Overruled`
 - `Refused` may not become `Selected`
 
 One view projects it: [`Selections`](#selections).
@@ -440,6 +449,7 @@ It exposes:
 - `action` — `String`
 - `strategy` — `loom.run.SelectionStrategy`
 - `case_revision` — `Integer`
+- `replaced_by` — `Optional<loom.run.SelectionId>`, which may be absent
 - `state` — `loom.run.Selection.State`
 
 It declares no order, so the rows come back in whatever order the implementation has, and two reads may disagree.
@@ -515,6 +525,21 @@ It has two outcomes.
 **`session-exists`** — Taken when a record already carries the identity the command's creating branch would create, and no input-guarded refusal applies. No entity in this specification changes. It reports `loom.run.SessionExists`, carrying `session_id`. It emits nothing. A test reaches it by sending the command twice with one identity: the first call creates the record, the second is answered by this branch.
 
 **`opened`** — The default branch, taken when no other outcome's condition matched. It creates a `loom.run.Session`, which starts in `Active`. The new instance's identity is published as `session_id` on `loom.run.SessionOpened`. It emits `loom.run.SessionOpened`. It sets `commission_run` from `input.commission_run` and `wire` from `input.wire`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+### `OverruleSelection`
+
+`loom.run.OverruleSelection`.
+
+It takes:
+
+- `selection_id` — `loom.run.SelectionId`
+- `replacement_id` — `loom.run.SelectionId`
+
+It has two outcomes.
+
+**`overruled`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.run.Selection` from `Selected` to `Overruled`, along the declared move `overrule`. The instance is the one named by the input field `selection_id`. It emits `loom.run.SelectionOverruled`. It sets `replaced_by` from `input.replacement_id`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+**`wrong-state`** — Taken when the subject is resting in a state none of this command's moves start from — a `loom.run.Selection` in `Admitted`, `Overruled` and `Refused`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `loom.run.SelectionStateConflict`, carrying `state`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
 
 ### `ProjectCatalogue`
 
@@ -637,7 +662,7 @@ It has four outcomes.
 
 **`admitted`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.run.Selection` from `Selected` to `Admitted`, along the declared move `admit`. The instance is the one named by the input field `selection_id`. It emits `loom.run.SelectionAdmitted`. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
-**`wrong-state`** — Taken when the subject is resting in a state none of this command's moves start from — a `loom.run.Selection` in `Admitted` and `Refused`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `loom.run.SelectionStateConflict`, carrying `state`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
+**`wrong-state`** — Taken when the subject is resting in a state none of this command's moves start from — a `loom.run.Selection` in `Admitted`, `Overruled` and `Refused`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `loom.run.SelectionStateConflict`, carrying `state`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
 
 ### `SelectAction`
 
@@ -727,6 +752,19 @@ It carries:
 - `action` — `String`
 
 Emitted by `loom.run.RevalidateSelection` on its `not-in-frontier` outcome.
+
+Nothing in this system reacts to it.
+
+### `SelectionOverruled`
+
+`loom.run.SelectionOverruled`.
+
+It carries:
+
+- `selection_id` — `loom.run.SelectionId`
+- `replacement_id` — `loom.run.SelectionId`
+
+Emitted by `loom.run.OverruleSelection` on its `overruled` outcome.
 
 Nothing in this system reacts to it.
 
@@ -895,6 +933,8 @@ It carries:
 
 - `state` — `loom.run.Selection.State`
 
+Reported by `loom.run.OverruleSelection` on its `wrong-state` outcome.
+
 Reported by `loom.run.RevalidateSelection` on its `wrong-state` outcome.
 
 ### `SessionExists`
@@ -952,4 +992,4 @@ Reported by `loom.run.ResumeSession` on its `cross-wire` outcome.
 
 ---
 
-Generated from loom v1 · model digest `cee559ad7b98c0f74aa2bb607bd073e52902527033f7f7fd8d1292410f7f2e17` · contract digest `slice-sha256/2:c791376a2e2ad9ce6ecb61095fa39fcff960e2f436017f5f49b528b2c64cf285`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · model digest `661401844e582bd43becacc2018c2e17e03abd6db5247a31d68efc412baadd64` · contract digest `slice-sha256/2:46527696eaabc584087bdf2c4b7a72fb6d84594443840cf9143caaa41bceda6f`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

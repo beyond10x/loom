@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest cee559ad7b98c0f74aa2bb607bd073e52902527033f7f7fd8d1292410f7f2e17
-// contract digest 874974d029ad4c9d989fd20452dec290f5ffb7299a164b44350cf9fe1e61f737
+// model digest 661401844e582bd43becacc2018c2e17e03abd6db5247a31d68efc412baadd64
+// contract digest 6085f971d79bcae6071aef5103a63bf925d279df28713c5dd4a816f29b50f01e
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Run — `loom.run`.
@@ -238,6 +238,8 @@ pub enum RunEnding {
 pub enum SelectionState {
     /// `Admitted`.
     Admitted,
+    /// `Overruled`.
+    Overruled,
     /// `Refused`.
     Refused,
     /// `Selected`.
@@ -720,6 +722,10 @@ pub struct SelectionData {
     pub strategy: SelectionStrategy,
     /// `case_revision` — `Integer`.
     pub case_revision: i64,
+    /// `replaced_by` — `Optional<loom.run.SelectionId>`.
+    ///
+    /// Carries `replacement`: `loom.run.Selection` references one `loom.run.Selection`.
+    pub replaced_by: Option<SelectionId>,
 }
 
 /// The states of `loom.run.Selection`, at the type level.
@@ -732,6 +738,7 @@ pub mod selection_state {
         /// Implemented only by the marker types beside this module.
         pub trait Sealed {}
         impl Sealed for super::Admitted {}
+        impl Sealed for super::Overruled {}
         impl Sealed for super::Refused {}
         impl Sealed for super::Selected {}
     }
@@ -747,6 +754,13 @@ pub mod selection_state {
 
     impl Marker for Admitted {
         const STATE: super::SelectionState = super::SelectionState::Admitted;
+    }
+
+    /// `Overruled`. Terminal: an instance may rest here forever.
+    pub struct Overruled;
+
+    impl Marker for Overruled {
+        const STATE: super::SelectionState = super::SelectionState::Overruled;
     }
 
     /// `Refused`. Terminal: an instance may rest here forever.
@@ -818,6 +832,14 @@ impl Selection<selection_state::Selected> {
             state: core::marker::PhantomData,
         }
     }
+
+    /// `overrule` — `Selected` → `Overruled`. Taken by the `overruled` outcome of `loom.run.OverruleSelection`.
+    pub fn overrule(self) -> Selection<selection_state::Overruled> {
+        Selection {
+            data: self.data,
+            state: core::marker::PhantomData,
+        }
+    }
 }
 
 /// `loom.run.Selection` as it crosses a boundary: the state as a value beside the data.
@@ -836,6 +858,8 @@ pub struct SelectionSnapshot {
 pub enum AnySelection {
     /// Resting in `Admitted`.
     Admitted(Selection<selection_state::Admitted>),
+    /// Resting in `Overruled`.
+    Overruled(Selection<selection_state::Overruled>),
     /// Resting in `Refused`.
     Refused(Selection<selection_state::Refused>),
     /// Resting in `Selected`.
@@ -850,6 +874,10 @@ impl SelectionSnapshot {
     pub fn refine(self) -> AnySelection {
         match self.state {
             SelectionState::Admitted => AnySelection::Admitted(Selection {
+                data: self.data,
+                state: core::marker::PhantomData,
+            }),
+            SelectionState::Overruled => AnySelection::Overruled(Selection {
                 data: self.data,
                 state: core::marker::PhantomData,
             }),
@@ -870,6 +898,7 @@ impl AnySelection {
     pub fn state(&self) -> SelectionState {
         match self {
             Self::Admitted(_) => SelectionState::Admitted,
+            Self::Overruled(_) => SelectionState::Overruled,
             Self::Refused(_) => SelectionState::Refused,
             Self::Selected(_) => SelectionState::Selected,
         }
@@ -880,6 +909,10 @@ impl AnySelection {
         match self {
             Self::Admitted(instance) => SelectionSnapshot {
                 state: SelectionState::Admitted,
+                data: instance.into_data(),
+            },
+            Self::Overruled(instance) => SelectionSnapshot {
+                state: SelectionState::Overruled,
                 data: instance.into_data(),
             },
             Self::Refused(instance) => SelectionSnapshot {
@@ -1342,6 +1375,41 @@ pub enum OpenSessionOutcome {
     },
 }
 
+/// OverruleSelection — the input of `loom.run.OverruleSelection`.
+///
+/// Everything it can result in is [`OverruleSelectionOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OverruleSelection {
+    /// `selection_id` — `loom.run.SelectionId`.
+    pub selection_id: SelectionId,
+    /// `replacement_id` — `loom.run.SelectionId`.
+    pub replacement_id: SelectionId,
+}
+
+/// Everything `loom.run.OverruleSelection` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OverruleSelectionOutcome {
+    /// `overruled` — otherwise.
+    Overruled {
+        /// The `loom.run.SelectionOverruled` this outcome publishes.
+        selection_overruled: SelectionOverruled,
+    },
+    /// `wrong-state` — from a state no declared move starts in.
+    WrongState {
+        /// Why it was refused: `loom.run.SelectionStateConflict`.
+        error: SelectionStateConflict,
+    },
+    /// `wrong-state` — for an instance no record carries.
+    ///
+    /// The same declared branch and error as [`Self::WrongState`], without the error's fields: an instance
+    /// that does not exist has nothing for them to describe (`docs/design/unknown-instance-seams.md`).
+    WrongStateUnknownInstance,
+}
+
 /// ProjectCatalogue — the input of `loom.run.ProjectCatalogue`.
 ///
 /// Everything it can result in is [`ProjectCatalogueOutcome`].
@@ -1704,6 +1772,15 @@ pub struct SelectionNotInFrontier {
     pub action: String,
 }
 
+/// SelectionOverruled — the event `loom.run.SelectionOverruled`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectionOverruled {
+    /// `selection_id` — `loom.run.SelectionId`.
+    pub selection_id: SelectionId,
+    /// `replacement_id` — `loom.run.SelectionId`.
+    pub replacement_id: SelectionId,
+}
+
 /// SelectionStale — the event `loom.run.SelectionStale`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectionStale {
@@ -1906,6 +1983,8 @@ pub struct Selections {
     pub strategy: SelectionStrategy,
     /// `case_revision` — `Integer`.
     pub case_revision: i64,
+    /// `replaced_by` — `Optional<loom.run.SelectionId>`.
+    pub replaced_by: Option<SelectionId>,
     /// `state` — `loom.run.Selection.State`.
     pub state: SelectionState,
 }
@@ -1964,6 +2043,17 @@ pub mod obligations {
         ///
         /// `Err` is the typed refusal of a request the model declares no outcome for.
         fn open_session(&mut self, input: super::OpenSession) -> Result<super::OpenSessionOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `loom.run.OverruleSelection` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait OverruleSelectionBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.run.OverruleSelection`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn overrule_selection(&mut self, input: super::OverruleSelection) -> Result<super::OverruleSelectionOutcome, crate::obligation::UnmetObligation>;
     }
 
     /// The behaviour `loom.run.ProjectCatalogue` — generated.
