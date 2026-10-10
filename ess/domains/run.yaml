@@ -360,20 +360,32 @@ entities:
       # catalogue's by SelectAction: revalidation compares it with the current one.
       - name: case_revision
         type: Integer
+      # The stronger selector's selection that replaced this one when a confidence fallback
+      # overruled it (decision-blocker:fallback-selection-record, option B); absent otherwise.
+      - name: replaced_by
+        type: Optional<loom.run.SelectionId>
     relations:
       - name: catalogue
         kind: references
         target: loom.run.ActionCatalogue
         cardinality: one
         via: catalogue_id
-    # Revalidated once against the frontier current at revalidation: admitted, or refused.
+      # Zero or one: ESS has only `one` and `many`, and the Optional field makes it zero or one.
+      - name: replacement
+        kind: references
+        target: loom.run.Selection
+        cardinality: one
+        via: replaced_by
+    # Revalidated once against the frontier current at revalidation: admitted, or refused. A
+    # selection a stronger selector overruled is never revalidated and never given arguments.
     lifecycle:
       initial: Selected
-      states: [Selected, Admitted, Refused]
-      terminal: [Admitted, Refused]
+      states: [Selected, Admitted, Refused, Overruled]
+      terminal: [Admitted, Refused, Overruled]
       transitions:
         - {name: admit, from: [Selected], to: Admitted}
         - {name: refuse, from: [Selected], to: Refused}
+        - {name: overrule, from: [Selected], to: Overruled}
 
   # loom-action-selection.md: arguments are generated for the selected action only.
   - name: loom.run.ArgumentRequest
@@ -812,6 +824,32 @@ commands:
             argument_request_id: input.argument_request_id
             selection_id: input.selection_id
 
+  # A confidence fallback overruled a fast selection: it names the stronger selector's selection
+  # that replaced it, and is never revalidated nor given arguments. Only a Selected selection is
+  # overruled. ESS refuses a when_related guard on the replacement beside wrong_state
+  # (ESS-COMMAND-004), so the behaviour on the record refuses an unknown replacement with
+  # SelectionNotFound naming it.
+  - name: loom.run.OverruleSelection
+    input:
+      - name: selection_id
+        type: loom.run.SelectionId
+      - name: replacement_id
+        type: loom.run.SelectionId
+    outcomes:
+      - name: overruled
+        moves: loom.run.Selection.overrule
+        instance: selection_id
+        sets:
+          replaced_by: input.replacement_id
+        emits: [loom.run.SelectionOverruled]
+        payload:
+          loom.run.SelectionOverruled:
+            selection_id: input.selection_id
+            replacement_id: input.replacement_id
+      - name: wrong-state
+        wrong_state: true
+        error: loom.run.SelectionStateConflict
+
   # Before a selection is proposed it is revalidated against the case revision and the action ids
   # of the frontier current at revalidation, which come from the governor, never from the model.
   # not-in-frontier stays `external:`, answered by the executor from the input's frontier_actions:
@@ -941,6 +979,14 @@ events:
       - name: selection_id
         type: loom.run.SelectionId
 
+  # Overruled by a confidence fallback: names the selection that replaced it.
+  - name: loom.run.SelectionOverruled
+    fields:
+      - name: selection_id
+        type: loom.run.SelectionId
+      - name: replacement_id
+        type: loom.run.SelectionId
+
   # Refused: the action id is not among the current frontier's actions. Names the id.
   - name: loom.run.SelectionNotInFrontier
     fields:
@@ -990,6 +1036,8 @@ views:
         type: loom.run.SelectionStrategy
       - name: case_revision
         type: Integer
+      - name: replaced_by
+        type: Optional<loom.run.SelectionId>
       - name: state
         type: loom.run.Selection.State
 
