@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:selection-telemetry
 kind: story
-status: active
+status: implemented
 title: Record selection telemetry for Metaharness
 refs:
 - provider: taskboard
@@ -32,10 +32,11 @@ scope:
   path: ess/domains/run.yaml
 - confidence: cited
   path: generated/rust/loom/src/run.rs
-revision: 13
+revision: 14
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-10T02:04:40Z", actor: "human:timo", revision: 11}
 - {from: "proposed", to: "active", at: "2026-10-10T02:04:40Z", actor: "human:timo", revision: 12}
+- {from: "active", to: "implemented", at: "2026-10-10T04:21:19Z", actor: "human:timo", revision: 14, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 
