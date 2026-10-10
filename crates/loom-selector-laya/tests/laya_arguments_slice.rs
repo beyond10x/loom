@@ -18,7 +18,11 @@
 //!    reasoning-model selector's choice is proposed.
 //!
 //! In each, the argument generator is called exactly once, for the action finally selected, and
-//! `release.rollback` reaches neither argument generation nor revalidation. Schema validation of
+//! `release.rollback` reaches neither argument generation nor revalidation. Each selection carries
+//! the strategy of the selector that made it (`story:fallback-selection-recording`): Laya's is
+//! `FastTyped`, the reasoning model's `ReasoningModel`. In run 2 the record holds two selections,
+//! Laya's `Overruled` and naming the reasoning model's, which alone reaches argument generation and
+//! revalidation; in run 3 Laya's choice is not a candidate, so it is no selection. Schema validation of
 //! the arguments (`decision-blocker:action-argument-schema`) and selection telemetry are not here.
 //! No test makes a network call beyond 127.0.0.1.
 
@@ -341,6 +345,7 @@ struct Observed {
     handed: Vec<CatalogueEntry>,
     selections: Vec<(String, Option<Decimal>, SelectionStrategy, SelectionState)>,
     selection_ids: Vec<String>,
+    replaced_by: Vec<Option<String>>,
     argument_requests: Vec<String>,
     revalidations: Vec<RevalidateSelectionOutcome>,
     governor_calls: Vec<GovernorCall>,
@@ -385,6 +390,10 @@ fn run(laya_choice: &str, laya_probability: &str, model_choice: &'static str) ->
             .iter()
             .map(|held| held.data.selection_id.0.0.clone())
             .collect(),
+        replaced_by: selections
+            .iter()
+            .map(|held| held.data.replaced_by.as_ref().map(|id| id.0.0.clone()))
+            .collect(),
         selections: selections
             .into_iter()
             .map(|held| {
@@ -407,9 +416,17 @@ fn run(laya_choice: &str, laya_probability: &str, model_choice: &'static str) ->
 }
 
 /// The checks every run shares: `expected` was proposed with the generator's arguments for it,
-/// the generator was called exactly once and only for it, and the one selection made is the one
-/// argument request and the one revalidation serve. `ROLLBACK` reaches none of them.
-fn assert_slice(name: &str, observed: &Observed, expected: &str) {
+/// the generator was called exactly once and only for it, and the selection `strategy` made of it,
+/// the last recorded, is the one the argument request and the revalidation serve. When Laya's
+/// choice `overruled` was overruled, it is recorded first, `Overruled` and naming that selection,
+/// and reaches neither. `ROLLBACK` reaches none of them.
+fn assert_slice(
+    name: &str,
+    observed: &Observed,
+    expected: &str,
+    strategy: SelectionStrategy,
+    overruled: Option<&str>,
+) {
     assert_eq!(
         observed.outcome,
         ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
@@ -428,31 +445,57 @@ fn assert_slice(name: &str, observed: &Observed, expected: &str) {
 
     assert_eq!(
         observed.selections.len(),
-        1,
-        "{name}: one selection: {:?}",
+        1 + usize::from(overruled.is_some()),
+        "{name}: the selections: {:?}",
         observed.selections
     );
-    let (action, _, strategy, state) = &observed.selections[0];
+    let proposed = observed.selections.len() - 1;
+    let proposed_id = observed.selection_ids[proposed].clone();
+    let (action, _, made_by, state) = &observed.selections[proposed];
     assert_eq!(action, expected, "{name}: the selection");
-    assert_eq!(*strategy, SelectionStrategy::Hybrid, "{name}: the strategy");
+    assert_eq!(*made_by, strategy, "{name}: the selection's strategy");
     assert_eq!(
         *state,
         SelectionState::Admitted,
         "{name}: the selection is admitted"
     );
+    assert_eq!(
+        observed.replaced_by[proposed], None,
+        "{name}: the proposed selection has no replacement"
+    );
+    if let Some(overruled) = overruled {
+        let (action, _, made_by, state) = &observed.selections[0];
+        assert_eq!(action, overruled, "{name}: Laya's selection");
+        assert_eq!(
+            *made_by,
+            SelectionStrategy::FastTyped,
+            "{name}: Laya's selection carries Laya's strategy"
+        );
+        assert_eq!(
+            *state,
+            SelectionState::Overruled,
+            "{name}: Laya's selection is overruled"
+        );
+        assert_eq!(
+            observed.replaced_by[0],
+            Some(proposed_id.clone()),
+            "{name}: Laya's selection names the selection that replaced it"
+        );
+    }
 
     assert_eq!(
-        observed.argument_requests, observed.selection_ids,
-        "{name}: one argument request, serving the one selection"
+        observed.argument_requests,
+        std::slice::from_ref(&proposed_id),
+        "{name}: one argument request, serving the proposed selection"
     );
     assert_eq!(
         observed.revalidations,
         [RevalidateSelectionOutcome::Admitted {
             selection_admitted: SelectionAdmitted {
-                selection_id: SelectionId(Uuid(observed.selection_ids[0].clone())),
+                selection_id: SelectionId(Uuid(proposed_id)),
             },
         }],
-        "{name}: one revalidation, admitting the one selection"
+        "{name}: one revalidation, admitting the proposed selection"
     );
     assert_eq!(
         observed.governor_calls,
@@ -508,7 +551,13 @@ fn assert_slice(name: &str, observed: &Observed, expected: &str) {
 #[test]
 fn an_in_set_choice_above_the_threshold_is_proposed_with_arguments_for_it_alone() {
     let observed = run(RELEASE, "0.96", LOGS);
-    assert_slice("above the threshold", &observed, RELEASE);
+    assert_slice(
+        "above the threshold",
+        &observed,
+        RELEASE,
+        SelectionStrategy::FastTyped,
+        None,
+    );
     assert!(
         observed.model_requests.is_empty(),
         "the reasoning model is not asked to select when Laya's choice is accepted"
@@ -523,14 +572,25 @@ fn an_in_set_choice_above_the_threshold_is_proposed_with_arguments_for_it_alone(
 #[test]
 fn an_in_set_choice_below_the_threshold_falls_back_to_the_reasoning_selector() {
     let observed = run(RELEASE, "0.42", LOGS);
-    assert_slice("below the threshold", &observed, LOGS);
+    assert_slice(
+        "below the threshold",
+        &observed,
+        LOGS,
+        SelectionStrategy::ReasoningModel,
+        Some(RELEASE),
+    );
     assert_eq!(
         observed.model_requests.len(),
         1,
         "the reasoning model selects once"
     );
     assert_eq!(
-        observed.selections[0].1, None,
+        observed.selections[0].1,
+        Some(Decimal("0.42".to_owned())),
+        "the overruled selection carries Laya's probability"
+    );
+    assert_eq!(
+        observed.selections[1].1, None,
         "the fallback carries no confidence"
     );
 }
@@ -538,7 +598,13 @@ fn an_in_set_choice_below_the_threshold_falls_back_to_the_reasoning_selector() {
 #[test]
 fn a_choice_outside_the_frontier_is_rejected_and_never_reaches_arguments_or_revalidation() {
     let observed = run(ROLLBACK, "0.99", METRICS);
-    assert_slice("outside the frontier", &observed, METRICS);
+    assert_slice(
+        "outside the frontier",
+        &observed,
+        METRICS,
+        SelectionStrategy::ReasoningModel,
+        None,
+    );
     assert_eq!(
         observed.model_requests.len(),
         1,

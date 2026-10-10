@@ -7,12 +7,18 @@
 //! Every command is answered by `b10x-loom-executor`, over the two records a Loom keeps:
 //!
 //! * `OpenSession`, `RecordTurn`, `RecordCompaction`, `FileSession`, `InterruptSession`,
-//!   `ResumeSession`, `ReleaseSession` and `ProjectCatalogue` by the behaviours of
-//!   `b10x_loom_executor::session::TurnRecord`;
+//!   `ResumeSession`, `ReleaseSession`, `CountBoundaryRefusal` and `ProjectCatalogue` by the
+//!   behaviours of `b10x_loom_executor::session::TurnRecord`;
 //! * `SelectAction` by `b10x_loom_executor::selection::select_action`, from the catalogues the
 //!   `TurnRecord` holds into the selections of a `b10x_loom_executor::arguments::RequestRecord`;
-//! * `RequestArguments` and `RevalidateSelection` by the behaviours of that `RequestRecord`;
-//! * the views `Sessions`, `Catalogues` and `Selections` from what the two records hold.
+//! * `RequestArguments`, `RevalidateSelection` and `OverruleSelection` by the behaviours of that
+//!   `RequestRecord`; `OverruleSelection` by its generated behaviour, which overrules whatever
+//!   replacement it is named, not by `RequestRecord::overrule`, the host's check that the
+//!   replacement is held (ESS refuses that guard beside `wrong_state`, `ESS-COMMAND-004`);
+//! * `RecordSelection` by the generated behaviour of that `RequestRecord`, over the selections it
+//!   holds and the selection records it keeps;
+//! * the views `Sessions`, `Catalogues`, `Selections` and `SelectionRecords` from what the two
+//!   records hold.
 //!
 //! This crate translates values and records what was published. It decides no outcome: each
 //! answer is the outcome the executor returned, and each event is the one it returned.
@@ -39,18 +45,21 @@ use std::cell::RefCell;
 use b10x_loom_executor::arguments::RequestRecord;
 use b10x_loom_executor::model::behaviour::SelectionStorage;
 use b10x_loom_executor::model::run::obligations::{
-    FileSessionBehavior, InterruptSessionBehavior, OpenSessionBehavior, ProjectCatalogueBehavior,
-    RecordCompactionBehavior, RecordTurnBehavior, ReleaseSessionBehavior, RequestArgumentsBehavior,
-    ResumeSessionBehavior, RevalidateSelectionBehavior,
+    CountBoundaryRefusalBehavior, FileSessionBehavior, InterruptSessionBehavior,
+    OpenSessionBehavior, OverruleSelectionBehavior, ProjectCatalogueBehavior,
+    RecordCompactionBehavior, RecordSelectionBehavior, RecordTurnBehavior, ReleaseSessionBehavior,
+    RequestArgumentsBehavior, ResumeSessionBehavior, RevalidateSelectionBehavior,
 };
 use b10x_loom_executor::model::run::{
-    ArgumentRequestId, CatalogueId, CommissionRunId, CompactionId, FileSession, FileSessionOutcome,
-    InterruptSession, InterruptSessionOutcome, OpenSession, OpenSessionOutcome, ProjectCatalogue,
-    ProjectCatalogueOutcome, RecordCompaction, RecordCompactionOutcome, RecordTurn,
+    ArgumentRequestId, CatalogueId, CommissionRunId, CompactionId, CountBoundaryRefusal,
+    CountBoundaryRefusalOutcome, FileSession, FileSessionOutcome, InterruptSession,
+    InterruptSessionOutcome, OpenSession, OpenSessionOutcome, OverruleSelection,
+    OverruleSelectionOutcome, ProjectCatalogue, ProjectCatalogueOutcome, RecordCompaction,
+    RecordCompactionOutcome, RecordSelection, RecordSelectionOutcome, RecordTurn,
     RecordTurnOutcome, ReleaseSession, ReleaseSessionOutcome, RequestArguments,
     RequestArgumentsOutcome, ResumeSession, ResumeSessionOutcome, RevalidateSelection,
-    RevalidateSelectionOutcome, SelectAction, SelectActionOutcome, SelectionId, SelectionState,
-    SessionId, SessionState, TurnId,
+    RevalidateSelectionOutcome, SelectAction, SelectActionOutcome, SelectionId, SelectionRecordId,
+    SelectionState, SessionId, SessionState, TurnId,
 };
 use b10x_loom_executor::selection::select_action;
 use b10x_loom_executor::session::TurnRecord;
@@ -82,6 +91,9 @@ const PROJECT_CATALOGUE: &str = "loom.run.ProjectCatalogue";
 const SELECT_ACTION: &str = "loom.run.SelectAction";
 const REQUEST_ARGUMENTS: &str = "loom.run.RequestArguments";
 const REVALIDATE_SELECTION: &str = "loom.run.RevalidateSelection";
+const OVERRULE_SELECTION: &str = "loom.run.OverruleSelection";
+const RECORD_SELECTION: &str = "loom.run.RecordSelection";
+const COUNT_BOUNDARY_REFUSAL: &str = "loom.run.CountBoundaryRefusal";
 
 const SESSION_OPENED: &str = "loom.run.SessionOpened";
 const TURN_RECORDED: &str = "loom.run.TurnRecorded";
@@ -96,6 +108,9 @@ const ARGUMENTS_REQUESTED: &str = "loom.run.ArgumentsRequested";
 const SELECTION_STALE: &str = "loom.run.SelectionStale";
 const SELECTION_NOT_IN_FRONTIER: &str = "loom.run.SelectionNotInFrontier";
 const SELECTION_ADMITTED: &str = "loom.run.SelectionAdmitted";
+const SELECTION_OVERRULED: &str = "loom.run.SelectionOverruled";
+const SELECTION_RECORDED: &str = "loom.run.SelectionRecorded";
+const BOUNDARY_REFUSAL_COUNTED: &str = "loom.run.BoundaryRefusalCounted";
 
 const SESSION_EXISTS: &str = "loom.run.SessionExists";
 const SESSION_NOT_FOUND: &str = "loom.run.SessionNotFound";
@@ -109,10 +124,12 @@ const CATALOGUE_REVISION_MISMATCH: &str = "loom.run.CatalogueRevisionMismatch";
 const SELECTION_NOT_FOUND: &str = "loom.run.SelectionNotFound";
 const SELECTION_NOT_SELECTED: &str = "loom.run.SelectionNotSelected";
 const SELECTION_STATE_CONFLICT: &str = "loom.run.SelectionStateConflict";
+const SELECTION_RECORD_EXISTS: &str = "loom.run.SelectionRecordExists";
 
 const SESSIONS: &str = "loom.run.Sessions";
 const CATALOGUES: &str = "loom.run.Catalogues";
 const SELECTIONS: &str = "loom.run.Selections";
+const SELECTION_RECORDS: &str = "loom.run.SelectionRecords";
 
 /// The external outcome a scenario may force.
 const NOT_IN_FRONTIER: &str = "not-in-frontier";
@@ -199,6 +216,9 @@ impl ConformanceTarget for LoomTarget {
             SELECT_ACTION => select(&mut live, input, correlation),
             REQUEST_ARGUMENTS => request_arguments(&mut live, input, correlation),
             REVALIDATE_SELECTION => revalidate_selection(&mut live, input, correlation),
+            OVERRULE_SELECTION => overrule_selection(&mut live, input, correlation),
+            RECORD_SELECTION => record_selection(&mut live, input, correlation),
+            COUNT_BOUNDARY_REFUSAL => count_boundary_refusal(&mut live, input, correlation),
             other => {
                 return Err(TargetError::unavailable(
                     format!("invoking `{other}`"),
@@ -228,6 +248,10 @@ impl ConformanceTarget for LoomTarget {
                             codec::id(&held.data.commission_run.0),
                         ),
                         ("wire".to_owned(), Node::Text(held.data.wire.clone())),
+                        (
+                            "boundary_refusals".to_owned(),
+                            codec::number(held.data.boundary_refusals),
+                        ),
                         ("state".to_owned(), codec::session_state(held.state)),
                     ])
                 })
@@ -273,7 +297,63 @@ impl ConformanceTarget for LoomTarget {
                             "case_revision".to_owned(),
                             codec::number(held.data.case_revision),
                         ),
+                        (
+                            "replaced_by".to_owned(),
+                            held.data
+                                .replaced_by
+                                .as_ref()
+                                .map_or(Node::Null, |id| codec::id(&id.0)),
+                        ),
                         ("state".to_owned(), codec::selection_state(held.state)),
+                    ])
+                })
+                .collect(),
+            // The confidence is not published (`ess/domains/run.yaml`, `loom.run.SelectionRecords`).
+            SELECTION_RECORDS => live
+                .requests
+                .selection_records()
+                .iter()
+                .map(|held| {
+                    ViewRow::from([
+                        (
+                            "selection_record_id".to_owned(),
+                            codec::id(&held.data.selection_record_id.0),
+                        ),
+                        (
+                            "selection_id".to_owned(),
+                            codec::id(&held.data.selection_id.0),
+                        ),
+                        (
+                            "strategy".to_owned(),
+                            codec::strategy_name(held.data.strategy),
+                        ),
+                        (
+                            "candidate_count".to_owned(),
+                            codec::number(held.data.candidate_count),
+                        ),
+                        (
+                            "chosen_action".to_owned(),
+                            Node::Text(held.data.chosen_action.clone()),
+                        ),
+                        (
+                            "fell_back_to".to_owned(),
+                            held.data
+                                .fell_back_to
+                                .map_or(Node::Null, codec::strategy_name),
+                        ),
+                        ("latency_ms".to_owned(), codec::number(held.data.latency_ms)),
+                        (
+                            "input_tokens".to_owned(),
+                            codec::number(held.data.input_tokens),
+                        ),
+                        (
+                            "output_tokens".to_owned(),
+                            codec::number(held.data.output_tokens),
+                        ),
+                        (
+                            "state".to_owned(),
+                            codec::selection_record_state(held.state),
+                        ),
                     ])
                 })
                 .collect(),
@@ -363,9 +443,9 @@ fn session_wrong_state(command: &str, state: Option<SessionState>) -> SemanticCo
 
 /// `wrong-state` with the selection's actual state, or with no field for a selection no record
 /// holds.
-fn selection_wrong_state(state: Option<SelectionState>) -> SemanticCommandResult {
+fn selection_wrong_state(command: &str, state: Option<SelectionState>) -> SemanticCommandResult {
     let declared = error(SELECTION_STATE_CONFLICT);
-    took(REVALIDATE_SELECTION, "wrong-state").with_error(match state {
+    took(command, "wrong-state").with_error(match state {
         Some(state) => declared.with("state", codec::selection_state(state)),
         None => declared,
     })
@@ -823,9 +903,140 @@ fn revalidate_selection(
             took(REVALIDATE_SELECTION, "admitted").emitting(published)
         }
         RevalidateSelectionOutcome::WrongState { error } => {
-            selection_wrong_state(Some(error.state))
+            selection_wrong_state(REVALIDATE_SELECTION, Some(error.state))
         }
-        RevalidateSelectionOutcome::WrongStateUnknownInstance => selection_wrong_state(None),
+        RevalidateSelectionOutcome::WrongStateUnknownInstance => {
+            selection_wrong_state(REVALIDATE_SELECTION, None)
+        }
+    })
+}
+
+/// `OverruleSelection`, by the generated behaviour of the `RequestRecord`.
+fn overrule_selection(
+    live: &mut Live,
+    input: &Input,
+    correlation: &CorrelationId,
+) -> Option<SemanticCommandResult> {
+    let command = OverruleSelection {
+        selection_id: SelectionId(codec::uuid(input, "selection_id")?),
+        replacement_id: SelectionId(codec::uuid(input, "replacement_id")?),
+    };
+    Some(match live.requests.overrule_selection(command).ok()? {
+        OverruleSelectionOutcome::Overruled {
+            selection_overruled,
+        } => {
+            let published = live.publish(
+                event(SELECTION_OVERRULED)
+                    .with(
+                        "selection_id",
+                        codec::id(&selection_overruled.selection_id.0),
+                    )
+                    .with(
+                        "replacement_id",
+                        codec::id(&selection_overruled.replacement_id.0),
+                    ),
+                correlation,
+            );
+            took(OVERRULE_SELECTION, "overruled").emitting(published)
+        }
+        OverruleSelectionOutcome::WrongState { error } => {
+            selection_wrong_state(OVERRULE_SELECTION, Some(error.state))
+        }
+        OverruleSelectionOutcome::WrongStateUnknownInstance => {
+            selection_wrong_state(OVERRULE_SELECTION, None)
+        }
+    })
+}
+
+/// `RecordSelection`, by the generated behaviour of the `RequestRecord`.
+fn record_selection(
+    live: &mut Live,
+    input: &Input,
+    correlation: &CorrelationId,
+) -> Option<SemanticCommandResult> {
+    let command = RecordSelection {
+        selection_record_id: SelectionRecordId(codec::uuid(input, "selection_record_id")?),
+        selection_id: SelectionId(codec::uuid(input, "selection_id")?),
+        strategy: codec::strategy(input, "strategy")?,
+        candidate_count: codec::integer(input, "candidate_count")?,
+        chosen_action: codec::text(input, "chosen_action")?,
+        confidence: codec::optional_decimal(input, "confidence")?,
+        fell_back_to: codec::optional_strategy(input, "fell_back_to")?,
+        latency_ms: codec::integer(input, "latency_ms")?,
+        input_tokens: codec::integer(input, "input_tokens")?,
+        output_tokens: codec::integer(input, "output_tokens")?,
+    };
+    Some(match live.requests.record_selection(command).ok()? {
+        RecordSelectionOutcome::RecordExists { error } => refused(
+            RECORD_SELECTION,
+            "record-exists",
+            SELECTION_RECORD_EXISTS,
+            "selection_record_id",
+            codec::id(&error.selection_record_id.0),
+        ),
+        RecordSelectionOutcome::SelectionUnknown { error } => refused(
+            RECORD_SELECTION,
+            "selection-unknown",
+            SELECTION_NOT_FOUND,
+            "selection_id",
+            codec::id(&error.selection_id.0),
+        ),
+        RecordSelectionOutcome::Recorded { selection_recorded } => {
+            let published = live.publish(
+                event(SELECTION_RECORDED)
+                    .with(
+                        "selection_record_id",
+                        codec::id(&selection_recorded.selection_record_id.0),
+                    )
+                    .with(
+                        "selection_id",
+                        codec::id(&selection_recorded.selection_id.0),
+                    )
+                    .with(
+                        "strategy",
+                        codec::strategy_name(selection_recorded.strategy),
+                    )
+                    .with(
+                        "fell_back_to",
+                        selection_recorded
+                            .fell_back_to
+                            .map_or(Node::Null, codec::strategy_name),
+                    ),
+                correlation,
+            );
+            took(RECORD_SELECTION, "recorded").emitting(published)
+        }
+    })
+}
+
+/// `CountBoundaryRefusal`, by the generated behaviour of the `TurnRecord`.
+fn count_boundary_refusal(
+    live: &mut Live,
+    input: &Input,
+    correlation: &CorrelationId,
+) -> Option<SemanticCommandResult> {
+    let command = CountBoundaryRefusal {
+        session_id: SessionId(codec::uuid(input, "session_id")?),
+    };
+    Some(match live.turns.count_boundary_refusal(command).ok()? {
+        CountBoundaryRefusalOutcome::Counted {
+            boundary_refusal_counted,
+        } => {
+            let published = live.publish(
+                event(BOUNDARY_REFUSAL_COUNTED).with(
+                    "session_id",
+                    codec::id(&boundary_refusal_counted.session_id.0),
+                ),
+                correlation,
+            );
+            took(COUNT_BOUNDARY_REFUSAL, "counted").emitting(published)
+        }
+        CountBoundaryRefusalOutcome::WrongState { error } => {
+            session_wrong_state(COUNT_BOUNDARY_REFUSAL, Some(error.state))
+        }
+        CountBoundaryRefusalOutcome::WrongStateUnknownInstance => {
+            session_wrong_state(COUNT_BOUNDARY_REFUSAL, None)
+        }
     })
 }
 

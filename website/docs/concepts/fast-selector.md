@@ -43,6 +43,15 @@ Exact thresholds must be calibrated per domain and measured by Metaharness. A hi
 changes which path picks the action; it never changes what the action is allowed to do.
 :::
 
+## How a fallback is recorded
+
+When the fast choice is not accepted and the stronger selector answers instead, Loom records both
+selections. The fast one is `Overruled` and names the selection that replaced it; the replacement
+alone reaches argument generation and revalidation. Each selection carries the strategy of the
+selector that made it, so an evaluation can tell which selector each pick came from. An accepted
+fast choice is one selection with no replacement, and a fast choice outside the candidates is never
+a selection.
+
 ## Large catalogues
 
 A large action set can be split into a hierarchical choice: first a tool family, then a specific

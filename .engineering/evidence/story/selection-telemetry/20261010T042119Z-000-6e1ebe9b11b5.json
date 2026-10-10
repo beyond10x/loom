@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-10T04:21:19Z",
+  "actor": "human:timo",
+  "artifact": "story:selection-telemetry",
+  "kind": "story",
+  "revision": 13,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "joint package gate on 008e046: cargo clippy -D warnings and cargo test --locked of b10x-loom-executor (781), -conformance (10), -selector-laya (11), -commission (47), -commission-conformance (19), loom-commission-docs (8), -governor (67), loom-xtask (26), -plugin (57): exit 0, 1026 passed 0 failed; fmt, ess-gate, commission:ess-gate, drift, commission:drift, intake-drift, conform, no-hand-model, docs-check, commission:docs-drift, plan exit 0"
+  }
+}

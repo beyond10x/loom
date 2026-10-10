@@ -508,6 +508,7 @@ fn open(id: &SessionId, workspace: &Path) -> SessionFile {
             session_id: id.clone(),
             commission_run: CommissionRunId(Uuid(RUN.to_owned())),
             wire: RESPONSES.to_owned(),
+            boundary_refusals: 0,
         },
         "adversary-model",
         "http://127.0.0.1:9/v1",

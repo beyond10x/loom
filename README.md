@@ -54,7 +54,7 @@ variant.
 Since `0.6.0` a run whose case moved to a revision whose frontier still admits an action ends
 `RunOutcome::CaseMovedOn`, naming the Run's revision and the current one; start a new Run at the
 current revision. Callers that match `RunOutcome` exhaustively handle the new variant. Loom
-requires ESS 0.56.0.
+requires ESS 0.57.0.
 
 Since `0.7.0` a process can supervise a run through `b10x-loom run --output jsonl`, decide a case
 it keeps itself through `b10x-loom evaluate`, and drive a run with a model from an llm catalog

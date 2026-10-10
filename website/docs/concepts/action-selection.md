@@ -42,12 +42,17 @@ action-selection contract,
 5. **Low confidence falls back** to a stronger path.
 6. For catalogues larger than about 20 actions, a selector may choose a **family first, then an
    action** within it.
-7. Selection telemetry should be available to **Metaharness** for evaluation.
+7. Selection telemetry is available to **Metaharness** for evaluation, and is never evidence.
 
 Rules 1 to 4 hold today. The catalogue is projected from the frontier of each step; Loom puts every
 selection to Commission's admission check, and one it refuses, such as an action outside the
 frontier, is never proposed, whatever confidence the selector reported; the Commission runtime
-revalidates every proposal before the effect port sees it. Rules 5 to 7 are design.
+revalidates every proposal before the effect port sees it. Rule 7 holds too: Loom writes one
+`SelectionRecord` per selection (its strategy, candidate count, chosen action, confidence, latency
+and the tokens the selector reported, and on an overruled fast selection the strategy it fell back
+to), and counts on each governed run's session the selections refused at the execution boundary
+after they were made. Rule 5 holds through `HybridSelector`, at a threshold the host supplies; rule
+6 is design.
 
 ## Beyond tool selection
 

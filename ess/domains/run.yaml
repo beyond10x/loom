@@ -34,6 +34,10 @@ types:
     kind: newtype
     of: Uuid
 
+  - name: loom.run.SelectionRecordId
+    kind: newtype
+    of: Uuid
+
   # The id of the commission run a session executes: Commission's commission.responsibility.RunId.
   # A typed id, not a relation: ESS cannot name another system's entity.
   - name: loom.run.CommissionRunId
@@ -247,6 +251,12 @@ entities:
       # wires, so a resume on another wire is refused naming both.
       - name: wire
         type: String
+      # How many selections of the session were refused at the execution boundary, after they were
+      # made: by Commission's admission or by revalidation against the current frontier
+      # (decision-blocker:selection-telemetry-record). Telemetry for Metaharness, never evidence
+      # (Atlas ADR 0074).
+      - name: boundary_refusals
+        type: Integer
     relations:
       # A turn is part of one session's transcript (loom-design.md: "model turn loop",
       # "session/transcript state").
@@ -275,6 +285,7 @@ entities:
         - {name: resume, from: [Filed, Interrupted], to: Active}
         - {name: release, from: [Active], to: Filed}
         - {name: interrupt, from: [Active], to: Interrupted}
+        - {name: count_refusal, from: [Active], to: Active}
 
   # One completed model turn. A turn that did not complete is never recorded, so a filed session
   # holds exactly the turns completed before the run ended.
@@ -360,20 +371,73 @@ entities:
       # catalogue's by SelectAction: revalidation compares it with the current one.
       - name: case_revision
         type: Integer
+      # The stronger selector's selection that replaced this one when a confidence fallback
+      # overruled it (decision-blocker:fallback-selection-record, option B); absent otherwise.
+      - name: replaced_by
+        type: Optional<loom.run.SelectionId>
     relations:
       - name: catalogue
         kind: references
         target: loom.run.ActionCatalogue
         cardinality: one
         via: catalogue_id
-    # Revalidated once against the frontier current at revalidation: admitted, or refused.
+      # Zero or one: ESS has only `one` and `many`, and the Optional field makes it zero or one.
+      - name: replacement
+        kind: references
+        target: loom.run.Selection
+        cardinality: one
+        via: replaced_by
+      # Its telemetry for Metaharness, one record per selection
+      # (decision-blocker:selection-telemetry-record).
+      - name: telemetry
+        kind: owns
+        target: loom.run.SelectionRecord
+        cardinality: one
+        via: selection_id
+    # Revalidated once against the frontier current at revalidation: admitted, or refused. A
+    # selection a stronger selector overruled is never revalidated and never given arguments.
     lifecycle:
       initial: Selected
-      states: [Selected, Admitted, Refused]
-      terminal: [Admitted, Refused]
+      states: [Selected, Admitted, Refused, Overruled]
+      terminal: [Admitted, Refused, Overruled]
       transitions:
         - {name: admit, from: [Selected], to: Admitted}
         - {name: refuse, from: [Selected], to: Refused}
+        - {name: overrule, from: [Selected], to: Overruled}
+
+  # The telemetry of one selection, for Metaharness (decision-blocker:selection-telemetry-record;
+  # loom-action-selection.md safety rule 7): the strategy of the selector that made it, how many
+  # candidates it was offered, the action it chose and its confidence; on a fast selection a
+  # confidence fallback overruled, the strategy of the selector that replaced it; how long the
+  # selection took, and the tokens the selector reported spending on it. Never evidence (Atlas ADR
+  # 0074).
+  - name: loom.run.SelectionRecord
+    identity:
+      name: selection_record_id
+      type: loom.run.SelectionRecordId
+    fields:
+      - name: selection_id
+        type: loom.run.SelectionId
+      - name: strategy
+        type: loom.run.SelectionStrategy
+      - name: candidate_count
+        type: Integer
+      - name: chosen_action
+        type: String
+      - name: confidence
+        type: Optional<Decimal>
+      - name: fell_back_to
+        type: Optional<loom.run.SelectionStrategy>
+      - name: latency_ms
+        type: Integer
+      - name: input_tokens
+        type: Integer
+      - name: output_tokens
+        type: Integer
+    lifecycle:
+      initial: Recorded
+      states: [Recorded]
+      terminal: [Recorded]
 
   # loom-action-selection.md: arguments are generated for the selected action only.
   - name: loom.run.ArgumentRequest
@@ -441,6 +505,12 @@ errors:
       - name: selection_id
         type: loom.run.SelectionId
 
+  # A selection's telemetry is recorded once: its id is never recorded again.
+  - name: loom.run.SelectionRecordExists
+    fields:
+      - name: selection_record_id
+        type: loom.run.SelectionRecordId
+
   # A session is opened once: its id is never opened again.
   - name: loom.run.SessionExists
     fields:
@@ -500,6 +570,7 @@ commands:
         sets:
           commission_run: input.commission_run
           wire: input.wire
+          boundary_refusals: 0
         emits: [loom.run.SessionOpened]
         payload:
           loom.run.SessionOpened:
@@ -812,10 +883,114 @@ commands:
             argument_request_id: input.argument_request_id
             selection_id: input.selection_id
 
+  # A confidence fallback overruled a fast selection: it names the stronger selector's selection
+  # that replaced it, and is never revalidated nor given arguments. Only a Selected selection is
+  # overruled. ESS refuses a when_related guard on the replacement beside wrong_state
+  # (ESS-COMMAND-004), so the behaviour on the record refuses an unknown replacement with
+  # SelectionNotFound naming it.
+  - name: loom.run.OverruleSelection
+    input:
+      - name: selection_id
+        type: loom.run.SelectionId
+      - name: replacement_id
+        type: loom.run.SelectionId
+    outcomes:
+      - name: overruled
+        moves: loom.run.Selection.overrule
+        instance: selection_id
+        sets:
+          replaced_by: input.replacement_id
+        emits: [loom.run.SelectionOverruled]
+        payload:
+          loom.run.SelectionOverruled:
+            selection_id: input.selection_id
+            replacement_id: input.replacement_id
+      - name: wrong-state
+        wrong_state: true
+        error: loom.run.SelectionStateConflict
+
+  # The telemetry of a selection that was made, recorded once.
+  - name: loom.run.RecordSelection
+    input:
+      - name: selection_record_id
+        type: loom.run.SelectionRecordId
+      - name: selection_id
+        type: loom.run.SelectionId
+      - name: strategy
+        type: loom.run.SelectionStrategy
+      - name: candidate_count
+        type: Integer
+      - name: chosen_action
+        type: String
+      - name: confidence
+        type: Optional<Decimal>
+      - name: fell_back_to
+        type: Optional<loom.run.SelectionStrategy>
+      - name: latency_ms
+        type: Integer
+      - name: input_tokens
+        type: Integer
+      - name: output_tokens
+        type: Integer
+    outcomes:
+      - name: record-exists
+        existing_instance: true
+        error: loom.run.SelectionRecordExists
+        payload:
+          loom.run.SelectionRecordExists:
+            selection_record_id: input.selection_record_id
+      - name: selection-unknown
+        when_related: {via: input.selection_id, exists: false}
+        error: loom.run.SelectionNotFound
+        payload:
+          loom.run.SelectionNotFound:
+            selection_id: input.selection_id
+      - name: recorded
+        creates: loom.run.SelectionRecord
+        instance: selection_record_id
+        sets:
+          selection_id: input.selection_id
+          strategy: input.strategy
+          candidate_count: input.candidate_count
+          chosen_action: input.chosen_action
+          confidence: input.confidence
+          fell_back_to: input.fell_back_to
+          latency_ms: input.latency_ms
+          input_tokens: input.input_tokens
+          output_tokens: input.output_tokens
+        emits: [loom.run.SelectionRecorded]
+        payload:
+          loom.run.SelectionRecorded:
+            selection_record_id: input.selection_record_id
+            selection_id: input.selection_id
+            strategy: input.strategy
+            fell_back_to: input.fell_back_to
+
+  # A selection of the session was refused at the execution boundary, after it was made: the
+  # session's count of such refusals goes up by one. Counted only in a session a run is taking turns
+  # in.
+  - name: loom.run.CountBoundaryRefusal
+    input:
+      - name: session_id
+        type: loom.run.SessionId
+    outcomes:
+      - name: counted
+        moves: loom.run.Session.count_refusal
+        instance: session_id
+        sets:
+          boundary_refusals: {increment: 1}
+        emits: [loom.run.BoundaryRefusalCounted]
+        payload:
+          loom.run.BoundaryRefusalCounted:
+            session_id: input.session_id
+      - name: wrong-state
+        wrong_state: true
+        error: loom.run.SessionStateConflict
+
   # Before a selection is proposed it is revalidated against the case revision and the action ids
   # of the frontier current at revalidation, which come from the governor, never from the model.
   # not-in-frontier stays `external:`, answered by the executor from the input's frontier_actions:
-  # ess 0.56.0 has no predicate for membership in them: it refuses one as unparsable (ESS-SPEC-012).
+  # ess 0.57.0 has no predicate for membership in them: it refuses one as unparsable (ESS-SPEC-012).
   - name: loom.run.RevalidateSelection
     input:
       - name: selection_id
@@ -941,6 +1116,30 @@ events:
       - name: selection_id
         type: loom.run.SelectionId
 
+  - name: loom.run.SelectionRecorded
+    fields:
+      - name: selection_record_id
+        type: loom.run.SelectionRecordId
+      - name: selection_id
+        type: loom.run.SelectionId
+      - name: strategy
+        type: loom.run.SelectionStrategy
+      - name: fell_back_to
+        type: Optional<loom.run.SelectionStrategy>
+
+  - name: loom.run.BoundaryRefusalCounted
+    fields:
+      - name: session_id
+        type: loom.run.SessionId
+
+  # Overruled by a confidence fallback: names the selection that replaced it.
+  - name: loom.run.SelectionOverruled
+    fields:
+      - name: selection_id
+        type: loom.run.SelectionId
+      - name: replacement_id
+        type: loom.run.SelectionId
+
   # Refused: the action id is not among the current frontier's actions. Names the id.
   - name: loom.run.SelectionNotInFrontier
     fields:
@@ -972,6 +1171,8 @@ views:
         type: loom.run.CommissionRunId
       - name: wire
         type: String
+      - name: boundary_refusals
+        type: Integer
       - name: state
         type: loom.run.Session.State
 
@@ -990,8 +1191,37 @@ views:
         type: loom.run.SelectionStrategy
       - name: case_revision
         type: Integer
+      - name: replaced_by
+        type: Optional<loom.run.SelectionId>
       - name: state
         type: loom.run.Selection.State
+
+  # Every selection's telemetry: what Metaharness reads (decision-blocker:selection-telemetry-record).
+  # The confidence is not published: the conformance suite cannot replay a Decimal.
+  - name: loom.run.SelectionRecords
+    source: loom.run.SelectionRecord
+    consistency: read_your_writes
+    fields:
+      - name: selection_record_id
+        type: loom.run.SelectionRecordId
+      - name: selection_id
+        type: loom.run.SelectionId
+      - name: strategy
+        type: loom.run.SelectionStrategy
+      - name: candidate_count
+        type: Integer
+      - name: chosen_action
+        type: String
+      - name: fell_back_to
+        type: Optional<loom.run.SelectionStrategy>
+      - name: latency_ms
+        type: Integer
+      - name: input_tokens
+        type: Integer
+      - name: output_tokens
+        type: Integer
+      - name: state
+        type: loom.run.SelectionRecord.State
 
   # Every catalogue with its state: what a second projection of one id is checked against.
   - name: loom.run.Catalogues

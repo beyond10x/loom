@@ -1,6 +1,6 @@
 {
   "format": "b10x-status/1",
-  "asOf": "2026-10-08",
+  "asOf": "2026-10-10",
   "source": "Loom's status record, maintained in the repository and checked against main",
   "items": [
     {"label": "Transient model failure recovery", "status": "shipped", "area": "Intake", "detail": "Since 0.4.0: at most three identical model attempts before any stream output, with per-attempt metrics and no effect retries. Persistent provider overload reports Unavailable.", "href": "/docs/guides/system-queries"},
@@ -26,7 +26,9 @@
     {"label": "Model-backed selector and argument generator", "status": "shipped", "area": "Selection", "detail": "The slice's ModelSelector and ModelArguments use forced tool calls through llm, told the intent, its references and a bounded transcript. Since 0.3.0, argument generation can retrieve stored results before returning an action."},
     {"label": "Arguments for the selected action only", "status": "shipped", "area": "Selection", "detail": "A generator is handed the selected catalogue entry only, and the request for arguments is recorded against its selection."},
     {"label": "Schema validation of arguments", "status": "planned", "area": "Selection", "detail": "Where an action schema comes from is not decided."},
-    {"label": "Fast typed and hybrid selectors; confidence fallback; selection telemetry", "status": "planned", "area": "Selection", "href": "/docs/concepts/fast-selector"},
+    {"label": "Fast typed and hybrid selectors; confidence fallback", "status": "planned", "area": "Selection", "href": "/docs/concepts/fast-selector"},
+    {"label": "A confidence fallback is recorded as two linked selections", "status": "shipped", "area": "Selection", "detail": "Unreleased: when the hybrid selector falls back, Loom records the fast selection as Overruled, naming the stronger selector's selection that replaced it, and that selection; each carries its own selector's strategy, and only the replacement reaches argument generation and revalidation.", "href": "/docs/concepts/fast-selector"},
+    {"label": "Selection telemetry for Metaharness", "status": "shipped", "area": "Selection", "detail": "Unreleased: every selection gets one SelectionRecord (strategy, candidate count, chosen action, confidence, latency, tokens the selector reported, and on an overruled fast selection the strategy it fell back to), read with Loom::selection_records; a governed run's session counts the selections refused at the execution boundary after they were made (boundary_refusals). Neither is evidence.", "href": "/docs/concepts/action-selection"},
     {"label": "Canon governor", "status": "shipped", "area": "Governor", "detail": "CanonGovernor evaluates a case's engineering protocol with Canon on every frontier and completion; no clock, network or model call, and no invented authority.", "href": "/docs/concepts/governor-and-intake"},
     {"label": "Hosted governor contracts", "status": "shipped", "area": "Governor", "detail": "Since 0.2.0: host-admitted Canon protocols, trusted freshness callback and fallible case storage. No database backend or automatic protocol adoption.", "href": "/docs/concepts/governor-and-intake"},
     {"label": "Stateless evaluation", "status": "shipped", "area": "Governor", "detail": "loom_governor::evaluate and b10x-loom evaluate decide a catalog protocol over a caller's canon-case/1 snapshot and canon-evidence/1 records, with an optional trusted time, and return Canon's decision as JSON; no Commission type, no case store, no clock. An unusable input is refused naming it.", "href": "/docs/concepts/governor-and-intake"},

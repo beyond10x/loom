@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:selection-telemetry
 kind: story
-status: draft
+status: implemented
 title: Record selection telemetry for Metaharness
 refs:
 - provider: taskboard
@@ -12,6 +12,7 @@ relations:
 - depends_on: story:confidence-fallback
 - serves: vision:O3
 - serves: vision:governed-autonomy
+- depends_on: story:fallback-selection-recording
 scope:
 - confidence: inferred
   path: CHANGELOG.md
@@ -31,7 +32,11 @@ scope:
   path: ess/domains/run.yaml
 - confidence: cited
   path: generated/rust/loom/src/run.rs
-revision: 10
+revision: 14
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-10T02:04:40Z", actor: "human:timo", revision: 11}
+- {from: "proposed", to: "active", at: "2026-10-10T02:04:40Z", actor: "human:timo", revision: 12}
+- {from: "active", to: "implemented", at: "2026-10-10T04:21:19Z", actor: "human:timo", revision: 14, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 
@@ -55,3 +60,20 @@ out-of-frontier proposal refused at the boundary increments `boundary_refusals` 
 
 Build pack `projects/loom/TASKS.md` lines 13-20 (Atlas `docs/design/governed-autonomy/projects/loom-TASKS.md`);
 `docs/contracts/loom-action-selection.md` safety rule 7.
+
+## Settled at implementation (2026-10-10)
+
+- `fell_back_to` is on the record of the overruled fast selection and names the replacement's
+  strategy; the replacement's record has none.
+- A boundary refusal is a selection refused after it was made, by admission or by revalidation; a
+  model call outside the catalogue makes no selection and is not counted. Only a run with a
+  session (`run_loop`) counts; the plain `AgentExecutor` run has no session.
+- In a governed loop the selection is the model's tool call: the first selection of a turn carries
+  that turn's latency and token usage, later selections of the same turn record 0, so totals are
+  not double-counted.
+- Acceptance (3) means the refusal writes no further record; the refused selection keeps the record
+  written when it was made.
+- The records live on the `Loom` and in `Loom::sessions()`; the filed session file keeps its
+  format, and a resume compares `SessionData` without `boundary_refusals`.
+- ESS writes the count with `sets: {increment: 1}` on a self-transition; `confidence` is not
+  published in the `SelectionRecords` view (a Decimal the suite cannot replay, ESS-SYNTH-001).

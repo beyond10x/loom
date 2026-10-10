@@ -113,6 +113,10 @@
         {
           "name": "case_revision",
           "type": "integer"
+        },
+        {
+          "name": "replaced_by",
+          "type": "Optional<SelectionId>"
         }
       ],
       "id": "loom.run.Selection",
@@ -124,11 +128,13 @@
         "initial": "Selected",
         "states": [
           "Admitted",
+          "Overruled",
           "Refused",
           "Selected"
         ],
         "terminal": [
           "Admitted",
+          "Overruled",
           "Refused"
         ],
         "transitions": [
@@ -145,10 +151,72 @@
             ],
             "name": "refuse",
             "to": "Refused"
+          },
+          {
+            "from": [
+              "Selected"
+            ],
+            "name": "overrule",
+            "to": "Overruled"
           }
         ]
       },
       "name": "Selection"
+    },
+    {
+      "fields": [
+        {
+          "name": "selection_id",
+          "type": "SelectionId"
+        },
+        {
+          "name": "strategy",
+          "type": "SelectionStrategy"
+        },
+        {
+          "name": "candidate_count",
+          "type": "integer"
+        },
+        {
+          "name": "chosen_action",
+          "type": "string"
+        },
+        {
+          "name": "confidence",
+          "type": "Optional<decimal>"
+        },
+        {
+          "name": "fell_back_to",
+          "type": "Optional<SelectionStrategy>"
+        },
+        {
+          "name": "latency_ms",
+          "type": "integer"
+        },
+        {
+          "name": "input_tokens",
+          "type": "integer"
+        },
+        {
+          "name": "output_tokens",
+          "type": "integer"
+        }
+      ],
+      "id": "loom.run.SelectionRecord",
+      "identity": {
+        "name": "selection_record_id",
+        "type": "SelectionRecordId"
+      },
+      "lifecycle": {
+        "initial": "Recorded",
+        "states": [
+          "Recorded"
+        ],
+        "terminal": [
+          "Recorded"
+        ]
+      },
+      "name": "SelectionRecord"
     },
     {
       "fields": [
@@ -159,6 +227,10 @@
         {
           "name": "wire",
           "type": "string"
+        },
+        {
+          "name": "boundary_refusals",
+          "type": "integer"
         }
       ],
       "id": "loom.run.Session",
@@ -202,6 +274,13 @@
             ],
             "name": "interrupt",
             "to": "Interrupted"
+          },
+          {
+            "from": [
+              "Active"
+            ],
+            "name": "count_refusal",
+            "to": "Active"
           }
         ]
       },
@@ -256,6 +335,22 @@
       "name": "catalogue",
       "to": "loom.run.ActionCatalogue",
       "via": "catalogue_id"
+    },
+    {
+      "cardinality": "one",
+      "from": "loom.run.Selection",
+      "kind": "references",
+      "name": "replacement",
+      "to": "loom.run.Selection",
+      "via": "replaced_by"
+    },
+    {
+      "cardinality": "one",
+      "from": "loom.run.Selection",
+      "kind": "owns",
+      "name": "telemetry",
+      "to": "loom.run.SelectionRecord",
+      "via": "selection_id"
     },
     {
       "cardinality": "many",

@@ -36,6 +36,7 @@ fn a_filed_session_whose_tool_call_holds_a_large_integer_loads() {
         session_id: SessionId(Uuid("0190a5b2-0000-7000-8000-00000000a8b1".to_owned())),
         commission_run: CommissionRunId(Uuid("0190a5b2-0000-7000-8000-00000000a8b2".to_owned())),
         wire: responses::WIRE.to_owned(),
+        boundary_refusals: 0,
     };
     let mut session =
         SessionFile::open(&data, "gpt-5", "https://example.invalid", &workspace).expect("opens");

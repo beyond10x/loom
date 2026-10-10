@@ -6,6 +6,52 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- Selection telemetry for Metaharness. Every selection Loom records gets one
+  `loom.run.SelectionRecord`, written with it and returned by `Loom::selection_records`: the
+  strategy of the selector that made it, the number of candidates, the chosen action, its
+  confidence, the selector's latency in milliseconds and the input and output tokens it reported.
+  On a confidence fallback, `fell_back_to` is on the record of the overruled fast selection and
+  names the strategy of the selector that replaced it; the replacement's record has none. A
+  selection refused at the execution boundary after it was made, by Commission's admission or by
+  revalidation, raises its governed run's `Session.boundary_refusals` by one and adds no record.
+  Neither is evidence. `ess/domains/run.yaml` gains the entity `loom.run.SelectionRecord`, owned by
+  `loom.run.Selection`, the commands `loom.run.RecordSelection` and `loom.run.CountBoundaryRefusal`,
+  their events, the view `loom.run.SelectionRecords`, and `Session.boundary_refusals`.
+
+### Changed
+
+- **Breaking:** the generated `SessionData` gains `boundary_refusals`. A caller that builds the
+  session it hands `Loom::run_loop` or `LoopExecutor` sets it to `0`; a resume compares the session
+  without it. The filed session file keeps its format and does not carry the count.
+- **Breaking:** `selection::Pick` gains `latency_ms`, `input_tokens` and `output_tokens`, and
+  `selection::Resolved` gains `pick` and `overruled_pick`. A selector that overrides
+  `ActionSelector::resolve` fills them; the default `resolve` times `select` and reports no tokens.
+
+- **Breaking:** a selection on a confidence fallback is now recorded as two selections, each with
+  its own selector's strategy, where there was one `Hybrid` selection. `Loom::selections` holds the
+  fast selection first, in the new terminal state `Overruled` and naming the stronger selector's
+  selection in the new field `replaced_by`, then that selection, which alone reaches argument
+  generation and revalidation. A fast choice that is accepted is recorded as one selection with the
+  fast selector's strategy and no replacement; a fast selector that errs or names an action outside
+  the candidates leaves no fast selection. `loom.run.Selection` gains `replaced_by` and `Overruled`,
+  and the new command `loom.run.OverruleSelection` emits `loom.run.SelectionOverruled`
+  (`ess/domains/run.yaml`). `ActionSelector` gains the provided method `resolve`, which
+  `HybridSelector` overrides; `RequestRecord::overrule` refuses, recording nothing, a replacement
+  the record does not hold (`SelectionNotFound`), the selection itself, a replacement no longer
+  `Selected` and one made from another catalogue (`OverruleRefused`). `Loom::select` returns the
+  pick under the strategy of the selector that made it, as `Loom::run` records it, never `Hybrid`;
+  `selection::select` still records the strategy of the selector it is handed. Callers that expect
+  one `Hybrid` selection per run, or `Hybrid` from `Loom::select`, must read the strategies instead.
+
+- Loom requires ESS 0.57.0: the Loom, Commission and intake specifications require it, the
+  conformance targets build on the 0.57.0 `ess-conformance` and `ess-primitives`, and CI installs
+  the 0.57.0 `ess`. Every specification validates under 0.57.0's new refusals (a wire name
+  containing `/`, a refusal whose `when:` always holds) without change. Regenerating changed only
+  documentation: a doc comment on the generated Commission `Generated` type, and the Commission
+  domain graph page, which names the new compiler.
+
 ## [0.14.0] - 2026-10-09
 
 Loom 0.14.0 generates `LoopStop` from its ESS declaration. `loom.run.LoopStop` in

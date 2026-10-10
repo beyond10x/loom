@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest cee559ad7b98c0f74aa2bb607bd073e52902527033f7f7fd8d1292410f7f2e17
-// contract digest 874974d029ad4c9d989fd20452dec290f5ffb7299a164b44350cf9fe1e61f737
+// model digest 300dc2d9cea4ebe03da46be3740cd2be006c06099199c740b4db2b22e0ef540b
+// contract digest 8d8c474b54c7be5a40b1ec49641cdc66e85f8f3e768698010015dd595b0fce5e
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Run — `loom.run`.
@@ -238,6 +238,8 @@ pub enum RunEnding {
 pub enum SelectionState {
     /// `Admitted`.
     Admitted,
+    /// `Overruled`.
+    Overruled,
     /// `Refused`.
     Refused,
     /// `Selected`.
@@ -247,6 +249,20 @@ pub enum SelectionState {
 /// SelectionId — `loom.run.SelectionId`: a distinct wrapper around `Uuid`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectionId(pub crate::primitives::Uuid);
+
+/// The states of `loom.run.SelectionRecord`, as runtime values.
+///
+/// Synthesised from the lifecycle, so the two cannot disagree. Which *moves* are legal is not
+/// carried here — it is carried by `SelectionRecord<S>`, where an undeclared move does not compile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionRecordState {
+    /// `Recorded`.
+    Recorded,
+}
+
+/// SelectionRecordId — `loom.run.SelectionRecordId`: a distinct wrapper around `Uuid`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectionRecordId(pub crate::primitives::Uuid);
 
 /// SelectionStrategy — `loom.run.SelectionStrategy`: one of a closed set of names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -720,6 +736,10 @@ pub struct SelectionData {
     pub strategy: SelectionStrategy,
     /// `case_revision` — `Integer`.
     pub case_revision: i64,
+    /// `replaced_by` — `Optional<loom.run.SelectionId>`.
+    ///
+    /// Carries `replacement`: `loom.run.Selection` references one `loom.run.Selection`.
+    pub replaced_by: Option<SelectionId>,
 }
 
 /// The states of `loom.run.Selection`, at the type level.
@@ -732,6 +752,7 @@ pub mod selection_state {
         /// Implemented only by the marker types beside this module.
         pub trait Sealed {}
         impl Sealed for super::Admitted {}
+        impl Sealed for super::Overruled {}
         impl Sealed for super::Refused {}
         impl Sealed for super::Selected {}
     }
@@ -747,6 +768,13 @@ pub mod selection_state {
 
     impl Marker for Admitted {
         const STATE: super::SelectionState = super::SelectionState::Admitted;
+    }
+
+    /// `Overruled`. Terminal: an instance may rest here forever.
+    pub struct Overruled;
+
+    impl Marker for Overruled {
+        const STATE: super::SelectionState = super::SelectionState::Overruled;
     }
 
     /// `Refused`. Terminal: an instance may rest here forever.
@@ -818,6 +846,14 @@ impl Selection<selection_state::Selected> {
             state: core::marker::PhantomData,
         }
     }
+
+    /// `overrule` — `Selected` → `Overruled`. Taken by the `overruled` outcome of `loom.run.OverruleSelection`.
+    pub fn overrule(self) -> Selection<selection_state::Overruled> {
+        Selection {
+            data: self.data,
+            state: core::marker::PhantomData,
+        }
+    }
 }
 
 /// `loom.run.Selection` as it crosses a boundary: the state as a value beside the data.
@@ -836,6 +872,8 @@ pub struct SelectionSnapshot {
 pub enum AnySelection {
     /// Resting in `Admitted`.
     Admitted(Selection<selection_state::Admitted>),
+    /// Resting in `Overruled`.
+    Overruled(Selection<selection_state::Overruled>),
     /// Resting in `Refused`.
     Refused(Selection<selection_state::Refused>),
     /// Resting in `Selected`.
@@ -850,6 +888,10 @@ impl SelectionSnapshot {
     pub fn refine(self) -> AnySelection {
         match self.state {
             SelectionState::Admitted => AnySelection::Admitted(Selection {
+                data: self.data,
+                state: core::marker::PhantomData,
+            }),
+            SelectionState::Overruled => AnySelection::Overruled(Selection {
                 data: self.data,
                 state: core::marker::PhantomData,
             }),
@@ -870,6 +912,7 @@ impl AnySelection {
     pub fn state(&self) -> SelectionState {
         match self {
             Self::Admitted(_) => SelectionState::Admitted,
+            Self::Overruled(_) => SelectionState::Overruled,
             Self::Refused(_) => SelectionState::Refused,
             Self::Selected(_) => SelectionState::Selected,
         }
@@ -882,12 +925,162 @@ impl AnySelection {
                 state: SelectionState::Admitted,
                 data: instance.into_data(),
             },
+            Self::Overruled(instance) => SelectionSnapshot {
+                state: SelectionState::Overruled,
+                data: instance.into_data(),
+            },
             Self::Refused(instance) => SelectionSnapshot {
                 state: SelectionState::Refused,
                 data: instance.into_data(),
             },
             Self::Selected(instance) => SelectionSnapshot {
                 state: SelectionState::Selected,
+                data: instance.into_data(),
+            },
+        }
+    }
+}
+
+/// What SelectionRecord — `loom.run.SelectionRecord` — holds, apart from where it is in its lifecycle.
+///
+/// The identity and every declared field. The state is deliberately not one: inside the domain it
+/// is carried by the type parameter of [`SelectionRecord<S>`], and at a boundary by [`SelectionRecordSnapshot::state`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectionRecordData {
+    /// The identity: `selection_record_id` — `loom.run.SelectionRecordId`.
+    pub selection_record_id: SelectionRecordId,
+    /// `selection_id` — `loom.run.SelectionId`.
+    ///
+    /// Carries `telemetry`: `loom.run.Selection` owns one `loom.run.SelectionRecord`.
+    pub selection_id: SelectionId,
+    /// `strategy` — `loom.run.SelectionStrategy`.
+    pub strategy: SelectionStrategy,
+    /// `candidate_count` — `Integer`.
+    pub candidate_count: i64,
+    /// `chosen_action` — `String`.
+    pub chosen_action: String,
+    /// `confidence` — `Optional<Decimal>`.
+    pub confidence: Option<crate::primitives::Decimal>,
+    /// `fell_back_to` — `Optional<loom.run.SelectionStrategy>`.
+    pub fell_back_to: Option<SelectionStrategy>,
+    /// `latency_ms` — `Integer`.
+    pub latency_ms: i64,
+    /// `input_tokens` — `Integer`.
+    pub input_tokens: i64,
+    /// `output_tokens` — `Integer`.
+    pub output_tokens: i64,
+}
+
+/// The states of `loom.run.SelectionRecord`, at the type level.
+///
+/// One marker type per declared state, sealed: a state the lifecycle does not declare cannot
+/// implement [`Marker`](selection_record_state::Marker), so [`SelectionRecord<S>`](SelectionRecord) can only ever rest in a real state.
+pub mod selection_record_state {
+    /// Closes [`Marker`] over the declared states.
+    mod sealed {
+        /// Implemented only by the marker types beside this module.
+        pub trait Sealed {}
+        impl Sealed for super::Recorded {}
+    }
+
+    /// A declared state of `SelectionRecord`, as a type.
+    pub trait Marker: sealed::Sealed {
+        /// The same state, as the runtime value.
+        const STATE: super::SelectionRecordState;
+    }
+
+    /// `Recorded`. Where a new instance starts.
+    pub struct Recorded;
+
+    impl Marker for Recorded {
+        const STATE: super::SelectionRecordState = super::SelectionRecordState::Recorded;
+    }
+}
+
+/// SelectionRecord — `loom.run.SelectionRecord` — with its lifecycle state carried by the type.
+///
+/// The one constructor rests in `Recorded`, and the only way to change `S` is a method generated from
+/// a declared transition. A move the specification does not declare is therefore not an error
+/// case: it does not compile. Where the state is data — wire, storage — use [`SelectionRecordSnapshot`]
+/// and [`SelectionRecordSnapshot::refine`].
+pub struct SelectionRecord<S: selection_record_state::Marker> {
+    data: SelectionRecordData,
+    state: core::marker::PhantomData<S>,
+}
+
+impl<S: selection_record_state::Marker> SelectionRecord<S> {
+    /// The state this instance rests in, as the runtime value.
+    pub fn state(&self) -> SelectionRecordState {
+        S::STATE
+    }
+
+    /// What it holds.
+    pub fn data(&self) -> &SelectionRecordData {
+        &self.data
+    }
+
+    /// Hands the data back, giving up the typed state.
+    pub fn into_data(self) -> SelectionRecordData {
+        self.data
+    }
+}
+
+impl SelectionRecord<selection_record_state::Recorded> {
+    /// A new instance, resting in `Recorded` — the only state the lifecycle starts one in.
+    pub fn new(data: SelectionRecordData) -> Self {
+        Self {
+            data,
+            state: core::marker::PhantomData,
+        }
+    }
+}
+
+/// `loom.run.SelectionRecord` as it crosses a boundary: the state as a value beside the data.
+///
+/// Wire and storage know states only at runtime; [`SelectionRecordSnapshot::refine`] is the one door back
+/// into the typed lifecycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectionRecordSnapshot {
+    /// Where the instance is in its lifecycle.
+    pub state: SelectionRecordState,
+    /// What it holds.
+    pub data: SelectionRecordData,
+}
+
+/// An `SelectionRecord` in whichever declared state it was found.
+pub enum AnySelectionRecord {
+    /// Resting in `Recorded`.
+    Recorded(SelectionRecord<selection_record_state::Recorded>),
+}
+
+impl SelectionRecordSnapshot {
+    /// Refines the runtime state into the typed one.
+    ///
+    /// Total: every declared state has an arm, and an undeclared state cannot reach here because
+    /// `SelectionRecordState` cannot spell one.
+    pub fn refine(self) -> AnySelectionRecord {
+        match self.state {
+            SelectionRecordState::Recorded => AnySelectionRecord::Recorded(SelectionRecord {
+                data: self.data,
+                state: core::marker::PhantomData,
+            }),
+        }
+    }
+}
+
+impl AnySelectionRecord {
+    /// The state, as the runtime value.
+    pub fn state(&self) -> SelectionRecordState {
+        match self {
+            Self::Recorded(_) => SelectionRecordState::Recorded,
+        }
+    }
+
+    /// Back to the boundary shape.
+    pub fn snapshot(self) -> SelectionRecordSnapshot {
+        match self {
+            Self::Recorded(instance) => SelectionRecordSnapshot {
+                state: SelectionRecordState::Recorded,
                 data: instance.into_data(),
             },
         }
@@ -906,6 +1099,8 @@ pub struct SessionData {
     pub commission_run: CommissionRunId,
     /// `wire` — `String`.
     pub wire: String,
+    /// `boundary_refusals` — `Integer`.
+    pub boundary_refusals: i64,
 }
 
 /// The states of `loom.run.Session`, at the type level.
@@ -1007,6 +1202,14 @@ impl Session<session_state::Active> {
 
     /// `interrupt` — `Active` → `Interrupted`. Taken by the `interrupted` outcome of `loom.run.InterruptSession`.
     pub fn interrupt(self) -> Session<session_state::Interrupted> {
+        Session {
+            data: self.data,
+            state: core::marker::PhantomData,
+        }
+    }
+
+    /// `count_refusal` — `Active` → `Active`. Taken by the `counted` outcome of `loom.run.CountBoundaryRefusal`.
+    pub fn count_refusal(self) -> Session<session_state::Active> {
         Session {
             data: self.data,
             state: core::marker::PhantomData,
@@ -1242,6 +1445,39 @@ impl AnyTurn {
     }
 }
 
+/// CountBoundaryRefusal — the input of `loom.run.CountBoundaryRefusal`.
+///
+/// Everything it can result in is [`CountBoundaryRefusalOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CountBoundaryRefusal {
+    /// `session_id` — `loom.run.SessionId`.
+    pub session_id: SessionId,
+}
+
+/// Everything `loom.run.CountBoundaryRefusal` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CountBoundaryRefusalOutcome {
+    /// `counted` — otherwise.
+    Counted {
+        /// The `loom.run.BoundaryRefusalCounted` this outcome publishes.
+        boundary_refusal_counted: BoundaryRefusalCounted,
+    },
+    /// `wrong-state` — from a state no declared move starts in.
+    WrongState {
+        /// Why it was refused: `loom.run.SessionStateConflict`.
+        error: SessionStateConflict,
+    },
+    /// `wrong-state` — for an instance no record carries.
+    ///
+    /// The same declared branch and error as [`Self::WrongState`], without the error's fields: an instance
+    /// that does not exist has nothing for them to describe (`docs/design/unknown-instance-seams.md`).
+    WrongStateUnknownInstance,
+}
+
 /// FileSession — the input of `loom.run.FileSession`.
 ///
 /// Everything it can result in is [`FileSessionOutcome`].
@@ -1342,6 +1578,41 @@ pub enum OpenSessionOutcome {
     },
 }
 
+/// OverruleSelection — the input of `loom.run.OverruleSelection`.
+///
+/// Everything it can result in is [`OverruleSelectionOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OverruleSelection {
+    /// `selection_id` — `loom.run.SelectionId`.
+    pub selection_id: SelectionId,
+    /// `replacement_id` — `loom.run.SelectionId`.
+    pub replacement_id: SelectionId,
+}
+
+/// Everything `loom.run.OverruleSelection` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OverruleSelectionOutcome {
+    /// `overruled` — otherwise.
+    Overruled {
+        /// The `loom.run.SelectionOverruled` this outcome publishes.
+        selection_overruled: SelectionOverruled,
+    },
+    /// `wrong-state` — from a state no declared move starts in.
+    WrongState {
+        /// Why it was refused: `loom.run.SelectionStateConflict`.
+        error: SelectionStateConflict,
+    },
+    /// `wrong-state` — for an instance no record carries.
+    ///
+    /// The same declared branch and error as [`Self::WrongState`], without the error's fields: an instance
+    /// that does not exist has nothing for them to describe (`docs/design/unknown-instance-seams.md`).
+    WrongStateUnknownInstance,
+}
+
 /// ProjectCatalogue — the input of `loom.run.ProjectCatalogue`.
 ///
 /// Everything it can result in is [`ProjectCatalogueOutcome`].
@@ -1412,6 +1683,57 @@ pub enum RecordCompactionOutcome {
     Recorded {
         /// The `loom.run.SessionCompacted` this outcome publishes.
         session_compacted: SessionCompacted,
+    },
+}
+
+/// RecordSelection — the input of `loom.run.RecordSelection`.
+///
+/// Everything it can result in is [`RecordSelectionOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordSelection {
+    /// `selection_record_id` — `loom.run.SelectionRecordId`.
+    pub selection_record_id: SelectionRecordId,
+    /// `selection_id` — `loom.run.SelectionId`.
+    pub selection_id: SelectionId,
+    /// `strategy` — `loom.run.SelectionStrategy`.
+    pub strategy: SelectionStrategy,
+    /// `candidate_count` — `Integer`.
+    pub candidate_count: i64,
+    /// `chosen_action` — `String`.
+    pub chosen_action: String,
+    /// `confidence` — `Optional<Decimal>`.
+    pub confidence: Option<crate::primitives::Decimal>,
+    /// `fell_back_to` — `Optional<loom.run.SelectionStrategy>`.
+    pub fell_back_to: Option<SelectionStrategy>,
+    /// `latency_ms` — `Integer`.
+    pub latency_ms: i64,
+    /// `input_tokens` — `Integer`.
+    pub input_tokens: i64,
+    /// `output_tokens` — `Integer`.
+    pub output_tokens: i64,
+}
+
+/// Everything `loom.run.RecordSelection` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordSelectionOutcome {
+    /// `record-exists` — for an identity a record already carries.
+    RecordExists {
+        /// Why it was refused: `loom.run.SelectionRecordExists`.
+        error: SelectionRecordExists,
+    },
+    /// `selection-unknown` — when no `loom.run.Selection` carries the identity `input.selection_id` names.
+    SelectionUnknown {
+        /// Why it was refused: `loom.run.SelectionNotFound`.
+        error: SelectionNotFound,
+    },
+    /// `recorded` — otherwise.
+    Recorded {
+        /// The `loom.run.SelectionRecorded` this outcome publishes.
+        selection_recorded: SelectionRecorded,
     },
 }
 
@@ -1677,6 +1999,13 @@ pub struct ArgumentsRequested {
     pub selection_id: SelectionId,
 }
 
+/// BoundaryRefusalCounted — the event `loom.run.BoundaryRefusalCounted`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundaryRefusalCounted {
+    /// `session_id` — `loom.run.SessionId`.
+    pub session_id: SessionId,
+}
+
 /// CatalogueProjected — the event `loom.run.CatalogueProjected`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogueProjected {
@@ -1702,6 +2031,28 @@ pub struct SelectionNotInFrontier {
     pub selection_id: SelectionId,
     /// `action` — `String`.
     pub action: String,
+}
+
+/// SelectionOverruled — the event `loom.run.SelectionOverruled`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectionOverruled {
+    /// `selection_id` — `loom.run.SelectionId`.
+    pub selection_id: SelectionId,
+    /// `replacement_id` — `loom.run.SelectionId`.
+    pub replacement_id: SelectionId,
+}
+
+/// SelectionRecorded — the event `loom.run.SelectionRecorded`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectionRecorded {
+    /// `selection_record_id` — `loom.run.SelectionRecordId`.
+    pub selection_record_id: SelectionRecordId,
+    /// `selection_id` — `loom.run.SelectionId`.
+    pub selection_id: SelectionId,
+    /// `strategy` — `loom.run.SelectionStrategy`.
+    pub strategy: SelectionStrategy,
+    /// `fell_back_to` — `Optional<loom.run.SelectionStrategy>`.
+    pub fell_back_to: Option<SelectionStrategy>,
 }
 
 /// SelectionStale — the event `loom.run.SelectionStale`.
@@ -1828,6 +2179,13 @@ pub struct SelectionNotSelected {
     pub selection_id: SelectionId,
 }
 
+/// The declared error `loom.run.SelectionRecordExists`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectionRecordExists {
+    /// `selection_record_id` — `loom.run.SelectionRecordId`.
+    pub selection_record_id: SelectionRecordId,
+}
+
 /// The declared error `loom.run.SelectionStateConflict`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectionStateConflict {
@@ -1889,6 +2247,35 @@ pub struct Catalogues {
     pub state: ActionCatalogueState,
 }
 
+/// SelectionRecords — one row of the view `loom.run.SelectionRecords`.
+///
+/// Projects `loom.run.SelectionRecord` at `read_your_writes` consistency.
+/// The specification fully determines every row, so its query is generated over the storage port —
+/// see the plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectionRecords {
+    /// `selection_record_id` — `loom.run.SelectionRecordId`.
+    pub selection_record_id: SelectionRecordId,
+    /// `selection_id` — `loom.run.SelectionId`.
+    pub selection_id: SelectionId,
+    /// `strategy` — `loom.run.SelectionStrategy`.
+    pub strategy: SelectionStrategy,
+    /// `candidate_count` — `Integer`.
+    pub candidate_count: i64,
+    /// `chosen_action` — `String`.
+    pub chosen_action: String,
+    /// `fell_back_to` — `Optional<loom.run.SelectionStrategy>`.
+    pub fell_back_to: Option<SelectionStrategy>,
+    /// `latency_ms` — `Integer`.
+    pub latency_ms: i64,
+    /// `input_tokens` — `Integer`.
+    pub input_tokens: i64,
+    /// `output_tokens` — `Integer`.
+    pub output_tokens: i64,
+    /// `state` — `loom.run.SelectionRecord.State`.
+    pub state: SelectionRecordState,
+}
+
 /// Selections — one row of the view `loom.run.Selections`.
 ///
 /// Projects `loom.run.Selection` at `read_your_writes` consistency.
@@ -1906,6 +2293,8 @@ pub struct Selections {
     pub strategy: SelectionStrategy,
     /// `case_revision` — `Integer`.
     pub case_revision: i64,
+    /// `replaced_by` — `Optional<loom.run.SelectionId>`.
+    pub replaced_by: Option<SelectionId>,
     /// `state` — `loom.run.Selection.State`.
     pub state: SelectionState,
 }
@@ -1923,6 +2312,8 @@ pub struct Sessions {
     pub commission_run: CommissionRunId,
     /// `wire` — `String`.
     pub wire: String,
+    /// `boundary_refusals` — `Integer`.
+    pub boundary_refusals: i64,
     /// `state` — `loom.run.Session.State`.
     pub state: SessionState,
 }
@@ -1933,6 +2324,17 @@ pub struct Sessions {
 /// per generated behaviour, which [`Generated`](crate::behaviour::Generated) implements.
 /// [`Unimplemented`](obligations::Unimplemented) satisfies every owed trait by refusing in the type system.
 pub mod obligations {
+    /// The behaviour `loom.run.CountBoundaryRefusal` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait CountBoundaryRefusalBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.run.CountBoundaryRefusal`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn count_boundary_refusal(&mut self, input: super::CountBoundaryRefusal) -> Result<super::CountBoundaryRefusalOutcome, crate::obligation::UnmetObligation>;
+    }
+
     /// The behaviour `loom.run.FileSession` — generated.
     ///
     /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
@@ -1966,6 +2368,17 @@ pub mod obligations {
         fn open_session(&mut self, input: super::OpenSession) -> Result<super::OpenSessionOutcome, crate::obligation::UnmetObligation>;
     }
 
+    /// The behaviour `loom.run.OverruleSelection` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait OverruleSelectionBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.run.OverruleSelection`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn overrule_selection(&mut self, input: super::OverruleSelection) -> Result<super::OverruleSelectionOutcome, crate::obligation::UnmetObligation>;
+    }
+
     /// The behaviour `loom.run.ProjectCatalogue` — generated.
     ///
     /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
@@ -1986,6 +2399,17 @@ pub mod obligations {
         ///
         /// `Err` is the typed refusal of a request the model declares no outcome for.
         fn record_compaction(&mut self, input: super::RecordCompaction) -> Result<super::RecordCompactionOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `loom.run.RecordSelection` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait RecordSelectionBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.run.RecordSelection`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn record_selection(&mut self, input: super::RecordSelection) -> Result<super::RecordSelectionOutcome, crate::obligation::UnmetObligation>;
     }
 
     /// The behaviour `loom.run.RecordTurn` — generated.
@@ -2065,6 +2489,17 @@ pub mod obligations {
         ///
         /// `Err` is the typed refusal of a row whose declared type cannot hold its value.
         fn catalogues(&self) -> Result<Vec<super::Catalogues>, crate::obligation::UnmetObligation>;
+    }
+
+    /// The query `loom.run.SelectionRecords` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage port. Implement it yourself to replace that query.
+    pub trait SelectionRecordsQuery {
+        /// Serves `loom.run.SelectionRecords` rows at the view's declared consistency.
+        ///
+        /// `Err` is the typed refusal of a row whose declared type cannot hold its value.
+        fn selection_records(&self) -> Result<Vec<super::SelectionRecords>, crate::obligation::UnmetObligation>;
     }
 
     /// The query `loom.run.Selections` — generated.

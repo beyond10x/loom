@@ -12,14 +12,17 @@
 
 use b10x_loom_commission::model::json::Value;
 
-use crate::model::behaviour::SelectionStorage;
+use crate::model::behaviour::{Generated, SelectionRecordStorage, SelectionStorage};
 use crate::model::obligation::UnmetObligation;
-use crate::model::run::obligations::RequestArgumentsBehavior;
+use crate::model::run::obligations::{
+    OverruleSelectionBehavior, RecordSelectionBehavior, RequestArgumentsBehavior,
+};
 use crate::model::run::{
     AnyArgumentRequest, ArgumentRequest, ArgumentRequestData, ArgumentRequestSnapshot,
-    ArgumentsRequested, CatalogueEntry, RequestArguments, RequestArgumentsOutcome,
+    ArgumentsRequested, CatalogueEntry, CatalogueId, OverruleSelection, OverruleSelectionOutcome,
+    RecordSelection, RecordSelectionOutcome, RequestArguments, RequestArgumentsOutcome,
     RevalidateSelectionOutcome, SelectionId, SelectionNotFound, SelectionNotSelected,
-    SelectionSnapshot, SelectionState,
+    SelectionRecordId, SelectionRecordSnapshot, SelectionSnapshot, SelectionState,
 };
 
 /// What a generator is told besides the selected entry.
@@ -51,12 +54,14 @@ impl ArgumentGenerator for EmptyObjectArguments {
     }
 }
 
-/// The selections Loom made, the argument requests that serve them and the outcome of every
-/// revalidation of them ([`crate::revalidation`]), in the order they were recorded. A selection or
+/// The selections Loom made, the telemetry of each (`loom.run.SelectionRecord`), the argument
+/// requests that serve them and the outcome of every revalidation of them
+/// ([`crate::revalidation`]), in the order they were recorded. A selection, selection record or
 /// argument request stored under an identity already held replaces it.
 #[derive(Debug, Default)]
 pub struct RequestRecord {
     selections: Vec<SelectionSnapshot>,
+    selection_records: Vec<SelectionRecordSnapshot>,
     argument_requests: Vec<ArgumentRequestSnapshot>,
     revalidations: Vec<RevalidateSelectionOutcome>,
 }
@@ -66,6 +71,13 @@ impl RequestRecord {
     #[must_use]
     pub fn selections(&self) -> &[SelectionSnapshot] {
         &self.selections
+    }
+
+    /// Every recorded selection's telemetry, in the order recorded. Never evidence (Atlas ADR
+    /// 0074).
+    #[must_use]
+    pub fn selection_records(&self) -> &[SelectionRecordSnapshot] {
+        &self.selection_records
     }
 
     /// Every recorded argument request.
@@ -112,6 +124,174 @@ impl SelectionStorage for RequestRecord {
 
     fn list(&self) -> Vec<SelectionSnapshot> {
         self.selections.clone()
+    }
+}
+
+/// Why [`RequestRecord::overrule`] overruled nothing. Every refusal but [`OverruleRefused::Unmet`]
+/// is the host's, made before the generated behaviour runs, and leaves the record as it was.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OverruleRefused {
+    /// The record holds no selection under the replacement's id, which this names.
+    ReplacementNotFound(SelectionNotFound),
+    /// The replacement is the selection to be overruled, whose id this names: no selection
+    /// replaces itself.
+    ReplacementIsTheSelection(SelectionId),
+    /// The replacement, which this names, is no longer `Selected`: an `Overruled`, `Admitted` or
+    /// `Refused` selection replaces nothing.
+    ReplacementNotSelected(SelectionNotSelected),
+    /// The replacement was made from another catalogue than the selection it would overrule, so
+    /// it is not that selection's turn's: names the replacement and the catalogue it was made from.
+    ReplacementFromAnotherCatalogue {
+        /// The replacement's id.
+        replacement_id: SelectionId,
+        /// The catalogue the replacement was made from.
+        catalogue_id: CatalogueId,
+    },
+    /// The generated behaviour refused the request as one the specification declares no outcome
+    /// for.
+    Unmet(UnmetObligation),
+}
+
+impl RequestRecord {
+    /// `loom.run.OverruleSelection` as Loom records a confidence fallback: refused, naming the
+    /// replacement, when the record holds no selection under `input.replacement_id`, when the
+    /// replacement is the selection itself, when it is no longer `Selected`, or when it was made
+    /// from another catalogue than a held selection it would overrule; otherwise the generated
+    /// behaviour's outcome ([`OverruleSelectionBehavior`]). A refusal records nothing.
+    ///
+    /// ESS refuses a `when_related` guard on the replacement beside `wrong_state`
+    /// (`ESS-COMMAND-004`), so the specification's behaviour, which the conformance suite holds,
+    /// overrules whatever replacement it is named; these checks are the host's, made before it.
+    pub fn overrule(
+        &mut self,
+        input: OverruleSelection,
+    ) -> Result<OverruleSelectionOutcome, OverruleRefused> {
+        let Some(replacement) = SelectionStorage::get(self, &input.replacement_id) else {
+            return Err(OverruleRefused::ReplacementNotFound(SelectionNotFound {
+                selection_id: input.replacement_id,
+            }));
+        };
+        if input.replacement_id == input.selection_id {
+            return Err(OverruleRefused::ReplacementIsTheSelection(
+                input.replacement_id,
+            ));
+        }
+        if replacement.state != SelectionState::Selected {
+            return Err(OverruleRefused::ReplacementNotSelected(
+                SelectionNotSelected {
+                    selection_id: input.replacement_id,
+                },
+            ));
+        }
+        if let Some(overruled) = SelectionStorage::get(self, &input.selection_id)
+            && overruled.data.catalogue_id != replacement.data.catalogue_id
+        {
+            return Err(OverruleRefused::ReplacementFromAnotherCatalogue {
+                replacement_id: input.replacement_id,
+                catalogue_id: replacement.data.catalogue_id,
+            });
+        }
+        self.overrule_selection(input)
+            .map_err(OverruleRefused::Unmet)
+    }
+}
+
+/// The record, as the storage port of the generated `OverruleSelection`.
+struct Overruling<'r>(&'r mut RequestRecord);
+
+impl SelectionStorage for Overruling<'_> {
+    fn get(&self, identity: &SelectionId) -> Option<SelectionSnapshot> {
+        SelectionStorage::get(self.0, identity)
+    }
+
+    fn put(&mut self, snapshot: SelectionSnapshot) {
+        SelectionStorage::put(self.0, snapshot);
+    }
+
+    fn delete(&mut self, identity: &SelectionId) {
+        SelectionStorage::delete(self.0, identity);
+    }
+
+    fn list(&self) -> Vec<SelectionSnapshot> {
+        SelectionStorage::list(self.0)
+    }
+}
+
+/// `loom.run.OverruleSelection`, generated, over this record: a `Selected` selection is moved to
+/// `Overruled` naming the replacement in `replaced_by` (`overruled`); any other is refused
+/// `wrong-state`. It does not check that the replacement is held: [`RequestRecord::overrule`] does.
+impl OverruleSelectionBehavior for RequestRecord {
+    fn overrule_selection(
+        &mut self,
+        input: OverruleSelection,
+    ) -> Result<OverruleSelectionOutcome, UnmetObligation> {
+        Generated::new(Overruling(self)).overrule_selection(input)
+    }
+}
+
+/// The record, as the storage ports of the generated `RecordSelection`: the selections a record
+/// names, and the records. Only through it is the record a store of selection records,
+/// so a caller holding both storage traits never finds two `put`s on [`RequestRecord`].
+struct Telemetry<'r>(&'r mut RequestRecord);
+
+impl SelectionStorage for Telemetry<'_> {
+    fn get(&self, identity: &SelectionId) -> Option<SelectionSnapshot> {
+        SelectionStorage::get(self.0, identity)
+    }
+
+    fn put(&mut self, snapshot: SelectionSnapshot) {
+        SelectionStorage::put(self.0, snapshot);
+    }
+
+    fn delete(&mut self, identity: &SelectionId) {
+        SelectionStorage::delete(self.0, identity);
+    }
+
+    fn list(&self) -> Vec<SelectionSnapshot> {
+        SelectionStorage::list(self.0)
+    }
+}
+
+impl SelectionRecordStorage for Telemetry<'_> {
+    fn get(&self, identity: &SelectionRecordId) -> Option<SelectionRecordSnapshot> {
+        self.0
+            .selection_records
+            .iter()
+            .find(|held| &held.data.selection_record_id == identity)
+            .cloned()
+    }
+
+    fn put(&mut self, snapshot: SelectionRecordSnapshot) {
+        let records = &mut self.0.selection_records;
+        match records
+            .iter_mut()
+            .find(|held| held.data.selection_record_id == snapshot.data.selection_record_id)
+        {
+            Some(held) => *held = snapshot,
+            None => records.push(snapshot),
+        }
+    }
+
+    fn delete(&mut self, identity: &SelectionRecordId) {
+        self.0
+            .selection_records
+            .retain(|held| &held.data.selection_record_id != identity);
+    }
+
+    fn list(&self) -> Vec<SelectionRecordSnapshot> {
+        self.0.selection_records.clone()
+    }
+}
+
+/// `loom.run.RecordSelection`, generated, over this record: a record identity is recorded once
+/// (`record-exists`), only for a selection the record holds (`selection-unknown`); otherwise the
+/// `loom.run.SelectionRecord` is stored `Recorded` (`recorded`).
+impl RecordSelectionBehavior for RequestRecord {
+    fn record_selection(
+        &mut self,
+        input: RecordSelection,
+    ) -> Result<RecordSelectionOutcome, UnmetObligation> {
+        Generated::new(Telemetry(self)).record_selection(input)
     }
 }
 
@@ -180,6 +360,7 @@ mod tests {
             confidence: None,
             strategy: SelectionStrategy::Rule,
             case_revision: 1,
+            replaced_by: None,
         })
     }
 

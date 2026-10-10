@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use b10x_loom_executor::model::primitives::{Decimal, Uuid};
 use b10x_loom_executor::model::run::{
     ActionCatalogueState, CatalogueEntry, CatalogueEntryStatus, ReportedUsage, RunEnding,
-    SelectionState, SelectionStrategy, SessionState,
+    SelectionRecordState, SelectionState, SelectionStrategy, SessionState,
 };
 use ess_primitives::facts::{Number, is_canonical_uuid};
 use ess_primitives::node::Node;
@@ -81,6 +81,14 @@ pub fn strategy(input: &Input, name: &str) -> Option<SelectionStrategy> {
         "Hybrid" => SelectionStrategy::Hybrid,
         _ => return None,
     })
+}
+
+/// The `Optional<loom.run.SelectionStrategy>` field `name`.
+pub fn optional_strategy(input: &Input, name: &str) -> Option<Option<SelectionStrategy>> {
+    match input.get(name) {
+        None | Some(Node::Null) => Some(None),
+        Some(_) => strategy(input, name).map(Some),
+    }
 }
 
 /// The `List<loom.run.CatalogueEntry>` field `name`.
@@ -166,6 +174,14 @@ pub fn selection_state(state: SelectionState) -> Node {
         SelectionState::Selected => "Selected",
         SelectionState::Admitted => "Admitted",
         SelectionState::Refused => "Refused",
+        SelectionState::Overruled => "Overruled",
+    })
+}
+
+/// The declared name of a selection record state.
+pub fn selection_record_state(state: SelectionRecordState) -> Node {
+    name(match state {
+        SelectionRecordState::Recorded => "Recorded",
     })
 }
 
