@@ -261,7 +261,7 @@ fn assert_proposed(name: &str, observed: &Observed, expected: &str, strategy: Se
     );
     assert_eq!(
         observed.argument_requests,
-        [proposed.data.selection_id.clone()],
+        std::slice::from_ref(&proposed.data.selection_id),
         "{name}: one argument request, serving the proposed selection"
     );
     assert_eq!(

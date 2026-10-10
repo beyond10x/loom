@@ -100,6 +100,7 @@ mod tests {
             confidence: None,
             strategy: SelectionStrategy::Rule,
             case_revision: 3,
+            replaced_by: None,
         })
     }
 

@@ -166,6 +166,7 @@ pub fn selection_state(state: SelectionState) -> Node {
         SelectionState::Selected => "Selected",
         SelectionState::Admitted => "Admitted",
         SelectionState::Refused => "Refused",
+        SelectionState::Overruled => "Overruled",
     })
 }
 

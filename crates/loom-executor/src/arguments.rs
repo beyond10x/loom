@@ -12,14 +12,14 @@
 
 use b10x_loom_commission::model::json::Value;
 
-use crate::model::behaviour::SelectionStorage;
+use crate::model::behaviour::{Generated, SelectionStorage};
 use crate::model::obligation::UnmetObligation;
-use crate::model::run::obligations::RequestArgumentsBehavior;
+use crate::model::run::obligations::{OverruleSelectionBehavior, RequestArgumentsBehavior};
 use crate::model::run::{
     AnyArgumentRequest, ArgumentRequest, ArgumentRequestData, ArgumentRequestSnapshot,
-    ArgumentsRequested, CatalogueEntry, RequestArguments, RequestArgumentsOutcome,
-    RevalidateSelectionOutcome, SelectionId, SelectionNotFound, SelectionNotSelected,
-    SelectionSnapshot, SelectionState,
+    ArgumentsRequested, CatalogueEntry, OverruleSelection, OverruleSelectionOutcome,
+    RequestArguments, RequestArgumentsOutcome, RevalidateSelectionOutcome, SelectionId,
+    SelectionNotFound, SelectionNotSelected, SelectionSnapshot, SelectionState,
 };
 
 /// What a generator is told besides the selected entry.
@@ -115,6 +115,71 @@ impl SelectionStorage for RequestRecord {
     }
 }
 
+/// Why [`RequestRecord::overrule`] overruled nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OverruleRefused {
+    /// The record holds no selection under the replacement's id, which this names.
+    ReplacementNotFound(SelectionNotFound),
+    /// The generated behaviour refused the request as one the specification declares no outcome
+    /// for.
+    Unmet(UnmetObligation),
+}
+
+impl RequestRecord {
+    /// `loom.run.OverruleSelection` as Loom records a confidence fallback: refused, naming the
+    /// replacement, when the record holds no selection under `input.replacement_id`; otherwise
+    /// the generated behaviour's outcome ([`OverruleSelectionBehavior`]).
+    ///
+    /// ESS refuses a `when_related` guard on the replacement beside `wrong_state`
+    /// (`ESS-COMMAND-004`), so the specification's behaviour, which the conformance suite holds,
+    /// overrules whatever replacement it is named; this check is the host's, made before it.
+    pub fn overrule(
+        &mut self,
+        input: OverruleSelection,
+    ) -> Result<OverruleSelectionOutcome, OverruleRefused> {
+        if SelectionStorage::get(self, &input.replacement_id).is_none() {
+            return Err(OverruleRefused::ReplacementNotFound(SelectionNotFound {
+                selection_id: input.replacement_id,
+            }));
+        }
+        self.overrule_selection(input)
+            .map_err(OverruleRefused::Unmet)
+    }
+}
+
+/// The record, as the storage port of a generated behaviour.
+struct Selections<'r>(&'r mut RequestRecord);
+
+impl SelectionStorage for Selections<'_> {
+    fn get(&self, identity: &SelectionId) -> Option<SelectionSnapshot> {
+        SelectionStorage::get(self.0, identity)
+    }
+
+    fn put(&mut self, snapshot: SelectionSnapshot) {
+        SelectionStorage::put(self.0, snapshot);
+    }
+
+    fn delete(&mut self, identity: &SelectionId) {
+        SelectionStorage::delete(self.0, identity);
+    }
+
+    fn list(&self) -> Vec<SelectionSnapshot> {
+        SelectionStorage::list(self.0)
+    }
+}
+
+/// `loom.run.OverruleSelection`, generated, over this record: a `Selected` selection is moved to
+/// `Overruled` naming the replacement in `replaced_by` (`overruled`); any other is refused
+/// `wrong-state`. It does not check that the replacement is held: [`RequestRecord::overrule`] does.
+impl OverruleSelectionBehavior for RequestRecord {
+    fn overrule_selection(
+        &mut self,
+        input: OverruleSelection,
+    ) -> Result<OverruleSelectionOutcome, UnmetObligation> {
+        Generated::new(Selections(self)).overrule_selection(input)
+    }
+}
+
 /// `loom.run.RequestArguments`: refused for a selection the record does not hold
 /// (`selection-unknown`) or one no longer `Selected` (`selection-not-selected`); otherwise the
 /// `loom.run.ArgumentRequest` is recorded against the selection (`requested`).
@@ -180,6 +245,7 @@ mod tests {
             confidence: None,
             strategy: SelectionStrategy::Rule,
             case_revision: 1,
+            replaced_by: None,
         })
     }
 

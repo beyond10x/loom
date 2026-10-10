@@ -485,7 +485,7 @@ fn assert_slice(
 
     assert_eq!(
         observed.argument_requests,
-        [proposed_id.clone()],
+        std::slice::from_ref(&proposed_id),
         "{name}: one argument request, serving the proposed selection"
     );
     assert_eq!(
