@@ -57,7 +57,7 @@ scope:
   path: website/data/status.json
 - confidence: cited
   path: website/docs/reference/ess
-revision: 27
+revision: 28
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-10T02:04:40Z", actor: "human:timo", revision: 26}
 - {from: "proposed", to: "active", at: "2026-10-10T02:04:40Z", actor: "human:timo", revision: 27}
@@ -127,3 +127,17 @@ follows this story.
 Split out of `story:confidence-fallback` at scoping, wave 2026-10-09-w1: the story's acceptance
 checks only which choice is returned, and the recording needs a specification change, shown to
 validate with ESS 0.57.0 on 2026-10-10.
+
+## Settled at implementation (2026-10-10)
+
+- The record implements the generated `OverruleSelectionBehavior` unchanged, and the conformance
+  target dispatches `OverruleSelection` through it: the synthesized `overruled` scenario names a
+  replacement no step creates. The host check is a separate record method,
+  `RequestRecord::overrule`, refusing an unknown replacement with `SelectionNotFound`; `Loom::prepare`
+  and the acceptance test use it.
+- An accepted fast pick under a hybrid records the fast selector's strategy (`FastTyped`), not
+  `Hybrid`; laya's test expects that.
+- When the stronger selector errs or its choice is refused, no fast selection is recorded.
+- The replacement's id is minted in `Loom::prepare` from the first selection id; the proposed
+  selection keeps the existing id.
+- Nested hybrids record only the outermost overrule (the relation is zero or one).
