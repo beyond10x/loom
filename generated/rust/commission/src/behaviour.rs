@@ -40,11 +40,10 @@ pub trait RunStorage {
 
 /// Every generated behaviour of this workspace, over the ports `P` supplies.
 ///
-/// `P` implements the storage trait of each entity a generated behaviour reads or writes,
-/// `TryContext` (or its legacy `Context` blanket adapter) where one asks it anything, and every `…Behavior` and `…Query` trait the plan still
-/// owes; `Generated<P>` forwards those to it.
+/// `P` implements the storage trait of each entity a generated behaviour reads or writes, and
+/// every `…Behavior` and `…Query` trait the plan still owes; `Generated<P>` forwards those to it.
 pub struct Generated<P> {
-    /// The storage and context ports, and every behaviour or query still owed.
+    /// The storage ports, and every behaviour or query still owed.
     pub ports: P,
 }
 
