@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-10T05:10:21Z",
+  "actor": "human:timo",
+  "artifact": "story:release-0150",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "release 0.15.0: PR https://github.com/beyond10x/loom/pull/64 merged 92ad129; check and Shared source gates green on 92ad129; annotated tag 0.15.0 by b10x-bot[bot]; release run https://github.com/beyond10x/loom/actions/runs/38025864800 success; GitHub Release https://github.com/beyond10x/loom/releases/tag/0.15.0 by b10x-bot[bot], latest"
+  }
+}
