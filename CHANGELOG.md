@@ -17,9 +17,12 @@ under **Unreleased** until the next release.
   the candidates leaves no fast selection. `loom.run.Selection` gains `replaced_by` and `Overruled`,
   and the new command `loom.run.OverruleSelection` emits `loom.run.SelectionOverruled`
   (`ess/domains/run.yaml`). `ActionSelector` gains the provided method `resolve`, which
-  `HybridSelector` overrides; `RequestRecord::overrule` refuses a replacement the record does not
-  hold with `SelectionNotFound`. `selection::select` still records the strategy of the selector it
-  is handed. Callers that expect one `Hybrid` selection per run must read the strategies instead.
+  `HybridSelector` overrides; `RequestRecord::overrule` refuses, recording nothing, a replacement
+  the record does not hold (`SelectionNotFound`), the selection itself, a replacement no longer
+  `Selected` and one made from another catalogue (`OverruleRefused`). `Loom::select` returns the
+  pick under the strategy of the selector that made it, as `Loom::run` records it, never `Hybrid`;
+  `selection::select` still records the strategy of the selector it is handed. Callers that expect
+  one `Hybrid` selection per run, or `Hybrid` from `Loom::select`, must read the strategies instead.
 
 - Loom requires ESS 0.57.0: the Loom, Commission and intake specifications require it, the
   conformance targets build on the 0.57.0 `ess-conformance` and `ess-primitives`, and CI installs

@@ -247,8 +247,12 @@ impl<S, G, V> Loom<S, G, V> {
 }
 
 impl<S: ActionSelector, G, V> Loom<S, G, V> {
-    /// The selector's choice from `catalogue`, as the selection `selection_id`. An action the
-    /// catalogue does not list is refused and named, whatever the selector's confidence.
+    /// The selector's choice from `catalogue`, as the selection `selection_id`, under the strategy
+    /// of the selector that made the pick ([`selection::resolve`]), as a run records it:
+    /// a [`HybridSelector`] that fell back answers with the stronger selector's strategy, one
+    /// that accepted the fast pick with the fast selector's, never `Hybrid`. A fast pick a
+    /// fallback overruled is not returned. An action the catalogue does not list is refused and
+    /// named, whatever the selector's confidence.
     pub fn select(
         &self,
         catalogue: &ActionCatalogue<action_catalogue_state::Projected>,
@@ -257,7 +261,20 @@ impl<S: ActionSelector, G, V> Loom<S, G, V> {
         let context = SelectionContext {
             prompt: self.prompt.clone(),
         };
-        selection::select(&self.selector, &context, catalogue, selection_id)
+        // The overruled fast pick's id is minted as `Loom::prepare` mints it; the pick is dropped.
+        let overruled_id = SelectionId(loom_id(
+            &self.instance,
+            "overruled-selection",
+            &selection_id.0.0,
+            0,
+        ));
+        selection::resolve(
+            &self.selector,
+            &context,
+            catalogue,
+            (selection_id, overruled_id),
+        )
+        .map(|resolved| resolved.selection)
     }
 }
 

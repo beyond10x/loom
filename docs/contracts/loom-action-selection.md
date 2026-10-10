@@ -102,7 +102,14 @@ fast selector that errs or names an action outside the candidates leaves no fast
 membership rule refuses it before a `Selection` exists. An overruled selection is never given
 arguments (`RequestArguments` answers `selection-not-selected`) and never revalidated
 (`RevalidateSelection` answers `wrong-state`). `ActionSelector::resolve` returns the chosen pick and
-the overruled one; its default overrules nothing, so other selectors are unchanged.
+the overruled one; its default overrules nothing, so other selectors are unchanged. `Loom::select`
+returns the chosen pick under its own selector's strategy, as a run records it, never `Hybrid`.
+
+The host overrules through `RequestRecord::overrule`, which refuses, recording nothing, a replacement
+the record does not hold, the selection itself, a replacement no longer `Selected` and one made from
+another catalogue (`OverruleRefused`). ESS refuses a guard on the replacement beside `wrong_state`
+(`ESS-COMMAND-004`), so these checks are the host's; `loom.run.OverruleSelection` as specified,
+which the conformance suite holds, checks only the overruled selection's state.
 
 ## Safety rules
 
