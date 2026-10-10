@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:fallback-selection-recording
 kind: story
-status: draft
+status: active
 title: A confidence fallback is recorded as two linked selections
 relations:
 - decomposes: epic:fast-selector
@@ -57,7 +57,10 @@ scope:
   path: website/data/status.json
 - confidence: cited
   path: website/docs/reference/ess
-revision: 25
+revision: 27
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-10T02:04:40Z", actor: "human:timo", revision: 26}
+- {from: "proposed", to: "active", at: "2026-10-10T02:04:40Z", actor: "human:timo", revision: 27}
 ---
 ## Outcome
 
