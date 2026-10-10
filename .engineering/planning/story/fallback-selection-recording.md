@@ -9,35 +9,118 @@ relations:
 - depends_on: story:confidence-fallback
 - serves: vision:O3
 - serves: vision:governed-autonomy
-revision: 1
+- depends_on: story:ess-057-upgrade
+scope:
+- confidence: inferred
+  path: AGENTS.md
+- confidence: inferred
+  path: CHANGELOG.md
+- confidence: cited
+  path: crates/loom-conformance/src/codec.rs
+- confidence: cited
+  path: crates/loom-conformance/src/lib.rs
+- confidence: cited
+  path: crates/loom-executor/src/arguments.rs
+- confidence: cited
+  path: crates/loom-executor/src/lib.rs
+- confidence: cited
+  path: crates/loom-executor/src/revalidation.rs
+- confidence: cited
+  path: crates/loom-executor/src/selection.rs
+- confidence: cited
+  path: crates/loom-executor/tests/action_selector.rs
+- confidence: cited
+  path: crates/loom-executor/tests/adversary2_run_identity.rs
+- confidence: cited
+  path: crates/loom-executor/tests/adversary_run_revalidation.rs
+- confidence: cited
+  path: crates/loom-executor/tests/adversary_w2_conformance_select_action.rs
+- confidence: inferred
+  path: crates/loom-executor/tests/fallback_selection_recording.rs
+- confidence: cited
+  path: crates/loom-selector-laya/tests/laya_arguments_slice.rs
+- confidence: inferred
+  path: docs/contracts/loom-action-selection.md
+- confidence: cited
+  path: ess/domains/run.yaml
+- confidence: cited
+  path: generated/rust/loom/PLAN.md
+- confidence: cited
+  path: generated/rust/loom/plan.json
+- confidence: cited
+  path: generated/rust/loom/src/behaviour.rs
+- confidence: cited
+  path: generated/rust/loom/src/run.rs
+- confidence: cited
+  path: website/data/ess/loom-run.domain-graph.json
+- confidence: inferred
+  path: website/data/status.json
+- confidence: cited
+  path: website/docs/reference/ess
+revision: 25
 ---
 ## Outcome
 
 A confidence fallback is recorded as `decision-blocker:fallback-selection-record` (option B)
 decided: two `loom.run.Selection`s, the fast selection and the stronger selector's selection that
 replaced it. The fast one references its replacement, zero or one; a fast selection that was not
-overruled has none. Both belong to the run's turn.
+overruled has none. Both belong to the run's turn. Each recorded selection carries the strategy of
+the selector that made it (the fast selector's, or the stronger selector's), so Metaharness can
+tell which selector each pick came from.
 
-ESS first: `ess/domains/run.yaml` gains the relation from `loom.run.Selection` to the selection
-that replaced it, and the way it is written (an optional input of `loom.run.SelectAction`, or a
-command that marks a fast selection overruled). Neither is proven expressible at the system's
-`format: ess/20`: no relation in this repository goes through an `Optional` field, and a guard on
-an optional input needs a later format. Validate on a copy first; if ESS refuses, stop and report.
+## ESS first
+
+Settled at scoping (2026-10-10) by a trial on a copy of `ess/` with `ess` 0.57.0; validate
+`--strict-requires`, compile and `ess verify conform synthesize` pass with 53 scenarios and
+0 refusals (46 unchanged). The system is `format: ess/22`. The first commit changes only
+`ess/domains/run.yaml`:
+
+- `loom.run.Selection` gains field `replaced_by: Optional<loom.run.SelectionId>` and relation
+  `replacement` (kind `references`, target `loom.run.Selection`, cardinality `one`, via
+  `replaced_by`). ESS has only `one` and `many`; the `Optional` field makes it zero or one.
+- Its lifecycle gains the terminal state `Overruled` and the transition `overrule` from
+  `[Selected]`. An overruled selection is never revalidated and never given arguments
+  (`RequestArguments` refuses a selection not in `Selected`).
+- New command `loom.run.OverruleSelection` (input `selection_id`, `replacement_id`): outcome
+  `overruled` moves `Selection.overrule`, sets `replaced_by`, emits new event
+  `loom.run.SelectionOverruled {selection_id, replacement_id}`; outcome `wrong-state` is
+  `SelectionStateConflict`. A `when_related` guard on the replacement beside `wrong_state` is refused
+  by ESS (`ESS-COMMAND-004`), so the `OverruleSelection` behaviour on the record checks that the
+  replacement exists and refuses with `SelectionNotFound` naming it.
+- The `loom.run.Selections` view publishes `replaced_by`.
+
+Red on that commit: `crates/loom-conformance/tests/conform.rs` (`ess_conformance_report`, the new
+`OverruleSelection` scenarios reach the target's unknown-command arm) and `task drift`.
+
+## Implementation notes
+
+- `ActionSelector::select` returns one `Choice`; the hybrid drops the fast pick
+  (`crates/loom-executor/src/selection.rs`, `HybridSelector`). Add a provided method on
+  `ActionSelector` that returns the chosen pick and, when it overruled one, the overruled pick; its
+  default wraps `select`, so no other selector changes.
+- `Loom::prepare` (`crates/loom-executor/src/lib.rs`) records the fast selection, then the
+  replacement, then overrules the fast one; only the replacement goes on to arguments and
+  revalidation. A second selection id is minted beside the first.
+- `crates/loom-selector-laya/tests/laya_arguments_slice.rs` expects one `Hybrid` selection; on a
+  fallback it now sees two, with their selectors' strategies. The CHANGELOG names the change.
 
 ## Acceptance
 
-When the fast selection is overruled, Loom's record holds both selections and the fast one names
-the replacement's `selection_id`; when it is not overruled, the record holds one selection with no
+Named test `crates/loom-executor/tests/fallback_selection_recording.rs`: when the fast selection is
+overruled, Loom's record holds both selections, the fast one in `Overruled` naming the
+replacement's `selection_id`; when it is not overruled, the record holds one selection with no
 replacement; a fast selector that errs or names an action outside the candidates leaves no fast
-selection (`selection::chosen` refuses it before a `Selection` exists).
+selection (`selection::chosen` refuses it before a `Selection` exists); `OverruleSelection` naming
+an unknown replacement is refused with `SelectionNotFound`. `task conform` and `task drift` pass.
 
 ## Dependencies
 
-`story:confidence-fallback` (the hybrid selector this records). `story:selection-telemetry`
-records `fell_back_to` on the same selections and follows this story.
+`story:confidence-fallback` (the hybrid selector this records); `story:ess-057-upgrade` (the trial
+needed 0.57.0). `story:selection-telemetry` records `fell_back_to` on the same selections and
+follows this story.
 
 ## Source
 
 Split out of `story:confidence-fallback` at scoping, wave 2026-10-09-w1: the story's acceptance
-checks only which choice is returned, and the recording needs a specification change that is not
-yet shown to validate.
+checks only which choice is returned, and the recording needs a specification change, shown to
+validate with ESS 0.57.0 on 2026-10-10.

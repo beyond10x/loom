@@ -12,6 +12,7 @@ relations:
 - depends_on: story:confidence-fallback
 - serves: vision:O3
 - serves: vision:governed-autonomy
+- depends_on: story:fallback-selection-recording
 scope:
 - confidence: inferred
   path: CHANGELOG.md
