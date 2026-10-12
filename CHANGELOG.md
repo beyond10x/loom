@@ -6,6 +6,17 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-12
+
+Loom 0.16.0 lets a Run continue past a step performed under an authority grant. When the
+authority provider allowed a step's request and the effect port performed it,
+`run_until_blocked` runs the executor again instead of ending the Run `AwaitingApproval`; the
+step budget and idle bound still end a Run that only repeats granted steps, and a Run whose
+budget runs out after a performed effect ends `Completed` when that step completed its case. A
+plugin turn is one Run. Loom now requires ESS 0.59.0. This is breaking for callers that matched
+`AwaitingApproval` after a granted effect and started another Run to get past it: they now get
+the Run's own end.
+
 ### Changed
 
 - **Breaking:** a step performed under an authority grant passes Commission's approval gate.
