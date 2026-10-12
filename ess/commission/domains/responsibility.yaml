@@ -191,7 +191,9 @@ types:
         type: String
 
   # story:run-outcomes: how a run ended or paused. story:runtime-merge adds AwaitingApproval (a
-  # step left a frontier listing actions that need approval unchanged) and NoPerformableAction
+  # step left a frontier listing actions that need approval unchanged; a step whose request needed
+  # authority, was allowed by the authority provider and performed is not one, and the run goes
+  # on, story:granted-gate-ends-run) and NoPerformableAction
   # (the frontier lists no action the effect port performs, so no executor is run). An empty
   # frontier goes to the executor; only a non-empty frontier none of whose actions the effect port
   # performs ends NoPerformableAction. story:moved-run-named-outcome adds CaseMovedOn (the case
