@@ -54,7 +54,7 @@ variant.
 Since `0.6.0` a run whose case moved to a revision whose frontier still admits an action ends
 `RunOutcome::CaseMovedOn`, naming the Run's revision and the current one; start a new Run at the
 current revision. Callers that match `RunOutcome` exhaustively handle the new variant. Loom
-requires ESS 0.57.0.
+requires ESS 0.59.0.
 
 Since `0.7.0` a process can supervise a run through `b10x-loom run --output jsonl`, decide a case
 it keeps itself through `b10x-loom evaluate`, and drive a run with a model from an llm catalog
@@ -83,7 +83,7 @@ identifies the cause.
 Since `0.15.0` a confidence fallback is recorded as two selections, the overruled fast one
 naming its replacement, each with the strategy of the selector that made it, and every
 selection carries a telemetry record (`loom.run.SelectionRecord`) for Metaharness; Loom
-requires ESS 0.57.0.
+requires ESS 0.59.0.
 
 Since `0.14.0` `LoopStop` is generated from its ESS declaration (`loom.run.LoopStop`): its
 variants carry payload structs and `i64` counts, while the JSON of loop outcomes and events is
