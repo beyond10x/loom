@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-12T20:47:49Z",
+  "actor": "human:timo",
+  "artifact": "story:release-0160",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "release PR 67 merged at 422b6c6; check, Documentation validation and Shared source gates green on it; annotated tag 0.16.0 by b10x-bot[bot]; release run 38305190996 green on the tag; GitHub Release 0.16.0 by the bot (latest), its notes the CHANGELOG entry"
+  }
+}
