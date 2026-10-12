@@ -1330,7 +1330,19 @@ fn a_step_performed_under_a_grant_passes_the_gate() {
     let name = "denied read";
     let case = CaseId("case-granted-denied".to_owned());
     let governor = FakeGovernor::new();
-    governor.script(case.clone(), [open()]);
+    // An admissible action beside the gated two: without one, a denied proposal ends the run in
+    // its own iteration (no admissible action), before any gate is read.
+    governor.script(
+        case.clone(),
+        [listing(
+            4,
+            vec![
+                admissible("inspect"),
+                gated("read", "datasource.read"),
+                gated("propose", "reply.propose"),
+            ],
+        )],
+    );
     let executor = Sequenced::new(&governor, [proposal("read"), proposal("propose")]);
     let effects = Effects::new(&governor);
     let authority = StaticAuthorityProvider::new()
