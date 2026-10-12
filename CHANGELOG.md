@@ -6,6 +6,14 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Changed
+
+- Loom requires ESS 0.59.0: the Loom, Commission and intake specifications require it, the
+  conformance targets build on the 0.59.0 `ess-conformance` and `ess-primitives`, and CI installs
+  the 0.59.0 `ess`. Every specification validates unchanged, and synthesis still writes its
+  suites with no refusal. `not-in-frontier` stays an `external:` outcome: 0.59.0 has no predicate
+  for membership in a list input.
+
 ## [0.15.0] - 2026-10-10
 
 Loom 0.15.0 records how a selection was made. A confidence fallback is recorded as two
