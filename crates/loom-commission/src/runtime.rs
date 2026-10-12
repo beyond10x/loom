@@ -12,8 +12,10 @@
 //!    reason. A step is an executor call whose iteration did not end the run ([`LoopEnd::steps`]).
 //!    When the last step left an approval gate pending (5), the iteration first reads the case and
 //!    the frontier (1-3) and checks the gate, so a last step that leaves the gate unchanged ends
-//!    `AwaitingApproval`, not suspended for its budget. A last step performed under a grant leaves
-//!    no gate pending (5), so the run is suspended for its budget at once. When the last step's
+//!    `AwaitingApproval`, not suspended for its budget. When the last step's effect was
+//!    `Performed` (8) and left no gate pending, as a step performed under a grant never does (5),
+//!    the iteration first loads the case (1-2), so a case that step completed ends the run
+//!    completed; a case still open is suspended for its budget. When the last step's
 //!    proposal was stale (8), the iteration first loads the case (1-2), so a move it finds ends the
 //!    run as item 2 says; only a case still at the revision held is suspended for its budget;
 //! 1. [`Governor::current_revision`]: the case is loaded. After an iteration whose effect the port
@@ -44,7 +46,8 @@
 //!    executor runs. Every other step leaves the gate to be read: one that performed an action
 //!    needing no authority, one that proposed nothing, and one whose request was refused, stale,
 //!    denied or not performed. The step budget (0) and the idle bound still end a run that only
-//!    repeats granted steps;
+//!    repeats granted steps; at the budget, the case a granted step leaves is loaded first (0), so
+//!    a case it completed ends the run completed;
 //! 6. [`AgentExecutor::run`] on that frontier, less every action the effect port does not perform
 //!    and that needs no authority (`story:effect-invocation`), action by action: an action with an
 //!    entry listed `ApprovalRequired`, or an entry naming a capability, stays with all its entries,
@@ -471,10 +474,11 @@ where
     let limit = budget.unwrap_or(UNBUDGETED_STEP_LIMIT);
 
     loop {
-        // With the budget used up, a pending approval gate is still read and checked first, and
-        // after a stale proposal the move is judged first.
+        // With the budget used up, a pending approval gate is still read and checked first, after
+        // a stale proposal the move is judged first, and after a performed effect the case is
+        // loaded first, so a case the last step completed ends the run completed.
         let exhausted = track.steps >= limit;
-        if exhausted && gate.is_none() && !after_stale {
+        if exhausted && gate.is_none() && !after_stale && !effected {
             return out_of_budget(runs, run_id, limit, track);
         }
 
@@ -506,6 +510,11 @@ where
                 &determination,
             )?;
             return Ok(track.end(run_id, ended));
+        }
+        // After a performed effect that left no gate pending, a case still open is suspended for
+        // its budget (0).
+        if exhausted && gate.is_none() && !after_stale {
+            return out_of_budget(runs, run_id, limit, track);
         }
 
         let frontier = governor.frontier(case)?;

@@ -5,7 +5,8 @@
 //!
 //! 0. the step budget ([`LoopContext::step_budget`]): when the steps taken reach it, the Run is
 //!    suspended through `SuspendRun` with `SuspensionReason::Budget({"max_steps": <budget>})` and
-//!    the run ends suspended with that reason, before the case is loaded again. A step is an
+//!    the run ends suspended with that reason; after a performed effect the case is loaded first,
+//!    and a case it completed ends the run completed (1-2). A step is an
 //!    executor call whose iteration did not end the run (`LoopEnd::steps`);
 //! 1. the case is loaded. The Run continues at a revision its own effect moved the case to: the
 //!    load after an iteration that invoked an effect sets the revision the loop holds the case at;
@@ -178,6 +179,12 @@ fn revalidation(case: &CaseId) -> Vec<GovernorCall> {
         GovernorCall::CurrentRevision(case.clone()),
         GovernorCall::Frontier(case.clone()),
     ]
+}
+
+/// The governor calls of an iteration that loads the case and judges its completion, and reads no
+/// frontier: one that finds it complete, or one at a used-up budget after a performed step.
+fn loaded(case: &CaseId) -> Vec<GovernorCall> {
+    completed(case)
 }
 
 /// The governor calls of an iteration that finds the case complete.
@@ -753,8 +760,9 @@ fn a_request_not_admitted_is_never_invoked() {
 // ---------------------------------------------------------------------------------------------
 // The slice's stop reasons, in Commission's terms.
 
-/// `StepBudget`: the steps taken reach the budget, and the Run is suspended for `Budget` before
-/// the case is loaded again. A budget of 0 reads no frontier and never runs the executor.
+/// `StepBudget`: the steps taken reach the budget, and the Run is suspended for `Budget`. After a
+/// performed step the case is loaded first and found open; no frontier is read. A budget of 0
+/// reads no frontier and never runs the executor.
 #[test]
 fn the_step_budget_suspends_the_run_for_budget() {
     let name = "budget 1";
@@ -774,8 +782,8 @@ fn the_step_budget_suspends_the_run_for_budget() {
     let end = ended(name, result);
     assert_eq!(
         governor.calls(),
-        [iteration(&case), revalidation(&case)].concat(),
-        "{name}: no load after the budget is used up"
+        [iteration(&case), revalidation(&case), loaded(&case)].concat(),
+        "{name}: after the performed step, a load and no frontier"
     );
     assert_eq!(
         effects.invoked().len(),
@@ -1249,7 +1257,8 @@ fn a_denied_action_is_not_awaited() {
 /// passes the approval gate: the next iteration does not read the gate and runs the executor, so a
 /// granted read is followed by the granted proposal and both are performed. Control: a provider
 /// that denies the read's capability stops the run at the gate as before, awaiting the other
-/// action. A step budget still ends a run after a granted step, suspended for its budget.
+/// action. A step budget still ends a run after a granted step: the case is loaded, and a case
+/// still open is suspended for its budget.
 #[test]
 fn a_step_performed_under_a_grant_passes_the_gate() {
     let open = || {
@@ -1396,8 +1405,8 @@ fn a_step_performed_under_a_grant_passes_the_gate() {
     let end = ended(name, result);
     assert_eq!(
         governor.calls(),
-        [iteration(&case), revalidation(&case)].concat(),
-        "{name}: no gate is read after the granted step"
+        [iteration(&case), revalidation(&case), loaded(&case)].concat(),
+        "{name}: the case is loaded and no gate is read after the granted step"
     );
     assert_eq!(effects.invoked().len(), 1, "{name}: the read was performed");
     assert_eq!(end.steps, 1, "{name}: steps");
