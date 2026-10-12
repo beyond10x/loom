@@ -6,6 +6,17 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** a step performed under an authority grant passes Commission's approval gate.
+  When a step's request needed authority, the authority provider allowed it and the effect port
+  performed it, `run_until_blocked` runs the executor again instead of ending the Run
+  `AwaitingApproval`. Every other step reads the gate as before, and the step budget and idle
+  bound still end a Run that only repeats granted steps. A caller that matched `AwaitingApproval`
+  after a granted effect, and started another Run to get past it, now gets the Run's own end. A
+  plugin turn is one Run: the turn no longer starts another Run at a granted gate. The rule and
+  its cases are in `docs/commission/design/approval-gate.md`.
+
 ## [0.15.0] - 2026-10-10
 
 Loom 0.15.0 records how a selection was made. A confidence fallback is recorded as two

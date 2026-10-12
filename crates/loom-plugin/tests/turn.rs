@@ -76,8 +76,9 @@ fn turn_reaches_proposed_on_a_fixture_source() {
     );
 }
 
-/// Each performed read ends a Run at the gate of `source.read` and `reply.propose`, and the turn
-/// starts the next Run; a model that only reads still stops, at the turn's step budget.
+/// A read performed under `PluginAuthority`'s grant passes the gate of `source.read` and
+/// `reply.propose`, so the turn's one Run goes on; a model that only reads still stops, at the
+/// turn's step budget.
 #[test]
 fn a_turn_that_only_reads_stops_at_its_budget() {
     let fixture = Fixture::new("turn", "budget");

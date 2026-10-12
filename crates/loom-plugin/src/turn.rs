@@ -11,14 +11,10 @@
 //!   the turn did so far. The sources are described before the first model call.
 //! - The authority provider is [`PluginAuthority`]; the effect port [`DataSourceEffects`].
 //!
-//! Commission ends a Run at an approval gate: a step that leaves the frontier's actions needing
-//! approval as they were ends the next iteration `AwaitingApproval`, whatever the provider
-//! answered for them. On `inbound-answer@1` every performed `source.read` does that, since
-//! `source.read` and `reply.propose` always need a capability. The caller then starts the next
-//! Run, which is what the turn does, on the same case, only when the Run performed an effect and
-//! every awaited action needs a capability [`PluginAuthority`] grants (the approval the gate waits
-//! for is the host's own standing grant), and only while the turn has steps left of
-//! [`TURN_STEP_BUDGET`]. Any other `AwaitingApproval` ends the turn.
+//! A turn is one Run, bounded by [`TURN_STEP_BUDGET`]. On `inbound-answer@1` `source.read` and
+//! `reply.propose` always need a capability; [`PluginAuthority`] grants both, and a step Commission
+//! performed under that grant passes its approval gate, so the Run goes on after each read. An
+//! `AwaitingApproval` ends the turn `stopped`.
 //!
 //! The case's outcome is the turn's: `proposed` with the proposal's text, `declined` with the
 //! decline's reason. Any other end of the run is `stopped`, naming it. A task gets no turn:
@@ -42,8 +38,8 @@ use loom_sdk::commission::model::json::Value;
 use loom_sdk::commission::model::primitives::{Timestamp, Uuid};
 use loom_sdk::commission::model::responsibility::{
     ActionRequestId, AgentRevisionId, AuthorityContext, Commission, CommissionData, CommissionId,
-    EffectOutcome, ExecutorOutcome, ExecutorOutcomeSuspended, Frontier, ObservationId, PrincipalId,
-    RunId, RunOutcome, SuspensionReason, commission_state, frontier_state,
+    ExecutorOutcome, ExecutorOutcomeSuspended, Frontier, ObservationId, PrincipalId, RunId,
+    RunOutcome, SuspensionReason, commission_state, frontier_state,
 };
 use loom_sdk::commission::outcome::RunStore;
 use loom_sdk::commission::ports::executor::AgentExecutor;
@@ -56,19 +52,19 @@ use loom_sdk::loom::harness::wire::{
 };
 use loom_sdk::loom::{EmptyObjectArguments, FirstAdmissibleSelector};
 use loom_sdk::{
-    CanonGovernor, Loom, LoopContext, LoopEnd, MemoryCaseStore, ProtocolCatalog, run_until_blocked,
+    CanonGovernor, Loom, LoopContext, MemoryCaseStore, ProtocolCatalog, run_until_blocked,
 };
 
 use crate::codec::{intent_name, kind_name};
 use crate::effects::{DataSourceEffects, ITEM};
 use crate::project::{DECLINE, PROPOSE, READ};
-use crate::{GRANTED, Host, PROTOCOL, PluginAuthority, PluginError, TurnModel};
+use crate::{Host, PROTOCOL, PluginAuthority, PluginError, TurnModel};
 
 /// The most executor steps one turn takes before the runtime suspends it.
 pub const TURN_STEP_BUDGET: usize = 8;
 
-/// The most requests one turn sends to its model, across all its Runs and every loop of each,
-/// a wire retry included: the port the turn lends refuses any request past it. Each governed loop
+/// The most requests one turn sends to its model, across every loop of its Run, a wire retry
+/// included: the port the turn lends refuses any request past it. Each governed loop
 /// is also given the calls the turn has left as its `max_turns`, and a step with none left asks no
 /// model and suspends the Run for its budget.
 pub const TURN_MODEL_BUDGET: u64 = 8;
@@ -221,24 +217,18 @@ pub fn turn(
     let mut runs = Generated::new(RunStore::new(move || {
         RunId(uuid('d', runs_ids.fetch_add(1, Ordering::SeqCst)))
     }));
-    let mut budget = TURN_STEP_BUDGET;
-    let end = loop {
-        let end = run_until_blocked(
-            &governor,
-            &executor,
-            &PluginAuthority,
-            &effects,
-            &commission,
-            &mut runs,
-            &mut Clock { ids: &ids, budget },
-        );
-        match &end {
-            Ok(ended) if at_a_granted_gate(ended) && ended.steps < budget => {
-                budget -= ended.steps.max(1);
-            }
-            _ => break end,
-        }
-    };
+    let end = run_until_blocked(
+        &governor,
+        &executor,
+        &PluginAuthority,
+        &effects,
+        &commission,
+        &mut runs,
+        &mut Clock {
+            ids: &ids,
+            budget: TURN_STEP_BUDGET,
+        },
+    );
     let asked = executor.asked.load(Ordering::SeqCst);
     drop(executor);
     let reads = effects.reads();
@@ -278,33 +268,6 @@ pub fn turn(
         }
         other => stopped(reads, &format!("the run ended {other:?}")),
     })
-}
-
-/// Whether `end` is a Run that performed an effect and then stopped at an approval gate whose
-/// every action needs a capability [`PluginAuthority`] grants: the approval the gate waits for is
-/// the host's own standing grant, and the caller starts the next Run (see the module docs).
-fn at_a_granted_gate(end: &LoopEnd) -> bool {
-    let RunOutcome::AwaitingApproval(awaiting) = &end.outcome else {
-        return false;
-    };
-    let Some(frontier) = &end.last_frontier else {
-        return false;
-    };
-    let granted = |action: &String| {
-        frontier.actions.iter().any(|listed| {
-            listed.action == *action
-                && listed
-                    .capability
-                    .as_deref()
-                    .is_some_and(|capability| GRANTED.contains(&capability))
-        })
-    };
-    !awaiting.actions.is_empty()
-        && awaiting.actions.iter().all(granted)
-        && end
-            .effects
-            .iter()
-            .any(|effect| matches!(effect, EffectOutcome::Performed(_)))
 }
 
 /// The part of every step's context that does not change: the item, its classification and the

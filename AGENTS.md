@@ -313,11 +313,11 @@ sit outside a run and grant nothing. A turn is a thin caller of `run_until_block
 (`LoopExecutor`), `PluginAuthority` (grants `datasource.read` and `reply.propose`, denies every
 other capability) and `DataSourceEffects`, which reads through `loom_connectors::cli`, refuses a
 `{source, kind}` outside the projection before any command, and submits one `source_read` evidence
-per performed read. Commission ends a Run `AwaitingApproval` after every performed read there, since
-both gated actions stay gated; the turn starts the next Run only when every awaited action needs a
-capability `PluginAuthority` grants and the Run performed an effect, within `TURN_STEP_BUDGET`.
-Model requests are bounded per turn: `TURN_MODEL_BUDGET` counts every request sent, wire retries
-included, across all Runs; the port the turn lends refuses any past it. A classifier hint that
+per performed read. A turn is one Run, bounded by `TURN_STEP_BUDGET`: a step Commission performed
+under a grant passes its approval gate (`docs/commission/design/approval-gate.md`), so the Run goes
+on after each granted read, and an `AwaitingApproval` ends the turn `stopped`. Model requests are
+bounded per turn: `TURN_MODEL_BUDGET` counts every request sent, wire retries included; the port
+the turn lends refuses any past it. A classifier hint that
 names no configured source is dropped before anything prints it. Nothing is sent: a reply is a
 proposal in the record. A task gets no turn: the router's pick from `ProtocolCatalog::bundled()`
 is recorded as a proposed case. An attempt on an item is counted in the state, which keeps the

@@ -12,9 +12,10 @@
 //!    reason. A step is an executor call whose iteration did not end the run ([`LoopEnd::steps`]).
 //!    When the last step left an approval gate pending (5), the iteration first reads the case and
 //!    the frontier (1-3) and checks the gate, so a last step that leaves the gate unchanged ends
-//!    `AwaitingApproval`, not suspended for its budget. When the last step's proposal was stale (8),
-//!    the iteration first loads the case (1-2), so a move it finds ends the run as item 2 says;
-//!    only a case still at the revision held is suspended for its budget;
+//!    `AwaitingApproval`, not suspended for its budget. A last step performed under a grant leaves
+//!    no gate pending (5), so the run is suspended for its budget at once. When the last step's
+//!    proposal was stale (8), the iteration first loads the case (1-2), so a move it finds ends the
+//!    run as item 2 says; only a case still at the revision held is suspended for its budget;
 //! 1. [`Governor::current_revision`]: the case is loaded. After an iteration whose effect the port
 //!    reported `Performed`, the loaded revision is the one the loop holds the case at from then on;
 //!    after a `Refused` one, as after no effect, a move is somebody else's;
@@ -37,7 +38,13 @@
 //!    handed frontier lists the same actions, each with the same status and reasons, the run ends
 //!    `AwaitingApproval`, carrying the actions that need approval in frontier order, and the
 //!    executor is not run. An action an authority verdict denied in this Run is not awaited; a
-//!    frontier whose only actions needing approval were denied is no gate;
+//!    frontier whose only actions needing approval were denied is no gate. A step performed under
+//!    a grant passes the gate: when the previous step's request needed authority (8), the provider
+//!    allowed it and the effect port reported it `Performed`, the gate is not read and the
+//!    executor runs. Every other step leaves the gate to be read: one that performed an action
+//!    needing no authority, one that proposed nothing, and one whose request was refused, stale,
+//!    denied or not performed. The step budget (0) and the idle bound still end a run that only
+//!    repeats granted steps;
 //! 6. [`AgentExecutor::run`] on that frontier, less every action the effect port does not perform
 //!    and that needs no authority (`story:effect-invocation`), action by action: an action with an
 //!    entry listed `ApprovalRequired`, or an entry naming a capability, stays with all its entries,
@@ -452,7 +459,7 @@ where
     // Whether the previous iteration admitted no request.
     let mut idle = false;
     // The actions of the frontier the previous step's executor was handed, when it listed actions
-    // awaiting approval.
+    // awaiting approval and the step was not performed under a grant.
     let mut gate: Option<Vec<FrontierAction>> = None;
     // The actions an authority verdict denied in this Run.
     let mut denied: Vec<String> = Vec::new();
@@ -565,6 +572,9 @@ where
         let mut decided = false;
         let mut stale = false;
         let mut verdict: Option<(String, AuthorityVerdict)> = None;
+        // Whether this step's request needed authority, the provider allowed it and the effect
+        // port performed it: such a step passes the approval gate (5).
+        let mut granted = false;
         if let ExecutorOutcome::ProposedAction(proposed) = &outcome {
             let made = request(
                 context.action_request_id(),
@@ -619,6 +629,7 @@ where
                 // Only an effect that took place may have moved the case; after a refusal, a move
                 // is somebody else's.
                 effected = matches!(effect, EffectOutcome::Performed(_));
+                granted = effected && matches!(verdict, Some((_, AuthorityVerdict::Allow(_))));
             }
         }
 
@@ -649,7 +660,7 @@ where
             idle = !progressed;
         }
         track.steps += 1;
-        gate = if awaited(&handed, &denied).is_empty() {
+        gate = if granted || awaited(&handed, &denied).is_empty() {
             None
         } else {
             Some(handed.data().actions.clone())
