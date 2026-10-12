@@ -195,11 +195,10 @@ fn run(
 ///
 /// The frontier lists `read` and `propose`, both needing a capability the provider allows; the
 /// executor proposes `read`, then `propose`, and the governor holds the case complete once
-/// `propose` is performed. With a budget of 2, `propose` is performed on the last step. Before
-/// this change the step left the gate pending, so the next iteration loaded the case (item 0)
-/// and found it complete. Now a granted step leaves no gate pending and the Run is suspended for
-/// its budget without loading the case: the completed case is reported as a Run out of budget.
-/// The plugin turn reaches exactly this (`TURN_STEP_BUDGET` 8, a proposal on the eighth step),
+/// `propose` is performed. With a budget of 2, `propose` is performed on the last step. A granted
+/// step leaves no gate pending, so a used-up budget after a performed effect first loads the case
+/// (item 0) and finds it complete; without that load the completed case would be reported as a
+/// Run out of budget. The plugin turn reaches exactly this (`TURN_STEP_BUDGET` 8, a proposal on the eighth step),
 /// see `crates/loom-plugin/tests/adversary_granted_gate.rs`.
 #[test]
 fn a_granted_step_that_completes_the_case_at_the_budget_ends_completed() {

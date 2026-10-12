@@ -13,10 +13,9 @@ use support::{Fixture, Scripted, chat, classification, item};
 /// A turn whose model reads on every step but the last and proposes on the last one, within
 /// `TURN_STEP_BUDGET` steps, reaches `proposed`: "the case's outcome is the turn's: `proposed` with
 /// the proposal's text" (`turn.rs` module doc). The proposal is performed on the turn's last
-/// budgeted step and completes the case. Since a granted step leaves no gate pending, the Run is
-/// suspended for its budget at once, before the case is loaded, and the turn reports `stopped`
-/// with no proposal although the reply was proposed and recorded. Before this change, the last
-/// Run (budget 1) read the gate after the step, loaded the case and ended `Completed`.
+/// budgeted step and completes the case. A granted step leaves no gate pending, so the Run must
+/// load the case before it is suspended for its budget; had it not, the turn would report
+/// `stopped` with no proposal although the reply was proposed and recorded.
 #[test]
 fn a_proposal_on_the_last_budgeted_step_ends_the_turn_proposed() {
     let fixture = Fixture::new("adversary-granted-gate", "last-step-proposal");
