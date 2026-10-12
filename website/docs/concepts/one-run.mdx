@@ -27,7 +27,8 @@ source: Atlas ADR 0071 (Loom owns the model/tool loop) and ADR 0082 (Commission 
 
 A run repeats these steps until it is blocked: by an approval gate, by nothing admissible, by its
 step budget, or by an action no effect port performs. `run_until_blocked` in
-`b10x-loom-commission` is that loop.
+`b10x-loom-commission` is that loop. A step whose action needed authority, which the authority
+provider granted and the effect port performed, passes the approval gate: the run goes on.
 
 ## 1. Project the catalogue — Loom
 

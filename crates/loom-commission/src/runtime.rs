@@ -12,9 +12,12 @@
 //!    reason. A step is an executor call whose iteration did not end the run ([`LoopEnd::steps`]).
 //!    When the last step left an approval gate pending (5), the iteration first reads the case and
 //!    the frontier (1-3) and checks the gate, so a last step that leaves the gate unchanged ends
-//!    `AwaitingApproval`, not suspended for its budget. When the last step's proposal was stale (8),
-//!    the iteration first loads the case (1-2), so a move it finds ends the run as item 2 says;
-//!    only a case still at the revision held is suspended for its budget;
+//!    `AwaitingApproval`, not suspended for its budget. When the last step's effect was
+//!    `Performed` (8) and left no gate pending, as a step performed under a grant never does (5),
+//!    the iteration first loads the case (1-2), so a case that step completed ends the run
+//!    completed; a case still open is suspended for its budget. When the last step's
+//!    proposal was stale (8), the iteration first loads the case (1-2), so a move it finds ends the
+//!    run as item 2 says; only a case still at the revision held is suspended for its budget;
 //! 1. [`Governor::current_revision`]: the case is loaded. After an iteration whose effect the port
 //!    reported `Performed`, the loaded revision is the one the loop holds the case at from then on;
 //!    after a `Refused` one, as after no effect, a move is somebody else's;
@@ -37,7 +40,14 @@
 //!    handed frontier lists the same actions, each with the same status and reasons, the run ends
 //!    `AwaitingApproval`, carrying the actions that need approval in frontier order, and the
 //!    executor is not run. An action an authority verdict denied in this Run is not awaited; a
-//!    frontier whose only actions needing approval were denied is no gate;
+//!    frontier whose only actions needing approval were denied is no gate. A step performed under
+//!    a grant passes the gate: when the previous step's request needed authority (8), the provider
+//!    allowed it and the effect port reported it `Performed`, the gate is not read and the
+//!    executor runs. Every other step leaves the gate to be read: one that performed an action
+//!    needing no authority, one that proposed nothing, and one whose request was refused, stale,
+//!    denied or not performed. The step budget (0) and the idle bound still end a run that only
+//!    repeats granted steps; at the budget, the case a granted step leaves is loaded first (0), so
+//!    a case it completed ends the run completed;
 //! 6. [`AgentExecutor::run`] on that frontier, less every action the effect port does not perform
 //!    and that needs no authority (`story:effect-invocation`), action by action: an action with an
 //!    entry listed `ApprovalRequired`, or an entry naming a capability, stays with all its entries,
@@ -452,7 +462,7 @@ where
     // Whether the previous iteration admitted no request.
     let mut idle = false;
     // The actions of the frontier the previous step's executor was handed, when it listed actions
-    // awaiting approval.
+    // awaiting approval and the step was not performed under a grant.
     let mut gate: Option<Vec<FrontierAction>> = None;
     // The actions an authority verdict denied in this Run.
     let mut denied: Vec<String> = Vec::new();
@@ -464,10 +474,11 @@ where
     let limit = budget.unwrap_or(UNBUDGETED_STEP_LIMIT);
 
     loop {
-        // With the budget used up, a pending approval gate is still read and checked first, and
-        // after a stale proposal the move is judged first.
+        // With the budget used up, a pending approval gate is still read and checked first, after
+        // a stale proposal the move is judged first, and after a performed effect the case is
+        // loaded first, so a case the last step completed ends the run completed.
         let exhausted = track.steps >= limit;
-        if exhausted && gate.is_none() && !after_stale {
+        if exhausted && gate.is_none() && !after_stale && !effected {
             return out_of_budget(runs, run_id, limit, track);
         }
 
@@ -499,6 +510,11 @@ where
                 &determination,
             )?;
             return Ok(track.end(run_id, ended));
+        }
+        // After a performed effect that left no gate pending, a case still open is suspended for
+        // its budget (0).
+        if exhausted && gate.is_none() && !after_stale {
+            return out_of_budget(runs, run_id, limit, track);
         }
 
         let frontier = governor.frontier(case)?;
@@ -565,6 +581,9 @@ where
         let mut decided = false;
         let mut stale = false;
         let mut verdict: Option<(String, AuthorityVerdict)> = None;
+        // Whether this step's request needed authority, the provider allowed it and the effect
+        // port performed it: such a step passes the approval gate (5).
+        let mut granted = false;
         if let ExecutorOutcome::ProposedAction(proposed) = &outcome {
             let made = request(
                 context.action_request_id(),
@@ -619,6 +638,7 @@ where
                 // Only an effect that took place may have moved the case; after a refusal, a move
                 // is somebody else's.
                 effected = matches!(effect, EffectOutcome::Performed(_));
+                granted = effected && matches!(verdict, Some((_, AuthorityVerdict::Allow(_))));
             }
         }
 
@@ -649,7 +669,7 @@ where
             idle = !progressed;
         }
         track.steps += 1;
-        gate = if awaited(&handed, &denied).is_empty() {
+        gate = if granted || awaited(&handed, &denied).is_empty() {
             None
         } else {
             Some(handed.data().actions.clone())
