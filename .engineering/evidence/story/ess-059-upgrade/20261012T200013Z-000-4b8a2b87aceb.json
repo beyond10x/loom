@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-12T20:00:13Z",
+  "actor": "human:timo",
+  "artifact": "story:ess-059-upgrade",
+  "kind": "story",
+  "revision": 21,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "joint package gate on e1ed968: cargo clippy -D warnings and cargo test --locked of b10x-loom-executor (781), -commission (47), -conformance (10), -commission-conformance (19), loom-commission-docs (8), -commission-testkit (183), -plugin (34), -plugin-slack (23): exit 0, 1105 passed 0 failed; fmt, spec, commission:spec, intake-spec, ess-gate, commission:ess-gate, drift, commission:drift, intake-drift, no-hand-model, commission:no-hand-model, plan, conform, commission:conform, docs-check, commission:docs-drift exit 0"
+  }
+}

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:granted-gate-ends-run
 kind: story
-status: active
+status: implemented
 title: A granted gated action ends a Commission run as awaiting approval
 relations:
 - serves: vision:O1
@@ -23,10 +23,11 @@ scope:
   path: docs/commission/design/approval-gate.md
 - confidence: cited
   path: ess/commission/domains/responsibility.yaml
-revision: 12
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-12T15:59:29Z", actor: "human:timo", revision: 11}
 - {from: "proposed", to: "active", at: "2026-10-12T15:59:29Z", actor: "human:timo", revision: 12}
+- {from: "active", to: "implemented", at: "2026-10-12T20:00:14Z", actor: "human:timo", revision: 13, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Why
 

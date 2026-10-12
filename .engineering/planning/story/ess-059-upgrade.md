@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:ess-059-upgrade
 kind: story
-status: active
+status: implemented
 title: Loom builds, generates and gates on ESS 0.59.0
 relations:
 - decomposes: epic:runtime-consolidation
@@ -44,10 +44,11 @@ scope:
   path: ess/ess-inputs.yaml
 - confidence: cited
   path: ess/intake/ess-inputs.yaml
-revision: 21
+revision: 22
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-12T15:59:29Z", actor: "human:timo", revision: 20}
 - {from: "proposed", to: "active", at: "2026-10-12T15:59:29Z", actor: "human:timo", revision: 21}
+- {from: "active", to: "implemented", at: "2026-10-12T20:00:14Z", actor: "human:timo", revision: 22, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 
