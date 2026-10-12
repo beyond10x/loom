@@ -86,8 +86,8 @@ impl port::ModelPort for Flaky {
     }
 }
 
-/// `TURN_MODEL_BUDGET` is "the most model calls one turn makes, across all its Runs and every loop
-/// of each". The budget is handed to each loop as `max_turns`, which counts loop turns, while the
+/// `TURN_MODEL_BUDGET` is "the most requests one turn sends to its model, across every loop of its
+/// Run". The budget is handed to each loop as `max_turns`, which counts loop turns, while the
 /// loop attempts a turn again on a retriable wire error without counting it (`MAX_TURN_RETRIES`).
 /// A model that reads on every step over a wire that fails twice before each answer is sent 3, 3
 /// and then, with 2 calls left, 3 more requests: 9 in one turn.

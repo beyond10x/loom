@@ -58,7 +58,7 @@ same 13 files).
 | `loom-plugin/src/lib.rs` | mechanism | the host loop: lock, retries from state, poll, classify, project, turn, record, stop | stays Rust |
 | `loom-plugin/src/state.rs` | mechanism | the state directory, atomic writes, the lock, the torn-line repair | stays Rust |
 | `loom-plugin/src/codec.rs` | mechanism | the JSON of record lines and state over the generated types | stays Rust (generated types already come from ESS) |
-| `loom-plugin/src/turn.rs` | mechanism, with policy constants | the composition of `run_until_blocked`, the re-run rule, the model budget (8) | the budget and step limits as plugin config; the composition stays Rust |
+| `loom-plugin/src/turn.rs` | mechanism, with policy constants | the composition of `run_until_blocked` as one Run, the model budget (8) | the budget and step limits as plugin config; the composition stays Rust |
 | `loom-plugin/src/effects.rs` | mechanism | `DataSourceEffects`: projection check, CLI read, evidence submission | stays Rust |
 | `loom-plugin/src/authority.rs` | policy | the two granted capabilities | derived from the protocol: grant what the plugin's protocol `requires` |
 | `loom-plugin/src/classify.rs` | policy, with a mechanism | the intent labels, their descriptions, the threshold; one forced tool call | `intents: [{name, description}]`, `threshold:`; the call stays Rust |
