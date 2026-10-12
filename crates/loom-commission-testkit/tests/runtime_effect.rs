@@ -17,7 +17,9 @@
 //! 5. the approval gate: when the previous iteration was a step on a frontier listing actions that
 //!    need approval, and this frontier lists the same actions with the same status and reasons,
 //!    the run ends `AwaitingApproval`, carrying those actions in frontier order, and the executor
-//!    is not run. An action an authority verdict in this Run denied is not one of them;
+//!    is not run. An action an authority verdict in this Run denied is not one of them. A step
+//!    whose request needed authority, which the provider allowed and the port performed, passes
+//!    the gate: the next iteration runs the executor;
 //! 6. the executor and its observation, as before;
 //! 7. a proposal is revalidated as before. An admitted request (or one the provider allowed) is
 //!    handed to [`EffectPort::invoke`] as an [`AdmittedRequest`], once, after its revalidation.
@@ -1240,6 +1242,157 @@ fn a_denied_action_is_not_awaited() {
         RunOutcome::AwaitingApproval(RunOutcomeAwaitingApproval {
             actions: vec!["merge".to_owned()],
         })
+    );
+}
+
+/// A step whose request needed authority, which the provider allowed and the effect port performed,
+/// passes the approval gate: the next iteration does not read the gate and runs the executor, so a
+/// granted read is followed by the granted proposal and both are performed. Control: a provider
+/// that denies the read's capability stops the run at the gate as before, awaiting the other
+/// action. A step budget still ends a run after a granted step, suspended for its budget.
+#[test]
+fn a_step_performed_under_a_grant_passes_the_gate() {
+    let open = || {
+        listing(
+            4,
+            vec![
+                gated("read", "datasource.read"),
+                gated("propose", "reply.propose"),
+            ],
+        )
+    };
+    let allow = || AuthorityVerdict::Allow(Unit(true));
+
+    let name = "granted, then granted";
+    let case = CaseId("case-granted".to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(
+        case.clone(),
+        repeat_n(open(), 11).chain([open().complete("answered")]),
+    );
+    let executor = Sequenced::new(&governor, [proposal("read"), proposal("propose")]);
+    let effects = Effects::new(&governor);
+    let authority = StaticAuthorityProvider::new()
+        .answer("datasource.read", allow())
+        .answer("reply.propose", allow());
+    let (result, _) = run(
+        &governor,
+        &executor,
+        &authority,
+        &effects,
+        &case,
+        Context::with_budget(10),
+    );
+    let end = ended(name, result);
+    assert_eq!(
+        governor.calls(),
+        [
+            iteration(&case),
+            revalidation(&case),
+            iteration(&case),
+            revalidation(&case),
+            completed(&case),
+        ]
+        .concat(),
+        "{name}: governor calls"
+    );
+    assert_eq!(
+        executor.at(),
+        [3, 8],
+        "{name}: the executor ran after the grant"
+    );
+    let asked: Vec<String> = authority
+        .asked()
+        .into_iter()
+        .map(|q| q.capability)
+        .collect();
+    assert_eq!(
+        asked,
+        ["datasource.read", "reply.propose"],
+        "{name}: provider asked"
+    );
+    let invoked: Vec<String> = effects.invoked().into_iter().map(|r| r.action).collect();
+    assert_eq!(invoked, ["read", "propose"], "{name}: both effects invoked");
+    assert_eq!(
+        end.effects,
+        vec![performed("done read"), performed("done propose")],
+        "{name}: both effects performed"
+    );
+    assert_eq!(end.steps, 2, "{name}: steps");
+    assert_eq!(
+        end.outcome,
+        RunOutcome::Completed(RunOutcomeCompleted {
+            outcome: "answered".to_owned()
+        }),
+        "{name}: outcome"
+    );
+
+    let name = "denied read";
+    let case = CaseId("case-granted-denied".to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(case.clone(), [open()]);
+    let executor = Sequenced::new(&governor, [proposal("read"), proposal("propose")]);
+    let effects = Effects::new(&governor);
+    let authority = StaticAuthorityProvider::new()
+        .answer(
+            "datasource.read",
+            AuthorityVerdict::Deny(AuthorityVerdictDeny {
+                reason: "no".to_owned(),
+            }),
+        )
+        .answer("reply.propose", allow());
+    let (result, _) = run(
+        &governor,
+        &executor,
+        &authority,
+        &effects,
+        &case,
+        Context::with_budget(10),
+    );
+    let end = ended(name, result);
+    assert_eq!(
+        governor.calls(),
+        [iteration(&case), revalidation(&case), iteration(&case)].concat(),
+        "{name}: governor calls"
+    );
+    assert_eq!(executor.at(), [3], "{name}: the executor ran once");
+    assert!(effects.invoked().is_empty(), "{name}: nothing invoked");
+    assert_eq!(end.steps, 1, "{name}: steps");
+    assert_eq!(
+        end.outcome,
+        RunOutcome::AwaitingApproval(RunOutcomeAwaitingApproval {
+            actions: vec!["propose".to_owned()],
+        }),
+        "{name}: outcome"
+    );
+
+    let name = "granted at the budget";
+    let case = CaseId("case-granted-budget".to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(case.clone(), [open()]);
+    let executor = Sequenced::new(&governor, [proposal("read")]);
+    let effects = Effects::new(&governor);
+    let authority = StaticAuthorityProvider::new().answer("datasource.read", allow());
+    let (result, _) = run(
+        &governor,
+        &executor,
+        &authority,
+        &effects,
+        &case,
+        Context::with_budget(1),
+    );
+    let end = ended(name, result);
+    assert_eq!(
+        governor.calls(),
+        [iteration(&case), revalidation(&case)].concat(),
+        "{name}: no gate is read after the granted step"
+    );
+    assert_eq!(effects.invoked().len(), 1, "{name}: the read was performed");
+    assert_eq!(end.steps, 1, "{name}: steps");
+    assert_eq!(
+        end.outcome,
+        RunOutcome::Suspended(RunOutcomeSuspended { reason: budget(1) }),
+        "{name}: outcome"
     );
 }
 
