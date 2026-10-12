@@ -88,7 +88,7 @@ plugin turn is one Run. Loom requires ESS 0.59.0.
 Since `0.15.0` a confidence fallback is recorded as two selections, the overruled fast one
 naming its replacement, each with the strategy of the selector that made it, and every
 selection carries a telemetry record (`loom.run.SelectionRecord`) for Metaharness; Loom
-requires ESS 0.59.0.
+requires ESS 0.57.0.
 
 Since `0.14.0` `LoopStop` is generated from its ESS declaration (`loom.run.LoopStop`): its
 variants carry payload structs and `i64` counts, while the JSON of loop outcomes and events is
