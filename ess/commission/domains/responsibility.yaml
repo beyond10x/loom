@@ -637,6 +637,11 @@ entities:
   # it): it stays stored and is never taken again, so the request is never performed twice and never
   # dropped without a durable trace; settling it is the host's. Once the request was performed the
   # Suspension is released (`ReleaseSuspension`), removed; a `Pending` one is not released.
+  #
+  # story:handoff-holds-no-suspension: a hold the host already settled (`HoldSuspension`,
+  # `settled`) leaves nothing held: the host has already done what an approval of the request
+  # would lead to, so no Suspension is stored, none is left for an approval to name and nothing
+  # can resume the Run from one.
   - name: commission.responsibility.Suspension
     identity:
       name: suspension
@@ -894,6 +899,17 @@ errors:
       - name: action_request_id
         type: commission.responsibility.ActionRequestId
 
+  # story:handoff-holds-no-suspension: the host already settled the request the Suspension would
+  # hold; nothing was stored. It names the Suspension, the request and the host's reason.
+  - name: commission.responsibility.SuspensionSettled
+    fields:
+      - name: suspension
+        type: commission.responsibility.SuspensionKey
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
+      - name: reason
+        type: String
+
   # story:approval-suspend-resume-slice: the suspension port cannot read or write.
   - name: commission.responsibility.SuspensionStorageFailed
     fields:
@@ -972,6 +988,10 @@ commands:
   # story:approval-suspend-resume-slice: a run suspended on an approval holds the commission's
   # Suspension, `Pending`, through the suspension port. A commission holds at most one: holding a
   # second is refused and keeps the first.
+  #
+  # story:handoff-holds-no-suspension: the host answers first whether it already settled the
+  # request the Suspension would hold (`settled`, naming the Suspension, the request and why); then
+  # nothing is stored and the run ends with nothing held.
   - name: commission.responsibility.HoldSuspension
     input:
       - name: suspension
@@ -995,6 +1015,13 @@ commands:
       - name: reason
         type: commission.responsibility.SuspensionReason
     outcomes:
+      - name: settled
+        external: the host already settled the request the Suspension would hold
+        error: commission.responsibility.SuspensionSettled
+        payload:
+          commission.responsibility.SuspensionSettled:
+            suspension: input.suspension
+            action_request_id: input.action_request_id
       - name: held
         creates: commission.responsibility.Suspension
         instance: suspension
