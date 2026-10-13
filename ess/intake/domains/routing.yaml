@@ -254,7 +254,10 @@ entities:
   # The hand-off a granted `repository.merge` performs on resume: the commission, the granted
   # request, the workspace and its `HEAD` as the implementation revision, recorded in the state
   # directory. No Git ref moves; merging happens outside Loom. One is recorded per request, so a
-  # request performed once leaves exactly one.
+  # request performed once leaves exactly one, and one per `HEAD` of a commission: a merge the
+  # agent proposes again at a `HEAD` the commission already handed off is not handed off again,
+  # and `approve` refuses the Suspension holding it (`HeadAlreadyHandedOff`). New work, a new
+  # `HEAD`, may be handed off.
   - name: intake.routing.MergeHandoff
     identity:
       name: action_request_id
@@ -292,6 +295,15 @@ errors:
       - name: action_request_id
         type: intake.routing.ActionRequestId
 
+  # The commission already handed off this `HEAD`, under another request: the same work is not
+  # handed off twice.
+  - name: intake.routing.HeadAlreadyHandedOff
+    fields:
+      - name: commission_id
+        type: intake.routing.CommissionId
+      - name: head
+        type: String
+
   # The merge hand-off could not be recorded: why, as the store reports it.
   - name: intake.routing.MergeHandoffStorageFailed
     fields:
@@ -319,8 +331,9 @@ commands:
         external: the resume context store cannot remove the context
         error: intake.routing.ResumeContextStorageFailed
 
-  # A granted `repository.merge` is performed by recording its hand-off, once per request: a
-  # second record for the same request is refused and changes nothing.
+  # A granted `repository.merge` is performed by recording its hand-off, once per request and once
+  # per `HEAD` of a commission: a second record for the same request, or for a `HEAD` the
+  # commission already handed off under another request, is refused and changes nothing.
   - name: intake.routing.RecordMergeHandoff
     input:
       - name: action_request_id
@@ -338,6 +351,17 @@ commands:
         payload:
           intake.routing.MergeHandoffAlreadyRecorded:
             action_request_id: input.action_request_id
+      - name: head-already-handed-off
+        when_related:
+          entity: intake.routing.MergeHandoff
+          where:
+            all: [commission_id == input.commission_id, head == input.head]
+          exists: true
+        error: intake.routing.HeadAlreadyHandedOff
+        payload:
+          intake.routing.HeadAlreadyHandedOff:
+            commission_id: input.commission_id
+            head: input.head
       - name: recorded
         creates: intake.routing.MergeHandoff
         instance: action_request_id
