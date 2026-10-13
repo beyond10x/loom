@@ -2,8 +2,8 @@
   "provenance": {
     "system": "intake",
     "specification_version": "v1",
-    "source_digest": "0dcbb44891d966a08164d0845cc89345f20e9da1a2bff9d8412d32181f207f99",
-    "contract_digest": "03a4eba225331c590679bbbce8fd69d4e4f51fa6589d185caf24c7551cb770fd"
+    "source_digest": "e5f987ee3613bbc2c1f7decd667a2b91fb1819f149cc970316814040874257c4",
+    "contract_digest": "3bcee985eed31b4d9ea384c5bf3512a98619ba6016205bfe0291f1860171e18a"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -243,6 +243,41 @@
     },
     {
       "kind": "domain_type",
+      "source": "intake.routing.AcceptedRoute",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.routing.AgentRevisionId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.routing.CaseId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.routing.CatalogDigest",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.routing.CommissionId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "intake.routing.ExtractedReference.State",
       "disposition": {
         "disposition": "generated"
@@ -278,6 +313,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "intake.routing.ResumeContext.State",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "intake.routing.SliceRun.State",
       "disposition": {
         "disposition": "generated"
@@ -307,6 +349,13 @@
     {
       "kind": "entity_lifecycle",
       "source": "intake.routing.ProtocolPick",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "entity_lifecycle",
+      "source": "intake.routing.ResumeContext",
       "disposition": {
         "disposition": "generated"
       }

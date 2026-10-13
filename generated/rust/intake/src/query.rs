@@ -1,6 +1,6 @@
 // generated from intake v1
-// model digest 0dcbb44891d966a08164d0845cc89345f20e9da1a2bff9d8412d32181f207f99
-// contract digest 03a4eba225331c590679bbbce8fd69d4e4f51fa6589d185caf24c7551cb770fd
+// model digest e5f987ee3613bbc2c1f7decd667a2b91fb1819f149cc970316814040874257c4
+// contract digest 3bcee985eed31b4d9ea384c5bf3512a98619ba6016205bfe0291f1860171e18a
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! query — `intake.query`.

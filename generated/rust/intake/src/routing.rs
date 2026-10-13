@@ -1,6 +1,6 @@
 // generated from intake v1
-// model digest 0dcbb44891d966a08164d0845cc89345f20e9da1a2bff9d8412d32181f207f99
-// contract digest 03a4eba225331c590679bbbce8fd69d4e4f51fa6589d185caf24c7551cb770fd
+// model digest e5f987ee3613bbc2c1f7decd667a2b91fb1819f149cc970316814040874257c4
+// contract digest 3bcee985eed31b4d9ea384c5bf3512a98619ba6016205bfe0291f1860171e18a
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Routing — `intake.routing`.
@@ -8,6 +8,42 @@
 //! An intent as given, the references extracted from its text, the protocol the router proposes for it, and the slice run that works the intent until it is blocked. A pick is a proposal, never authority.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
+
+/// AcceptedRoute — `intake.routing.AcceptedRoute`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcceptedRoute {
+    /// `protocol` — `String`.
+    pub protocol: String,
+    /// `intent_revision` — `String`.
+    pub intent_revision: String,
+    /// `catalog` — `List<intake.routing.CatalogDigest>`.
+    pub catalog: Vec<CatalogDigest>,
+    /// `context_policy` — `intake.context.ContextPolicy`.
+    pub context_policy: crate::context::ContextPolicy,
+    /// `threshold` — `Decimal`.
+    pub threshold: crate::primitives::Decimal,
+}
+
+/// AgentRevisionId — `intake.routing.AgentRevisionId`: a distinct wrapper around `Uuid`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentRevisionId(pub crate::primitives::Uuid);
+
+/// CaseId — `intake.routing.CaseId`: a distinct wrapper around `String`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaseId(pub String);
+
+/// CatalogDigest — `intake.routing.CatalogDigest`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogDigest {
+    /// `name` — `String`.
+    pub name: String,
+    /// `digest` — `String`.
+    pub digest: String,
+}
+
+/// CommissionId — `intake.routing.CommissionId`: a distinct wrapper around `Uuid`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommissionId(pub crate::primitives::Uuid);
 
 /// The states of `intake.routing.ExtractedReference`, as runtime values.
 ///
@@ -60,6 +96,16 @@ pub enum ReferenceKind {
     GithubPullRequest,
     /// `Url`.
     Url,
+}
+
+/// The states of `intake.routing.ResumeContext`, as runtime values.
+///
+/// Synthesised from the lifecycle, so the two cannot disagree. Which *moves* are legal is not
+/// carried here — it is carried by `ResumeContext<S>`, where an undeclared move does not compile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResumeContextState {
+    /// `Kept`.
+    Kept,
 }
 
 /// The states of `intake.routing.SliceRun`, as runtime values.
@@ -483,6 +529,154 @@ impl AnyProtocolPick {
         match self {
             Self::Proposed(instance) => ProtocolPickSnapshot {
                 state: ProtocolPickState::Proposed,
+                data: instance.into_data(),
+            },
+        }
+    }
+}
+
+/// What ResumeContext — `intake.routing.ResumeContext` — holds, apart from where it is in its lifecycle.
+///
+/// The identity and every declared field. The state is deliberately not one: inside the domain it
+/// is carried by the type parameter of [`ResumeContext<S>`], and at a boundary by [`ResumeContextSnapshot::state`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResumeContextData {
+    /// The identity: `commission_id` — `intake.routing.CommissionId`.
+    pub commission_id: CommissionId,
+    /// `case_id` — `intake.routing.CaseId`.
+    pub case_id: CaseId,
+    /// `agent_revision_id` — `intake.routing.AgentRevisionId`.
+    pub agent_revision_id: AgentRevisionId,
+    /// `intent` — `String`.
+    pub intent: String,
+    /// `route` — `intake.routing.AcceptedRoute`.
+    pub route: AcceptedRoute,
+    /// `workspace` — `Optional<String>`.
+    pub workspace: Option<String>,
+    /// `test_command` — `List<String>`.
+    pub test_command: Vec<String>,
+    /// `max_steps` — `Integer`.
+    pub max_steps: i64,
+    /// `confinement` — `intake.confinement.Backend`.
+    pub confinement: crate::confinement::Backend,
+    /// `cgroup_root` — `Optional<String>`.
+    pub cgroup_root: Option<String>,
+    /// `model` — `String`.
+    pub model: String,
+    /// `catalog` — `Optional<String>`.
+    pub catalog: Option<String>,
+}
+
+/// The states of `intake.routing.ResumeContext`, at the type level.
+///
+/// One marker type per declared state, sealed: a state the lifecycle does not declare cannot
+/// implement [`Marker`](resume_context_state::Marker), so [`ResumeContext<S>`](ResumeContext) can only ever rest in a real state.
+pub mod resume_context_state {
+    /// Closes [`Marker`] over the declared states.
+    mod sealed {
+        /// Implemented only by the marker types beside this module.
+        pub trait Sealed {}
+        impl Sealed for super::Kept {}
+    }
+
+    /// A declared state of `ResumeContext`, as a type.
+    pub trait Marker: sealed::Sealed {
+        /// The same state, as the runtime value.
+        const STATE: super::ResumeContextState;
+    }
+
+    /// `Kept`. Where a new instance starts.
+    pub struct Kept;
+
+    impl Marker for Kept {
+        const STATE: super::ResumeContextState = super::ResumeContextState::Kept;
+    }
+}
+
+/// ResumeContext — `intake.routing.ResumeContext` — with its lifecycle state carried by the type.
+///
+/// The one constructor rests in `Kept`, and the only way to change `S` is a method generated from
+/// a declared transition. A move the specification does not declare is therefore not an error
+/// case: it does not compile. Where the state is data — wire, storage — use [`ResumeContextSnapshot`]
+/// and [`ResumeContextSnapshot::refine`].
+pub struct ResumeContext<S: resume_context_state::Marker> {
+    data: ResumeContextData,
+    state: core::marker::PhantomData<S>,
+}
+
+impl<S: resume_context_state::Marker> ResumeContext<S> {
+    /// The state this instance rests in, as the runtime value.
+    pub fn state(&self) -> ResumeContextState {
+        S::STATE
+    }
+
+    /// What it holds.
+    pub fn data(&self) -> &ResumeContextData {
+        &self.data
+    }
+
+    /// Hands the data back, giving up the typed state.
+    pub fn into_data(self) -> ResumeContextData {
+        self.data
+    }
+}
+
+impl ResumeContext<resume_context_state::Kept> {
+    /// A new instance, resting in `Kept` — the only state the lifecycle starts one in.
+    pub fn new(data: ResumeContextData) -> Self {
+        Self {
+            data,
+            state: core::marker::PhantomData,
+        }
+    }
+}
+
+/// `intake.routing.ResumeContext` as it crosses a boundary: the state as a value beside the data.
+///
+/// Wire and storage know states only at runtime; [`ResumeContextSnapshot::refine`] is the one door back
+/// into the typed lifecycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResumeContextSnapshot {
+    /// Where the instance is in its lifecycle.
+    pub state: ResumeContextState,
+    /// What it holds.
+    pub data: ResumeContextData,
+}
+
+/// An `ResumeContext` in whichever declared state it was found.
+pub enum AnyResumeContext {
+    /// Resting in `Kept`.
+    Kept(ResumeContext<resume_context_state::Kept>),
+}
+
+impl ResumeContextSnapshot {
+    /// Refines the runtime state into the typed one.
+    ///
+    /// Total: every declared state has an arm, and an undeclared state cannot reach here because
+    /// `ResumeContextState` cannot spell one.
+    pub fn refine(self) -> AnyResumeContext {
+        match self.state {
+            ResumeContextState::Kept => AnyResumeContext::Kept(ResumeContext {
+                data: self.data,
+                state: core::marker::PhantomData,
+            }),
+        }
+    }
+}
+
+impl AnyResumeContext {
+    /// The state, as the runtime value.
+    pub fn state(&self) -> ResumeContextState {
+        match self {
+            Self::Kept(_) => ResumeContextState::Kept,
+        }
+    }
+
+    /// Back to the boundary shape.
+    pub fn snapshot(self) -> ResumeContextSnapshot {
+        match self {
+            Self::Kept(instance) => ResumeContextSnapshot {
+                state: ResumeContextState::Kept,
                 data: instance.into_data(),
             },
         }
