@@ -19,6 +19,7 @@ b10x-loom-protocols = { path = "../loom-protocols" }
 serde_json = "1"
 b10x-loom-governor = { path = "../loom-governor" }
 b10x-llm-tool-call = { git = "https://github.com/beyond10x/llm", tag = "0.4.0" }
+b10x-loom-commission = { path = "../loom-commission" }
 b10x-loom-intake-slice = { path = "../loom-intake-slice" }
 b10x-loom-plugin = { path = "../loom-plugin" }
 b10x-loom-plugin-slack = { path = "../loom-plugin-slack" }
@@ -35,6 +36,5 @@ libc = "0.2"
 tokio = { version = "1.53", features = ["rt", "signal", "macros"] }
 
 [dev-dependencies]
-b10x-loom-commission = { path = "../loom-commission" }
 b10x-loom-intake-references = { path = "../loom-intake-references" }
 serde_json = "1"

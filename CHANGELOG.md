@@ -34,6 +34,29 @@ under **Unreleased** until the next release.
   commission's Suspension. `PreparedIntent` types its route (`accepted_route`, `restore_route`),
   and the slice's functions take any `FallibleCaseStore` instead of only a `CaseStore`.
   `SliceError` gains `State`, which breaks an exhaustive match.
+- `b10x-loom approve <COMMISSION> <CAPABILITY> --state <DIR>` approves the request a
+  commission's Suspension holds: it writes a grant record (`intake.routing.Grant`: the commission,
+  the action, the capability, the request it grants and when, mirroring Commission's
+  `AuthorityDecision`) into the directory and performs nothing. It refuses, writing nothing, when
+  the commission holds no Suspension (exit 10), the Suspension is being resumed (11), or the
+  suspended request needs another capability (19).
+- `b10x-loom resume <COMMISSION> --state <DIR>` continues the suspended run after the approval,
+  through `resume_after_grant`: it rebuilds the run from the commission's resume context, only for
+  the intent, protocol catalog and context policy its route was accepted for, validates the
+  workspace again, reads the grant through an authority provider that allows only the request
+  the commission's Suspension holds while it is held (`b10x_loom_intake_slice::grant`,
+  `GrantAuthority`), performs that request once, releases the Suspension and runs on as `run`
+  does; a run that ends without a Suspension removes its context. A granted `repository.merge` is
+  a merge hand-off: a record of the commission, the request, the workspace and its `HEAD`
+  (`intake.routing.MergeHandoff`, `merge-<hex>.json` in the state directory, recorded once per
+  request through `RecordMergeHandoff`); no Git ref moves and merging happens outside Loom
+  (`b10x_loom_intake_slice::handoff`). Each refusal of Commission's resume has its own exit
+  status: `NothingSuspended` 10, `InDoubt` 11, `OtherRequest` 12, `OtherCommission` 13,
+  `CaseMoved` 14, `NotAdmitted` 15, `NotGranted` 16, `NotPerformed` 17, `RunNotSuspended` 18;
+  a suspension store that cannot be read is 20, a governor that cannot answer 21, and a resumed
+  loop that stops without an outcome 22. The resumed model starts with an empty briefing.
+  `SliceError` gains `Resume`, which breaks an exhaustive match, and `b10x-loom-cli` depends on
+  `b10x-loom-commission`.
 - `FileCaseStore::open` and `FileSuspensionStore::open` prove their directory takes a write:
   holding the lock, they create, write, sync and remove a temporary file, so a directory that
   has become read-only is refused when a store opens rather than at its first write.

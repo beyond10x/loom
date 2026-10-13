@@ -1,7 +1,7 @@
 //! Run a routed intent, initializing resources only for the selected protocol.
 
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command as Process, ExitCode};
 use std::sync::Arc;
 
@@ -12,8 +12,8 @@ use b10x_loom_cli::model_catalog::ModelCatalog;
 use b10x_loom_cli::plugin::{is_proposal, recorded, report_line, turn_models};
 use b10x_loom_cli::regular_file;
 use b10x_loom_cli::{
-    Cli, Command, Confinement, EvaluateArgs, Output, PluginCommand, PluginName, ProtocolCommand,
-    RunArgs, exit_status,
+    ApproveArgs, Cli, Command, Confinement, EvaluateArgs, Output, PluginCommand, PluginName,
+    ProtocolCommand, ResumeArgs, RunArgs, approve_exit_status, exit_status, resume_exit_status,
 };
 use b10x_loom_intake_slice::case;
 use b10x_loom_intake_slice::clock::HostClock;
@@ -22,12 +22,17 @@ use b10x_loom_intake_slice::confinement::{
 };
 use b10x_loom_intake_slice::context_metrics::ContextMetrics;
 use b10x_loom_intake_slice::executor::{TestCommand, UnconfinedRunner};
+use b10x_loom_intake_slice::grant::{self, GrantStore, approve};
+use b10x_loom_intake_slice::handoff::MergeHandoffStore;
 use b10x_loom_intake_slice::intent::{
-    IntentRequest, Preparation, PreparedIntent, ResumeHost, RunState, prepare_intent,
-    run_prepared_intent, run_prepared_intent_with_state,
+    IntentRequest, Preparation, PreparedIntent, ResumeHost, ResumeState, RunState,
+    held_resume_context, prepare_intent, resume_with_state, resumed_request, run_prepared_intent,
+    run_prepared_intent_with_state,
 };
 use b10x_loom_intake_slice::resume::ResumeContextStore;
-use b10x_loom_intake_slice::run::{LOCAL_PROTOCOL, RunOptions, SliceRun, StopReason, printable};
+use b10x_loom_intake_slice::run::{
+    LOCAL_PROTOCOL, RunOptions, SliceError, SliceRun, StopReason, printable,
+};
 use b10x_loom_plugin_slack::{SlackHandler, config as slack_config};
 use clap::Parser;
 use intake_model::confinement::Backend;
@@ -56,7 +61,127 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => failed(&error),
         },
+        Command::Approve(arguments) => approve_command(&arguments),
+        Command::Resume(arguments) => resume_command(&arguments),
     }
+}
+
+/// The state directory `approve` and `resume` read: one `run --state` made. Neither creates it.
+fn existing_state(dir: &Path) -> Result<(), String> {
+    if dir.is_dir() {
+        Ok(())
+    } else {
+        Err(format!(
+            "the state directory {} does not exist",
+            dir.display()
+        ))
+    }
+}
+
+/// Runs `approve`, as `APPROVE_HELP` states: writes the grant and performs nothing.
+fn approve_command(arguments: &ApproveArgs) -> ExitCode {
+    let dir = &arguments.state;
+    let stores = existing_state(dir).and_then(|()| {
+        let unusable = |error: &dyn std::fmt::Display| format!("the state directory: {error}");
+        Ok((
+            FileSuspensionStore::open(dir).map_err(|e| unusable(&e))?,
+            GrantStore::open(dir).map_err(|e| unusable(&e))?,
+        ))
+    });
+    let (suspensions, grants) = match stores {
+        Ok(stores) => stores,
+        Err(error) => return failed(&error),
+    };
+    match approve(
+        &suspensions,
+        &grants,
+        &arguments.commission,
+        &arguments.capability,
+        grant::now(),
+    ) {
+        Ok(granted) => {
+            println!(
+                "granted {} for request {} ({}) of commission {}; nothing is performed until resume",
+                printable(&granted.capability),
+                printable(&granted.action_request_id.0.0),
+                printable(&granted.action),
+                printable(&granted.commission_id.0.0)
+            );
+            ExitCode::SUCCESS
+        }
+        Err(refusal) => {
+            eprintln!(
+                "b10x-loom: approve refused: {}",
+                printable(&refusal.to_string())
+            );
+            ExitCode::from(approve_exit_status(&refusal))
+        }
+    }
+}
+
+/// Runs `resume`, as `RESUME_HELP` states.
+fn resume_command(arguments: &ResumeArgs) -> ExitCode {
+    let mut out = std::io::stdout().lock();
+    match resume(arguments, &mut out) {
+        Ok(run) => ExitCode::from(exit_status(run.stop_reason)),
+        Err(SliceError::Resume(error)) => {
+            eprintln!(
+                "b10x-loom: {}",
+                printable(&SliceError::Resume(error.clone()).to_string())
+            );
+            ExitCode::from(resume_exit_status(&error))
+        }
+        Err(error) => failed(&error.to_string()),
+    }
+}
+
+fn resume(arguments: &ResumeArgs, out: &mut dyn Write) -> Result<SliceRun, SliceError> {
+    let dir = &arguments.state;
+    let unusable = |error: &dyn std::fmt::Display| SliceError::State(error.to_string());
+    existing_state(dir).map_err(SliceError::State)?;
+    let suspensions = FileSuspensionStore::open(dir).map_err(|e| unusable(&e))?;
+    let contexts = ResumeContextStore::open(dir).map_err(|e| unusable(&e))?;
+    let grants = GrantStore::open(dir).map_err(|e| unusable(&e))?;
+    let handoffs = MergeHandoffStore::open(dir).map_err(|e| unusable(&e))?;
+    let state = ResumeState {
+        suspensions: &suspensions,
+        contexts: &contexts,
+        grants: &grants,
+        handoffs: &handoffs,
+    };
+    // The context is read only for a commission that holds a Suspension; nothing else is opened,
+    // and no model is called, before.
+    let context = held_resume_context(&state, &arguments.commission)?;
+    let catalog = InstallStore::user()
+        .and_then(|store| store.catalog())
+        .map_err(SliceError::Context)?;
+    let governor = CanonGovernor::new(FileCaseStore::open(dir).map_err(|e| unusable(&e))?)
+        .with_catalog(&catalog)
+        .map_err(|e| SliceError::Context(e.to_string()))?;
+    let agent = match &context.catalog {
+        Some(path) => Box::new(
+            ModelCatalog::read(Path::new(path))
+                .and_then(|models| models.model("--model", &context.model))
+                .map_err(SliceError::Context)?,
+        ) as Box<dyn Model>,
+        None => chosen_model(None, &context.model).map_err(SliceError::Context)?,
+    };
+    let runner: Arc<dyn TestRunner> = match context.confinement {
+        Backend::None => Arc::new(UnconfinedRunner),
+        Backend::Substrate => {
+            let runner = SubstrateRunner::new(context.cgroup_root.as_ref().map(PathBuf::from));
+            if let Some(workspace) = &context.workspace {
+                runner
+                    .preflight(Path::new(workspace))
+                    .map_err(|e| SliceError::Context(format!("confinement unavailable: {e}")))?;
+            }
+            Arc::new(runner)
+        }
+    };
+    let request = resumed_request(&context, Some(runner))?;
+    resume_with_state(
+        &context, &request, &catalog, &governor, &governor, &*agent, out, &state,
+    )
 }
 
 /// Runs `plugin run` or `plugin report`, as `PLUGIN_RUN_HELP` states.

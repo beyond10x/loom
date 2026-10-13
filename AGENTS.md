@@ -441,6 +441,17 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   open proves the directory takes a write. Without it `run` keeps the memory
   store and `run_until_blocked`. `crates/loom-cli/tests/run_state.rs` runs the binary to a held
   Suspension and reads `<DIR>` back through the stores.
+- `approve <COMMISSION> <CAPABILITY> --state <DIR>` writes a grant (`intake.routing.Grant`,
+  `b10x_loom_intake_slice::grant::GrantStore`) for the request the commission's Suspension holds
+  and performs nothing. `resume <COMMISSION> --state <DIR>` reads the context only for a
+  commission holding a Suspension, rebuilds the run from it (`resume_with_state`), and continues
+  it through `resume_after_grant` with `GrantAuthority`, which allows only the request the
+  Suspension holds while it is `Pending`. A granted `repository.merge` is bound to
+  `handoff::HandoffEffects`, which records a merge hand-off (`intake.routing.MergeHandoff`,
+  once per request) and moves no Git ref; only a resume binds it. Each `ResumeRefusal` and
+  `ResumeError` has its own exit status (`resume_exit_status`, `RESUME_HELP`).
+  `crates/loom-cli/tests/resume_after_grant.rs` runs `run`, `approve` and `resume` as separate
+  processes.
 
 The injected `TestRunner` defaults to Substrate 0.7.10, with host and wire pinned together.
 Tests get no network, a cleared environment, read-only source and Rust toolchain, writes only
