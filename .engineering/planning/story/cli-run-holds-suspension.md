@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:cli-run-holds-suspension
 kind: story
-status: active
+status: implemented
 title: b10x-loom run --state holds a Suspension on a withheld approval
 relations:
 - serves: vision:O1
@@ -43,10 +43,11 @@ scope:
   path: website/docs/reference/cli.md
 - confidence: cited
   path: website/docs/reference/ess
-revision: 14
+revision: 15
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-13T07:10:02Z", actor: "human:timo", revision: 10}
 - {from: "proposed", to: "active", at: "2026-10-13T07:35:42Z", actor: "human:timo", revision: 11}
+- {from: "active", to: "implemented", at: "2026-10-13T10:08:51Z", actor: "human:timo", revision: 15, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 

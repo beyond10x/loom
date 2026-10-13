@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:host-suspension-store
 kind: story
-status: active
+status: implemented
 title: A host keeps a commission's Suspension in a directory (production file store)
 relations:
 - serves: vision:O1
@@ -18,10 +18,11 @@ scope:
   path: crates/loom-governor/src/file_suspension.rs
 - confidence: inferred
   path: crates/loom-governor/src/lib.rs
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-13T07:10:02Z", actor: "human:timo", revision: 7}
 - {from: "proposed", to: "active", at: "2026-10-13T07:35:42Z", actor: "human:timo", revision: 8}
+- {from: "active", to: "implemented", at: "2026-10-13T10:08:51Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 

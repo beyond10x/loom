@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:cli-resume-after-grant
 kind: story
-status: active
+status: implemented
 title: b10x-loom approve and resume continue a suspended run after a grant
 relations:
 - serves: vision:O1
@@ -37,10 +37,11 @@ scope:
   path: website/docs/reference/cli.md
 - confidence: cited
   path: website/docs/reference/ess
-revision: 13
+revision: 14
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-13T07:10:02Z", actor: "human:timo", revision: 9}
 - {from: "proposed", to: "active", at: "2026-10-13T07:35:42Z", actor: "human:timo", revision: 10}
+- {from: "active", to: "implemented", at: "2026-10-13T10:08:51Z", actor: "human:timo", revision: 14, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 
