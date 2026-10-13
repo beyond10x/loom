@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: epic:vertical-slices
 kind: epic
-status: draft
+status: implemented
 title: 'Vertical slices: software change, incident, suspend/resume'
 refs:
 - provider: commission
@@ -10,7 +10,11 @@ refs:
 relations:
 - serves: vision:governed-autonomy
 - serves: vision:O1
-revision: 1
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-13T06:22:50Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-10-13T06:22:50Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-13T06:22:51Z", actor: "human:timo", revision: 4}
 ---
 > Re-filed from `beyond10x/commission` `epic:vertical-slices` at `e61e4f0` (status there: `proposed`) under Atlas ADR 0090
 > (loom `story:import-commission`). Paths below are Commission's: `ess/` is now `ess/commission/`,

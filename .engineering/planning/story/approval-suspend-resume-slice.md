@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:approval-suspend-resume-slice
 kind: story
-status: active
+status: implemented
 title: Approval suspend/resume across a process restart
 refs:
 - provider: commission
@@ -46,10 +46,11 @@ scope:
   path: generated/rust/commission/src
 - confidence: inferred
   path: website/docs/reference/commission
-revision: 33
+revision: 34
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-13T05:12:40Z", actor: "human:timo", revision: 31}
 - {from: "proposed", to: "active", at: "2026-10-13T05:12:40Z", actor: "human:timo", revision: 32}
+- {from: "active", to: "implemented", at: "2026-10-13T06:22:43Z", actor: "human:timo", revision: 34, decided_on: {"recorded":{"test_result":1,"review_outcome":2}}}
 ---
 > Re-filed from `beyond10x/commission` `story:approval-suspend-resume-slice` at `e61e4f0` (Atlas ADR 0090, loom `story:import-commission`); paths below are Loom's.
 

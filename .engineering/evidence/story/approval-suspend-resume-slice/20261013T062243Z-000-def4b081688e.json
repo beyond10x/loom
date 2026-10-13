@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-13T06:22:43Z",
+  "actor": "human:timo",
+  "artifact": "story:approval-suspend-resume-slice",
+  "kind": "story",
+  "revision": 33,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "joint package gate on d5b676d: cargo fmt --check; cargo clippy -D warnings and cargo test --locked of b10x-loom-commission (47), -commission-conformance (19), -commission-testkit (204), loom-commission-docs (8), loom-commission-xtask (49), b10x-loom-governor (67), b10x-loom-executor (781): exit 0, 1175 passed 0 failed; commission:spec, ess-gate, drift, no-hand-model, conform, docs-drift, plan exit 0"
+  }
+}
