@@ -13,7 +13,7 @@
 //! * `HoldSuspension`, `TakeSuspension` and `ReleaseSuspension` through the generated behaviours
 //!   over `b10x_loom_commission::ports::suspension::SuspensionStore`, the suspension port over
 //!   memory, held in [`store`]: their `storage-failed` is the store failing the write a scenario
-//!   forced;
+//!   forced, and `HoldSuspension`'s `settled` is the host settling the hold a scenario forced;
 //! * `RevalidateActionRequest` by `b10x_loom_commission::action_request::revalidate`, against the
 //!   governor in [`governor`];
 //! * the views `RunStates` and `SuspensionStates` by the generated queries over the same stores.
@@ -43,8 +43,8 @@ use b10x_loom_commission::model::responsibility::{
     HoldSuspensionOutcome, ProposedActionArguments, ReleaseSuspension, ReleaseSuspensionOutcome,
     ResumeRun, ResumeRunOutcome, RevalidateActionRequestOutcome, RunId, RunStateConflict,
     RunStorageFailed, StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome,
-    SuspensionRequestMismatch, SuspensionStateConflict, SuspensionStorageFailed, TakeSuspension,
-    TakeSuspensionOutcome,
+    SuspensionRequestMismatch, SuspensionSettled, SuspensionStateConflict, SuspensionStorageFailed,
+    TakeSuspension, TakeSuspensionOutcome,
 };
 use b10x_loom_commission::outcome::RunStore;
 use ess_conformance::scenario::{CommandRef, ErrorRef, EventRef, OutcomeRef};
@@ -91,6 +91,8 @@ const SUSPENSION_NOT_FOUND: &str = "commission.responsibility.SuspensionNotFound
 const SUSPENSION_STATE_CONFLICT: &str = "commission.responsibility.SuspensionStateConflict";
 const SUSPENSION_REQUEST_MISMATCH: &str = "commission.responsibility.SuspensionRequestMismatch";
 const SUSPENSION_STORAGE_FAILED: &str = "commission.responsibility.SuspensionStorageFailed";
+const SUSPENSION_SETTLED: &str = "commission.responsibility.SuspensionSettled";
+const SETTLED: &str = "settled";
 const SUSPENSION_STATES: &str = "commission.responsibility.SuspensionStates";
 
 /// One scenario's state.
@@ -273,6 +275,7 @@ impl ConformanceTarget for CommissionTarget {
             (HOLD_SUSPENSION, STORAGE_FAILED) => {
                 live.suspensions.ports.fail_next(SuspensionUnwritable::Hold)
             }
+            (HOLD_SUSPENSION, SETTLED) => live.suspensions.ports.settle_next(),
             (TAKE_SUSPENSION, STORAGE_FAILED) => {
                 live.suspensions.ports.fail_next(SuspensionUnwritable::Take)
             }
@@ -419,6 +422,23 @@ fn suspension_storage_failed(
         .with_error(error(SUSPENSION_STORAGE_FAILED).with("reason", Node::Text(failed.reason)))
 }
 
+/// `HoldSuspension`'s `settled`: the host already settled the request, naming the Suspension, the
+/// request and why; nothing was stored.
+fn suspension_settled(settled: SuspensionSettled) -> SemanticCommandResult {
+    took(HOLD_SUSPENSION, SETTLED).with_error(
+        error(SUSPENSION_SETTLED)
+            .with(
+                "suspension",
+                codec::from_suspension_key(&settled.suspension),
+            )
+            .with(
+                "action_request_id",
+                Node::Text(settled.action_request_id.0.0),
+            )
+            .with("reason", Node::Text(settled.reason)),
+    )
+}
+
 /// A Suspension command's refusal naming the state the Suspension is in and its request.
 fn suspension_conflict(
     command: &str,
@@ -476,6 +496,7 @@ fn hold_suspension(
         reason: codec::suspension_reason(input.get("reason")?)?,
     };
     Some(match live.suspensions.hold_suspension(command).ok()? {
+        HoldSuspensionOutcome::Settled { error: settled } => suspension_settled(settled),
         HoldSuspensionOutcome::Held { suspension_held } => {
             let published = live.publish(
                 event(SUSPENSION_HELD)

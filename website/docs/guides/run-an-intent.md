@@ -73,8 +73,9 @@ without the earlier steps. A granted `repository.merge` is a merge hand-off: `re
 commission, the request, the workspace and its `HEAD` in the state directory, and moves no Git
 ref; merging happens outside Loom. A commission hands one `HEAD` off once: a resumed run that
 stops at the merge's gate again at that `HEAD` prints
-`stopped: MergeHandedOff (<request>, HEAD <sha>)`, and `approve` refuses a merge at it
-`AlreadyHandedOff` (23); new work, a new `HEAD`, is approved and handed off again. A resume that
+`stopped: MergeHandedOff (<request>, HEAD <sha>)`. A merge the agent proposed again there holds no
+Suspension and the state directory keeps no resume context for it, so `approve` finds nothing to
+approve (`NothingSuspended`, 10); new work, a new `HEAD`, is approved and handed off again. A resume that
 performs nothing exits with the status of its refusal, `NotGranted` (16) without a grant and
 `NothingSuspended` (10) once the Suspension is released among them; the
 [CLI reference](../reference/cli.md) lists every status.

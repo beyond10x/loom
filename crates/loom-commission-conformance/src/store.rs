@@ -10,6 +10,9 @@
 //! `HoldSuspension`, `TakeSuspension` and `ReleaseSuspension` declare `storage-failed` the same
 //! way, and are forced the same way on [`ScenarioSuspensions`]; every other answer comes from
 //! `b10x_loom_commission::ports::suspension::SuspensionStore`, which holds the Suspensions.
+//! `HoldSuspension` also declares `settled` as `external:`: the host already settled the request
+//! the Suspension would hold. A scenario forces it the same way, and the next hold is answered
+//! `settled`, storing nothing, as a host that settled the request answers it.
 
 use b10x_loom_commission::model::behaviour::{RunStorage, SuspensionStorage};
 use b10x_loom_commission::model::obligation::UnmetObligation;
@@ -20,8 +23,8 @@ use b10x_loom_commission::model::responsibility::obligations::{
 use b10x_loom_commission::model::responsibility::{
     HoldSuspension, HoldSuspensionOutcome, ReleaseSuspension, ReleaseSuspensionOutcome, ResumeRun,
     ResumeRunOutcome, RunId, RunSnapshot, RunStorageFailed, StartRun, StartRunOutcome, SuspendRun,
-    SuspendRunOutcome, SuspensionKey, SuspensionSnapshot, SuspensionStorageFailed, TakeSuspension,
-    TakeSuspensionOutcome,
+    SuspendRunOutcome, SuspensionKey, SuspensionSettled, SuspensionSnapshot,
+    SuspensionStorageFailed, TakeSuspension, TakeSuspensionOutcome,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::suspension::SuspensionStore;
@@ -143,11 +146,16 @@ pub enum SuspensionUnwritable {
     Release,
 }
 
-/// [`SuspensionStore`], whose next write of one Suspension command can be made to fail.
+/// The reason the suspension store gives for a hold a scenario made the host settle.
+pub const HOST_SETTLED: &str = "the conformance host already settled the request";
+
+/// [`SuspensionStore`], whose next write of one Suspension command can be made to fail, and whose
+/// next hold can be answered as settled by the host.
 #[derive(Debug, Default)]
 pub struct ScenarioSuspensions {
     held: SuspensionStore,
     unwritable: Option<SuspensionUnwritable>,
+    settles: bool,
 }
 
 impl ScenarioSuspensions {
@@ -159,6 +167,12 @@ impl ScenarioSuspensions {
     /// Makes the next write of `command` fail. The condition lapses after that invocation.
     pub fn fail_next(&mut self, command: SuspensionUnwritable) {
         self.unwritable = Some(command);
+    }
+
+    /// Makes the next `HoldSuspension` answer `settled`, storing nothing. The condition lapses
+    /// after that invocation.
+    pub fn settle_next(&mut self) {
+        self.settles = true;
     }
 
     /// Whether `command`'s write fails now; a condition that fires lapses.
@@ -201,6 +215,15 @@ impl HoldSuspensionBehavior for ScenarioSuspensions {
         &mut self,
         input: HoldSuspension,
     ) -> Result<HoldSuspensionOutcome, UnmetObligation> {
+        if std::mem::take(&mut self.settles) {
+            return Ok(HoldSuspensionOutcome::Settled {
+                error: SuspensionSettled {
+                    suspension: input.suspension,
+                    action_request_id: input.action_request_id,
+                    reason: HOST_SETTLED.to_owned(),
+                },
+            });
+        }
         if self.fails(SuspensionUnwritable::Hold) {
             return Ok(HoldSuspensionOutcome::StorageFailed {
                 error: suspensions_unwritable(),

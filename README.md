@@ -170,7 +170,9 @@ written stops the run before any model call. Without it nothing outlives the run
 that Suspension holds, performing nothing, and `b10x-loom resume <COMMISSION> --state <DIR>`
 performs that request once and runs on. A granted `repository.merge` is a merge hand-off: a record
 of the commission, the request, the workspace and its `HEAD` in the state directory, once per
-`HEAD` of a commission; no Git ref moves, and merging happens outside Loom. Each refusal of a
+`HEAD` of a commission; no Git ref moves, and merging happens outside Loom. A merge the agent
+proposes again at a `HEAD` its commission already handed off holds no Suspension and leaves no
+resume context, so there is nothing to approve. Each refusal of a
 resume has its own exit status (10 to 22, listed by `b10x-loom resume --help`). Only a last line
 `stopped: ApprovalRequired (<action>)` leaves something to approve: `..., nothing suspended`
 (exit 4) and `stopped: MergeHandedOff (<request>, HEAD <sha>)` leave nothing.

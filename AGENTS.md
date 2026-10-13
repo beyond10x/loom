@@ -229,7 +229,11 @@ none. The port answers the Suspension's commands (`HoldSuspension`, `TakeSuspens
 `ReleaseSuspension`), each atomically, decided by `decide_hold`, `decide_take` and
 `decide_release`: a resume takes the Suspension before it performs anything and releases it after,
 a `Resuming` one is in doubt and never taken again, and a commission holding one starts no new Run
-through `run_with_suspension`. The production store is the governor's `FileSuspensionStore`.
+through `run_with_suspension`. A host that already settled the request answers `HoldSuspension`
+`settled` (`SuspensionSettled`), which `decide_hold` never answers: nothing is held, the runtime
+puts the Run back `Running` (`ResumeRun`, so `run_with_suspension`'s run store implements it too)
+and the run ends as without a port, with no loop error. The production store is the governor's
+`FileSuspensionStore`.
 `crates/loom-commission-testkit/tests/approval_suspend_resume.rs` holds it across a real process
 restart. Design and contract notes are under
 `docs/commission/`. Its tasks are in `Taskfile.commission.yml`, included under the `commission:`
@@ -451,9 +455,12 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   granted `repository.merge` is bound to `handoff::HandoffEffects`, which records a merge
   hand-off (`intake.routing.MergeHandoff`, once per request and once per `HEAD` of a
   commission, only at the implementation revision the case holds) and moves no Git ref; only a
-  resume binds it. `approve` refuses a merge at a `HEAD` the commission already handed off
-  (`AlreadyHandedOff`). With a state directory, a stop `ApprovalRequired` reads as approvable
-  only when the commission holds a Suspension (`run::ApprovalGate`): otherwise it prints
+  resume binds it. A resume runs on `handoff::SettledHandoffs`, which settles a merge the agent
+  proposes again at a `HEAD` the commission already handed off (`HoldSuspension` `settled`), so
+  it holds no Suspension and leaves no resume context; `approve` still refuses a merge at such a
+  `HEAD` (`AlreadyHandedOff`) as a defence. With a state directory, a stop `ApprovalRequired`
+  reads as approvable only when the commission holds a Suspension (`run::ApprovalGate`):
+  otherwise it prints
   `..., nothing suspended` (exit 4) or, in a resume at a handed-off `HEAD`,
   `stopped: MergeHandedOff (<request>, HEAD <sha>)`. Each `ResumeRefusal` and `ResumeError` has
   its own exit status (`resume_exit_status`, `RESUME_HELP`).

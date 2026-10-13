@@ -1,0 +1,23 @@
+# story:handoff-holds-no-suspension, the class of the settled hold: a run the run store cannot
+# hold is refused before anything is stored. The scenario synthesized for `StartRun`
+# `storage-failed` reads no view; this one reads `RunStates` after the refused start and finds no
+# run of the commission.
+type: ess-scenario/1
+domain: commission.responsibility
+scenario: unwritable-start-stores-nothing
+summary: A run the run store cannot hold is not stored, so RunStates holds no run of its commission.
+
+timeline:
+  - at: 2026-10-13T09:00:00Z
+    command: commission.responsibility.StartRun
+    input:
+      commission_id: 00000000-0000-4000-8000-0000000000c4
+      case_revision: 1
+    outcome: storage-failed
+    error: {name: commission.responsibility.RunStorageFailed}
+    no_events: [commission.responsibility.RunStarted]
+
+assert:
+  - view: commission.responsibility.RunStates
+    excludes:
+      commission_id: 00000000-0000-4000-8000-0000000000c4

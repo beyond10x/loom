@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 38b8acbd65a0405d8e8080d91f671bb5dd9c73ab42c29aa2b87b1502f66fa167
-// contract digest 5b62b713b7f16745e0bcdee1eab0e84186e1374ae08b7590fde1278b345879af
+// model digest 350c43fc092c90e046f38c4d6de7ff571c845c296f6ba8d0f64258e21170d928
+// contract digest 2354d7e1a107137146df3a47ff2f31ec3c25aeb71755bdbf6a47908cf2fe89f2
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Responsibility — `commission.responsibility`.
@@ -2423,6 +2423,11 @@ pub struct HoldSuspension {
 /// outcomes exist to prevent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HoldSuspensionOutcome {
+    /// `settled` — externally decided (the host already settled the request the Suspension would hold).
+    Settled {
+        /// Why it was refused: `commission.responsibility.SuspensionSettled`.
+        error: SuspensionSettled,
+    },
     /// `held` — otherwise.
     Held {
         /// The `commission.responsibility.SuspensionHeld` this outcome publishes.
@@ -2803,6 +2808,17 @@ pub struct SuspensionRequestMismatch {
     pub action_request_id: ActionRequestId,
 }
 
+/// The declared error `commission.responsibility.SuspensionSettled`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuspensionSettled {
+    /// `suspension` — `commission.responsibility.SuspensionKey`.
+    pub suspension: SuspensionKey,
+    /// `action_request_id` — `commission.responsibility.ActionRequestId`.
+    pub action_request_id: ActionRequestId,
+    /// `reason` — `String`.
+    pub reason: String,
+}
+
 /// The declared error `commission.responsibility.SuspensionStateConflict`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SuspensionStateConflict {
@@ -2863,9 +2879,9 @@ pub struct SuspensionStates {
 pub mod obligations {
     /// The behaviour `commission.responsibility.HoldSuspension` — an implementation obligation.
     ///
-    /// Why it is not generated: kept an obligation by the fields of error `commission.responsibility.SuspensionStorageFailed`, which the specification gives no source, in `storage-failed`.
+    /// Why it is not generated: kept an obligation by the fields of error `commission.responsibility.SuspensionSettled`, which the specification gives no source, in `settled`.
     ///
-    /// Contract: given `commission.responsibility.HoldSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `held` otherwise, creates `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionHeld`; `already-held` for an identity a record already carries, error `commission.responsibility.SuspensionAlreadyHeld`; `storage-failed` externally decided (the suspension port cannot hold the Suspension), error `commission.responsibility.SuspensionStorageFailed`.
+    /// Contract: given `commission.responsibility.HoldSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `settled` externally decided (the host already settled the request the Suspension would hold), error `commission.responsibility.SuspensionSettled`; `held` otherwise, creates `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionHeld`; `already-held` for an identity a record already carries, error `commission.responsibility.SuspensionAlreadyHeld`; `storage-failed` externally decided (the suspension port cannot hold the Suspension), error `commission.responsibility.SuspensionStorageFailed`.
     pub trait HoldSuspensionBehavior {
         /// Decides and enacts exactly one declared outcome of `commission.responsibility.HoldSuspension`.
         ///

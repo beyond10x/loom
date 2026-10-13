@@ -179,10 +179,39 @@ impl LockedDir {
 }
 
 /// The file's text, or `None` when there is no such file.
+///
+/// Only a regular file is a record: a symlink (to a record kept elsewhere, or to nothing), a
+/// directory or any other entry at `path` is refused, never followed. The file opened is checked
+/// to be the entry examined.
 pub(crate) fn read_if_present(path: &Path) -> Result<Option<String>, FileStoreError> {
-    match fs::read_to_string(path) {
-        Ok(text) => Ok(Some(text)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(failed(path, error)),
+    use std::io::Read as _;
+    use std::os::unix::fs::MetadataExt as _;
+
+    let entry = match fs::symlink_metadata(path) {
+        Ok(entry) => entry,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(failed(path, error)),
+    };
+    if !entry.file_type().is_file() {
+        return Err(failed(
+            path,
+            "is not a regular file, not a record this store wrote; it is not followed",
+        ));
     }
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(failed(path, error)),
+    };
+    let opened = file.metadata().map_err(|error| failed(path, error))?;
+    if !opened.file_type().is_file() || (opened.dev(), opened.ino()) != (entry.dev(), entry.ino()) {
+        return Err(failed(
+            path,
+            "changed while it was read: the file opened is not the entry examined",
+        ));
+    }
+    let mut text = String::new();
+    file.read_to_string(&mut text)
+        .map_err(|error| failed(path, error))?;
+    Ok(Some(text))
 }

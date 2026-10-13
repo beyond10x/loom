@@ -255,9 +255,10 @@ entities:
   # request, the workspace and its `HEAD` as the implementation revision, recorded in the state
   # directory. No Git ref moves; merging happens outside Loom. One is recorded per request, so a
   # request performed once leaves exactly one, and one per `HEAD` of a commission: a merge the
-  # agent proposes again at a `HEAD` the commission already handed off is not handed off again,
-  # and `approve` refuses the Suspension holding it (`HeadAlreadyHandedOff`). New work, a new
-  # `HEAD`, may be handed off.
+  # agent proposes again at a `HEAD` the commission already handed off is not handed off again:
+  # the resume holds no Suspension for it (Commission's `HoldSuspension` answers `settled`), so
+  # nothing is left to approve, and `approve` still refuses a Suspension that would hand off such
+  # a `HEAD` (`HeadAlreadyHandedOff`). New work, a new `HEAD`, may be handed off.
   - name: intake.routing.MergeHandoff
     identity:
       name: action_request_id
