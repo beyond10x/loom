@@ -131,7 +131,12 @@ fn run_with_state_holds_a_suspension_on_a_withheld_approval() {
     let suspension_files = std::fs::read_dir(&state)
         .unwrap()
         .filter_map(Result::ok)
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with("suspension-"))
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("suspension-")
+        })
         .count();
     assert_eq!(suspension_files, 1, "one Suspension in the state directory");
 
@@ -161,10 +166,8 @@ impl Scratch {
             .duration_since(UNIX_EPOCH)
             .map(|elapsed| elapsed.as_nanos())
             .unwrap_or_default();
-        let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
-            "run-state-{label}-{}-{nanos}",
-            std::process::id()
-        ));
+        let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+            .join(format!("run-state-{label}-{}-{nanos}", std::process::id()));
         let workspace = root.join("workspace");
         std::fs::create_dir_all(root.join("home")).unwrap();
         std::fs::create_dir_all(&workspace).unwrap();

@@ -1,16 +1,22 @@
 //! Catalog-based intent orchestration. Resource initialization follows the accepted route.
 
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::model_retry::classify_with_retries;
+use b10x_loom_commission::model::responsibility::CommissionData;
 use b10x_loom_commission::ports::governor::Governor;
+use b10x_loom_commission::ports::suspension::SuspensionPort;
 use b10x_loom_intake_references::references;
 use b10x_loom_intake_router::RouterError;
+use intake_model::confinement::Backend;
+use intake_model::context::ContextPolicy;
+use intake_model::primitives::{Decimal, Uuid as IntakeUuid};
 use llm_core::Model;
-use loom_governor::{CanonGovernor, CaseStore};
+use loom_governor::{CanonGovernor, FallibleCaseStore};
 use loom_protocols::ProtocolCatalog;
 use serde_json::{Value, json};
 
@@ -19,8 +25,10 @@ use crate::clock::Clock;
 use crate::confinement::TestRunner;
 use crate::context_metrics::{ContextMetrics, MeasuredModel};
 use crate::executor::{TestCommand, backend_name};
+use crate::resume::{self, AcceptedRoute, CatalogDigest, ResumeContextData, ResumeContextStore};
 use crate::run::{
-    Execution, LOCAL_PROTOCOL, RunOptions, SliceError, SliceRun, StopReason, drive, printable,
+    Execution, Holding, LOCAL_PROTOCOL, RunOptions, SliceError, SliceRun, StopReason, drive,
+    printable,
 };
 use crate::selector::Briefing;
 
@@ -72,6 +80,81 @@ impl PreparedIntent {
             protocol: protocol.into(),
             binding: value["binding"].clone(),
         })
+    }
+
+    /// The route as the resume context keeps it (`intake.routing.AcceptedRoute`): the handoff's
+    /// protocol and binding, typed.
+    ///
+    /// # Errors
+    /// [`SliceError::State`] when the binding is not the one this module makes.
+    pub fn accepted_route(&self) -> Result<AcceptedRoute, SliceError> {
+        let invalid = || SliceError::State("the accepted route's binding is not readable".into());
+        let text = |value: &Value| value.as_str().map(str::to_owned).ok_or_else(invalid);
+        let catalog = self.binding["catalog"]
+            .as_array()
+            .ok_or_else(invalid)?
+            .iter()
+            .map(|entry| {
+                Ok(CatalogDigest {
+                    name: text(&entry["name"])?,
+                    digest: text(&entry["digest"])?,
+                })
+            })
+            .collect::<Result<_, SliceError>>()?;
+        let context_policy = match self.binding["policy"].as_str() {
+            Some("Legacy") => ContextPolicy::Legacy,
+            Some("Bounded") => ContextPolicy::Bounded,
+            _ => return Err(invalid()),
+        };
+        let threshold = match &self.binding["threshold"] {
+            Value::Number(number) => Decimal(number.to_string()),
+            _ => return Err(invalid()),
+        };
+        Ok(AcceptedRoute {
+            protocol: self.protocol.clone(),
+            intent_revision: text(&self.binding["intent"])?,
+            catalog,
+            context_policy,
+            threshold,
+        })
+    }
+
+    /// Restores a route a resume context kept, as [`PreparedIntent::restore`] restores a handoff:
+    /// only when it was accepted for exactly `request`'s intent and threshold, `catalog` and
+    /// `options`' context policy.
+    ///
+    /// # Errors
+    /// [`SliceError::Context`] when it was not, or names a protocol `catalog` does not hold.
+    pub fn restore_route(
+        route: &AcceptedRoute,
+        request: &IntentRequest,
+        catalog: &ProtocolCatalog,
+        options: &RunOptions,
+    ) -> Result<Self, SliceError> {
+        let threshold = route
+            .threshold
+            .0
+            .parse::<f64>()
+            .map_err(|_| SliceError::Context("invalid routing handoff".into()))?;
+        let entries: Vec<Value> = route
+            .catalog
+            .iter()
+            .map(|entry| json!({"name": entry.name, "digest": entry.digest}))
+            .collect();
+        let policy = match route.context_policy {
+            ContextPolicy::Legacy => "Legacy",
+            ContextPolicy::Bounded => "Bounded",
+        };
+        let handoff = json!({
+            "protocol": route.protocol,
+            "binding": {
+                "intent": route.intent_revision,
+                "catalog": entries,
+                "policy": policy,
+                "threshold": threshold,
+            },
+        });
+        Self::restore(&handoff, request, catalog, options)
     }
 }
 
@@ -177,7 +260,7 @@ fn stop(
 
 /// Execute an accepted route with host-provided resources and the same immutable catalog.
 #[allow(clippy::too_many_arguments)]
-pub fn run_prepared_intent<S: CaseStore>(
+pub fn run_prepared_intent<S: FallibleCaseStore>(
     request: &IntentRequest,
     prepared: &PreparedIntent,
     catalog: &ProtocolCatalog,
@@ -188,6 +271,155 @@ pub fn run_prepared_intent<S: CaseStore>(
     out: &mut dyn Write,
     options: &RunOptions,
     metrics: &ContextMetrics,
+) -> Result<SliceRun, SliceError> {
+    run_prepared(
+        request, prepared, catalog, governor, frontiers, agent, clock, out, options, metrics, None,
+    )
+}
+
+/// What `run --state` keeps a commission in, beside the case its governor's store holds: the
+/// suspension store a withheld approval's Suspension is held in, the resume context store, and
+/// what the host knows of the run that the slice does not.
+pub struct RunState<'s> {
+    /// The suspension store `run_with_suspension` holds the commission's Suspension in.
+    pub suspensions: &'s dyn SuspensionPort,
+    /// Where the commission's resume context is kept before it runs.
+    pub contexts: &'s ResumeContextStore,
+    /// The host's part of the resume context.
+    pub host: ResumeHost,
+}
+
+/// What the host knows of a run that a resume needs and the slice does not: how the test command
+/// is confined, and which agent model runs it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResumeHost {
+    /// The confinement the operator asked for.
+    pub confinement: Backend,
+    /// The delegated cgroup root the operator gave, if any.
+    pub cgroup_root: Option<PathBuf>,
+    /// The agent model: a Codex model name, or with `catalog` a route alias of that llm catalog.
+    pub model: String,
+    /// The llm catalog the agent model's alias names a route of, if any.
+    pub catalog: Option<PathBuf>,
+}
+
+/// Executes an accepted route as [`run_prepared_intent`] does, holding the commission in `state`:
+/// its resume context is kept before it runs, and it runs through Commission's
+/// `run_with_suspension`, so a withheld approval leaves a Suspension in `state.suspensions`.
+///
+/// # Errors
+/// As [`run_prepared_intent`], plus [`SliceError::State`] when the resume context cannot be kept
+/// (nothing runs then), and [`SliceError::Loop`] when the suspension store cannot be used.
+#[allow(clippy::too_many_arguments)]
+pub fn run_prepared_intent_with_state<S: FallibleCaseStore>(
+    request: &IntentRequest,
+    prepared: &PreparedIntent,
+    catalog: &ProtocolCatalog,
+    governor: &CanonGovernor<S>,
+    frontiers: &dyn Governor,
+    agent: &dyn Model,
+    clock: &dyn Clock,
+    out: &mut dyn Write,
+    options: &RunOptions,
+    metrics: &ContextMetrics,
+    state: &RunState<'_>,
+) -> Result<SliceRun, SliceError> {
+    let keep = |commission: &CommissionData| {
+        let context = resume_context(request, prepared, &state.host, commission)?;
+        state
+            .contexts
+            .keep(&context)
+            .map_err(|error| SliceError::State(error.to_string()))
+    };
+    let holding = Holding {
+        suspensions: state.suspensions,
+        keep: &keep,
+    };
+    run_prepared(
+        request,
+        prepared,
+        catalog,
+        governor,
+        frontiers,
+        agent,
+        clock,
+        out,
+        options,
+        metrics,
+        Some(&holding),
+    )
+}
+
+/// The resume context of `commission`, run on `request` over `prepared`'s route.
+fn resume_context(
+    request: &IntentRequest,
+    prepared: &PreparedIntent,
+    host: &ResumeHost,
+    commission: &CommissionData,
+) -> Result<ResumeContextData, SliceError> {
+    let test_command = std::iter::once(request.test.program())
+        .chain(request.test.args().iter().map(OsString::as_os_str))
+        .map(|word| {
+            word.to_str().map(str::to_owned).ok_or_else(|| {
+                SliceError::State(format!("the test command word {word:?} is not UTF-8"))
+            })
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(ResumeContextData {
+        commission_id: resume::CommissionId(IntakeUuid(commission.commission_id.0.0.clone())),
+        case_id: resume::CaseId(commission.case_id.0.clone()),
+        agent_revision_id: resume::AgentRevisionId(IntakeUuid(
+            commission.agent_revision_id.0.0.clone(),
+        )),
+        intent: request.intent.clone(),
+        route: prepared.accepted_route()?,
+        workspace: request
+            .workspace
+            .as_deref()
+            .map(|path| absolute_text("the workspace", path))
+            .transpose()?,
+        test_command,
+        max_steps: i64::try_from(request.max_steps)
+            .map_err(|_| SliceError::State("max_steps does not fit a 64-bit integer".into()))?,
+        confinement: host.confinement,
+        cgroup_root: host
+            .cgroup_root
+            .as_deref()
+            .map(|path| absolute_text("the cgroup root", path))
+            .transpose()?,
+        model: host.model.clone(),
+        catalog: host
+            .catalog
+            .as_deref()
+            .map(|path| absolute_text("the catalog", path))
+            .transpose()?,
+    })
+}
+
+/// `path` made absolute against the current directory, as text, so a resume from elsewhere finds
+/// the same file.
+fn absolute_text(what: &str, path: &Path) -> Result<String, SliceError> {
+    let absolute = std::path::absolute(path)
+        .map_err(|error| SliceError::State(format!("{what} {}: {error}", path.display())))?;
+    absolute
+        .to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| SliceError::State(format!("{what} {} is not UTF-8", path.display())))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_prepared<S: FallibleCaseStore>(
+    request: &IntentRequest,
+    prepared: &PreparedIntent,
+    catalog: &ProtocolCatalog,
+    governor: &CanonGovernor<S>,
+    frontiers: &dyn Governor,
+    agent: &dyn Model,
+    clock: &dyn Clock,
+    out: &mut dyn Write,
+    options: &RunOptions,
+    metrics: &ContextMetrics,
+    holding: Option<&Holding<'_>>,
 ) -> Result<SliceRun, SliceError> {
     if metrics.report().policy != options.context_policy {
         return Err(SliceError::Context(
@@ -242,6 +474,7 @@ pub fn run_prepared_intent<S: CaseStore>(
                 test: &request.test,
                 runner: Arc::clone(runner),
             },
+            holding,
         )
     } else {
         entry.clock_compatible().map_err(SliceError::Context)?;
@@ -266,13 +499,14 @@ pub fn run_prepared_intent<S: CaseStore>(
                 clock,
                 intent_revision: &revision,
             },
+            holding,
         )
     }
 }
 
 /// Route and run using an injectable clock, preserving metrics on every failure.
 #[allow(clippy::too_many_arguments)]
-pub fn run_intent_with_options<S: CaseStore>(
+pub fn run_intent_with_options<S: FallibleCaseStore>(
     request: &IntentRequest,
     catalog: &ProtocolCatalog,
     governor: &CanonGovernor<S>,
@@ -362,5 +596,41 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    /// A resume context's route restores only for the intent, catalog, threshold and policy it
+    /// was accepted for, as the delegation handoff does.
+    #[test]
+    fn a_kept_route_restores_as_the_handoff_it_types() {
+        let catalog = ProtocolCatalog::bundled().unwrap();
+        let mut request = IntentRequest {
+            intent: "current time".into(),
+            workspace: None,
+            test: TestCommand::new("", [] as [&str; 0]),
+            runner: None,
+            max_steps: 4,
+            threshold: 0.35,
+        };
+        let options = RunOptions {
+            context_policy: ContextPolicy::Bounded,
+            context_report: None,
+        };
+        let prepared = PreparedIntent {
+            protocol: "system-query@1".into(),
+            binding: binding(&request, &catalog, &options),
+        };
+        let route = prepared.accepted_route().unwrap();
+        assert_eq!(route.protocol, "system-query@1");
+        assert_eq!(route.context_policy, ContextPolicy::Bounded);
+        assert_eq!(route.threshold.0, "0.35");
+        assert_eq!(route.catalog.len(), catalog.iter().count());
+        let restored = PreparedIntent::restore_route(&route, &request, &catalog, &options).unwrap();
+        assert_eq!(restored.handoff(), prepared.handoff());
+        assert!(
+            PreparedIntent::restore_route(&route, &request, &catalog, &RunOptions::default())
+                .is_err()
+        );
+        request.intent = "write a file".into();
+        assert!(PreparedIntent::restore_route(&route, &request, &catalog, &options).is_err());
     }
 }

@@ -430,6 +430,13 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   built from the generated types, the terminal record last and exactly once.
   `crates/loom-cli/tests/run_events.rs` holds it; `loom-docs` checks the hand-written
   `website/docs/reference/run-events.md` against the declaration.
+- `run --state <DIR>` puts the case in a `FileCaseStore` and the commission's Suspension in a
+  `FileSuspensionStore` over `<DIR>`, keeps the commission's resume context
+  (`intake.routing.ResumeContext`, `b10x_loom_intake_slice::resume::ResumeContextStore`, under
+  the same lock and atomic write) before the commission runs, and runs it through
+  `run_with_suspension` (`run_prepared_intent_with_state`). Without it `run` keeps the memory
+  store and `run_until_blocked`. `crates/loom-cli/tests/run_state.rs` runs the binary to a held
+  Suspension and reads `<DIR>` back through the stores.
 
 The injected `TestRunner` defaults to Substrate 0.7.10, with host and wire pinned together.
 Tests get no network, a cleared environment, read-only source and Rust toolchain, writes only

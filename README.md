@@ -154,6 +154,9 @@ exit status ([run events](https://beyond10x.github.io/loom/docs/reference/run-ev
 `--catalog <PATH>`, an [llm](https://beyond10x.github.io/llm/) catalog file, both name route
 aliases of that catalog instead, such as a self-hosted endpoint whose account needs no
 credential; an unknown alias or an unreadable catalog stops the run before any model call.
+With `--state <DIR>` the run keeps its case, its commission's Suspension and a resume context in
+that directory, so a run that stops for an approval leaves what a later resume continues from;
+without it nothing outlives the run.
 
 Since `0.2.0` tests run confined. A software-change run needs a Codex
 login and Linux with bubblewrap and delegated cgroup v2 controllers. Tests default to Substrate:

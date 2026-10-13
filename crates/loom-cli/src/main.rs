@@ -23,15 +23,20 @@ use b10x_loom_intake_slice::confinement::{
 use b10x_loom_intake_slice::context_metrics::ContextMetrics;
 use b10x_loom_intake_slice::executor::{TestCommand, UnconfinedRunner};
 use b10x_loom_intake_slice::intent::{
-    IntentRequest, Preparation, PreparedIntent, prepare_intent, run_prepared_intent,
+    IntentRequest, Preparation, PreparedIntent, ResumeHost, RunState, prepare_intent,
+    run_prepared_intent, run_prepared_intent_with_state,
 };
+use b10x_loom_intake_slice::resume::ResumeContextStore;
 use b10x_loom_intake_slice::run::{LOCAL_PROTOCOL, RunOptions, SliceRun, StopReason, printable};
 use b10x_loom_plugin_slack::{SlackHandler, config as slack_config};
 use clap::Parser;
+use intake_model::confinement::Backend;
 use llm_core::Model;
 use llm_models::Port;
-use loom_governor::{CanonGovernor, MemoryCaseStore};
-use loom_protocols::InstallStore;
+use loom_governor::{
+    CanonGovernor, FallibleCaseStore, FileCaseStore, FileSuspensionStore, MemoryCaseStore,
+};
+use loom_protocols::{InstallStore, ProtocolCatalog};
 use serde_json::{Value, json};
 use std::sync::atomic::AtomicBool;
 
@@ -340,9 +345,61 @@ fn execute(
         None => (None, None),
     };
     let catalog = InstallStore::user()?.catalog()?;
-    let governor = CanonGovernor::new(MemoryCaseStore::default())
+    let models = (classifier_route.take(), agent_route.take());
+    let Some(dir) = &arguments.state else {
+        let governor = CanonGovernor::new(MemoryCaseStore::default())
+            .with_catalog(&catalog)
+            .map_err(|e| e.to_string())?;
+        return execute_on(
+            arguments, options, metrics, out, stream, &catalog, &governor, None, models,
+        );
+    };
+    // The state directory is opened before any model call: one that cannot be used stops here.
+    let unusable = |error: &dyn std::fmt::Display| format!("the state directory: {error}");
+    let governor = CanonGovernor::new(FileCaseStore::open(dir).map_err(|e| unusable(&e))?)
         .with_catalog(&catalog)
         .map_err(|e| e.to_string())?;
+    let suspensions = FileSuspensionStore::open(dir).map_err(|e| unusable(&e))?;
+    let contexts = ResumeContextStore::open(dir).map_err(|e| unusable(&e))?;
+    let state = RunState {
+        suspensions: &suspensions,
+        contexts: &contexts,
+        host: ResumeHost {
+            confinement: match arguments.confinement {
+                Confinement::Substrate => Backend::Substrate,
+                Confinement::None => Backend::None,
+            },
+            cgroup_root: arguments.cgroup_root.clone(),
+            model: arguments.model.clone(),
+            catalog: arguments.catalog.clone(),
+        },
+    };
+    execute_on(
+        arguments,
+        options,
+        metrics,
+        out,
+        stream,
+        &catalog,
+        &governor,
+        Some(&state),
+        models,
+    )
+}
+
+/// Runs `run` on `governor`, holding the commission in `state` when `--state` gave one.
+#[allow(clippy::too_many_arguments)]
+fn execute_on<S: FallibleCaseStore>(
+    arguments: &RunArgs,
+    options: &RunOptions,
+    metrics: &mut ContextMetrics,
+    out: &mut dyn Write,
+    stream: Option<&EventStream>,
+    catalog: &ProtocolCatalog,
+    governor: &CanonGovernor<S>,
+    state: Option<&RunState<'_>>,
+    (mut classifier_route, mut agent_route): (Option<Port>, Option<Port>),
+) -> Result<Ending, String> {
     let mut words = arguments.test_cmd.split_whitespace();
     let program = words.next().unwrap_or("");
     let mut request = IntentRequest {
@@ -356,7 +413,7 @@ fn execute(
     let prepared = if std::env::var_os(REEXEC_MARKER).is_some() {
         let handoff = read_handoff()?;
         *metrics = ContextMetrics::restore(&handoff["metrics"], options.context_policy)?;
-        PreparedIntent::restore(&handoff["route"], &request, &catalog, options)
+        PreparedIntent::restore(&handoff["route"], &request, catalog, options)
             .map_err(|e| e.to_string())?
     } else {
         let classifier = chosen_model(classifier_route.take(), &arguments.classifier_model)?;
@@ -365,7 +422,7 @@ fn execute(
             Some(observed) => observed,
             None => &*classifier,
         };
-        let preparation = prepare_intent(&request, &catalog, classifier, out, options, metrics)
+        let preparation = prepare_intent(&request, catalog, classifier, out, options, metrics)
             .map_err(|e| e.to_string())?;
         let (protocol, accepted) = match &preparation {
             Preparation::Ready(prepared) => (prepared.protocol(), true),
@@ -436,10 +493,16 @@ fn execute(
         Some(observed) => observed,
         None => &*agent,
     };
-    let run = run_prepared_intent(
-        &request, &prepared, &catalog, &governor, &governor, agent, &HostClock, out, options,
-        metrics,
-    )
+    let run = match state {
+        Some(state) => run_prepared_intent_with_state(
+            &request, &prepared, catalog, governor, governor, agent, &HostClock, out, options,
+            metrics, state,
+        ),
+        None => run_prepared_intent(
+            &request, &prepared, catalog, governor, governor, agent, &HostClock, out, options,
+            metrics,
+        ),
+    }
     .map_err(|e| e.to_string())?;
     Ok(Ending::Stopped(run))
 }

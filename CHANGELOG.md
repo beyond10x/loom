@@ -15,6 +15,18 @@ under **Unreleased** until the next release.
   directory, in one process or in two. A commission id over `LONGEST_COMMISSION_ID` bytes is
   refused. The testkit's `FileSuspensionStore` now re-exports it, and
   `b10x-loom-commission-testkit` depends on `b10x-loom-governor`.
+- `b10x-loom run --state <DIR>` keeps the run in a directory: the case in a `FileCaseStore`, the
+  commission's Suspension in a `FileSuspensionStore`, and the commission's resume context
+  (`intake.routing.ResumeContext`: the commission, case and agent revision, the intent, the
+  accepted route, the workspace, the test command, `max_steps`, the confinement and cgroup root,
+  the agent model and the `--catalog` path), kept before the commission runs. The commission runs
+  through `run_with_suspension`, so a run that stops `ApprovalRequired` on a proposed merge leaves
+  a `Pending` Suspension a later resume can continue. Output and exit status are unchanged, and
+  without `--state` `run` is as before. In the slice, `run_prepared_intent_with_state` takes a
+  `RunState`, `b10x_loom_intake_slice::resume::ResumeContextStore` keeps the contexts under the
+  stores' lock with their atomic write, `PreparedIntent` types its route
+  (`accepted_route`, `restore_route`), and the slice's functions take any `FallibleCaseStore`
+  instead of only a `CaseStore`. `SliceError` gains `State`, which breaks an exhaustive match.
 
 ## [0.17.0] - 2026-10-13
 
