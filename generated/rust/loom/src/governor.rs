@@ -1,11 +1,11 @@
 // generated from loom v1
-// model digest 300dc2d9cea4ebe03da46be3740cd2be006c06099199c740b4db2b22e0ef540b
-// contract digest 8d8c474b54c7be5a40b1ec49641cdc66e85f8f3e768698010015dd595b0fce5e
+// model digest 7dee72f34c381236c680e35cdb45af40bf2db94a72cb4522d2a152d83bc8c88e
+// contract digest f8b677a3f783a96b6bdc38dd5c82bd4daa181f4d17fdbb94ab55827348c3f45f
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Governor — `loom.governor`.
 //!
-//! The governor's held case as a store writes it: the case id, the protocol that governs it, the case revision, the current revision of every declared artifact, and every evidence record received with whether it applies; and the observations kept beside the cases.
+//! The governor's held case as a store writes it: the case id, the protocol that governs it, the case revision, the current revision of every declared artifact, the value of every case input the protocol declares, and every evidence record received with whether it applies; and the observations kept beside the cases.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
 
@@ -29,6 +29,8 @@ pub struct StoredCase {
     pub revision: i64,
     /// `artifacts` — `List<loom.governor.StoredArtifact>`.
     pub artifacts: Vec<StoredArtifact>,
+    /// `inputs` — `List<loom.governor.StoredInput>`.
+    pub inputs: Vec<StoredInput>,
     /// `evidence` — `List<loom.governor.StoredEvidence>`.
     pub evidence: Vec<StoredEvidence>,
 }
@@ -65,6 +67,15 @@ pub struct StoredEvidenceData {
     pub facts: crate::json::Value,
     /// `provenance` — `Json`.
     pub provenance: crate::json::Value,
+}
+
+/// StoredInput — `loom.governor.StoredInput`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredInput {
+    /// `input` — `String`.
+    pub input: String,
+    /// `value` — `String`.
+    pub value: String,
 }
 
 /// StoredObservation — `loom.governor.StoredObservation`.
