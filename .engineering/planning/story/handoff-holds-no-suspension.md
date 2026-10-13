@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:handoff-holds-no-suspension
 kind: story
-status: active
+status: implemented
 title: A merge proposed again at a handed-off HEAD holds no Suspension
 relations:
 - serves: vision:O1
@@ -46,10 +46,11 @@ scope:
   path: website/docs/guides/run-an-intent.md
 - confidence: inferred
   path: website/docs/reference/commission
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-13T11:48:53Z", actor: "human:timo", revision: 5}
 - {from: "proposed", to: "active", at: "2026-10-13T11:48:53Z", actor: "human:timo", revision: 6}
+- {from: "active", to: "implemented", at: "2026-10-13T14:41:32Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-13T14:41:32Z",
+  "actor": "human:timo",
+  "artifact": "story:handoff-holds-no-suspension",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "full gate on b20170b: task check steps (spec x3, both ESS gates, three drifts, both no-hand-model, conform, commission:conform, deps-guard, fmt on 60b812b; clippy -D warnings and cargo test --workspace, 1665 passed, 0 failed, docs-check, commission:docs-drift on b20170b), task plan, release-check 0.19.0 and task website exit 0",
+    "reference": "~/.cache/loom-w15/w3-gate2.log"
+  }
+}
