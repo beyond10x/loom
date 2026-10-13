@@ -1,14 +1,14 @@
 <!--
   generated from commission v1
-  model digest 38b8acbd65a0405d8e8080d91f671bb5dd9c73ab42c29aa2b87b1502f66fa167
-  contract digest 5b62b713b7f16745e0bcdee1eab0e84186e1374ae08b7590fde1278b345879af
+  model digest 350c43fc092c90e046f38c4d6de7ff571c845c296f6ba8d0f64258e21170d928
+  contract digest 2354d7e1a107137146df3a47ff2f31ec3c25aeb71755bdbf6a47908cf2fe89f2
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — commission v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-115 capabilities: **108 generated**, **7 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+116 capabilities: **109 generated**, **7 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -116,6 +116,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | error type | `commission.responsibility.SuspensionAlreadyHeld` |
 | error type | `commission.responsibility.SuspensionNotFound` |
 | error type | `commission.responsibility.SuspensionRequestMismatch` |
+| error type | `commission.responsibility.SuspensionSettled` |
 | error type | `commission.responsibility.SuspensionStateConflict` |
 | error type | `commission.responsibility.SuspensionStorageFailed` |
 | view type | `commission.responsibility.RunStates` |
@@ -136,7 +137,7 @@ What the specification fully determines is generated; what it cannot determine i
 
 | capability | source | why not generated | contract |
 | --- | --- | --- | --- |
-| command behaviour | `commission.responsibility.HoldSuspension` | kept an obligation by the fields of error `commission.responsibility.SuspensionStorageFailed`, which the specification gives no source, in `storage-failed` | given `commission.responsibility.HoldSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `held` otherwise, creates `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionHeld`; `already-held` for an identity a record already carries, error `commission.responsibility.SuspensionAlreadyHeld`; `storage-failed` externally decided (the suspension port cannot hold the Suspension), error `commission.responsibility.SuspensionStorageFailed` |
+| command behaviour | `commission.responsibility.HoldSuspension` | kept an obligation by the fields of error `commission.responsibility.SuspensionSettled`, which the specification gives no source, in `settled` | given `commission.responsibility.HoldSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `settled` externally decided (the host already settled the request the Suspension would hold), error `commission.responsibility.SuspensionSettled`; `held` otherwise, creates `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionHeld`; `already-held` for an identity a record already carries, error `commission.responsibility.SuspensionAlreadyHeld`; `storage-failed` externally decided (the suspension port cannot hold the Suspension), error `commission.responsibility.SuspensionStorageFailed` |
 | command behaviour | `commission.responsibility.ReleaseSuspension` | kept an obligation by the field `reason` of error `commission.responsibility.SuspensionStorageFailed`, which neither the specification nor the held `commission.responsibility.Suspension` determines, in `storage-failed` | given `commission.responsibility.ReleaseSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `other-request` when the existing subject's stored fields satisfy `action_request_id != input.action_request_id`, error `commission.responsibility.SuspensionRequestMismatch`; `not-taken` when the existing subject's stored fields satisfy `state == Pending`, error `commission.responsibility.SuspensionStateConflict`; `released` otherwise, deletes `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionReleased`; `not-found` for an identity no record carries, error `commission.responsibility.SuspensionNotFound`; `storage-failed` externally decided (the suspension port cannot remove the Suspension), error `commission.responsibility.SuspensionStorageFailed` |
 | command behaviour | `commission.responsibility.ResumeRun` | kept an obligation by the fields of error `commission.responsibility.RunStorageFailed`, which the specification gives no source, in `storage-failed` | given `commission.responsibility.ResumeRun` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `resumed` otherwise, takes `resume` of `commission.responsibility.Run`, emits `commission.responsibility.RunResumed`; `wrong-state` from a state no declared move starts in, error `commission.responsibility.RunStateConflict`, and for an instance no record carries, without the error's fields; `storage-failed` externally decided (the run store cannot record the resumption), error `commission.responsibility.RunStorageFailed` |
 | command behaviour | `commission.responsibility.RevalidateActionRequest` | kept an obligation by the fields of error `commission.responsibility.ActionRequestStale`, which the specification gives no source, in `stale` | given `commission.responsibility.RevalidateActionRequest` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `stale` externally decided (the governor's current revision of the case is not the request's expected case revision), error `commission.responsibility.ActionRequestStale`; `not-admitted` externally decided (the current frontier refuses the action), error `commission.responsibility.ActionNotAdmitted`; `needs-authority` externally decided (the current frontier lists the action as ApprovalRequired, naming one capability), error `commission.responsibility.ActionNeedsAuthority`; `admitted` otherwise |
