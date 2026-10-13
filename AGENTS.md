@@ -229,8 +229,9 @@ none. The port answers the Suspension's commands (`HoldSuspension`, `TakeSuspens
 `ReleaseSuspension`), each atomically, decided by `decide_hold`, `decide_take` and
 `decide_release`: a resume takes the Suspension before it performs anything and releases it after,
 a `Resuming` one is in doubt and never taken again, and a commission holding one starts no new Run
-through `run_with_suspension`. `crates/loom-commission-testkit/tests/approval_suspend_resume.rs`
-holds it across a real process restart. Design and contract notes are under
+through `run_with_suspension`. The production store is the governor's `FileSuspensionStore`.
+`crates/loom-commission-testkit/tests/approval_suspend_resume.rs` holds it across a real process
+restart. Design and contract notes are under
 `docs/commission/`. Its tasks are in `Taskfile.commission.yml`, included under the `commission:`
 namespace.
 
@@ -251,7 +252,11 @@ never a model argument. Durable stores implement `FallibleCaseStore` atomically 
 failures explicitly; the legacy `CaseStore` bridge is only for infallible adapters.
 `FileCaseStore` is one: a file per case, written as `loom.governor`'s `StoredCase` to a temporary
 file and renamed, under a per-operation lock; `crates/loom-governor/tests/restart_durability.rs`
-holds a case across a real process restart. The host
+holds a case across a real process restart. `FileSuspensionStore` is Commission's suspension port
+over the same lock and write (the private `locked_dir` module), a file per commission, so the two
+may share one directory; the testkit's `FileSuspensionStore` re-exports it, and
+`crates/loom-commission-testkit/tests/approval_suspend_resume.rs` holds both in one directory
+across a restart. The host
 restores the same admitted protocol definitions on recovery and authenticates evidence before
 `submit_evidence`. The governor supplies no authority decision.
 
