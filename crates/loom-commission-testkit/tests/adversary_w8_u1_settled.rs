@@ -132,7 +132,7 @@ fn a_resume_run_that_fails_after_a_settled_hold_fails_the_loop_and_holds_nothing
             .unwrap_or_else(|| panic!("{label}: the error names the Run"));
         assert_eq!(
             runs.asked,
-            [run_id.clone()],
+            std::slice::from_ref(&run_id),
             "{label}: ResumeRun was asked once, for the Run the loop suspended"
         );
         assert!(
