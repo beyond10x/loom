@@ -6,6 +6,18 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-13
+
+Loom 0.17.0 lets a Commission host keep a Run that waits on an approval across a process
+restart. `ess/commission/` declares a commission's Suspension: the suspended Run, the pending
+action request and the reason, held, taken once and released through a port the host
+implements. Given the port, `run_with_suspension` holds the Suspension on a withheld approval and
+`resume_after_grant`, in the same or a new process, performs the pending request once after the
+grant, at the case revision it was suspended at; a resume that finds nothing, a moved case, a
+Suspension already being resumed or one held for another request performs nothing. Callers of
+`run_until_blocked` see no change. This is breaking for callers that match `ResumeRunOutcome`
+or `LoopFailure` exhaustively: both gain variants.
+
 ### Added
 
 - A suspension port for Commission's runtime (`b10x_loom_commission::ports::suspension`,
