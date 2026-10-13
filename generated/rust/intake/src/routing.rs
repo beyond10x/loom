@@ -1,6 +1,6 @@
 // generated from intake v1
-// model digest 37c41dbb3f182fdc2e86847d2c00f33c383427a3e0348ed227d154f4db1025cd
-// contract digest 24cb171fcf66d80fdd605b11e0f9ffd7bd48dd94330463efaaced6d846429c69
+// model digest 58fc59c73e160b3816e4c2add829c8c5a6c05ea1c6901838a7d61a911e157818
+// contract digest c7bf5a36bfa3d72e856cecfa8dd5cf67906769eb0ed8049fb9d732fc4c997443
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Routing — `intake.routing`.
@@ -1170,6 +1170,11 @@ pub enum RecordMergeHandoffOutcome {
         /// Why it was refused: `intake.routing.MergeHandoffAlreadyRecorded`.
         error: MergeHandoffAlreadyRecorded,
     },
+    /// `head-already-handed-off` — when, of the `intake.routing.MergeHandoff` rows satisfying `(commission_id == input.commission_id and head == input.head)`, at least one row is selected.
+    HeadAlreadyHandedOff {
+        /// Why it was refused: `intake.routing.HeadAlreadyHandedOff`.
+        error: HeadAlreadyHandedOff,
+    },
     /// `recorded` — otherwise.
     Recorded {
         /// The `intake.routing.MergeHandedOff` this outcome publishes.
@@ -1191,6 +1196,15 @@ pub struct MergeHandedOff {
     pub commission_id: CommissionId,
     /// `workspace` — `String`.
     pub workspace: String,
+    /// `head` — `String`.
+    pub head: String,
+}
+
+/// The declared error `intake.routing.HeadAlreadyHandedOff`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeadAlreadyHandedOff {
+    /// `commission_id` — `intake.routing.CommissionId`.
+    pub commission_id: CommissionId,
     /// `head` — `String`.
     pub head: String,
 }
@@ -1244,9 +1258,9 @@ pub mod obligations {
 
     /// The behaviour `intake.routing.RecordMergeHandoff` — an implementation obligation.
     ///
-    /// Why it is not generated: kept an obligation by the fields of error `intake.routing.MergeHandoffStorageFailed`, which the specification gives no source, in `storage-failed`.
+    /// Why it is not generated: kept an obligation by a guard over the rows a selector selects (`when_related: {entity, where, exists | count | forall}`), in `head-already-handed-off`.
     ///
-    /// Contract: given `intake.routing.RecordMergeHandoff` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `already-recorded` for an identity a record already carries, error `intake.routing.MergeHandoffAlreadyRecorded`; `recorded` otherwise, creates `intake.routing.MergeHandoff`, emits `intake.routing.MergeHandedOff`; `storage-failed` externally decided (the state directory cannot record the hand-off), error `intake.routing.MergeHandoffStorageFailed`.
+    /// Contract: given `intake.routing.RecordMergeHandoff` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `already-recorded` for an identity a record already carries, error `intake.routing.MergeHandoffAlreadyRecorded`; `head-already-handed-off` when, of the `intake.routing.MergeHandoff` rows satisfying `(commission_id == input.commission_id and head == input.head)`, at least one row is selected, error `intake.routing.HeadAlreadyHandedOff`; `recorded` otherwise, creates `intake.routing.MergeHandoff`, emits `intake.routing.MergeHandedOff`; `storage-failed` externally decided (the state directory cannot record the hand-off), error `intake.routing.MergeHandoffStorageFailed`.
     pub trait RecordMergeHandoffBehavior {
         /// Decides and enacts exactly one declared outcome of `intake.routing.RecordMergeHandoff`.
         ///

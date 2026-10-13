@@ -1,14 +1,14 @@
 <!--
   generated from intake v1
-  model digest 37c41dbb3f182fdc2e86847d2c00f33c383427a3e0348ed227d154f4db1025cd
-  contract digest 24cb171fcf66d80fdd605b11e0f9ffd7bd48dd94330463efaaced6d846429c69
+  model digest 58fc59c73e160b3816e4c2add829c8c5a6c05ea1c6901838a7d61a911e157818
+  contract digest c7bf5a36bfa3d72e856cecfa8dd5cf67906769eb0ed8049fb9d732fc4c997443
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — intake v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-65 capabilities: **63 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+66 capabilities: **64 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -73,6 +73,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command contract | `intake.routing.DropResumeContext` |
 | command contract | `intake.routing.RecordMergeHandoff` |
 | event type | `intake.routing.MergeHandedOff` |
+| error type | `intake.routing.HeadAlreadyHandedOff` |
 | error type | `intake.routing.MergeHandoffAlreadyRecorded` |
 | error type | `intake.routing.MergeHandoffStorageFailed` |
 | error type | `intake.routing.ResumeContextNotFound` |
@@ -83,7 +84,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | capability | source | why not generated | contract |
 | --- | --- | --- | --- |
 | command behaviour | `intake.routing.DropResumeContext` | kept an obligation by the fields of error `intake.routing.ResumeContextStorageFailed`, which the specification gives no source, in `storage-failed` | given `intake.routing.DropResumeContext` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `dropped` otherwise, deletes `intake.routing.ResumeContext`; `not-found` for an identity no record carries, error `intake.routing.ResumeContextNotFound`; `storage-failed` externally decided (the resume context store cannot remove the context), error `intake.routing.ResumeContextStorageFailed` |
-| command behaviour | `intake.routing.RecordMergeHandoff` | kept an obligation by the fields of error `intake.routing.MergeHandoffStorageFailed`, which the specification gives no source, in `storage-failed` | given `intake.routing.RecordMergeHandoff` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `already-recorded` for an identity a record already carries, error `intake.routing.MergeHandoffAlreadyRecorded`; `recorded` otherwise, creates `intake.routing.MergeHandoff`, emits `intake.routing.MergeHandedOff`; `storage-failed` externally decided (the state directory cannot record the hand-off), error `intake.routing.MergeHandoffStorageFailed` |
+| command behaviour | `intake.routing.RecordMergeHandoff` | kept an obligation by a guard over the rows a selector selects (`when_related: {entity, where, exists | count | forall}`), in `head-already-handed-off` | given `intake.routing.RecordMergeHandoff` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `already-recorded` for an identity a record already carries, error `intake.routing.MergeHandoffAlreadyRecorded`; `head-already-handed-off` when, of the `intake.routing.MergeHandoff` rows satisfying `(commission_id == input.commission_id and head == input.head)`, at least one row is selected, error `intake.routing.HeadAlreadyHandedOff`; `recorded` otherwise, creates `intake.routing.MergeHandoff`, emits `intake.routing.MergeHandedOff`; `storage-failed` externally decided (the state directory cannot record the hand-off), error `intake.routing.MergeHandoffStorageFailed` |
 
 ## Refused — not represented by this synthesis
 

@@ -2,8 +2,8 @@
   "provenance": {
     "system": "intake",
     "specification_version": "v1",
-    "source_digest": "37c41dbb3f182fdc2e86847d2c00f33c383427a3e0348ed227d154f4db1025cd",
-    "contract_digest": "24cb171fcf66d80fdd605b11e0f9ffd7bd48dd94330463efaaced6d846429c69"
+    "source_digest": "58fc59c73e160b3816e4c2add829c8c5a6c05ea1c6901838a7d61a911e157818",
+    "contract_digest": "c7bf5a36bfa3d72e856cecfa8dd5cf67906769eb0ed8049fb9d732fc4c997443"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -435,14 +435,21 @@
         "disposition": "obligation",
         "reason": {
           "class": "undetermined",
-          "construct": "the fields of error `intake.routing.MergeHandoffStorageFailed`, which the specification gives no source, in `storage-failed`"
+          "construct": "a guard over the rows a selector selects (`when_related: {entity, where, exists | count | forall}`), in `head-already-handed-off`"
         },
-        "contract": "given `intake.routing.RecordMergeHandoff` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `already-recorded` for an identity a record already carries, error `intake.routing.MergeHandoffAlreadyRecorded`; `recorded` otherwise, creates `intake.routing.MergeHandoff`, emits `intake.routing.MergeHandedOff`; `storage-failed` externally decided (the state directory cannot record the hand-off), error `intake.routing.MergeHandoffStorageFailed`"
+        "contract": "given `intake.routing.RecordMergeHandoff` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `already-recorded` for an identity a record already carries, error `intake.routing.MergeHandoffAlreadyRecorded`; `head-already-handed-off` when, of the `intake.routing.MergeHandoff` rows satisfying `(commission_id == input.commission_id and head == input.head)`, at least one row is selected, error `intake.routing.HeadAlreadyHandedOff`; `recorded` otherwise, creates `intake.routing.MergeHandoff`, emits `intake.routing.MergeHandedOff`; `storage-failed` externally decided (the state directory cannot record the hand-off), error `intake.routing.MergeHandoffStorageFailed`"
       }
     },
     {
       "kind": "event_type",
       "source": "intake.routing.MergeHandedOff",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "intake.routing.HeadAlreadyHandedOff",
       "disposition": {
         "disposition": "generated"
       }
