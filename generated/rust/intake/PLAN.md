@@ -1,14 +1,14 @@
 <!--
   generated from intake v1
-  model digest 6a863e68d9e21bd404ea8cd1c1da3b9677c04d000b3ba83ac143ad567a38235c
-  contract digest 3c2bf8b3896629e198b3ad7d91d750b1b57d6d5df6039ce670e57cf6bedd69c6
+  model digest 37c41dbb3f182fdc2e86847d2c00f33c383427a3e0348ed227d154f4db1025cd
+  contract digest 24cb171fcf66d80fdd605b11e0f9ffd7bd48dd94330463efaaced6d846429c69
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — intake v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-55 capabilities: **54 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+65 capabilities: **63 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -48,24 +48,33 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `intake.results.SelectionKind` |
 | domain type | `intake.results.StoredResult` |
 | domain type | `intake.routing.AcceptedRoute` |
+| domain type | `intake.routing.ActionRequestId` |
 | domain type | `intake.routing.AgentRevisionId` |
 | domain type | `intake.routing.CaseId` |
 | domain type | `intake.routing.CatalogDigest` |
 | domain type | `intake.routing.CommissionId` |
 | domain type | `intake.routing.ExtractedReference.State` |
+| domain type | `intake.routing.Grant.State` |
 | domain type | `intake.routing.Intent.State` |
 | domain type | `intake.routing.IntentId` |
+| domain type | `intake.routing.MergeHandoff.State` |
 | domain type | `intake.routing.ProtocolPick.State` |
 | domain type | `intake.routing.ReferenceKind` |
 | domain type | `intake.routing.ResumeContext.State` |
 | domain type | `intake.routing.SliceRun.State` |
 | domain type | `intake.routing.StopReason` |
 | entity lifecycle | `intake.routing.ExtractedReference` |
+| entity lifecycle | `intake.routing.Grant` |
 | entity lifecycle | `intake.routing.Intent` |
+| entity lifecycle | `intake.routing.MergeHandoff` |
 | entity lifecycle | `intake.routing.ProtocolPick` |
 | entity lifecycle | `intake.routing.ResumeContext` |
 | entity lifecycle | `intake.routing.SliceRun` |
 | command contract | `intake.routing.DropResumeContext` |
+| command contract | `intake.routing.RecordMergeHandoff` |
+| event type | `intake.routing.MergeHandedOff` |
+| error type | `intake.routing.MergeHandoffAlreadyRecorded` |
+| error type | `intake.routing.MergeHandoffStorageFailed` |
 | error type | `intake.routing.ResumeContextNotFound` |
 | error type | `intake.routing.ResumeContextStorageFailed` |
 
@@ -74,6 +83,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | capability | source | why not generated | contract |
 | --- | --- | --- | --- |
 | command behaviour | `intake.routing.DropResumeContext` | kept an obligation by the fields of error `intake.routing.ResumeContextStorageFailed`, which the specification gives no source, in `storage-failed` | given `intake.routing.DropResumeContext` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `dropped` otherwise, deletes `intake.routing.ResumeContext`; `not-found` for an identity no record carries, error `intake.routing.ResumeContextNotFound`; `storage-failed` externally decided (the resume context store cannot remove the context), error `intake.routing.ResumeContextStorageFailed` |
+| command behaviour | `intake.routing.RecordMergeHandoff` | kept an obligation by the fields of error `intake.routing.MergeHandoffStorageFailed`, which the specification gives no source, in `storage-failed` | given `intake.routing.RecordMergeHandoff` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `already-recorded` for an identity a record already carries, error `intake.routing.MergeHandoffAlreadyRecorded`; `recorded` otherwise, creates `intake.routing.MergeHandoff`, emits `intake.routing.MergeHandedOff`; `storage-failed` externally decided (the state directory cannot record the hand-off), error `intake.routing.MergeHandoffStorageFailed` |
 
 ## Refused — not represented by this synthesis
 

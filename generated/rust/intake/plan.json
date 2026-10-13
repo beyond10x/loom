@@ -2,8 +2,8 @@
   "provenance": {
     "system": "intake",
     "specification_version": "v1",
-    "source_digest": "6a863e68d9e21bd404ea8cd1c1da3b9677c04d000b3ba83ac143ad567a38235c",
-    "contract_digest": "3c2bf8b3896629e198b3ad7d91d750b1b57d6d5df6039ce670e57cf6bedd69c6"
+    "source_digest": "37c41dbb3f182fdc2e86847d2c00f33c383427a3e0348ed227d154f4db1025cd",
+    "contract_digest": "24cb171fcf66d80fdd605b11e0f9ffd7bd48dd94330463efaaced6d846429c69"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -250,6 +250,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "intake.routing.ActionRequestId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "intake.routing.AgentRevisionId",
       "disposition": {
         "disposition": "generated"
@@ -285,6 +292,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "intake.routing.Grant.State",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "intake.routing.Intent.State",
       "disposition": {
         "disposition": "generated"
@@ -293,6 +307,13 @@
     {
       "kind": "domain_type",
       "source": "intake.routing.IntentId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.routing.MergeHandoff.State",
       "disposition": {
         "disposition": "generated"
       }
@@ -341,7 +362,21 @@
     },
     {
       "kind": "entity_lifecycle",
+      "source": "intake.routing.Grant",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "entity_lifecycle",
       "source": "intake.routing.Intent",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "entity_lifecycle",
+      "source": "intake.routing.MergeHandoff",
       "disposition": {
         "disposition": "generated"
       }
@@ -384,6 +419,46 @@
           "construct": "the fields of error `intake.routing.ResumeContextStorageFailed`, which the specification gives no source, in `storage-failed`"
         },
         "contract": "given `intake.routing.DropResumeContext` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `dropped` otherwise, deletes `intake.routing.ResumeContext`; `not-found` for an identity no record carries, error `intake.routing.ResumeContextNotFound`; `storage-failed` externally decided (the resume context store cannot remove the context), error `intake.routing.ResumeContextStorageFailed`"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "intake.routing.RecordMergeHandoff",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "intake.routing.RecordMergeHandoff",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "the fields of error `intake.routing.MergeHandoffStorageFailed`, which the specification gives no source, in `storage-failed`"
+        },
+        "contract": "given `intake.routing.RecordMergeHandoff` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `already-recorded` for an identity a record already carries, error `intake.routing.MergeHandoffAlreadyRecorded`; `recorded` otherwise, creates `intake.routing.MergeHandoff`, emits `intake.routing.MergeHandedOff`; `storage-failed` externally decided (the state directory cannot record the hand-off), error `intake.routing.MergeHandoffStorageFailed`"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "intake.routing.MergeHandedOff",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "intake.routing.MergeHandoffAlreadyRecorded",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "intake.routing.MergeHandoffStorageFailed",
+      "disposition": {
+        "disposition": "generated"
       }
     },
     {
