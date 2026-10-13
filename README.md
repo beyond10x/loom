@@ -33,9 +33,9 @@ the whole boundary.
 
 ## Status
 
-Version `0.16.0`, released from source at the tag `0.16.0`
-([release](https://github.com/beyond10x/loom/releases/tag/0.16.0)). Nothing is on a registry: you
-install from the tag or depend on it with `tag = "0.16.0"`. `b10x-loom run` completed a live run
+Version `0.17.0`, released from source at the tag `0.17.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.17.0)). Nothing is on a registry: you
+install from the tag or depend on it with `tag = "0.17.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -80,6 +80,12 @@ a consumer that adds Canon itself pins the same tag). `incident.response/1` keep
 `investigate_cause` open after `emergency.leave` becomes admissible, until a cause analysis
 identifies the cause.
 
+Since `0.17.0` a Commission host can keep a Run waiting on an approval across a process restart:
+given a suspension port, `run_with_suspension` holds the commission's Suspension on a withheld
+approval and `resume_after_grant` performs the pending request once, after the grant, at the case
+revision it was suspended at. Callers of `run_until_blocked` see no change; callers that match
+`ResumeRunOutcome` or `LoopFailure` exhaustively add the new arms.
+
 Since `0.16.0` a step performed under an authority grant passes Commission's approval gate:
 `run_until_blocked` runs the executor again instead of ending the Run `AwaitingApproval`, so a
 caller that matched `AwaitingApproval` after a granted effect now gets the Run's own end, and a
@@ -119,14 +125,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.16.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.17.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.16.0
+b10x-loom 0.17.0
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -191,7 +197,7 @@ A supervisor that keeps its own case record calls `loom_governor::evaluate` (or 
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.16.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.17.0" }
 ```
 
 The example below
