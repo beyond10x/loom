@@ -3,4 +3,9 @@ requires: ess 0.59.0
 specification:
   - system.yaml
   - domains/responsibility.yaml
-scenarios: []
+# Authored scenarios: what the synthesized suite leaves unread (story:handoff-holds-no-suspension).
+scenarios:
+  - scenarios/settled-hold-leaves-the-commission-free.yaml
+  - scenarios/settled-hold-stores-nothing.yaml
+  - scenarios/unwritable-hold-stores-nothing.yaml
+  - scenarios/unwritable-start-stores-nothing.yaml

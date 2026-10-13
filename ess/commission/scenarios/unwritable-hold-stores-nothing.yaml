@@ -1,0 +1,34 @@
+# story:handoff-holds-no-suspension, the class of the settled hold: a hold the suspension port
+# cannot write is refused before anything is stored. The scenario synthesized for `HoldSuspension`
+# `storage-failed` reads no view either; this one reads `SuspensionStates` after the refused hold
+# and finds neither the Suspension nor its request.
+type: ess-scenario/1
+domain: commission.responsibility
+scenario: unwritable-hold-stores-nothing
+summary: A hold the suspension port cannot write stores no Suspension, so SuspensionStates holds neither its key nor its request.
+
+timeline:
+  - at: 2026-10-13T09:00:00Z
+    command: commission.responsibility.HoldSuspension
+    input:
+      suspension: {commission_id: 00000000-0000-4000-8000-0000000000c2}
+      commission_id: 00000000-0000-4000-8000-0000000000c2
+      run_id: 00000000-0000-4000-8000-0000000000d1
+      run_case_revision: 1
+      action_request_id: 00000000-0000-4000-8000-0000000000a2
+      case_id: case-unwritable
+      expected_case_revision: 3
+      action: repository.merge
+      arguments: {}
+      reason: {kind: Authority, value: {capability: repository.merge}}
+    outcome: storage-failed
+    error: {name: commission.responsibility.SuspensionStorageFailed}
+    no_events: [commission.responsibility.SuspensionHeld]
+
+assert:
+  - view: commission.responsibility.SuspensionStates
+    excludes:
+      suspension: {commission_id: 00000000-0000-4000-8000-0000000000c2}
+  - view: commission.responsibility.SuspensionStates
+    excludes:
+      action_request_id: 00000000-0000-4000-8000-0000000000a2

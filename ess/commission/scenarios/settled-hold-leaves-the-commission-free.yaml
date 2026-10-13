@@ -1,0 +1,60 @@
+# story:handoff-holds-no-suspension: a hold the host already settled leaves nothing held, so the
+# commission holds no Suspension afterwards and a later hold of its Suspension is `held`, never
+# `already-held`. A target that stores the Suspension under any key and answers `settled` is
+# refused the second hold and fails here.
+type: ess-scenario/1
+domain: commission.responsibility
+scenario: settled-hold-leaves-the-commission-free
+summary: After a hold the host settled, the commission holds no Suspension, so the next hold of it is held.
+
+timeline:
+  - at: 2026-10-13T09:00:00Z
+    command: commission.responsibility.HoldSuspension
+    input:
+      suspension: {commission_id: 00000000-0000-4000-8000-0000000000c3}
+      commission_id: 00000000-0000-4000-8000-0000000000c3
+      run_id: 00000000-0000-4000-8000-0000000000d1
+      run_case_revision: 1
+      action_request_id: 00000000-0000-4000-8000-0000000000a3
+      case_id: case-settled
+      expected_case_revision: 3
+      action: repository.merge
+      arguments: {}
+      reason: {kind: Authority, value: {capability: repository.merge}}
+    outcome: settled
+    error:
+      name: commission.responsibility.SuspensionSettled
+      fields:
+        suspension: {commission_id: 00000000-0000-4000-8000-0000000000c3}
+        action_request_id: 00000000-0000-4000-8000-0000000000a3
+    no_events: [commission.responsibility.SuspensionHeld]
+
+  - at: 2026-10-13T09:00:01Z
+    command: commission.responsibility.HoldSuspension
+    input:
+      suspension: {commission_id: 00000000-0000-4000-8000-0000000000c3}
+      commission_id: 00000000-0000-4000-8000-0000000000c3
+      run_id: 00000000-0000-4000-8000-0000000000d1
+      run_case_revision: 1
+      action_request_id: 00000000-0000-4000-8000-0000000000a4
+      case_id: case-settled
+      expected_case_revision: 4
+      action: repository.edit
+      arguments: {}
+      reason: {kind: Authority, value: {capability: repository.edit}}
+    outcome: held
+    events:
+      - event: commission.responsibility.SuspensionHeld
+        payload:
+          suspension: {commission_id: 00000000-0000-4000-8000-0000000000c3}
+          action_request_id: 00000000-0000-4000-8000-0000000000a4
+
+assert:
+  - view: commission.responsibility.SuspensionStates
+    contains:
+      suspension: {commission_id: 00000000-0000-4000-8000-0000000000c3}
+      action_request_id: 00000000-0000-4000-8000-0000000000a4
+      state: Pending
+  - view: commission.responsibility.SuspensionStates
+    excludes:
+      action_request_id: 00000000-0000-4000-8000-0000000000a3

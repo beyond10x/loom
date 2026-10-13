@@ -1,0 +1,39 @@
+# story:handoff-holds-no-suspension: a hold the host already settled leaves nothing held. The
+# scenario synthesized for `HoldSuspension` `settled` checks the error and that no event is
+# published, and reads no view: a target that answers `settled` and stores the Suspension anyway
+# passes it. This one reads `SuspensionStates` after the settled hold and finds neither the
+# Suspension nor the request it would have held.
+type: ess-scenario/1
+domain: commission.responsibility
+scenario: settled-hold-stores-nothing
+summary: A hold the host settled stores no Suspension, so SuspensionStates holds neither its key nor its request.
+
+timeline:
+  - at: 2026-10-13T09:00:00Z
+    command: commission.responsibility.HoldSuspension
+    input:
+      suspension: {commission_id: 00000000-0000-4000-8000-0000000000c1}
+      commission_id: 00000000-0000-4000-8000-0000000000c1
+      run_id: 00000000-0000-4000-8000-0000000000d1
+      run_case_revision: 1
+      action_request_id: 00000000-0000-4000-8000-0000000000a1
+      case_id: case-settled
+      expected_case_revision: 3
+      action: repository.merge
+      arguments: {}
+      reason: {kind: Authority, value: {capability: repository.merge}}
+    outcome: settled
+    error:
+      name: commission.responsibility.SuspensionSettled
+      fields:
+        suspension: {commission_id: 00000000-0000-4000-8000-0000000000c1}
+        action_request_id: 00000000-0000-4000-8000-0000000000a1
+    no_events: [commission.responsibility.SuspensionHeld]
+
+assert:
+  - view: commission.responsibility.SuspensionStates
+    excludes:
+      suspension: {commission_id: 00000000-0000-4000-8000-0000000000c1}
+  - view: commission.responsibility.SuspensionStates
+    excludes:
+      action_request_id: 00000000-0000-4000-8000-0000000000a1
