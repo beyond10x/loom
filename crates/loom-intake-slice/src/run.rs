@@ -73,6 +73,13 @@
 //! then indented `effect:` and `evidence:` lines; further lines of an effect are indented and
 //! start with `|`), and last `stopped: <reason>`, with its detail in parentheses where it has one.
 //!
+//! A run with a state directory or a resume that stops [`StopReason::ApprovalRequired`] prints
+//! that line only when the commission holds a Suspension `approve` can approve
+//! ([`ApprovalGate`]): it prints `stopped: ApprovalRequired (<action>), nothing suspended` when it
+//! holds none, and a resume prints `stopped: MergeHandedOff (<request>, HEAD <head>)` when the
+//! case's `HEAD` is one the commission already handed off. A run without a state directory prints
+//! as it always did.
+//!
 //! # Identity
 //!
 //! A [`SliceRun`] carries the specification's `protocol`, `steps` and `stop_reason`. Its `run_id`
@@ -177,6 +184,31 @@ pub struct SliceRun {
     /// The actions the run awaits approval for, in frontier order; empty unless it stopped
     /// [`StopReason::ApprovalRequired`].
     pub approvals: Vec<String>,
+    /// What a run with a state directory that stopped [`StopReason::ApprovalRequired`] left to
+    /// approve; [`ApprovalGate::Approvable`] for every other run.
+    pub gate: ApprovalGate,
+}
+
+/// What a run that stopped [`StopReason::ApprovalRequired`] left for `approve`. A run without a
+/// state directory (`run_until_blocked`) holds nothing anyone could approve and is always
+/// [`ApprovalGate::Approvable`], printed as it always was.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ApprovalGate {
+    /// The stop line reads `stopped: ApprovalRequired (<action>)`: with a state directory, the
+    /// commission holds a Suspension `approve` can approve.
+    #[default]
+    Approvable,
+    /// The commission holds no Suspension: `stopped: ApprovalRequired (<action>), nothing
+    /// suspended`. Nothing can be approved.
+    NothingSuspended,
+    /// The case's `HEAD` is one the commission already handed off:
+    /// `stopped: MergeHandedOff (<request>, HEAD <head>)`. Nothing is left to approve for it.
+    HandedOff {
+        /// The request that handed it off.
+        action_request_id: String,
+        /// The `HEAD` handed off.
+        head: String,
+    },
 }
 
 /// Why a run ended without a stop reason.
@@ -529,12 +561,14 @@ pub(crate) fn drive<S: FallibleCaseStore>(
         )),
     };
     // A resume hands a granted `repository.merge` off; nothing else performs one.
+    let held_head = || implementation_revision(governor, &case);
     let handoff = match (&mode, workspace) {
         (Mode::Resuming(resuming), Some(workspace)) => Some(HandoffEffects::new(
             &*local,
             resuming.handoffs,
             workspace,
             resuming.workspace.clone(),
+            &held_head,
             briefing.clone(),
             &console,
             protocol == LOCAL_PROTOCOL,
@@ -622,7 +656,76 @@ pub(crate) fn drive<S: FallibleCaseStore>(
             Some(complete.outcome.clone()),
         );
     }
-    finish(out, protocol.to_owned(), end)
+    let gate = if matches!(
+        end.outcome,
+        RunOutcome::NeedsAuthority(_) | RunOutcome::AwaitingApproval(_)
+    ) {
+        approval_gate(&mode, governor, &case, &commission.data().commission_id)?
+    } else {
+        ApprovalGate::Approvable
+    };
+    finish(out, protocol.to_owned(), end, gate)
+}
+
+/// The case's implementation revision as `governor` holds it: the `HEAD` the case is at.
+fn implementation_revision<S: FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &CaseId,
+) -> Result<String, SliceError> {
+    governor
+        .revisions(case)?
+        .remove(case::IMPLEMENTATION)
+        .ok_or_else(|| {
+            SliceError::State(format!(
+                "case {} holds no {} revision",
+                case.0,
+                case::IMPLEMENTATION
+            ))
+        })
+}
+
+/// What a run in `mode` that stopped `ApprovalRequired` left to approve: in a resume, a `HEAD`
+/// the commission already handed off first; with a state directory, whether the commission holds
+/// its Suspension. A run without one is always approvable as it prints.
+fn approval_gate<S: FallibleCaseStore>(
+    mode: &Mode<'_>,
+    governor: &CanonGovernor<S>,
+    case: &CaseId,
+    commission: &CommissionId,
+) -> Result<ApprovalGate, SliceError> {
+    let held = |suspensions: &dyn SuspensionPort| {
+        let held = suspensions.get(commission).map_err(|error| {
+            SliceError::State(format!(
+                "whether commission {} holds a Suspension cannot be read: {error}",
+                commission.0.0
+            ))
+        })?;
+        Ok(match held {
+            Some(_) => ApprovalGate::Approvable,
+            None => ApprovalGate::NothingSuspended,
+        })
+    };
+    match mode {
+        Mode::Once => Ok(ApprovalGate::Approvable),
+        Mode::Holding(holding) => held(holding.suspensions),
+        Mode::Resuming(resuming) => {
+            let head = implementation_revision(governor, case)?;
+            let commission_id = crate::handoff::CommissionId(intake_model::primitives::Uuid(
+                commission.0.0.clone(),
+            ));
+            let handed_off = resuming
+                .handoffs
+                .handed_off(&commission_id, &head)
+                .map_err(|error| SliceError::State(error.to_string()))?;
+            match handed_off {
+                Some(handoff) => Ok(ApprovalGate::HandedOff {
+                    action_request_id: handoff.action_request_id.0.0,
+                    head: handoff.head,
+                }),
+                None => held(resuming.suspensions),
+            }
+        }
+    }
 }
 
 /// The slice's failure for a loop that stopped without a run outcome: the governor's, or the
@@ -637,8 +740,14 @@ fn loop_failed(error: LoopError) -> SliceError {
     }
 }
 
-/// The stop reason the runtime's `end` stands for, as the module documents, printed.
-fn finish(out: &mut dyn Write, protocol: String, end: LoopEnd) -> Result<SliceRun, SliceError> {
+/// The stop reason the runtime's `end` stands for, as the module documents, printed; a stop
+/// `ApprovalRequired` as `gate` says what it left to approve.
+fn finish(
+    out: &mut dyn Write,
+    protocol: String,
+    end: LoopEnd,
+    gate: ApprovalGate,
+) -> Result<SliceRun, SliceError> {
     let steps = end.steps;
     match end.outcome {
         RunOutcome::Completed(complete) => Err(SliceError::Complete(complete.outcome)),
@@ -658,18 +767,14 @@ fn finish(out: &mut dyn Write, protocol: String, end: LoopEnd) -> Result<SliceRu
                     _ => None,
                 });
             let approvals = action.iter().cloned().collect();
-            stop(out, protocol, steps, StopReason::ApprovalRequired, action)
-                .map(|run| SliceRun { approvals, ..run })
+            gated_stop(out, protocol, steps, action, approvals, gate)
         }
         RunOutcome::AwaitingApproval(awaiting) => {
             if let Some(frontier) = &end.last_frontier {
                 print_frontier(out, frontier)?;
             }
             let detail = Some(awaiting.actions.join(", "));
-            stop(out, protocol, steps, StopReason::ApprovalRequired, detail).map(|run| SliceRun {
-                approvals: awaiting.actions,
-                ..run
-            })
+            gated_stop(out, protocol, steps, detail, awaiting.actions, gate)
         }
         RunOutcome::NoAdmissibleAction(_) | RunOutcome::NeedsExternalEvidence(_) => {
             stop(out, protocol, steps, StopReason::NothingAdmissible, None)
@@ -924,6 +1029,52 @@ fn pick(request: &SliceRequest, classifier: &dyn Model) -> Result<Pick, SliceErr
     Ok(Err((protocol, detail.to_owned(), error.to_string())))
 }
 
+/// Prints the stop line of a run that stopped `ApprovalRequired`, as `gate` says what it left to
+/// approve (see [`ApprovalGate`]), and returns the run.
+fn gated_stop(
+    out: &mut dyn Write,
+    protocol: String,
+    steps: usize,
+    detail: Option<String>,
+    approvals: Vec<String>,
+    gate: ApprovalGate,
+) -> Result<SliceRun, SliceError> {
+    let reason = StopReason::ApprovalRequired;
+    match (&gate, &detail) {
+        (ApprovalGate::Approvable, _) => {
+            return stop(out, protocol, steps, reason, detail)
+                .map(|run| SliceRun { approvals, ..run });
+        }
+        (ApprovalGate::NothingSuspended, Some(detail)) => writeln!(
+            out,
+            "stopped: {reason:?} ({}), nothing suspended",
+            printable(detail)
+        )?,
+        (ApprovalGate::NothingSuspended, None) => {
+            writeln!(out, "stopped: {reason:?}, nothing suspended")?;
+        }
+        (
+            ApprovalGate::HandedOff {
+                action_request_id,
+                head,
+            },
+            _,
+        ) => writeln!(
+            out,
+            "stopped: MergeHandedOff ({}, HEAD {})",
+            printable(action_request_id),
+            printable(head)
+        )?,
+    }
+    Ok(SliceRun {
+        protocol,
+        steps,
+        stop_reason: reason,
+        approvals,
+        gate,
+    })
+}
+
 /// Prints the stop line and returns the run.
 fn stop(
     out: &mut dyn Write,
@@ -941,6 +1092,7 @@ fn stop(
         steps,
         stop_reason,
         approvals: Vec::new(),
+        gate: ApprovalGate::Approvable,
     })
 }
 
@@ -1109,7 +1261,7 @@ mod tests {
     use b10x_loom_commission::model::responsibility::{RunId, RunOutcome, RunOutcomeCaseMovedOn};
     use b10x_loom_commission::runtime::LoopEnd;
 
-    use super::{SliceRun, StopReason, finish};
+    use super::{ApprovalGate, SliceRun, StopReason, finish};
 
     /// story:moved-run-named-outcome: a run whose case moved on to a frontier that still admits an
     /// action stops as one with no admissible action does, a stop that is not a success, and its
@@ -1130,8 +1282,13 @@ mod tests {
         };
         let mut out = Vec::new();
 
-        let run = finish(&mut out, "software-change@1".to_owned(), end)
-            .unwrap_or_else(|error| panic!("the stop failed: {error}"));
+        let run = finish(
+            &mut out,
+            "software-change@1".to_owned(),
+            end,
+            ApprovalGate::Approvable,
+        )
+        .unwrap_or_else(|error| panic!("the stop failed: {error}"));
 
         assert_eq!(
             run,
@@ -1140,6 +1297,7 @@ mod tests {
                 steps: 2,
                 stop_reason: StopReason::NothingAdmissible,
                 approvals: Vec::new(),
+                gate: ApprovalGate::Approvable,
             }
         );
         assert_eq!(

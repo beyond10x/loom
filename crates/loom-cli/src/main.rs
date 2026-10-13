@@ -13,7 +13,7 @@ use b10x_loom_cli::plugin::{is_proposal, recorded, report_line, turn_models};
 use b10x_loom_cli::regular_file;
 use b10x_loom_cli::{
     ApproveArgs, Cli, Command, Confinement, EvaluateArgs, Output, PluginCommand, PluginName,
-    ProtocolCommand, ResumeArgs, RunArgs, approve_exit_status, exit_status, resume_exit_status,
+    ProtocolCommand, ResumeArgs, RunArgs, approve_exit_status, resume_exit_status, run_exit_status,
 };
 use b10x_loom_intake_slice::case;
 use b10x_loom_intake_slice::clock::HostClock;
@@ -31,7 +31,7 @@ use b10x_loom_intake_slice::intent::{
 };
 use b10x_loom_intake_slice::resume::ResumeContextStore;
 use b10x_loom_intake_slice::run::{
-    LOCAL_PROTOCOL, RunOptions, SliceError, SliceRun, StopReason, printable,
+    ApprovalGate, LOCAL_PROTOCOL, RunOptions, SliceError, SliceRun, StopReason, printable,
 };
 use b10x_loom_plugin_slack::{SlackHandler, config as slack_config};
 use clap::Parser;
@@ -86,15 +86,27 @@ fn approve_command(arguments: &ApproveArgs) -> ExitCode {
         Ok((
             FileSuspensionStore::open(dir).map_err(|e| unusable(&e))?,
             GrantStore::open(dir).map_err(|e| unusable(&e))?,
+            MergeHandoffStore::open(dir).map_err(|e| unusable(&e))?,
+            CanonGovernor::new(FileCaseStore::open(dir).map_err(|e| unusable(&e))?),
         ))
     });
-    let (suspensions, grants) = match stores {
+    let (suspensions, grants, handoffs, governor) = match stores {
         Ok(stores) => stores,
         Err(error) => return failed(&error),
+    };
+    // The HEAD a suspended merge would hand off: the case's implementation revision.
+    let head_of = |case: &b10x_loom_commission::model::responsibility::CaseId| {
+        governor
+            .revisions(case)
+            .map_err(|error| format!("the case {} cannot be read: {error:?}", case.0))?
+            .remove(case::IMPLEMENTATION)
+            .ok_or_else(|| format!("the case {} holds no implementation revision", case.0))
     };
     match approve(
         &suspensions,
         &grants,
+        &handoffs,
+        &head_of,
         &arguments.commission,
         &arguments.capability,
         grant::now(),
@@ -123,7 +135,7 @@ fn approve_command(arguments: &ApproveArgs) -> ExitCode {
 fn resume_command(arguments: &ResumeArgs) -> ExitCode {
     let mut out = std::io::stdout().lock();
     match resume(arguments, &mut out) {
-        Ok(run) => ExitCode::from(exit_status(run.stop_reason)),
+        Ok(run) => ExitCode::from(run_exit_status(&run)),
         Err(SliceError::Resume(error)) => {
             eprintln!(
                 "b10x-loom: {}",
@@ -430,7 +442,7 @@ fn run_command(arguments: RunArgs) -> ExitCode {
                 Ok(status) => ExitCode::from(status),
                 Err(error) => failed(&format!("the event stream cannot be written: {error}")),
             },
-            None => ExitCode::from(exit_status(run.stop_reason)),
+            None => ExitCode::from(run_exit_status(&run)),
         },
         Err(error) => {
             let status = failed(&error);
@@ -665,6 +677,7 @@ fn confinement_refused(prepared: &PreparedIntent, reason: &str) -> Ending {
         steps: 0,
         stop_reason: StopReason::ConfinementUnavailable,
         approvals: Vec::new(),
+        gate: ApprovalGate::Approvable,
     })
 }
 

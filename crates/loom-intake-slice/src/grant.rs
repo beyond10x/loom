@@ -11,7 +11,8 @@
 //!
 //! [`approve`] performs nothing: it reads the commission's Suspension and writes a grant for its
 //! request, and only when the Suspension is `Pending` and the request needs the capability the
-//! operator named.
+//! operator named, and never for a `repository.merge` that would hand off a `HEAD` the commission
+//! already handed off (`intake.routing.HeadAlreadyHandedOff`).
 //!
 //! [`GrantAuthority`] allows a capability only while the commission's Suspension is held `Pending`
 //! for the very request the grant names, for that capability: a grant for another request, or a
@@ -25,7 +26,7 @@ use std::path::{Path, PathBuf};
 
 use b10x_loom_commission::model::json;
 use b10x_loom_commission::model::responsibility::{
-    AuthorityVerdict, AuthorityVerdictApprovalRequired, CommissionData,
+    AuthorityVerdict, AuthorityVerdictApprovalRequired, CaseId, CommissionData,
     CommissionId as HeldCommissionId, SuspensionReason, SuspensionState, Unit,
 };
 use b10x_loom_commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
@@ -34,6 +35,7 @@ use intake_model::primitives::{Timestamp, Uuid};
 pub use intake_model::routing::{ActionRequestId, CommissionId, GrantData};
 use serde_json::{Map, Value, json};
 
+use crate::handoff::{HeadAlreadyHandedOff, MERGE, MergeHandoffStore};
 use crate::resume::ResumeStoreError;
 use crate::state_dir::{StateDir, failed, read_text};
 
@@ -126,7 +128,12 @@ pub enum ApproveRefusal {
         /// The capability the Suspension names, if any.
         held: Option<String>,
     },
-    /// The suspension store or the grant store could not be used.
+    /// The suspended request is a `repository.merge` that would hand off a `HEAD` the commission
+    /// already handed off (`intake.routing.HeadAlreadyHandedOff`): the same work is not handed
+    /// off twice.
+    AlreadyHandedOff(HeadAlreadyHandedOff),
+    /// The suspension store, the grant store, the case or the hand-offs could not be read or
+    /// written.
     Store(String),
 }
 
@@ -149,6 +156,12 @@ impl fmt::Display for ApproveRefusal {
                 f,
                 "OtherCapability: the Suspension names no capability its request needs"
             ),
+            Self::AlreadyHandedOff(error) => write!(
+                f,
+                "AlreadyHandedOff: commission {} already handed off HEAD {}; the same work is not \
+                 handed off twice",
+                error.commission_id.0.0, error.head
+            ),
             Self::Store(why) => write!(f, "the state directory cannot be used: {why}"),
         }
     }
@@ -162,15 +175,19 @@ pub fn now() -> Timestamp {
 }
 
 /// Approves `capability` for the request `commission`'s Suspension holds, at `at`: writes the
-/// grant and performs nothing.
+/// grant and performs nothing. A suspended `repository.merge` hands off the case's
+/// implementation revision, which `head_of` reads from the governor for the Suspension's case;
+/// when the commission already handed that `HEAD` off (`handoffs`), nothing is approved.
 ///
 /// # Errors
 /// [`ApproveRefusal`] when nothing is suspended for the commission, its Suspension is
-/// `Resuming`, its request needs another capability, or a store cannot be used; no grant is
-/// written then.
+/// `Resuming`, its request needs another capability, it would hand off a `HEAD` the commission
+/// already handed off, or a store cannot be used; no grant is written then.
 pub fn approve(
     suspensions: &dyn SuspensionPort,
     grants: &GrantStore,
+    handoffs: &MergeHandoffStore,
+    head_of: &dyn Fn(&CaseId) -> Result<String, String>,
     commission: &str,
     capability: &str,
     at: Timestamp,
@@ -189,6 +206,20 @@ pub fn approve(
     let needed = needed_capability(&held.data.reason);
     if needed.as_deref() != Some(capability) {
         return Err(ApproveRefusal::OtherCapability { held: needed });
+    }
+    if held.data.action == MERGE {
+        let head = head_of(&held.data.case_id).map_err(ApproveRefusal::Store)?;
+        let commission_id = CommissionId(Uuid(commission.to_owned()));
+        if handoffs
+            .handed_off(&commission_id, &head)
+            .map_err(|error| ApproveRefusal::Store(error.to_string()))?
+            .is_some()
+        {
+            return Err(ApproveRefusal::AlreadyHandedOff(HeadAlreadyHandedOff {
+                commission_id,
+                head,
+            }));
+        }
     }
     let grant = GrantData {
         commission_id: CommissionId(Uuid(commission.to_owned())),

@@ -37,8 +37,8 @@ use crate::resume::{
     ResumeContextData, ResumeContextStore,
 };
 use crate::run::{
-    Execution, Holding, LOCAL_PROTOCOL, Mode, Resuming, RunOptions, SliceError, SliceRun,
-    StopReason, drive, operator_commission, printable,
+    ApprovalGate, Execution, Holding, LOCAL_PROTOCOL, Mode, Resuming, RunOptions, SliceError,
+    SliceRun, StopReason, drive, operator_commission, printable,
 };
 use crate::selector::Briefing;
 
@@ -265,6 +265,7 @@ fn stop(
         steps: 0,
         stop_reason: reason,
         approvals: Vec::new(),
+        gate: ApprovalGate::Approvable,
     })
 }
 
@@ -543,9 +544,11 @@ pub fn resumed_request(
 
 /// Continues `context`'s commission after the grant, through Commission's `resume_after_grant`:
 /// the route is restored only for the intent, the catalog and the policy it was accepted for, the
-/// workspace is validated again (`case::validate_workspace`), the grant `approve` wrote is read
-/// through [`GrantAuthority`], and a granted `repository.merge` is handed off into
-/// `state.handoffs`, moving no Git ref. The suspended request is performed once, the Suspension is
+/// workspace is validated again (`case::validate_workspace`) and its `HEAD` reported to the
+/// governor as the case's implementation revision (`case::report_head`), so a commit made since
+/// the Suspension is refused `CaseMoved`; the grant `approve` wrote is read through
+/// [`GrantAuthority`], and a granted `repository.merge` is handed off into `state.handoffs`, at
+/// the implementation revision the case holds only, moving no Git ref. The suspended request is performed once, the Suspension is
 /// released, and the run goes on until it stops, as a run does. When it ends, however it ends,
 /// without the commission's Suspension held, the context is removed
 /// (`intake.routing.DropResumeContext`).
@@ -621,12 +624,17 @@ fn resume_prepared<S: FallibleCaseStore>(
         .grants
         .get(&context.commission_id)
         .map_err(|error| SliceError::State(error.to_string()))?;
+    // The workspace's HEAD is reported to the governor as the case's implementation revision, as
+    // a run reports it after an edit: a commit made since the Suspension moves the case, and the
+    // resume is refused `CaseMoved` before anything is performed.
+    let case_id = CaseId(context.case_id.0.clone());
+    case::report_head(governor, &case_id, workspace).map_err(SliceError::Case)?;
     let authority = GrantAuthority::new(grant, state.suspensions);
     let resuming = Resuming {
         commission: operator_commission(
             CommissionId(CommissionUuid(context.commission_id.0.0.clone())),
             AgentRevisionId(CommissionUuid(context.agent_revision_id.0.0.clone())),
-            CaseId(context.case_id.0.clone()),
+            case_id.clone(),
         ),
         suspensions: state.suspensions,
         authority: &authority,
@@ -644,7 +652,7 @@ fn resume_prepared<S: FallibleCaseStore>(
     drive(
         &request.intent,
         &prepared.protocol,
-        CaseId(context.case_id.0.clone()),
+        case_id,
         request.max_steps,
         governor,
         frontiers,

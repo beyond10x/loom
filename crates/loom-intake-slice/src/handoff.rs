@@ -26,8 +26,9 @@ use intake_model::obligation::UnmetObligation;
 use intake_model::primitives::Uuid;
 use intake_model::routing::obligations::RecordMergeHandoffBehavior;
 pub use intake_model::routing::{
-    ActionRequestId, CommissionId, MergeHandedOff, MergeHandoffAlreadyRecorded, MergeHandoffData,
-    MergeHandoffStorageFailed, RecordMergeHandoff, RecordMergeHandoffOutcome,
+    ActionRequestId, CommissionId, HeadAlreadyHandedOff, MergeHandedOff,
+    MergeHandoffAlreadyRecorded, MergeHandoffData, MergeHandoffStorageFailed, RecordMergeHandoff,
+    RecordMergeHandoffOutcome,
 };
 use serde_json::{Value, json};
 
@@ -72,9 +73,11 @@ impl MergeHandoffStore {
     }
 
     /// Records `input`'s hand-off once (`intake.routing.RecordMergeHandoff`): `Recorded`, with the
-    /// `MergeHandedOff` it publishes, when none was recorded for the request; `AlreadyRecorded`,
-    /// changing nothing, when one was; `StorageFailed`, with the store's reason, when it cannot be
-    /// written.
+    /// `MergeHandedOff` it publishes, when none was recorded for the request nor for the
+    /// commission and `HEAD`; `AlreadyRecorded`, changing nothing, when one was for the request;
+    /// `HeadAlreadyHandedOff`, changing nothing, when the commission handed that `HEAD` off under
+    /// another request; `StorageFailed`, with the store's reason, when the directory cannot be
+    /// read or written.
     pub fn record(&self, input: &RecordMergeHandoff) -> RecordMergeHandoffOutcome {
         let storage_failed = |error: ResumeStoreError| RecordMergeHandoffOutcome::StorageFailed {
             error: MergeHandoffStorageFailed {
@@ -97,12 +100,15 @@ impl MergeHandoffStore {
         }
         let recorded = self.dir.locked(|| {
             if path.exists() {
-                return Ok(false);
+                return Ok(Recording::AlreadyRecorded);
             }
-            self.dir.replace(&path, &text).map(|()| true)
+            if self.find(&handoff.commission_id, &handoff.head)?.is_some() {
+                return Ok(Recording::HeadHandedOff);
+            }
+            self.dir.replace(&path, &text).map(|()| Recording::Recorded)
         });
         match recorded.and_then(|recorded| recorded) {
-            Ok(true) => RecordMergeHandoffOutcome::Recorded {
+            Ok(Recording::Recorded) => RecordMergeHandoffOutcome::Recorded {
                 merge_handed_off: MergeHandedOff {
                     action_request_id: handoff.action_request_id,
                     commission_id: handoff.commission_id,
@@ -110,13 +116,71 @@ impl MergeHandoffStore {
                     head: handoff.head,
                 },
             },
-            Ok(false) => RecordMergeHandoffOutcome::AlreadyRecorded {
+            Ok(Recording::AlreadyRecorded) => RecordMergeHandoffOutcome::AlreadyRecorded {
                 error: MergeHandoffAlreadyRecorded {
                     action_request_id: handoff.action_request_id,
                 },
             },
+            Ok(Recording::HeadHandedOff) => RecordMergeHandoffOutcome::HeadAlreadyHandedOff {
+                error: HeadAlreadyHandedOff {
+                    commission_id: handoff.commission_id,
+                    head: handoff.head,
+                },
+            },
             Err(error) => storage_failed(error),
         }
+    }
+
+    /// The hand-off `commission` recorded for `head`, under whichever request, or `None` when it
+    /// handed that `HEAD` off under none: the rows `head-already-handed-off` selects.
+    ///
+    /// # Errors
+    /// [`ResumeStoreError`] when the directory or a hand-off in it cannot be read: a hand-off that
+    /// cannot be read might be that one.
+    pub fn handed_off(
+        &self,
+        commission: &CommissionId,
+        head: &str,
+    ) -> Result<Option<MergeHandoffData>, ResumeStoreError> {
+        self.dir.locked(|| self.find(commission, head))?
+    }
+
+    /// The hand-off of `commission` at `head`, as [`Self::handed_off`] answers. Only called holding
+    /// the lock.
+    fn find(
+        &self,
+        commission: &CommissionId,
+        head: &str,
+    ) -> Result<Option<MergeHandoffData>, ResumeStoreError> {
+        let dir = self.dir.dir();
+        let mut paths = Vec::new();
+        for entry in std::fs::read_dir(dir).map_err(|error| failed(dir, error))? {
+            let entry = entry.map_err(|error| failed(dir, error))?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with(PREFIX) && name.ends_with(".json") {
+                paths.push(entry.path());
+            }
+        }
+        paths.sort();
+        for path in paths {
+            let Some(text) = read_text(&path)? else {
+                continue;
+            };
+            let handoff = decode_any(&text).map_err(|problem| failed(&path, problem))?;
+            if self.path(&handoff.action_request_id)? != path {
+                return Err(failed(
+                    &path,
+                    format!(
+                        "holds the hand-off of request {}",
+                        handoff.action_request_id.0.0
+                    ),
+                ));
+            }
+            if &handoff.commission_id == commission && handoff.head == head {
+                return Ok(Some(handoff));
+            }
+        }
+        Ok(None)
     }
 
     /// The hand-off recorded for `request`, or `None` when none is.
@@ -154,12 +218,16 @@ impl RecordMergeHandoffBehavior for MergeHandoffStore {
     }
 }
 
+/// The case's implementation revision as the governor holds it, read at each hand-off.
+pub(crate) type HeldHead<'a> = &'a dyn Fn() -> Result<String, crate::run::SliceError>;
+
 /// The effect port a resume runs on (see the module documentation).
 pub struct HandoffEffects<'a, 'o> {
     inner: &'a dyn EffectPort,
     store: &'a MergeHandoffStore,
     workspace: PathBuf,
     workspace_text: String,
+    held_head: HeldHead<'a>,
     briefing: Briefing,
     console: &'a Console<'o>,
     local: bool,
@@ -168,12 +236,15 @@ pub struct HandoffEffects<'a, 'o> {
 impl<'a, 'o> HandoffEffects<'a, 'o> {
     /// Merges handed off into `store` for the workspace `workspace` (kept as `workspace_text`),
     /// every other action performed by `inner`; a merge only when `local`, the case's protocol
-    /// being `software-change@1`.
+    /// being `software-change@1`, and only at the `HEAD` `held_head` answers, the case's
+    /// implementation revision the governor holds.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         inner: &'a dyn EffectPort,
         store: &'a MergeHandoffStore,
         workspace: PathBuf,
         workspace_text: String,
+        held_head: HeldHead<'a>,
         briefing: Briefing,
         console: &'a Console<'o>,
         local: bool,
@@ -183,6 +254,7 @@ impl<'a, 'o> HandoffEffects<'a, 'o> {
             store,
             workspace,
             workspace_text,
+            held_head,
             briefing,
             console,
             local,
@@ -211,6 +283,19 @@ impl<'a, 'o> HandoffEffects<'a, 'o> {
         })?;
         let head =
             crate::case::current_head(&self.workspace).map_err(crate::run::SliceError::Case)?;
+        // Only the HEAD the case holds as its implementation revision, the one the request was
+        // revalidated at, is handed off; a HEAD that moved since is work nobody approved.
+        let held = (self.held_head)()?;
+        if head != held {
+            let reason = format!(
+                "the workspace's HEAD {head} is not the implementation revision {held} the case \
+                 holds; nothing is handed off"
+            );
+            self.console.write(|out| {
+                crate::effect::refuse(out, &self.briefing, &proposal.action, &reason)
+            })?;
+            return Ok(EffectOutcome::Refused(EffectOutcomeRefused { reason }));
+        }
         let input = RecordMergeHandoff {
             action_request_id: ActionRequestId(Uuid(request.action_request_id.0.0.clone())),
             commission_id: CommissionId(Uuid(commission.data().commission_id.0.0.clone())),
@@ -244,6 +329,16 @@ impl<'a, 'o> HandoffEffects<'a, 'o> {
                 let reason = format!(
                     "a merge hand-off is already recorded for request {}",
                     error.action_request_id.0.0
+                );
+                self.console.write(|out| {
+                    crate::effect::refuse(out, &self.briefing, &proposal.action, &reason)
+                })?;
+                Ok(EffectOutcome::Refused(EffectOutcomeRefused { reason }))
+            }
+            RecordMergeHandoffOutcome::HeadAlreadyHandedOff { error } => {
+                let reason = format!(
+                    "commission {} already handed off HEAD {}",
+                    error.commission_id.0.0, error.head
                 );
                 self.console.write(|out| {
                     crate::effect::refuse(out, &self.briefing, &proposal.action, &reason)
@@ -295,16 +390,28 @@ fn encode(handoff: &MergeHandoffData) -> String {
     text
 }
 
-/// The hand-off `text` holds, refused unless it is `request`'s and names exactly its members.
-fn decode(text: &str, request: &ActionRequestId) -> Result<MergeHandoffData, String> {
+/// What [`MergeHandoffStore::record`] found holding the lock.
+enum Recording {
+    Recorded,
+    AlreadyRecorded,
+    HeadHandedOff,
+}
+
+/// The hand-off `text` holds, refused unless it names exactly its members.
+fn decode_any(text: &str) -> Result<MergeHandoffData, String> {
     let value: Value = serde_json::from_str(text).map_err(|error| error.to_string())?;
     let object = exactly(&value, &MEMBERS)?;
-    let handoff = MergeHandoffData {
+    Ok(MergeHandoffData {
         action_request_id: ActionRequestId(Uuid(text_of(object, "action_request_id")?)),
         commission_id: CommissionId(Uuid(text_of(object, "commission_id")?)),
         workspace: text_of(object, "workspace")?,
         head: text_of(object, "head")?,
-    };
+    })
+}
+
+/// The hand-off `text` holds, refused unless it is `request`'s and names exactly its members.
+fn decode(text: &str, request: &ActionRequestId) -> Result<MergeHandoffData, String> {
+    let handoff = decode_any(text)?;
     if &handoff.action_request_id != request {
         return Err(format!(
             "holds the hand-off of request {}, not {}",
@@ -349,5 +456,70 @@ mod tests {
         let kept = store.get(&input.action_request_id).unwrap().unwrap();
         assert_eq!(kept.head, "0123abcd", "the second record changed nothing");
         assert_eq!(kept.workspace, "/work/space");
+    }
+
+    /// `head-already-handed-off`: a commission hands one HEAD off once, under whichever request;
+    /// another HEAD, or another commission's hand-off of the same HEAD, is recorded.
+    #[test]
+    fn a_head_of_a_commission_is_handed_off_once() {
+        let dir = tempfile::Builder::new()
+            .prefix("merge-store-")
+            .tempdir()
+            .unwrap();
+        let store = MergeHandoffStore::open(dir.path()).unwrap();
+        let input = RecordMergeHandoff {
+            action_request_id: ActionRequestId(Uuid("request-1".to_owned())),
+            commission_id: CommissionId(Uuid("commission-1".to_owned())),
+            workspace: "/work/space".to_owned(),
+            head: "0123abcd".to_owned(),
+        };
+        assert_eq!(
+            store.handed_off(&input.commission_id, &input.head).unwrap(),
+            None
+        );
+        assert!(matches!(
+            store.record(&input),
+            RecordMergeHandoffOutcome::Recorded { .. }
+        ));
+        let found = store.handed_off(&input.commission_id, &input.head).unwrap();
+        assert_eq!(
+            found.map(|handoff| handoff.action_request_id),
+            Some(input.action_request_id.clone())
+        );
+
+        let mut again = input.clone();
+        again.action_request_id = ActionRequestId(Uuid("request-2".to_owned()));
+        assert_eq!(
+            store.record(&again),
+            RecordMergeHandoffOutcome::HeadAlreadyHandedOff {
+                error: HeadAlreadyHandedOff {
+                    commission_id: input.commission_id.clone(),
+                    head: input.head.clone(),
+                }
+            }
+        );
+        assert_eq!(store.get(&again.action_request_id).unwrap(), None);
+
+        let mut new_work = again.clone();
+        new_work.head = "4567cdef".to_owned();
+        assert!(matches!(
+            store.record(&new_work),
+            RecordMergeHandoffOutcome::Recorded { .. }
+        ));
+        let mut other = again.clone();
+        other.action_request_id = ActionRequestId(Uuid("request-3".to_owned()));
+        other.commission_id = CommissionId(Uuid("commission-2".to_owned()));
+        assert!(matches!(
+            store.record(&other),
+            RecordMergeHandoffOutcome::Recorded { .. }
+        ));
+
+        // A hand-off that cannot be read might be the one asked about: the lookup fails closed.
+        std::fs::write(
+            store.path(&ActionRequestId(Uuid("x".to_owned()))).unwrap(),
+            "{",
+        )
+        .unwrap();
+        assert!(store.handed_off(&input.commission_id, "ffff").is_err());
     }
 }
