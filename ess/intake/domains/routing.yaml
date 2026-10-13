@@ -169,6 +169,12 @@ entities:
   # commission runs. The run id and the request a resume continues are in the Suspension, not
   # here. It grants nothing: a resume still needs a grant, and revalidates the request against
   # the case as it is then. The classifier model is not kept: a resume classifies nothing.
+  #
+  # It is kept before the commission runs, so a run that dies after holding the Suspension still
+  # leaves what resumes it. A run that ends without the commission's Suspension held removes it
+  # (`DropResumeContext`): nothing can resume that commission. A run that dies before it ends
+  # leaves its context without a Suspension, so a reader pairs each context with the commission's
+  # Suspension and never takes a kept context alone for one that can be resumed.
   - name: intake.routing.ResumeContext
     identity:
       name: commission_id
@@ -205,3 +211,37 @@ entities:
       initial: Kept
       states: [Kept]
       terminal: [Kept]
+
+errors:
+  # No resume context is kept for the commission.
+  - name: intake.routing.ResumeContextNotFound
+    fields:
+      - name: commission_id
+        type: intake.routing.CommissionId
+
+  # The resume context store could not remove the context: why, as the store reports it.
+  - name: intake.routing.ResumeContextStorageFailed
+    fields:
+      - name: reason
+        type: String
+
+commands:
+  # A run that ends without the commission's Suspension held removes the commission's resume
+  # context: nothing can resume the commission. A run that holds the Suspension keeps it.
+  - name: intake.routing.DropResumeContext
+    input:
+      - name: commission_id
+        type: intake.routing.CommissionId
+    outcomes:
+      - name: dropped
+        deletes: intake.routing.ResumeContext
+        instance: commission_id
+      - name: not-found
+        unknown_instance: true
+        error: intake.routing.ResumeContextNotFound
+        payload:
+          intake.routing.ResumeContextNotFound:
+            commission_id: input.commission_id
+      - name: storage-failed
+        external: the resume context store cannot remove the context
+        error: intake.routing.ResumeContextStorageFailed
