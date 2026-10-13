@@ -150,6 +150,76 @@ fn run_with_state_holds_a_suspension_on_a_withheld_approval() {
     assert_eq!(case.revision, held.data.expected_case_revision);
 }
 
+/// A resume context keeps the workspace, the cgroup root and the catalog path as text, so with
+/// `--state` a path that is not UTF-8 is refused before the classifier is called and before any
+/// store opens the state directory: the run names the path, calls no model and leaves no state
+/// directory behind.
+#[test]
+fn run_with_state_refuses_a_path_that_is_not_utf8_before_any_model_call() {
+    use std::ffi::{OsStr, OsString};
+    use std::os::unix::ffi::OsStrExt as _;
+
+    for (label, what) in [
+        ("workspace", "the workspace"),
+        ("cgroup", "the cgroup root"),
+        ("catalog", "the catalog"),
+    ] {
+        let scratch = Scratch::new(&format!("non-utf8-{label}"));
+        let (base_url, server) = Script::serve(vec![classify("software-change@1")]);
+        let odd = |name: &str| {
+            let mut bytes = name.as_bytes().to_vec();
+            bytes.extend_from_slice(b"-\xff");
+            scratch.root.join(OsStr::from_bytes(&bytes))
+        };
+        let mut workspace = scratch.workspace.clone();
+        if label == "workspace" {
+            workspace = odd("workspace");
+            std::fs::rename(&scratch.workspace, &workspace).unwrap();
+        }
+        let mut catalog = scratch.catalog(&base_url);
+        if label == "catalog" {
+            let moved = odd("catalog.toml");
+            std::fs::rename(&catalog, &moved).unwrap();
+            catalog = moved;
+        }
+        let state = scratch.root.join("state");
+        let mut args: Vec<OsString> = vec!["--state".into(), state.clone().into()];
+        if label == "cgroup" {
+            args.extend(["--cgroup-root".into(), odd("cgroup").into()]);
+        }
+        args.extend([
+            "--workspace".into(),
+            workspace.into_os_string(),
+            "--test-cmd".into(),
+            TEST_CMD.into(),
+            "--catalog".into(),
+            catalog.into_os_string(),
+            "--classifier-model".into(),
+            "lab-classifier".into(),
+            "--model".into(),
+            "lab-agent".into(),
+            INTENT.into(),
+        ]);
+        let output = scratch.run(&args);
+        let calls = server.finish();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{label}: {stdout}\n{stderr}");
+        assert!(
+            calls.is_empty(),
+            "{label}: no model is called; the models were called {calls:?}\n{stderr}"
+        );
+        assert!(
+            stderr.contains(what) && stderr.contains("is not UTF-8"),
+            "{label}: the refusal names {what}: {stderr}"
+        );
+        assert!(
+            !state.exists(),
+            "{label}: no store opened the state directory"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Fixtures.
 
@@ -204,7 +274,7 @@ impl Scratch {
         path
     }
 
-    fn run(&self, args: &[&str]) -> Output {
+    fn run<A: AsRef<std::ffi::OsStr>>(&self, args: &[A]) -> Output {
         let home = self.root.join("home");
         Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
             .arg("run")
