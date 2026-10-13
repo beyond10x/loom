@@ -41,6 +41,12 @@ types:
     kind: newtype
     of: String
 
+  # commission.responsibility.ActionRequestId, mirrored as the ids above are: the request a
+  # commission's Suspension holds, which a grant names and a merge hand-off performs.
+  - name: intake.routing.ActionRequestId
+    kind: newtype
+    of: Uuid
+
   # One protocol of the catalog a route was accepted on, by its registered name and the SHA-256
   # of its definition.
   - name: intake.routing.CatalogDigest
@@ -212,6 +218,61 @@ entities:
       states: [Kept]
       terminal: [Kept]
 
+  # An operator's approval of the one request a commission's Suspension holds, written by
+  # `approve` into the directory `run --state` keeps the commission in, and read by `resume`
+  # through an authority provider over it. It mirrors commission.responsibility.AuthorityDecision
+  # (the action, whether it is granted, the request it belongs to) and names the commission, the
+  # capability the request needs and when it was granted. Approval performs nothing: a resume
+  # performs the request, after revalidating it against the case as it is then.
+  #
+  # A grant allows only the request it names: a resume allows the capability only while the
+  # commission's Suspension is held for that request, so a grant for another request, or a request
+  # proposed again later in the resumed run, is not allowed by it. One grant is kept per
+  # commission; a later approval of the commission's next Suspension replaces it.
+  - name: intake.routing.Grant
+    identity:
+      name: commission_id
+      type: intake.routing.CommissionId
+    fields:
+      # The request's action, as the Suspension holds it.
+      - name: action
+        type: String
+      # The capability the request needs authority for, as the operator approved it.
+      - name: capability
+        type: String
+      - name: granted
+        type: Boolean
+      - name: action_request_id
+        type: intake.routing.ActionRequestId
+      - name: granted_at
+        type: Timestamp
+    lifecycle:
+      initial: Granted
+      states: [Granted]
+      terminal: [Granted]
+
+  # The hand-off a granted `repository.merge` performs on resume: the commission, the granted
+  # request, the workspace and its `HEAD` as the implementation revision, recorded in the state
+  # directory. No Git ref moves; merging happens outside Loom. One is recorded per request, so a
+  # request performed once leaves exactly one.
+  - name: intake.routing.MergeHandoff
+    identity:
+      name: action_request_id
+      type: intake.routing.ActionRequestId
+    fields:
+      - name: commission_id
+        type: intake.routing.CommissionId
+      # The workspace, as the resume context keeps it.
+      - name: workspace
+        type: String
+      # The workspace's `HEAD` commit when the request was performed.
+      - name: head
+        type: String
+    lifecycle:
+      initial: Recorded
+      states: [Recorded]
+      terminal: [Recorded]
+
 errors:
   # No resume context is kept for the commission.
   - name: intake.routing.ResumeContextNotFound
@@ -221,6 +282,18 @@ errors:
 
   # The resume context store could not remove the context: why, as the store reports it.
   - name: intake.routing.ResumeContextStorageFailed
+    fields:
+      - name: reason
+        type: String
+
+  # A merge hand-off is already recorded for the request: it was performed, and is not again.
+  - name: intake.routing.MergeHandoffAlreadyRecorded
+    fields:
+      - name: action_request_id
+        type: intake.routing.ActionRequestId
+
+  # The merge hand-off could not be recorded: why, as the store reports it.
+  - name: intake.routing.MergeHandoffStorageFailed
     fields:
       - name: reason
         type: String
@@ -245,3 +318,54 @@ commands:
       - name: storage-failed
         external: the resume context store cannot remove the context
         error: intake.routing.ResumeContextStorageFailed
+
+  # A granted `repository.merge` is performed by recording its hand-off, once per request: a
+  # second record for the same request is refused and changes nothing.
+  - name: intake.routing.RecordMergeHandoff
+    input:
+      - name: action_request_id
+        type: intake.routing.ActionRequestId
+      - name: commission_id
+        type: intake.routing.CommissionId
+      - name: workspace
+        type: String
+      - name: head
+        type: String
+    outcomes:
+      - name: already-recorded
+        existing_instance: true
+        error: intake.routing.MergeHandoffAlreadyRecorded
+        payload:
+          intake.routing.MergeHandoffAlreadyRecorded:
+            action_request_id: input.action_request_id
+      - name: recorded
+        creates: intake.routing.MergeHandoff
+        instance: action_request_id
+        sets:
+          commission_id: input.commission_id
+          workspace: input.workspace
+          head: input.head
+        emits: [intake.routing.MergeHandedOff]
+        payload:
+          intake.routing.MergeHandedOff:
+            action_request_id: input.action_request_id
+            commission_id: input.commission_id
+            workspace: input.workspace
+            head: input.head
+      - name: storage-failed
+        external: the state directory cannot record the hand-off
+        error: intake.routing.MergeHandoffStorageFailed
+
+events:
+  # A granted merge was handed off: its record names the request, the commission, the workspace
+  # and its `HEAD`.
+  - name: intake.routing.MergeHandedOff
+    fields:
+      - name: action_request_id
+        type: intake.routing.ActionRequestId
+      - name: commission_id
+        type: intake.routing.CommissionId
+      - name: workspace
+        type: String
+      - name: head
+        type: String
