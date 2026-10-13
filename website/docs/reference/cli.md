@@ -28,6 +28,8 @@ Generated from the clap definition of the `b10x-loom` command line in [`crates/l
 | [`b10x-loom plugin`](#b10x-loom-plugin) | Host a plugin, or print what it proposed. A plugin reads and proposes; it never sends |
 | [`b10x-loom plugin run`](#b10x-loom-plugin-run) | Host a plugin: poll, classify and answer each new item in a governed read-only turn, and record one line per handled item. Nothing is sent |
 | [`b10x-loom plugin report`](#b10x-loom-plugin-report) | Print one line per proposal a plugin recorded in its state directory: a proposed reply or a proposed case |
+| [`b10x-loom approve`](#b10x-loom-approve) | Approve the request a commission's Suspension holds: write a grant into the state directory. Approval performs nothing; `resume` does |
+| [`b10x-loom resume`](#b10x-loom-resume) | Continue a commission's suspended run after its approval: perform the suspended request once, release the Suspension, and run on until the run stops |
 
 ## `b10x-loom run`
 
@@ -195,3 +197,77 @@ Usage: b10x-loom plugin report --state <DIR> <PLUGIN>
 |---|---|---|---|
 | `<PLUGIN>` | yes | none | The plugin whose record is read |
 | `--state <DIR>` | yes | none | The plugin's state directory |
+
+## `b10x-loom approve`
+
+Approve the request a commission's Suspension holds: write a grant into the state directory. Approval performs nothing; `resume` does
+
+```text
+Usage: b10x-loom approve --state <DIR> <COMMISSION> <CAPABILITY>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `<COMMISSION>` | yes | none | The commission whose Suspension is approved: the id its resume context and Suspension carry |
+| `<CAPABILITY>` | yes | none | The capability approved; it must be the one the suspended request needs |
+| `--state <DIR>` | yes | none | The state directory `run --state` kept the commission in. It must exist |
+
+```text
+Approval performs nothing. It reads the commission's Suspension in the state directory and
+writes a grant (intake.routing.Grant) for the one request it holds, which `resume` reads; a later
+approval of the commission's next Suspension replaces it. The capability must be the one the
+suspended request needs, as `run` named it when it stopped (ApprovalRequired).
+
+Exit status:
+  0   the grant is written
+  10  NothingSuspended: the commission holds no Suspension
+  11  InDoubt: the commission's Suspension is being resumed, so its request may have been performed
+  19  OtherCapability: the suspended request needs another capability than the one given
+  1   the state directory cannot be used
+  2   the command line is not valid
+```
+
+## `b10x-loom resume`
+
+Continue a commission's suspended run after its approval: perform the suspended request once, release the Suspension, and run on until the run stops
+
+```text
+Usage: b10x-loom resume --state <DIR> <COMMISSION>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `<COMMISSION>` | yes | none | The commission whose suspended run is continued |
+| `--state <DIR>` | yes | none | The state directory `run --state` kept the commission in, and `approve` wrote its grant into. It must exist; the merge hand-off is recorded there |
+
+```text
+The run is rebuilt from the commission's resume context: the same intent, route, workspace (validated
+again), test command, step budget, confinement and agent model; the route is used only when the intent,
+the protocol catalog and the context policy are still the ones it was accepted for. The grant `approve`
+wrote allows only the request the commission's Suspension holds, and only while it is held. A granted
+repository.merge is performed as a merge hand-off: a record of the commission, the request, the
+workspace and its HEAD (intake.routing.MergeHandoff, merge-<hex of the request id>.json in the state
+directory). No Git ref moves; merging happens outside Loom. The request is performed once, the
+Suspension is released, and the run goes on as `run` does. The model does not see the steps before
+the Suspension.
+
+Exit status:
+  0   the resumed run reached its human gate again (ApprovalRequired)
+  3   the resumed run stopped for another reason (NothingAdmissible, StepBudget, NoLocalExecutor, ConfinementUnavailable)
+  10  NothingSuspended: the commission holds no Suspension, or another resume took and released it first
+  11  InDoubt: a resume took the Suspension and did not release it; its request is never performed again
+  12  OtherRequest: the Suspension is now held for another request than the one revalidated
+  13  OtherCommission: the Suspension or its run names another commission, case or run revision
+  14  CaseMoved: the case is no longer at the revision the request was suspended at
+  15  NotAdmitted: the current frontier refuses the request's action
+  16  NotGranted: no grant allows the request
+  17  NotPerformed: nothing performs the request's action
+  18  RunNotSuspended: the run store does not hold the run suspended
+  20  the suspension store could not be read; nothing was resumed
+  21  the governor could not answer before the run resumed; nothing was resumed
+  22  the run could not be resumed, the Suspension could not be taken or released, or the resumed
+      loop stopped without a run outcome
+  1   anything else failed: the state directory, the resume context, the workspace, the models
+  2   the command line is not valid
+Nothing is performed on any status from 10 to 21.
+```
