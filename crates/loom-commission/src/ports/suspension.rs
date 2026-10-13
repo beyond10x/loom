@@ -110,7 +110,7 @@ impl std::error::Error for SuspensionStoreError {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SuspensionWrite {
     /// Store this Suspension under its identity, replacing what was held.
-    Put(SuspensionSnapshot),
+    Put(Box<SuspensionSnapshot>),
     /// Remove the Suspension under this identity.
     Delete(SuspensionKey),
 }
@@ -152,9 +152,9 @@ pub fn decide_hold(
         HoldSuspensionOutcome::Held {
             suspension_held: event,
         },
-        Some(SuspensionWrite::Put(
+        Some(SuspensionWrite::Put(Box::new(
             AnySuspension::Pending(pending).snapshot(),
-        )),
+        ))),
     )
 }
 
@@ -186,9 +186,9 @@ pub fn decide_take(
                 TakeSuspensionOutcome::Taken {
                     suspension_taken: event,
                 },
-                Some(SuspensionWrite::Put(
+                Some(SuspensionWrite::Put(Box::new(
                     AnySuspension::Resuming(taken).snapshot(),
-                )),
+                ))),
             )
         }
         resuming @ AnySuspension::Resuming(_) => {
@@ -268,7 +268,7 @@ impl SuspensionStore {
     fn enact(held: &mut BTreeMap<Uuid, SuspensionSnapshot>, write: Option<SuspensionWrite>) {
         match write {
             Some(SuspensionWrite::Put(snapshot)) => {
-                held.insert(snapshot.data.suspension.commission_id.0.clone(), snapshot);
+                held.insert(snapshot.data.suspension.commission_id.0.clone(), *snapshot);
             }
             Some(SuspensionWrite::Delete(key)) => {
                 held.remove(&key.commission_id.0);
@@ -316,7 +316,10 @@ impl SuspensionStorage for SuspensionStore {
     }
 
     fn put(&mut self, snapshot: SuspensionSnapshot) {
-        Self::enact(&mut self.lock(), Some(SuspensionWrite::Put(snapshot)));
+        Self::enact(
+            &mut self.lock(),
+            Some(SuspensionWrite::Put(Box::new(snapshot))),
+        );
     }
 
     fn delete(&mut self, identity: &SuspensionKey) {

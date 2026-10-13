@@ -234,7 +234,7 @@ impl FileSuspensionStore {
                 let reread = json::parse(&text)
                     .ok()
                     .and_then(|value| decode(&value).ok());
-                if reread.as_ref() != Some(&snapshot) {
+                if reread.as_ref() != Some(&*snapshot) {
                     return Err(failed(
                         path,
                         "the Suspension would not read back as it is held; nothing was written",
