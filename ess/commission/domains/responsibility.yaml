@@ -629,11 +629,14 @@ entities:
   # It is held `Pending` (`HoldSuspension`); a commission already holding one is refused. A resume
   # takes it (`TakeSuspension`, `take`: `Pending` -> `Resuming`) before anything is performed, so
   # one take wins and every other is refused: none stored is `not-found`, one already `Resuming` is
-  # `wrong-state`, naming the request it holds. A `Resuming` Suspension is a request that may have
-  # been performed or not (the process that took it stopped before releasing it): it stays stored
-  # and is never taken again, so the request is never performed twice and never dropped without a
-  # durable trace; settling it is the host's. Once the request was performed the Suspension is
-  # released (`ReleaseSuspension`), removed; a `Pending` one is not released.
+  # `wrong-state`, naming the request it holds. A take and a release name the action request the
+  # resume read and revalidated, and a Suspension held for another request is refused
+  # (`other-request`, naming both) and kept as it is: a resume that read one Suspension never takes
+  # or releases a later one the commission holds for another request. A `Resuming` Suspension is a
+  # request that may have been performed or not (the process that took it stopped before releasing
+  # it): it stays stored and is never taken again, so the request is never performed twice and never
+  # dropped without a durable trace; settling it is the host's. Once the request was performed the
+  # Suspension is released (`ReleaseSuspension`), removed; a `Pending` one is not released.
   - name: commission.responsibility.Suspension
     identity:
       name: suspension
@@ -880,6 +883,17 @@ errors:
       - name: action_request_id
         type: commission.responsibility.ActionRequestId
 
+  # story:approval-suspend-resume-slice: the commission's Suspension is held for another action
+  # request than the one the command names; nothing was changed. It names both.
+  - name: commission.responsibility.SuspensionRequestMismatch
+    fields:
+      - name: suspension
+        type: commission.responsibility.SuspensionKey
+      - name: held_action_request_id
+        type: commission.responsibility.ActionRequestId
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
+
   # story:approval-suspend-resume-slice: the suspension port cannot read or write.
   - name: commission.responsibility.SuspensionStorageFailed
     fields:
@@ -1011,14 +1025,26 @@ commands:
         error: commission.responsibility.SuspensionStorageFailed
 
   # story:approval-suspend-resume-slice: a resume takes the commission's Suspension before it
-  # performs anything, so of two resumes one takes it and the other is refused. A Suspension
-  # already `Resuming` is refused, naming its request: that request may have been performed, and
-  # is never performed again from it.
+  # performs anything, so of two resumes one takes it and the other is refused. It names the
+  # request the resume revalidated: a Suspension held for another request is refused, naming both,
+  # and kept as it is. A Suspension already `Resuming` is refused, naming its request: that request
+  # may have been performed, and is never performed again from it.
   - name: commission.responsibility.TakeSuspension
     input:
       - name: suspension
         type: commission.responsibility.SuspensionKey
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
     outcomes:
+      - name: other-request
+        when_subject:
+          predicate: action_request_id != input.action_request_id
+        error: commission.responsibility.SuspensionRequestMismatch
+        payload:
+          commission.responsibility.SuspensionRequestMismatch:
+            suspension: input.suspension
+            held_action_request_id: {subject: action_request_id}
+            action_request_id: input.action_request_id
       - name: taken
         moves: commission.responsibility.Suspension.take
         instance: suspension
@@ -1044,12 +1070,25 @@ commands:
         error: commission.responsibility.SuspensionStorageFailed
 
   # story:approval-suspend-resume-slice: once the request a resume took the Suspension for was
-  # performed, the Suspension is removed. A `Pending` one, which no resume took, is not.
+  # performed, the Suspension is removed. It names the request that was performed: a Suspension
+  # held for another request is refused, naming both, and kept as it is. A `Pending` one, which no
+  # resume took, is not removed.
   - name: commission.responsibility.ReleaseSuspension
     input:
       - name: suspension
         type: commission.responsibility.SuspensionKey
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
     outcomes:
+      - name: other-request
+        when_subject:
+          predicate: action_request_id != input.action_request_id
+        error: commission.responsibility.SuspensionRequestMismatch
+        payload:
+          commission.responsibility.SuspensionRequestMismatch:
+            suspension: input.suspension
+            held_action_request_id: {subject: action_request_id}
+            action_request_id: input.action_request_id
       - name: not-taken
         when_subject:
           predicate: state == Pending
