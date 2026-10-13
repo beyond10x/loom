@@ -73,6 +73,29 @@ fn a_case_file_with_an_undeclared_member_is_refused() {
     );
 }
 
+/// A case file that is a symlink, even to a case this store wrote elsewhere, is not a record this
+/// store wrote; following it reads a case nobody wrote into this directory.
+#[test]
+fn a_symlinked_case_file_is_refused_and_not_followed() {
+    let elsewhere = store_dir("symlink-source");
+    let case = CaseId("case-1".to_owned());
+    let store = FileCaseStore::open(&elsewhere).expect("the store opens");
+    assert_eq!(
+        store.insert(plain_state(&case)).map_err(|e| e.to_string()),
+        Ok(true)
+    );
+    let source = only_case_file(&elsewhere);
+
+    let dir = store_dir("symlink-target");
+    std::os::unix::fs::symlink(&source, dir.join(source.file_name().unwrap())).unwrap();
+    let read = FileCaseStore::open(&dir).unwrap().get(&case);
+    assert!(
+        read.as_ref()
+            .is_err_and(|error| error.to_string().contains("not a regular file")),
+        "a symlinked case file is an error, not a case: {read:?}"
+    );
+}
+
 /// A case file naming `revision` twice is not a document this store wrote; reading the first and
 /// ignoring the second is a silently different case.
 #[test]
