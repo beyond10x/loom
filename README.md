@@ -161,9 +161,11 @@ written stops the run before any model call. Without it nothing outlives the run
 `b10x-loom approve <COMMISSION> <CAPABILITY> --state <DIR>` then writes a grant for the request
 that Suspension holds, performing nothing, and `b10x-loom resume <COMMISSION> --state <DIR>`
 performs that request once and runs on. A granted `repository.merge` is a merge hand-off: a record
-of the commission, the request, the workspace and its `HEAD` in the state directory; no Git ref
-moves, and merging happens outside Loom. Each refusal of a resume has its own exit status (10 to
-22, listed by `b10x-loom resume --help`).
+of the commission, the request, the workspace and its `HEAD` in the state directory, once per
+`HEAD` of a commission; no Git ref moves, and merging happens outside Loom. Each refusal of a
+resume has its own exit status (10 to 22, listed by `b10x-loom resume --help`). Only a last line
+`stopped: ApprovalRequired (<action>)` leaves something to approve: `..., nothing suspended`
+(exit 4) and `stopped: MergeHandedOff (<request>, HEAD <sha>)` leave nothing.
 
 Since `0.2.0` tests run confined. A software-change run needs a Codex
 login and Linux with bubblewrap and delegated cgroup v2 controllers. Tests default to Substrate:

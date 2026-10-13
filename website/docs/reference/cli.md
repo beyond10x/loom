@@ -57,8 +57,13 @@ Usage: b10x-loom run [OPTIONS] <INTENT>
 | `<INTENT>` | yes | none | What to do, as given |
 
 ```text
+With --state, only a run whose last line is `stopped: ApprovalRequired (<action>)` holds a
+Suspension `approve` can approve.
+
 Exit status:
   0  the query completed (Completed) or the run reached its human gate (ApprovalRequired)
+  4  with --state, the run reached its human gate holding no Suspension:
+     `stopped: ApprovalRequired (<action>), nothing suspended`; there is nothing to approve
   3  the run stopped for another reason (NothingAdmissible, StepBudget, NoLocalExecutor, Refused, ConfinementUnavailable)
   1  the run failed
   2  the command line is not valid
@@ -216,13 +221,19 @@ Usage: b10x-loom approve --state <DIR> <COMMISSION> <CAPABILITY>
 Approval performs nothing. It reads the commission's Suspension in the state directory and
 writes a grant (intake.routing.Grant) for the one request it holds, which `resume` reads; a later
 approval of the commission's next Suspension replaces it. The capability must be the one the
-suspended request needs, as `run` named it when it stopped (ApprovalRequired).
+suspended request needs, as `run` or `resume` named it when it stopped.
+
+Only a stop line `stopped: ApprovalRequired (<action>)` of `run --state` or `resume` leaves a
+Suspension to approve. `stopped: ApprovalRequired (<action>), nothing suspended` leaves none, and
+`stopped: MergeHandedOff (<request>, HEAD <sha>)` says that HEAD was already handed off: a merge at
+it is refused AlreadyHandedOff, and only new work, a new HEAD, is approved again.
 
 Exit status:
   0   the grant is written
   10  NothingSuspended: the commission holds no Suspension
   11  InDoubt: the commission's Suspension is being resumed, so its request may have been performed
   19  OtherCapability: the suspended request needs another capability than the one given
+  23  AlreadyHandedOff: the suspended repository.merge would hand off a HEAD the commission already handed off
   1   the state directory cannot be used
   2   the command line is not valid
 ```
@@ -243,16 +254,24 @@ Usage: b10x-loom resume --state <DIR> <COMMISSION>
 ```text
 The run is rebuilt from the commission's resume context: the same intent, route, workspace (validated
 again), test command, step budget, confinement and agent model; the route is used only when the intent,
-the protocol catalog and the context policy are still the ones it was accepted for. The grant `approve`
-wrote allows only the request the commission's Suspension holds, and only while it is held. A granted
-repository.merge is performed as a merge hand-off: a record of the commission, the request, the
+the protocol catalog and the context policy are still the ones it was accepted for. The workspace's HEAD
+is reported to the case first, so a commit made since the Suspension is refused CaseMoved. The grant
+`approve` wrote allows only the request the commission's Suspension holds, and only while it is held. A
+granted repository.merge is performed as a merge hand-off: a record of the commission, the request, the
 workspace and its HEAD (intake.routing.MergeHandoff, merge-<hex of the request id>.json in the state
-directory). No Git ref moves; merging happens outside Loom. The request is performed once, the
-Suspension is released, and the run goes on as `run` does. The model does not see the steps before
-the Suspension.
+directory), only at the HEAD the case holds and once per HEAD of a commission. No Git ref moves; merging
+happens outside Loom. The request is performed once, the Suspension is released, and the run goes on as
+`run` does. The model does not see the steps before the Suspension.
+
+When the resumed run reaches its human gate again, its last line says what is left to approve:
+  stopped: ApprovalRequired (<action>)                    a Suspension `approve` can approve
+  stopped: ApprovalRequired (<action>), nothing suspended  nothing to approve
+  stopped: MergeHandedOff (<request>, HEAD <sha>)          the case is at a HEAD this commission
+                                                           already handed off; nothing to approve
 
 Exit status:
-  0   the resumed run reached its human gate again (ApprovalRequired)
+  0   the resumed run reached its human gate again (ApprovalRequired, or MergeHandedOff)
+  4   the resumed run reached its human gate holding no Suspension (ApprovalRequired, nothing suspended)
   3   the resumed run stopped for another reason (NothingAdmissible, StepBudget, NoLocalExecutor, ConfinementUnavailable)
   10  NothingSuspended: the commission holds no Suspension, or another resume took and released it first
   11  InDoubt: a resume took the Suspension and did not release it; its request is never performed again
