@@ -2,8 +2,13 @@
 //! approval outlives the process that suspended it (`story:approval-suspend-resume-slice`).
 //!
 //! A test store, not a production host's. Each commission's Suspension is one file,
-//! `suspension-<hex of the commission id>.json`, holding the Suspension's fields as JSON written
-//! with the generated JSON writer and read with its reader. Every write goes to a fresh temporary
+//! `suspension-<hex of the commission id>.json`, holding the Suspension's state (`Pending` or
+//! `Resuming`) and fields as JSON written with the generated JSON writer and read with its reader.
+//! `HoldSuspension`, `TakeSuspension` and `ReleaseSuspension` are decided by Commission's own
+//! decisions (`decide_hold`, `decide_take`, `decide_release`) over the file as it is read, and
+//! their write made, under one hold of the lock below, so of two resumes over one directory only
+//! one takes a Suspension. A store that cannot read or write answers the command's
+//! `storage-failed` and changes nothing. Every write goes to a fresh temporary
 //! file in the same directory, is synced and renamed over its target, so a reader sees the previous
 //! document or the next one and never part of one; a failed write leaves what was stored before.
 //! Before anything is written it is read back and compared with what was meant, so a Suspension
@@ -28,10 +33,14 @@ use b10x_loom_commission::model::json::{
 };
 use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::{
-    ActionRequestId, CaseId, CommissionId, HumanDecisionRequest, ProposedActionArguments, RunId,
-    Suspension, SuspensionData, SuspensionKey, SuspensionReason, suspension_state,
+    ActionRequestId, CaseId, CommissionId, HoldSuspension, HoldSuspensionOutcome,
+    HumanDecisionRequest, ProposedActionArguments, ReleaseSuspension, ReleaseSuspensionOutcome,
+    RunId, SuspensionData, SuspensionKey, SuspensionReason, SuspensionSnapshot, SuspensionState,
+    SuspensionStorageFailed, TakeSuspension, TakeSuspensionOutcome,
 };
-use b10x_loom_commission::ports::suspension::{SuspensionPort, SuspensionStoreError};
+use b10x_loom_commission::ports::suspension::{
+    SuspensionPort, SuspensionStoreError, SuspensionWrite, decide_hold, decide_release, decide_take,
+};
 
 /// The longest commission id, in bytes, the store keeps: `suspension-`, 200 hex digits and `.json`
 /// is 216 bytes.
@@ -47,7 +56,8 @@ const TEMPORARY_ATTEMPTS: u32 = 1024;
 static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
 
 /// The members a stored Suspension has, in the order written.
-const MEMBERS: [&str; 9] = [
+const MEMBERS: [&str; 10] = [
+    "state",
     "commission_id",
     "run_id",
     "run_case_revision",
@@ -189,68 +199,125 @@ impl FileSuspensionStore {
     }
 }
 
-impl SuspensionPort for FileSuspensionStore {
-    fn put(
+impl FileSuspensionStore {
+    /// The Suspension stored for `commission` in `path`, or `None` when there is no such file. Only
+    /// called holding the lock.
+    fn read(
+        path: &Path,
+        commission: &CommissionId,
+    ) -> Result<Option<SuspensionSnapshot>, SuspensionStoreError> {
+        let Some(text) = read_if_present(path)? else {
+            return Ok(None);
+        };
+        let held = json::parse(&text)
+            .map_err(|error| failed(path, error))
+            .and_then(|value| decode(&value).map_err(|error| failed(path, error)))?;
+        if held.data.commission_id != *commission {
+            return Err(failed(
+                path,
+                format!(
+                    "holds the Suspension of commission `{}`, not `{}`",
+                    held.data.commission_id.0.0, commission.0.0
+                ),
+            ));
+        }
+        Ok(Some(held))
+    }
+
+    /// Enacts `write` on `path`. Only called holding the lock. A Suspension that would not read
+    /// back exactly is refused before anything is written.
+    fn enact(&self, path: &Path, write: SuspensionWrite) -> Result<(), SuspensionStoreError> {
+        match write {
+            SuspensionWrite::Put(snapshot) => {
+                let mut text = String::new();
+                encode(&mut text, &snapshot);
+                let reread = json::parse(&text)
+                    .ok()
+                    .and_then(|value| decode(&value).ok());
+                if reread.as_ref() != Some(&snapshot) {
+                    return Err(failed(
+                        path,
+                        "the Suspension would not read back as it is held; nothing was written",
+                    ));
+                }
+                self.replace(path, &text)
+            }
+            SuspensionWrite::Delete(_) => match fs::remove_file(path) {
+                Ok(()) => {
+                    if let Ok(dir) = File::open(&self.dir) {
+                        let _ = dir.sync_all();
+                    }
+                    Ok(())
+                }
+                Err(error) => Err(failed(path, error)),
+            },
+        }
+    }
+
+    /// Decides one command over what is stored for `commission` with `decide`, and enacts its
+    /// write, all holding the lock. A store that cannot read or write answers `refused`.
+    fn command<O>(
         &self,
-        suspension: &Suspension<suspension_state::Pending>,
-    ) -> Result<(), SuspensionStoreError> {
-        let data = suspension.data();
-        let path = self.path(&data.commission_id)?;
-        if data.suspension.commission_id != data.commission_id {
-            return Err(failed(
-                &path,
-                "the Suspension's identity names another commission than its `commission_id`",
-            ));
+        commission: &CommissionId,
+        decide: impl FnOnce(Option<SuspensionSnapshot>) -> (O, Option<SuspensionWrite>),
+        refused: impl FnOnce(SuspensionStorageFailed) -> O,
+    ) -> O {
+        let answered = self.path(commission).and_then(|path| {
+            self.locked(|| {
+                let (outcome, write) = decide(Self::read(&path, commission)?);
+                if let Some(write) = write {
+                    self.enact(&path, write)?;
+                }
+                Ok(outcome)
+            })
+        });
+        answered.unwrap_or_else(|error| refused(error.refusal()))
+    }
+}
+
+impl SuspensionPort for FileSuspensionStore {
+    fn hold(&self, input: HoldSuspension) -> HoldSuspensionOutcome {
+        let refused = |error| HoldSuspensionOutcome::StorageFailed { error };
+        if input.suspension.commission_id != input.commission_id {
+            return refused(
+                SuspensionStoreError::new(
+                    "the Suspension's identity names another commission than its `commission_id`",
+                )
+                .refusal(),
+            );
         }
-        let mut text = String::new();
-        encode(&mut text, data);
-        let reread = json::parse(&text)
-            .ok()
-            .and_then(|value| decode(&value).ok());
-        if reread.as_ref() != Some(data) {
-            return Err(failed(
-                &path,
-                "the Suspension would not read back as it is held; nothing was written",
-            ));
-        }
-        self.locked(|| self.replace(&path, &text))
+        let commission = input.commission_id.clone();
+        self.command(
+            &commission,
+            |held| decide_hold(held.as_ref(), input),
+            refused,
+        )
+    }
+
+    fn take(&self, input: TakeSuspension) -> TakeSuspensionOutcome {
+        let commission = input.suspension.commission_id.clone();
+        self.command(
+            &commission,
+            |held| decide_take(held, input),
+            |error| TakeSuspensionOutcome::StorageFailed { error },
+        )
+    }
+
+    fn release(&self, input: ReleaseSuspension) -> ReleaseSuspensionOutcome {
+        let commission = input.suspension.commission_id.clone();
+        self.command(
+            &commission,
+            |held| decide_release(held, input),
+            |error| ReleaseSuspensionOutcome::StorageFailed { error },
+        )
     }
 
     fn get(
         &self,
         commission: &CommissionId,
-    ) -> Result<Option<Suspension<suspension_state::Pending>>, SuspensionStoreError> {
+    ) -> Result<Option<SuspensionSnapshot>, SuspensionStoreError> {
         let path = self.path(commission)?;
-        let Some(text) = self.locked(|| read_if_present(&path))? else {
-            return Ok(None);
-        };
-        let data = json::parse(&text)
-            .map_err(|error| failed(&path, error))
-            .and_then(|value| decode(&value).map_err(|error| failed(&path, error)))?;
-        if data.commission_id != *commission {
-            return Err(failed(
-                &path,
-                format!(
-                    "holds the Suspension of commission `{}`, not `{}`",
-                    data.commission_id.0.0, commission.0.0
-                ),
-            ));
-        }
-        Ok(Some(Suspension::new(data)))
-    }
-
-    fn remove(&self, commission: &CommissionId) -> Result<bool, SuspensionStoreError> {
-        let path = self.path(commission)?;
-        self.locked(|| match fs::remove_file(&path) {
-            Ok(()) => {
-                if let Ok(dir) = File::open(&self.dir) {
-                    let _ = dir.sync_all();
-                }
-                Ok(true)
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-            Err(error) => Err(failed(&path, error)),
-        })
+        self.locked(|| Self::read(&path, commission))
     }
 }
 
@@ -263,8 +330,17 @@ fn read_if_present(path: &Path) -> Result<Option<String>, SuspensionStoreError> 
     }
 }
 
-fn encode(out: &mut String, data: &SuspensionData) {
+fn encode(out: &mut String, snapshot: &SuspensionSnapshot) {
+    let data = &snapshot.data;
     out.push('{');
+    member(out, "state");
+    push_text(
+        out,
+        match snapshot.state {
+            SuspensionState::Pending => "Pending",
+            SuspensionState::Resuming => "Resuming",
+        },
+    );
     member(out, "commission_id");
     push_text(out, &data.commission_id.0.0);
     member(out, "run_id");
@@ -353,10 +429,21 @@ fn integer(value: &Value, name: &str) -> Result<i64, DecodeError> {
     integer_at(member_at(value, "", name)?, &at, "an integer")
 }
 
-fn decode(value: &Value) -> Result<SuspensionData, DecodeError> {
+fn decode(value: &Value) -> Result<SuspensionSnapshot, DecodeError> {
     exactly(value, "", &MEMBERS)?;
+    let state = match text(value, "state")?.as_str() {
+        "Pending" => SuspensionState::Pending,
+        "Resuming" => SuspensionState::Resuming,
+        _ => {
+            return Err(DecodeError::of(
+                &nested("", "state"),
+                "a Suspension state",
+                member_at(value, "", "state")?,
+            ));
+        }
+    };
     let commission_id = CommissionId(uuid(value, "commission_id")?);
-    Ok(SuspensionData {
+    let data = SuspensionData {
         suspension: SuspensionKey {
             commission_id: commission_id.clone(),
         },
@@ -369,7 +456,8 @@ fn decode(value: &Value) -> Result<SuspensionData, DecodeError> {
         action: text(value, "action")?,
         arguments: ProposedActionArguments(member_at(value, "", "arguments")?.clone()),
         reason: decode_reason(member_at(value, "", "reason")?)?,
-    })
+    };
+    Ok(SuspensionSnapshot { state, data })
 }
 
 fn decode_reason(value: &Value) -> Result<SuspensionReason, DecodeError> {
