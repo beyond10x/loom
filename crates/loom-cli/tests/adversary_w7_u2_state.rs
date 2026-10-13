@@ -45,7 +45,12 @@ fn merge_script() -> Vec<Vec<u8>> {
     ]
 }
 
-fn run_args<'a>(state: Option<&'a str>, workspace: &'a str, catalog: &'a str, steps: &'a str) -> Vec<&'a str> {
+fn run_args<'a>(
+    state: Option<&'a str>,
+    workspace: &'a str,
+    catalog: &'a str,
+    steps: &'a str,
+) -> Vec<&'a str> {
     let mut args = Vec::new();
     if let Some(state) = state {
         args.extend(["--state", state]);
@@ -140,7 +145,10 @@ fn a_state_path_that_is_a_file_stops_before_any_model_call() {
     assert_eq!(output.status.code(), Some(1), "{stderr}");
     assert!(calls.is_empty(), "{calls:?}");
     assert!(stderr.contains("the state directory"), "{stderr}");
-    assert_eq!(std::fs::read_to_string(&state).unwrap(), "not a directory\n");
+    assert_eq!(
+        std::fs::read_to_string(&state).unwrap(),
+        "not a directory\n"
+    );
 }
 
 /// A second `run --state d` over a directory already holding a Pending Suspension and a case
@@ -214,7 +222,11 @@ fn a_run_ending_without_a_suspension_leaves_no_resume_context() {
         Some("stopped: StepBudget"),
         "{stdout}\n{stderr}"
     );
-    assert_eq!(files_named(&state, "suspension-"), 0, "no Suspension on a step budget");
+    assert_eq!(
+        files_named(&state, "suspension-"),
+        0,
+        "no Suspension on a step budget"
+    );
     let contexts = ResumeContextStore::open(&state).unwrap().list().unwrap();
     assert!(
         contexts.is_empty(),
@@ -314,7 +326,11 @@ impl Scratch {
     fn catalog(&self, base_url: &str) -> PathBuf {
         let path = self.root.join(format!(
             "catalog-{}.toml",
-            base_url.rsplit(':').next().unwrap_or("0").replace("/v1", "")
+            base_url
+                .rsplit(':')
+                .next()
+                .unwrap_or("0")
+                .replace("/v1", "")
         ));
         std::fs::write(&path, CATALOG.replace("http://127.0.0.1:1/v1", base_url)).unwrap();
         path

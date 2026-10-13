@@ -36,7 +36,12 @@ fn context(n: usize, intent: &str) -> ResumeContextData {
             threshold: Decimal("0.5".into()),
         },
         workspace: Some("/work/space".into()),
-        test_command: vec!["grep".into(), "-qx".into(), "fixed".into(), "check.txt".into()],
+        test_command: vec![
+            "grep".into(),
+            "-qx".into(),
+            "fixed".into(),
+            "check.txt".into(),
+        ],
         max_steps: 6,
         confinement: Backend::None,
         cgroup_root: None,
@@ -102,7 +107,10 @@ fn keeping_contexts_while_governor_stores_open_over_the_directory_loses_nothing(
     }
     stop.store(true, Ordering::SeqCst);
     let opened: u64 = openers.into_iter().map(|o| o.join().unwrap()).sum();
-    assert!(opened > 0, "the governor stores opened while contexts were kept");
+    assert!(
+        opened > 0,
+        "the governor stores opened while contexts were kept"
+    );
     let kept = store.list().unwrap();
     assert_eq!(kept.len(), 300);
     for half in 0..2 {
@@ -121,7 +129,11 @@ fn keeping_contexts_while_governor_stores_open_over_the_directory_loses_nothing(
 fn a_resume_temporary_a_dead_write_left_is_removed_by_the_governor_stores() {
     let dir = scratch("stale");
     let store = ResumeContextStore::open(dir.path()).unwrap();
-    std::fs::write(dir.path().join(".tmp-4194304-resume-0"), "{\"commission_id\":").unwrap();
+    std::fs::write(
+        dir.path().join(".tmp-4194304-resume-0"),
+        "{\"commission_id\":",
+    )
+    .unwrap();
     FileCaseStore::open(dir.path()).unwrap();
     assert!(temporaries(dir.path()).is_empty());
     store.keep(&context(7, "after a crash")).unwrap();
@@ -134,9 +146,14 @@ fn a_resume_temporary_a_dead_write_left_is_removed_by_the_governor_stores() {
 fn a_context_reads_back_exactly_for_awkward_text() {
     let dir = scratch("exact");
     let store = ResumeContextStore::open(dir.path()).unwrap();
-    for (n, intent) in ["", "\u{0}\u{1f}\"\\", "tab\there\r\nline", "\u{1F600} \u{2028}"]
-        .into_iter()
-        .enumerate()
+    for (n, intent) in [
+        "",
+        "\u{0}\u{1f}\"\\",
+        "tab\there\r\nline",
+        "\u{1F600} \u{2028}",
+    ]
+    .into_iter()
+    .enumerate()
     {
         let mut kept = context(n, intent);
         kept.workspace = None;
