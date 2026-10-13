@@ -6,3 +6,4 @@ pub mod effect;
 pub mod evidence;
 pub mod executor;
 pub mod governor;
+pub mod suspension;

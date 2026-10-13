@@ -2,8 +2,8 @@
   "provenance": {
     "system": "commission",
     "specification_version": "v1",
-    "source_digest": "1ba42c043f9934dcbbb38e6d540f230eda0871defa63756e7c3db7d01b3050c3",
-    "contract_digest": "9f2ffaa60ef43fd8f3ad719e5f980e33a4fc329e9ba4c5a990bbcfa1579a3135"
+    "source_digest": "38b8acbd65a0405d8e8080d91f671bb5dd9c73ab42c29aa2b87b1502f66fa167",
+    "contract_digest": "5b62b713b7f16745e0bcdee1eab0e84186e1374ae08b7590fde1278b345879af"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -453,6 +453,20 @@
     },
     {
       "kind": "domain_type",
+      "source": "commission.responsibility.Suspension.State",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "commission.responsibility.SuspensionKey",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "commission.responsibility.SuspensionReason",
       "disposition": {
         "disposition": "generated"
@@ -557,6 +571,51 @@
       }
     },
     {
+      "kind": "entity_lifecycle",
+      "source": "commission.responsibility.Suspension",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "commission.responsibility.HoldSuspension",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "commission.responsibility.HoldSuspension",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "the fields of error `commission.responsibility.SuspensionStorageFailed`, which the specification gives no source, in `storage-failed`"
+        },
+        "contract": "given `commission.responsibility.HoldSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `held` otherwise, creates `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionHeld`; `already-held` for an identity a record already carries, error `commission.responsibility.SuspensionAlreadyHeld`; `storage-failed` externally decided (the suspension port cannot hold the Suspension), error `commission.responsibility.SuspensionStorageFailed`"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "commission.responsibility.ReleaseSuspension",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "commission.responsibility.ReleaseSuspension",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "the field `reason` of error `commission.responsibility.SuspensionStorageFailed`, which neither the specification nor the held `commission.responsibility.Suspension` determines, in `storage-failed`"
+        },
+        "contract": "given `commission.responsibility.ReleaseSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `other-request` when the existing subject's stored fields satisfy `action_request_id != input.action_request_id`, error `commission.responsibility.SuspensionRequestMismatch`; `not-taken` when the existing subject's stored fields satisfy `state == Pending`, error `commission.responsibility.SuspensionStateConflict`; `released` otherwise, deletes `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionReleased`; `not-found` for an identity no record carries, error `commission.responsibility.SuspensionNotFound`; `storage-failed` externally decided (the suspension port cannot remove the Suspension), error `commission.responsibility.SuspensionStorageFailed`"
+      }
+    },
+    {
       "kind": "command_contract",
       "source": "commission.responsibility.ResumeRun",
       "disposition": {
@@ -567,7 +626,12 @@
       "kind": "command_behavior",
       "source": "commission.responsibility.ResumeRun",
       "disposition": {
-        "disposition": "generated"
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "the fields of error `commission.responsibility.RunStorageFailed`, which the specification gives no source, in `storage-failed`"
+        },
+        "contract": "given `commission.responsibility.ResumeRun` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `resumed` otherwise, takes `resume` of `commission.responsibility.Run`, emits `commission.responsibility.RunResumed`; `wrong-state` from a state no declared move starts in, error `commission.responsibility.RunStateConflict`, and for an instance no record carries, without the error's fields; `storage-failed` externally decided (the run store cannot record the resumption), error `commission.responsibility.RunStorageFailed`"
       }
     },
     {
@@ -628,6 +692,25 @@
       }
     },
     {
+      "kind": "command_contract",
+      "source": "commission.responsibility.TakeSuspension",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "commission.responsibility.TakeSuspension",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "the field `reason` of error `commission.responsibility.SuspensionStorageFailed`, which neither the specification nor the held `commission.responsibility.Suspension` determines, in `storage-failed`"
+        },
+        "contract": "given `commission.responsibility.TakeSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `other-request` when the existing subject's stored fields satisfy `action_request_id != input.action_request_id`, error `commission.responsibility.SuspensionRequestMismatch`; `taken` otherwise, takes `take` of `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionTaken`; `not-found` for an identity no record carries, error `commission.responsibility.SuspensionNotFound`; `wrong-state` from a state no declared move starts in, error `commission.responsibility.SuspensionStateConflict`; `storage-failed` externally decided (the suspension port cannot record the take), error `commission.responsibility.SuspensionStorageFailed`"
+      }
+    },
+    {
       "kind": "event_type",
       "source": "commission.responsibility.RunResumed",
       "disposition": {
@@ -644,6 +727,27 @@
     {
       "kind": "event_type",
       "source": "commission.responsibility.RunSuspended",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "commission.responsibility.SuspensionHeld",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "commission.responsibility.SuspensionReleased",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "commission.responsibility.SuspensionTaken",
       "disposition": {
         "disposition": "generated"
       }
@@ -684,6 +788,41 @@
       }
     },
     {
+      "kind": "error_type",
+      "source": "commission.responsibility.SuspensionAlreadyHeld",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "commission.responsibility.SuspensionNotFound",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "commission.responsibility.SuspensionRequestMismatch",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "commission.responsibility.SuspensionStateConflict",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "commission.responsibility.SuspensionStorageFailed",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
       "kind": "view_type",
       "source": "commission.responsibility.RunStates",
       "disposition": {
@@ -693,6 +832,20 @@
     {
       "kind": "view_query",
       "source": "commission.responsibility.RunStates",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_type",
+      "source": "commission.responsibility.SuspensionStates",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_query",
+      "source": "commission.responsibility.SuspensionStates",
       "disposition": {
         "disposition": "generated"
       }

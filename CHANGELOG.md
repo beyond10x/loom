@@ -6,6 +6,48 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- A suspension port for Commission's runtime (`b10x_loom_commission::ports::suspension`,
+  `SuspensionPort`), which the host implements over durable storage. Given one,
+  `run_with_suspension` suspends a Run whose request needs authority the provider withholds
+  (`SuspendRun` with `SuspensionReason::Authority`) and stores the commission's Suspension: the
+  Run, the pending action request and the reason, as `ess/commission/` now declares it. The
+  caller still gets the Run's `NeedsAuthority` end. `resume_after_grant` continues the same Run
+  from the stored Suspension, in a new process if need be: after the grant it performs the
+  request once, at the case revision it was suspended at, and refuses, performing nothing, when
+  nothing is stored or the case revision moved. Callers of `run_until_blocked`, which passes no
+  suspension port, see no change in how a Run ends. The testkit's `FileSuspensionStore` is a
+  file-backed store for tests, and `SuspensionStore` the port over memory.
+- A Suspension is taken once, as `ess/commission/` declares it: the port answers
+  `HoldSuspension`, `TakeSuspension` and `ReleaseSuspension`, each atomically. A resume takes the
+  Suspension (`Pending` to `Resuming`) for the request it read and revalidated before it performs
+  anything, and releases it for that request once the effect port answered and the governor
+  observed it. Of two resumes racing over one Suspension, one takes it and performs the request;
+  the other is refused (`ResumeRefusal::NothingSuspended` or `InDoubt`) and performs nothing. A
+  take or a release naming another request than the Suspension holds is refused (`other-request`,
+  `SuspensionRequestMismatch`) and changes nothing, so a resume that read a Suspension the
+  commission has since resumed and replaced with one for another request is refused
+  `ResumeRefusal::OtherRequest`, naming both requests, and performs nothing. A resume that stopped
+  between take and release (a crash, a failing effect port or governor) leaves the Suspension
+  `Resuming`: every later resume is refused `ResumeRefusal::InDoubt`, naming the request, and
+  performs nothing; settling it is the host's. A release the port refuses after the request was
+  performed ends the resume with `LoopFailure::SuspensionNotReleased`, naming the performed request
+  and what the port answered. `run_with_suspension` starts no Run of a commission that holds a
+  Suspension in either state (`LoopFailure::CommissionSuspended`) and performs nothing.
+
+### Changed
+
+- **Breaking:** `ResumeRun` declares a `storage-failed` outcome (`ResumeRunOutcome::StorageFailed`,
+  `RunStorageFailed`), so it is no longer generated whole: a run store implements
+  `ResumeRunBehavior` itself, as `RunStore` does, and `Generated` forwards it. A caller that
+  matches `ResumeRunOutcome` exhaustively adds an arm; a run store of its own used through
+  `Generated` for `ResumeRun` implements the obligation.
+- **Breaking:** `LoopFailure` gains `CommissionSuspended`, `SuspensionStore`, `SuspensionNotHeld`
+  and `SuspensionNotReleased`, which only `run_with_suspension` and `resume_after_grant` report. A
+  caller that matches `LoopFailure` exhaustively adds the arms; `run_until_blocked` reports none
+  of them.
+
 ## [0.16.0] - 2026-10-12
 
 Loom 0.16.0 lets a Run continue past a step performed under an authority grant. When the

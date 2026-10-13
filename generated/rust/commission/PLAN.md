@@ -1,14 +1,14 @@
 <!--
   generated from commission v1
-  model digest 1ba42c043f9934dcbbb38e6d540f230eda0871defa63756e7c3db7d01b3050c3
-  contract digest 9f2ffaa60ef43fd8f3ad719e5f980e33a4fc329e9ba4c5a990bbcfa1579a3135
+  model digest 38b8acbd65a0405d8e8080d91f671bb5dd9c73ab42c29aa2b87b1502f66fa167
+  contract digest 5b62b713b7f16745e0bcdee1eab0e84186e1374ae08b7590fde1278b345879af
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — commission v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-96 capabilities: **93 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+115 capabilities: **108 generated**, **7 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -77,6 +77,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `commission.responsibility.RunOutcomeNeedsExternalEvidence` |
 | domain type | `commission.responsibility.RunOutcomeNeedsHumanJudgment` |
 | domain type | `commission.responsibility.RunOutcomeSuspended` |
+| domain type | `commission.responsibility.Suspension.State` |
+| domain type | `commission.responsibility.SuspensionKey` |
 | domain type | `commission.responsibility.SuspensionReason` |
 | domain type | `commission.responsibility.Truth` |
 | domain type | `commission.responsibility.Unit` |
@@ -92,21 +94,34 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | entity lifecycle | `commission.responsibility.Frontier` |
 | entity lifecycle | `commission.responsibility.Observation` |
 | entity lifecycle | `commission.responsibility.Run` |
+| entity lifecycle | `commission.responsibility.Suspension` |
+| command contract | `commission.responsibility.HoldSuspension` |
+| command contract | `commission.responsibility.ReleaseSuspension` |
 | command contract | `commission.responsibility.ResumeRun` |
-| command behaviour | `commission.responsibility.ResumeRun` |
 | command contract | `commission.responsibility.RevalidateActionRequest` |
 | command contract | `commission.responsibility.StartRun` |
 | command contract | `commission.responsibility.SuspendRun` |
+| command contract | `commission.responsibility.TakeSuspension` |
 | event type | `commission.responsibility.RunResumed` |
 | event type | `commission.responsibility.RunStarted` |
 | event type | `commission.responsibility.RunSuspended` |
+| event type | `commission.responsibility.SuspensionHeld` |
+| event type | `commission.responsibility.SuspensionReleased` |
+| event type | `commission.responsibility.SuspensionTaken` |
 | error type | `commission.responsibility.ActionNeedsAuthority` |
 | error type | `commission.responsibility.ActionNotAdmitted` |
 | error type | `commission.responsibility.ActionRequestStale` |
 | error type | `commission.responsibility.RunStateConflict` |
 | error type | `commission.responsibility.RunStorageFailed` |
+| error type | `commission.responsibility.SuspensionAlreadyHeld` |
+| error type | `commission.responsibility.SuspensionNotFound` |
+| error type | `commission.responsibility.SuspensionRequestMismatch` |
+| error type | `commission.responsibility.SuspensionStateConflict` |
+| error type | `commission.responsibility.SuspensionStorageFailed` |
 | view type | `commission.responsibility.RunStates` |
 | view query | `commission.responsibility.RunStates` |
+| view type | `commission.responsibility.SuspensionStates` |
+| view query | `commission.responsibility.SuspensionStates` |
 
 ## Ports — yours to provide
 
@@ -121,9 +136,13 @@ What the specification fully determines is generated; what it cannot determine i
 
 | capability | source | why not generated | contract |
 | --- | --- | --- | --- |
+| command behaviour | `commission.responsibility.HoldSuspension` | kept an obligation by the fields of error `commission.responsibility.SuspensionStorageFailed`, which the specification gives no source, in `storage-failed` | given `commission.responsibility.HoldSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `held` otherwise, creates `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionHeld`; `already-held` for an identity a record already carries, error `commission.responsibility.SuspensionAlreadyHeld`; `storage-failed` externally decided (the suspension port cannot hold the Suspension), error `commission.responsibility.SuspensionStorageFailed` |
+| command behaviour | `commission.responsibility.ReleaseSuspension` | kept an obligation by the field `reason` of error `commission.responsibility.SuspensionStorageFailed`, which neither the specification nor the held `commission.responsibility.Suspension` determines, in `storage-failed` | given `commission.responsibility.ReleaseSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `other-request` when the existing subject's stored fields satisfy `action_request_id != input.action_request_id`, error `commission.responsibility.SuspensionRequestMismatch`; `not-taken` when the existing subject's stored fields satisfy `state == Pending`, error `commission.responsibility.SuspensionStateConflict`; `released` otherwise, deletes `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionReleased`; `not-found` for an identity no record carries, error `commission.responsibility.SuspensionNotFound`; `storage-failed` externally decided (the suspension port cannot remove the Suspension), error `commission.responsibility.SuspensionStorageFailed` |
+| command behaviour | `commission.responsibility.ResumeRun` | kept an obligation by the fields of error `commission.responsibility.RunStorageFailed`, which the specification gives no source, in `storage-failed` | given `commission.responsibility.ResumeRun` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `resumed` otherwise, takes `resume` of `commission.responsibility.Run`, emits `commission.responsibility.RunResumed`; `wrong-state` from a state no declared move starts in, error `commission.responsibility.RunStateConflict`, and for an instance no record carries, without the error's fields; `storage-failed` externally decided (the run store cannot record the resumption), error `commission.responsibility.RunStorageFailed` |
 | command behaviour | `commission.responsibility.RevalidateActionRequest` | kept an obligation by the fields of error `commission.responsibility.ActionRequestStale`, which the specification gives no source, in `stale` | given `commission.responsibility.RevalidateActionRequest` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `stale` externally decided (the governor's current revision of the case is not the request's expected case revision), error `commission.responsibility.ActionRequestStale`; `not-admitted` externally decided (the current frontier refuses the action), error `commission.responsibility.ActionNotAdmitted`; `needs-authority` externally decided (the current frontier lists the action as ApprovalRequired, naming one capability), error `commission.responsibility.ActionNeedsAuthority`; `admitted` otherwise |
 | command behaviour | `commission.responsibility.StartRun` | kept an obligation by the fields of error `commission.responsibility.RunStorageFailed`, which the specification gives no source, in `storage-failed` | given `commission.responsibility.StartRun` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `started` otherwise, creates `commission.responsibility.Run`, emits `commission.responsibility.RunStarted`; `storage-failed` externally decided (the run store cannot hold the new run), error `commission.responsibility.RunStorageFailed` |
 | command behaviour | `commission.responsibility.SuspendRun` | kept an obligation by the fields of error `commission.responsibility.RunStorageFailed`, which the specification gives no source, in `storage-failed` | given `commission.responsibility.SuspendRun` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `suspended` otherwise, takes `suspend` of `commission.responsibility.Run`, emits `commission.responsibility.RunSuspended`; `wrong-state` from a state no declared move starts in, error `commission.responsibility.RunStateConflict`, and for an instance no record carries, without the error's fields; `storage-failed` externally decided (the run store cannot record the suspension), error `commission.responsibility.RunStorageFailed` |
+| command behaviour | `commission.responsibility.TakeSuspension` | kept an obligation by the field `reason` of error `commission.responsibility.SuspensionStorageFailed`, which neither the specification nor the held `commission.responsibility.Suspension` determines, in `storage-failed` | given `commission.responsibility.TakeSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `other-request` when the existing subject's stored fields satisfy `action_request_id != input.action_request_id`, error `commission.responsibility.SuspensionRequestMismatch`; `taken` otherwise, takes `take` of `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionTaken`; `not-found` for an identity no record carries, error `commission.responsibility.SuspensionNotFound`; `wrong-state` from a state no declared move starts in, error `commission.responsibility.SuspensionStateConflict`; `storage-failed` externally decided (the suspension port cannot record the take), error `commission.responsibility.SuspensionStorageFailed` |
 
 ## Refused — not represented by this synthesis
 

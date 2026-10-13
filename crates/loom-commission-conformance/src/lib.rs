@@ -8,11 +8,15 @@
 //!
 //! * `StartRun`, `SuspendRun` and `ResumeRun` through the generated behaviours
 //!   (`b10x_loom_commission::model::behaviour::Generated`) over `b10x_loom_commission::outcome::RunStore`,
-//!   which answers `StartRun` and `SuspendRun` itself, held in [`store`]: their `storage-failed`
+//!   which answers all three itself, held in [`store`]: their `storage-failed`
 //!   is the store failing the write a scenario forced;
+//! * `HoldSuspension`, `TakeSuspension` and `ReleaseSuspension` through the generated behaviours
+//!   over `b10x_loom_commission::ports::suspension::SuspensionStore`, the suspension port over
+//!   memory, held in [`store`]: their `storage-failed` is the store failing the write a scenario
+//!   forced;
 //! * `RevalidateActionRequest` by `b10x_loom_commission::action_request::revalidate`, against the
 //!   governor in [`governor`];
-//! * the view `RunStates` by the generated query over the same store.
+//! * the views `RunStates` and `SuspensionStates` by the generated queries over the same stores.
 //!
 //! This crate translates values and records what was published. It decides no outcome: each
 //! answer is the outcome the implementation returned, and each event is the one it returned.
@@ -31,12 +35,16 @@ use b10x_loom_commission::action_request::revalidate;
 use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::obligations::{
-    ResumeRunBehavior, RunStatesQuery, StartRunBehavior, SuspendRunBehavior,
+    HoldSuspensionBehavior, ReleaseSuspensionBehavior, ResumeRunBehavior, RunStatesQuery,
+    StartRunBehavior, SuspendRunBehavior, SuspensionStatesQuery, TakeSuspensionBehavior,
 };
 use b10x_loom_commission::model::responsibility::{
-    ActionRequest, ActionRequestData, ActionRequestId, CaseId, CommissionId,
-    ProposedActionArguments, ResumeRun, ResumeRunOutcome, RevalidateActionRequestOutcome, RunId,
-    RunStateConflict, RunStorageFailed, StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome,
+    ActionRequest, ActionRequestData, ActionRequestId, CaseId, CommissionId, HoldSuspension,
+    HoldSuspensionOutcome, ProposedActionArguments, ReleaseSuspension, ReleaseSuspensionOutcome,
+    ResumeRun, ResumeRunOutcome, RevalidateActionRequestOutcome, RunId, RunStateConflict,
+    RunStorageFailed, StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome,
+    SuspensionRequestMismatch, SuspensionStateConflict, SuspensionStorageFailed, TakeSuspension,
+    TakeSuspensionOutcome,
 };
 use b10x_loom_commission::outcome::RunStore;
 use ess_conformance::scenario::{CommandRef, ErrorRef, EventRef, OutcomeRef};
@@ -53,7 +61,7 @@ use ess_primitives::node::Node;
 
 use crate::codec::Input;
 use crate::governor::{Condition, ScenarioGovernor};
-use crate::store::{ScenarioStore, Unwritable};
+use crate::store::{ScenarioStore, ScenarioSuspensions, SuspensionUnwritable, Unwritable};
 
 /// The name this implementation is reported under.
 pub const IMPLEMENTATION: &str = "b10x-loom-commission";
@@ -72,11 +80,25 @@ const ACTION_NEEDS_AUTHORITY: &str = "commission.responsibility.ActionNeedsAutho
 const RUN_STORAGE_FAILED: &str = "commission.responsibility.RunStorageFailed";
 const STORAGE_FAILED: &str = "storage-failed";
 const RUN_STATES: &str = "commission.responsibility.RunStates";
+const HOLD_SUSPENSION: &str = "commission.responsibility.HoldSuspension";
+const TAKE_SUSPENSION: &str = "commission.responsibility.TakeSuspension";
+const RELEASE_SUSPENSION: &str = "commission.responsibility.ReleaseSuspension";
+const SUSPENSION_HELD: &str = "commission.responsibility.SuspensionHeld";
+const SUSPENSION_TAKEN: &str = "commission.responsibility.SuspensionTaken";
+const SUSPENSION_RELEASED: &str = "commission.responsibility.SuspensionReleased";
+const SUSPENSION_ALREADY_HELD: &str = "commission.responsibility.SuspensionAlreadyHeld";
+const SUSPENSION_NOT_FOUND: &str = "commission.responsibility.SuspensionNotFound";
+const SUSPENSION_STATE_CONFLICT: &str = "commission.responsibility.SuspensionStateConflict";
+const SUSPENSION_REQUEST_MISMATCH: &str = "commission.responsibility.SuspensionRequestMismatch";
+const SUSPENSION_STORAGE_FAILED: &str = "commission.responsibility.SuspensionStorageFailed";
+const SUSPENSION_STATES: &str = "commission.responsibility.SuspensionStates";
 
 /// One scenario's state.
 struct Live {
     /// The runs, behind the generated behaviours.
     runs: Generated<ScenarioStore>,
+    /// The Suspensions, behind the generated behaviours.
+    suspensions: Generated<ScenarioSuspensions>,
     /// Every event published in this scenario, in order.
     log: Vec<ObservedEvent>,
     /// The external condition armed for the next revalidation.
@@ -94,6 +116,7 @@ impl Live {
         };
         Self {
             runs: Generated::new(ScenarioStore::new(RunStore::new(ids))),
+            suspensions: Generated::new(ScenarioSuspensions::new()),
             log: Vec::new(),
             forced: None,
             sequence: 0,
@@ -165,6 +188,9 @@ impl ConformanceTarget for CommissionTarget {
             START_RUN => start_run(&mut live, input, correlation),
             SUSPEND_RUN => suspend_run(&mut live, input, correlation),
             RESUME_RUN => resume_run(&mut live, input, correlation),
+            HOLD_SUSPENSION => hold_suspension(&mut live, input, correlation),
+            TAKE_SUSPENSION => take_suspension(&mut live, input, correlation),
+            RELEASE_SUSPENSION => release_suspension(&mut live, input, correlation),
             REVALIDATE => revalidate_request(&mut live, input)?,
             other => {
                 return Err(TargetError::unavailable(
@@ -181,6 +207,9 @@ impl ConformanceTarget for CommissionTarget {
 
     fn query_view(&self, request: SemanticViewRequest) -> Result<SemanticViewResult, TargetError> {
         let view = request.view.to_string();
+        if view == SUSPENSION_STATES {
+            return suspension_states(&self.live.borrow(), &view);
+        }
         if view != RUN_STATES {
             return Err(TargetError::unavailable(
                 format!("reading `{view}`"),
@@ -240,6 +269,17 @@ impl ConformanceTarget for CommissionTarget {
             }
             (START_RUN, STORAGE_FAILED) => live.runs.ports.fail_next(Unwritable::StartRun),
             (SUSPEND_RUN, STORAGE_FAILED) => live.runs.ports.fail_next(Unwritable::SuspendRun),
+            (RESUME_RUN, STORAGE_FAILED) => live.runs.ports.fail_next(Unwritable::ResumeRun),
+            (HOLD_SUSPENSION, STORAGE_FAILED) => {
+                live.suspensions.ports.fail_next(SuspensionUnwritable::Hold)
+            }
+            (TAKE_SUSPENSION, STORAGE_FAILED) => {
+                live.suspensions.ports.fail_next(SuspensionUnwritable::Take)
+            }
+            (RELEASE_SUSPENSION, STORAGE_FAILED) => live
+                .suspensions
+                .ports
+                .fail_next(SuspensionUnwritable::Release),
             _ => return Err(undeclared()),
         }
         Ok(())
@@ -366,7 +406,211 @@ fn resume_run(
         }
         ResumeRunOutcome::WrongState { error } => wrong_state(RESUME_RUN, Some(error)),
         ResumeRunOutcome::WrongStateUnknownInstance => wrong_state(RESUME_RUN, None),
+        ResumeRunOutcome::StorageFailed { error } => storage_failed(RESUME_RUN, error),
     })
+}
+
+/// `storage-failed` of a Suspension command, with the store's reason.
+fn suspension_storage_failed(
+    command: &str,
+    failed: SuspensionStorageFailed,
+) -> SemanticCommandResult {
+    took(command, STORAGE_FAILED)
+        .with_error(error(SUSPENSION_STORAGE_FAILED).with("reason", Node::Text(failed.reason)))
+}
+
+/// A Suspension command's refusal naming the state the Suspension is in and its request.
+fn suspension_conflict(
+    command: &str,
+    outcome: &str,
+    conflict: SuspensionStateConflict,
+) -> SemanticCommandResult {
+    took(command, outcome).with_error(
+        error(SUSPENSION_STATE_CONFLICT)
+            .with("state", codec::suspension_state(conflict.state))
+            .with(
+                "action_request_id",
+                Node::Text(conflict.action_request_id.0.0),
+            ),
+    )
+}
+
+/// A take's or a release's `other-request` refusal, naming the Suspension, the request it is held
+/// for and the one the command named.
+fn suspension_other_request(
+    command: &str,
+    mismatch: SuspensionRequestMismatch,
+) -> SemanticCommandResult {
+    took(command, "other-request").with_error(
+        error(SUSPENSION_REQUEST_MISMATCH)
+            .with(
+                "suspension",
+                codec::from_suspension_key(&mismatch.suspension),
+            )
+            .with(
+                "held_action_request_id",
+                Node::Text(mismatch.held_action_request_id.0.0),
+            )
+            .with(
+                "action_request_id",
+                Node::Text(mismatch.action_request_id.0.0),
+            ),
+    )
+}
+
+fn hold_suspension(
+    live: &mut Live,
+    input: &Input,
+    correlation: &CorrelationId,
+) -> Option<SemanticCommandResult> {
+    let command = HoldSuspension {
+        suspension: codec::suspension_key(input.get("suspension")?)?,
+        commission_id: CommissionId(codec::uuid(input, "commission_id")?),
+        run_id: RunId(codec::uuid(input, "run_id")?),
+        run_case_revision: codec::integer(input, "run_case_revision")?,
+        action_request_id: ActionRequestId(codec::uuid(input, "action_request_id")?),
+        case_id: CaseId(codec::text(input, "case_id")?),
+        expected_case_revision: codec::integer(input, "expected_case_revision")?,
+        action: codec::text(input, "action")?,
+        arguments: ProposedActionArguments(codec::json(input, "arguments")?),
+        reason: codec::suspension_reason(input.get("reason")?)?,
+    };
+    Some(match live.suspensions.hold_suspension(command).ok()? {
+        HoldSuspensionOutcome::Held { suspension_held } => {
+            let published = live.publish(
+                event(SUSPENSION_HELD)
+                    .with(
+                        "suspension",
+                        codec::from_suspension_key(&suspension_held.suspension),
+                    )
+                    .with("run_id", Node::Text(suspension_held.run_id.0.0))
+                    .with(
+                        "action_request_id",
+                        Node::Text(suspension_held.action_request_id.0.0),
+                    ),
+                correlation,
+            );
+            took(HOLD_SUSPENSION, "held").emitting(published)
+        }
+        HoldSuspensionOutcome::AlreadyHeld { error: held } => took(HOLD_SUSPENSION, "already-held")
+            .with_error(
+                error(SUSPENSION_ALREADY_HELD)
+                    .with("suspension", codec::from_suspension_key(&held.suspension)),
+            ),
+        HoldSuspensionOutcome::StorageFailed { error } => {
+            suspension_storage_failed(HOLD_SUSPENSION, error)
+        }
+    })
+}
+
+fn take_suspension(
+    live: &mut Live,
+    input: &Input,
+    correlation: &CorrelationId,
+) -> Option<SemanticCommandResult> {
+    let command = TakeSuspension {
+        suspension: codec::suspension_key(input.get("suspension")?)?,
+        action_request_id: ActionRequestId(codec::uuid(input, "action_request_id")?),
+    };
+    Some(match live.suspensions.take_suspension(command).ok()? {
+        TakeSuspensionOutcome::OtherRequest { error } => {
+            suspension_other_request(TAKE_SUSPENSION, error)
+        }
+        TakeSuspensionOutcome::Taken { suspension_taken } => {
+            let published = live.publish(
+                event(SUSPENSION_TAKEN)
+                    .with(
+                        "suspension",
+                        codec::from_suspension_key(&suspension_taken.suspension),
+                    )
+                    .with(
+                        "action_request_id",
+                        Node::Text(suspension_taken.action_request_id.0.0),
+                    ),
+                correlation,
+            );
+            took(TAKE_SUSPENSION, "taken").emitting(published)
+        }
+        TakeSuspensionOutcome::NotFound { error: missing } => took(TAKE_SUSPENSION, "not-found")
+            .with_error(error(SUSPENSION_NOT_FOUND).with(
+                "suspension",
+                codec::from_suspension_key(&missing.suspension),
+            )),
+        TakeSuspensionOutcome::WrongState { error } => {
+            suspension_conflict(TAKE_SUSPENSION, "wrong-state", error)
+        }
+        TakeSuspensionOutcome::StorageFailed { error } => {
+            suspension_storage_failed(TAKE_SUSPENSION, error)
+        }
+    })
+}
+
+fn release_suspension(
+    live: &mut Live,
+    input: &Input,
+    correlation: &CorrelationId,
+) -> Option<SemanticCommandResult> {
+    let command = ReleaseSuspension {
+        suspension: codec::suspension_key(input.get("suspension")?)?,
+        action_request_id: ActionRequestId(codec::uuid(input, "action_request_id")?),
+    };
+    Some(match live.suspensions.release_suspension(command).ok()? {
+        ReleaseSuspensionOutcome::OtherRequest { error } => {
+            suspension_other_request(RELEASE_SUSPENSION, error)
+        }
+        ReleaseSuspensionOutcome::Released {
+            suspension_released,
+        } => {
+            let published = live.publish(
+                event(SUSPENSION_RELEASED).with(
+                    "suspension",
+                    codec::from_suspension_key(&suspension_released.suspension),
+                ),
+                correlation,
+            );
+            took(RELEASE_SUSPENSION, "released").emitting(published)
+        }
+        ReleaseSuspensionOutcome::NotTaken { error } => {
+            suspension_conflict(RELEASE_SUSPENSION, "not-taken", error)
+        }
+        ReleaseSuspensionOutcome::NotFound { error: missing } => {
+            took(RELEASE_SUSPENSION, "not-found").with_error(error(SUSPENSION_NOT_FOUND).with(
+                "suspension",
+                codec::from_suspension_key(&missing.suspension),
+            ))
+        }
+        ReleaseSuspensionOutcome::StorageFailed { error } => {
+            suspension_storage_failed(RELEASE_SUSPENSION, error)
+        }
+    })
+}
+
+/// The view `SuspensionStates`, by the generated query over the suspension store.
+fn suspension_states(live: &Live, view: &str) -> Result<SemanticViewResult, TargetError> {
+    let rows = live.suspensions.suspension_states().map_err(|unmet| {
+        TargetError::unavailable(
+            format!("reading `{view}`"),
+            format!("{} is owed: {}", unmet.capability, unmet.source),
+        )
+    })?;
+    Ok(SemanticViewResult::of(rows.into_iter().map(|row| {
+        ViewRow::from([
+            (
+                "suspension".to_owned(),
+                codec::from_suspension_key(&row.suspension),
+            ),
+            (
+                "commission_id".to_owned(),
+                Node::Text(row.commission_id.0.0),
+            ),
+            ("run_id".to_owned(), Node::Text(row.run_id.0.0)),
+            (
+                "action_request_id".to_owned(),
+                Node::Text(row.action_request_id.0.0),
+            ),
+            ("state".to_owned(), codec::suspension_state(row.state)),
+        ])
+    })))
 }
 
 /// `RevalidateActionRequest`: the request as the input names it, revalidated against the

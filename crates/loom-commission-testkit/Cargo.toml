@@ -11,4 +11,8 @@ repository.workspace = true
 b10x-loom-commission = { path = "../loom-commission" }
 
 [dev-dependencies]
-syn = { version = "3", default-features = false, features = ["full", "parsing", "visit"] }
+b10x-loom-executor = { path = "../loom-executor" }
+b10x-loom-governor = { path = "../loom-governor" }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+syn ={ version = "3", default-features = false, features = ["full", "parsing", "visit"] }

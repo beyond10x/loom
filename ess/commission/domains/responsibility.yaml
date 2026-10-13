@@ -353,6 +353,14 @@ types:
       - name: action
         type: String
 
+  # story:approval-suspend-resume-slice: what identifies a Suspension, the commission it belongs to,
+  # so a commission holds at most one.
+  - name: commission.responsibility.SuspensionKey
+    kind: struct
+    fields:
+      - name: commission_id
+        type: commission.responsibility.CommissionId
+
   # docs/contracts/protocol-core.md: three-valued truth.
   - name: commission.responsibility.Truth
     kind: enum
@@ -512,6 +520,14 @@ entities:
         target: commission.responsibility.ActionBinding
         cardinality: many
         via: commission_id
+      # story:approval-suspend-resume-slice (decision-blocker:suspension-durable-record, B): the
+      # commission's suspension pending an approval, at most one. It lives and dies with the
+      # commission, never with the case, and is kept by a suspension port the host implements.
+      - name: suspension
+        kind: owns
+        target: commission.responsibility.Suspension
+        cardinality: one
+        via: commission_id
     lifecycle:
       initial: Assigned
       states: [Assigned]
@@ -600,6 +616,72 @@ entities:
       transitions:
         - {name: suspend, from: [Running], to: Suspended}
         - {name: resume, from: [Suspended], to: Running}
+
+  # story:approval-suspend-resume-slice (decision-blocker:suspension-durable-record, B): a run
+  # suspended on an approval, as a new process resumes it from durable state alone. Its identity
+  # holds the commission's id, so a commission holds at most one; `commission_id` repeats it for the
+  # relation, as on ActionBinding. It holds the run it suspended (its id and
+  # the case revision the run started against, `run_case_revision`), the pending action request
+  # (its id, case, `expected_case_revision`, action and arguments, as the run made it) and the
+  # reason the run was suspended for. Resuming continues that same run (`ResumeRun`) at the
+  # request's revision.
+  #
+  # It is held `Pending` (`HoldSuspension`); a commission already holding one is refused. A resume
+  # takes it (`TakeSuspension`, `take`: `Pending` -> `Resuming`) before anything is performed, so
+  # one take wins and every other is refused: none stored is `not-found`, one already `Resuming` is
+  # `wrong-state`, naming the request it holds. A take and a release name the action request the
+  # resume read and revalidated, and a Suspension held for another request is refused
+  # (`other-request`, naming both) and kept as it is: a resume that read one Suspension never takes
+  # or releases a later one the commission holds for another request. A `Resuming` Suspension is a
+  # request that may have been performed or not (the process that took it stopped before releasing
+  # it): it stays stored and is never taken again, so the request is never performed twice and never
+  # dropped without a durable trace; settling it is the host's. Once the request was performed the
+  # Suspension is released (`ReleaseSuspension`), removed; a `Pending` one is not released.
+  - name: commission.responsibility.Suspension
+    identity:
+      name: suspension
+      type: commission.responsibility.SuspensionKey
+    fields:
+      - name: commission_id
+        type: commission.responsibility.CommissionId
+      - name: run_id
+        type: commission.responsibility.RunId
+      - name: run_case_revision
+        type: Integer
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
+      - name: case_id
+        type: commission.responsibility.CaseId
+      - name: expected_case_revision
+        type: Integer
+      - name: action
+        type: String
+      - name: arguments
+        type: commission.responsibility.ProposedActionArguments
+      - name: reason
+        type: commission.responsibility.SuspensionReason
+    relations:
+      - name: run
+        kind: references
+        target: commission.responsibility.Run
+        cardinality: one
+        via: run_id
+      - name: action_request
+        kind: references
+        target: commission.responsibility.ActionRequest
+        cardinality: one
+        via: action_request_id
+      - name: case
+        kind: references
+        target: commission.responsibility.Case
+        cardinality: one
+        via: case_id
+    lifecycle:
+      initial: Pending
+      states: [Pending, Resuming]
+      terminal: [Resuming]
+      transitions:
+        - {name: take, from: [Pending], to: Resuming}
 
   # docs/commission/contracts/frontier.md: the bridge between governance and execution, for one case revision.
   # Its claims, obligations and actions are Commission's own value types (story M-002): none has an
@@ -779,6 +861,45 @@ errors:
       - name: reason
         type: String
 
+  # story:approval-suspend-resume-slice: the commission already holds a Suspension; nothing was
+  # stored over it.
+  - name: commission.responsibility.SuspensionAlreadyHeld
+    fields:
+      - name: suspension
+        type: commission.responsibility.SuspensionKey
+
+  # story:approval-suspend-resume-slice: the commission holds no Suspension.
+  - name: commission.responsibility.SuspensionNotFound
+    fields:
+      - name: suspension
+        type: commission.responsibility.SuspensionKey
+
+  # story:approval-suspend-resume-slice: the Suspension is not in a state the command acts from.
+  # Taken when it is already `Resuming`, it names the request whose performance is in doubt.
+  - name: commission.responsibility.SuspensionStateConflict
+    fields:
+      - name: state
+        type: commission.responsibility.Suspension.State
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
+
+  # story:approval-suspend-resume-slice: the commission's Suspension is held for another action
+  # request than the one the command names; nothing was changed. It names both.
+  - name: commission.responsibility.SuspensionRequestMismatch
+    fields:
+      - name: suspension
+        type: commission.responsibility.SuspensionKey
+      - name: held_action_request_id
+        type: commission.responsibility.ActionRequestId
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
+
+  # story:approval-suspend-resume-slice: the suspension port cannot read or write.
+  - name: commission.responsibility.SuspensionStorageFailed
+    fields:
+      - name: reason
+        type: String
+
 commands:
   - name: commission.responsibility.StartRun
     input:
@@ -803,8 +924,9 @@ commands:
         external: the run store cannot hold the new run
         error: commission.responsibility.RunStorageFailed
 
-  # The reason is reported, not stored on Run: where a suspension is kept is open
-  # (decision-blocker:suspension-durable-record).
+  # The reason is carried by the command and its event, not stored on Run. A run suspended on an
+  # approval keeps its reason on the commission's Suspension, with the pending request
+  # (story:approval-suspend-resume-slice, decision-blocker:suspension-durable-record, B).
   - name: commission.responsibility.SuspendRun
     input:
       - name: run_id
@@ -842,6 +964,154 @@ commands:
       - name: wrong-state
         wrong_state: true
         error: commission.responsibility.RunStateConflict
+      # story:approval-suspend-resume-slice: a durable run store that cannot write the resumption.
+      - name: storage-failed
+        external: the run store cannot record the resumption
+        error: commission.responsibility.RunStorageFailed
+
+  # story:approval-suspend-resume-slice: a run suspended on an approval holds the commission's
+  # Suspension, `Pending`, through the suspension port. A commission holds at most one: holding a
+  # second is refused and keeps the first.
+  - name: commission.responsibility.HoldSuspension
+    input:
+      - name: suspension
+        type: commission.responsibility.SuspensionKey
+      - name: commission_id
+        type: commission.responsibility.CommissionId
+      - name: run_id
+        type: commission.responsibility.RunId
+      - name: run_case_revision
+        type: Integer
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
+      - name: case_id
+        type: commission.responsibility.CaseId
+      - name: expected_case_revision
+        type: Integer
+      - name: action
+        type: String
+      - name: arguments
+        type: commission.responsibility.ProposedActionArguments
+      - name: reason
+        type: commission.responsibility.SuspensionReason
+    outcomes:
+      - name: held
+        creates: commission.responsibility.Suspension
+        instance: suspension
+        sets:
+          commission_id: input.commission_id
+          run_id: input.run_id
+          run_case_revision: input.run_case_revision
+          action_request_id: input.action_request_id
+          case_id: input.case_id
+          expected_case_revision: input.expected_case_revision
+          action: input.action
+          arguments: input.arguments
+          reason: input.reason
+        emits: [commission.responsibility.SuspensionHeld]
+        payload:
+          commission.responsibility.SuspensionHeld:
+            suspension: input.suspension
+            run_id: input.run_id
+            action_request_id: input.action_request_id
+      - name: already-held
+        existing_instance: true
+        error: commission.responsibility.SuspensionAlreadyHeld
+        payload:
+          commission.responsibility.SuspensionAlreadyHeld:
+            suspension: input.suspension
+      - name: storage-failed
+        external: the suspension port cannot hold the Suspension
+        error: commission.responsibility.SuspensionStorageFailed
+
+  # story:approval-suspend-resume-slice: a resume takes the commission's Suspension before it
+  # performs anything, so of two resumes one takes it and the other is refused. It names the
+  # request the resume revalidated: a Suspension held for another request is refused, naming both,
+  # and kept as it is. A Suspension already `Resuming` is refused, naming its request: that request
+  # may have been performed, and is never performed again from it.
+  - name: commission.responsibility.TakeSuspension
+    input:
+      - name: suspension
+        type: commission.responsibility.SuspensionKey
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
+    outcomes:
+      - name: other-request
+        when_subject:
+          predicate: action_request_id != input.action_request_id
+        error: commission.responsibility.SuspensionRequestMismatch
+        payload:
+          commission.responsibility.SuspensionRequestMismatch:
+            suspension: input.suspension
+            held_action_request_id: {subject: action_request_id}
+            action_request_id: input.action_request_id
+      - name: taken
+        moves: commission.responsibility.Suspension.take
+        instance: suspension
+        emits: [commission.responsibility.SuspensionTaken]
+        payload:
+          commission.responsibility.SuspensionTaken:
+            suspension: input.suspension
+            action_request_id: {subject: action_request_id}
+      - name: not-found
+        unknown_instance: true
+        error: commission.responsibility.SuspensionNotFound
+        payload:
+          commission.responsibility.SuspensionNotFound:
+            suspension: input.suspension
+      - name: wrong-state
+        wrong_state: true
+        error: commission.responsibility.SuspensionStateConflict
+        payload:
+          commission.responsibility.SuspensionStateConflict:
+            action_request_id: {subject: action_request_id}
+      - name: storage-failed
+        external: the suspension port cannot record the take
+        error: commission.responsibility.SuspensionStorageFailed
+
+  # story:approval-suspend-resume-slice: once the request a resume took the Suspension for was
+  # performed, the Suspension is removed. It names the request that was performed: a Suspension
+  # held for another request is refused, naming both, and kept as it is. A `Pending` one, which no
+  # resume took, is not removed.
+  - name: commission.responsibility.ReleaseSuspension
+    input:
+      - name: suspension
+        type: commission.responsibility.SuspensionKey
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
+    outcomes:
+      - name: other-request
+        when_subject:
+          predicate: action_request_id != input.action_request_id
+        error: commission.responsibility.SuspensionRequestMismatch
+        payload:
+          commission.responsibility.SuspensionRequestMismatch:
+            suspension: input.suspension
+            held_action_request_id: {subject: action_request_id}
+            action_request_id: input.action_request_id
+      - name: not-taken
+        when_subject:
+          predicate: state == Pending
+        error: commission.responsibility.SuspensionStateConflict
+        payload:
+          commission.responsibility.SuspensionStateConflict:
+            action_request_id: {subject: action_request_id}
+      - name: released
+        deletes: commission.responsibility.Suspension
+        instance: suspension
+        emits: [commission.responsibility.SuspensionReleased]
+        payload:
+          commission.responsibility.SuspensionReleased:
+            suspension: input.suspension
+      - name: not-found
+        unknown_instance: true
+        error: commission.responsibility.SuspensionNotFound
+        payload:
+          commission.responsibility.SuspensionNotFound:
+            suspension: input.suspension
+      - name: storage-failed
+        external: the suspension port cannot remove the Suspension
+        error: commission.responsibility.SuspensionStorageFailed
 
   # Immediately before anything is done with a request, the request as the run built it is
   # revalidated. The case's current revision and frontier come from the governor, never from the
@@ -905,6 +1175,27 @@ events:
       - name: run_id
         type: commission.responsibility.RunId
 
+  - name: commission.responsibility.SuspensionHeld
+    fields:
+      - name: suspension
+        type: commission.responsibility.SuspensionKey
+      - name: run_id
+        type: commission.responsibility.RunId
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
+
+  - name: commission.responsibility.SuspensionTaken
+    fields:
+      - name: suspension
+        type: commission.responsibility.SuspensionKey
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
+
+  - name: commission.responsibility.SuspensionReleased
+    fields:
+      - name: suspension
+        type: commission.responsibility.SuspensionKey
+
 views:
   - name: commission.responsibility.RunStates
     source: commission.responsibility.Run
@@ -918,3 +1209,20 @@ views:
         type: Integer
       - name: state
         type: commission.responsibility.Run.State
+
+  # story:approval-suspend-resume-slice: each commission's Suspension and its state, as the
+  # suspension port holds it.
+  - name: commission.responsibility.SuspensionStates
+    source: commission.responsibility.Suspension
+    consistency: read_your_writes
+    fields:
+      - name: suspension
+        type: commission.responsibility.SuspensionKey
+      - name: commission_id
+        type: commission.responsibility.CommissionId
+      - name: run_id
+        type: commission.responsibility.RunId
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
+      - name: state
+        type: commission.responsibility.Suspension.State

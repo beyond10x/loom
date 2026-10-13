@@ -6,12 +6,13 @@
 //! (`docs/contracts/commission-executor.md`).
 //!
 //! [`RunStore`] holds runs for the `StartRun`, `SuspendRun` and `ResumeRun` commands through
-//! [`crate::model::behaviour::Generated`]: it implements the `StartRun` and `SuspendRun` obligations
-//! itself, and the generated `ResumeRun` behaviour reads and writes it as storage. Resume continues
-//! the same run: its id and case revision are kept, and no new run is created. The store is in
-//! memory and never answers `storage-failed`; a durable store implements the two obligations over
-//! its own storage and answers `storage-failed` when a write fails. Keeping a suspended run across
-//! a process restart is not done here.
+//! [`crate::model::behaviour::Generated`]: it implements the three obligations itself. Resume
+//! continues the same run: its id and case revision are kept, and no new run is created. The store
+//! is in memory and never answers `storage-failed`; a durable store implements the three
+//! obligations over its own storage and answers `storage-failed` when a write fails. A run
+//! suspended on an approval is kept across a process restart by the suspension port
+//! ([`crate::ports::suspension`]), not here: [`crate::runtime::resume_after_grant`] puts the run
+//! back into a store that no longer holds it, from the stored Suspension.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -20,13 +21,15 @@ use crate::admission::admit;
 use crate::model::behaviour::RunStorage;
 use crate::model::obligation::UnmetObligation;
 use crate::model::primitives::Uuid;
-use crate::model::responsibility::obligations::{StartRunBehavior, SuspendRunBehavior};
+use crate::model::responsibility::obligations::{
+    ResumeRunBehavior, StartRunBehavior, SuspendRunBehavior,
+};
 use crate::model::responsibility::{
-    Admission, AnyRun, AuthorityVerdict, CompletionDetermination, ExecutorOutcome, Frontier, Run,
-    RunData, RunId, RunOutcome, RunOutcomeCompleted, RunOutcomeNeedsAuthority,
-    RunOutcomeNeedsExternalEvidence, RunOutcomeNeedsHumanJudgment, RunOutcomeSuspended,
-    RunSnapshot, RunStarted, RunStateConflict, RunSuspended, StartRun, StartRunOutcome, SuspendRun,
-    SuspendRunOutcome, Unit, frontier_state,
+    Admission, AnyRun, AuthorityVerdict, CompletionDetermination, ExecutorOutcome, Frontier,
+    ResumeRun, ResumeRunOutcome, Run, RunData, RunId, RunOutcome, RunOutcomeCompleted,
+    RunOutcomeNeedsAuthority, RunOutcomeNeedsExternalEvidence, RunOutcomeNeedsHumanJudgment,
+    RunOutcomeSuspended, RunResumed, RunSnapshot, RunStarted, RunStateConflict, RunSuspended,
+    StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome, Unit, frontier_state,
 };
 
 /// What [`derive`] decides for a run.
@@ -245,6 +248,28 @@ impl SuspendRunBehavior for RunStore {
             run_suspended: RunSuspended {
                 run_id: input.run_id,
                 reason: input.reason,
+            },
+        })
+    }
+}
+
+/// `ResumeRun` over memory, which always records the resumption: it never answers
+/// `storage-failed`.
+impl ResumeRunBehavior for RunStore {
+    fn resume_run(&mut self, input: ResumeRun) -> Result<ResumeRunOutcome, UnmetObligation> {
+        let Some(held) = RunStorage::get(self, &input.run_id) else {
+            return Ok(ResumeRunOutcome::WrongStateUnknownInstance);
+        };
+        let state = held.state;
+        let AnyRun::Suspended(suspended) = held.refine() else {
+            return Ok(ResumeRunOutcome::WrongState {
+                error: RunStateConflict { state },
+            });
+        };
+        RunStorage::put(self, AnyRun::Running(suspended.resume()).snapshot());
+        Ok(ResumeRunOutcome::Resumed {
+            run_resumed: RunResumed {
+                run_id: input.run_id,
             },
         })
     }

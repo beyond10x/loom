@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 1ba42c043f9934dcbbb38e6d540f230eda0871defa63756e7c3db7d01b3050c3
-// contract digest 9f2ffaa60ef43fd8f3ad719e5f980e33a4fc329e9ba4c5a990bbcfa1579a3135
+// model digest 38b8acbd65a0405d8e8080d91f671bb5dd9c73ab42c29aa2b87b1502f66fa167
+// contract digest 5b62b713b7f16745e0bcdee1eab0e84186e1374ae08b7590fde1278b345879af
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Responsibility — `commission.responsibility`.
@@ -494,6 +494,25 @@ pub struct RunOutcomeNeedsHumanJudgment {
 pub struct RunOutcomeSuspended {
     /// `reason` — `commission.responsibility.SuspensionReason`.
     pub reason: SuspensionReason,
+}
+
+/// The states of `commission.responsibility.Suspension`, as runtime values.
+///
+/// Synthesised from the lifecycle, so the two cannot disagree. Which *moves* are legal is not
+/// carried here — it is carried by `Suspension<S>`, where an undeclared move does not compile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuspensionState {
+    /// `Pending`.
+    Pending,
+    /// `Resuming`.
+    Resuming,
+}
+
+/// SuspensionKey — `commission.responsibility.SuspensionKey`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuspensionKey {
+    /// `commission_id` — `commission.responsibility.CommissionId`.
+    pub commission_id: CommissionId,
 }
 
 /// SuspensionReason — `commission.responsibility.SuspensionReason`: one of a fixed set of shapes, tagged on the wire by `kind`.
@@ -2189,6 +2208,283 @@ impl AnyRun {
     }
 }
 
+/// What Suspension — `commission.responsibility.Suspension` — holds, apart from where it is in its lifecycle.
+///
+/// The identity and every declared field. The state is deliberately not one: inside the domain it
+/// is carried by the type parameter of [`Suspension<S>`], and at a boundary by [`SuspensionSnapshot::state`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuspensionData {
+    /// The identity: `suspension` — `commission.responsibility.SuspensionKey`.
+    pub suspension: SuspensionKey,
+    /// `commission_id` — `commission.responsibility.CommissionId`.
+    ///
+    /// Carries `suspension`: `commission.responsibility.Commission` owns one `commission.responsibility.Suspension`.
+    pub commission_id: CommissionId,
+    /// `run_id` — `commission.responsibility.RunId`.
+    ///
+    /// Carries `run`: `commission.responsibility.Suspension` references one `commission.responsibility.Run`.
+    pub run_id: RunId,
+    /// `run_case_revision` — `Integer`.
+    pub run_case_revision: i64,
+    /// `action_request_id` — `commission.responsibility.ActionRequestId`.
+    ///
+    /// Carries `action_request`: `commission.responsibility.Suspension` references one `commission.responsibility.ActionRequest`.
+    pub action_request_id: ActionRequestId,
+    /// `case_id` — `commission.responsibility.CaseId`.
+    ///
+    /// Carries `case`: `commission.responsibility.Suspension` references one `commission.responsibility.Case`.
+    pub case_id: CaseId,
+    /// `expected_case_revision` — `Integer`.
+    pub expected_case_revision: i64,
+    /// `action` — `String`.
+    pub action: String,
+    /// `arguments` — `commission.responsibility.ProposedActionArguments`.
+    pub arguments: ProposedActionArguments,
+    /// `reason` — `commission.responsibility.SuspensionReason`.
+    pub reason: SuspensionReason,
+}
+
+/// The states of `commission.responsibility.Suspension`, at the type level.
+///
+/// One marker type per declared state, sealed: a state the lifecycle does not declare cannot
+/// implement [`Marker`](suspension_state::Marker), so [`Suspension<S>`](Suspension) can only ever rest in a real state.
+pub mod suspension_state {
+    /// Closes [`Marker`] over the declared states.
+    mod sealed {
+        /// Implemented only by the marker types beside this module.
+        pub trait Sealed {}
+        impl Sealed for super::Pending {}
+        impl Sealed for super::Resuming {}
+    }
+
+    /// A declared state of `Suspension`, as a type.
+    pub trait Marker: sealed::Sealed {
+        /// The same state, as the runtime value.
+        const STATE: super::SuspensionState;
+    }
+
+    /// `Pending`. Where a new instance starts.
+    pub struct Pending;
+
+    impl Marker for Pending {
+        const STATE: super::SuspensionState = super::SuspensionState::Pending;
+    }
+
+    /// `Resuming`. Terminal: an instance may rest here forever.
+    pub struct Resuming;
+
+    impl Marker for Resuming {
+        const STATE: super::SuspensionState = super::SuspensionState::Resuming;
+    }
+}
+
+/// Suspension — `commission.responsibility.Suspension` — with its lifecycle state carried by the type.
+///
+/// The one constructor rests in `Pending`, and the only way to change `S` is a method generated from
+/// a declared transition. A move the specification does not declare is therefore not an error
+/// case: it does not compile. Where the state is data — wire, storage — use [`SuspensionSnapshot`]
+/// and [`SuspensionSnapshot::refine`].
+pub struct Suspension<S: suspension_state::Marker> {
+    data: SuspensionData,
+    state: core::marker::PhantomData<S>,
+}
+
+impl<S: suspension_state::Marker> Suspension<S> {
+    /// The state this instance rests in, as the runtime value.
+    pub fn state(&self) -> SuspensionState {
+        S::STATE
+    }
+
+    /// What it holds.
+    pub fn data(&self) -> &SuspensionData {
+        &self.data
+    }
+
+    /// Hands the data back, giving up the typed state.
+    pub fn into_data(self) -> SuspensionData {
+        self.data
+    }
+}
+
+impl Suspension<suspension_state::Pending> {
+    /// A new instance, resting in `Pending` — the only state the lifecycle starts one in.
+    pub fn new(data: SuspensionData) -> Self {
+        Self {
+            data,
+            state: core::marker::PhantomData,
+        }
+    }
+}
+
+impl Suspension<suspension_state::Pending> {
+    /// `take` — `Pending` → `Resuming`. Taken by the `taken` outcome of `commission.responsibility.TakeSuspension`.
+    pub fn take(self) -> Suspension<suspension_state::Resuming> {
+        Suspension {
+            data: self.data,
+            state: core::marker::PhantomData,
+        }
+    }
+}
+
+/// `commission.responsibility.Suspension` as it crosses a boundary: the state as a value beside the data.
+///
+/// Wire and storage know states only at runtime; [`SuspensionSnapshot::refine`] is the one door back
+/// into the typed lifecycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuspensionSnapshot {
+    /// Where the instance is in its lifecycle.
+    pub state: SuspensionState,
+    /// What it holds.
+    pub data: SuspensionData,
+}
+
+/// An `Suspension` in whichever declared state it was found.
+pub enum AnySuspension {
+    /// Resting in `Pending`.
+    Pending(Suspension<suspension_state::Pending>),
+    /// Resting in `Resuming`.
+    Resuming(Suspension<suspension_state::Resuming>),
+}
+
+impl SuspensionSnapshot {
+    /// Refines the runtime state into the typed one.
+    ///
+    /// Total: every declared state has an arm, and an undeclared state cannot reach here because
+    /// `SuspensionState` cannot spell one.
+    pub fn refine(self) -> AnySuspension {
+        match self.state {
+            SuspensionState::Pending => AnySuspension::Pending(Suspension {
+                data: self.data,
+                state: core::marker::PhantomData,
+            }),
+            SuspensionState::Resuming => AnySuspension::Resuming(Suspension {
+                data: self.data,
+                state: core::marker::PhantomData,
+            }),
+        }
+    }
+}
+
+impl AnySuspension {
+    /// The state, as the runtime value.
+    pub fn state(&self) -> SuspensionState {
+        match self {
+            Self::Pending(_) => SuspensionState::Pending,
+            Self::Resuming(_) => SuspensionState::Resuming,
+        }
+    }
+
+    /// Back to the boundary shape.
+    pub fn snapshot(self) -> SuspensionSnapshot {
+        match self {
+            Self::Pending(instance) => SuspensionSnapshot {
+                state: SuspensionState::Pending,
+                data: instance.into_data(),
+            },
+            Self::Resuming(instance) => SuspensionSnapshot {
+                state: SuspensionState::Resuming,
+                data: instance.into_data(),
+            },
+        }
+    }
+}
+
+/// HoldSuspension — the input of `commission.responsibility.HoldSuspension`.
+///
+/// Everything it can result in is [`HoldSuspensionOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HoldSuspension {
+    /// `suspension` — `commission.responsibility.SuspensionKey`.
+    pub suspension: SuspensionKey,
+    /// `commission_id` — `commission.responsibility.CommissionId`.
+    pub commission_id: CommissionId,
+    /// `run_id` — `commission.responsibility.RunId`.
+    pub run_id: RunId,
+    /// `run_case_revision` — `Integer`.
+    pub run_case_revision: i64,
+    /// `action_request_id` — `commission.responsibility.ActionRequestId`.
+    pub action_request_id: ActionRequestId,
+    /// `case_id` — `commission.responsibility.CaseId`.
+    pub case_id: CaseId,
+    /// `expected_case_revision` — `Integer`.
+    pub expected_case_revision: i64,
+    /// `action` — `String`.
+    pub action: String,
+    /// `arguments` — `commission.responsibility.ProposedActionArguments`.
+    pub arguments: ProposedActionArguments,
+    /// `reason` — `commission.responsibility.SuspensionReason`.
+    pub reason: SuspensionReason,
+}
+
+/// Everything `commission.responsibility.HoldSuspension` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HoldSuspensionOutcome {
+    /// `held` — otherwise.
+    Held {
+        /// The `commission.responsibility.SuspensionHeld` this outcome publishes.
+        suspension_held: SuspensionHeld,
+    },
+    /// `already-held` — for an identity a record already carries.
+    AlreadyHeld {
+        /// Why it was refused: `commission.responsibility.SuspensionAlreadyHeld`.
+        error: SuspensionAlreadyHeld,
+    },
+    /// `storage-failed` — externally decided (the suspension port cannot hold the Suspension).
+    StorageFailed {
+        /// Why it was refused: `commission.responsibility.SuspensionStorageFailed`.
+        error: SuspensionStorageFailed,
+    },
+}
+
+/// ReleaseSuspension — the input of `commission.responsibility.ReleaseSuspension`.
+///
+/// Everything it can result in is [`ReleaseSuspensionOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReleaseSuspension {
+    /// `suspension` — `commission.responsibility.SuspensionKey`.
+    pub suspension: SuspensionKey,
+    /// `action_request_id` — `commission.responsibility.ActionRequestId`.
+    pub action_request_id: ActionRequestId,
+}
+
+/// Everything `commission.responsibility.ReleaseSuspension` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReleaseSuspensionOutcome {
+    /// `other-request` — when the existing subject's stored fields satisfy `action_request_id != input.action_request_id`.
+    OtherRequest {
+        /// Why it was refused: `commission.responsibility.SuspensionRequestMismatch`.
+        error: SuspensionRequestMismatch,
+    },
+    /// `not-taken` — when the existing subject's stored fields satisfy `state == Pending`.
+    NotTaken {
+        /// Why it was refused: `commission.responsibility.SuspensionStateConflict`.
+        error: SuspensionStateConflict,
+    },
+    /// `released` — otherwise.
+    Released {
+        /// The `commission.responsibility.SuspensionReleased` this outcome publishes.
+        suspension_released: SuspensionReleased,
+    },
+    /// `not-found` — for an identity no record carries.
+    NotFound {
+        /// Why it was refused: `commission.responsibility.SuspensionNotFound`.
+        error: SuspensionNotFound,
+    },
+    /// `storage-failed` — externally decided (the suspension port cannot remove the Suspension).
+    StorageFailed {
+        /// Why it was refused: `commission.responsibility.SuspensionStorageFailed`.
+        error: SuspensionStorageFailed,
+    },
+}
+
 /// ResumeRun — the input of `commission.responsibility.ResumeRun`.
 ///
 /// Everything it can result in is [`ResumeRunOutcome`].
@@ -2214,6 +2510,11 @@ pub enum ResumeRunOutcome {
     WrongState {
         /// Why it was refused: `commission.responsibility.RunStateConflict`.
         error: RunStateConflict,
+    },
+    /// `storage-failed` — externally decided (the run store cannot record the resumption).
+    StorageFailed {
+        /// Why it was refused: `commission.responsibility.RunStorageFailed`.
+        error: RunStorageFailed,
     },
     /// `wrong-state` — for an instance no record carries.
     ///
@@ -2337,6 +2638,51 @@ pub enum SuspendRunOutcome {
     WrongStateUnknownInstance,
 }
 
+/// TakeSuspension — the input of `commission.responsibility.TakeSuspension`.
+///
+/// Everything it can result in is [`TakeSuspensionOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TakeSuspension {
+    /// `suspension` — `commission.responsibility.SuspensionKey`.
+    pub suspension: SuspensionKey,
+    /// `action_request_id` — `commission.responsibility.ActionRequestId`.
+    pub action_request_id: ActionRequestId,
+}
+
+/// Everything `commission.responsibility.TakeSuspension` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TakeSuspensionOutcome {
+    /// `other-request` — when the existing subject's stored fields satisfy `action_request_id != input.action_request_id`.
+    OtherRequest {
+        /// Why it was refused: `commission.responsibility.SuspensionRequestMismatch`.
+        error: SuspensionRequestMismatch,
+    },
+    /// `taken` — otherwise.
+    Taken {
+        /// The `commission.responsibility.SuspensionTaken` this outcome publishes.
+        suspension_taken: SuspensionTaken,
+    },
+    /// `not-found` — for an identity no record carries.
+    NotFound {
+        /// Why it was refused: `commission.responsibility.SuspensionNotFound`.
+        error: SuspensionNotFound,
+    },
+    /// `wrong-state` — from a state no declared move starts in.
+    WrongState {
+        /// Why it was refused: `commission.responsibility.SuspensionStateConflict`.
+        error: SuspensionStateConflict,
+    },
+    /// `storage-failed` — externally decided (the suspension port cannot record the take).
+    StorageFailed {
+        /// Why it was refused: `commission.responsibility.SuspensionStorageFailed`.
+        error: SuspensionStorageFailed,
+    },
+}
+
 /// RunResumed — the event `commission.responsibility.RunResumed`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunResumed {
@@ -2362,6 +2708,33 @@ pub struct RunSuspended {
     pub run_id: RunId,
     /// `reason` — `commission.responsibility.SuspensionReason`.
     pub reason: SuspensionReason,
+}
+
+/// SuspensionHeld — the event `commission.responsibility.SuspensionHeld`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuspensionHeld {
+    /// `suspension` — `commission.responsibility.SuspensionKey`.
+    pub suspension: SuspensionKey,
+    /// `run_id` — `commission.responsibility.RunId`.
+    pub run_id: RunId,
+    /// `action_request_id` — `commission.responsibility.ActionRequestId`.
+    pub action_request_id: ActionRequestId,
+}
+
+/// SuspensionReleased — the event `commission.responsibility.SuspensionReleased`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuspensionReleased {
+    /// `suspension` — `commission.responsibility.SuspensionKey`.
+    pub suspension: SuspensionKey,
+}
+
+/// SuspensionTaken — the event `commission.responsibility.SuspensionTaken`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuspensionTaken {
+    /// `suspension` — `commission.responsibility.SuspensionKey`.
+    pub suspension: SuspensionKey,
+    /// `action_request_id` — `commission.responsibility.ActionRequestId`.
+    pub action_request_id: ActionRequestId,
 }
 
 /// The declared error `commission.responsibility.ActionNeedsAuthority`.
@@ -2405,6 +2778,47 @@ pub struct RunStorageFailed {
     pub reason: String,
 }
 
+/// The declared error `commission.responsibility.SuspensionAlreadyHeld`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuspensionAlreadyHeld {
+    /// `suspension` — `commission.responsibility.SuspensionKey`.
+    pub suspension: SuspensionKey,
+}
+
+/// The declared error `commission.responsibility.SuspensionNotFound`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuspensionNotFound {
+    /// `suspension` — `commission.responsibility.SuspensionKey`.
+    pub suspension: SuspensionKey,
+}
+
+/// The declared error `commission.responsibility.SuspensionRequestMismatch`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuspensionRequestMismatch {
+    /// `suspension` — `commission.responsibility.SuspensionKey`.
+    pub suspension: SuspensionKey,
+    /// `held_action_request_id` — `commission.responsibility.ActionRequestId`.
+    pub held_action_request_id: ActionRequestId,
+    /// `action_request_id` — `commission.responsibility.ActionRequestId`.
+    pub action_request_id: ActionRequestId,
+}
+
+/// The declared error `commission.responsibility.SuspensionStateConflict`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuspensionStateConflict {
+    /// `state` — `commission.responsibility.Suspension.State`.
+    pub state: SuspensionState,
+    /// `action_request_id` — `commission.responsibility.ActionRequestId`.
+    pub action_request_id: ActionRequestId,
+}
+
+/// The declared error `commission.responsibility.SuspensionStorageFailed`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuspensionStorageFailed {
+    /// `reason` — `String`.
+    pub reason: String,
+}
+
 /// RunStates — one row of the view `commission.responsibility.RunStates`.
 ///
 /// Projects `commission.responsibility.Run` at `read_your_writes` consistency.
@@ -2422,20 +2836,67 @@ pub struct RunStates {
     pub state: RunState,
 }
 
+/// SuspensionStates — one row of the view `commission.responsibility.SuspensionStates`.
+///
+/// Projects `commission.responsibility.Suspension` at `read_your_writes` consistency.
+/// The specification fully determines every row, so its query is generated over the storage port —
+/// see the plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuspensionStates {
+    /// `suspension` — `commission.responsibility.SuspensionKey`.
+    pub suspension: SuspensionKey,
+    /// `commission_id` — `commission.responsibility.CommissionId`.
+    pub commission_id: CommissionId,
+    /// `run_id` — `commission.responsibility.RunId`.
+    pub run_id: RunId,
+    /// `action_request_id` — `commission.responsibility.ActionRequestId`.
+    pub action_request_id: ActionRequestId,
+    /// `state` — `commission.responsibility.Suspension.State`.
+    pub state: SuspensionState,
+}
+
 /// What this bounded context owes its implementor, and the seams of what is generated.
 ///
 /// One trait per obligation in the synthesis plan, each carrying the plan's own contract, and one
 /// per generated behaviour, which [`Generated`](crate::behaviour::Generated) implements.
 /// [`Unimplemented`](obligations::Unimplemented) satisfies every owed trait by refusing in the type system.
 pub mod obligations {
-    /// The behaviour `commission.responsibility.ResumeRun` — generated.
+    /// The behaviour `commission.responsibility.HoldSuspension` — an implementation obligation.
     ///
-    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
-    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    /// Why it is not generated: kept an obligation by the fields of error `commission.responsibility.SuspensionStorageFailed`, which the specification gives no source, in `storage-failed`.
+    ///
+    /// Contract: given `commission.responsibility.HoldSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `held` otherwise, creates `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionHeld`; `already-held` for an identity a record already carries, error `commission.responsibility.SuspensionAlreadyHeld`; `storage-failed` externally decided (the suspension port cannot hold the Suspension), error `commission.responsibility.SuspensionStorageFailed`.
+    pub trait HoldSuspensionBehavior {
+        /// Decides and enacts exactly one declared outcome of `commission.responsibility.HoldSuspension`.
+        ///
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
+        fn hold_suspension(&mut self, input: super::HoldSuspension) -> Result<super::HoldSuspensionOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `commission.responsibility.ReleaseSuspension` — an implementation obligation.
+    ///
+    /// Why it is not generated: kept an obligation by the field `reason` of error `commission.responsibility.SuspensionStorageFailed`, which neither the specification nor the held `commission.responsibility.Suspension` determines, in `storage-failed`.
+    ///
+    /// Contract: given `commission.responsibility.ReleaseSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `other-request` when the existing subject's stored fields satisfy `action_request_id != input.action_request_id`, error `commission.responsibility.SuspensionRequestMismatch`; `not-taken` when the existing subject's stored fields satisfy `state == Pending`, error `commission.responsibility.SuspensionStateConflict`; `released` otherwise, deletes `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionReleased`; `not-found` for an identity no record carries, error `commission.responsibility.SuspensionNotFound`; `storage-failed` externally decided (the suspension port cannot remove the Suspension), error `commission.responsibility.SuspensionStorageFailed`.
+    pub trait ReleaseSuspensionBehavior {
+        /// Decides and enacts exactly one declared outcome of `commission.responsibility.ReleaseSuspension`.
+        ///
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
+        fn release_suspension(&mut self, input: super::ReleaseSuspension) -> Result<super::ReleaseSuspensionOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `commission.responsibility.ResumeRun` — an implementation obligation.
+    ///
+    /// Why it is not generated: kept an obligation by the fields of error `commission.responsibility.RunStorageFailed`, which the specification gives no source, in `storage-failed`.
+    ///
+    /// Contract: given `commission.responsibility.ResumeRun` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `resumed` otherwise, takes `resume` of `commission.responsibility.Run`, emits `commission.responsibility.RunResumed`; `wrong-state` from a state no declared move starts in, error `commission.responsibility.RunStateConflict`, and for an instance no record carries, without the error's fields; `storage-failed` externally decided (the run store cannot record the resumption), error `commission.responsibility.RunStorageFailed`.
     pub trait ResumeRunBehavior {
         /// Decides and enacts exactly one declared outcome of `commission.responsibility.ResumeRun`.
         ///
-        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
         fn resume_run(&mut self, input: super::ResumeRun) -> Result<super::ResumeRunOutcome, crate::obligation::UnmetObligation>;
     }
 
@@ -2478,6 +2939,19 @@ pub mod obligations {
         fn suspend_run(&mut self, input: super::SuspendRun) -> Result<super::SuspendRunOutcome, crate::obligation::UnmetObligation>;
     }
 
+    /// The behaviour `commission.responsibility.TakeSuspension` — an implementation obligation.
+    ///
+    /// Why it is not generated: kept an obligation by the field `reason` of error `commission.responsibility.SuspensionStorageFailed`, which neither the specification nor the held `commission.responsibility.Suspension` determines, in `storage-failed`.
+    ///
+    /// Contract: given `commission.responsibility.TakeSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `other-request` when the existing subject's stored fields satisfy `action_request_id != input.action_request_id`, error `commission.responsibility.SuspensionRequestMismatch`; `taken` otherwise, takes `take` of `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionTaken`; `not-found` for an identity no record carries, error `commission.responsibility.SuspensionNotFound`; `wrong-state` from a state no declared move starts in, error `commission.responsibility.SuspensionStateConflict`; `storage-failed` externally decided (the suspension port cannot record the take), error `commission.responsibility.SuspensionStorageFailed`.
+    pub trait TakeSuspensionBehavior {
+        /// Decides and enacts exactly one declared outcome of `commission.responsibility.TakeSuspension`.
+        ///
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
+        fn take_suspension(&mut self, input: super::TakeSuspension) -> Result<super::TakeSuspensionOutcome, crate::obligation::UnmetObligation>;
+    }
+
     /// The query `commission.responsibility.RunStates` — generated.
     ///
     /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
@@ -2489,11 +2963,40 @@ pub mod obligations {
         fn run_states(&self) -> Result<Vec<super::RunStates>, crate::obligation::UnmetObligation>;
     }
 
+    /// The query `commission.responsibility.SuspensionStates` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage port. Implement it yourself to replace that query.
+    pub trait SuspensionStatesQuery {
+        /// Serves `commission.responsibility.SuspensionStates` rows at the view's declared consistency.
+        ///
+        /// `Err` is the typed refusal of a row whose declared type cannot hold its value.
+        fn suspension_states(&self) -> Result<Vec<super::SuspensionStates>, crate::obligation::UnmetObligation>;
+    }
+
     /// Every obligation of this bounded context, refused in the type system.
     ///
     /// Each method returns the typed refusal naming what is owed — never a panic, never a guessed
     /// value — so a workspace built on this stub compiles and reports its own gaps.
     pub struct Unimplemented;
+
+    impl HoldSuspensionBehavior for Unimplemented {
+        fn hold_suspension(&mut self, _input: super::HoldSuspension) -> Result<super::HoldSuspensionOutcome, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "commission.responsibility.HoldSuspension" })
+        }
+    }
+
+    impl ReleaseSuspensionBehavior for Unimplemented {
+        fn release_suspension(&mut self, _input: super::ReleaseSuspension) -> Result<super::ReleaseSuspensionOutcome, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "commission.responsibility.ReleaseSuspension" })
+        }
+    }
+
+    impl ResumeRunBehavior for Unimplemented {
+        fn resume_run(&mut self, _input: super::ResumeRun) -> Result<super::ResumeRunOutcome, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "commission.responsibility.ResumeRun" })
+        }
+    }
 
     impl RevalidateActionRequestBehavior for Unimplemented {
         fn revalidate_action_request(&mut self, _input: super::RevalidateActionRequest) -> Result<super::RevalidateActionRequestOutcome, crate::obligation::UnmetObligation> {
@@ -2510,6 +3013,12 @@ pub mod obligations {
     impl SuspendRunBehavior for Unimplemented {
         fn suspend_run(&mut self, _input: super::SuspendRun) -> Result<super::SuspendRunOutcome, crate::obligation::UnmetObligation> {
             Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "commission.responsibility.SuspendRun" })
+        }
+    }
+
+    impl TakeSuspensionBehavior for Unimplemented {
+        fn take_suspension(&mut self, _input: super::TakeSuspension) -> Result<super::TakeSuspensionOutcome, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "commission.responsibility.TakeSuspension" })
         }
     }
 }
