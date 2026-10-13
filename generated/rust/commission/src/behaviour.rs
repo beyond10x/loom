@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 1ba42c043f9934dcbbb38e6d540f230eda0871defa63756e7c3db7d01b3050c3
-// contract digest 9f2ffaa60ef43fd8f3ad719e5f980e33a4fc329e9ba4c5a990bbcfa1579a3135
+// model digest 38b8acbd65a0405d8e8080d91f671bb5dd9c73ab42c29aa2b87b1502f66fa167
+// contract digest 5b62b713b7f16745e0bcdee1eab0e84186e1374ae08b7590fde1278b345879af
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -38,6 +38,24 @@ pub trait RunStorage {
     fn list(&self) -> Vec<crate::responsibility::RunSnapshot>;
 }
 
+/// Where `commission.responsibility.Suspension` is stored — a port the implementor provides.
+///
+/// Keyed by the identity `suspension`. Generated network entries supply an ephemeral implementation; durable storage remains a port.
+pub trait SuspensionStorage {
+    /// The instance with this identity, or `None` where none is stored.
+    fn get(&self, identity: &crate::responsibility::SuspensionKey) -> Option<crate::responsibility::SuspensionSnapshot>;
+
+    /// Stores this instance under its identity, replacing what was held.
+    fn put(&mut self, snapshot: crate::responsibility::SuspensionSnapshot);
+
+    /// Removes the instance with this identity.
+    fn delete(&mut self, identity: &crate::responsibility::SuspensionKey);
+
+    /// Every stored instance, in the order the store keeps them: the order a generated query
+    /// answers an unordered view in.
+    fn list(&self) -> Vec<crate::responsibility::SuspensionSnapshot>;
+}
+
 /// Every generated behaviour of this workspace, over the ports `P` supplies.
 ///
 /// `P` implements the storage trait of each entity a generated behaviour reads or writes, and
@@ -54,27 +72,21 @@ impl<P> Generated<P> {
     }
 }
 
-/// `commission.responsibility.ResumeRun`, generated: every outcome is one the specification fully determines.
-impl<P> crate::responsibility::obligations::ResumeRunBehavior for Generated<P>
-where
-    P: RunStorage,
-{
+impl<P: crate::responsibility::obligations::HoldSuspensionBehavior> crate::responsibility::obligations::HoldSuspensionBehavior for Generated<P> {
+    fn hold_suspension(&mut self, input: crate::responsibility::HoldSuspension) -> Result<crate::responsibility::HoldSuspensionOutcome, UnmetObligation> {
+        crate::responsibility::obligations::HoldSuspensionBehavior::hold_suspension(&mut self.ports, input)
+    }
+}
+
+impl<P: crate::responsibility::obligations::ReleaseSuspensionBehavior> crate::responsibility::obligations::ReleaseSuspensionBehavior for Generated<P> {
+    fn release_suspension(&mut self, input: crate::responsibility::ReleaseSuspension) -> Result<crate::responsibility::ReleaseSuspensionOutcome, UnmetObligation> {
+        crate::responsibility::obligations::ReleaseSuspensionBehavior::release_suspension(&mut self.ports, input)
+    }
+}
+
+impl<P: crate::responsibility::obligations::ResumeRunBehavior> crate::responsibility::obligations::ResumeRunBehavior for Generated<P> {
     fn resume_run(&mut self, input: crate::responsibility::ResumeRun) -> Result<crate::responsibility::ResumeRunOutcome, UnmetObligation> {
-        let _ = &input;
-        // `resumed`: the default.
-        let Some(held) = RunStorage::get(&self.ports, &input.run_id) else {
-            return Ok(crate::responsibility::ResumeRunOutcome::WrongStateUnknownInstance);
-        };
-        let _ = &held;
-        let held_state = held.state;
-        let moved = match held.refine() {
-            crate::responsibility::AnyRun::Suspended(instance) => crate::responsibility::AnyRun::Running(instance.resume()),
-            _ => return Ok(crate::responsibility::ResumeRunOutcome::WrongState { error: crate::responsibility::RunStateConflict { state: held_state } }),
-        };
-        let next = moved.snapshot();
-        let answer = crate::responsibility::ResumeRunOutcome::Resumed { run_resumed: crate::responsibility::RunResumed { run_id: input.run_id.clone() } };
-        RunStorage::put(&mut self.ports, next);
-        return Ok(answer);
+        crate::responsibility::obligations::ResumeRunBehavior::resume_run(&mut self.ports, input)
     }
 }
 
@@ -96,6 +108,12 @@ impl<P: crate::responsibility::obligations::SuspendRunBehavior> crate::responsib
     }
 }
 
+impl<P: crate::responsibility::obligations::TakeSuspensionBehavior> crate::responsibility::obligations::TakeSuspensionBehavior for Generated<P> {
+    fn take_suspension(&mut self, input: crate::responsibility::TakeSuspension) -> Result<crate::responsibility::TakeSuspensionOutcome, UnmetObligation> {
+        crate::responsibility::obligations::TakeSuspensionBehavior::take_suspension(&mut self.ports, input)
+    }
+}
+
 /// `commission.responsibility.RunStates`, generated: every row is one the specification fully determines from the stored `commission.responsibility.Run`s.
 impl<P> crate::responsibility::obligations::RunStatesQuery for Generated<P>
 where
@@ -109,6 +127,26 @@ where
                 run_id: held.data.run_id,
                 commission_id: held.data.commission_id,
                 case_revision: held.data.case_revision,
+                state: held.state,
+            })
+            .collect())
+    }
+}
+
+/// `commission.responsibility.SuspensionStates`, generated: every row is one the specification fully determines from the stored `commission.responsibility.Suspension`s.
+impl<P> crate::responsibility::obligations::SuspensionStatesQuery for Generated<P>
+where
+    P: SuspensionStorage,
+{
+    fn suspension_states(&self) -> Result<Vec<crate::responsibility::SuspensionStates>, UnmetObligation> {
+        let admitted = SuspensionStorage::list(&self.ports);
+        Ok(admitted
+            .into_iter()
+            .map(|held| crate::responsibility::SuspensionStates {
+                suspension: held.data.suspension,
+                commission_id: held.data.commission_id,
+                run_id: held.data.run_id,
+                action_request_id: held.data.action_request_id,
                 state: held.state,
             })
             .collect())

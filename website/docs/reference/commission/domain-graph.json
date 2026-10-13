@@ -425,6 +425,77 @@
         ]
       },
       "name": "Run"
+    },
+    {
+      "createdBy": [
+        "HoldSuspension"
+      ],
+      "fields": [
+        {
+          "name": "commission_id",
+          "type": "CommissionId"
+        },
+        {
+          "name": "run_id",
+          "type": "RunId"
+        },
+        {
+          "name": "run_case_revision",
+          "type": "integer"
+        },
+        {
+          "name": "action_request_id",
+          "type": "ActionRequestId"
+        },
+        {
+          "name": "case_id",
+          "type": "CaseId"
+        },
+        {
+          "name": "expected_case_revision",
+          "type": "integer"
+        },
+        {
+          "name": "action",
+          "type": "string"
+        },
+        {
+          "name": "arguments",
+          "type": "ProposedActionArguments"
+        },
+        {
+          "name": "reason",
+          "type": "SuspensionReason"
+        }
+      ],
+      "id": "commission.responsibility.Suspension",
+      "identity": {
+        "name": "suspension",
+        "type": "SuspensionKey"
+      },
+      "lifecycle": {
+        "initial": "Pending",
+        "states": [
+          "Pending",
+          "Resuming"
+        ],
+        "terminal": [
+          "Resuming"
+        ],
+        "transitions": [
+          {
+            "commands": [
+              "TakeSuspension"
+            ],
+            "from": [
+              "Pending"
+            ],
+            "name": "take",
+            "to": "Resuming"
+          }
+        ]
+      },
+      "name": "Suspension"
     }
   ],
   "format": "b10x-domain-graph/1",
@@ -495,6 +566,14 @@
     },
     {
       "cardinality": "one",
+      "from": "commission.responsibility.Commission",
+      "kind": "owns",
+      "name": "suspension",
+      "to": "commission.responsibility.Suspension",
+      "via": "commission_id"
+    },
+    {
+      "cardinality": "one",
       "from": "commission.responsibility.Evidence",
       "kind": "references",
       "name": "case",
@@ -524,6 +603,30 @@
       "name": "requests",
       "to": "commission.responsibility.ActionRequest",
       "via": "run_id"
+    },
+    {
+      "cardinality": "one",
+      "from": "commission.responsibility.Suspension",
+      "kind": "references",
+      "name": "run",
+      "to": "commission.responsibility.Run",
+      "via": "run_id"
+    },
+    {
+      "cardinality": "one",
+      "from": "commission.responsibility.Suspension",
+      "kind": "references",
+      "name": "action_request",
+      "to": "commission.responsibility.ActionRequest",
+      "via": "action_request_id"
+    },
+    {
+      "cardinality": "one",
+      "from": "commission.responsibility.Suspension",
+      "kind": "references",
+      "name": "case",
+      "to": "commission.responsibility.Case",
+      "via": "case_id"
     }
   ]
 }

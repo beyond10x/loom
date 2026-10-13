@@ -128,23 +128,76 @@
 //! reported, not stored on the Run. A run store that answers `storage-failed` is reported as
 //! [`LoopFailure::RunStorage`]: from `StartRun`, the loop ends with no Run named before any
 //! executor, authority or effect call; from `SuspendRun`, as the suspension's failure.
+//!
+//! # Suspending on an approval, and resuming after a restart
+//!
+//! [`run_with_suspension`] is the same loop given a suspension port ([`SuspensionPort`],
+//! `story:approval-suspend-resume-slice`). It differs in two places. Before anything else it reads
+//! the port: a commission that holds a Suspension, `Pending` or `Resuming`, starts no Run
+//! ([`LoopFailure::CommissionSuspended`], naming its state and request; a port that cannot be read
+//! is [`LoopFailure::SuspensionStore`]), and nothing is performed. And when a step's request needs
+//! authority and the provider answers `ApprovalRequired`, so the run ends `NeedsAuthority` (8), the
+//! Run is first suspended through `SuspendRun` with `SuspensionReason::Authority`, whose payload
+//! names the `capability` and the provider's `request`, and the commission's Suspension — the Run,
+//! the pending request and that reason — is held `Pending` through the port (`HoldSuspension`).
+//! The caller sees the same [`LoopEnd`] as without a port. A `SuspendRun` that fails ends the loop
+//! as on any other suspension, and no Suspension is held; a Suspension the port cannot hold ends it
+//! with [`LoopFailure::RunStorage`] (`storage-failed`) or [`LoopFailure::SuspensionNotHeld`], the
+//! Run suspended, its reason in [`LoopError::suspension_reason`]. [`run_until_blocked`] passes no
+//! port, reads none and never suspends a Run on an approval, as in 0.16.0.
+//!
+//! [`resume_after_grant`] continues the same Run from the stored Suspension alone, in a process
+//! that need not be the one that suspended it. In this order: the Suspension is read
+//! ([`ResumeRefusal::NothingSuspended`] when none is stored; [`ResumeRefusal::InDoubt`], naming its
+//! request, when it is `Resuming`); it must be the commission's, on its case; the case is loaded,
+//! and a revision other than the request's ends it with [`ResumeRefusal::CaseMoved`]; the request
+//! is revalidated as the loop revalidates one (8), and a request that still needs authority is
+//! resumed only on the provider's allow ([`ResumeRefusal::NotGranted`]); the effect port must
+//! perform its action. Then the Run is put back into a run store that does not hold it,
+//! `Suspended` at the case revision it started at, and resumed through `ResumeRun`. The Suspension
+//! is then taken through the port for the request read and revalidated (`TakeSuspension`,
+//! `Pending` → `Resuming`): of two resumes one takes it, and the other is refused,
+//! [`ResumeRefusal::NothingSuspended`] when the first already released it,
+//! [`ResumeRefusal::InDoubt`] when it is still `Resuming`, and [`ResumeRefusal::OtherRequest`],
+//! naming both requests, when the commission holds a Suspension for another request by then (the
+//! first resumed it in full and the commission was suspended again), which is kept as it is; a take
+//! the port cannot record ends the resume with [`LoopFailure::RunStorage`]. On any answer but
+//! `taken` the Run is suspended again in the run store with its stored reason, no Suspension is
+//! held, and nothing is performed. The request, under its own id and at its own revision, is handed
+//! to [`EffectPort::invoke`] once, recorded and observed as the loop does (8), and the Suspension is
+//! released for that request (`ReleaseSuspension`), removed; a release the port refuses ends the
+//! loop with [`LoopFailure::SuspensionNotReleased`], naming the performed request. That is the resumed Run's
+//! first step ([`LoopEnd::steps`]); the loop holds no frontier an executor was handed for it, so
+//! the next iteration reads no approval gate (5), as after a step performed under a grant. The loop
+//! goes on from that iteration, holding the case at the revision the request was made at, or at the
+//! one a `Performed` effect moved it to (1). A refusal, and any failure before the take, performs
+//! nothing and leaves the Suspension `Pending`. A process that stops after the take and before the
+//! release — a crash, an effect port or a governor that fails — leaves it `Resuming`: the request
+//! may have been performed, so it is never performed again from the Suspension, which stays stored
+//! as its durable trace; every later resume is refused [`ResumeRefusal::InDoubt`], and settling the
+//! request is the host's.
 #![forbid(unsafe_code)]
 
 use std::fmt;
 
 use crate::action_request::{request, revalidate};
+use crate::model::behaviour::RunStorage;
 use crate::model::json::Value;
 use crate::model::obligation::UnmetObligation;
 use crate::model::primitives::Timestamp;
-use crate::model::responsibility::obligations::{StartRunBehavior, SuspendRunBehavior};
+use crate::model::responsibility::obligations::{
+    ResumeRunBehavior, StartRunBehavior, SuspendRunBehavior,
+};
 use crate::model::responsibility::{
-    ActionRequestData, ActionRequestId, ActionStatus, AuthorityVerdict, CaseId, Commission,
-    CompletionDetermination, EffectOutcome, ExecutorOutcome, Frontier, FrontierAction,
-    FrontierData, GovernorError, Observation, ObservationData, ObservationId,
-    RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeAwaitingApproval,
-    RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeSuspended, RunStarted, RunStorageFailed,
-    StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionReason, Unit,
-    commission_state, frontier_state, observation_state,
+    ActionRequest, ActionRequestData, ActionRequestId, ActionStatus, AnyRun, AuthorityVerdict,
+    CaseId, Commission, CompletionDetermination, EffectOutcome, ExecutorOutcome, Frontier,
+    FrontierAction, FrontierData, GovernorError, HoldSuspension, HoldSuspensionOutcome,
+    Observation, ObservationData, ObservationId, ReleaseSuspension, ReleaseSuspensionOutcome,
+    ResumeRun, ResumeRunOutcome, RevalidateActionRequestOutcome, Run, RunData, RunId, RunOutcome,
+    RunOutcomeAwaitingApproval, RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeSuspended,
+    RunStarted, RunStorageFailed, StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome,
+    SuspensionKey, SuspensionReason, SuspensionState, SuspensionStateConflict, TakeSuspension,
+    TakeSuspensionOutcome, Unit, commission_state, frontier_state, observation_state,
 };
 use crate::outcome::{CapabilityVerdict, Derived, derive};
 use crate::ports::authority::{AuthorityCheck, AuthorityProvider, check_authority};
@@ -152,6 +205,7 @@ use crate::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use crate::ports::evidence::ObservationPort;
 use crate::ports::executor::AgentExecutor;
 use crate::ports::governor::Governor;
+use crate::ports::suspension::{SuspensionPort, SuspensionStoreError};
 
 /// The source of the observation of an executor step.
 pub const EXECUTOR_SOURCE: &str = "executor";
@@ -218,8 +272,40 @@ pub enum LoopFailure {
     /// The effect port could not answer for an admitted request.
     Effect(EffectError),
     /// The run store could not hold the new run (`StartRun`) or record its suspension
-    /// (`SuspendRun`): their `storage-failed` outcome.
+    /// (`SuspendRun`): their `storage-failed` outcome. Also the suspension port's `storage-failed`
+    /// when it cannot hold a Suspension (`HoldSuspension`) or record a resume's take
+    /// (`TakeSuspension`).
     RunStorage(RunStorageFailed),
+    /// [`run_with_suspension`] started no Run: the commission holds a Suspension, in this state and
+    /// for this request. Nothing was performed.
+    CommissionSuspended(SuspensionStateConflict),
+    /// The suspension port could not be read before a Run started. Nothing was performed.
+    SuspensionStore(SuspensionStoreError),
+    /// `HoldSuspension` did not store the Run's Suspension, for a reason other than storage.
+    SuspensionNotHeld(Box<HoldSuspensionOutcome>),
+    /// `ReleaseSuspension` did not remove the Suspension a resume took, after the request it names
+    /// was performed. [`UnreleasedSuspension::outcome`] says what the port left stored.
+    SuspensionNotReleased(Box<UnreleasedSuspension>),
+}
+
+/// A release of the Suspension a resume took that did not remove it, after its request was
+/// performed: the effect port answered for it and the governor observed the answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnreleasedSuspension {
+    /// The request that was performed, the one the resume took the Suspension for.
+    pub action_request_id: ActionRequestId,
+    /// What `ReleaseSuspension` answered, and so what is stored for the commission:
+    ///
+    /// * `storage-failed`: the port changed nothing, and the Suspension stays `Resuming` for this
+    ///   request, in doubt: every later resume is refused [`ResumeRefusal::InDoubt`], and settling
+    ///   it is the host's;
+    /// * `not-found`: no Suspension is stored for the commission (something other than this resume
+    ///   removed it), so nothing durable records that the request was performed;
+    /// * `other-request`: a Suspension for another request is stored, as it was; nothing stored
+    ///   names this request;
+    /// * `not-taken`: a `Pending` Suspension for this request is stored, as it was, and a later
+    ///   resume may take it and perform the request again.
+    pub outcome: ReleaseSuspensionOutcome,
 }
 
 impl fmt::Display for LoopFailure {
@@ -230,6 +316,18 @@ impl fmt::Display for LoopFailure {
             Self::NotSuspended(outcome) => write!(f, "run not suspended: {outcome:?}"),
             Self::Effect(error) => error.fmt(f),
             Self::RunStorage(failed) => write!(f, "run store failed: {}", failed.reason),
+            Self::CommissionSuspended(held) => write!(
+                f,
+                "the commission holds a {:?} Suspension for request {}",
+                held.state, held.action_request_id.0.0
+            ),
+            Self::SuspensionStore(error) => error.fmt(f),
+            Self::SuspensionNotHeld(outcome) => write!(f, "suspension not held: {outcome:?}"),
+            Self::SuspensionNotReleased(unreleased) => write!(
+                f,
+                "suspension not released after request {} was performed: {:?}",
+                unreleased.action_request_id.0.0, unreleased.outcome
+            ),
         }
     }
 }
@@ -277,6 +375,76 @@ impl fmt::Display for LoopError {
 }
 
 impl std::error::Error for LoopError {}
+
+/// Why [`resume_after_grant`] resumed nothing. Nothing was performed, and the Suspension, when one
+/// was stored, is stored as it was.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResumeRefusal {
+    /// The suspension port holds no Suspension for the commission, or another resume took and
+    /// released it first (`TakeSuspension` answered `not-found`).
+    NothingSuspended,
+    /// The commission's Suspension is `Resuming`: a resume took it and did not release it, so its
+    /// request may have been performed or not. It is never performed again from the Suspension,
+    /// which stays stored; settling the request is the host's.
+    InDoubt {
+        /// The request whose performance is in doubt.
+        action_request_id: ActionRequestId,
+    },
+    /// The commission's Suspension is held for another request than the one this resume read and
+    /// revalidated (`TakeSuspension` answered `other-request`): it was resumed and replaced since.
+    /// That Suspension is kept as it is, and neither request is performed.
+    OtherRequest {
+        /// The request this resume read from the Suspension and revalidated.
+        action_request_id: ActionRequestId,
+        /// The request the Suspension now stored is held for.
+        held_action_request_id: ActionRequestId,
+    },
+    /// The stored Suspension, or the run the run store holds under its run id, names another
+    /// commission, case or run revision than the one given.
+    OtherCommission,
+    /// The case is no longer at the revision the request was suspended at.
+    CaseMoved {
+        /// The revision the request was suspended at.
+        expected_case_revision: i64,
+        /// The case's current revision.
+        current_case_revision: i64,
+    },
+    /// The current frontier refuses the request's action: its revalidation answered this.
+    NotAdmitted(RevalidateActionRequestOutcome),
+    /// The request still needs authority, and the provider did not allow it.
+    NotGranted(AuthorityCheck),
+    /// The effect port does not perform the request's action.
+    NotPerformed,
+    /// The run store does not hold the Run suspended: `ResumeRun` answered this.
+    RunNotSuspended(ResumeRunOutcome),
+}
+
+/// Why [`resume_after_grant`] returned no run outcome.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResumeError {
+    /// Nothing was resumed; why.
+    Refused(ResumeRefusal),
+    /// The suspension port could not be read. Nothing was resumed.
+    Store(SuspensionStoreError),
+    /// The governor could not answer before the Run resumed. Nothing was resumed.
+    Governor(GovernorError),
+    /// `ResumeRun` failed, the Suspension could not be taken, or the resumed loop stopped without
+    /// a run outcome.
+    Loop(LoopError),
+}
+
+impl fmt::Display for ResumeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refused(refusal) => write!(f, "resume refused: {refusal:?}"),
+            Self::Store(error) => error.fmt(f),
+            Self::Governor(error) => write!(f, "governor failed: {error:?}"),
+            Self::Loop(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for ResumeError {}
 
 /// A failure before the Run started.
 fn unstarted(failure: impl Into<LoopFailure>) -> LoopError {
@@ -344,7 +512,79 @@ where
     R: StartRunBehavior + SuspendRunBehavior + ?Sized,
     C: LoopContext + ?Sized,
 {
-    let revision = governor
+    let ports = Ports {
+        governor,
+        executor,
+        authority,
+        effects,
+        suspensions: None,
+    };
+    start(&ports, commission, runs, context)
+}
+
+/// Runs `commission` until its run ends, as [`run_until_blocked`] does, suspending the Run into
+/// `suspensions` when it ends on an approval the provider withholds, as the module documents.
+// The ports of `run_until_blocked`, and the suspension port.
+#[allow(clippy::too_many_arguments)]
+pub fn run_with_suspension<G, E, A, F, R, C>(
+    governor: &G,
+    executor: &E,
+    authority: &A,
+    effects: &F,
+    commission: &Commission<commission_state::Assigned>,
+    runs: &mut R,
+    suspensions: &dyn SuspensionPort,
+    context: &mut C,
+) -> Result<LoopEnd, LoopError>
+where
+    G: Governor + ObservationPort + ?Sized,
+    E: AgentExecutor + ?Sized,
+    A: AuthorityProvider + ?Sized,
+    F: EffectPort + ?Sized,
+    R: StartRunBehavior + SuspendRunBehavior + ?Sized,
+    C: LoopContext + ?Sized,
+{
+    // A commission holding a Suspension, `Pending` or `Resuming`, starts no new Run: its request
+    // is resumed, or settled by the host, from that Suspension alone.
+    match suspensions.get(&commission.data().commission_id) {
+        Err(error) => return Err(unstarted(LoopFailure::SuspensionStore(error))),
+        Ok(Some(held)) => {
+            return Err(unstarted(LoopFailure::CommissionSuspended(
+                SuspensionStateConflict {
+                    state: held.state,
+                    action_request_id: held.data.action_request_id,
+                },
+            )));
+        }
+        Ok(None) => {}
+    }
+    let ports = Ports {
+        governor,
+        executor,
+        authority,
+        effects,
+        suspensions: Some(suspensions),
+    };
+    start(&ports, commission, runs, context)
+}
+
+/// Starts a Run of `commission` and drives it until it ends.
+fn start<G, E, A, F, R, C>(
+    ports: &Ports<'_, G, E, A, F>,
+    commission: &Commission<commission_state::Assigned>,
+    runs: &mut R,
+    context: &mut C,
+) -> Result<LoopEnd, LoopError>
+where
+    G: Governor + ObservationPort + ?Sized,
+    E: AgentExecutor + ?Sized,
+    A: AuthorityProvider + ?Sized,
+    F: EffectPort + ?Sized,
+    R: StartRunBehavior + SuspendRunBehavior + ?Sized,
+    C: LoopContext + ?Sized,
+{
+    let revision = ports
+        .governor
         .current_revision(&commission.data().case_id)
         .map_err(unstarted)?;
     let run_started = match runs
@@ -359,14 +599,26 @@ where
             return Err(unstarted(LoopFailure::RunStorage(error)));
         }
     };
-    let ports = Ports {
-        governor,
-        executor,
-        authority,
-        effects,
-    };
-    let result = iterate(&ports, commission, runs, context, &run_started);
-    let run_id = run_started.run_id;
+    let result = iterate(
+        ports,
+        commission,
+        runs,
+        context,
+        &run_started,
+        run_started.case_revision,
+        None,
+    );
+    finish(runs, run_started.run_id, result)
+}
+
+/// The loop's answer for the Run `run_id`: its end, or the error naming it, after suspending the
+/// Run for `ExternalAvailability` when a governor or effect failure stopped it and nothing
+/// suspended it yet.
+fn finish<R: SuspendRunBehavior + ?Sized>(
+    runs: &mut R,
+    run_id: RunId,
+    result: Result<LoopEnd, Stopped>,
+) -> Result<LoopEnd, LoopError> {
     let Stopped { failure, suspended } = match result {
         Ok(end) => return Ok(end),
         Err(stopped) => stopped,
@@ -403,6 +655,17 @@ struct Ports<'p, G: ?Sized, E: ?Sized, A: ?Sized, F: ?Sized> {
     executor: &'p E,
     authority: &'p A,
     effects: &'p F,
+    /// Where a Run ended on a withheld approval is suspended to; `None` suspends none.
+    suspensions: Option<&'p dyn SuspensionPort>,
+}
+
+/// A suspended request [`resume_after_grant`] revalidated and admitted, which the resumed loop
+/// hands to the effect port before its first iteration.
+struct Resumed {
+    request: ActionRequestData,
+    answer: RevalidateActionRequestOutcome,
+    /// The Suspension the resume took, released once the effect port answered for the request.
+    taken: SuspensionKey,
 }
 
 /// What one loop has made so far.
@@ -429,13 +692,18 @@ impl Track {
     }
 }
 
-/// The iterations of the loop of the started Run `run`, whose case was loaded at its revision.
+/// The iterations of the loop of the Run `run`, holding its case at `held`: the Run's own revision
+/// for a Run just started, whose case was loaded at it; for a resumed Run, the revision its
+/// suspended request was made at, which [`resume_after_grant`] loaded. A resumed Run first hands
+/// its request to the effect port, as the module documents.
 fn iterate<G, E, A, F, R, C>(
     ports: &Ports<'_, G, E, A, F>,
     commission: &Commission<commission_state::Assigned>,
     runs: &mut R,
     context: &mut C,
     run: &RunStarted,
+    held: i64,
+    resumed: Option<Resumed>,
 ) -> Result<LoopEnd, Stopped>
 where
     G: Governor + ObservationPort + ?Sized,
@@ -450,13 +718,14 @@ where
         executor,
         authority,
         effects,
+        suspensions,
     } = *ports;
     let case = &commission.data().case_id;
     let run_id = &run.run_id;
     let budget = context.step_budget();
     let mut track = Track::default();
     // The revision the loop holds the case at: the Run's, or one its own effect moved the case to.
-    let mut held = run.case_revision;
+    let mut held = held;
     // Whether the previous iteration invoked an effect.
     let mut effected = false;
     // Whether the previous iteration admitted no request.
@@ -472,6 +741,49 @@ where
     let mut after_stale = false;
 
     let limit = budget.unwrap_or(UNBUDGETED_STEP_LIMIT);
+
+    // A resumed Run's suspended request is performed once, as an admitted request is (8). The loop
+    // holds no frontier an executor was handed for that step, so no gate is pending after it (5).
+    // Once the effect port answered and the governor observed its answer, the request is no
+    // longer in doubt and the Suspension the resume took is released. An effect port or a governor
+    // that fails first leaves it `Resuming`.
+    if let Some(Resumed {
+        request: data,
+        answer,
+        taken,
+    }) = resumed
+    {
+        first = false;
+        track.requests.push(Revalidated {
+            request: data.clone(),
+            outcome: answer,
+        });
+        track.admitted.push(data.clone());
+        let effect = effects
+            .invoke(commission, &AdmittedRequest::new(data.clone()))
+            .map_err(|error| Stopped::from(LoopFailure::Effect(error)))?;
+        track.effects.push(effect.clone());
+        governor.observe(effect_observation(context, &data, &effect))?;
+        if let Some(port) = suspensions {
+            match port.release(ReleaseSuspension {
+                suspension: taken,
+                action_request_id: data.action_request_id.clone(),
+            }) {
+                ReleaseSuspensionOutcome::Released { .. } => {}
+                outcome => {
+                    return Err(LoopFailure::SuspensionNotReleased(Box::new(
+                        UnreleasedSuspension {
+                            action_request_id: data.action_request_id,
+                            outcome,
+                        },
+                    ))
+                    .into());
+                }
+            }
+        }
+        effected = matches!(effect, EffectOutcome::Performed(_));
+        track.steps += 1;
+    }
 
     loop {
         // With the budget used up, a pending approval gate is still read and checked first, after
@@ -584,6 +896,8 @@ where
         // Whether this step's request needed authority, the provider allowed it and the effect
         // port performed it: such a step passes the approval gate (5).
         let mut granted = false;
+        // This step's request, when its revalidation answered that it needs authority.
+        let mut pending: Option<ActionRequestData> = None;
         if let ExecutorOutcome::ProposedAction(proposed) = &outcome {
             let made = request(
                 context.action_request_id(),
@@ -609,6 +923,7 @@ where
                 // Not counted toward the idle bound: the next iteration's load ends the run.
                 RevalidateActionRequestOutcome::Stale { .. } => stale = true,
                 RevalidateActionRequestOutcome::NeedsAuthority { error } => {
+                    pending = Some(data.clone());
                     if let AuthorityCheck::Decided(answer) =
                         check_authority(authority, commission, &error.capability)
                     {
@@ -657,6 +972,21 @@ where
                 {
                     return Ok(track.end(run_id, ended));
                 }
+                // With a suspension port, a run that ends on an approval the provider withholds is
+                // suspended, and its Suspension stored, before the caller hears of it.
+                if let (
+                    Some(port),
+                    RunOutcome::NeedsAuthority(_),
+                    Some(request),
+                    Some((capability, AuthorityVerdict::ApprovalRequired(required))),
+                ) = (suspensions, &derived, &pending, &verdict)
+                {
+                    let reason = SuspensionReason::Authority(Value::Object(vec![
+                        ("capability".to_owned(), Value::Text(capability.clone())),
+                        ("request".to_owned(), Value::Text(required.request.clone())),
+                    ]));
+                    suspend_for_approval(runs, port, run, request, reason)?;
+                }
                 return Ok(track.end(run_id, derived));
             }
         }
@@ -696,6 +1026,248 @@ fn out_of_budget<R: SuspendRunBehavior + ?Sized>(
     }
     let outcome = RunOutcome::Suspended(RunOutcomeSuspended { reason });
     Ok(track.end(run_id, outcome))
+}
+
+/// Suspends the Run `run` for `reason` and holds the commission's Suspension, holding the Run and
+/// `request`, through `port` (`HoldSuspension`). The Suspension is not held when the Run could not
+/// be suspended.
+fn suspend_for_approval<R: SuspendRunBehavior + ?Sized>(
+    runs: &mut R,
+    port: &dyn SuspensionPort,
+    run: &RunStarted,
+    request: &ActionRequestData,
+    reason: SuspensionReason,
+) -> Result<(), Stopped> {
+    if let Err(failure) = suspend(runs, &run.run_id, reason.clone()) {
+        return Err(Stopped {
+            failure,
+            suspended: Some((reason, None)),
+        });
+    }
+    let failure = match port.hold(HoldSuspension {
+        suspension: SuspensionKey {
+            commission_id: run.commission_id.clone(),
+        },
+        commission_id: run.commission_id.clone(),
+        run_id: run.run_id.clone(),
+        run_case_revision: run.case_revision,
+        action_request_id: request.action_request_id.clone(),
+        case_id: request.case_id.clone(),
+        expected_case_revision: request.expected_case_revision,
+        action: request.action.clone(),
+        arguments: request.arguments.clone(),
+        reason: reason.clone(),
+    }) {
+        HoldSuspensionOutcome::Held { .. } => return Ok(()),
+        HoldSuspensionOutcome::StorageFailed { error } => {
+            LoopFailure::RunStorage(RunStorageFailed {
+                reason: error.reason,
+            })
+        }
+        other => LoopFailure::SuspensionNotHeld(Box::new(other)),
+    };
+    Err(Stopped {
+        failure,
+        suspended: Some((reason, None)),
+    })
+}
+
+/// Continues the Run `commission`'s stored Suspension holds, after the grant, as the module
+/// documents: the Suspension is taken, the suspended request is performed once, the Suspension is
+/// released, and the loop goes on until the Run ends.
+///
+/// `runs` need not hold the Run: a store of a new process gets it back, `Suspended`, from the
+/// Suspension.
+///
+/// # Errors
+///
+/// [`ResumeError::Refused`] when there is nothing to resume, the request is in doubt or may not be
+/// performed now, or another resume took the Suspension first or the commission holds one for
+/// another request by the time it is taken; [`ResumeError::Store`] or
+/// [`ResumeError::Governor`] when a port fails before the Run resumes: nothing is performed, and
+/// the Suspension stays stored as it was. [`ResumeError::Loop`] when `ResumeRun` fails, the
+/// Suspension cannot be taken (nothing is performed), or the resumed loop stops without a run
+/// outcome.
+// The ports of `run_until_blocked`, and the suspension port.
+#[allow(clippy::too_many_arguments)]
+pub fn resume_after_grant<G, E, A, F, R, C>(
+    governor: &G,
+    executor: &E,
+    authority: &A,
+    effects: &F,
+    commission: &Commission<commission_state::Assigned>,
+    runs: &mut R,
+    suspensions: &dyn SuspensionPort,
+    context: &mut C,
+) -> Result<LoopEnd, ResumeError>
+where
+    G: Governor + ObservationPort + ?Sized,
+    E: AgentExecutor + ?Sized,
+    A: AuthorityProvider + ?Sized,
+    F: EffectPort + ?Sized,
+    R: RunStorage + SuspendRunBehavior + ResumeRunBehavior + ?Sized,
+    C: LoopContext + ?Sized,
+{
+    let refused = |refusal| Err(ResumeError::Refused(refusal));
+    let held = commission.data();
+    let Some(stored) = suspensions
+        .get(&held.commission_id)
+        .map_err(ResumeError::Store)?
+    else {
+        return refused(ResumeRefusal::NothingSuspended);
+    };
+    if stored.state == SuspensionState::Resuming {
+        return refused(ResumeRefusal::InDoubt {
+            action_request_id: stored.data.action_request_id,
+        });
+    }
+    let stored = stored.data;
+    if stored.commission_id != held.commission_id
+        || stored.suspension.commission_id != held.commission_id
+        || stored.case_id != held.case_id
+    {
+        return refused(ResumeRefusal::OtherCommission);
+    }
+    let current = governor
+        .current_revision(&held.case_id)
+        .map_err(ResumeError::Governor)?;
+    if current != stored.expected_case_revision {
+        return refused(ResumeRefusal::CaseMoved {
+            expected_case_revision: stored.expected_case_revision,
+            current_case_revision: current,
+        });
+    }
+    let request = ActionRequestData {
+        action_request_id: stored.action_request_id.clone(),
+        run_id: stored.run_id.clone(),
+        case_id: stored.case_id.clone(),
+        expected_case_revision: stored.expected_case_revision,
+        action: stored.action.clone(),
+        arguments: stored.arguments.clone(),
+    };
+    let answer = revalidate(governor, &ActionRequest::new(request.clone()))
+        .map_err(ResumeError::Governor)?;
+    match &answer {
+        RevalidateActionRequestOutcome::Admitted => {}
+        RevalidateActionRequestOutcome::Stale { error } => {
+            return refused(ResumeRefusal::CaseMoved {
+                expected_case_revision: error.expected_case_revision,
+                current_case_revision: error.current_case_revision,
+            });
+        }
+        RevalidateActionRequestOutcome::NotAdmitted { .. } => {
+            return refused(ResumeRefusal::NotAdmitted(answer));
+        }
+        RevalidateActionRequestOutcome::NeedsAuthority { error } => {
+            let check = check_authority(authority, commission, &error.capability);
+            if !check.allows() {
+                return refused(ResumeRefusal::NotGranted(check));
+            }
+        }
+    }
+    if !effects.performs(&request.action) {
+        return refused(ResumeRefusal::NotPerformed);
+    }
+
+    let run_id = stored.run_id.clone();
+    match RunStorage::get(runs, &run_id) {
+        None => {
+            let run = Run::new(RunData {
+                run_id: run_id.clone(),
+                commission_id: stored.commission_id.clone(),
+                case_revision: stored.run_case_revision,
+            });
+            RunStorage::put(runs, AnyRun::Suspended(run.suspend()).snapshot());
+        }
+        Some(held_run)
+            if held_run.data.commission_id != stored.commission_id
+                || held_run.data.case_revision != stored.run_case_revision =>
+        {
+            return refused(ResumeRefusal::OtherCommission);
+        }
+        Some(_) => {}
+    }
+    let failed = |failure: LoopFailure| LoopError {
+        run_id: Some(run_id.clone()),
+        failure,
+        suspension: None,
+        suspension_reason: None,
+    };
+    match runs
+        .resume_run(ResumeRun {
+            run_id: run_id.clone(),
+        })
+        .map_err(|unmet| ResumeError::Loop(failed(LoopFailure::Obligation(unmet))))?
+    {
+        ResumeRunOutcome::Resumed { .. } => {}
+        ResumeRunOutcome::StorageFailed { error } => {
+            return Err(ResumeError::Loop(failed(LoopFailure::RunStorage(error))));
+        }
+        other => return refused(ResumeRefusal::RunNotSuspended(other)),
+    }
+    // Taken before anything is performed, for the request read and revalidated above: of two
+    // resumes one takes it, a Suspension a resume took and never released is never taken again,
+    // and one held since for another request is not taken. Whatever the take answers but `taken`,
+    // the Run is suspended again with its stored reason and nothing is performed.
+    let key = stored.suspension.clone();
+    let failure = match suspensions.take(TakeSuspension {
+        suspension: key.clone(),
+        action_request_id: stored.action_request_id.clone(),
+    }) {
+        TakeSuspensionOutcome::Taken { .. } => None,
+        TakeSuspensionOutcome::OtherRequest { error } => Some(Err(ResumeRefusal::OtherRequest {
+            action_request_id: error.action_request_id,
+            held_action_request_id: error.held_action_request_id,
+        })),
+        TakeSuspensionOutcome::NotFound { .. } => Some(Err(ResumeRefusal::NothingSuspended)),
+        TakeSuspensionOutcome::WrongState { error } => Some(Err(ResumeRefusal::InDoubt {
+            action_request_id: error.action_request_id,
+        })),
+        TakeSuspensionOutcome::StorageFailed { error } => {
+            Some(Ok(LoopFailure::RunStorage(RunStorageFailed {
+                reason: error.reason,
+            })))
+        }
+    };
+    if let Some(failure) = failure {
+        let suspension = suspend(runs, &run_id, stored.reason.clone()).err();
+        return Err(match failure {
+            Err(refusal) => ResumeError::Refused(refusal),
+            Ok(failure) => ResumeError::Loop(LoopError {
+                run_id: Some(run_id),
+                failure,
+                suspension: suspension.map(Box::new),
+                suspension_reason: Some(Box::new(stored.reason)),
+            }),
+        });
+    }
+
+    let ports = Ports {
+        governor,
+        executor,
+        authority,
+        effects,
+        suspensions: Some(suspensions),
+    };
+    let run = RunStarted {
+        run_id: run_id.clone(),
+        commission_id: stored.commission_id,
+        case_revision: stored.run_case_revision,
+    };
+    let result = iterate(
+        &ports,
+        commission,
+        runs,
+        context,
+        &run,
+        stored.expected_case_revision,
+        Some(Resumed {
+            request,
+            answer,
+            taken: key,
+        }),
+    );
+    finish(runs, run_id, result).map_err(ResumeError::Loop)
 }
 
 /// Whether `frontier` lists actions and the effect port performs none of them (item 4).

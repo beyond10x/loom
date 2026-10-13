@@ -9,7 +9,8 @@ use std::collections::BTreeMap;
 use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::{
-    CaseId, HumanDecisionRequest, RunState, SuspensionReason,
+    CaseId, CommissionId, HumanDecisionRequest, RunState, SuspensionKey, SuspensionReason,
+    SuspensionState,
 };
 use ess_primitives::facts::{Number, is_canonical_uuid};
 use ess_primitives::node::Node;
@@ -120,6 +121,37 @@ pub fn run_state(state: RunState) -> Node {
         }
         .to_owned(),
     )
+}
+
+/// The declared name of a Suspension state.
+pub fn suspension_state(state: SuspensionState) -> Node {
+    Node::Text(
+        match state {
+            SuspensionState::Pending => "Pending",
+            SuspensionState::Resuming => "Resuming",
+        }
+        .to_owned(),
+    )
+}
+
+/// A `SuspensionKey`: the struct holding the commission's id, `commission_id`, and nothing else.
+pub fn suspension_key(node: &Node) -> Option<SuspensionKey> {
+    let members = node.as_map()?;
+    if members.len() != 1 {
+        return None;
+    }
+    let id = members.get("commission_id")?.as_text()?;
+    is_canonical_uuid(id).then(|| SuspensionKey {
+        commission_id: CommissionId(Uuid(id.to_owned())),
+    })
+}
+
+/// A `SuspensionKey` as a suite value.
+pub fn from_suspension_key(key: &SuspensionKey) -> Node {
+    Node::Map(BTreeMap::from([(
+        "commission_id".to_owned(),
+        Node::Text(key.commission_id.0.0.clone()),
+    )]))
 }
 
 /// A `SuspensionReason`: the union tagged `kind`, its payload under `value`.

@@ -383,6 +383,10 @@ name = "b10x-loom-commission-testkit"
 version = "0.16.0"
 dependencies = [
  "b10x-loom-commission",
+ "b10x-loom-executor",
+ "b10x-loom-governor",
+ "serde_json",
+ "serde_yaml_ng",
  "syn 3.0.6",
 ]
 
