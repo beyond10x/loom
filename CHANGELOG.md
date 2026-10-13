@@ -26,6 +26,16 @@ under **Unreleased** until the next release.
   `stopped: MergeHandedOff (<request>, HEAD <sha>)`, the state directory keeps no Suspension and no
   resume context for the commission, and `approve` is refused `NothingSuspended` (10).
   `approve`'s `AlreadyHandedOff` refusal (23) stays as a defence.
+- The slice's state-directory stores (`GrantStore`, `ResumeContextStore`, `MergeHandoffStore`)
+  read only regular files as records: a grant, resume context or hand-off record that is a
+  symbolic link (to a record elsewhere or to nothing), a directory or any other entry is refused as
+  a store error and never followed. A symlinked hand-off record no longer settles a resume's hold
+  of a merge; the hold is `storage-failed` and nothing is held. A symlinked resume context is
+  listed as unreadable.
+- Commission's conformance check (`task commission:conform`) also runs the authored scenarios
+  `ess/commission/ess-inputs.yaml` lists, which read the stores after `HoldSuspension` `settled`
+  and `storage-failed` and `StartRun` `storage-failed`, and fails when a scenario file under
+  `ess/commission/scenarios/` is not listed.
 
 ## [0.18.0] - 2026-10-13
 
