@@ -380,7 +380,9 @@ types:
       - name: value
         type: commission.responsibility.Truth
 
-  # docs/commission/contracts/frontier.md: one obligation of a frontier, open or discharged.
+  # docs/commission/contracts/frontier.md: one obligation of a frontier, open or not. `open` is
+  # true exactly when the governor reports the obligation owed: an obligation discharged is not
+  # open, and neither is one that does not apply to the case (the case's inputs do not select it).
   - name: commission.responsibility.FrontierObligation
     kind: struct
     fields:

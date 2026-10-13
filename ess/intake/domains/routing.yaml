@@ -26,6 +26,35 @@ types:
     # step budget ran out, the picked protocol has no local executor, or the router refused.
     variants: [ApprovalRequired, NothingAdmissible, StepBudget, NoLocalExecutor, Refused, ConfinementUnavailable, Completed]
 
+  # How much proof a software change must carry: `software.change/1`'s case input `risk`, with the
+  # values it declares (`trivial`, `standard`, `elevated`, `critical`, in this order). Each level
+  # owes every obligation of the level below it and one more.
+  - name: intake.routing.Risk
+    kind: enum
+    variants: [Trivial, Standard, Elevated, Critical]
+
+  # What a software change is: `software.change/1`'s case input `change_kind`, with the values it
+  # declares (`feature`, `bugfix`, `refactor`). A bugfix needs its regression reproduced, a test
+  # failing on the current implementation revision, before the implementation is edited.
+  - name: intake.routing.ChangeKind
+    kind: enum
+    variants: [Feature, Bugfix, Refactor]
+
+  # The case inputs the host supplies for a run, as trusted context: from the operator's command
+  # line or the embedding caller, never from a model, classifier or router. A `software-change@1`
+  # case opens with all three (`risk`, `change_kind`, `affects_security_boundary`, whose values
+  # `software.change/1` declares as `true` and `false`); a protocol that declares no case input
+  # opens with none of them.
+  - name: intake.routing.CaseInputs
+    kind: struct
+    fields:
+      - name: risk
+        type: intake.routing.Risk
+      - name: change_kind
+        type: intake.routing.ChangeKind
+      - name: affects_security_boundary
+        type: Boolean
+
   # Commission's ids, mirrored as local newtypes rather than named across systems (as
   # ess/domains/governor.yaml mirrors the case id): commission.responsibility.CommissionId,
   # commission.responsibility.AgentRevisionId and commission.responsibility.CaseId.
@@ -159,6 +188,14 @@ entities:
       # ApprovalRequired.
       - name: approvals
         type: List<String>
+      # The case inputs the host supplied for the run (intake.routing.CaseInputs): the values a
+      # `software-change@1` case opened with. A protocol that declares no case input ignores them.
+      - name: risk
+        type: intake.routing.Risk
+      - name: change_kind
+        type: intake.routing.ChangeKind
+      - name: affects_security_boundary
+        type: Boolean
     relations:
       - name: intent
         kind: references
