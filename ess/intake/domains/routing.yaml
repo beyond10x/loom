@@ -26,6 +26,52 @@ types:
     # step budget ran out, the picked protocol has no local executor, or the router refused.
     variants: [ApprovalRequired, NothingAdmissible, StepBudget, NoLocalExecutor, Refused, ConfinementUnavailable, Completed]
 
+  # Commission's ids, mirrored as local newtypes rather than named across systems (as
+  # ess/domains/governor.yaml mirrors the case id): commission.responsibility.CommissionId,
+  # commission.responsibility.AgentRevisionId and commission.responsibility.CaseId.
+  - name: intake.routing.CommissionId
+    kind: newtype
+    of: Uuid
+
+  - name: intake.routing.AgentRevisionId
+    kind: newtype
+    of: Uuid
+
+  - name: intake.routing.CaseId
+    kind: newtype
+    of: String
+
+  # One protocol of the catalog a route was accepted on, by its registered name and the SHA-256
+  # of its definition.
+  - name: intake.routing.CatalogDigest
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: digest
+        type: String
+
+  # A route the router's pick was accepted on, bound to the exact intent, catalog, context policy
+  # and threshold it was accepted for: what a delegated run hands its child. A route is never
+  # authority; a run restored from one checks it against its own intent, catalog and options.
+  - name: intake.routing.AcceptedRoute
+    kind: struct
+    fields:
+      # The accepted protocol, `name@major`.
+      - name: protocol
+        type: String
+      # The intent's revision: the digest the case's `intent` artifact carries.
+      - name: intent_revision
+        type: String
+      # Every protocol of the catalog, in catalog order.
+      - name: catalog
+        type: List<intake.routing.CatalogDigest>
+      - name: context_policy
+        type: intake.context.ContextPolicy
+      # The router's confidence threshold, from 0 to 1, as the run was given it.
+      - name: threshold
+        type: Decimal
+
 entities:
   # What someone asked for, as given: a prompt, a request or a question.
   - name: intake.routing.Intent
@@ -117,3 +163,85 @@ entities:
       initial: Ended
       states: [Ended]
       terminal: [Ended]
+
+  # What a later resume needs to rebuild a commission's run without the arguments of the run that
+  # started it, kept by `run --state` beside the case and the commission's Suspension, before the
+  # commission runs. The run id and the request a resume continues are in the Suspension, not
+  # here. It grants nothing: a resume still needs a grant, and revalidates the request against
+  # the case as it is then. The classifier model is not kept: a resume classifies nothing.
+  #
+  # It is kept before the commission runs, so a run that dies after holding the Suspension still
+  # leaves what resumes it. A run that ends without the commission's Suspension held removes it
+  # (`DropResumeContext`): nothing can resume that commission. A run that dies before it ends
+  # leaves its context without a Suspension, so a reader pairs each context with the commission's
+  # Suspension and never takes a kept context alone for one that can be resumed.
+  - name: intake.routing.ResumeContext
+    identity:
+      name: commission_id
+      type: intake.routing.CommissionId
+    fields:
+      - name: case_id
+        type: intake.routing.CaseId
+      - name: agent_revision_id
+        type: intake.routing.AgentRevisionId
+      # The intent, as given.
+      - name: intent
+        type: String
+      - name: route
+        type: intake.routing.AcceptedRoute
+      # The workspace the case is about; absent for a protocol that needs none.
+      - name: workspace
+        type: Optional<String>
+      # The test command: the program, then its arguments.
+      - name: test_command
+        type: List<String>
+      - name: max_steps
+        type: Integer
+      # How the test command is confined, and the delegated cgroup root, when one was given.
+      - name: confinement
+        type: intake.confinement.Backend
+      - name: cgroup_root
+        type: Optional<String>
+      # The agent model: a Codex model name, or with `catalog` a route alias of that llm catalog.
+      - name: model
+        type: String
+      - name: catalog
+        type: Optional<String>
+    lifecycle:
+      initial: Kept
+      states: [Kept]
+      terminal: [Kept]
+
+errors:
+  # No resume context is kept for the commission.
+  - name: intake.routing.ResumeContextNotFound
+    fields:
+      - name: commission_id
+        type: intake.routing.CommissionId
+
+  # The resume context store could not remove the context: why, as the store reports it.
+  - name: intake.routing.ResumeContextStorageFailed
+    fields:
+      - name: reason
+        type: String
+
+commands:
+  # A run that ends without the commission's Suspension held removes the commission's resume
+  # context: nothing can resume the commission. A run that holds the Suspension keeps it.
+  - name: intake.routing.DropResumeContext
+    input:
+      - name: commission_id
+        type: intake.routing.CommissionId
+    outcomes:
+      - name: dropped
+        deletes: intake.routing.ResumeContext
+        instance: commission_id
+      - name: not-found
+        unknown_instance: true
+        error: intake.routing.ResumeContextNotFound
+        payload:
+          intake.routing.ResumeContextNotFound:
+            commission_id: input.commission_id
+      - name: storage-failed
+        external: the resume context store cannot remove the context
+        error: intake.routing.ResumeContextStorageFailed

@@ -2,8 +2,8 @@
   "provenance": {
     "system": "intake",
     "specification_version": "v1",
-    "source_digest": "0dcbb44891d966a08164d0845cc89345f20e9da1a2bff9d8412d32181f207f99",
-    "contract_digest": "03a4eba225331c590679bbbce8fd69d4e4f51fa6589d185caf24c7551cb770fd"
+    "source_digest": "6a863e68d9e21bd404ea8cd1c1da3b9677c04d000b3ba83ac143ad567a38235c",
+    "contract_digest": "3c2bf8b3896629e198b3ad7d91d750b1b57d6d5df6039ce670e57cf6bedd69c6"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -243,6 +243,41 @@
     },
     {
       "kind": "domain_type",
+      "source": "intake.routing.AcceptedRoute",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.routing.AgentRevisionId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.routing.CaseId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.routing.CatalogDigest",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.routing.CommissionId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "intake.routing.ExtractedReference.State",
       "disposition": {
         "disposition": "generated"
@@ -272,6 +307,13 @@
     {
       "kind": "domain_type",
       "source": "intake.routing.ReferenceKind",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.routing.ResumeContext.State",
       "disposition": {
         "disposition": "generated"
       }
@@ -313,7 +355,47 @@
     },
     {
       "kind": "entity_lifecycle",
+      "source": "intake.routing.ResumeContext",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "entity_lifecycle",
       "source": "intake.routing.SliceRun",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "intake.routing.DropResumeContext",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "intake.routing.DropResumeContext",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "the fields of error `intake.routing.ResumeContextStorageFailed`, which the specification gives no source, in `storage-failed`"
+        },
+        "contract": "given `intake.routing.DropResumeContext` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `dropped` otherwise, deletes `intake.routing.ResumeContext`; `not-found` for an identity no record carries, error `intake.routing.ResumeContextNotFound`; `storage-failed` externally decided (the resume context store cannot remove the context), error `intake.routing.ResumeContextStorageFailed`"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "intake.routing.ResumeContextNotFound",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "intake.routing.ResumeContextStorageFailed",
       "disposition": {
         "disposition": "generated"
       }

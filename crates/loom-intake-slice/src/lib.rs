@@ -18,6 +18,8 @@
 //!   command the executor ran (Atlas ADR 0074). Nothing a model says becomes evidence.
 //! - [`run`] drives them: references, classification, the case, then Commission's
 //!   `run_until_blocked` until the run stops for a stated reason.
+//! - [`resume`] keeps the resume context `run --state` writes beside the case and the
+//!   commission's Suspension.
 
 pub mod case;
 pub mod confinement;
@@ -27,6 +29,7 @@ pub mod effect;
 pub mod executor;
 pub mod git;
 pub mod results;
+pub mod resume;
 pub mod run;
 pub mod selector;
 pub mod verifier;

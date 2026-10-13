@@ -32,7 +32,7 @@ use b10x_loom_commission::model::responsibility::{
     CaseId, EvidenceData, EvidenceId, ObservationId,
 };
 use b10x_loom_commission::ports::evidence::{EvidenceError, submit_evidence};
-use loom_governor::{CanonGovernor, CaseStore};
+use loom_governor::{CanonGovernor, FallibleCaseStore};
 
 use crate::case::IMPLEMENTATION;
 use crate::executor::{Report, TEST_RUN_SOURCE, TestRun, fresh_uuid};
@@ -80,7 +80,7 @@ pub struct TestResultVerifier<'g, S> {
     cited: Mutex<HashSet<String>>,
 }
 
-impl<'g, S: CaseStore> TestResultVerifier<'g, S> {
+impl<'g, S: FallibleCaseStore> TestResultVerifier<'g, S> {
     /// A verifier for `case` that attributes its evidence to `producer`.
     pub fn new(governor: &'g CanonGovernor<S>, case: CaseId, producer: impl Into<String>) -> Self {
         Self {

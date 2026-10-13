@@ -15,6 +15,28 @@ under **Unreleased** until the next release.
   directory, in one process or in two. A commission id over `LONGEST_COMMISSION_ID` bytes is
   refused. The testkit's `FileSuspensionStore` now re-exports it, and
   `b10x-loom-commission-testkit` depends on `b10x-loom-governor`.
+- `b10x-loom run --state <DIR>` keeps the run in a directory: the case in a `FileCaseStore`, the
+  commission's Suspension in a `FileSuspensionStore`, and the commission's resume context
+  (`intake.routing.ResumeContext`: the commission, case and agent revision, the intent, the
+  accepted route, the workspace, the test command, `max_steps`, the confinement and cgroup root,
+  the agent model and the `--catalog` path), kept before the commission runs and removed when the
+  run ends without the commission's Suspension held (`intake.routing.DropResumeContext`). The
+  commission runs through `run_with_suspension`, so a run that stops `ApprovalRequired` on a
+  proposed merge leaves a `Pending` Suspension a later resume can continue. A state directory
+  that cannot be written, a read-only one an earlier run used included, and a workspace, cgroup
+  root or catalog path that is not UTF-8 stop the run before any model call. Otherwise output and
+  exit status are unchanged, and without `--state` `run` is as before. In the slice,
+  `run_prepared_intent_with_state` takes a `RunState`, `ResumeHost::check` checks what a context
+  keeps as text, and `b10x_loom_intake_slice::resume::ResumeContextStore` keeps the contexts under
+  the stores' lock with their atomic write, removes one (`remove`), and lists them as
+  `ResumeContexts`: the contexts it read and each file it could not. A process that dies before
+  its run ends can leave a context with no Suspension, so a reader pairs each context with its
+  commission's Suspension. `PreparedIntent` types its route (`accepted_route`, `restore_route`),
+  and the slice's functions take any `FallibleCaseStore` instead of only a `CaseStore`.
+  `SliceError` gains `State`, which breaks an exhaustive match.
+- `FileCaseStore::open` and `FileSuspensionStore::open` prove their directory takes a write:
+  holding the lock, they create, write, sync and remove a temporary file, so a directory that
+  has become read-only is refused when a store opens rather than at its first write.
 
 ## [0.17.0] - 2026-10-13
 

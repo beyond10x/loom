@@ -51,6 +51,7 @@ Usage: b10x-loom run [OPTIONS] <INTENT>
 | `--classifier-model <ID>` | no | `gpt-5.6-sol` | The model that classifies the intent: a Codex model name, or with `--catalog` a route alias of that catalog |
 | `--threshold <X>` | no | `0.5` | The confidence, from 0 to 1, below which the router refuses its pick |
 | `--output <FORMAT>` | no | `human` | What standard output carries: lines for a person, or one JSON record per line, the last one the terminal record with the stop reason and the exit status |
+| `--state <DIR>` | no | none | Keep the run's case, its commission's Suspension and the commission's resume context in this directory, created when missing, so a run stopped for an approval leaves what a later resume continues from. Without it nothing outlives the run |
 | `<INTENT>` | yes | none | What to do, as given |
 
 ```text

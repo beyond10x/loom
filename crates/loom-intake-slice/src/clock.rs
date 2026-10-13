@@ -12,7 +12,7 @@ use b10x_loom_commission::ports::evidence::{ObservationPort, submit_evidence};
 use b10x_loom_commission::ports::governor::Governor;
 use chrono::{DateTime, FixedOffset, SecondsFormat, Utc};
 use intake_model::query::TimeObservation;
-use loom_governor::{CanonGovernor, CaseStore};
+use loom_governor::{CanonGovernor, FallibleCaseStore};
 
 use crate::case::INTENT;
 use crate::effect::{Console, refuse};
@@ -67,7 +67,7 @@ pub(crate) struct ClockEffects<'a, 'o, S> {
     console: &'a Console<'o>,
 }
 
-impl<'a, 'o, S: CaseStore> ClockEffects<'a, 'o, S> {
+impl<'a, 'o, S: FallibleCaseStore> ClockEffects<'a, 'o, S> {
     pub(crate) fn new(
         governor: &'a CanonGovernor<S>,
         case: CaseId,
@@ -221,7 +221,7 @@ impl<'a, 'o, S: CaseStore> ClockEffects<'a, 'o, S> {
     }
 }
 
-impl<S: CaseStore> EffectPort for ClockEffects<'_, '_, S> {
+impl<S: FallibleCaseStore> EffectPort for ClockEffects<'_, '_, S> {
     fn performs(&self, action: &str) -> bool {
         action == READ_TIME
     }

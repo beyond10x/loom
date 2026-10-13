@@ -97,7 +97,8 @@ impl FileCaseStore {
     /// # Errors
     ///
     /// [`FileStoreError`] when the directory or its lock file cannot be created, or a temporary
-    /// file an earlier life left behind cannot be removed.
+    /// file an earlier life left behind cannot be removed, or the directory does not take a write:
+    /// a temporary file cannot be created, written, synced and removed in it.
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self, FileStoreError> {
         LockedDir::open(dir.into()).map(|dir| Self { dir })
     }

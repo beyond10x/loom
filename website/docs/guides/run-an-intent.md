@@ -48,6 +48,16 @@ port its first target declares, never falls back to another target, and needs an
 a credential, because the command line supplies none. An alias the catalog does not declare, or a
 catalog that cannot be read, stops the run with exit status 1 before any model call.
 
+`--state <DIR>` keeps the run in a directory, created when missing: the governed case, the
+commission's Suspension when the run stops for an approval, and the commission's resume context
+(the intent, the accepted route, the workspace, the test command, the step budget, the
+confinement, and the agent model with its catalog), written before the commission runs and
+removed when the run ends without a Suspension. A directory that cannot be written, or a
+workspace, cgroup root or catalog path that is not UTF-8, stops the run with exit status 1 before
+any model call. A run whose process dies early can leave a resume context with no Suspension: only a
+context whose commission holds a Suspension can be resumed. Otherwise output and exit status are
+the same as without it. Without `--state` nothing outlives the run.
+
 `--confinement substrate` is the default. `--cgroup-root` selects an explicit delegated
 root. Tests retain their 300-second timeout, with 8 GiB memory and 2,048-process limits.
 Only `--confinement none` runs with your rights and environment; the run output and every test

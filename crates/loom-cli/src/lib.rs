@@ -237,6 +237,11 @@ pub struct RunArgs {
     /// one the terminal record with the stop reason and the exit status.
     #[arg(long, value_enum, value_name = "FORMAT", default_value_t = Output::Human)]
     pub output: Output,
+    /// Keep the run's case, its commission's Suspension and the commission's resume context in
+    /// this directory, created when missing, so a run stopped for an approval leaves what a later
+    /// resume continues from. Without it nothing outlives the run.
+    #[arg(long, value_name = "DIR")]
+    pub state: Option<PathBuf>,
     /// What to do, as given.
     pub intent: String,
 }

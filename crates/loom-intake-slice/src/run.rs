@@ -17,6 +17,12 @@
 //! provider that answers every capability with approval required: the slice never supplies
 //! authority on the operator's behalf. Its step budget is the request's `max_steps`.
 //!
+//! A run given a state directory ([`crate::intent::run_prepared_intent_with_state`], `run --state`)
+//! keeps its commission's resume context there before the commission runs, then runs it through
+//! Commission's `run_with_suspension` over the directory's suspension store instead, so the
+//! Suspension a withheld approval leaves outlives the process. Its output and stop reasons are the
+//! same.
+//!
 //! It ends with a [`SliceRun`] and its [`StopReason`] (`intake.routing.SliceRun` and
 //! `intake.routing.StopReason` in `ess/intake/domains/routing.yaml`), read from the runtime's
 //! outcome:
@@ -89,8 +95,9 @@ use b10x_loom_commission::ports::authority::{AuthorityProvider, AuthorityProvide
 use b10x_loom_commission::ports::evidence::ObservationPort;
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
+use b10x_loom_commission::ports::suspension::SuspensionPort;
 use b10x_loom_commission::runtime::{
-    LoopContext, LoopEnd, LoopError, LoopFailure, run_until_blocked,
+    LoopContext, LoopEnd, LoopError, LoopFailure, run_until_blocked, run_with_suspension,
 };
 use b10x_loom_executor::model::run::{CatalogueEntry, SelectionStrategy};
 use b10x_loom_executor::selection::{Choice, SelectionContext, SelectorError};
@@ -98,7 +105,7 @@ use b10x_loom_executor::{ActionSelector, ArgumentContext, ArgumentGenerator, Loo
 use b10x_loom_intake_references::references;
 use b10x_loom_intake_router::{ProtocolPick, RouterError};
 use llm_core::Model;
-use loom_governor::{CanonGovernor, CaseStore};
+use loom_governor::{CanonGovernor, FallibleCaseStore};
 
 use crate::case::{self, CaseError};
 use crate::confinement::TestRunner;
@@ -199,8 +206,11 @@ pub enum SliceError {
     /// The governor holds the case complete. `software-change@1` completes only with evidence the
     /// slice never produces, so this is not a stop reason.
     Complete(String),
-    /// Commission's runtime stopped for a failure of its own: a run command that refused.
+    /// Commission's runtime stopped for a failure of its own: a run command that refused, or a
+    /// suspension store that could not be read or written.
     Loop(LoopError),
+    /// The run's state directory could not keep what it holds: the resume context.
+    State(String),
 }
 
 impl fmt::Display for SliceError {
@@ -225,6 +235,7 @@ impl fmt::Display for SliceError {
             Self::Unexpected(outcome) => write!(f, "Loom answered {outcome}"),
             Self::Complete(outcome) => write!(f, "the case completed as `{outcome}`"),
             Self::Loop(error) => write!(f, "the runtime stopped: {error}"),
+            Self::State(why) => write!(f, "the state directory cannot be used: {why}"),
         }
     }
 }
@@ -253,7 +264,7 @@ impl From<GovernorError> for SliceError {
 /// # Errors
 /// A [`SliceError`] for every failure that is not a [`StopReason`] (see the module
 /// documentation). What was printed before the failure stays printed.
-pub fn run<S: CaseStore>(
+pub fn run<S: FallibleCaseStore>(
     request: &SliceRequest,
     governor: &CanonGovernor<S>,
     frontiers: &dyn Governor,
@@ -277,7 +288,7 @@ pub fn run<S: CaseStore>(
 /// # Errors
 /// As [`run`], plus explicit context capacity and report output failures. A report output failure
 /// retains any original run failure; already printed output and completed effects remain visible.
-pub fn run_with_options<S: CaseStore>(
+pub fn run_with_options<S: FallibleCaseStore>(
     request: &SliceRequest,
     governor: &CanonGovernor<S>,
     frontiers: &dyn Governor,
@@ -311,7 +322,7 @@ pub fn run_with_options<S: CaseStore>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_measured<S: CaseStore>(
+fn run_measured<S: FallibleCaseStore>(
     request: &SliceRequest,
     governor: &CanonGovernor<S>,
     frontiers: &dyn Governor,
@@ -382,7 +393,16 @@ fn run_measured<S: CaseStore>(
             test: &request.test,
             runner: Arc::clone(&request.runner),
         },
+        None,
     )
+}
+
+/// What a run whose commission outlives its process holds it through (`run --state`): the store
+/// the runtime keeps a withheld approval's Suspension in, and what keeps the commission's resume
+/// context before the commission runs.
+pub(crate) struct Holding<'h> {
+    pub(crate) suspensions: &'h dyn SuspensionPort,
+    pub(crate) keep: &'h dyn Fn(&CommissionData) -> Result<(), SliceError>,
 }
 
 pub(crate) enum Execution<'a> {
@@ -398,7 +418,7 @@ pub(crate) enum Execution<'a> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn drive<S: CaseStore>(
+pub(crate) fn drive<S: FallibleCaseStore>(
     intent: &str,
     protocol: &str,
     case: CaseId,
@@ -409,7 +429,12 @@ pub(crate) fn drive<S: CaseStore>(
     out: &mut dyn Write,
     briefing: Briefing,
     execution: Execution<'_>,
+    holding: Option<&Holding<'_>>,
 ) -> Result<SliceRun, SliceError> {
+    let commission = commission(&case);
+    if let Some(holding) = holding {
+        (holding.keep)(commission.data())?;
+    }
     let chosen = Arc::new(Mutex::new(None));
     let refused = Arc::new(Mutex::new(None));
     let console = Console::new(out);
@@ -473,15 +498,27 @@ pub(crate) fn drive<S: CaseStore>(
         case: case.0.clone(),
         budget,
     };
-    let result = run_until_blocked(
-        &reads,
-        &step,
-        &NoDelegatedAuthority,
-        &*effects,
-        &commission(&case),
-        &mut runs,
-        &mut context,
-    );
+    let result = match holding {
+        Some(holding) => run_with_suspension(
+            &reads,
+            &step,
+            &NoDelegatedAuthority,
+            &*effects,
+            &commission,
+            &mut runs,
+            holding.suspensions,
+            &mut context,
+        ),
+        None => run_until_blocked(
+            &reads,
+            &step,
+            &NoDelegatedAuthority,
+            &*effects,
+            &commission,
+            &mut runs,
+            &mut context,
+        ),
+    };
     drop(effects);
     drop(step);
     let failure = console.take_failure();
@@ -607,7 +644,7 @@ impl<S> Governor for Reads<'_, S> {
     }
 }
 
-impl<S: CaseStore> ObservationPort for Reads<'_, S> {
+impl<S: FallibleCaseStore> ObservationPort for Reads<'_, S> {
     fn observe(
         &self,
         observation: Observation<observation_state::Reported>,

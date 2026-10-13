@@ -9,6 +9,11 @@
 //! `.tmp-<process id>-<counter>` from one counter for the whole process, and a store that opens
 //! removes the ones a dead process left, holding the lock, so it never removes one a live write
 //! is using.
+//!
+//! A store that opens also proves, holding the lock, that the directory takes a write: it creates
+//! a fresh temporary file, writes it, syncs it and removes it. A lock file an earlier open left is
+//! no such proof, so a directory that has since become read-only is refused when the store opens,
+//! before its owner starts anything that would end at the first write.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write as _};
@@ -42,7 +47,7 @@ pub(crate) struct LockedDir {
 
 impl LockedDir {
     /// The directory `dir`, created with its lock file when it does not exist yet, without the
-    /// temporary files an earlier life left behind.
+    /// temporary files an earlier life left behind, and proven to take a write.
     pub(crate) fn open(dir: PathBuf) -> Result<Self, FileStoreError> {
         fs::create_dir_all(&dir).map_err(|error| failed(&dir, error))?;
         let lock = dir.join(LOCK);
@@ -53,8 +58,25 @@ impl LockedDir {
             .open(&lock)
             .map_err(|error| failed(&lock, error))?;
         let opened = Self { dir };
-        opened.locked(|| opened.remove_stale_temporaries())??;
+        opened.locked(|| {
+            opened.remove_stale_temporaries()?;
+            opened.probe()
+        })??;
         Ok(opened)
+    }
+
+    /// Proves the directory takes a write as a store makes one: a fresh temporary file is
+    /// created, written, synced and removed. Only called holding the lock. A probe a crash
+    /// interrupted is a temporary file like any other, removed by the next open.
+    fn probe(&self) -> Result<(), FileStoreError> {
+        let (temporary, mut file) = self.temporary()?;
+        let written = file
+            .write_all(b"probe\n")
+            .and_then(|()| file.sync_all())
+            .map_err(|error| failed(&temporary, error));
+        drop(file);
+        let removed = fs::remove_file(&temporary).map_err(|error| failed(&temporary, error));
+        written.and(removed)
     }
 
     /// The directory.
@@ -96,30 +118,7 @@ impl LockedDir {
     /// `path`. On any failure the temporary file is removed and `path` is untouched. Only called
     /// holding the lock.
     pub(crate) fn replace(&self, path: &Path, text: &str) -> Result<(), FileStoreError> {
-        // A name in use, left by an earlier life with the same process id, is skipped for the
-        // next one rather than reported: it says nothing about this write.
-        let mut attempts = 0;
-        let (temporary, mut file) = loop {
-            let temporary = self.dir.join(format!(
-                "{TEMPORARY}{}-{}",
-                std::process::id(),
-                NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)
-            ));
-            match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&temporary)
-            {
-                Ok(file) => break (temporary, file),
-                Err(error)
-                    if error.kind() == io::ErrorKind::AlreadyExists
-                        && attempts < TEMPORARY_ATTEMPTS =>
-                {
-                    attempts += 1;
-                }
-                Err(error) => return Err(failed(&temporary, error)),
-            }
-        };
+        let (temporary, mut file) = self.temporary()?;
         let written = (|| -> io::Result<()> {
             file.write_all(text.as_bytes())?;
             file.sync_all()
@@ -134,6 +133,34 @@ impl LockedDir {
         // weakens how soon it is durable and is not reported as a failed write.
         self.sync();
         Ok(())
+    }
+
+    /// A new temporary file in the directory, created for writing. Only called holding the lock.
+    fn temporary(&self) -> Result<(PathBuf, File), FileStoreError> {
+        // A name in use, left by an earlier life with the same process id, is skipped for the
+        // next one rather than reported: it says nothing about this write.
+        let mut attempts = 0;
+        loop {
+            let temporary = self.dir.join(format!(
+                "{TEMPORARY}{}-{}",
+                std::process::id(),
+                NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)
+            ));
+            match OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary)
+            {
+                Ok(file) => return Ok((temporary, file)),
+                Err(error)
+                    if error.kind() == io::ErrorKind::AlreadyExists
+                        && attempts < TEMPORARY_ATTEMPTS =>
+                {
+                    attempts += 1;
+                }
+                Err(error) => return Err(failed(&temporary, error)),
+            }
+        }
     }
 
     /// Removes `path`. Only called holding the lock.

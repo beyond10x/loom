@@ -99,6 +99,69 @@
     {
       "fields": [
         {
+          "name": "case_id",
+          "type": "CaseId"
+        },
+        {
+          "name": "agent_revision_id",
+          "type": "AgentRevisionId"
+        },
+        {
+          "name": "intent",
+          "type": "string"
+        },
+        {
+          "name": "route",
+          "type": "AcceptedRoute"
+        },
+        {
+          "name": "workspace",
+          "type": "Optional<string>"
+        },
+        {
+          "name": "test_command",
+          "type": "List<string>"
+        },
+        {
+          "name": "max_steps",
+          "type": "integer"
+        },
+        {
+          "name": "confinement",
+          "type": "Backend"
+        },
+        {
+          "name": "cgroup_root",
+          "type": "Optional<string>"
+        },
+        {
+          "name": "model",
+          "type": "string"
+        },
+        {
+          "name": "catalog",
+          "type": "Optional<string>"
+        }
+      ],
+      "id": "intake.routing.ResumeContext",
+      "identity": {
+        "name": "commission_id",
+        "type": "CommissionId"
+      },
+      "lifecycle": {
+        "initial": "Kept",
+        "states": [
+          "Kept"
+        ],
+        "terminal": [
+          "Kept"
+        ]
+      },
+      "name": "ResumeContext"
+    },
+    {
+      "fields": [
+        {
           "name": "intent_id",
           "type": "IntentId"
         },

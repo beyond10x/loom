@@ -1,14 +1,14 @@
 <!--
   generated from intake v1
-  model digest 0dcbb44891d966a08164d0845cc89345f20e9da1a2bff9d8412d32181f207f99
-  contract digest 03a4eba225331c590679bbbce8fd69d4e4f51fa6589d185caf24c7551cb770fd
+  model digest 6a863e68d9e21bd404ea8cd1c1da3b9677c04d000b3ba83ac143ad567a38235c
+  contract digest 3c2bf8b3896629e198b3ad7d91d750b1b57d6d5df6039ce670e57cf6bedd69c6
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — intake v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-44 capabilities: **44 generated**, **0 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+55 capabilities: **54 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -47,22 +47,33 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `intake.results.ResultSelector` |
 | domain type | `intake.results.SelectionKind` |
 | domain type | `intake.results.StoredResult` |
+| domain type | `intake.routing.AcceptedRoute` |
+| domain type | `intake.routing.AgentRevisionId` |
+| domain type | `intake.routing.CaseId` |
+| domain type | `intake.routing.CatalogDigest` |
+| domain type | `intake.routing.CommissionId` |
 | domain type | `intake.routing.ExtractedReference.State` |
 | domain type | `intake.routing.Intent.State` |
 | domain type | `intake.routing.IntentId` |
 | domain type | `intake.routing.ProtocolPick.State` |
 | domain type | `intake.routing.ReferenceKind` |
+| domain type | `intake.routing.ResumeContext.State` |
 | domain type | `intake.routing.SliceRun.State` |
 | domain type | `intake.routing.StopReason` |
 | entity lifecycle | `intake.routing.ExtractedReference` |
 | entity lifecycle | `intake.routing.Intent` |
 | entity lifecycle | `intake.routing.ProtocolPick` |
+| entity lifecycle | `intake.routing.ResumeContext` |
 | entity lifecycle | `intake.routing.SliceRun` |
+| command contract | `intake.routing.DropResumeContext` |
+| error type | `intake.routing.ResumeContextNotFound` |
+| error type | `intake.routing.ResumeContextStorageFailed` |
 
 ## Obligations — yours to implement
 
 | capability | source | why not generated | contract |
 | --- | --- | --- | --- |
+| command behaviour | `intake.routing.DropResumeContext` | kept an obligation by the fields of error `intake.routing.ResumeContextStorageFailed`, which the specification gives no source, in `storage-failed` | given `intake.routing.DropResumeContext` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `dropped` otherwise, deletes `intake.routing.ResumeContext`; `not-found` for an identity no record carries, error `intake.routing.ResumeContextNotFound`; `storage-failed` externally decided (the resume context store cannot remove the context), error `intake.routing.ResumeContextStorageFailed` |
 
 ## Refused — not represented by this synthesis
 
