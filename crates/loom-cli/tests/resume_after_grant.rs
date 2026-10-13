@@ -44,6 +44,13 @@ const TEST_CMD: &str = "grep -qx fixed check.txt";
 const NOTHING_SUSPENDED: i32 = 10;
 /// The exit status of a resume refused `NotGranted`.
 const NOT_GRANTED: i32 = 16;
+/// The exit status of a resume refused `CaseMoved`.
+const CASE_MOVED: i32 = 14;
+/// The exit status of an approval refused `AlreadyHandedOff`.
+const ALREADY_HANDED_OFF: i32 = 23;
+/// The exit status of a run or a resume with a state directory that stopped `ApprovalRequired`
+/// with nothing suspended.
+const NOTHING_HELD: i32 = 4;
 
 #[test]
 fn resume_after_approve_merges_once() {
@@ -95,9 +102,18 @@ fn resume_after_approve_merges_once() {
             .any(|line| line.starts_with("step 1: repository.merge")),
         "the first step is the merge\n{stdout}"
     );
+    // The run stopped at the merge's gate again, at the HEAD it handed off: nothing is left to
+    // approve, and the stop line says so instead of reading as an approvable gate.
     assert_eq!(
         stdout.lines().last(),
-        Some("stopped: ApprovalRequired (repository.merge)"),
+        Some(
+            format!(
+                "stopped: MergeHandedOff ({}, HEAD {})",
+                held.action_request_id,
+                scratch.head()
+            )
+            .as_str()
+        ),
         "{}",
         shown(&resumed)
     );
@@ -243,6 +259,251 @@ fn approve_refuses_another_capability_and_a_commission_with_nothing_suspended() 
     assert_eq!(held.suspension_state(), Some(SuspensionState::Pending));
 }
 
+fn approve(scratch: &Scratch, held: &Held) -> Output {
+    scratch.command(&[
+        "approve",
+        &held.commission,
+        "repository.merge",
+        "--state",
+        held.state_text(),
+    ])
+}
+
+/// A commit made in the workspace after the approval moves the case: `resume` reports the
+/// workspace's `HEAD` to the governor first, so the resume is refused `CaseMoved`, calls no model
+/// and hands nothing off.
+#[test]
+fn a_commit_after_approve_is_refused_case_moved_and_hands_off_nothing() {
+    let scratch = Scratch::new("case-moved");
+    let held = scratch.suspend();
+    let approved = approve(&scratch, &held);
+    assert_eq!(approved.status.code(), Some(0), "{}", shown(&approved));
+
+    std::fs::write(scratch.workspace.join("later.txt"), "not reviewed\n").unwrap();
+    scratch.git(&["add", "--all"]);
+    scratch.git(&["commit", "--quiet", "--message", "an unreviewed change"]);
+
+    let (base_url, server) = Script::serve(vec![]);
+    scratch.catalog(&base_url);
+    let resumed = scratch.command(&["resume", &held.commission, "--state", held.state_text()]);
+    let calls = server.finish();
+    assert_eq!(
+        resumed.status.code(),
+        Some(CASE_MOVED),
+        "{}",
+        shown(&resumed)
+    );
+    assert!(
+        String::from_utf8_lossy(&resumed.stderr).contains("CaseMoved"),
+        "{}",
+        shown(&resumed)
+    );
+    assert!(calls.is_empty(), "no model is called: {calls:?}");
+    assert_eq!(
+        scratch.files(&held.state, "merge-"),
+        0,
+        "nothing handed off"
+    );
+    assert_eq!(held.suspension_state(), Some(SuspensionState::Pending));
+}
+
+/// A merge the agent proposes again after the hand-off, at the same `HEAD`, is held, but its stop
+/// line says the `HEAD` was handed off, and `approve` refuses it `AlreadyHandedOff`, writing
+/// nothing.
+#[test]
+fn approve_refuses_a_suspension_that_would_hand_off_a_head_already_handed_off() {
+    let scratch = Scratch::new("already-handed-off");
+    let held = scratch.suspend();
+    let approved = approve(&scratch, &held);
+    assert_eq!(approved.status.code(), Some(0), "{}", shown(&approved));
+
+    let (base_url, server) = Script::serve(vec![
+        agent("select_action", json!({"action": "repository.merge"})),
+        agent("action_arguments", json!({})),
+    ]);
+    scratch.catalog(&base_url);
+    let resumed = scratch.command(&["resume", &held.commission, "--state", held.state_text()]);
+    server.finish();
+    assert_eq!(resumed.status.code(), Some(0), "{}", shown(&resumed));
+    assert_eq!(
+        String::from_utf8_lossy(&resumed.stdout).lines().last(),
+        Some(
+            format!(
+                "stopped: MergeHandedOff ({}, HEAD {})",
+                held.action_request_id,
+                scratch.head()
+            )
+            .as_str()
+        ),
+        "{}",
+        shown(&resumed)
+    );
+    assert_eq!(scratch.files(&held.state, "merge-"), 1);
+
+    let grant = scratch.paths(&held.state, "grant-");
+    let before = std::fs::read(&grant[0]).unwrap();
+    let again = approve(&scratch, &held);
+    assert_eq!(
+        again.status.code(),
+        Some(ALREADY_HANDED_OFF),
+        "{}",
+        shown(&again)
+    );
+    assert!(
+        String::from_utf8_lossy(&again.stderr).contains("AlreadyHandedOff"),
+        "{}",
+        shown(&again)
+    );
+    assert_eq!(
+        std::fs::read(&grant[0]).unwrap(),
+        before,
+        "the grant is not replaced"
+    );
+    assert_eq!(scratch.files(&held.state, "grant-"), 1);
+    assert_eq!(scratch.files(&held.state, "merge-"), 1);
+}
+
+/// New work after a hand-off, a new `HEAD`, is held at its own gate, approved and handed off at
+/// that `HEAD`.
+#[test]
+fn new_work_after_a_hand_off_is_approved_and_handed_off_at_its_own_head() {
+    let scratch = Scratch::new("new-work");
+    let held = scratch.suspend_with(8);
+    let first_head = scratch.head();
+    let approved = approve(&scratch, &held);
+    assert_eq!(approved.status.code(), Some(0), "{}", shown(&approved));
+
+    let (base_url, server) = Script::serve(vec![
+        agent("select_action", json!({"action": "repository.edit"})),
+        agent(
+            "action_arguments",
+            json!({
+                "files": [{"path": "notes.txt", "contents": "more work\n"}],
+                "message": "more work"
+            }),
+        ),
+        agent("select_action", json!({"action": "tests.run"})),
+        agent("action_arguments", json!({})),
+        agent("select_action", json!({"action": "repository.merge"})),
+        agent("action_arguments", json!({})),
+    ]);
+    scratch.catalog(&base_url);
+    let first = scratch.command(&["resume", &held.commission, "--state", held.state_text()]);
+    server.finish();
+    assert_eq!(first.status.code(), Some(0), "{}", shown(&first));
+    let second_head = scratch.head();
+    assert_ne!(first_head, second_head, "{}", shown(&first));
+    assert_eq!(
+        String::from_utf8_lossy(&first.stdout).lines().last(),
+        Some("stopped: ApprovalRequired (repository.merge)"),
+        "{}",
+        shown(&first)
+    );
+    assert_eq!(held.suspension_state(), Some(SuspensionState::Pending));
+
+    let again = approve(&scratch, &held);
+    assert_eq!(again.status.code(), Some(0), "{}", shown(&again));
+    let (base_url, server) = Script::serve(vec![
+        agent("select_action", json!({"action": "tests.run"})),
+        agent("action_arguments", json!({})),
+    ]);
+    scratch.catalog(&base_url);
+    let second = scratch.command(&["resume", &held.commission, "--state", held.state_text()]);
+    server.finish();
+    assert_eq!(second.status.code(), Some(0), "{}", shown(&second));
+    let mut heads: Vec<Value> = scratch
+        .documents(&held.state, "merge-")
+        .iter()
+        .map(|handoff| handoff["head"].clone())
+        .collect();
+    heads.sort_by_key(|head| head.as_str().map(str::to_owned));
+    let mut expected = vec![json!(first_head), json!(second_head)];
+    expected.sort_by_key(|head| head.as_str().map(str::to_owned));
+    assert_eq!(heads, expected, "{}", shown(&second));
+}
+
+/// A run with a state directory that stops at the merge's gate without holding a Suspension (the
+/// agent ran the tests again instead of proposing the merge) does not read as approvable: its stop
+/// line says nothing is suspended, and it exits with its own status. Without `--state` the line
+/// and the status are unchanged.
+#[test]
+fn a_run_at_the_gate_with_nothing_suspended_says_so() {
+    let scratch = Scratch::new("nothing-held");
+    let plain = scratch.run(5, false, "tests.run");
+    assert_eq!(plain.status.code(), Some(0), "{}", shown(&plain));
+    assert_eq!(
+        String::from_utf8_lossy(&plain.stdout).lines().last(),
+        Some("stopped: ApprovalRequired (repository.merge)"),
+        "{}",
+        shown(&plain)
+    );
+
+    let scratch = Scratch::new("nothing-held-state");
+    let output = scratch.run(5, true, "tests.run");
+    assert_eq!(
+        output.status.code(),
+        Some(NOTHING_HELD),
+        "{}",
+        shown(&output)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).lines().last(),
+        Some("stopped: ApprovalRequired (repository.merge), nothing suspended"),
+        "{}",
+        shown(&output)
+    );
+    let state = scratch.root.join("state");
+    assert!(
+        ResumeContextStore::open(&state)
+            .unwrap()
+            .list()
+            .unwrap()
+            .contexts
+            .is_empty(),
+        "no context is kept"
+    );
+}
+
+/// The same for a resume: after the hand-off the agent commits new work and runs the tests, but
+/// proposes no merge; the new `HEAD` was not handed off and nothing is suspended.
+#[test]
+fn a_resume_at_the_gate_with_nothing_suspended_says_so() {
+    let scratch = Scratch::new("resume-nothing-held");
+    let held = scratch.suspend_with(8);
+    let approved = approve(&scratch, &held);
+    assert_eq!(approved.status.code(), Some(0), "{}", shown(&approved));
+    let (base_url, server) = Script::serve(vec![
+        agent("select_action", json!({"action": "repository.edit"})),
+        agent(
+            "action_arguments",
+            json!({
+                "files": [{"path": "notes.txt", "contents": "more work\n"}],
+                "message": "more work"
+            }),
+        ),
+        agent("select_action", json!({"action": "tests.run"})),
+        agent("action_arguments", json!({})),
+        agent("select_action", json!({"action": "tests.run"})),
+        agent("action_arguments", json!({})),
+    ]);
+    scratch.catalog(&base_url);
+    let resumed = scratch.command(&["resume", &held.commission, "--state", held.state_text()]);
+    server.finish();
+    assert_eq!(
+        resumed.status.code(),
+        Some(NOTHING_HELD),
+        "{}",
+        shown(&resumed)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&resumed.stdout).lines().last(),
+        Some("stopped: ApprovalRequired (repository.merge), nothing suspended"),
+        "{}",
+        shown(&resumed)
+    );
+    assert_eq!(held.suspension_state(), None);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Fixtures.
 
@@ -309,6 +570,13 @@ impl Scratch {
 
     /// Runs `run --state` to a Suspension on the merge, and reads what it left.
     fn suspend(&self) -> Held {
+        self.suspend_with(3)
+    }
+
+    /// Runs `run`, with `--state <root>/state` when `state`, for `--max-steps max_steps`: the
+    /// agent edits the check and runs the tests, then answers `last` (the merge, or the tests
+    /// again).
+    fn run(&self, max_steps: usize, state: bool, last: &str) -> Output {
         let (base_url, server) = Script::serve(vec![
             classify("software-change@1"),
             agent("select_action", json!({"action": "repository.edit"})),
@@ -321,23 +589,23 @@ impl Scratch {
             ),
             agent("select_action", json!({"action": "tests.run"})),
             agent("action_arguments", json!({})),
-            agent("select_action", json!({"action": "repository.merge"})),
+            agent("select_action", json!({"action": last})),
             agent("action_arguments", json!({})),
         ]);
         let catalog = self.catalog(&base_url);
-        let state = self.root.join("state");
-        let output = self.command(&[
-            "run",
-            "--confinement",
-            "none",
-            "--state",
-            state.to_str().unwrap(),
+        let state_dir = self.root.join("state");
+        let max_steps = max_steps.to_string();
+        let mut args = vec!["run", "--confinement", "none"];
+        if state {
+            args.extend(["--state", state_dir.to_str().unwrap()]);
+        }
+        args.extend([
             "--workspace",
             self.workspace.to_str().unwrap(),
             "--test-cmd",
             TEST_CMD,
             "--max-steps",
-            "3",
+            &max_steps,
             "--catalog",
             catalog.to_str().unwrap(),
             "--classifier-model",
@@ -346,7 +614,16 @@ impl Scratch {
             "lab-agent",
             INTENT,
         ]);
+        let output = self.command(&args);
         server.finish();
+        output
+    }
+
+    /// Runs `run --state` to a Suspension on the merge, with a step budget of `max_steps`, and
+    /// reads what it left.
+    fn suspend_with(&self, max_steps: usize) -> Held {
+        let state = self.root.join("state");
+        let output = self.run(max_steps, true, "repository.merge");
         assert_eq!(output.status.code(), Some(0), "{}", shown(&output));
         assert_eq!(
             String::from_utf8_lossy(&output.stdout).lines().last(),

@@ -148,19 +148,27 @@ fn a_resume_that_stops_approval_required_leaves_something_to_approve() {
     let resumed = scratch.command(&["resume", &held.commission, "--state", held.state_text()]);
     server.finish();
     assert_eq!(resumed.status.code(), Some(0), "{}", shown(&resumed));
+    // Changed with the fix (U3 fix 1, finding 3): the resume stopped at the merge's gate at the
+    // HEAD it handed off, holding nothing, so its stop line no longer reads as an approvable gate
+    // but names the hand-off; and the approval it no longer invites is refused NothingSuspended,
+    // as the line says.
+    let line = format!(
+        "stopped: MergeHandedOff ({}, HEAD {})",
+        held.action_request_id,
+        scratch.head()
+    );
     assert_eq!(
         String::from_utf8_lossy(&resumed.stdout).lines().last(),
-        Some("stopped: ApprovalRequired (repository.merge)"),
+        Some(line.as_str()),
         "{}",
         shown(&resumed)
     );
 
     let again = approve(&scratch, &held);
-    assert_ne!(
+    assert_eq!(
         again.status.code(),
         Some(NOTHING_SUSPENDED),
-        "the resume exited 0 printing `stopped: ApprovalRequired (repository.merge)`, yet the \
-         approval it invites is refused NothingSuspended\n{}",
+        "the resume printed `{line}`, which invites no approval\n{}",
         shown(&again)
     );
 }
