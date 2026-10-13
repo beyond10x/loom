@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 8c7b1dfdf553739c49d885d9964fdf5699206173f9b1feaf7f84c83a7e4a3cbf
-// contract digest d3ed463c053e0bbbeac480510ab245c329c31ebddce9fd6ac57905e9fb52fbaf
+// model digest cd3dbf86d11d586d3a6fc8ff5824c94f34f1d13379fde5b82dfe68af2d933bd3
+// contract digest f4c927a16c4e6722b2391b3c04ffeb293d9eb8891a3e9d0c1de63b62bc036234
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -38,6 +38,24 @@ pub trait RunStorage {
     fn list(&self) -> Vec<crate::responsibility::RunSnapshot>;
 }
 
+/// Where `commission.responsibility.Suspension` is stored — a port the implementor provides.
+///
+/// Keyed by the identity `suspension`. Generated network entries supply an ephemeral implementation; durable storage remains a port.
+pub trait SuspensionStorage {
+    /// The instance with this identity, or `None` where none is stored.
+    fn get(&self, identity: &crate::responsibility::SuspensionKey) -> Option<crate::responsibility::SuspensionSnapshot>;
+
+    /// Stores this instance under its identity, replacing what was held.
+    fn put(&mut self, snapshot: crate::responsibility::SuspensionSnapshot);
+
+    /// Removes the instance with this identity.
+    fn delete(&mut self, identity: &crate::responsibility::SuspensionKey);
+
+    /// Every stored instance, in the order the store keeps them: the order a generated query
+    /// answers an unordered view in.
+    fn list(&self) -> Vec<crate::responsibility::SuspensionSnapshot>;
+}
+
 /// Every generated behaviour of this workspace, over the ports `P` supplies.
 ///
 /// `P` implements the storage trait of each entity a generated behaviour reads or writes, and
@@ -51,6 +69,18 @@ impl<P> Generated<P> {
     /// The generated behaviours, over `ports`.
     pub fn new(ports: P) -> Self {
         Self { ports }
+    }
+}
+
+impl<P: crate::responsibility::obligations::HoldSuspensionBehavior> crate::responsibility::obligations::HoldSuspensionBehavior for Generated<P> {
+    fn hold_suspension(&mut self, input: crate::responsibility::HoldSuspension) -> Result<crate::responsibility::HoldSuspensionOutcome, UnmetObligation> {
+        crate::responsibility::obligations::HoldSuspensionBehavior::hold_suspension(&mut self.ports, input)
+    }
+}
+
+impl<P: crate::responsibility::obligations::ReleaseSuspensionBehavior> crate::responsibility::obligations::ReleaseSuspensionBehavior for Generated<P> {
+    fn release_suspension(&mut self, input: crate::responsibility::ReleaseSuspension) -> Result<crate::responsibility::ReleaseSuspensionOutcome, UnmetObligation> {
+        crate::responsibility::obligations::ReleaseSuspensionBehavior::release_suspension(&mut self.ports, input)
     }
 }
 
@@ -78,6 +108,12 @@ impl<P: crate::responsibility::obligations::SuspendRunBehavior> crate::responsib
     }
 }
 
+impl<P: crate::responsibility::obligations::TakeSuspensionBehavior> crate::responsibility::obligations::TakeSuspensionBehavior for Generated<P> {
+    fn take_suspension(&mut self, input: crate::responsibility::TakeSuspension) -> Result<crate::responsibility::TakeSuspensionOutcome, UnmetObligation> {
+        crate::responsibility::obligations::TakeSuspensionBehavior::take_suspension(&mut self.ports, input)
+    }
+}
+
 /// `commission.responsibility.RunStates`, generated: every row is one the specification fully determines from the stored `commission.responsibility.Run`s.
 impl<P> crate::responsibility::obligations::RunStatesQuery for Generated<P>
 where
@@ -91,6 +127,26 @@ where
                 run_id: held.data.run_id,
                 commission_id: held.data.commission_id,
                 case_revision: held.data.case_revision,
+                state: held.state,
+            })
+            .collect())
+    }
+}
+
+/// `commission.responsibility.SuspensionStates`, generated: every row is one the specification fully determines from the stored `commission.responsibility.Suspension`s.
+impl<P> crate::responsibility::obligations::SuspensionStatesQuery for Generated<P>
+where
+    P: SuspensionStorage,
+{
+    fn suspension_states(&self) -> Result<Vec<crate::responsibility::SuspensionStates>, UnmetObligation> {
+        let admitted = SuspensionStorage::list(&self.ports);
+        Ok(admitted
+            .into_iter()
+            .map(|held| crate::responsibility::SuspensionStates {
+                suspension: held.data.suspension,
+                commission_id: held.data.commission_id,
+                run_id: held.data.run_id,
+                action_request_id: held.data.action_request_id,
                 state: held.state,
             })
             .collect())

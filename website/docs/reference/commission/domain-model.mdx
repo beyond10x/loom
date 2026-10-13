@@ -233,7 +233,11 @@ Identity: `suspension`, [`SuspensionKey`](./types.mdx#suspensionkey).
 | `arguments` | [`ProposedActionArguments`](./types.mdx#proposedactionarguments) |
 | `reason` | [`SuspensionReason`](./types.mdx#suspensionreason) |
 
-Lifecycle: states `Pending`; initial `Pending`; terminal `Pending`.
+Lifecycle: states `Pending`, `Resuming`; initial `Pending`; terminal `Resuming`.
+
+| Transition | From | To |
+|---|---|---|
+| `take` | `Pending` | `Resuming` |
 
 | Relation | Kind | Target | Cardinality | Via |
 |---|---|---|---|---|
@@ -242,6 +246,40 @@ Lifecycle: states `Pending`; initial `Pending`; terminal `Pending`.
 | `case` | references | [Case](#case) | one | `case_id` |
 
 ### Commands
+
+#### HoldSuspension
+
+| Input | Type |
+|---|---|
+| `suspension` | [`SuspensionKey`](./types.mdx#suspensionkey) |
+| `commission_id` | [`CommissionId`](./types.mdx#commissionid) |
+| `run_id` | [`RunId`](./types.mdx#runid) |
+| `run_case_revision` | `integer` |
+| `action_request_id` | [`ActionRequestId`](./types.mdx#actionrequestid) |
+| `case_id` | [`CaseId`](./types.mdx#caseid) |
+| `expected_case_revision` | `integer` |
+| `action` | `string` |
+| `arguments` | [`ProposedActionArguments`](./types.mdx#proposedactionarguments) |
+| `reason` | [`SuspensionReason`](./types.mdx#suspensionreason) |
+
+| Outcome | When | Effect | Emits | Error |
+|---|---|---|---|---|
+| `held` | otherwise | creates Suspension | `SuspensionHeld` | none |
+| `already-held` | existing instance | none | none | `SuspensionAlreadyHeld` |
+| `storage-failed` | external | none | none | `SuspensionStorageFailed` |
+
+#### ReleaseSuspension
+
+| Input | Type |
+|---|---|
+| `suspension` | [`SuspensionKey`](./types.mdx#suspensionkey) |
+
+| Outcome | When | Effect | Emits | Error |
+|---|---|---|---|---|
+| `not-taken` | subject predicate | none | none | `SuspensionStateConflict` |
+| `released` | otherwise | deletes Suspension | `SuspensionReleased` | none |
+| `not-found` | unknown instance | none | none | `SuspensionNotFound` |
+| `storage-failed` | external | none | none | `SuspensionStorageFailed` |
 
 #### ResumeRun
 
@@ -298,6 +336,19 @@ Lifecycle: states `Pending`; initial `Pending`; terminal `Pending`.
 | `wrong-state` | wrong state | refused | none | `RunStateConflict` |
 | `storage-failed` | external | none | none | `RunStorageFailed` |
 
+#### TakeSuspension
+
+| Input | Type |
+|---|---|
+| `suspension` | [`SuspensionKey`](./types.mdx#suspensionkey) |
+
+| Outcome | When | Effect | Emits | Error |
+|---|---|---|---|---|
+| `taken` | otherwise | moves Suspension by `take`, from `Pending` to `Resuming` | `SuspensionTaken` | none |
+| `not-found` | unknown instance | none | none | `SuspensionNotFound` |
+| `wrong-state` | wrong state | refused | none | `SuspensionStateConflict` |
+| `storage-failed` | external | none | none | `SuspensionStorageFailed` |
+
 ### Events
 
 #### RunResumed
@@ -320,6 +371,27 @@ Lifecycle: states `Pending`; initial `Pending`; terminal `Pending`.
 |---|---|
 | `run_id` | [`RunId`](./types.mdx#runid) |
 | `reason` | [`SuspensionReason`](./types.mdx#suspensionreason) |
+
+#### SuspensionHeld
+
+| Field | Type |
+|---|---|
+| `suspension` | [`SuspensionKey`](./types.mdx#suspensionkey) |
+| `run_id` | [`RunId`](./types.mdx#runid) |
+| `action_request_id` | [`ActionRequestId`](./types.mdx#actionrequestid) |
+
+#### SuspensionReleased
+
+| Field | Type |
+|---|---|
+| `suspension` | [`SuspensionKey`](./types.mdx#suspensionkey) |
+
+#### SuspensionTaken
+
+| Field | Type |
+|---|---|
+| `suspension` | [`SuspensionKey`](./types.mdx#suspensionkey) |
+| `action_request_id` | [`ActionRequestId`](./types.mdx#actionrequestid) |
 
 ### Errors
 
@@ -356,6 +428,31 @@ Lifecycle: states `Pending`; initial `Pending`; terminal `Pending`.
 |---|---|
 | `reason` | `string` |
 
+#### SuspensionAlreadyHeld
+
+| Field | Type |
+|---|---|
+| `suspension` | [`SuspensionKey`](./types.mdx#suspensionkey) |
+
+#### SuspensionNotFound
+
+| Field | Type |
+|---|---|
+| `suspension` | [`SuspensionKey`](./types.mdx#suspensionkey) |
+
+#### SuspensionStateConflict
+
+| Field | Type |
+|---|---|
+| `state` | `Suspension.State` |
+| `action_request_id` | [`ActionRequestId`](./types.mdx#actionrequestid) |
+
+#### SuspensionStorageFailed
+
+| Field | Type |
+|---|---|
+| `reason` | `string` |
+
 ### Views
 
 #### RunStates
@@ -368,3 +465,15 @@ Projects [Run](#run); consistency `read_your_writes`.
 | `commission_id` | [`CommissionId`](./types.mdx#commissionid) |
 | `case_revision` | `integer` |
 | `state` | `Run.State` |
+
+#### SuspensionStates
+
+Projects [Suspension](#suspension); consistency `read_your_writes`.
+
+| Field | Type |
+|---|---|
+| `suspension` | [`SuspensionKey`](./types.mdx#suspensionkey) |
+| `commission_id` | [`CommissionId`](./types.mdx#commissionid) |
+| `run_id` | [`RunId`](./types.mdx#runid) |
+| `action_request_id` | [`ActionRequestId`](./types.mdx#actionrequestid) |
+| `state` | `Suspension.State` |

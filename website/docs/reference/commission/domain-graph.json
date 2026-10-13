@@ -427,6 +427,9 @@
       "name": "Run"
     },
     {
+      "createdBy": [
+        "HoldSuspension"
+      ],
       "fields": [
         {
           "name": "commission_id",
@@ -473,10 +476,23 @@
       "lifecycle": {
         "initial": "Pending",
         "states": [
-          "Pending"
+          "Pending",
+          "Resuming"
         ],
         "terminal": [
-          "Pending"
+          "Resuming"
+        ],
+        "transitions": [
+          {
+            "commands": [
+              "TakeSuspension"
+            ],
+            "from": [
+              "Pending"
+            ],
+            "name": "take",
+            "to": "Resuming"
+          }
         ]
       },
       "name": "Suspension"
