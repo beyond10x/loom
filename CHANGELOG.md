@@ -6,6 +6,22 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-13
+
+Loom 0.18.0 lets the command line keep a run that waits on an approval and continue it after the
+grant. A host keeps a commission's Suspension in a directory with
+`loom_governor::FileSuspensionStore`, beside the case in a `FileCaseStore`.
+`b10x-loom run --state <DIR>` keeps the run there and holds the commission's Suspension when it
+stops on a withheld approval; `b10x-loom approve` writes the grant and performs nothing, and
+`b10x-loom resume` continues the run after it, performing the suspended request once. A granted
+merge is handed off as a record of the commission, the request, the workspace and its `HEAD`; no
+Git ref moves and merging happens outside Loom. Without `--state`, `run` prints and exits as
+before. This is breaking for Rust callers of the slice and the command-line crate:
+`SliceError` gains `State` and `Resume`, and `b10x_loom_cli::Command` gains `Approve` and
+`Resume`, which break an exhaustive match; `SliceRun` gains `gate` and `RunArgs` gains `state`,
+which break a struct literal. The slice's functions now take any `FallibleCaseStore`, which every
+`CaseStore` is, and the new exit statuses belong to `run --state`, `approve` and `resume` only.
+
 ### Added
 
 - A production suspension store: `loom_governor::FileSuspensionStore` keeps each commission's
