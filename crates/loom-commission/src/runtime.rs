@@ -155,14 +155,18 @@
 //! resumed only on the provider's allow ([`ResumeRefusal::NotGranted`]); the effect port must
 //! perform its action. Then the Run is put back into a run store that does not hold it,
 //! `Suspended` at the case revision it started at, and resumed through `ResumeRun`. The Suspension
-//! is then taken through the port (`TakeSuspension`, `Pending` → `Resuming`): of two resumes one
-//! takes it, and the other is refused, [`ResumeRefusal::NothingSuspended`] when the first already
-//! released it and [`ResumeRefusal::InDoubt`] when it is still `Resuming`; a take the port cannot
-//! record ends the resume with [`LoopFailure::RunStorage`]. On any answer but `taken` the Run is
-//! suspended again with its stored reason and nothing is performed. The request, under its own id
-//! and at its own revision, is handed to [`EffectPort::invoke`] once, recorded and observed as the
-//! loop does (8), and the Suspension is released (`ReleaseSuspension`), removed; a release the port
-//! refuses ends the loop with [`LoopFailure::SuspensionNotReleased`]. That is the resumed Run's
+//! is then taken through the port for the request read and revalidated (`TakeSuspension`,
+//! `Pending` → `Resuming`): of two resumes one takes it, and the other is refused,
+//! [`ResumeRefusal::NothingSuspended`] when the first already released it,
+//! [`ResumeRefusal::InDoubt`] when it is still `Resuming`, and [`ResumeRefusal::OtherRequest`],
+//! naming both requests, when the commission holds a Suspension for another request by then (the
+//! first resumed it in full and the commission was suspended again), which is kept as it is; a take
+//! the port cannot record ends the resume with [`LoopFailure::RunStorage`]. On any answer but
+//! `taken` the Run is suspended again in the run store with its stored reason, no Suspension is
+//! held, and nothing is performed. The request, under its own id and at its own revision, is handed
+//! to [`EffectPort::invoke`] once, recorded and observed as the loop does (8), and the Suspension is
+//! released for that request (`ReleaseSuspension`), removed; a release the port refuses ends the
+//! loop with [`LoopFailure::SuspensionNotReleased`], naming the performed request. That is the resumed Run's
 //! first step ([`LoopEnd::steps`]); the loop holds no frontier an executor was handed for it, so
 //! the next iteration reads no approval gate (5), as after a step performed under a grant. The loop
 //! goes on from that iteration, holding the case at the revision the request was made at, or at the
@@ -279,9 +283,29 @@ pub enum LoopFailure {
     SuspensionStore(SuspensionStoreError),
     /// `HoldSuspension` did not store the Run's Suspension, for a reason other than storage.
     SuspensionNotHeld(Box<HoldSuspensionOutcome>),
-    /// `ReleaseSuspension` did not remove the Suspension a resume took after its request was
-    /// performed: the Suspension stays `Resuming`, its request in doubt for the host to settle.
-    SuspensionNotReleased(Box<ReleaseSuspensionOutcome>),
+    /// `ReleaseSuspension` did not remove the Suspension a resume took, after the request it names
+    /// was performed. [`UnreleasedSuspension::outcome`] says what the port left stored.
+    SuspensionNotReleased(Box<UnreleasedSuspension>),
+}
+
+/// A release of the Suspension a resume took that did not remove it, after its request was
+/// performed: the effect port answered for it and the governor observed the answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnreleasedSuspension {
+    /// The request that was performed, the one the resume took the Suspension for.
+    pub action_request_id: ActionRequestId,
+    /// What `ReleaseSuspension` answered, and so what is stored for the commission:
+    ///
+    /// * `storage-failed`: the port changed nothing, and the Suspension stays `Resuming` for this
+    ///   request, in doubt: every later resume is refused [`ResumeRefusal::InDoubt`], and settling
+    ///   it is the host's;
+    /// * `not-found`: no Suspension is stored for the commission (something other than this resume
+    ///   removed it), so nothing durable records that the request was performed;
+    /// * `other-request`: a Suspension for another request is stored, as it was; nothing stored
+    ///   names this request;
+    /// * `not-taken`: a `Pending` Suspension for this request is stored, as it was, and a later
+    ///   resume may take it and perform the request again.
+    pub outcome: ReleaseSuspensionOutcome,
 }
 
 impl fmt::Display for LoopFailure {
@@ -299,9 +323,11 @@ impl fmt::Display for LoopFailure {
             ),
             Self::SuspensionStore(error) => error.fmt(f),
             Self::SuspensionNotHeld(outcome) => write!(f, "suspension not held: {outcome:?}"),
-            Self::SuspensionNotReleased(outcome) => {
-                write!(f, "suspension not released: {outcome:?}")
-            }
+            Self::SuspensionNotReleased(unreleased) => write!(
+                f,
+                "suspension not released after request {} was performed: {:?}",
+                unreleased.action_request_id.0.0, unreleased.outcome
+            ),
         }
     }
 }
@@ -363,6 +389,15 @@ pub enum ResumeRefusal {
     InDoubt {
         /// The request whose performance is in doubt.
         action_request_id: ActionRequestId,
+    },
+    /// The commission's Suspension is held for another request than the one this resume read and
+    /// revalidated (`TakeSuspension` answered `other-request`): it was resumed and replaced since.
+    /// That Suspension is kept as it is, and neither request is performed.
+    OtherRequest {
+        /// The request this resume read from the Suspension and revalidated.
+        action_request_id: ActionRequestId,
+        /// The request the Suspension now stored is held for.
+        held_action_request_id: ActionRequestId,
     },
     /// The stored Suspension, or the run the run store holds under its run id, names another
     /// commission, case or run revision than the one given.
@@ -730,10 +765,19 @@ where
         track.effects.push(effect.clone());
         governor.observe(effect_observation(context, &data, &effect))?;
         if let Some(port) = suspensions {
-            match port.release(ReleaseSuspension { suspension: taken }) {
+            match port.release(ReleaseSuspension {
+                suspension: taken,
+                action_request_id: data.action_request_id.clone(),
+            }) {
                 ReleaseSuspensionOutcome::Released { .. } => {}
-                other => {
-                    return Err(LoopFailure::SuspensionNotReleased(Box::new(other)).into());
+                outcome => {
+                    return Err(LoopFailure::SuspensionNotReleased(Box::new(
+                        UnreleasedSuspension {
+                            action_request_id: data.action_request_id,
+                            outcome,
+                        },
+                    ))
+                    .into());
                 }
             }
         }
@@ -1038,7 +1082,8 @@ fn suspend_for_approval<R: SuspendRunBehavior + ?Sized>(
 /// # Errors
 ///
 /// [`ResumeError::Refused`] when there is nothing to resume, the request is in doubt or may not be
-/// performed now, or another resume took the Suspension first; [`ResumeError::Store`] or
+/// performed now, or another resume took the Suspension first or the commission holds one for
+/// another request by the time it is taken; [`ResumeError::Store`] or
 /// [`ResumeError::Governor`] when a port fails before the Run resumes: nothing is performed, and
 /// the Suspension stays stored as it was. [`ResumeError::Loop`] when `ResumeRun` fails, the
 /// Suspension cannot be taken (nothing is performed), or the resumed loop stops without a run
@@ -1160,14 +1205,20 @@ where
         }
         other => return refused(ResumeRefusal::RunNotSuspended(other)),
     }
-    // Taken before anything is performed: of two resumes one takes it, and a Suspension a resume
-    // took and never released is never taken again. Whatever the take answers but `taken`, the
-    // Run is suspended again with its stored reason and nothing is performed.
+    // Taken before anything is performed, for the request read and revalidated above: of two
+    // resumes one takes it, a Suspension a resume took and never released is never taken again,
+    // and one held since for another request is not taken. Whatever the take answers but `taken`,
+    // the Run is suspended again with its stored reason and nothing is performed.
     let key = stored.suspension.clone();
     let failure = match suspensions.take(TakeSuspension {
         suspension: key.clone(),
+        action_request_id: stored.action_request_id.clone(),
     }) {
         TakeSuspensionOutcome::Taken { .. } => None,
+        TakeSuspensionOutcome::OtherRequest { error } => Some(Err(ResumeRefusal::OtherRequest {
+            action_request_id: error.action_request_id,
+            held_action_request_id: error.held_action_request_id,
+        })),
         TakeSuspensionOutcome::NotFound { .. } => Some(Err(ResumeRefusal::NothingSuspended)),
         TakeSuspensionOutcome::WrongState { error } => Some(Err(ResumeRefusal::InDoubt {
             action_request_id: error.action_request_id,

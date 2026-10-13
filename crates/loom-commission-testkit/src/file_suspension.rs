@@ -7,7 +7,9 @@
 //! `HoldSuspension`, `TakeSuspension` and `ReleaseSuspension` are decided by Commission's own
 //! decisions (`decide_hold`, `decide_take`, `decide_release`) over the file as it is read, and
 //! their write made, under one hold of the lock below, so of two resumes over one directory only
-//! one takes a Suspension. A store that cannot read or write answers the command's
+//! one takes a Suspension, and a take or a release naming another request than the stored
+//! Suspension's is refused (`other-request`) and changes nothing. A store that cannot read or write
+//! answers the command's
 //! `storage-failed` and changes nothing. Every write goes to a fresh temporary
 //! file in the same directory, is synced and renamed over its target, so a reader sees the previous
 //! document or the next one and never part of one; a failed write leaves what was stored before.

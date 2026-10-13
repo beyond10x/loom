@@ -43,7 +43,8 @@ use b10x_loom_commission::model::responsibility::{
     HoldSuspensionOutcome, ProposedActionArguments, ReleaseSuspension, ReleaseSuspensionOutcome,
     ResumeRun, ResumeRunOutcome, RevalidateActionRequestOutcome, RunId, RunStateConflict,
     RunStorageFailed, StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome,
-    SuspensionStateConflict, SuspensionStorageFailed, TakeSuspension, TakeSuspensionOutcome,
+    SuspensionRequestMismatch, SuspensionStateConflict, SuspensionStorageFailed, TakeSuspension,
+    TakeSuspensionOutcome,
 };
 use b10x_loom_commission::outcome::RunStore;
 use ess_conformance::scenario::{CommandRef, ErrorRef, EventRef, OutcomeRef};
@@ -88,6 +89,7 @@ const SUSPENSION_RELEASED: &str = "commission.responsibility.SuspensionReleased"
 const SUSPENSION_ALREADY_HELD: &str = "commission.responsibility.SuspensionAlreadyHeld";
 const SUSPENSION_NOT_FOUND: &str = "commission.responsibility.SuspensionNotFound";
 const SUSPENSION_STATE_CONFLICT: &str = "commission.responsibility.SuspensionStateConflict";
+const SUSPENSION_REQUEST_MISMATCH: &str = "commission.responsibility.SuspensionRequestMismatch";
 const SUSPENSION_STORAGE_FAILED: &str = "commission.responsibility.SuspensionStorageFailed";
 const SUSPENSION_STATES: &str = "commission.responsibility.SuspensionStates";
 
@@ -433,6 +435,29 @@ fn suspension_conflict(
     )
 }
 
+/// A take's or a release's `other-request` refusal, naming the Suspension, the request it is held
+/// for and the one the command named.
+fn suspension_other_request(
+    command: &str,
+    mismatch: SuspensionRequestMismatch,
+) -> SemanticCommandResult {
+    took(command, "other-request").with_error(
+        error(SUSPENSION_REQUEST_MISMATCH)
+            .with(
+                "suspension",
+                codec::from_suspension_key(&mismatch.suspension),
+            )
+            .with(
+                "held_action_request_id",
+                Node::Text(mismatch.held_action_request_id.0.0),
+            )
+            .with(
+                "action_request_id",
+                Node::Text(mismatch.action_request_id.0.0),
+            ),
+    )
+}
+
 fn hold_suspension(
     live: &mut Live,
     input: &Input,
@@ -485,8 +510,12 @@ fn take_suspension(
 ) -> Option<SemanticCommandResult> {
     let command = TakeSuspension {
         suspension: codec::suspension_key(input.get("suspension")?)?,
+        action_request_id: ActionRequestId(codec::uuid(input, "action_request_id")?),
     };
     Some(match live.suspensions.take_suspension(command).ok()? {
+        TakeSuspensionOutcome::OtherRequest { error } => {
+            suspension_other_request(TAKE_SUSPENSION, error)
+        }
         TakeSuspensionOutcome::Taken { suspension_taken } => {
             let published = live.publish(
                 event(SUSPENSION_TAKEN)
@@ -523,8 +552,12 @@ fn release_suspension(
 ) -> Option<SemanticCommandResult> {
     let command = ReleaseSuspension {
         suspension: codec::suspension_key(input.get("suspension")?)?,
+        action_request_id: ActionRequestId(codec::uuid(input, "action_request_id")?),
     };
     Some(match live.suspensions.release_suspension(command).ok()? {
+        ReleaseSuspensionOutcome::OtherRequest { error } => {
+            suspension_other_request(RELEASE_SUSPENSION, error)
+        }
         ReleaseSuspensionOutcome::Released {
             suspension_released,
         } => {

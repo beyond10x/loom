@@ -19,9 +19,8 @@ use b10x_loom_commission::model::responsibility::{
     CompletionDetermination, EffectOutcome, EffectOutcomePerformed, EvidenceData, EvidenceId,
     Frontier, GovernorError, HoldSuspension, HoldSuspensionOutcome, Observation, ObservationId,
     PrincipalId, ReleaseSuspension, ReleaseSuspensionOutcome, RunId, SuspensionKey,
-    SuspensionReason, SuspensionSnapshot, SuspensionState, SuspensionStorageFailed,
-    TakeSuspension, TakeSuspensionOutcome, Unit, commission_state, frontier_state,
-    observation_state,
+    SuspensionReason, SuspensionSnapshot, SuspensionState, SuspensionStorageFailed, TakeSuspension,
+    TakeSuspensionOutcome, Unit, commission_state, frontier_state, observation_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -104,7 +103,11 @@ fn a_stale_resume_takes_a_later_suspension_and_merges_its_old_request_again() {
             "A released S1"
         );
         // The commission's next Run is suspended on R2: S2 is held `Pending`.
-        let held = suspensions(&dir).hold(hold_input(&first, RunId(uuid(0xA00)), second_request.clone()));
+        let held = suspensions(&dir).hold(hold_input(
+            &first,
+            RunId(uuid(0xA00)),
+            second_request.clone(),
+        ));
         assert!(
             matches!(held, HoldSuspensionOutcome::Held { .. }),
             "S2 is held: {held:?}"
@@ -135,11 +138,14 @@ fn a_stale_resume_takes_a_later_suspension_and_merges_its_old_request_again() {
     lock(&merges).extend(merges_of(&adapter));
 
     let merges = lock(&merges).clone();
-    let left = suspensions(&dir).get(&commission_id).expect("the store reads");
+    let left = suspensions(&dir)
+        .get(&commission_id)
+        .expect("the store reads");
     assert_eq!(
         (
             merges.len(),
-            left.as_ref().map(|s| (s.state, s.data.action_request_id.clone()))
+            left.as_ref()
+                .map(|s| (s.state, s.data.action_request_id.clone()))
         ),
         (1, Some((SuspensionState::Pending, second_request.clone()))),
         "R1 was merged {} times ({merges:?}) and S2 (R2, never performed) is left as {left:?}; \
@@ -252,7 +258,10 @@ fn a_refused_release_leaves_the_request_in_doubt_and_merged_once() {
         "the resume ends SuspensionNotReleased: {resumed:?}"
     );
     assert_eq!(merges_of(&adapter).len(), 1, "the merge was performed once");
-    assert_eq!(stored(&dir, &commission_id).state, SuspensionState::Resuming);
+    assert_eq!(
+        stored(&dir, &commission_id).state,
+        SuspensionState::Resuming
+    );
 
     let retry = Adapter::new(&governor, &case, &ids);
     let retried = resume_after_grant(
@@ -405,19 +414,30 @@ fn concurrent_takes_over_one_directory_take_once() {
         data.data.suspension = key.clone();
         let held = FileSuspensionStore::open(&root)
             .expect("opens")
-            .hold(hold_input(&data, data.data.run_id.clone(), data.data.action_request_id.clone()));
-        assert!(matches!(held, HoldSuspensionOutcome::Held { .. }), "{held:?}");
+            .hold(hold_input(
+                &data,
+                data.data.run_id.clone(),
+                data.data.action_request_id.clone(),
+            ));
+        assert!(
+            matches!(held, HoldSuspensionOutcome::Held { .. }),
+            "{held:?}"
+        );
         let barrier = Arc::new(Barrier::new(8));
         let taken: Vec<bool> = (0..8)
             .map(|_| {
                 let barrier = barrier.clone();
                 let root = root.clone();
                 let key = key.clone();
+                let request = data.data.action_request_id.clone();
                 std::thread::spawn(move || {
                     let store = FileSuspensionStore::open(&root).expect("opens");
                     barrier.wait();
                     matches!(
-                        store.take(TakeSuspension { suspension: key }),
+                        store.take(TakeSuspension {
+                            suspension: key,
+                            action_request_id: request,
+                        }),
                         TakeSuspensionOutcome::Taken { .. }
                     )
                 })
@@ -443,16 +463,35 @@ fn the_file_store_answers_hold_take_and_release_from_each_state() {
     let held = template();
     let key = held.data.suspension.clone();
     let id = held.data.commission_id.clone();
-    let input = || hold_input(&held, held.data.run_id.clone(), held.data.action_request_id.clone());
+    let request = held.data.action_request_id.clone();
+    let input = || {
+        hold_input(
+            &held,
+            held.data.run_id.clone(),
+            held.data.action_request_id.clone(),
+        )
+    };
 
-    assert!(matches!(store.hold(input()), HoldSuspensionOutcome::Held { .. }));
     assert!(matches!(
-        store.release(ReleaseSuspension { suspension: key.clone() }),
+        store.hold(input()),
+        HoldSuspensionOutcome::Held { .. }
+    ));
+    assert!(matches!(
+        store.release(ReleaseSuspension {
+            suspension: key.clone(),
+            action_request_id: request.clone()
+        }),
         ReleaseSuspensionOutcome::NotTaken { .. }
     ));
-    assert_eq!(store.get(&id).unwrap().unwrap().state, SuspensionState::Pending);
+    assert_eq!(
+        store.get(&id).unwrap().unwrap().state,
+        SuspensionState::Pending
+    );
     assert!(matches!(
-        store.take(TakeSuspension { suspension: key.clone() }),
+        store.take(TakeSuspension {
+            suspension: key.clone(),
+            action_request_id: request.clone()
+        }),
         TakeSuspensionOutcome::Taken { .. }
     ));
     assert!(matches!(
@@ -460,16 +499,28 @@ fn the_file_store_answers_hold_take_and_release_from_each_state() {
         HoldSuspensionOutcome::AlreadyHeld { .. }
     ));
     assert!(matches!(
-        store.take(TakeSuspension { suspension: key.clone() }),
+        store.take(TakeSuspension {
+            suspension: key.clone(),
+            action_request_id: request.clone()
+        }),
         TakeSuspensionOutcome::WrongState { .. }
     ));
-    assert_eq!(store.get(&id).unwrap().unwrap().state, SuspensionState::Resuming);
+    assert_eq!(
+        store.get(&id).unwrap().unwrap().state,
+        SuspensionState::Resuming
+    );
     assert!(matches!(
-        store.release(ReleaseSuspension { suspension: key.clone() }),
+        store.release(ReleaseSuspension {
+            suspension: key.clone(),
+            action_request_id: request.clone()
+        }),
         ReleaseSuspensionOutcome::Released { .. }
     ));
     assert!(matches!(
-        store.release(ReleaseSuspension { suspension: key }),
+        store.release(ReleaseSuspension {
+            suspension: key,
+            action_request_id: request
+        }),
         ReleaseSuspensionOutcome::NotFound { .. }
     ));
     assert!(store.get(&id).unwrap().is_none());
@@ -486,7 +537,11 @@ fn stored(dir: &Path, commission_id: &CommissionId) -> SuspensionSnapshot {
         .expect("the Suspension is stored")
 }
 
-fn hold_input(from: &SuspensionSnapshot, run_id: RunId, request: ActionRequestId) -> HoldSuspension {
+fn hold_input(
+    from: &SuspensionSnapshot,
+    run_id: RunId,
+    request: ActionRequestId,
+) -> HoldSuspension {
     let data = &from.data;
     HoldSuspension {
         suspension: data.suspension.clone(),
@@ -836,6 +891,8 @@ impl<'g> Adapter<'g> {
         }
     }
 
+    // Copied with the fixtures; no case of this pass dies before an action.
+    #[allow(dead_code)]
     fn dying_on(mut self, action: &'static str) -> Self {
         self.dies_on = Some(action);
         self

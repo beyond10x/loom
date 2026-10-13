@@ -34,15 +34,17 @@ use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
     ActionRequestId, AgentRevisionId, AuthorityContext, AuthorityVerdict,
     AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData, CommissionId,
-    EffectOutcome, EffectOutcomePerformed, EvidenceData, EvidenceId, ObservationId, PrincipalId,
-    RunId, RunOutcome, RunOutcomeNeedsAuthority, RunState, SuspensionReason, SuspensionState,
-    SuspensionStateConflict, Unit, commission_state,
+    EffectOutcome, EffectOutcomePerformed, EvidenceData, EvidenceId, HoldSuspension,
+    HoldSuspensionOutcome, ObservationId, PrincipalId, ReleaseSuspension, ReleaseSuspensionOutcome,
+    RunId, RunOutcome, RunOutcomeNeedsAuthority, RunState, SuspensionReason,
+    SuspensionRequestMismatch, SuspensionSnapshot, SuspensionState, SuspensionStateConflict,
+    TakeSuspension, TakeSuspensionOutcome, Unit, commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use b10x_loom_commission::ports::evidence::submit_evidence;
 use b10x_loom_commission::ports::governor::Governor as _;
-use b10x_loom_commission::ports::suspension::SuspensionPort;
+use b10x_loom_commission::ports::suspension::{SuspensionPort, SuspensionStoreError};
 use b10x_loom_commission::runtime::{
     LoopContext, LoopFailure, ResumeError, ResumeRefusal, resume_after_grant, run_until_blocked,
     run_with_suspension,
@@ -424,6 +426,138 @@ fn a_resume_with_no_stored_suspension_is_refused() {
     assert!(adapter.invoked().is_empty(), "nothing was invoked");
     assert!(granting.asked().is_empty(), "the provider was not asked");
     assert!(model.offered().is_empty(), "the executor was not run");
+}
+
+/// A resume that read the Suspension for one request and, when it takes it, finds the commission's
+/// Suspension held for another request is refused naming both: nothing is invoked, the executor is
+/// not run, no Suspension is held anew and the stored one is kept `Pending`, as it was. A release
+/// naming another request than the one held is refused the same way and removes nothing.
+#[test]
+fn a_take_or_a_release_for_another_request_is_refused_naming_both_and_changes_nothing() {
+    let dir = store_dir("other-request");
+    let (governor, case, ids) = opened_case(&dir);
+    let suspensions = suspensions(&dir);
+    let commission = commission(&case);
+    {
+        let adapter = Adapter::new(&governor, &case, &ids);
+        let model = Model::picking([TESTS_RUN, MERGE]);
+        let loom = loom(&model, &governor, "chg-1842-other-request");
+        run_with_suspension(
+            &governor,
+            &loom,
+            &withholding(),
+            &adapter,
+            &commission,
+            &mut run_store(0x500),
+            &suspensions,
+            &mut Context::starting_at(0x300),
+        )
+        .unwrap_or_else(|error| panic!("the loop failed: {error}"));
+    }
+    let commission_id = commission.data().commission_id.clone();
+    let held = suspensions
+        .get(&commission_id)
+        .expect("the store reads")
+        .expect("the Suspension is stored");
+    let read = ActionRequestId(uuid(0xDEAD));
+
+    let granting =
+        StaticAuthorityProvider::new().answer(MERGE, AuthorityVerdict::Allow(Unit(true)));
+    let adapter = Adapter::new(&governor, &case, &ids);
+    let model = Model::picking([MERGE]);
+    let loom = loom(&model, &governor, "chg-1842-other-request-resume");
+    let mut runs = run_store(0x600);
+    let resumed = resume_after_grant(
+        &governor,
+        &loom,
+        &granting,
+        &adapter,
+        &commission,
+        &mut runs,
+        &ReadsAnotherRequest {
+            store: &suspensions,
+            request: read.clone(),
+        },
+        &mut Context::starting_at(0x700),
+    );
+    assert_eq!(
+        resumed.err(),
+        Some(ResumeError::Refused(ResumeRefusal::OtherRequest {
+            action_request_id: read.clone(),
+            held_action_request_id: held.data.action_request_id.clone(),
+        })),
+        "the take names both requests"
+    );
+    assert!(adapter.invoked().is_empty(), "nothing was invoked");
+    assert!(model.offered().is_empty(), "the executor was not run");
+    assert_eq!(run_state(&runs, &held.data.run_id), "Suspended");
+    assert_eq!(
+        suspensions.get(&commission_id).expect("the store reads"),
+        Some(held.clone()),
+        "the Suspension held for the other request is kept as it was"
+    );
+
+    let key = held.data.suspension.clone();
+    let taken = suspensions.take(TakeSuspension {
+        suspension: key.clone(),
+        action_request_id: held.data.action_request_id.clone(),
+    });
+    assert!(
+        matches!(taken, TakeSuspensionOutcome::Taken { .. }),
+        "{taken:?}"
+    );
+    assert_eq!(
+        suspensions.release(ReleaseSuspension {
+            suspension: key.clone(),
+            action_request_id: read.clone(),
+        }),
+        ReleaseSuspensionOutcome::OtherRequest {
+            error: SuspensionRequestMismatch {
+                suspension: key,
+                held_action_request_id: held.data.action_request_id.clone(),
+                action_request_id: read,
+            },
+        }
+    );
+    assert_eq!(
+        suspensions
+            .get(&commission_id)
+            .expect("the store reads")
+            .map(|stored| (stored.state, stored.data.action_request_id)),
+        Some((SuspensionState::Resuming, held.data.action_request_id)),
+        "the release for another request removed nothing"
+    );
+}
+
+/// The file store, read as holding the Suspension for `request`: what a resume that read the
+/// commission's earlier Suspension, before it was resumed and replaced, saw.
+struct ReadsAnotherRequest<'s> {
+    store: &'s FileSuspensionStore,
+    request: ActionRequestId,
+}
+
+impl SuspensionPort for ReadsAnotherRequest<'_> {
+    fn hold(&self, input: HoldSuspension) -> HoldSuspensionOutcome {
+        self.store.hold(input)
+    }
+
+    fn take(&self, input: TakeSuspension) -> TakeSuspensionOutcome {
+        self.store.take(input)
+    }
+
+    fn release(&self, input: ReleaseSuspension) -> ReleaseSuspensionOutcome {
+        self.store.release(input)
+    }
+
+    fn get(
+        &self,
+        commission: &CommissionId,
+    ) -> Result<Option<SuspensionSnapshot>, SuspensionStoreError> {
+        Ok(self.store.get(commission)?.map(|mut stored| {
+            stored.data.action_request_id = self.request.clone();
+            stored
+        }))
+    }
 }
 
 /// A Suspension the port cannot write fails the loop as the run store's failure to record the

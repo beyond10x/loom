@@ -18,6 +18,11 @@
 //! * `ReleaseSuspension` removes a `Resuming` Suspension once its request was performed; a
 //!   `Pending` one is refused (`not-taken`).
 //!
+//! A take and a release name the action request the resume read and revalidated. A Suspension
+//! held for another request is refused (`other-request`, [`SuspensionRequestMismatch`] naming
+//! both) whatever its state, and kept as it is, so a resume that read one Suspension never takes
+//! or releases a later one the commission holds for another request.
+//!
 //! A `Resuming` Suspension is never taken again: its request may have been performed or not, and
 //! settling it is the host's. Each command answers `storage-failed` when the store cannot read or
 //! write, and then changes nothing. [`decide_hold`], [`decide_take`] and [`decide_release`] decide
@@ -41,11 +46,11 @@ use crate::model::responsibility::obligations::{
     HoldSuspensionBehavior, ReleaseSuspensionBehavior, TakeSuspensionBehavior,
 };
 use crate::model::responsibility::{
-    AnySuspension, CommissionId, HoldSuspension, HoldSuspensionOutcome, ReleaseSuspension,
-    ReleaseSuspensionOutcome, Suspension, SuspensionAlreadyHeld, SuspensionData, SuspensionHeld,
-    SuspensionKey, SuspensionNotFound, SuspensionReleased, SuspensionSnapshot,
-    SuspensionStateConflict, SuspensionStorageFailed, SuspensionTaken, TakeSuspension,
-    TakeSuspensionOutcome,
+    ActionRequestId, AnySuspension, CommissionId, HoldSuspension, HoldSuspensionOutcome,
+    ReleaseSuspension, ReleaseSuspensionOutcome, Suspension, SuspensionAlreadyHeld, SuspensionData,
+    SuspensionHeld, SuspensionKey, SuspensionNotFound, SuspensionReleased,
+    SuspensionRequestMismatch, SuspensionSnapshot, SuspensionStateConflict,
+    SuspensionStorageFailed, SuspensionTaken, TakeSuspension, TakeSuspensionOutcome,
 };
 
 /// Keeps the Suspension of each commission, answering the commands the specification declares on
@@ -56,11 +61,12 @@ pub trait SuspensionPort {
     fn hold(&self, input: HoldSuspension) -> HoldSuspensionOutcome;
 
     /// `TakeSuspension`: moves the commission's Suspension from `Pending` to `Resuming`, or refuses
-    /// when none is stored or it is already `Resuming`.
+    /// when none is stored, it is held for another request than the input's, or it is already
+    /// `Resuming`.
     fn take(&self, input: TakeSuspension) -> TakeSuspensionOutcome;
 
     /// `ReleaseSuspension`: removes the commission's `Resuming` Suspension, or refuses when none
-    /// is stored or it is `Pending`.
+    /// is stored, it is held for another request than the input's, or it is `Pending`.
     fn release(&self, input: ReleaseSuspension) -> ReleaseSuspensionOutcome;
 
     /// The Suspension of `commission`, in either state, or `None` when none is stored.
@@ -158,7 +164,22 @@ pub fn decide_hold(
     )
 }
 
-/// `TakeSuspension` over `held`: `not-found` when nothing is stored, `wrong-state` naming the
+/// The refusal `other-request` of a take or a release naming `requested` when `held` is held for
+/// another request; `None` when it is held for `requested`.
+fn other_request(
+    held: &SuspensionSnapshot,
+    suspension: &SuspensionKey,
+    requested: &ActionRequestId,
+) -> Option<SuspensionRequestMismatch> {
+    (held.data.action_request_id != *requested).then(|| SuspensionRequestMismatch {
+        suspension: suspension.clone(),
+        held_action_request_id: held.data.action_request_id.clone(),
+        action_request_id: requested.clone(),
+    })
+}
+
+/// `TakeSuspension` over `held`: `not-found` when nothing is stored, `other-request` naming both
+/// requests when it is held for another request than the input's, `wrong-state` naming the
 /// request when it is already `Resuming`, otherwise `taken`, with the `Resuming` Suspension to
 /// store.
 pub fn decide_take(
@@ -175,6 +196,9 @@ pub fn decide_take(
             None,
         );
     };
+    if let Some(error) = other_request(&held, &input.suspension, &input.action_request_id) {
+        return (TakeSuspensionOutcome::OtherRequest { error }, None);
+    }
     match held.refine() {
         AnySuspension::Pending(pending) => {
             let taken = pending.take();
@@ -207,7 +231,8 @@ pub fn decide_take(
     }
 }
 
-/// `ReleaseSuspension` over `held`: `not-found` when nothing is stored, `not-taken` naming the
+/// `ReleaseSuspension` over `held`: `not-found` when nothing is stored, `other-request` naming
+/// both requests when it is held for another request than the input's, `not-taken` naming the
 /// request when it is `Pending`, otherwise `released`, removing it.
 pub fn decide_release(
     held: Option<SuspensionSnapshot>,
@@ -223,6 +248,9 @@ pub fn decide_release(
             None,
         );
     };
+    if let Some(error) = other_request(&held, &input.suspension, &input.action_request_id) {
+        return (ReleaseSuspensionOutcome::OtherRequest { error }, None);
+    }
     match held.refine() {
         pending @ AnySuspension::Pending(_) => {
             let state = pending.state();
