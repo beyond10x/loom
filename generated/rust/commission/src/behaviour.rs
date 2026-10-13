@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest cd3dbf86d11d586d3a6fc8ff5824c94f34f1d13379fde5b82dfe68af2d933bd3
-// contract digest f4c927a16c4e6722b2391b3c04ffeb293d9eb8891a3e9d0c1de63b62bc036234
+// model digest 38b8acbd65a0405d8e8080d91f671bb5dd9c73ab42c29aa2b87b1502f66fa167
+// contract digest 5b62b713b7f16745e0bcdee1eab0e84186e1374ae08b7590fde1278b345879af
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan

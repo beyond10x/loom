@@ -273,9 +273,11 @@ Lifecycle: states `Pending`, `Resuming`; initial `Pending`; terminal `Resuming`.
 | Input | Type |
 |---|---|
 | `suspension` | [`SuspensionKey`](./types.mdx#suspensionkey) |
+| `action_request_id` | [`ActionRequestId`](./types.mdx#actionrequestid) |
 
 | Outcome | When | Effect | Emits | Error |
 |---|---|---|---|---|
+| `other-request` | subject predicate | none | none | `SuspensionRequestMismatch` |
 | `not-taken` | subject predicate | none | none | `SuspensionStateConflict` |
 | `released` | otherwise | deletes Suspension | `SuspensionReleased` | none |
 | `not-found` | unknown instance | none | none | `SuspensionNotFound` |
@@ -341,9 +343,11 @@ Lifecycle: states `Pending`, `Resuming`; initial `Pending`; terminal `Resuming`.
 | Input | Type |
 |---|---|
 | `suspension` | [`SuspensionKey`](./types.mdx#suspensionkey) |
+| `action_request_id` | [`ActionRequestId`](./types.mdx#actionrequestid) |
 
 | Outcome | When | Effect | Emits | Error |
 |---|---|---|---|---|
+| `other-request` | subject predicate | none | none | `SuspensionRequestMismatch` |
 | `taken` | otherwise | moves Suspension by `take`, from `Pending` to `Resuming` | `SuspensionTaken` | none |
 | `not-found` | unknown instance | none | none | `SuspensionNotFound` |
 | `wrong-state` | wrong state | refused | none | `SuspensionStateConflict` |
@@ -439,6 +443,14 @@ Lifecycle: states `Pending`, `Resuming`; initial `Pending`; terminal `Resuming`.
 | Field | Type |
 |---|---|
 | `suspension` | [`SuspensionKey`](./types.mdx#suspensionkey) |
+
+#### SuspensionRequestMismatch
+
+| Field | Type |
+|---|---|
+| `suspension` | [`SuspensionKey`](./types.mdx#suspensionkey) |
+| `held_action_request_id` | [`ActionRequestId`](./types.mdx#actionrequestid) |
+| `action_request_id` | [`ActionRequestId`](./types.mdx#actionrequestid) |
 
 #### SuspensionStateConflict
 
