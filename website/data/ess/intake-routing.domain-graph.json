@@ -250,6 +250,18 @@
         {
           "name": "approvals",
           "type": "List<string>"
+        },
+        {
+          "name": "risk",
+          "type": "Risk"
+        },
+        {
+          "name": "change_kind",
+          "type": "ChangeKind"
+        },
+        {
+          "name": "affects_security_boundary",
+          "type": "boolean"
         }
       ],
       "id": "intake.routing.SliceRun",

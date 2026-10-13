@@ -132,7 +132,7 @@ running 1 test
 {"arguments":"{}","call_id":"call-2","kind":"ToolCall","name":"action_arguments","schema_version":1,"turn":3}
 {"cached_input_tokens":0,"final_usage":true,"input_tokens":120,"kind":"Usage","model":"recorded","output_tokens":7,"schema_version":1,"turn":3}
 {"kind":"Turn","model":"recorded","phase":"Selection","schema_version":1,"turn":4,"turn_stop":"ToolCalls"}
-{"arguments":"{\"action\":\"repository.edit\"}","call_id":"call-3","kind":"ToolCall","name":"select_action","schema_version":1,"turn":4}
+{"arguments":"{\"action\":\"implementation.edit\"}","call_id":"call-3","kind":"ToolCall","name":"select_action","schema_version":1,"turn":4}
 {"cached_input_tokens":0,"final_usage":true,"input_tokens":120,"kind":"Usage","model":"recorded","output_tokens":7,"schema_version":1,"turn":4}
 {"kind":"Turn","model":"recorded","phase":"Arguments","schema_version":1,"turn":5,"turn_stop":"ToolCalls"}
 {"arguments":"{\"files\":[{\"contents\":\"fixed\\n\",\"path\":\"check.txt\"}],\"message\":\"update the check\"}","call_id":"call-4","kind":"ToolCall","name":"action_arguments","schema_version":1,"turn":5}
@@ -153,7 +153,7 @@ running 1 test
 {"exit_status":0,"kind":"Terminal","protocol":"software-change@1","schema_version":1,"steps":3,"stop_reason":"ApprovalRequired"}
 test every_line_is_one_object_carrying_the_schema_version ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.10s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.13s
 ```
 
 ## A failed run

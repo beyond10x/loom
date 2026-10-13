@@ -6,6 +6,58 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- Case inputs: a case opens with the value of every case input its protocol declares, given by
+  the host as trusted context and never by a model (`loom_governor::CaseInputs`, re-exported by
+  `loom_sdk`). `software-change@1` declares `risk` (`trivial`, `standard`, `elevated`,
+  `critical`), `change_kind` (`feature`, `bugfix`, `refactor`) and `affects_security_boundary`
+  (`true`, `false`); `incident-response@1`, `system-query@1` and `inbound-answer@1` declare none
+  and open with `CaseInputs::none()`. Canon decides each evaluation with them, and
+  `CanonGovernor::inputs` returns them.
+- `b10x-loom run --risk <trivial|standard|elevated|critical>` (default `standard`),
+  `--change-kind <feature|bugfix|refactor>` (default `feature`) and
+  `--affects-security-boundary <true|false>` (default `false`) give a software change its inputs
+  (`intake.routing.CaseInputs`; `b10x_loom_intake_slice::case::RUN_DEFAULTS`). With the defaults a
+  run reaches the outcomes it reached in 0.19.0; with `--change-kind bugfix` an
+  `implementation.edit` is admissible only once a test failed on the current revision.
+- The specification's `intake.routing.SliceRun` declares the run's `risk`, `change_kind` and
+  `affects_security_boundary`, the inputs of its request; the slice's `run::SliceRun` leaves them
+  with the request the caller holds, as it leaves `run_id`.
+
+### Changed
+
+- Loom builds on `b10x-canon-engineering` `0.7.0` and `b10x-canon` `0.4.0` (was `0.3.0` and
+  `0.1.0`); `Cargo.lock` holds one copy of each. A consumer that adds Canon itself moves to
+  `tag = "0.4.0"`. `loom-protocols` records revision `0.7.0`, and the bundled catalogue gains
+  `ml-experiment@1`, which no slice executes (`NoLocalExecutor`).
+- Breaking: `CanonGovernor::open` and `open_case` take the case inputs as a third argument, and
+  refuse, before anything is stored, an input the protocol does not declare
+  (`OpenError::UndeclaredInput`), a value its input does not list
+  (`OpenError::UnlistedInputValue`) and a declared input left out (`OpenError::MissingInput`),
+  each naming the input; an exhaustive match of `OpenError` adds the three. `CaseState` gains
+  `inputs`. `case::open` and `case::open_with_catalog` take the host's `CaseInputs`, and
+  `SliceRequest` and `IntentRequest` gain `inputs`.
+- Breaking: `loom.governor`'s `StoredCase` gains `inputs`, a list of `{input, value}`.
+  `FileCaseStore` refuses a case file without it as a store failure naming the case (`case <id>
+  does not read: ...`), never filling in defaults: a state directory 0.19.0 wrote a case into is
+  not resumed by this release; start a new run.
+- Breaking: the slice performs `tests.write` and `implementation.edit`, the two write actions of
+  `software.change/1`, where it performed `repository.edit`, with the same effect (a committed
+  write reporting the new `HEAD`); the selector's prompt and argument schema name both, and
+  `executor::EDIT` is replaced by `TESTS_WRITE` and `IMPLEMENTATION_EDIT`. Scripts and
+  hosts that name `repository.edit` name one of them.
+- An obligation is open only when Canon reports it `open`: one the case's inputs do not select
+  (`not_applicable`) is not reported owed (`FrontierObligation.open`, `DecidedObligation.open`).
+  With the default inputs `red_first.required` and `security_review.required` do not apply; where
+  they apply they stay open, since the slice submits no regression test result or security
+  review.
+- The slice reads a software change's frontier without the actions it can never perform
+  (`run::never_performed`, `run::PERFORMED`, `run::SliceReads` for an embedder's own loop):
+  `release.rollback`, new on that frontier, is never offered to the agent, never awaited at an
+  approval gate and never held as a Suspension; a proposal of it is refused as not in the
+  frontier.
+
 ## [0.19.0] - 2026-10-13
 
 Loom 0.19.0 lets a host settle a hold before anything is held. Commission's `HoldSuspension` gains
