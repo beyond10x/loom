@@ -13,15 +13,24 @@
 //! `software-change@1` case, is performed by recording its hand-off; every other action goes to
 //! the slice's local effect adapter unchanged. The slice's run never builds one, so a run outside
 //! a resume performs no merge at all.
+//!
+//! [`SettledHandoffs`] is the suspension port a resume runs on (`story:handoff-holds-no-suspension`):
+//! a `repository.merge` the agent proposes again at a `HEAD` the commission already handed off is
+//! settled, so Commission's `HoldSuspension` answers `settled` and holds no Suspension; every other
+//! call goes to the state directory's suspension store unchanged.
 
 use std::path::{Path, PathBuf};
 
 use b10x_loom_commission::model::json;
 use b10x_loom_commission::model::responsibility::{
-    ActionRequestData, Commission, EffectOutcome, EffectOutcomePerformed, EffectOutcomeRefused,
-    ExecutorOutcomeProposedAction, commission_state,
+    ActionRequestData, Commission, CommissionId as HeldCommissionId, EffectOutcome,
+    EffectOutcomePerformed, EffectOutcomeRefused, ExecutorOutcomeProposedAction, HoldSuspension,
+    HoldSuspensionOutcome, ReleaseSuspension, ReleaseSuspensionOutcome, SuspensionSettled,
+    SuspensionSnapshot, SuspensionStorageFailed, TakeSuspension, TakeSuspensionOutcome,
+    commission_state,
 };
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
+use b10x_loom_commission::ports::suspension::{SuspensionPort, SuspensionStoreError};
 use intake_model::obligation::UnmetObligation;
 use intake_model::primitives::Uuid;
 use intake_model::routing::obligations::RecordMergeHandoffBehavior;
@@ -377,6 +386,85 @@ impl EffectPort for HandoffEffects<'_, '_> {
     }
 }
 
+/// The suspension port a resume runs on (see the module documentation): `HoldSuspension` for a
+/// `repository.merge` whose request would hand off a `HEAD` the commission already handed off is
+/// answered `settled` and stores nothing, since the work it would approve is already handed off;
+/// every other hold, and every take, release and read, goes to `inner`.
+pub struct SettledHandoffs<'a> {
+    inner: &'a dyn SuspensionPort,
+    store: &'a MergeHandoffStore,
+    held_head: HeldHead<'a>,
+}
+
+impl<'a> SettledHandoffs<'a> {
+    /// The suspension store `inner`, with a merge settled when `store` holds a hand-off of its
+    /// commission at the `HEAD` `held_head` answers: the case's implementation revision the
+    /// governor holds, the one a hand-off of the request would record.
+    pub(crate) fn new(
+        inner: &'a dyn SuspensionPort,
+        store: &'a MergeHandoffStore,
+        held_head: HeldHead<'a>,
+    ) -> Self {
+        Self {
+            inner,
+            store,
+            held_head,
+        }
+    }
+}
+
+impl SuspensionPort for SettledHandoffs<'_> {
+    /// A merge at a handed-off `HEAD` is `settled`; a `HEAD` or a hand-off that cannot be read is
+    /// `storage-failed`, holding nothing; every other hold is `inner`'s.
+    fn hold(&self, input: HoldSuspension) -> HoldSuspensionOutcome {
+        if input.action != MERGE {
+            return self.inner.hold(input);
+        }
+        let unreadable = |reason: String| HoldSuspensionOutcome::StorageFailed {
+            error: SuspensionStorageFailed { reason },
+        };
+        let head = match (self.held_head)() {
+            Ok(head) => head,
+            Err(error) => {
+                return unreadable(format!(
+                    "the HEAD a merge would hand off cannot be read: {error}"
+                ));
+            }
+        };
+        let commission = CommissionId(Uuid(input.commission_id.0.0.clone()));
+        match self.store.handed_off(&commission, &head) {
+            Ok(None) => self.inner.hold(input),
+            Ok(Some(handoff)) => HoldSuspensionOutcome::Settled {
+                error: SuspensionSettled {
+                    suspension: input.suspension,
+                    action_request_id: input.action_request_id,
+                    reason: format!(
+                        "commission {} already handed off HEAD {} under request {}; the same \
+                         work is not handed off twice",
+                        handoff.commission_id.0.0, handoff.head, handoff.action_request_id.0.0
+                    ),
+                },
+            },
+            Err(error) => unreadable(error.to_string()),
+        }
+    }
+
+    fn take(&self, input: TakeSuspension) -> TakeSuspensionOutcome {
+        self.inner.take(input)
+    }
+
+    fn release(&self, input: ReleaseSuspension) -> ReleaseSuspensionOutcome {
+        self.inner.release(input)
+    }
+
+    fn get(
+        &self,
+        commission: &HeldCommissionId,
+    ) -> Result<Option<SuspensionSnapshot>, SuspensionStoreError> {
+        self.inner.get(commission)
+    }
+}
+
 /// `handoff` as the JSON document the store writes.
 fn encode(handoff: &MergeHandoffData) -> String {
     let value = json!({
@@ -521,5 +609,124 @@ mod tests {
         )
         .unwrap();
         assert!(store.handed_off(&input.commission_id, "ffff").is_err());
+    }
+
+    /// `story:handoff-holds-no-suspension`: the resume's suspension port settles a merge at a
+    /// `HEAD` the commission already handed off, storing nothing; a merge at another `HEAD`, a
+    /// merge of another commission and every other action are held by the store as before.
+    #[test]
+    fn a_merge_at_a_handed_off_head_is_settled_and_holds_no_suspension() {
+        use b10x_loom_commission::model::json;
+        use b10x_loom_commission::model::primitives::Uuid as HeldUuid;
+        use b10x_loom_commission::model::responsibility::{
+            ActionRequestId as HeldRequestId, CaseId, ProposedActionArguments, RunId,
+            SuspensionKey, SuspensionReason,
+        };
+        use loom_governor::FileSuspensionStore;
+
+        let dir = tempfile::Builder::new()
+            .prefix("settled-handoffs-")
+            .tempdir()
+            .unwrap();
+        let suspensions = FileSuspensionStore::open(dir.path().join("suspensions")).unwrap();
+        let handoffs = MergeHandoffStore::open(dir.path().join("merges")).unwrap();
+        let commission = "00000000-0000-4000-8000-000000000001";
+        let other_commission = "00000000-0000-4000-8000-000000000002";
+        let recorded = handoffs.record(&RecordMergeHandoff {
+            action_request_id: ActionRequestId(Uuid("00000000-0000-4000-8000-0000000000a1".into())),
+            commission_id: CommissionId(Uuid(commission.to_owned())),
+            workspace: "/work/space".to_owned(),
+            head: "0123abcd".to_owned(),
+        });
+        assert!(
+            matches!(recorded, RecordMergeHandoffOutcome::Recorded { .. }),
+            "{recorded:?}"
+        );
+        let hold = |commission: &str, action: &str| HoldSuspension {
+            suspension: SuspensionKey {
+                commission_id: HeldCommissionId(HeldUuid(commission.to_owned())),
+            },
+            commission_id: HeldCommissionId(HeldUuid(commission.to_owned())),
+            run_id: RunId(HeldUuid("00000000-0000-4000-8000-000000000003".to_owned())),
+            run_case_revision: 1,
+            action_request_id: HeldRequestId(HeldUuid(
+                "00000000-0000-4000-8000-0000000000a2".to_owned(),
+            )),
+            case_id: CaseId("case-1".to_owned()),
+            expected_case_revision: 3,
+            action: action.to_owned(),
+            arguments: ProposedActionArguments(json::Value::Object(Vec::new())),
+            reason: SuspensionReason::Authority(json::Value::Object(vec![(
+                "capability".to_owned(),
+                json::Value::Text(action.to_owned()),
+            )])),
+        };
+        let held = |commission: &str| {
+            suspensions
+                .get(&HeldCommissionId(HeldUuid(commission.to_owned())))
+                .unwrap()
+        };
+
+        let at_handed_off: HeldHead<'_> = &|| Ok("0123abcd".to_owned());
+        let port = SettledHandoffs::new(&suspensions, &handoffs, at_handed_off);
+        let input = hold(commission, MERGE);
+        match port.hold(input.clone()) {
+            HoldSuspensionOutcome::Settled { error } => {
+                assert_eq!(error.suspension, input.suspension);
+                assert_eq!(error.action_request_id, input.action_request_id);
+                assert!(error.reason.contains("0123abcd"), "{}", error.reason);
+            }
+            other => panic!("a merge at a handed-off HEAD is settled: {other:?}"),
+        }
+        assert_eq!(held(commission), None, "nothing is held");
+
+        let other = port.hold(hold(other_commission, MERGE));
+        assert!(
+            matches!(other, HoldSuspensionOutcome::Held { .. }),
+            "another commission handed off nothing: {other:?}"
+        );
+        assert!(held(other_commission).is_some());
+
+        let edit = port.hold(hold(commission, "repository.edit"));
+        assert!(
+            matches!(edit, HoldSuspensionOutcome::Held { .. }),
+            "{edit:?}"
+        );
+        let stored = held(commission).expect("another action is held");
+        assert_eq!(stored.data.action, "repository.edit");
+
+        let suspensions = FileSuspensionStore::open(dir.path().join("fresh")).unwrap();
+        let at_new_work: HeldHead<'_> = &|| Ok("4567cdef".to_owned());
+        let port = SettledHandoffs::new(&suspensions, &handoffs, at_new_work);
+        let new_work = port.hold(hold(commission, MERGE));
+        assert!(
+            matches!(new_work, HoldSuspensionOutcome::Held { .. }),
+            "a merge at a new HEAD is held: {new_work:?}"
+        );
+        assert!(
+            suspensions
+                .get(&HeldCommissionId(HeldUuid(commission.to_owned())))
+                .unwrap()
+                .is_some()
+        );
+
+        let unreadable: HeldHead<'_> = &|| {
+            Err(crate::run::SliceError::State(
+                "no implementation revision".into(),
+            ))
+        };
+        let suspensions = FileSuspensionStore::open(dir.path().join("unreadable")).unwrap();
+        let port = SettledHandoffs::new(&suspensions, &handoffs, unreadable);
+        let failed = port.hold(hold(commission, MERGE));
+        assert!(
+            matches!(failed, HoldSuspensionOutcome::StorageFailed { .. }),
+            "a HEAD that cannot be read holds nothing and settles nothing: {failed:?}"
+        );
+        assert!(
+            suspensions
+                .get(&HeldCommissionId(HeldUuid(commission.to_owned())))
+                .unwrap()
+                .is_none()
+        );
     }
 }

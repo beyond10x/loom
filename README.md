@@ -33,9 +33,9 @@ the whole boundary.
 
 ## Status
 
-Version `0.18.0`, released from source at the tag `0.18.0`
-([release](https://github.com/beyond10x/loom/releases/tag/0.18.0)). Nothing is on a registry: you
-install from the tag or depend on it with `tag = "0.18.0"`. `b10x-loom run` completed a live run
+Version `0.19.0`, released from source at the tag `0.19.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.19.0)). Nothing is on a registry: you
+install from the tag or depend on it with `tag = "0.19.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -79,6 +79,15 @@ Since `0.11.0` Loom builds on engineering-protocols `0.3.0` and Canon `0.1.0` (`
 a consumer that adds Canon itself pins the same tag). `incident.response/1` keeps the obligation
 `investigate_cause` open after `emergency.leave` becomes admissible, until a cause analysis
 identifies the cause.
+
+Since `0.19.0` a suspension port can answer that the host already settled a hold: Commission's
+`HoldSuspension` has the outcome `settled`, and the run then holds nothing and ends as a loop
+without a port ends it. `b10x-loom resume` uses it for a merge the agent proposes again at a
+`HEAD` its commission already handed off: the run stops `MergeHandedOff`, nothing is held, and
+`approve` has nothing to approve. The state directory and the governor's file stores read only
+regular files as records; a symbolic link is refused, never followed. Callers that match
+`HoldSuspensionOutcome` or `LoopFailure` exhaustively add `Settled` and `NotResumed`, and the run
+store given to `run_with_suspension` implements `ResumeRunBehavior`, as `RunStore` does.
 
 Since `0.18.0` the command line keeps a run that waits on an approval and continues it after the
 grant: `b10x-loom run --state <DIR>` keeps the case, the commission's Suspension (in a
@@ -133,14 +142,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.18.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.19.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.18.0
+b10x-loom 0.19.0
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -170,7 +179,9 @@ written stops the run before any model call. Without it nothing outlives the run
 that Suspension holds, performing nothing, and `b10x-loom resume <COMMISSION> --state <DIR>`
 performs that request once and runs on. A granted `repository.merge` is a merge hand-off: a record
 of the commission, the request, the workspace and its `HEAD` in the state directory, once per
-`HEAD` of a commission; no Git ref moves, and merging happens outside Loom. Each refusal of a
+`HEAD` of a commission; no Git ref moves, and merging happens outside Loom. A merge the agent
+proposes again at a `HEAD` its commission already handed off holds no Suspension and leaves no
+resume context, so there is nothing to approve. Each refusal of a
 resume has its own exit status (10 to 22, listed by `b10x-loom resume --help`). Only a last line
 `stopped: ApprovalRequired (<action>)` leaves something to approve: `..., nothing suspended`
 (exit 4) and `stopped: MergeHandedOff (<request>, HEAD <sha>)` leave nothing.
@@ -217,7 +228,7 @@ A supervisor that keeps its own case record calls `loom_governor::evaluate` (or 
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.18.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.19.0" }
 ```
 
 The example below

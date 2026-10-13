@@ -7,6 +7,9 @@
 //! left one), is synced, and is renamed over its target, so a reader sees no document or the whole
 //! one.
 //!
+//! A read takes only a regular file as a record ([`read_text`]): a symbolic link or any other entry
+//! where a record would be is refused, never followed.
+//!
 //! Opening proves the directory takes a write: holding the lock, a temporary file is created,
 //! written, synced and removed. A lock file an earlier open left is no such proof, so a directory
 //! that has since become read-only is refused on open.
@@ -169,10 +172,84 @@ impl StateDir {
 
 /// The text of the file `path`, or `None` when there is no such file. Only called holding the
 /// lock.
+///
+/// Only a regular file in the directory is a record: a symlink (to a record kept elsewhere, or to
+/// nothing), a directory or any other entry at `path` is refused, never followed, so no store reads
+/// a record its own writes did not put there. The file opened is checked to be the entry examined.
 pub(crate) fn read_text(path: &Path) -> Result<Option<String>, ResumeStoreError> {
-    match fs::read_to_string(path) {
-        Ok(text) => Ok(Some(text)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(failed(path, error)),
+    use std::io::Read as _;
+    use std::os::unix::fs::MetadataExt as _;
+
+    let entry = match fs::symlink_metadata(path) {
+        Ok(entry) => entry,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(failed(path, error)),
+    };
+    if !entry.file_type().is_file() {
+        return Err(failed(path, not_a_record(&entry.file_type())));
+    }
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(failed(path, error)),
+    };
+    let opened = file.metadata().map_err(|error| failed(path, error))?;
+    if !opened.file_type().is_file() || (opened.dev(), opened.ino()) != (entry.dev(), entry.ino()) {
+        return Err(failed(
+            path,
+            "changed while it was read: the file opened is not the entry examined",
+        ));
+    }
+    let mut text = String::new();
+    file.read_to_string(&mut text)
+        .map_err(|error| failed(path, error))?;
+    Ok(Some(text))
+}
+
+/// Why an entry that is not a regular file is not read as a record.
+fn not_a_record(kind: &fs::FileType) -> &'static str {
+    if kind.is_symlink() {
+        "is a symbolic link, not a record this store wrote; it is not followed"
+    } else if kind.is_dir() {
+        "is a directory, not a record this store wrote"
+    } else {
+        "is not a regular file, not a record this store wrote"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every store here reads its records through `read_text` (`GrantStore`, `ResumeContextStore`,
+    /// `MergeHandoffStore`), so a record is only ever a regular file in the directory: a symlink,
+    /// to a record kept elsewhere or to nothing, and a directory are refused, never read as a
+    /// record and never as no record.
+    #[test]
+    fn only_a_regular_file_is_read_as_a_record() {
+        let dir = tempfile::Builder::new()
+            .prefix("read-text-")
+            .tempdir()
+            .unwrap();
+        let record = dir.path().join("record.json");
+        std::fs::write(&record, "{}").unwrap();
+        assert_eq!(read_text(&record).unwrap().as_deref(), Some("{}"));
+        assert_eq!(read_text(&dir.path().join("absent.json")).unwrap(), None);
+
+        let linked = dir.path().join("linked.json");
+        std::os::unix::fs::symlink(&record, &linked).unwrap();
+        let refused = read_text(&linked).unwrap_err();
+        assert!(refused.problem.contains("symbolic link"), "{refused:?}");
+
+        let dangling = dir.path().join("dangling.json");
+        std::os::unix::fs::symlink(dir.path().join("nothing.json"), &dangling).unwrap();
+        assert!(
+            read_text(&dangling).is_err(),
+            "a dangling link is not no record"
+        );
+
+        let directory = dir.path().join("directory.json");
+        std::fs::create_dir(&directory).unwrap();
+        assert!(read_text(&directory).is_err());
     }
 }

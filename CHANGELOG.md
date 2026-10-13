@@ -6,6 +6,50 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-13
+
+Loom 0.19.0 lets a host settle a hold before anything is held. Commission's `HoldSuspension` gains
+the outcome `settled`: a suspension port that answers it leaves no Suspension and nothing to
+approve, and the run ends as a loop without a port ends it. `b10x-loom resume` answers it for a
+merge the agent proposes again at a `HEAD` its commission already handed off, so the run stops
+`MergeHandedOff`, nothing waits on an approval, and `approve` answers `NothingSuspended`. The
+state directory and the governor's `FileCaseStore` and `FileSuspensionStore` read only regular
+files as records; a symbolic link is refused, never followed. Breaking for exhaustive matches of
+`HoldSuspensionOutcome` (`Settled`) and `LoopFailure` (`NotResumed`), and for a run store given to
+`run_with_suspension` that does not implement `ResumeRunBehavior`.
+
+### Added
+
+- A suspension port can answer that the host already settled a hold: Commission's
+  `HoldSuspension` gains the outcome `settled`, carrying `SuspensionSettled` (the Suspension, the
+  action request and the host's reason). `run_with_suspension` and `resume_after_grant` then hold
+  nothing, put the Run they suspended back `Running` through `ResumeRun`, and end the run as a
+  loop without a port ends it, with no loop error; a resume of the commission finds nothing to
+  resume. This is breaking for Rust callers: `HoldSuspensionOutcome` gains `Settled` and
+  `LoopFailure` gains `NotResumed` (a `ResumeRun` that fails after a settled hold), which break an
+  exhaustive match, and `run_with_suspension`'s run store must implement `ResumeRunBehavior`, as
+  `RunStore` does.
+
+### Changed
+
+- A merge the agent proposes again, in `b10x-loom resume`, at a `HEAD` its commission already
+  handed off holds no Suspension: the resume's suspension port
+  (`b10x_loom_intake_slice::handoff::SettledHandoffs`) answers its hold `settled`, the run stops
+  `stopped: MergeHandedOff (<request>, HEAD <sha>)`, the state directory keeps no Suspension and no
+  resume context for the commission, and `approve` is refused `NothingSuspended` (10).
+  `approve`'s `AlreadyHandedOff` refusal (23) stays as a defence.
+- The slice's state-directory stores (`GrantStore`, `ResumeContextStore`, `MergeHandoffStore`)
+  read only regular files as records: a grant, resume context or hand-off record that is a
+  symbolic link (to a record elsewhere or to nothing), a directory or any other entry is refused as
+  a store error and never followed. A symlinked hand-off record no longer settles a resume's hold
+  of a merge; the hold is `storage-failed` and nothing is held. A symlinked resume context is
+  listed as unreadable. The governor's `FileCaseStore` and `FileSuspensionStore` read their
+  files the same way: a case or Suspension file that is not a regular file is a store error.
+- Commission's conformance check (`task commission:conform`) also runs the authored scenarios
+  `ess/commission/ess-inputs.yaml` lists, which read the stores after `HoldSuspension` `settled`
+  and `storage-failed` and `StartRun` `storage-failed`, and fails when a scenario file under
+  `ess/commission/scenarios/` is not listed.
+
 ## [0.18.0] - 2026-10-13
 
 Loom 0.18.0 lets the command line keep a run that waits on an approval and continue it after the

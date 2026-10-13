@@ -526,4 +526,97 @@ mod tests {
         )]));
         assert_eq!(needed_capability(&budget), None);
     }
+
+    /// A resume holds no Suspension for a merge at a `HEAD` its commission already handed off
+    /// (`story:handoff-holds-no-suspension`), so `approve` never meets one there; should a
+    /// Suspension for one be held anyway, `approve` still refuses it `AlreadyHandedOff` and writes
+    /// no grant, and approves the same Suspension once the case is at a `HEAD` not handed off.
+    #[test]
+    fn approve_refuses_a_merge_at_a_head_already_handed_off_and_writes_no_grant() {
+        use b10x_loom_commission::model::primitives::Uuid as HeldUuid;
+        use b10x_loom_commission::model::responsibility::{
+            ActionRequestId as HeldRequestId, HoldSuspension, HoldSuspensionOutcome,
+            ProposedActionArguments, RunId, SuspensionKey,
+        };
+        use loom_governor::FileSuspensionStore;
+
+        use crate::handoff::{RecordMergeHandoff, RecordMergeHandoffOutcome};
+
+        let dir = tempfile::Builder::new()
+            .prefix("approve-handed-off-")
+            .tempdir()
+            .unwrap();
+        let suspensions = FileSuspensionStore::open(dir.path()).unwrap();
+        let grants = GrantStore::open(dir.path()).unwrap();
+        let handoffs = MergeHandoffStore::open(dir.path()).unwrap();
+        let id = "00000000-0000-4000-8000-000000000001";
+        let commission_id = HeldCommissionId(HeldUuid(id.to_owned()));
+        let held = suspensions.hold(HoldSuspension {
+            suspension: SuspensionKey {
+                commission_id: commission_id.clone(),
+            },
+            commission_id,
+            run_id: RunId(HeldUuid("00000000-0000-4000-8000-000000000003".to_owned())),
+            run_case_revision: 1,
+            action_request_id: HeldRequestId(HeldUuid(
+                "00000000-0000-4000-8000-0000000000a2".to_owned(),
+            )),
+            case_id: CaseId("case-1".to_owned()),
+            expected_case_revision: 3,
+            action: MERGE.to_owned(),
+            arguments: ProposedActionArguments(json::Value::Object(Vec::new())),
+            reason: SuspensionReason::Authority(json::Value::Object(vec![(
+                "capability".to_owned(),
+                json::Value::Text(MERGE.to_owned()),
+            )])),
+        });
+        assert!(
+            matches!(held, HoldSuspensionOutcome::Held { .. }),
+            "{held:?}"
+        );
+        let recorded = handoffs.record(&RecordMergeHandoff {
+            action_request_id: ActionRequestId(Uuid("00000000-0000-4000-8000-0000000000a1".into())),
+            commission_id: CommissionId(Uuid(id.to_owned())),
+            workspace: "/work/space".to_owned(),
+            head: "0123abcd".to_owned(),
+        });
+        assert!(
+            matches!(recorded, RecordMergeHandoffOutcome::Recorded { .. }),
+            "{recorded:?}"
+        );
+        let at = Timestamp("2026-10-13T08:00:00Z".to_owned());
+
+        let refused = approve(
+            &suspensions,
+            &grants,
+            &handoffs,
+            &|_| Ok("0123abcd".to_owned()),
+            id,
+            MERGE,
+            at.clone(),
+        );
+        assert_eq!(
+            refused,
+            Err(ApproveRefusal::AlreadyHandedOff(HeadAlreadyHandedOff {
+                commission_id: CommissionId(Uuid(id.to_owned())),
+                head: "0123abcd".to_owned(),
+            }))
+        );
+        assert_eq!(
+            grants.get(&CommissionId(Uuid(id.to_owned()))).unwrap(),
+            None,
+            "no grant is written"
+        );
+
+        let approved = approve(
+            &suspensions,
+            &grants,
+            &handoffs,
+            &|_| Ok("4567cdef".to_owned()),
+            id,
+            MERGE,
+            at,
+        );
+        assert!(approved.is_ok(), "{approved:?}");
+    }
 }

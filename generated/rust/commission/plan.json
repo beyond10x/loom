@@ -2,8 +2,8 @@
   "provenance": {
     "system": "commission",
     "specification_version": "v1",
-    "source_digest": "38b8acbd65a0405d8e8080d91f671bb5dd9c73ab42c29aa2b87b1502f66fa167",
-    "contract_digest": "5b62b713b7f16745e0bcdee1eab0e84186e1374ae08b7590fde1278b345879af"
+    "source_digest": "350c43fc092c90e046f38c4d6de7ff571c845c296f6ba8d0f64258e21170d928",
+    "contract_digest": "2354d7e1a107137146df3a47ff2f31ec3c25aeb71755bdbf6a47908cf2fe89f2"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -591,9 +591,9 @@
         "disposition": "obligation",
         "reason": {
           "class": "undetermined",
-          "construct": "the fields of error `commission.responsibility.SuspensionStorageFailed`, which the specification gives no source, in `storage-failed`"
+          "construct": "the fields of error `commission.responsibility.SuspensionSettled`, which the specification gives no source, in `settled`"
         },
-        "contract": "given `commission.responsibility.HoldSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `held` otherwise, creates `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionHeld`; `already-held` for an identity a record already carries, error `commission.responsibility.SuspensionAlreadyHeld`; `storage-failed` externally decided (the suspension port cannot hold the Suspension), error `commission.responsibility.SuspensionStorageFailed`"
+        "contract": "given `commission.responsibility.HoldSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `settled` externally decided (the host already settled the request the Suspension would hold), error `commission.responsibility.SuspensionSettled`; `held` otherwise, creates `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionHeld`; `already-held` for an identity a record already carries, error `commission.responsibility.SuspensionAlreadyHeld`; `storage-failed` externally decided (the suspension port cannot hold the Suspension), error `commission.responsibility.SuspensionStorageFailed`"
       }
     },
     {
@@ -804,6 +804,13 @@
     {
       "kind": "error_type",
       "source": "commission.responsibility.SuspensionRequestMismatch",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "commission.responsibility.SuspensionSettled",
       "disposition": {
         "disposition": "generated"
       }

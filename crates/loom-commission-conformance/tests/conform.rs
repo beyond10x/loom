@@ -1,7 +1,9 @@
 //! `task check` holds Commission's ESS specification to its synthesized conformance suite.
 //!
 //! [`ess_conformance_report`] synthesizes the suite from `ess/commission/` with `ess verify conform
-//! synthesize --suite-format 5` (declared coverage), runs it against `b10x-loom-commission` through
+//! synthesize --suite-format 5` (declared coverage), with the authored scenarios
+//! `ess/commission/ess-inputs.yaml` lists (`--scenarios`, every file under
+//! `ess/commission/scenarios/` and no other), runs it against `b10x-loom-commission` through
 //! [`CommissionTarget`], and reads the verdict from the `ess-conformance-report/2` document, never
 //! from an exit code:
 //!
@@ -61,7 +63,9 @@ fn scratch() -> PathBuf {
 }
 
 /// The suite `ess/commission/` obliges, synthesized fresh with declared coverage
-/// (`--suite-format 5`), so the report can qualify the run `passed` rather than `inconclusive`.
+/// (`--suite-format 5`), so the report can qualify the run `passed` rather than `inconclusive`,
+/// with the authored scenarios `ess/commission/ess-inputs.yaml` lists (`--scenarios`): without
+/// it ESS selects none of them.
 fn synthesize(out: &Path) -> String {
     let output = Command::new("ess")
         .current_dir(root())
@@ -70,6 +74,8 @@ fn synthesize(out: &Path) -> String {
             "conform",
             "synthesize",
             "--path",
+            "ess/commission",
+            "--scenarios",
             "ess/commission",
             "--suite-format",
             "5",
@@ -80,12 +86,38 @@ fn synthesize(out: &Path) -> String {
         .unwrap_or_else(|error| panic!("`ess` must be on PATH: {error}"));
     assert!(
         output.status.success(),
-        "`ess verify conform synthesize --path ess/commission --suite-format 5` exited {}:\n{}{}",
+        "`ess verify conform synthesize --path ess/commission --scenarios ess/commission \
+         --suite-format 5` exited {}:\n{}{}",
         output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
     fs::read_to_string(out).unwrap_or_else(|error| panic!("read {}: {error}", out.display()))
+}
+
+/// The authored scenarios `suite` carries, each by the name after `/authored/` in its id.
+fn authored_in(suite: &str) -> BTreeSet<String> {
+    let suite: Value = serde_json::from_str(suite).expect("the suite is JSON");
+    suite["scenarios"]
+        .as_object()
+        .expect("the suite carries an object of scenarios")
+        .keys()
+        .filter_map(|id| id.split_once("/authored/"))
+        .map(|(_, name)| name.to_owned())
+        .collect()
+}
+
+/// The authored scenarios under `ess/commission/scenarios/`, each by its file stem, which is the
+/// `scenario:` name the document declares.
+fn authored_files() -> BTreeSet<String> {
+    let dir = root().join("ess/commission/scenarios");
+    fs::read_dir(&dir)
+        .unwrap_or_else(|error| panic!("read {}: {error}", dir.display()))
+        .map(|entry| entry.unwrap_or_else(|error| panic!("read {}: {error}", dir.display())))
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "yaml"))
+        .filter_map(|path| path.file_stem()?.to_str().map(str::to_owned))
+        .collect()
 }
 
 /// The scenario ids `ess/SKIPPED.md` names, each on a line `- <scenario id>: <reason>` with a
@@ -212,6 +244,12 @@ fn ess_conformance_report() {
     assert!(
         scenarios > 0,
         "the suite synthesized from ess/ holds no scenario"
+    );
+    assert_eq!(
+        authored_in(&suite),
+        authored_files(),
+        "the suite must carry every authored scenario under ess/commission/scenarios/, and only \
+         those: one left out of ess-inputs.yaml is never run"
     );
 
     let executed =

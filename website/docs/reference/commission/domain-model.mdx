@@ -264,6 +264,7 @@ Lifecycle: states `Pending`, `Resuming`; initial `Pending`; terminal `Resuming`.
 
 | Outcome | When | Effect | Emits | Error |
 |---|---|---|---|---|
+| `settled` | external | none | none | `SuspensionSettled` |
 | `held` | otherwise | creates Suspension | `SuspensionHeld` | none |
 | `already-held` | existing instance | none | none | `SuspensionAlreadyHeld` |
 | `storage-failed` | external | none | none | `SuspensionStorageFailed` |
@@ -451,6 +452,14 @@ Lifecycle: states `Pending`, `Resuming`; initial `Pending`; terminal `Resuming`.
 | `suspension` | [`SuspensionKey`](./types.mdx#suspensionkey) |
 | `held_action_request_id` | [`ActionRequestId`](./types.mdx#actionrequestid) |
 | `action_request_id` | [`ActionRequestId`](./types.mdx#actionrequestid) |
+
+#### SuspensionSettled
+
+| Field | Type |
+|---|---|
+| `suspension` | [`SuspensionKey`](./types.mdx#suspensionkey) |
+| `action_request_id` | [`ActionRequestId`](./types.mdx#actionrequestid) |
+| `reason` | `string` |
 
 #### SuspensionStateConflict
 

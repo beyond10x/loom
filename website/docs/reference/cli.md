@@ -225,8 +225,9 @@ suspended request needs, as `run` or `resume` named it when it stopped.
 
 Only a stop line `stopped: ApprovalRequired (<action>)` of `run --state` or `resume` leaves a
 Suspension to approve. `stopped: ApprovalRequired (<action>), nothing suspended` leaves none, and
-`stopped: MergeHandedOff (<request>, HEAD <sha>)` says that HEAD was already handed off: a merge at
-it is refused AlreadyHandedOff, and only new work, a new HEAD, is approved again.
+`stopped: MergeHandedOff (<request>, HEAD <sha>)` says that HEAD was already handed off: a merge the
+agent proposed again at it holds no Suspension, so approving it is refused NothingSuspended, and only
+new work, a new HEAD, is approved again.
 
 Exit status:
   0   the grant is written

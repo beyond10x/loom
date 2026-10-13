@@ -143,8 +143,15 @@
 //! The caller sees the same [`LoopEnd`] as without a port. A `SuspendRun` that fails ends the loop
 //! as on any other suspension, and no Suspension is held; a Suspension the port cannot hold ends it
 //! with [`LoopFailure::RunStorage`] (`storage-failed`) or [`LoopFailure::SuspensionNotHeld`], the
-//! Run suspended, its reason in [`LoopError::suspension_reason`]. [`run_until_blocked`] passes no
-//! port, reads none and never suspends a Run on an approval, as in 0.16.0.
+//! Run suspended, its reason in [`LoopError::suspension_reason`]. A hold the host settled
+//! (`settled`: it already did what an approval of the request would lead to,
+//! `story:handoff-holds-no-suspension`) holds nothing and is no failure: the Run is put back
+//! `Running` through `ResumeRun`, as a loop without a port leaves it, so no Run stays `Suspended`
+//! with no Suspension behind it and a resume finds nothing to resume
+//! ([`ResumeRefusal::NothingSuspended`]); the caller sees the same [`LoopEnd`]. A `ResumeRun` that
+//! fails then ends the loop with [`LoopFailure::RunStorage`] or [`LoopFailure::NotResumed`], the
+//! Run suspended. [`run_until_blocked`] passes no port, reads none and never suspends a Run on an
+//! approval, as in 0.16.0.
 //!
 //! [`resume_after_grant`] continues the same Run from the stored Suspension alone, in a process
 //! that need not be the one that suspended it. In this order: the Suspension is read
@@ -281,8 +288,13 @@ pub enum LoopFailure {
     CommissionSuspended(SuspensionStateConflict),
     /// The suspension port could not be read before a Run started. Nothing was performed.
     SuspensionStore(SuspensionStoreError),
-    /// `HoldSuspension` did not store the Run's Suspension, for a reason other than storage.
+    /// `HoldSuspension` did not store the Run's Suspension, for a reason other than storage or a
+    /// hold the host settled (`settled`, which is no failure).
     SuspensionNotHeld(Box<HoldSuspensionOutcome>),
+    /// `ResumeRun` did not put back `Running` the Run the loop suspended for an approval whose
+    /// hold the host settled, for a reason other than storage. The Run stays `Suspended`, with no
+    /// Suspension behind it.
+    NotResumed(Box<ResumeRunOutcome>),
     /// `ReleaseSuspension` did not remove the Suspension a resume took, after the request it names
     /// was performed. [`UnreleasedSuspension::outcome`] says what the port left stored.
     SuspensionNotReleased(Box<UnreleasedSuspension>),
@@ -323,6 +335,9 @@ impl fmt::Display for LoopFailure {
             ),
             Self::SuspensionStore(error) => error.fmt(f),
             Self::SuspensionNotHeld(outcome) => write!(f, "suspension not held: {outcome:?}"),
+            Self::NotResumed(outcome) => {
+                write!(f, "run not resumed after a settled hold: {outcome:?}")
+            }
             Self::SuspensionNotReleased(unreleased) => write!(
                 f,
                 "suspension not released after request {} was performed: {:?}",
@@ -541,7 +556,7 @@ where
     E: AgentExecutor + ?Sized,
     A: AuthorityProvider + ?Sized,
     F: EffectPort + ?Sized,
-    R: StartRunBehavior + SuspendRunBehavior + ?Sized,
+    R: StartRunBehavior + SuspendRunBehavior + ResumeRunBehavior + ?Sized,
     C: LoopContext + ?Sized,
 {
     // A commission holding a Suspension, `Pending` or `Resuming`, starts no new Run: its request
@@ -563,14 +578,14 @@ where
         executor,
         authority,
         effects,
-        suspensions: Some(suspensions),
+        suspensions: Some(Suspensions::new(suspensions)),
     };
     start(&ports, commission, runs, context)
 }
 
 /// Starts a Run of `commission` and drives it until it ends.
 fn start<G, E, A, F, R, C>(
-    ports: &Ports<'_, G, E, A, F>,
+    ports: &Ports<'_, G, E, A, F, R>,
     commission: &Commission<commission_state::Assigned>,
     runs: &mut R,
     context: &mut C,
@@ -650,13 +665,53 @@ fn finish<R: SuspendRunBehavior + ?Sized>(
 }
 
 /// The ports one loop calls out through.
-struct Ports<'p, G: ?Sized, E: ?Sized, A: ?Sized, F: ?Sized> {
+struct Ports<'p, G: ?Sized, E: ?Sized, A: ?Sized, F: ?Sized, R: ?Sized> {
     governor: &'p G,
     executor: &'p E,
     authority: &'p A,
     effects: &'p F,
     /// Where a Run ended on a withheld approval is suspended to; `None` suspends none.
-    suspensions: Option<&'p dyn SuspensionPort>,
+    suspensions: Option<Suspensions<'p, R>>,
+}
+
+/// The suspension port of a loop given one, and how the loop puts back `Running` a Run it
+/// suspended for an approval when the host settled the hold ([`unsuspend`]).
+struct Suspensions<'p, R: ?Sized> {
+    port: &'p dyn SuspensionPort,
+    unsuspend: fn(&mut R, &RunId) -> Result<(), LoopFailure>,
+}
+
+impl<R: ?Sized> Clone for Suspensions<'_, R> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<R: ?Sized> Copy for Suspensions<'_, R> {}
+
+impl<'p, R: ResumeRunBehavior + ?Sized> Suspensions<'p, R> {
+    fn new(port: &'p dyn SuspensionPort) -> Self {
+        Self {
+            port,
+            unsuspend: unsuspend::<R>,
+        }
+    }
+}
+
+/// Puts the Run `run_id`, which the loop suspended for an approval whose hold the host settled,
+/// back `Running` (`ResumeRun`): no Suspension stands behind it, so it is left as a loop without a
+/// suspension port leaves a Run that ends on an approval.
+fn unsuspend<R: ResumeRunBehavior + ?Sized>(
+    runs: &mut R,
+    run_id: &RunId,
+) -> Result<(), LoopFailure> {
+    match runs.resume_run(ResumeRun {
+        run_id: run_id.clone(),
+    })? {
+        ResumeRunOutcome::Resumed { .. } => Ok(()),
+        ResumeRunOutcome::StorageFailed { error } => Err(LoopFailure::RunStorage(error)),
+        other => Err(LoopFailure::NotResumed(Box::new(other))),
+    }
 }
 
 /// A suspended request [`resume_after_grant`] revalidated and admitted, which the resumed loop
@@ -697,7 +752,7 @@ impl Track {
 /// suspended request was made at, which [`resume_after_grant`] loaded. A resumed Run first hands
 /// its request to the effect port, as the module documents.
 fn iterate<G, E, A, F, R, C>(
-    ports: &Ports<'_, G, E, A, F>,
+    ports: &Ports<'_, G, E, A, F, R>,
     commission: &Commission<commission_state::Assigned>,
     runs: &mut R,
     context: &mut C,
@@ -764,7 +819,7 @@ where
             .map_err(|error| Stopped::from(LoopFailure::Effect(error)))?;
         track.effects.push(effect.clone());
         governor.observe(effect_observation(context, &data, &effect))?;
-        if let Some(port) = suspensions {
+        if let Some(Suspensions { port, .. }) = suspensions {
             match port.release(ReleaseSuspension {
                 suspension: taken,
                 action_request_id: data.action_request_id.clone(),
@@ -973,9 +1028,10 @@ where
                     return Ok(track.end(run_id, ended));
                 }
                 // With a suspension port, a run that ends on an approval the provider withholds is
-                // suspended, and its Suspension stored, before the caller hears of it.
+                // suspended, and its Suspension stored, before the caller hears of it; a hold the
+                // host settled stores none and puts the Run back `Running`.
                 if let (
-                    Some(port),
+                    Some(suspending),
                     RunOutcome::NeedsAuthority(_),
                     Some(request),
                     Some((capability, AuthorityVerdict::ApprovalRequired(required))),
@@ -985,7 +1041,7 @@ where
                         ("capability".to_owned(), Value::Text(capability.clone())),
                         ("request".to_owned(), Value::Text(required.request.clone())),
                     ]));
-                    suspend_for_approval(runs, port, run, request, reason)?;
+                    suspend_for_approval(runs, suspending, run, request, reason)?;
                 }
                 return Ok(track.end(run_id, derived));
             }
@@ -1029,11 +1085,12 @@ fn out_of_budget<R: SuspendRunBehavior + ?Sized>(
 }
 
 /// Suspends the Run `run` for `reason` and holds the commission's Suspension, holding the Run and
-/// `request`, through `port` (`HoldSuspension`). The Suspension is not held when the Run could not
-/// be suspended.
+/// `request`, through the port (`HoldSuspension`). The Suspension is not held when the Run could
+/// not be suspended. A hold the host settled (`settled`) stores nothing: the Run is put back
+/// `Running` ([`unsuspend`]) and the run ends as it would without a port.
 fn suspend_for_approval<R: SuspendRunBehavior + ?Sized>(
     runs: &mut R,
-    port: &dyn SuspensionPort,
+    suspending: Suspensions<'_, R>,
     run: &RunStarted,
     request: &ActionRequestData,
     reason: SuspensionReason,
@@ -1044,7 +1101,7 @@ fn suspend_for_approval<R: SuspendRunBehavior + ?Sized>(
             suspended: Some((reason, None)),
         });
     }
-    let failure = match port.hold(HoldSuspension {
+    let failure = match suspending.port.hold(HoldSuspension {
         suspension: SuspensionKey {
             commission_id: run.commission_id.clone(),
         },
@@ -1059,6 +1116,11 @@ fn suspend_for_approval<R: SuspendRunBehavior + ?Sized>(
         reason: reason.clone(),
     }) {
         HoldSuspensionOutcome::Held { .. } => return Ok(()),
+        // Nothing is held, so nothing may leave the Run suspended: a resume finds no Suspension.
+        HoldSuspensionOutcome::Settled { .. } => match (suspending.unsuspend)(runs, &run.run_id) {
+            Ok(()) => return Ok(()),
+            Err(failure) => failure,
+        },
         HoldSuspensionOutcome::StorageFailed { error } => {
             LoopFailure::RunStorage(RunStorageFailed {
                 reason: error.reason,
@@ -1247,7 +1309,7 @@ where
         executor,
         authority,
         effects,
-        suspensions: Some(suspensions),
+        suspensions: Some(Suspensions::new(suspensions)),
     };
     let run = RunStarted {
         run_id: run_id.clone(),

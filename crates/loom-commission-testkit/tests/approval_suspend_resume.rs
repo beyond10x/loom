@@ -38,8 +38,8 @@ use b10x_loom_commission::model::responsibility::{
     EffectOutcome, EffectOutcomePerformed, EvidenceData, EvidenceId, HoldSuspension,
     HoldSuspensionOutcome, ObservationId, PrincipalId, ReleaseSuspension, ReleaseSuspensionOutcome,
     RunId, RunOutcome, RunOutcomeNeedsAuthority, RunState, SuspensionReason,
-    SuspensionRequestMismatch, SuspensionSnapshot, SuspensionState, SuspensionStateConflict,
-    TakeSuspension, TakeSuspensionOutcome, Unit, commission_state,
+    SuspensionRequestMismatch, SuspensionSettled, SuspensionSnapshot, SuspensionState,
+    SuspensionStateConflict, TakeSuspension, TakeSuspensionOutcome, Unit, commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -557,6 +557,178 @@ impl SuspensionPort for ReadsAnotherRequest<'_> {
             stored.data.action_request_id = self.request.clone();
             stored
         }))
+    }
+}
+
+/// `story:handoff-holds-no-suspension`: a port that answers `HoldSuspension` `settled` (the host
+/// already settled the request) ends the run as the caller sees it without a port, `NeedsAuthority`
+/// with the same requests, effects and steps: no loop error, no Suspension stored, the Run not left
+/// `Suspended`, and a resume finds nothing to resume. The same port settling nothing holds the
+/// Suspension `Pending`, the Run `Suspended`, as before.
+#[test]
+fn a_hold_the_host_settled_holds_no_suspension_and_ends_the_run_without_a_loop_error() {
+    let settled_dir = store_dir("settled");
+    let (governor, case, ids) = opened_case(&settled_dir);
+    let adapter = Adapter::new(&governor, &case, &ids);
+    let model = Model::picking([TESTS_RUN, MERGE]);
+    let executor = loom(&model, &governor, "chg-1842-settled");
+    let mut runs = run_store(0x500);
+    let store = suspensions(&settled_dir);
+    let settling = Settles {
+        store: &store,
+        settled: true,
+        asked: Mutex::new(Vec::new()),
+    };
+    let end = run_with_suspension(
+        &governor,
+        &executor,
+        &withholding(),
+        &adapter,
+        &commission(&case),
+        &mut runs,
+        &settling,
+        &mut Context::starting_at(0x300),
+    )
+    .unwrap_or_else(|error| panic!("a settled hold is no loop error: {error}"));
+    assert_eq!(
+        end.outcome,
+        RunOutcome::NeedsAuthority(RunOutcomeNeedsAuthority {
+            request: WITHHELD.to_owned(),
+        }),
+        "the run ends at its approval gate"
+    );
+    let asked = lock(&settling.asked).clone();
+    assert_eq!(asked.len(), 1, "the port was asked to hold once: {asked:?}");
+    assert_eq!(asked[0].action, MERGE);
+    assert_eq!(asked[0].run_id, end.run_id);
+    assert_eq!(adapter.invoked(), [TESTS_RUN], "nothing was merged");
+    let commission_id = commission(&case).data().commission_id.clone();
+    assert!(
+        store
+            .get(&commission_id)
+            .expect("the store reads")
+            .is_none(),
+        "a settled hold leaves nothing held"
+    );
+    assert_eq!(
+        run_state(&runs, &end.run_id),
+        "Running",
+        "the Run is not left suspended with no Suspension behind it"
+    );
+
+    let without_dir = store_dir("settled-without-port");
+    let without = {
+        let (governor, case, ids) = opened_case(&without_dir);
+        let adapter = Adapter::new(&governor, &case, &ids);
+        let model = Model::picking([TESTS_RUN, MERGE]);
+        let executor = loom(&model, &governor, "chg-1842-settled");
+        run_until_blocked(
+            &governor,
+            &executor,
+            &withholding(),
+            &adapter,
+            &commission(&case),
+            &mut run_store(0x500),
+            &mut Context::starting_at(0x300),
+        )
+        .unwrap_or_else(|error| panic!("the loop failed: {error}"))
+    };
+    assert_eq!(
+        end, without,
+        "the caller sees what a run without a port ends with"
+    );
+
+    let granting =
+        StaticAuthorityProvider::new().answer(MERGE, AuthorityVerdict::Allow(Unit(true)));
+    let resume_adapter = Adapter::new(&governor, &case, &ids);
+    let resume_model = Model::picking([MERGE]);
+    let resume_loom = loom(&resume_model, &governor, "chg-1842-settled-resume");
+    let resumed = resume_after_grant(
+        &governor,
+        &resume_loom,
+        &granting,
+        &resume_adapter,
+        &commission(&case),
+        &mut runs,
+        &settling,
+        &mut Context::starting_at(0x700),
+    );
+    assert_eq!(
+        resumed.err(),
+        Some(ResumeError::Refused(ResumeRefusal::NothingSuspended)),
+        "a resume finds nothing to resume"
+    );
+    assert!(resume_adapter.invoked().is_empty(), "nothing was invoked");
+
+    let held_dir = store_dir("not-settled");
+    let (governor, case, ids) = opened_case(&held_dir);
+    let adapter = Adapter::new(&governor, &case, &ids);
+    let model = Model::picking([TESTS_RUN, MERGE]);
+    let executor = loom(&model, &governor, "chg-1842-not-settled");
+    let mut runs = run_store(0x500);
+    let store = suspensions(&held_dir);
+    let passing = Settles {
+        store: &store,
+        settled: false,
+        asked: Mutex::new(Vec::new()),
+    };
+    let end = run_with_suspension(
+        &governor,
+        &executor,
+        &withholding(),
+        &adapter,
+        &commission(&case),
+        &mut runs,
+        &passing,
+        &mut Context::starting_at(0x300),
+    )
+    .unwrap_or_else(|error| panic!("the loop failed: {error}"));
+    assert_eq!(end, without, "the same end, holding the Suspension");
+    assert_eq!(run_state(&runs, &end.run_id), "Suspended");
+    let held = store
+        .get(&commission(&case).data().commission_id)
+        .expect("the store reads")
+        .expect("a hold the host does not settle is held");
+    assert_eq!(held.state, SuspensionState::Pending);
+    assert_eq!(held.data.run_id, end.run_id);
+}
+
+/// The file store behind a host that answers `HoldSuspension` `settled` when `settled` is set, and
+/// passes every other call, and every hold otherwise, to the store.
+struct Settles<'s> {
+    store: &'s FileSuspensionStore,
+    settled: bool,
+    asked: Mutex<Vec<HoldSuspension>>,
+}
+
+impl SuspensionPort for Settles<'_> {
+    fn hold(&self, input: HoldSuspension) -> HoldSuspensionOutcome {
+        lock(&self.asked).push(input.clone());
+        if self.settled {
+            return HoldSuspensionOutcome::Settled {
+                error: SuspensionSettled {
+                    suspension: input.suspension,
+                    action_request_id: input.action_request_id,
+                    reason: "the host already did what an approval would lead to".to_owned(),
+                },
+            };
+        }
+        self.store.hold(input)
+    }
+
+    fn take(&self, input: TakeSuspension) -> TakeSuspensionOutcome {
+        self.store.take(input)
+    }
+
+    fn release(&self, input: ReleaseSuspension) -> ReleaseSuspensionOutcome {
+        self.store.release(input)
+    }
+
+    fn get(
+        &self,
+        commission: &CommissionId,
+    ) -> Result<Option<SuspensionSnapshot>, SuspensionStoreError> {
+        self.store.get(commission)
     }
 }
 

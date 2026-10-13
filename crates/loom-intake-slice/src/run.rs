@@ -24,7 +24,9 @@
 //! same. A resume ([`crate::intent::resume_with_state`], `resume`) continues that commission
 //! through Commission's `resume_after_grant`, under the authority provider over its grant
 //! ([`crate::grant::GrantAuthority`]), with `repository.merge` handed off
-//! ([`crate::handoff::HandoffEffects`]); its output and stop reasons are a run's too.
+//! ([`crate::handoff::HandoffEffects`]), and a merge proposed again at a `HEAD` the commission
+//! already handed off held as no Suspension ([`crate::handoff::SettledHandoffs`]); its output and
+//! stop reasons are a run's too.
 //!
 //! It ends with a [`SliceRun`] and its [`StopReason`] (`intake.routing.SliceRun` and
 //! `intake.routing.StopReason` in `ess/intake/domains/routing.yaml`), read from the runtime's
@@ -125,7 +127,7 @@ use crate::context_metrics::{ContextMetrics, ContextPolicy, MeasuredModel};
 use crate::effect::{Console, LocalEffects, refuse};
 use crate::executor::backend_name;
 use crate::executor::{ExecuteError, LocalExecutor, TestCommand, fresh_uuid, now};
-use crate::handoff::{HandoffEffects, MergeHandoffStore};
+use crate::handoff::{HandoffEffects, MergeHandoffStore, SettledHandoffs};
 use crate::selector::{ArgumentsError, Briefing, ModelArguments, ModelSelector, NO_ACTION};
 use crate::verifier::{TestResultVerifier, VerifyError};
 
@@ -611,6 +613,8 @@ pub(crate) fn drive<S: FallibleCaseStore>(
             &mut context,
         )
         .map_err(loop_failed),
+        // A merge proposed again at a HEAD the commission already handed off holds no
+        // Suspension: the hold is settled, and nothing is left to approve.
         Mode::Resuming(resuming) => resume_after_grant(
             &reads,
             &step,
@@ -618,7 +622,7 @@ pub(crate) fn drive<S: FallibleCaseStore>(
             effects,
             &commission,
             &mut runs(),
-            resuming.suspensions,
+            &SettledHandoffs::new(resuming.suspensions, resuming.handoffs, &held_head),
             &mut context,
         )
         .map_err(SliceError::Resume),
