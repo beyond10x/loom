@@ -303,6 +303,42 @@ fn a_case_id_names_one_file_inside_the_store() {
     assert!(!dir.parent().unwrap().join("escape").exists());
 }
 
+/// A directory a store cannot write is refused when the store opens, not at its first write: the
+/// lock file an earlier open left is no proof the directory can still be written. Both stores over
+/// the directory refuse it, and an open that succeeds leaves no file besides the lock.
+#[test]
+fn a_directory_the_stores_cannot_write_is_refused_when_they_open() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let dir = store_dir("read-only-open");
+    FileCaseStore::open(&dir).expect("the case store opens");
+    loom_governor::FileSuspensionStore::open(&dir).expect("the suspension store opens");
+    assert_eq!(file_names(&dir), [".lock"], "an open leaves only the lock");
+
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    assert!(
+        std::fs::write(dir.join("probe"), "x").is_err(),
+        "this test needs a directory its user cannot write; run it as a user without \
+         CAP_DAC_OVERRIDE"
+    );
+    let cases = FileCaseStore::open(&dir);
+    let suspensions = loom_governor::FileSuspensionStore::open(&dir);
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let cases = cases.expect_err("the case store refuses a directory it cannot write");
+    assert!(
+        cases.path.starts_with(&dir) && cases.problem.contains("denied"),
+        "the error names the directory and why: {cases}"
+    );
+    let suspensions =
+        suspensions.expect_err("the suspension store refuses a directory it cannot write");
+    assert!(
+        suspensions.to_string().contains("denied"),
+        "the error says why: {suspensions}"
+    );
+    assert_eq!(file_names(&dir), [".lock"], "nothing was left behind");
+}
+
 /// The names of the files directly in `dir`, sorted.
 fn file_names(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(dir)

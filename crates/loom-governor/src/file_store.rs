@@ -13,6 +13,8 @@
 //!
 //! Every operation holds an exclusive lock on `<dir>/.lock` for its duration, so two stores over
 //! one directory, in one process or in two, never interleave a read and a write of the same file.
+//! The lock and the write are the ones [`FileSuspensionStore`](crate::FileSuspensionStore) uses,
+//! through the same code, so a case store and a suspension store may share one directory.
 //!
 //! The document is written with the generated JSON writer and read with its reader, and before
 //! anything is written it is read back and compared with what was meant: a case whose JSON values
@@ -28,10 +30,9 @@
 //! Protocol definitions are not stored: the host registers the same protocols before it reads.
 
 use std::fmt;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write as _};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use b10x_loom_commission::model::json as commission_json;
 use b10x_loom_commission::model::primitives::{
@@ -51,18 +52,14 @@ use loom::primitives::{Timestamp, Uuid};
 
 use sha2::{Digest as _, Sha256};
 
+use crate::locked_dir::{LockedDir, failed, read_if_present};
 use crate::{CaseState, FallibleCaseStore, HeldEvidence};
 
 const OBSERVATIONS: &str = "observations.json";
-const LOCK: &str = ".lock";
-const TEMPORARY: &str = ".tmp-";
 
 /// The longest id, in bytes, whose file is named by its hex: `case-` and 200 hex digits and
 /// `.json` is 210 bytes, under the 255 a file name may have.
 const HEX_NAMED: usize = 100;
-
-/// How many temporary names in use one write skips before it reports the last as its error.
-const TEMPORARY_ATTEMPTS: u32 = 1024;
 
 fn push_hex(out: &mut String, bytes: &[u8]) {
     for byte in bytes {
@@ -70,13 +67,10 @@ fn push_hex(out: &mut String, bytes: &[u8]) {
     }
 }
 
-/// Temporary file names this process has used, so two writes in one process never share one.
-static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
-
 /// A [`FallibleCaseStore`] keeping one file per case in a directory.
 #[derive(Debug)]
 pub struct FileCaseStore {
-    dir: PathBuf,
+    dir: LockedDir,
 }
 
 /// Why the store could not read or write: the file and what went wrong with it.
@@ -96,53 +90,22 @@ impl fmt::Display for FileStoreError {
 
 impl std::error::Error for FileStoreError {}
 
-fn failed(path: &Path, problem: impl fmt::Display) -> FileStoreError {
-    FileStoreError {
-        path: path.to_owned(),
-        problem: problem.to_string(),
-    }
-}
-
 impl FileCaseStore {
-    /// A store over `dir`, created when it does not exist yet.
+    /// A store over `dir`, created when it does not exist yet. `dir` may be the directory a
+    /// [`FileSuspensionStore`](crate::FileSuspensionStore) keeps its Suspensions in.
     ///
     /// # Errors
     ///
     /// [`FileStoreError`] when the directory or its lock file cannot be created, or a temporary
-    /// file an earlier life left behind cannot be removed.
+    /// file an earlier life left behind cannot be removed, or the directory does not take a write:
+    /// a temporary file cannot be created, written, synced and removed in it.
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self, FileStoreError> {
-        let dir = dir.into();
-        fs::create_dir_all(&dir).map_err(|error| failed(&dir, error))?;
-        let lock = dir.join(LOCK);
-        OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&lock)
-            .map_err(|error| failed(&lock, error))?;
-        let store = Self { dir };
-        store.locked(|| store.remove_stale_temporaries())?;
-        Ok(store)
-    }
-
-    /// Removes every temporary file in the directory. Only called holding the lock, when no write
-    /// of any store over the directory is in progress, so each one was left by a write that died
-    /// before its rename and holds nothing the store's state depends on.
-    fn remove_stale_temporaries(&self) -> Result<(), FileStoreError> {
-        let entries = fs::read_dir(&self.dir).map_err(|error| failed(&self.dir, error))?;
-        for entry in entries {
-            let entry = entry.map_err(|error| failed(&self.dir, error))?;
-            if entry.file_name().to_string_lossy().starts_with(TEMPORARY) {
-                let path = entry.path();
-                fs::remove_file(&path).map_err(|error| failed(&path, error))?;
-            }
-        }
-        Ok(())
+        LockedDir::open(dir.into()).map(|dir| Self { dir })
     }
 
     /// The directory the store keeps its files in.
     pub fn dir(&self) -> &Path {
-        &self.dir
+        self.dir.path()
     }
 
     /// The file that holds `case`, named so no id names a file outside the store and no name
@@ -159,7 +122,7 @@ impl FileCaseStore {
             push_hex(&mut name, &Sha256::digest(case.0.as_bytes()));
         }
         name.push_str(".json");
-        self.dir.join(name)
+        self.dir.path().join(name)
     }
 
     /// Runs `operation` holding the directory's lock.
@@ -167,16 +130,7 @@ impl FileCaseStore {
         &self,
         operation: impl FnOnce() -> Result<T, FileStoreError>,
     ) -> Result<T, FileStoreError> {
-        let path = self.dir.join(LOCK);
-        let lock = OpenOptions::new()
-            .write(true)
-            .open(&path)
-            .map_err(|error| failed(&path, error))?;
-        lock.lock().map_err(|error| failed(&path, error))?;
-        let result = operation();
-        // Closing the file releases the lock; an unlock error changes nothing about the result.
-        let _ = lock.unlock();
-        result
+        self.dir.locked(operation)?
     }
 
     fn read_case(&self, case: &CaseId) -> Result<Option<CaseState>, FileStoreError> {
@@ -212,11 +166,11 @@ impl FileCaseStore {
                 "the case would not read back as it is held; nothing was written",
             ));
         }
-        self.replace(&path, &text)
+        self.dir.replace(&path, &text)
     }
 
     fn read_observations(&self) -> Result<Vec<ObservationData>, FileStoreError> {
-        let path = self.dir.join(OBSERVATIONS);
+        let path = self.dir.path().join(OBSERVATIONS);
         let Some(text) = read_if_present(&path)? else {
             return Ok(Vec::new());
         };
@@ -234,7 +188,7 @@ impl FileCaseStore {
     }
 
     fn write_observations(&self, observations: &[ObservationData]) -> Result<(), FileStoreError> {
-        let path = self.dir.join(OBSERVATIONS);
+        let path = self.dir.path().join(OBSERVATIONS);
         let stored: Vec<StoredObservation> = observations.iter().map(stored_observation).collect();
         let mut text = String::from("[");
         for (index, observation) in stored.iter().enumerate() {
@@ -257,61 +211,7 @@ impl FileCaseStore {
                 "the observations would not read back as they are kept; nothing was written",
             ));
         }
-        self.replace(&path, &text)
-    }
-
-    /// Writes `text` to a new temporary file in the store's directory, syncs it, and renames it
-    /// over `path`. On any failure the temporary file is removed and `path` is untouched.
-    fn replace(&self, path: &Path, text: &str) -> Result<(), FileStoreError> {
-        // A name in use, left by an earlier life with the same process id, is skipped for the
-        // next one rather than reported: it says nothing about this write.
-        let mut attempts = 0;
-        let (temporary, mut file) = loop {
-            let temporary = self.dir.join(format!(
-                "{TEMPORARY}{}-{}",
-                std::process::id(),
-                NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)
-            ));
-            match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&temporary)
-            {
-                Ok(file) => break (temporary, file),
-                Err(error)
-                    if error.kind() == io::ErrorKind::AlreadyExists
-                        && attempts < TEMPORARY_ATTEMPTS =>
-                {
-                    attempts += 1;
-                }
-                Err(error) => return Err(failed(&temporary, error)),
-            }
-        };
-        let written = (|| -> io::Result<()> {
-            file.write_all(text.as_bytes())?;
-            file.sync_all()
-        })()
-        .map_err(|error| failed(&temporary, error))
-        .and_then(|()| fs::rename(&temporary, path).map_err(|error| failed(path, error)));
-        if written.is_err() {
-            let _ = fs::remove_file(&temporary);
-            return written;
-        }
-        // The rename has happened, so the new document is the state; a failed directory sync only
-        // weakens how soon it is durable and is not reported as a failed write.
-        if let Ok(dir) = File::open(&self.dir) {
-            let _ = dir.sync_all();
-        }
-        Ok(())
-    }
-}
-
-/// The file's text, or `None` when there is no such file.
-fn read_if_present(path: &Path) -> Result<Option<String>, FileStoreError> {
-    match fs::read_to_string(path) {
-        Ok(text) => Ok(Some(text)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(failed(path, error)),
+        self.dir.replace(&path, &text)
     }
 }
 

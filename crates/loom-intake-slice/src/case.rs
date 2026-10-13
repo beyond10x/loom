@@ -39,7 +39,7 @@ use std::path::{Path, PathBuf};
 use crate::git::HostGitRefusal;
 
 use b10x_loom_commission::model::responsibility::CaseId;
-use loom_governor::{CanonGovernor, CaseStore, OpenError, UpdateError};
+use loom_governor::{CanonGovernor, FallibleCaseStore, OpenError, UpdateError};
 use loom_protocols::ProtocolCatalog;
 use sha2::{Digest, Sha256};
 
@@ -88,7 +88,7 @@ impl std::error::Error for CaseError {}
 
 /// Opens a case on the picked protocol (`<name>@<major>`, e.g. `software-change@1`) through
 /// `governor`, starting from `intent` and the git repository at `workspace`, and returns its id.
-pub fn open<S: CaseStore>(
+pub fn open<S: FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     pick: &str,
     intent: &str,
@@ -109,7 +109,7 @@ pub fn open<S: CaseStore>(
 
 /// Opens a workspace case using the same host catalog used for routing and governor admission.
 /// Query cases without a workspace initialize their artifacts directly through the governor.
-pub fn open_with_catalog<S: CaseStore>(
+pub fn open_with_catalog<S: FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     pick: &str,
     intent: &str,
@@ -128,7 +128,7 @@ pub fn open_with_catalog<S: CaseStore>(
     )
 }
 
-fn open_declared<S: CaseStore>(
+fn open_declared<S: FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     pick: &str,
     intent: &str,
@@ -159,9 +159,19 @@ pub fn validate_workspace(workspace: &Path) -> Result<(), CaseError> {
     crate::git::record(workspace).map_err(CaseError::HostGit)
 }
 
+/// The workspace's current `HEAD` commit, read through the Git configuration
+/// [`validate_workspace`] recorded for it: a call is refused when that configuration changed since.
+///
+/// # Errors
+/// [`CaseError::HostGit`] when the call is refused, [`CaseError::Workspace`] when git fails or the
+/// workspace is not the root of a work tree with a committed `HEAD`.
+pub fn current_head(workspace: &Path) -> Result<String, CaseError> {
+    head(workspace, Calls::Recorded)
+}
+
 /// Reports the workspace's current `HEAD` as the case's `implementation` revision and returns the
 /// case revision the governor holds afterwards (one higher when `HEAD` moved, unchanged otherwise).
-pub fn report_head<S: CaseStore>(
+pub fn report_head<S: FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     case: &CaseId,
     workspace: &Path,

@@ -79,7 +79,7 @@ use b10x_loom_commission::model::responsibility::{
 };
 use b10x_loom_commission::ports::evidence::ObservationPort as _;
 use b10x_loom_commission::ports::governor::Governor as _;
-use loom_governor::{CanonGovernor, CaseStore};
+use loom_governor::{CanonGovernor, FallibleCaseStore};
 use sha2::{Digest, Sha256};
 
 use crate::case::{self, CaseError, REDIRECTING_GIT_VARIABLES};
@@ -358,7 +358,7 @@ pub struct LocalExecutor<'g, S> {
     runner: Arc<dyn TestRunner>,
 }
 
-impl<'g, S: CaseStore> LocalExecutor<'g, S> {
+impl<'g, S: FallibleCaseStore> LocalExecutor<'g, S> {
     /// An executor for `case` in the git work tree at `workspace`, running `test` for `tests.run`.
     pub fn new(
         governor: &'g CanonGovernor<S>,

@@ -23,7 +23,7 @@ use llm_core::{
 };
 use serde_json::{Map, Value, json};
 
-use crate::exit_status;
+use crate::run_exit_status;
 
 /// The schema version every line carries, as written: `intake.events.SchemaVersion::V1`.
 pub const SCHEMA_VERSION: u64 = version(SchemaVersion::V1);
@@ -82,8 +82,8 @@ impl EventStream {
     }
 
     /// Ends the stream: an approval record when the run stopped for approval, then the one
-    /// terminal record. Answers the exit status the process returns: [`exit_status`] of the stop
-    /// reason, or [`FAILED`] for a run that failed with the given message.
+    /// terminal record. Answers the exit status the process returns: [`run_exit_status`] of the
+    /// run, or [`FAILED`] for a run that failed with the given message.
     ///
     /// # Errors
     /// The stream cannot be written, now or at an earlier record.
@@ -97,7 +97,7 @@ impl EventStream {
                 }
                 TerminalEvent {
                     stop_reason: Some(run.stop_reason),
-                    exit_status: i64::from(exit_status(run.stop_reason)),
+                    exit_status: i64::from(run_exit_status(run)),
                     protocol: Some(run.protocol.clone()),
                     steps: Some(i64::try_from(run.steps).unwrap_or(i64::MAX)),
                     error: None,

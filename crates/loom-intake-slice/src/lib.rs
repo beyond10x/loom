@@ -18,6 +18,11 @@
 //!   command the executor ran (Atlas ADR 0074). Nothing a model says becomes evidence.
 //! - [`run`] drives them: references, classification, the case, then Commission's
 //!   `run_until_blocked` until the run stops for a stated reason.
+//! - [`resume`] keeps the resume context `run --state` writes beside the case and the
+//!   commission's Suspension.
+//! - [`grant`] keeps the grant `approve` writes there, and reads it as a resume's authority
+//!   provider; [`handoff`] records the merge hand-off a resumed `repository.merge` performs, which
+//!   moves no Git ref.
 
 pub mod case;
 pub mod confinement;
@@ -26,9 +31,13 @@ pub mod context_metrics;
 pub mod effect;
 pub mod executor;
 pub mod git;
+pub mod grant;
+pub mod handoff;
 pub mod results;
+pub mod resume;
 pub mod run;
 pub mod selector;
+mod state_dir;
 pub mod verifier;
 
 pub mod clock;

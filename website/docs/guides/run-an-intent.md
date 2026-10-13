@@ -48,6 +48,37 @@ port its first target declares, never falls back to another target, and needs an
 a credential, because the command line supplies none. An alias the catalog does not declare, or a
 catalog that cannot be read, stops the run with exit status 1 before any model call.
 
+`--state <DIR>` keeps the run in a directory, created when missing: the governed case, the
+commission's Suspension when the run stops for an approval, and the commission's resume context
+(the intent, the accepted route, the workspace, the test command, the step budget, the
+confinement, and the agent model with its catalog), written before the commission runs and
+removed when the run ends without a Suspension. A directory that cannot be written, or a
+workspace, cgroup root or catalog path that is not UTF-8, stops the run with exit status 1 before
+any model call. A run whose process dies early can leave a resume context with no Suspension: only a
+context whose commission holds a Suspension can be resumed. Otherwise output and exit status are
+the same as without it, except at the human gate: only a last line
+`stopped: ApprovalRequired (<action>)` leaves a Suspension to approve, and a run that stops there
+holding none prints `stopped: ApprovalRequired (<action>), nothing suspended` and exits 4.
+Without `--state` nothing outlives the run.
+
+A run kept with `--state` that stopped for an approval is continued in two further commands,
+each in its own process. `b10x-loom approve <COMMISSION> <CAPABILITY> --state <DIR>` writes a
+grant for the request the commission's Suspension holds, and performs nothing; the capability is
+the one the run named when it stopped, and the commission is the id its resume context and
+Suspension carry. `b10x-loom resume <COMMISSION> --state <DIR>` rebuilds the run from the resume
+context, reports the workspace's `HEAD` to the case, performs the granted request once, releases
+the Suspension and runs on, printing the same lines as `run`; a commit made after the run stopped
+moves the case, and the resume is refused `CaseMoved` (14). The model starts the resumed run
+without the earlier steps. A granted `repository.merge` is a merge hand-off: `resume` records the
+commission, the request, the workspace and its `HEAD` in the state directory, and moves no Git
+ref; merging happens outside Loom. A commission hands one `HEAD` off once: a resumed run that
+stops at the merge's gate again at that `HEAD` prints
+`stopped: MergeHandedOff (<request>, HEAD <sha>)`, and `approve` refuses a merge at it
+`AlreadyHandedOff` (23); new work, a new `HEAD`, is approved and handed off again. A resume that
+performs nothing exits with the status of its refusal, `NotGranted` (16) without a grant and
+`NothingSuspended` (10) once the Suspension is released among them; the
+[CLI reference](../reference/cli.md) lists every status.
+
 `--confinement substrate` is the default. `--cgroup-root` selects an explicit delegated
 root. Tests retain their 300-second timeout, with 8 GiB memory and 2,048-process limits.
 Only `--confinement none` runs with your rights and environment; the run output and every test

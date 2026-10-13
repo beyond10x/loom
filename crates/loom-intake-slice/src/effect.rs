@@ -30,7 +30,7 @@ use b10x_loom_commission::model::responsibility::{
     EffectOutcomeRefused, ExecutorOutcomeProposedAction, commission_state,
 };
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
-use loom_governor::{CanonGovernor, CaseStore};
+use loom_governor::{CanonGovernor, FallibleCaseStore};
 
 use crate::executor::{EDIT, ExecuteError, INSPECT, LocalExecutor, Report, TESTS_RUN};
 use crate::run::{LOCAL_PROTOCOL, SliceError, json_text, printable};
@@ -101,7 +101,7 @@ pub struct LocalEffects<'a, 'o, S> {
     local: bool,
 }
 
-impl<'a, 'o, S: CaseStore> LocalEffects<'a, 'o, S> {
+impl<'a, 'o, S: FallibleCaseStore> LocalEffects<'a, 'o, S> {
     /// An adapter for `case`, opened on `protocol`, performing through `executor`.
     pub fn new(
         executor: LocalExecutor<'a, S>,
@@ -199,7 +199,7 @@ impl<'a, 'o, S: CaseStore> LocalEffects<'a, 'o, S> {
     }
 }
 
-impl<S: CaseStore> EffectPort for LocalEffects<'_, '_, S> {
+impl<S: FallibleCaseStore> EffectPort for LocalEffects<'_, '_, S> {
     fn performs(&self, action: &str) -> bool {
         self.local && [INSPECT, EDIT, TESTS_RUN].contains(&action)
     }

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-13T10:08:50Z",
+  "actor": "human:timo",
+  "artifact": "story:host-suspension-store",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "joint package gate on a46f42c (6 crates, 553 passed, 0 failed; spec, drift, ess-gate, no-hand-model, deps-guard, docs-check, plan tasks exit 0)",
+    "reference": "~/.cache/loom-w14/joint-gate.log"
+  }
+}

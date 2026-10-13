@@ -229,8 +229,9 @@ none. The port answers the Suspension's commands (`HoldSuspension`, `TakeSuspens
 `ReleaseSuspension`), each atomically, decided by `decide_hold`, `decide_take` and
 `decide_release`: a resume takes the Suspension before it performs anything and releases it after,
 a `Resuming` one is in doubt and never taken again, and a commission holding one starts no new Run
-through `run_with_suspension`. `crates/loom-commission-testkit/tests/approval_suspend_resume.rs`
-holds it across a real process restart. Design and contract notes are under
+through `run_with_suspension`. The production store is the governor's `FileSuspensionStore`.
+`crates/loom-commission-testkit/tests/approval_suspend_resume.rs` holds it across a real process
+restart. Design and contract notes are under
 `docs/commission/`. Its tasks are in `Taskfile.commission.yml`, included under the `commission:`
 namespace.
 
@@ -251,7 +252,11 @@ never a model argument. Durable stores implement `FallibleCaseStore` atomically 
 failures explicitly; the legacy `CaseStore` bridge is only for infallible adapters.
 `FileCaseStore` is one: a file per case, written as `loom.governor`'s `StoredCase` to a temporary
 file and renamed, under a per-operation lock; `crates/loom-governor/tests/restart_durability.rs`
-holds a case across a real process restart. The host
+holds a case across a real process restart. `FileSuspensionStore` is Commission's suspension port
+over the same lock and write (the private `locked_dir` module), a file per commission, so the two
+may share one directory; the testkit's `FileSuspensionStore` re-exports it, and
+`crates/loom-commission-testkit/tests/approval_suspend_resume.rs` holds both in one directory
+across a restart. The host
 restores the same admitted protocol definitions on recovery and authenticates evidence before
 `submit_evidence`. The governor supplies no authority decision.
 
@@ -425,6 +430,35 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   built from the generated types, the terminal record last and exactly once.
   `crates/loom-cli/tests/run_events.rs` holds it; `loom-docs` checks the hand-written
   `website/docs/reference/run-events.md` against the declaration.
+- `run --state <DIR>` puts the case in a `FileCaseStore` and the commission's Suspension in a
+  `FileSuspensionStore` over `<DIR>`, keeps the commission's resume context
+  (`intake.routing.ResumeContext`, `b10x_loom_intake_slice::resume::ResumeContextStore`, under
+  the same lock and atomic write) before the commission runs, and runs it through
+  `run_with_suspension` (`run_prepared_intent_with_state`). A run that ends without the
+  Suspension held removes its context (`intake.routing.DropResumeContext`); a process that dies
+  first leaves one, so a reader pairs each context with its commission's Suspension. Before any
+  model call, `ResumeHost::check` refuses a path the context cannot keep as text, and each store's
+  open proves the directory takes a write. Without it `run` keeps the memory
+  store and `run_until_blocked`. `crates/loom-cli/tests/run_state.rs` runs the binary to a held
+  Suspension and reads `<DIR>` back through the stores.
+- `approve <COMMISSION> <CAPABILITY> --state <DIR>` writes a grant (`intake.routing.Grant`,
+  `b10x_loom_intake_slice::grant::GrantStore`) for the request the commission's Suspension holds
+  and performs nothing. `resume <COMMISSION> --state <DIR>` reads the context only for a
+  commission holding a Suspension, rebuilds the run from it (`resume_with_state`), and continues
+  it through `resume_after_grant` with `GrantAuthority`, which allows only the request the
+  Suspension holds while it is `Pending`. `resume` reports the workspace's `HEAD` to the case
+  first (`case::report_head`), so a commit made since the Suspension is refused `CaseMoved`. A
+  granted `repository.merge` is bound to `handoff::HandoffEffects`, which records a merge
+  hand-off (`intake.routing.MergeHandoff`, once per request and once per `HEAD` of a
+  commission, only at the implementation revision the case holds) and moves no Git ref; only a
+  resume binds it. `approve` refuses a merge at a `HEAD` the commission already handed off
+  (`AlreadyHandedOff`). With a state directory, a stop `ApprovalRequired` reads as approvable
+  only when the commission holds a Suspension (`run::ApprovalGate`): otherwise it prints
+  `..., nothing suspended` (exit 4) or, in a resume at a handed-off `HEAD`,
+  `stopped: MergeHandedOff (<request>, HEAD <sha>)`. Each `ResumeRefusal` and `ResumeError` has
+  its own exit status (`resume_exit_status`, `RESUME_HELP`).
+  `crates/loom-cli/tests/resume_after_grant.rs` runs `run`, `approve` and `resume` as separate
+  processes.
 
 The injected `TestRunner` defaults to Substrate 0.7.10, with host and wire pinned together.
 Tests get no network, a cleared environment, read-only source and Rust toolchain, writes only

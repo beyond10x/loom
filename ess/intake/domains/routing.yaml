@@ -26,6 +26,58 @@ types:
     # step budget ran out, the picked protocol has no local executor, or the router refused.
     variants: [ApprovalRequired, NothingAdmissible, StepBudget, NoLocalExecutor, Refused, ConfinementUnavailable, Completed]
 
+  # Commission's ids, mirrored as local newtypes rather than named across systems (as
+  # ess/domains/governor.yaml mirrors the case id): commission.responsibility.CommissionId,
+  # commission.responsibility.AgentRevisionId and commission.responsibility.CaseId.
+  - name: intake.routing.CommissionId
+    kind: newtype
+    of: Uuid
+
+  - name: intake.routing.AgentRevisionId
+    kind: newtype
+    of: Uuid
+
+  - name: intake.routing.CaseId
+    kind: newtype
+    of: String
+
+  # commission.responsibility.ActionRequestId, mirrored as the ids above are: the request a
+  # commission's Suspension holds, which a grant names and a merge hand-off performs.
+  - name: intake.routing.ActionRequestId
+    kind: newtype
+    of: Uuid
+
+  # One protocol of the catalog a route was accepted on, by its registered name and the SHA-256
+  # of its definition.
+  - name: intake.routing.CatalogDigest
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: digest
+        type: String
+
+  # A route the router's pick was accepted on, bound to the exact intent, catalog, context policy
+  # and threshold it was accepted for: what a delegated run hands its child. A route is never
+  # authority; a run restored from one checks it against its own intent, catalog and options.
+  - name: intake.routing.AcceptedRoute
+    kind: struct
+    fields:
+      # The accepted protocol, `name@major`.
+      - name: protocol
+        type: String
+      # The intent's revision: the digest the case's `intent` artifact carries.
+      - name: intent_revision
+        type: String
+      # Every protocol of the catalog, in catalog order.
+      - name: catalog
+        type: List<intake.routing.CatalogDigest>
+      - name: context_policy
+        type: intake.context.ContextPolicy
+      # The router's confidence threshold, from 0 to 1, as the run was given it.
+      - name: threshold
+        type: Decimal
+
 entities:
   # What someone asked for, as given: a prompt, a request or a question.
   - name: intake.routing.Intent
@@ -117,3 +169,227 @@ entities:
       initial: Ended
       states: [Ended]
       terminal: [Ended]
+
+  # What a later resume needs to rebuild a commission's run without the arguments of the run that
+  # started it, kept by `run --state` beside the case and the commission's Suspension, before the
+  # commission runs. The run id and the request a resume continues are in the Suspension, not
+  # here. It grants nothing: a resume still needs a grant, and revalidates the request against
+  # the case as it is then. The classifier model is not kept: a resume classifies nothing.
+  #
+  # It is kept before the commission runs, so a run that dies after holding the Suspension still
+  # leaves what resumes it. A run that ends without the commission's Suspension held removes it
+  # (`DropResumeContext`): nothing can resume that commission. A run that dies before it ends
+  # leaves its context without a Suspension, so a reader pairs each context with the commission's
+  # Suspension and never takes a kept context alone for one that can be resumed.
+  - name: intake.routing.ResumeContext
+    identity:
+      name: commission_id
+      type: intake.routing.CommissionId
+    fields:
+      - name: case_id
+        type: intake.routing.CaseId
+      - name: agent_revision_id
+        type: intake.routing.AgentRevisionId
+      # The intent, as given.
+      - name: intent
+        type: String
+      - name: route
+        type: intake.routing.AcceptedRoute
+      # The workspace the case is about; absent for a protocol that needs none.
+      - name: workspace
+        type: Optional<String>
+      # The test command: the program, then its arguments.
+      - name: test_command
+        type: List<String>
+      - name: max_steps
+        type: Integer
+      # How the test command is confined, and the delegated cgroup root, when one was given.
+      - name: confinement
+        type: intake.confinement.Backend
+      - name: cgroup_root
+        type: Optional<String>
+      # The agent model: a Codex model name, or with `catalog` a route alias of that llm catalog.
+      - name: model
+        type: String
+      - name: catalog
+        type: Optional<String>
+    lifecycle:
+      initial: Kept
+      states: [Kept]
+      terminal: [Kept]
+
+  # An operator's approval of the one request a commission's Suspension holds, written by
+  # `approve` into the directory `run --state` keeps the commission in, and read by `resume`
+  # through an authority provider over it. It mirrors commission.responsibility.AuthorityDecision
+  # (the action, whether it is granted, the request it belongs to) and names the commission, the
+  # capability the request needs and when it was granted. Approval performs nothing: a resume
+  # performs the request, after revalidating it against the case as it is then.
+  #
+  # A grant allows only the request it names: a resume allows the capability only while the
+  # commission's Suspension is held for that request, so a grant for another request, or a request
+  # proposed again later in the resumed run, is not allowed by it. One grant is kept per
+  # commission; a later approval of the commission's next Suspension replaces it.
+  - name: intake.routing.Grant
+    identity:
+      name: commission_id
+      type: intake.routing.CommissionId
+    fields:
+      # The request's action, as the Suspension holds it.
+      - name: action
+        type: String
+      # The capability the request needs authority for, as the operator approved it.
+      - name: capability
+        type: String
+      - name: granted
+        type: Boolean
+      - name: action_request_id
+        type: intake.routing.ActionRequestId
+      - name: granted_at
+        type: Timestamp
+    lifecycle:
+      initial: Granted
+      states: [Granted]
+      terminal: [Granted]
+
+  # The hand-off a granted `repository.merge` performs on resume: the commission, the granted
+  # request, the workspace and its `HEAD` as the implementation revision, recorded in the state
+  # directory. No Git ref moves; merging happens outside Loom. One is recorded per request, so a
+  # request performed once leaves exactly one, and one per `HEAD` of a commission: a merge the
+  # agent proposes again at a `HEAD` the commission already handed off is not handed off again,
+  # and `approve` refuses the Suspension holding it (`HeadAlreadyHandedOff`). New work, a new
+  # `HEAD`, may be handed off.
+  - name: intake.routing.MergeHandoff
+    identity:
+      name: action_request_id
+      type: intake.routing.ActionRequestId
+    fields:
+      - name: commission_id
+        type: intake.routing.CommissionId
+      # The workspace, as the resume context keeps it.
+      - name: workspace
+        type: String
+      # The workspace's `HEAD` commit when the request was performed.
+      - name: head
+        type: String
+    lifecycle:
+      initial: Recorded
+      states: [Recorded]
+      terminal: [Recorded]
+
+errors:
+  # No resume context is kept for the commission.
+  - name: intake.routing.ResumeContextNotFound
+    fields:
+      - name: commission_id
+        type: intake.routing.CommissionId
+
+  # The resume context store could not remove the context: why, as the store reports it.
+  - name: intake.routing.ResumeContextStorageFailed
+    fields:
+      - name: reason
+        type: String
+
+  # A merge hand-off is already recorded for the request: it was performed, and is not again.
+  - name: intake.routing.MergeHandoffAlreadyRecorded
+    fields:
+      - name: action_request_id
+        type: intake.routing.ActionRequestId
+
+  # The commission already handed off this `HEAD`, under another request: the same work is not
+  # handed off twice.
+  - name: intake.routing.HeadAlreadyHandedOff
+    fields:
+      - name: commission_id
+        type: intake.routing.CommissionId
+      - name: head
+        type: String
+
+  # The merge hand-off could not be recorded: why, as the store reports it.
+  - name: intake.routing.MergeHandoffStorageFailed
+    fields:
+      - name: reason
+        type: String
+
+commands:
+  # A run that ends without the commission's Suspension held removes the commission's resume
+  # context: nothing can resume the commission. A run that holds the Suspension keeps it.
+  - name: intake.routing.DropResumeContext
+    input:
+      - name: commission_id
+        type: intake.routing.CommissionId
+    outcomes:
+      - name: dropped
+        deletes: intake.routing.ResumeContext
+        instance: commission_id
+      - name: not-found
+        unknown_instance: true
+        error: intake.routing.ResumeContextNotFound
+        payload:
+          intake.routing.ResumeContextNotFound:
+            commission_id: input.commission_id
+      - name: storage-failed
+        external: the resume context store cannot remove the context
+        error: intake.routing.ResumeContextStorageFailed
+
+  # A granted `repository.merge` is performed by recording its hand-off, once per request and once
+  # per `HEAD` of a commission: a second record for the same request, or for a `HEAD` the
+  # commission already handed off under another request, is refused and changes nothing.
+  - name: intake.routing.RecordMergeHandoff
+    input:
+      - name: action_request_id
+        type: intake.routing.ActionRequestId
+      - name: commission_id
+        type: intake.routing.CommissionId
+      - name: workspace
+        type: String
+      - name: head
+        type: String
+    outcomes:
+      - name: already-recorded
+        existing_instance: true
+        error: intake.routing.MergeHandoffAlreadyRecorded
+        payload:
+          intake.routing.MergeHandoffAlreadyRecorded:
+            action_request_id: input.action_request_id
+      - name: head-already-handed-off
+        when_related:
+          entity: intake.routing.MergeHandoff
+          where:
+            all: [commission_id == input.commission_id, head == input.head]
+          exists: true
+        error: intake.routing.HeadAlreadyHandedOff
+        payload:
+          intake.routing.HeadAlreadyHandedOff:
+            commission_id: input.commission_id
+            head: input.head
+      - name: recorded
+        creates: intake.routing.MergeHandoff
+        instance: action_request_id
+        sets:
+          commission_id: input.commission_id
+          workspace: input.workspace
+          head: input.head
+        emits: [intake.routing.MergeHandedOff]
+        payload:
+          intake.routing.MergeHandedOff:
+            action_request_id: input.action_request_id
+            commission_id: input.commission_id
+            workspace: input.workspace
+            head: input.head
+      - name: storage-failed
+        external: the state directory cannot record the hand-off
+        error: intake.routing.MergeHandoffStorageFailed
+
+events:
+  # A granted merge was handed off: its record names the request, the commission, the workspace
+  # and its `HEAD`.
+  - name: intake.routing.MergeHandedOff
+    fields:
+      - name: action_request_id
+        type: intake.routing.ActionRequestId
+      - name: commission_id
+        type: intake.routing.CommissionId
+      - name: workspace
+        type: String
+      - name: head
+        type: String

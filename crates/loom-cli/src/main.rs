@@ -1,7 +1,7 @@
 //! Run a routed intent, initializing resources only for the selected protocol.
 
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command as Process, ExitCode};
 use std::sync::Arc;
 
@@ -12,8 +12,8 @@ use b10x_loom_cli::model_catalog::ModelCatalog;
 use b10x_loom_cli::plugin::{is_proposal, recorded, report_line, turn_models};
 use b10x_loom_cli::regular_file;
 use b10x_loom_cli::{
-    Cli, Command, Confinement, EvaluateArgs, Output, PluginCommand, PluginName, ProtocolCommand,
-    RunArgs, exit_status,
+    ApproveArgs, Cli, Command, Confinement, EvaluateArgs, Output, PluginCommand, PluginName,
+    ProtocolCommand, ResumeArgs, RunArgs, approve_exit_status, resume_exit_status, run_exit_status,
 };
 use b10x_loom_intake_slice::case;
 use b10x_loom_intake_slice::clock::HostClock;
@@ -22,16 +22,26 @@ use b10x_loom_intake_slice::confinement::{
 };
 use b10x_loom_intake_slice::context_metrics::ContextMetrics;
 use b10x_loom_intake_slice::executor::{TestCommand, UnconfinedRunner};
+use b10x_loom_intake_slice::grant::{self, GrantStore, approve};
+use b10x_loom_intake_slice::handoff::MergeHandoffStore;
 use b10x_loom_intake_slice::intent::{
-    IntentRequest, Preparation, PreparedIntent, prepare_intent, run_prepared_intent,
+    IntentRequest, Preparation, PreparedIntent, ResumeHost, ResumeState, RunState,
+    held_resume_context, prepare_intent, resume_with_state, resumed_request, run_prepared_intent,
+    run_prepared_intent_with_state,
 };
-use b10x_loom_intake_slice::run::{LOCAL_PROTOCOL, RunOptions, SliceRun, StopReason, printable};
+use b10x_loom_intake_slice::resume::ResumeContextStore;
+use b10x_loom_intake_slice::run::{
+    ApprovalGate, LOCAL_PROTOCOL, RunOptions, SliceError, SliceRun, StopReason, printable,
+};
 use b10x_loom_plugin_slack::{SlackHandler, config as slack_config};
 use clap::Parser;
+use intake_model::confinement::Backend;
 use llm_core::Model;
 use llm_models::Port;
-use loom_governor::{CanonGovernor, MemoryCaseStore};
-use loom_protocols::InstallStore;
+use loom_governor::{
+    CanonGovernor, FallibleCaseStore, FileCaseStore, FileSuspensionStore, MemoryCaseStore,
+};
+use loom_protocols::{InstallStore, ProtocolCatalog};
 use serde_json::{Value, json};
 use std::sync::atomic::AtomicBool;
 
@@ -51,7 +61,139 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => failed(&error),
         },
+        Command::Approve(arguments) => approve_command(&arguments),
+        Command::Resume(arguments) => resume_command(&arguments),
     }
+}
+
+/// The state directory `approve` and `resume` read: one `run --state` made. Neither creates it.
+fn existing_state(dir: &Path) -> Result<(), String> {
+    if dir.is_dir() {
+        Ok(())
+    } else {
+        Err(format!(
+            "the state directory {} does not exist",
+            dir.display()
+        ))
+    }
+}
+
+/// Runs `approve`, as `APPROVE_HELP` states: writes the grant and performs nothing.
+fn approve_command(arguments: &ApproveArgs) -> ExitCode {
+    let dir = &arguments.state;
+    let stores = existing_state(dir).and_then(|()| {
+        let unusable = |error: &dyn std::fmt::Display| format!("the state directory: {error}");
+        Ok((
+            FileSuspensionStore::open(dir).map_err(|e| unusable(&e))?,
+            GrantStore::open(dir).map_err(|e| unusable(&e))?,
+            MergeHandoffStore::open(dir).map_err(|e| unusable(&e))?,
+            CanonGovernor::new(FileCaseStore::open(dir).map_err(|e| unusable(&e))?),
+        ))
+    });
+    let (suspensions, grants, handoffs, governor) = match stores {
+        Ok(stores) => stores,
+        Err(error) => return failed(&error),
+    };
+    // The HEAD a suspended merge would hand off: the case's implementation revision.
+    let head_of = |case: &b10x_loom_commission::model::responsibility::CaseId| {
+        governor
+            .revisions(case)
+            .map_err(|error| format!("the case {} cannot be read: {error:?}", case.0))?
+            .remove(case::IMPLEMENTATION)
+            .ok_or_else(|| format!("the case {} holds no implementation revision", case.0))
+    };
+    match approve(
+        &suspensions,
+        &grants,
+        &handoffs,
+        &head_of,
+        &arguments.commission,
+        &arguments.capability,
+        grant::now(),
+    ) {
+        Ok(granted) => {
+            println!(
+                "granted {} for request {} ({}) of commission {}; nothing is performed until resume",
+                printable(&granted.capability),
+                printable(&granted.action_request_id.0.0),
+                printable(&granted.action),
+                printable(&granted.commission_id.0.0)
+            );
+            ExitCode::SUCCESS
+        }
+        Err(refusal) => {
+            eprintln!(
+                "b10x-loom: approve refused: {}",
+                printable(&refusal.to_string())
+            );
+            ExitCode::from(approve_exit_status(&refusal))
+        }
+    }
+}
+
+/// Runs `resume`, as `RESUME_HELP` states.
+fn resume_command(arguments: &ResumeArgs) -> ExitCode {
+    let mut out = std::io::stdout().lock();
+    match resume(arguments, &mut out) {
+        Ok(run) => ExitCode::from(run_exit_status(&run)),
+        Err(SliceError::Resume(error)) => {
+            eprintln!(
+                "b10x-loom: {}",
+                printable(&SliceError::Resume(error.clone()).to_string())
+            );
+            ExitCode::from(resume_exit_status(&error))
+        }
+        Err(error) => failed(&error.to_string()),
+    }
+}
+
+fn resume(arguments: &ResumeArgs, out: &mut dyn Write) -> Result<SliceRun, SliceError> {
+    let dir = &arguments.state;
+    let unusable = |error: &dyn std::fmt::Display| SliceError::State(error.to_string());
+    existing_state(dir).map_err(SliceError::State)?;
+    let suspensions = FileSuspensionStore::open(dir).map_err(|e| unusable(&e))?;
+    let contexts = ResumeContextStore::open(dir).map_err(|e| unusable(&e))?;
+    let grants = GrantStore::open(dir).map_err(|e| unusable(&e))?;
+    let handoffs = MergeHandoffStore::open(dir).map_err(|e| unusable(&e))?;
+    let state = ResumeState {
+        suspensions: &suspensions,
+        contexts: &contexts,
+        grants: &grants,
+        handoffs: &handoffs,
+    };
+    // The context is read only for a commission that holds a Suspension; nothing else is opened,
+    // and no model is called, before.
+    let context = held_resume_context(&state, &arguments.commission)?;
+    let catalog = InstallStore::user()
+        .and_then(|store| store.catalog())
+        .map_err(SliceError::Context)?;
+    let governor = CanonGovernor::new(FileCaseStore::open(dir).map_err(|e| unusable(&e))?)
+        .with_catalog(&catalog)
+        .map_err(|e| SliceError::Context(e.to_string()))?;
+    let agent = match &context.catalog {
+        Some(path) => Box::new(
+            ModelCatalog::read(Path::new(path))
+                .and_then(|models| models.model("--model", &context.model))
+                .map_err(SliceError::Context)?,
+        ) as Box<dyn Model>,
+        None => chosen_model(None, &context.model).map_err(SliceError::Context)?,
+    };
+    let runner: Arc<dyn TestRunner> = match context.confinement {
+        Backend::None => Arc::new(UnconfinedRunner),
+        Backend::Substrate => {
+            let runner = SubstrateRunner::new(context.cgroup_root.as_ref().map(PathBuf::from));
+            if let Some(workspace) = &context.workspace {
+                runner
+                    .preflight(Path::new(workspace))
+                    .map_err(|e| SliceError::Context(format!("confinement unavailable: {e}")))?;
+            }
+            Arc::new(runner)
+        }
+    };
+    let request = resumed_request(&context, Some(runner))?;
+    resume_with_state(
+        &context, &request, &catalog, &governor, &governor, &*agent, out, &state,
+    )
 }
 
 /// Runs `plugin run` or `plugin report`, as `PLUGIN_RUN_HELP` states.
@@ -300,7 +442,7 @@ fn run_command(arguments: RunArgs) -> ExitCode {
                 Ok(status) => ExitCode::from(status),
                 Err(error) => failed(&format!("the event stream cannot be written: {error}")),
             },
-            None => ExitCode::from(exit_status(run.stop_reason)),
+            None => ExitCode::from(run_exit_status(&run)),
         },
         Err(error) => {
             let status = failed(&error);
@@ -340,23 +482,90 @@ fn execute(
         None => (None, None),
     };
     let catalog = InstallStore::user()?.catalog()?;
-    let governor = CanonGovernor::new(MemoryCaseStore::default())
+    let models = (classifier_route.take(), agent_route.take());
+    let Some(dir) = &arguments.state else {
+        let governor = CanonGovernor::new(MemoryCaseStore::default())
+            .with_catalog(&catalog)
+            .map_err(|e| e.to_string())?;
+        return execute_on(
+            arguments, options, metrics, out, stream, &catalog, &governor, None, models,
+        );
+    };
+    // Everything below happens before any model call. First, what the resume context keeps as
+    // text is checked, before any store touches the directory: a path that is not UTF-8 stops
+    // here and leaves the directory as it was.
+    let host = ResumeHost {
+        confinement: match arguments.confinement {
+            Confinement::Substrate => Backend::Substrate,
+            Confinement::None => Backend::None,
+        },
+        cgroup_root: arguments.cgroup_root.clone(),
+        model: arguments.model.clone(),
+        catalog: arguments.catalog.clone(),
+    };
+    host.check(&intent_request(arguments))
+        .map_err(|e| e.to_string())?;
+    // Then each store opens the directory, creating it and its lock when missing, and proves it
+    // takes a write: holding the lock, it writes, syncs and removes a temporary file. A directory
+    // that cannot be created, locked or written, a read-only one an earlier run used included,
+    // stops here.
+    let unusable = |error: &dyn std::fmt::Display| format!("the state directory: {error}");
+    let governor = CanonGovernor::new(FileCaseStore::open(dir).map_err(|e| unusable(&e))?)
         .with_catalog(&catalog)
         .map_err(|e| e.to_string())?;
+    let suspensions = FileSuspensionStore::open(dir).map_err(|e| unusable(&e))?;
+    let contexts = ResumeContextStore::open(dir).map_err(|e| unusable(&e))?;
+    let state = RunState {
+        suspensions: &suspensions,
+        contexts: &contexts,
+        host,
+    };
+    execute_on(
+        arguments,
+        options,
+        metrics,
+        out,
+        stream,
+        &catalog,
+        &governor,
+        Some(&state),
+        models,
+    )
+}
+
+/// The intent request `run`'s arguments make, with no test runner yet.
+fn intent_request(arguments: &RunArgs) -> IntentRequest {
     let mut words = arguments.test_cmd.split_whitespace();
     let program = words.next().unwrap_or("");
-    let mut request = IntentRequest {
+    IntentRequest {
         intent: arguments.intent.clone(),
         workspace: arguments.workspace.clone(),
         test: TestCommand::new(program, words),
         runner: None,
         max_steps: arguments.max_steps,
         threshold: arguments.threshold,
-    };
+    }
+}
+
+/// Runs `run` on `governor`, holding the commission in `state` when `--state` gave one.
+#[allow(clippy::too_many_arguments)]
+fn execute_on<S: FallibleCaseStore>(
+    arguments: &RunArgs,
+    options: &RunOptions,
+    metrics: &mut ContextMetrics,
+    out: &mut dyn Write,
+    stream: Option<&EventStream>,
+    catalog: &ProtocolCatalog,
+    governor: &CanonGovernor<S>,
+    state: Option<&RunState<'_>>,
+    (mut classifier_route, mut agent_route): (Option<Port>, Option<Port>),
+) -> Result<Ending, String> {
+    let program = arguments.test_cmd.split_whitespace().next().unwrap_or("");
+    let mut request = intent_request(arguments);
     let prepared = if std::env::var_os(REEXEC_MARKER).is_some() {
         let handoff = read_handoff()?;
         *metrics = ContextMetrics::restore(&handoff["metrics"], options.context_policy)?;
-        PreparedIntent::restore(&handoff["route"], &request, &catalog, options)
+        PreparedIntent::restore(&handoff["route"], &request, catalog, options)
             .map_err(|e| e.to_string())?
     } else {
         let classifier = chosen_model(classifier_route.take(), &arguments.classifier_model)?;
@@ -365,7 +574,7 @@ fn execute(
             Some(observed) => observed,
             None => &*classifier,
         };
-        let preparation = prepare_intent(&request, &catalog, classifier, out, options, metrics)
+        let preparation = prepare_intent(&request, catalog, classifier, out, options, metrics)
             .map_err(|e| e.to_string())?;
         let (protocol, accepted) = match &preparation {
             Preparation::Ready(prepared) => (prepared.protocol(), true),
@@ -436,10 +645,16 @@ fn execute(
         Some(observed) => observed,
         None => &*agent,
     };
-    let run = run_prepared_intent(
-        &request, &prepared, &catalog, &governor, &governor, agent, &HostClock, out, options,
-        metrics,
-    )
+    let run = match state {
+        Some(state) => run_prepared_intent_with_state(
+            &request, &prepared, catalog, governor, governor, agent, &HostClock, out, options,
+            metrics, state,
+        ),
+        None => run_prepared_intent(
+            &request, &prepared, catalog, governor, governor, agent, &HostClock, out, options,
+            metrics,
+        ),
+    }
     .map_err(|e| e.to_string())?;
     Ok(Ending::Stopped(run))
 }
@@ -462,6 +677,7 @@ fn confinement_refused(prepared: &PreparedIntent, reason: &str) -> Ending {
         steps: 0,
         stop_reason: StopReason::ConfinementUnavailable,
         approvals: Vec::new(),
+        gate: ApprovalGate::Approvable,
     })
 }
 
