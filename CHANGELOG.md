@@ -19,17 +19,22 @@ under **Unreleased** until the next release.
   nothing is stored or the case revision moved. Callers of `run_until_blocked`, which passes no
   suspension port, see no change in how a Run ends. The testkit's `FileSuspensionStore` is a
   file-backed store for tests, and `SuspensionStore` the port over memory.
-- A Suspension is consumed once, as `ess/commission/` declares it: the port answers
+- A Suspension is taken once, as `ess/commission/` declares it: the port answers
   `HoldSuspension`, `TakeSuspension` and `ReleaseSuspension`, each atomically. A resume takes the
-  Suspension (`Pending` to `Resuming`) before it performs anything and releases it once the effect
-  port answered and the governor observed it, so of two racing resumes only one performs the
-  request; the other is refused (`ResumeRefusal::NothingSuspended` or `InDoubt`). A resume that
-  stopped between take and release (a crash, a failing effect port or governor) leaves the
-  Suspension `Resuming`: every later resume is refused `ResumeRefusal::InDoubt`, naming the
-  request, and performs nothing, so the request is never performed twice and never dropped without
-  a durable trace; settling it is the host's. `run_with_suspension` starts no Run of a commission
-  that holds a Suspension in either state (`LoopFailure::CommissionSuspended`) and performs
-  nothing.
+  Suspension (`Pending` to `Resuming`) for the request it read and revalidated before it performs
+  anything, and releases it for that request once the effect port answered and the governor
+  observed it. Of two resumes racing over one Suspension, one takes it and performs the request;
+  the other is refused (`ResumeRefusal::NothingSuspended` or `InDoubt`) and performs nothing. A
+  take or a release naming another request than the Suspension holds is refused (`other-request`,
+  `SuspensionRequestMismatch`) and changes nothing, so a resume that read a Suspension the
+  commission has since resumed and replaced with one for another request is refused
+  `ResumeRefusal::OtherRequest`, naming both requests, and performs nothing. A resume that stopped
+  between take and release (a crash, a failing effect port or governor) leaves the Suspension
+  `Resuming`: every later resume is refused `ResumeRefusal::InDoubt`, naming the request, and
+  performs nothing; settling it is the host's. A release the port refuses after the request was
+  performed ends the resume with `LoopFailure::SuspensionNotReleased`, naming the performed request
+  and what the port answered. `run_with_suspension` starts no Run of a commission that holds a
+  Suspension in either state (`LoopFailure::CommissionSuspended`) and performs nothing.
 
 ### Changed
 
