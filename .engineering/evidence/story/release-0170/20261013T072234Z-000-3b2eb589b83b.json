@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-13T07:22:34Z",
+  "actor": "human:timo",
+  "artifact": "story:release-0170",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "release 0.17.0: PR 70 merged dbcca9d (task check pass 12m10s, Build documentation, Security and privacy, local evidence pass); annotated tag 0.17.0 by b10x-bot[bot] on dbcca9d; release run 38360879295 success; GitHub Release https://github.com/beyond10x/loom/releases/tag/0.17.0 by b10x-bot[bot], latest, notes the CHANGELOG entry; release-check --tag 0.17.0 exit 0"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-13T07:10:09Z",
+  "actor": "human:timo",
+  "artifact": "epic:plugin-layer",
+  "kind": "epic",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "acceptance held on main 3bd6e45 by its four implemented stories: crates/loom-plugin-slack/tests/run.rs:63,140,183; crates/loom-cli/tests/plugin.rs:71; crates/loom-protocols/tests/inbound_answer.rs:176; crates/loom-plugin/tests/effects.rs:135; crates/loom-plugin/tests/hooks.rs:109; the two measurement lines by runs of docs/qualification/plugin-layer-measurement.sh recorded with the measurement page; CI task check green on PR 70"
+  }
+}

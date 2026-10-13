@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:release-0170
 kind: story
-status: active
+status: implemented
 title: Release Loom 0.17.0
 relations:
 - serves: vision:O1
@@ -19,10 +19,11 @@ scope:
   path: website/data/status.json
 - confidence: cited
   path: website/docs
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-13T06:38:45Z", actor: "human:timo", revision: 8}
 - {from: "proposed", to: "active", at: "2026-10-13T06:38:46Z", actor: "human:timo", revision: 9}
+- {from: "active", to: "implemented", at: "2026-10-13T07:22:34Z", actor: "human:timo", revision: 10, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Why
 

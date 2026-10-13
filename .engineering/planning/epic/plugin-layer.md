@@ -2,12 +2,16 @@
 format: aep.planning-md/3
 id: epic:plugin-layer
 kind: epic
-status: draft
+status: implemented
 title: 'Unattended agents are Loom plugins: a Slack handler first'
 relations:
 - serves: vision:O1
 - implements: architecture-decision-record:plugin-hooks
-revision: 4
+revision: 7
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-13T07:10:09Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1,"review_outcome":4}}}
+- {from: "proposed", to: "active", at: "2026-10-13T07:10:10Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":1,"review_outcome":4}}}
+- {from: "active", to: "implemented", at: "2026-10-13T07:10:10Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"test_result":1,"review_outcome":4}}}
 ---
 ## Outcome
 
