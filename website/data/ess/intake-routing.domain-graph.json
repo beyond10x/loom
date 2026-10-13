@@ -41,6 +41,45 @@
     {
       "fields": [
         {
+          "name": "action",
+          "type": "string"
+        },
+        {
+          "name": "capability",
+          "type": "string"
+        },
+        {
+          "name": "granted",
+          "type": "boolean"
+        },
+        {
+          "name": "action_request_id",
+          "type": "ActionRequestId"
+        },
+        {
+          "name": "granted_at",
+          "type": "timestamp"
+        }
+      ],
+      "id": "intake.routing.Grant",
+      "identity": {
+        "name": "commission_id",
+        "type": "CommissionId"
+      },
+      "lifecycle": {
+        "initial": "Granted",
+        "states": [
+          "Granted"
+        ],
+        "terminal": [
+          "Granted"
+        ]
+      },
+      "name": "Grant"
+    },
+    {
+      "fields": [
+        {
           "name": "text",
           "type": "string"
         }
@@ -60,6 +99,37 @@
         ]
       },
       "name": "Intent"
+    },
+    {
+      "fields": [
+        {
+          "name": "commission_id",
+          "type": "CommissionId"
+        },
+        {
+          "name": "workspace",
+          "type": "string"
+        },
+        {
+          "name": "head",
+          "type": "string"
+        }
+      ],
+      "id": "intake.routing.MergeHandoff",
+      "identity": {
+        "name": "action_request_id",
+        "type": "ActionRequestId"
+      },
+      "lifecycle": {
+        "initial": "Recorded",
+        "states": [
+          "Recorded"
+        ],
+        "terminal": [
+          "Recorded"
+        ]
+      },
+      "name": "MergeHandoff"
     },
     {
       "fields": [

@@ -1,6 +1,6 @@
 // generated from intake v1
-// model digest 6a863e68d9e21bd404ea8cd1c1da3b9677c04d000b3ba83ac143ad567a38235c
-// contract digest 3c2bf8b3896629e198b3ad7d91d750b1b57d6d5df6039ce670e57cf6bedd69c6
+// model digest 58fc59c73e160b3816e4c2add829c8c5a6c05ea1c6901838a7d61a911e157818
+// contract digest c7bf5a36bfa3d72e856cecfa8dd5cf67906769eb0ed8049fb9d732fc4c997443
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Routing — `intake.routing`.
@@ -23,6 +23,10 @@ pub struct AcceptedRoute {
     /// `threshold` — `Decimal`.
     pub threshold: crate::primitives::Decimal,
 }
+
+/// ActionRequestId — `intake.routing.ActionRequestId`: a distinct wrapper around `Uuid`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionRequestId(pub crate::primitives::Uuid);
 
 /// AgentRevisionId — `intake.routing.AgentRevisionId`: a distinct wrapper around `Uuid`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,6 +59,16 @@ pub enum ExtractedReferenceState {
     Extracted,
 }
 
+/// The states of `intake.routing.Grant`, as runtime values.
+///
+/// Synthesised from the lifecycle, so the two cannot disagree. Which *moves* are legal is not
+/// carried here — it is carried by `Grant<S>`, where an undeclared move does not compile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GrantState {
+    /// `Granted`.
+    Granted,
+}
+
 /// The states of `intake.routing.Intent`, as runtime values.
 ///
 /// Synthesised from the lifecycle, so the two cannot disagree. Which *moves* are legal is not
@@ -68,6 +82,16 @@ pub enum IntentState {
 /// IntentId — `intake.routing.IntentId`: a distinct wrapper around `Uuid`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IntentId(pub crate::primitives::Uuid);
+
+/// The states of `intake.routing.MergeHandoff`, as runtime values.
+///
+/// Synthesised from the lifecycle, so the two cannot disagree. Which *moves* are legal is not
+/// carried here — it is carried by `MergeHandoff<S>`, where an undeclared move does not compile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeHandoffState {
+    /// `Recorded`.
+    Recorded,
+}
 
 /// The states of `intake.routing.ProtocolPick`, as runtime values.
 ///
@@ -271,6 +295,142 @@ impl AnyExtractedReference {
     }
 }
 
+/// What Grant — `intake.routing.Grant` — holds, apart from where it is in its lifecycle.
+///
+/// The identity and every declared field. The state is deliberately not one: inside the domain it
+/// is carried by the type parameter of [`Grant<S>`], and at a boundary by [`GrantSnapshot::state`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrantData {
+    /// The identity: `commission_id` — `intake.routing.CommissionId`.
+    pub commission_id: CommissionId,
+    /// `action` — `String`.
+    pub action: String,
+    /// `capability` — `String`.
+    pub capability: String,
+    /// `granted` — `Boolean`.
+    pub granted: bool,
+    /// `action_request_id` — `intake.routing.ActionRequestId`.
+    pub action_request_id: ActionRequestId,
+    /// `granted_at` — `Timestamp`.
+    pub granted_at: crate::primitives::Timestamp,
+}
+
+/// The states of `intake.routing.Grant`, at the type level.
+///
+/// One marker type per declared state, sealed: a state the lifecycle does not declare cannot
+/// implement [`Marker`](grant_state::Marker), so [`Grant<S>`](Grant) can only ever rest in a real state.
+pub mod grant_state {
+    /// Closes [`Marker`] over the declared states.
+    mod sealed {
+        /// Implemented only by the marker types beside this module.
+        pub trait Sealed {}
+        impl Sealed for super::Granted {}
+    }
+
+    /// A declared state of `Grant`, as a type.
+    pub trait Marker: sealed::Sealed {
+        /// The same state, as the runtime value.
+        const STATE: super::GrantState;
+    }
+
+    /// `Granted`. Where a new instance starts.
+    pub struct Granted;
+
+    impl Marker for Granted {
+        const STATE: super::GrantState = super::GrantState::Granted;
+    }
+}
+
+/// Grant — `intake.routing.Grant` — with its lifecycle state carried by the type.
+///
+/// The one constructor rests in `Granted`, and the only way to change `S` is a method generated from
+/// a declared transition. A move the specification does not declare is therefore not an error
+/// case: it does not compile. Where the state is data — wire, storage — use [`GrantSnapshot`]
+/// and [`GrantSnapshot::refine`].
+pub struct Grant<S: grant_state::Marker> {
+    data: GrantData,
+    state: core::marker::PhantomData<S>,
+}
+
+impl<S: grant_state::Marker> Grant<S> {
+    /// The state this instance rests in, as the runtime value.
+    pub fn state(&self) -> GrantState {
+        S::STATE
+    }
+
+    /// What it holds.
+    pub fn data(&self) -> &GrantData {
+        &self.data
+    }
+
+    /// Hands the data back, giving up the typed state.
+    pub fn into_data(self) -> GrantData {
+        self.data
+    }
+}
+
+impl Grant<grant_state::Granted> {
+    /// A new instance, resting in `Granted` — the only state the lifecycle starts one in.
+    pub fn new(data: GrantData) -> Self {
+        Self {
+            data,
+            state: core::marker::PhantomData,
+        }
+    }
+}
+
+/// `intake.routing.Grant` as it crosses a boundary: the state as a value beside the data.
+///
+/// Wire and storage know states only at runtime; [`GrantSnapshot::refine`] is the one door back
+/// into the typed lifecycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrantSnapshot {
+    /// Where the instance is in its lifecycle.
+    pub state: GrantState,
+    /// What it holds.
+    pub data: GrantData,
+}
+
+/// An `Grant` in whichever declared state it was found.
+pub enum AnyGrant {
+    /// Resting in `Granted`.
+    Granted(Grant<grant_state::Granted>),
+}
+
+impl GrantSnapshot {
+    /// Refines the runtime state into the typed one.
+    ///
+    /// Total: every declared state has an arm, and an undeclared state cannot reach here because
+    /// `GrantState` cannot spell one.
+    pub fn refine(self) -> AnyGrant {
+        match self.state {
+            GrantState::Granted => AnyGrant::Granted(Grant {
+                data: self.data,
+                state: core::marker::PhantomData,
+            }),
+        }
+    }
+}
+
+impl AnyGrant {
+    /// The state, as the runtime value.
+    pub fn state(&self) -> GrantState {
+        match self {
+            Self::Granted(_) => GrantState::Granted,
+        }
+    }
+
+    /// Back to the boundary shape.
+    pub fn snapshot(self) -> GrantSnapshot {
+        match self {
+            Self::Granted(instance) => GrantSnapshot {
+                state: GrantState::Granted,
+                data: instance.into_data(),
+            },
+        }
+    }
+}
+
 /// What Intent — `intake.routing.Intent` — holds, apart from where it is in its lifecycle.
 ///
 /// The identity and every declared field. The state is deliberately not one: inside the domain it
@@ -393,6 +553,138 @@ impl AnyIntent {
         match self {
             Self::Received(instance) => IntentSnapshot {
                 state: IntentState::Received,
+                data: instance.into_data(),
+            },
+        }
+    }
+}
+
+/// What MergeHandoff — `intake.routing.MergeHandoff` — holds, apart from where it is in its lifecycle.
+///
+/// The identity and every declared field. The state is deliberately not one: inside the domain it
+/// is carried by the type parameter of [`MergeHandoff<S>`], and at a boundary by [`MergeHandoffSnapshot::state`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergeHandoffData {
+    /// The identity: `action_request_id` — `intake.routing.ActionRequestId`.
+    pub action_request_id: ActionRequestId,
+    /// `commission_id` — `intake.routing.CommissionId`.
+    pub commission_id: CommissionId,
+    /// `workspace` — `String`.
+    pub workspace: String,
+    /// `head` — `String`.
+    pub head: String,
+}
+
+/// The states of `intake.routing.MergeHandoff`, at the type level.
+///
+/// One marker type per declared state, sealed: a state the lifecycle does not declare cannot
+/// implement [`Marker`](merge_handoff_state::Marker), so [`MergeHandoff<S>`](MergeHandoff) can only ever rest in a real state.
+pub mod merge_handoff_state {
+    /// Closes [`Marker`] over the declared states.
+    mod sealed {
+        /// Implemented only by the marker types beside this module.
+        pub trait Sealed {}
+        impl Sealed for super::Recorded {}
+    }
+
+    /// A declared state of `MergeHandoff`, as a type.
+    pub trait Marker: sealed::Sealed {
+        /// The same state, as the runtime value.
+        const STATE: super::MergeHandoffState;
+    }
+
+    /// `Recorded`. Where a new instance starts.
+    pub struct Recorded;
+
+    impl Marker for Recorded {
+        const STATE: super::MergeHandoffState = super::MergeHandoffState::Recorded;
+    }
+}
+
+/// MergeHandoff — `intake.routing.MergeHandoff` — with its lifecycle state carried by the type.
+///
+/// The one constructor rests in `Recorded`, and the only way to change `S` is a method generated from
+/// a declared transition. A move the specification does not declare is therefore not an error
+/// case: it does not compile. Where the state is data — wire, storage — use [`MergeHandoffSnapshot`]
+/// and [`MergeHandoffSnapshot::refine`].
+pub struct MergeHandoff<S: merge_handoff_state::Marker> {
+    data: MergeHandoffData,
+    state: core::marker::PhantomData<S>,
+}
+
+impl<S: merge_handoff_state::Marker> MergeHandoff<S> {
+    /// The state this instance rests in, as the runtime value.
+    pub fn state(&self) -> MergeHandoffState {
+        S::STATE
+    }
+
+    /// What it holds.
+    pub fn data(&self) -> &MergeHandoffData {
+        &self.data
+    }
+
+    /// Hands the data back, giving up the typed state.
+    pub fn into_data(self) -> MergeHandoffData {
+        self.data
+    }
+}
+
+impl MergeHandoff<merge_handoff_state::Recorded> {
+    /// A new instance, resting in `Recorded` — the only state the lifecycle starts one in.
+    pub fn new(data: MergeHandoffData) -> Self {
+        Self {
+            data,
+            state: core::marker::PhantomData,
+        }
+    }
+}
+
+/// `intake.routing.MergeHandoff` as it crosses a boundary: the state as a value beside the data.
+///
+/// Wire and storage know states only at runtime; [`MergeHandoffSnapshot::refine`] is the one door back
+/// into the typed lifecycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergeHandoffSnapshot {
+    /// Where the instance is in its lifecycle.
+    pub state: MergeHandoffState,
+    /// What it holds.
+    pub data: MergeHandoffData,
+}
+
+/// An `MergeHandoff` in whichever declared state it was found.
+pub enum AnyMergeHandoff {
+    /// Resting in `Recorded`.
+    Recorded(MergeHandoff<merge_handoff_state::Recorded>),
+}
+
+impl MergeHandoffSnapshot {
+    /// Refines the runtime state into the typed one.
+    ///
+    /// Total: every declared state has an arm, and an undeclared state cannot reach here because
+    /// `MergeHandoffState` cannot spell one.
+    pub fn refine(self) -> AnyMergeHandoff {
+        match self.state {
+            MergeHandoffState::Recorded => AnyMergeHandoff::Recorded(MergeHandoff {
+                data: self.data,
+                state: core::marker::PhantomData,
+            }),
+        }
+    }
+}
+
+impl AnyMergeHandoff {
+    /// The state, as the runtime value.
+    pub fn state(&self) -> MergeHandoffState {
+        match self {
+            Self::Recorded(_) => MergeHandoffState::Recorded,
+        }
+    }
+
+    /// Back to the boundary shape.
+    pub fn snapshot(self) -> MergeHandoffSnapshot {
+        match self {
+            Self::Recorded(instance) => MergeHandoffSnapshot {
+                state: MergeHandoffState::Recorded,
                 data: instance.into_data(),
             },
         }
@@ -851,6 +1143,86 @@ pub enum DropResumeContextOutcome {
     },
 }
 
+/// RecordMergeHandoff — the input of `intake.routing.RecordMergeHandoff`.
+///
+/// Everything it can result in is [`RecordMergeHandoffOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordMergeHandoff {
+    /// `action_request_id` — `intake.routing.ActionRequestId`.
+    pub action_request_id: ActionRequestId,
+    /// `commission_id` — `intake.routing.CommissionId`.
+    pub commission_id: CommissionId,
+    /// `workspace` — `String`.
+    pub workspace: String,
+    /// `head` — `String`.
+    pub head: String,
+}
+
+/// Everything `intake.routing.RecordMergeHandoff` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordMergeHandoffOutcome {
+    /// `already-recorded` — for an identity a record already carries.
+    AlreadyRecorded {
+        /// Why it was refused: `intake.routing.MergeHandoffAlreadyRecorded`.
+        error: MergeHandoffAlreadyRecorded,
+    },
+    /// `head-already-handed-off` — when, of the `intake.routing.MergeHandoff` rows satisfying `(commission_id == input.commission_id and head == input.head)`, at least one row is selected.
+    HeadAlreadyHandedOff {
+        /// Why it was refused: `intake.routing.HeadAlreadyHandedOff`.
+        error: HeadAlreadyHandedOff,
+    },
+    /// `recorded` — otherwise.
+    Recorded {
+        /// The `intake.routing.MergeHandedOff` this outcome publishes.
+        merge_handed_off: MergeHandedOff,
+    },
+    /// `storage-failed` — externally decided (the state directory cannot record the hand-off).
+    StorageFailed {
+        /// Why it was refused: `intake.routing.MergeHandoffStorageFailed`.
+        error: MergeHandoffStorageFailed,
+    },
+}
+
+/// MergeHandedOff — the event `intake.routing.MergeHandedOff`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergeHandedOff {
+    /// `action_request_id` — `intake.routing.ActionRequestId`.
+    pub action_request_id: ActionRequestId,
+    /// `commission_id` — `intake.routing.CommissionId`.
+    pub commission_id: CommissionId,
+    /// `workspace` — `String`.
+    pub workspace: String,
+    /// `head` — `String`.
+    pub head: String,
+}
+
+/// The declared error `intake.routing.HeadAlreadyHandedOff`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeadAlreadyHandedOff {
+    /// `commission_id` — `intake.routing.CommissionId`.
+    pub commission_id: CommissionId,
+    /// `head` — `String`.
+    pub head: String,
+}
+
+/// The declared error `intake.routing.MergeHandoffAlreadyRecorded`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergeHandoffAlreadyRecorded {
+    /// `action_request_id` — `intake.routing.ActionRequestId`.
+    pub action_request_id: ActionRequestId,
+}
+
+/// The declared error `intake.routing.MergeHandoffStorageFailed`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergeHandoffStorageFailed {
+    /// `reason` — `String`.
+    pub reason: String,
+}
+
 /// The declared error `intake.routing.ResumeContextNotFound`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResumeContextNotFound {
@@ -884,6 +1256,19 @@ pub mod obligations {
         fn drop_resume_context(&mut self, input: super::DropResumeContext) -> Result<super::DropResumeContextOutcome, crate::obligation::UnmetObligation>;
     }
 
+    /// The behaviour `intake.routing.RecordMergeHandoff` — an implementation obligation.
+    ///
+    /// Why it is not generated: kept an obligation by a guard over the rows a selector selects (`when_related: {entity, where, exists | count | forall}`), in `head-already-handed-off`.
+    ///
+    /// Contract: given `intake.routing.RecordMergeHandoff` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `already-recorded` for an identity a record already carries, error `intake.routing.MergeHandoffAlreadyRecorded`; `head-already-handed-off` when, of the `intake.routing.MergeHandoff` rows satisfying `(commission_id == input.commission_id and head == input.head)`, at least one row is selected, error `intake.routing.HeadAlreadyHandedOff`; `recorded` otherwise, creates `intake.routing.MergeHandoff`, emits `intake.routing.MergeHandedOff`; `storage-failed` externally decided (the state directory cannot record the hand-off), error `intake.routing.MergeHandoffStorageFailed`.
+    pub trait RecordMergeHandoffBehavior {
+        /// Decides and enacts exactly one declared outcome of `intake.routing.RecordMergeHandoff`.
+        ///
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
+        fn record_merge_handoff(&mut self, input: super::RecordMergeHandoff) -> Result<super::RecordMergeHandoffOutcome, crate::obligation::UnmetObligation>;
+    }
+
     /// Every obligation of this bounded context, refused in the type system.
     ///
     /// Each method returns the typed refusal naming what is owed — never a panic, never a guessed
@@ -893,6 +1278,12 @@ pub mod obligations {
     impl DropResumeContextBehavior for Unimplemented {
         fn drop_resume_context(&mut self, _input: super::DropResumeContext) -> Result<super::DropResumeContextOutcome, crate::obligation::UnmetObligation> {
             Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "intake.routing.DropResumeContext" })
+        }
+    }
+
+    impl RecordMergeHandoffBehavior for Unimplemented {
+        fn record_merge_handoff(&mut self, _input: super::RecordMergeHandoff) -> Result<super::RecordMergeHandoffOutcome, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "intake.routing.RecordMergeHandoff" })
         }
     }
 }

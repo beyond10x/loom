@@ -8,9 +8,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::model_retry::classify_with_retries;
-use b10x_loom_commission::model::responsibility::{CommissionData, CommissionId};
+use b10x_loom_commission::model::primitives::Uuid as CommissionUuid;
+use b10x_loom_commission::model::responsibility::{
+    AgentRevisionId, CaseId, CommissionData, CommissionId,
+};
 use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_commission::ports::suspension::SuspensionPort;
+use b10x_loom_commission::runtime::{ResumeError, ResumeRefusal};
 use b10x_loom_intake_references::references;
 use b10x_loom_intake_router::RouterError;
 use intake_model::confinement::Backend;
@@ -26,13 +30,15 @@ use crate::clock::Clock;
 use crate::confinement::TestRunner;
 use crate::context_metrics::{ContextMetrics, MeasuredModel};
 use crate::executor::{TestCommand, backend_name};
+use crate::grant::{GrantAuthority, GrantStore};
+use crate::handoff::MergeHandoffStore;
 use crate::resume::{
     self, AcceptedRoute, CatalogDigest, DropResumeContext, DropResumeContextOutcome,
     ResumeContextData, ResumeContextStore,
 };
 use crate::run::{
-    Execution, Holding, LOCAL_PROTOCOL, RunOptions, SliceError, SliceRun, StopReason, drive,
-    printable,
+    ApprovalGate, Execution, Holding, LOCAL_PROTOCOL, Mode, Resuming, RunOptions, SliceError,
+    SliceRun, StopReason, drive, operator_commission, printable,
 };
 use crate::selector::Briefing;
 
@@ -259,6 +265,7 @@ fn stop(
         steps: 0,
         stop_reason: reason,
         approvals: Vec::new(),
+        gate: ApprovalGate::Approvable,
     })
 }
 
@@ -421,7 +428,7 @@ pub fn run_prepared_intent_with_state<S: FallibleCaseStore>(
     let Some(commission) = kept.into_inner() else {
         return ran;
     };
-    let settled = settle(state, &commission);
+    let settled = settle(state.suspensions, state.contexts, &commission);
     match ran {
         Ok(run) => settled.map(|()| run),
         Err(failure) => Err(failure),
@@ -430,8 +437,12 @@ pub fn run_prepared_intent_with_state<S: FallibleCaseStore>(
 
 /// Keeps `commission`'s resume context when the commission holds its Suspension, and removes it
 /// otherwise. When the suspension store cannot say, the context is kept.
-fn settle(state: &RunState<'_>, commission: &CommissionId) -> Result<(), SliceError> {
-    let held = state.suspensions.get(commission).map_err(|error| {
+fn settle(
+    suspensions: &dyn SuspensionPort,
+    contexts: &ResumeContextStore,
+    commission: &CommissionId,
+) -> Result<(), SliceError> {
+    let held = suspensions.get(commission).map_err(|error| {
         SliceError::State(format!(
             "whether commission {} holds a Suspension cannot be read, so its resume context is \
              kept: {error}",
@@ -444,7 +455,7 @@ fn settle(state: &RunState<'_>, commission: &CommissionId) -> Result<(), SliceEr
     let input = DropResumeContext {
         commission_id: resume::CommissionId(IntakeUuid(commission.0.0.clone())),
     };
-    match state.contexts.remove(&input) {
+    match contexts.remove(&input) {
         // Gone either way: none is left for a commission nothing can resume.
         DropResumeContextOutcome::Dropped | DropResumeContextOutcome::NotFound { .. } => Ok(()),
         DropResumeContextOutcome::StorageFailed { error } => Err(SliceError::State(format!(
@@ -452,6 +463,209 @@ fn settle(state: &RunState<'_>, commission: &CommissionId) -> Result<(), SliceEr
             commission.0.0, error.reason
         ))),
     }
+}
+
+/// What `resume` continues a commission from, in the directory `run --state` kept it in: the
+/// suspension store its Suspension is held in, its resume context, the grant `approve` wrote for
+/// it, and where a granted `repository.merge` is handed off.
+pub struct ResumeState<'s> {
+    /// The suspension store the commission's Suspension is held in.
+    pub suspensions: &'s dyn SuspensionPort,
+    /// Where the commission's resume context is kept.
+    pub contexts: &'s ResumeContextStore,
+    /// Where `approve` wrote the commission's grant.
+    pub grants: &'s GrantStore,
+    /// Where a granted `repository.merge` is handed off.
+    pub handoffs: &'s MergeHandoffStore,
+}
+
+/// The resume context of `commission`, read only when the commission holds a Suspension: a
+/// context alone, which a run that died early leaves behind, resumes nothing.
+///
+/// # Errors
+/// [`SliceError::Resume`] refusing `NothingSuspended` when the commission holds no Suspension, or
+/// with `Store` when the suspension store cannot be read; [`SliceError::State`] when no context is
+/// kept for the commission or it cannot be read.
+pub fn held_resume_context(
+    state: &ResumeState<'_>,
+    commission: &str,
+) -> Result<ResumeContextData, SliceError> {
+    let held = state
+        .suspensions
+        .get(&CommissionId(CommissionUuid(commission.to_owned())))
+        .map_err(|error| SliceError::Resume(ResumeError::Store(error)))?;
+    if held.is_none() {
+        return Err(SliceError::Resume(ResumeError::Refused(
+            ResumeRefusal::NothingSuspended,
+        )));
+    }
+    state
+        .contexts
+        .get(&resume::CommissionId(IntakeUuid(commission.to_owned())))
+        .map_err(|error| SliceError::State(error.to_string()))?
+        .ok_or_else(|| {
+            SliceError::State(format!(
+                "commission {} holds a Suspension, but no resume context is kept for it",
+                printable(commission)
+            ))
+        })
+}
+
+/// The request `context` keeps, as the run that kept it was given it: the intent, the
+/// workspace, the test command, the step budget and the threshold, with `runner`.
+///
+/// # Errors
+/// [`SliceError::State`] when the context keeps no test program, a negative step budget or a
+/// threshold that is not a number.
+pub fn resumed_request(
+    context: &ResumeContextData,
+    runner: Option<Arc<dyn TestRunner>>,
+) -> Result<IntentRequest, SliceError> {
+    let invalid = |what: &str| SliceError::State(format!("the resume context keeps {what}"));
+    let (program, args) = context
+        .test_command
+        .split_first()
+        .ok_or_else(|| invalid("no test program"))?;
+    Ok(IntentRequest {
+        intent: context.intent.clone(),
+        workspace: context.workspace.as_ref().map(PathBuf::from),
+        test: TestCommand::new(program, args),
+        runner,
+        max_steps: usize::try_from(context.max_steps)
+            .map_err(|_| invalid("a step budget that is not a count"))?,
+        threshold: context
+            .route
+            .threshold
+            .0
+            .parse()
+            .map_err(|_| invalid("a threshold that is not a number"))?,
+    })
+}
+
+/// Continues `context`'s commission after the grant, through Commission's `resume_after_grant`:
+/// the route is restored only for the intent, the catalog and the policy it was accepted for, the
+/// workspace is validated again (`case::validate_workspace`) and its `HEAD` reported to the
+/// governor as the case's implementation revision (`case::report_head`), so a commit made since
+/// the Suspension is refused `CaseMoved`; the grant `approve` wrote is read through
+/// [`GrantAuthority`], and a granted `repository.merge` is handed off into `state.handoffs`, at
+/// the implementation revision the case holds only, moving no Git ref. The suspended request is performed once, the Suspension is
+/// released, and the run goes on until it stops, as a run does. When it ends, however it ends,
+/// without the commission's Suspension held, the context is removed
+/// (`intake.routing.DropResumeContext`).
+///
+/// Only a `software-change@1` commission is resumed: no other protocol's run holds a Suspension.
+///
+/// # Errors
+/// [`SliceError::Resume`] when Commission refused the resume (nothing was performed) or its loop
+/// stopped without a run outcome; [`SliceError::Context`] when the route no longer matches the
+/// intent, the catalog or the policy, or the protocol is not `software-change@1`;
+/// [`SliceError::Case`] when the workspace no longer validates; [`SliceError::State`] when the
+/// grant cannot be read, or the context cannot be removed; and every failure of a run.
+#[allow(clippy::too_many_arguments)]
+pub fn resume_with_state<S: FallibleCaseStore>(
+    context: &ResumeContextData,
+    request: &IntentRequest,
+    catalog: &ProtocolCatalog,
+    governor: &CanonGovernor<S>,
+    frontiers: &dyn Governor,
+    agent: &dyn Model,
+    out: &mut dyn Write,
+    state: &ResumeState<'_>,
+) -> Result<SliceRun, SliceError> {
+    let ran = resume_prepared(
+        context, request, catalog, governor, frontiers, agent, out, state,
+    );
+    let commission = CommissionId(CommissionUuid(context.commission_id.0.0.clone()));
+    let settled = settle(state.suspensions, state.contexts, &commission);
+    match ran {
+        Ok(run) => settled.map(|()| run),
+        Err(failure) => Err(failure),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resume_prepared<S: FallibleCaseStore>(
+    context: &ResumeContextData,
+    request: &IntentRequest,
+    catalog: &ProtocolCatalog,
+    governor: &CanonGovernor<S>,
+    frontiers: &dyn Governor,
+    agent: &dyn Model,
+    out: &mut dyn Write,
+    state: &ResumeState<'_>,
+) -> Result<SliceRun, SliceError> {
+    let options = RunOptions {
+        context_policy: context.route.context_policy,
+        context_report: None,
+    };
+    let metrics = ContextMetrics::new(options.context_policy);
+    let prepared = PreparedIntent::restore_route(&context.route, request, catalog, &options)?;
+    governor
+        .validate_catalog(catalog)
+        .map_err(|error| SliceError::Context(error.to_string()))?;
+    if prepared.protocol != LOCAL_PROTOCOL {
+        return Err(SliceError::Context(format!(
+            "resume continues {LOCAL_PROTOCOL} runs only, not {}",
+            printable(&prepared.protocol)
+        )));
+    }
+    let (Some(workspace), Some(kept)) = (request.workspace.as_deref(), &context.workspace) else {
+        return Err(SliceError::State(
+            "the resume context keeps no workspace".into(),
+        ));
+    };
+    let runner = request
+        .runner
+        .as_ref()
+        .ok_or_else(|| SliceError::Context("software-change@1 requires a test runner".into()))?;
+    case::validate_workspace(workspace).map_err(SliceError::Case)?;
+    writeln!(out, "confinement: {}", backend_name(runner.backend()))?;
+    let grant = state
+        .grants
+        .get(&context.commission_id)
+        .map_err(|error| SliceError::State(error.to_string()))?;
+    // The workspace's HEAD is reported to the governor as the case's implementation revision, as
+    // a run reports it after an edit: a commit made since the Suspension moves the case, and the
+    // resume is refused `CaseMoved` before anything is performed.
+    let case_id = CaseId(context.case_id.0.clone());
+    case::report_head(governor, &case_id, workspace).map_err(SliceError::Case)?;
+    let authority = GrantAuthority::new(grant, state.suspensions);
+    let resuming = Resuming {
+        commission: operator_commission(
+            CommissionId(CommissionUuid(context.commission_id.0.0.clone())),
+            AgentRevisionId(CommissionUuid(context.agent_revision_id.0.0.clone())),
+            case_id.clone(),
+        ),
+        suspensions: state.suspensions,
+        authority: &authority,
+        handoffs: state.handoffs,
+        workspace: kept.clone(),
+    };
+    // The briefing starts empty: the model does not see the steps before the Suspension.
+    let briefing = Briefing::with_options(
+        request.intent.clone(),
+        references(&request.intent),
+        options.context_policy,
+        metrics.clone(),
+    );
+    let agent = MeasuredModel::new(agent, metrics);
+    drive(
+        &request.intent,
+        &prepared.protocol,
+        case_id,
+        request.max_steps,
+        governor,
+        frontiers,
+        &agent,
+        out,
+        briefing,
+        Execution::Software {
+            workspace,
+            test: &request.test,
+            runner: Arc::clone(runner),
+        },
+        Mode::Resuming(&resuming),
+    )
 }
 
 /// The resume context of `commission`, run on `request` over `prepared`'s route.
@@ -505,6 +719,7 @@ fn run_prepared<S: FallibleCaseStore>(
     metrics: &ContextMetrics,
     holding: Option<&Holding<'_>>,
 ) -> Result<SliceRun, SliceError> {
+    let mode = holding.map_or(Mode::Once, Mode::Holding);
     if metrics.report().policy != options.context_policy {
         return Err(SliceError::Context(
             "measurement policy differs from context policy".into(),
@@ -558,7 +773,7 @@ fn run_prepared<S: FallibleCaseStore>(
                 test: &request.test,
                 runner: Arc::clone(runner),
             },
-            holding,
+            mode,
         )
     } else {
         entry.clock_compatible().map_err(SliceError::Context)?;
@@ -583,7 +798,7 @@ fn run_prepared<S: FallibleCaseStore>(
                 clock,
                 intent_revision: &revision,
             },
-            holding,
+            mode,
         )
     }
 }

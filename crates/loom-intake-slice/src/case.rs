@@ -159,6 +159,16 @@ pub fn validate_workspace(workspace: &Path) -> Result<(), CaseError> {
     crate::git::record(workspace).map_err(CaseError::HostGit)
 }
 
+/// The workspace's current `HEAD` commit, read through the Git configuration
+/// [`validate_workspace`] recorded for it: a call is refused when that configuration changed since.
+///
+/// # Errors
+/// [`CaseError::HostGit`] when the call is refused, [`CaseError::Workspace`] when git fails or the
+/// workspace is not the root of a work tree with a committed `HEAD`.
+pub fn current_head(workspace: &Path) -> Result<String, CaseError> {
+    head(workspace, Calls::Recorded)
+}
+
 /// Reports the workspace's current `HEAD` as the case's `implementation` revision and returns the
 /// case revision the governor holds afterwards (one higher when `HEAD` moved, unchanged otherwise).
 pub fn report_head<S: FallibleCaseStore>(

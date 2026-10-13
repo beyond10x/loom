@@ -31,11 +31,10 @@
 //! suspended request against the case as it is then.
 
 use std::fmt;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write as _};
+use std::fs;
+use std::io;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use intake_model::confinement::Backend;
 use intake_model::context::ContextPolicy;
@@ -48,18 +47,14 @@ pub use intake_model::routing::{
 };
 use serde_json::{Map, Value, json};
 
-/// The lock file the governor's file stores take; this store takes the same one.
-const LOCK: &str = ".lock";
-
-/// The prefix of a temporary file; the governor's file stores remove the ones a dead process left.
-const TEMPORARY: &str = ".tmp-";
+use crate::state_dir::{StateDir, failed, read_text};
 
 /// The prefix of a kept context's file name.
 const PREFIX: &str = "resume-";
 
 /// The longest commission id, in bytes, the store keeps: `resume-`, 200 hex digits and `.json`
 /// is 212 bytes, under the 255 a file name may have.
-pub const LONGEST_COMMISSION_ID: usize = 100;
+pub const LONGEST_COMMISSION_ID: usize = crate::state_dir::LONGEST_ID;
 
 /// The members a kept context has, in the order written.
 const MEMBERS: [&str; 12] = [
@@ -86,9 +81,6 @@ const ROUTE_MEMBERS: [&str; 5] = [
     "threshold",
 ];
 
-/// Temporary file names this process has used, so two writes never share one.
-static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
-
 /// Why the store could not keep or read a context: the file and what went wrong with it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResumeStoreError {
@@ -105,13 +97,6 @@ impl fmt::Display for ResumeStoreError {
 }
 
 impl std::error::Error for ResumeStoreError {}
-
-fn failed(path: &Path, problem: impl fmt::Display) -> ResumeStoreError {
-    ResumeStoreError {
-        path: path.to_owned(),
-        problem: problem.to_string(),
-    }
-}
 
 /// A context file the store lists but cannot read: the commission its name is for, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -161,7 +146,7 @@ impl IntoIterator for ResumeContexts {
 /// The resume contexts kept in one directory, one file per commission.
 #[derive(Debug)]
 pub struct ResumeContextStore {
-    dir: PathBuf,
+    dir: StateDir,
 }
 
 impl ResumeContextStore {
@@ -173,23 +158,14 @@ impl ResumeContextStore {
     /// does not take a write: a temporary file cannot be created, written, synced and removed in
     /// it.
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self, ResumeStoreError> {
-        let dir = dir.into();
-        fs::create_dir_all(&dir).map_err(|error| failed(&dir, error))?;
-        let lock = dir.join(LOCK);
-        OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&lock)
-            .map_err(|error| failed(&lock, error))?;
-        let store = Self { dir };
-        store.locked(|| store.probe())??;
-        Ok(store)
+        Ok(Self {
+            dir: StateDir::open(dir.into(), "resume")?,
+        })
     }
 
     /// The directory the store keeps its files in.
     pub fn dir(&self) -> &Path {
-        &self.dir
+        self.dir.dir()
     }
 
     /// Keeps `context` for its commission.
@@ -203,14 +179,14 @@ impl ResumeContextStore {
         if decode(&text, &context.commission_id).as_ref() != Ok(context) {
             return Err(failed(&path, "the context would not read back as written"));
         }
-        self.locked(|| {
+        self.dir.locked(|| {
             if path.exists() {
                 return Err(failed(
                     &path,
                     "a context is already kept for this commission",
                 ));
             }
-            self.replace(&path, &text)
+            self.dir.replace(&path, &text)
         })?
     }
 
@@ -223,7 +199,7 @@ impl ResumeContextStore {
         commission: &CommissionId,
     ) -> Result<Option<ResumeContextData>, ResumeStoreError> {
         let path = self.path(commission)?;
-        self.locked(|| read(&path, commission))?
+        self.dir.locked(|| read(&path, commission))?
     }
 
     /// Every context kept in the directory, by file name: the ones read, and each context file
@@ -236,10 +212,11 @@ impl ResumeContextStore {
     /// # Errors
     /// [`ResumeStoreError`] when the directory itself cannot be locked or read.
     pub fn list(&self) -> Result<ResumeContexts, ResumeStoreError> {
-        self.locked(|| {
+        let dir = self.dir.dir();
+        self.dir.locked(|| {
             let mut names = Vec::new();
-            for entry in fs::read_dir(&self.dir).map_err(|error| failed(&self.dir, error))? {
-                let entry = entry.map_err(|error| failed(&self.dir, error))?;
+            for entry in fs::read_dir(dir).map_err(|error| failed(dir, error))? {
+                let entry = entry.map_err(|error| failed(dir, error))?;
                 let name = entry.file_name().to_string_lossy().into_owned();
                 if let Some(commission) = commission_named(&name) {
                     names.push((name, commission));
@@ -248,7 +225,7 @@ impl ResumeContextStore {
             names.sort_by(|left, right| left.0.cmp(&right.0));
             let mut listed = ResumeContexts::default();
             for (name, commission) in names {
-                match read(&self.dir.join(&name), &commission) {
+                match read(&dir.join(&name), &commission) {
                     Ok(Some(context)) => listed.contexts.push(context),
                     // Removed since the directory was read: no context, and nothing unreadable.
                     Ok(None) => {}
@@ -275,10 +252,10 @@ impl ResumeContextStore {
             Ok(path) => path,
             Err(error) => return storage_failed(error),
         };
-        let removed = self.locked(|| match fs::remove_file(&path) {
+        let removed = self.dir.locked(|| match fs::remove_file(&path) {
             Ok(()) => {
                 // The file is gone; a failed directory sync is not a failed remove.
-                self.sync();
+                self.dir.sync();
                 DropResumeContextOutcome::Dropped
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -295,97 +272,7 @@ impl ResumeContextStore {
 
     /// The file that holds `commission`'s context, named so no id names a file outside the store.
     fn path(&self, commission: &CommissionId) -> Result<PathBuf, ResumeStoreError> {
-        let id = commission.0.0.as_bytes();
-        if id.len() > LONGEST_COMMISSION_ID {
-            return Err(failed(
-                &self.dir,
-                format!(
-                    "a commission id of {} bytes is longer than the {LONGEST_COMMISSION_ID} this \
-                     store keeps",
-                    id.len()
-                ),
-            ));
-        }
-        let mut name = String::from(PREFIX);
-        for byte in id {
-            name.push_str(&format!("{byte:02x}"));
-        }
-        name.push_str(".json");
-        Ok(self.dir.join(name))
-    }
-
-    /// Runs `operation` holding the directory's lock. The outer error is the lock's.
-    fn locked<T>(&self, operation: impl FnOnce() -> T) -> Result<T, ResumeStoreError> {
-        let path = self.dir.join(LOCK);
-        let lock = OpenOptions::new()
-            .write(true)
-            .open(&path)
-            .map_err(|error| failed(&path, error))?;
-        lock.lock().map_err(|error| failed(&path, error))?;
-        let result = operation();
-        let _ = lock.unlock();
-        Ok(result)
-    }
-
-    /// Writes `text` to a new temporary file in the directory, syncs it, and renames it over
-    /// `path`; on failure the temporary file is removed and `path` is untouched. Only called
-    /// holding the lock.
-    fn replace(&self, path: &Path, text: &str) -> Result<(), ResumeStoreError> {
-        let (temporary, mut file) = self.temporary()?;
-        let written = (|| -> io::Result<()> {
-            file.write_all(text.as_bytes())?;
-            file.sync_all()
-        })()
-        .map_err(|error| failed(&temporary, error))
-        .and_then(|()| fs::rename(&temporary, path).map_err(|error| failed(path, error)));
-        if written.is_err() {
-            let _ = fs::remove_file(&temporary);
-            return written;
-        }
-        self.sync();
-        Ok(())
-    }
-
-    /// Proves the directory takes a write as [`Self::replace`] makes one: a fresh temporary file is
-    /// created, written, synced and removed. Only called holding the lock. A probe a crash
-    /// interrupted is a temporary file the governor's stores remove when they open.
-    fn probe(&self) -> Result<(), ResumeStoreError> {
-        let (temporary, mut file) = self.temporary()?;
-        let written = file
-            .write_all(b"probe\n")
-            .and_then(|()| file.sync_all())
-            .map_err(|error| failed(&temporary, error));
-        drop(file);
-        let removed = fs::remove_file(&temporary).map_err(|error| failed(&temporary, error));
-        written.and(removed)
-    }
-
-    /// A new temporary file in the directory, created for writing. Only called holding the lock.
-    fn temporary(&self) -> Result<(PathBuf, File), ResumeStoreError> {
-        loop {
-            let temporary = self.dir.join(format!(
-                "{TEMPORARY}{}-resume-{}",
-                std::process::id(),
-                NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)
-            ));
-            match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&temporary)
-            {
-                Ok(file) => return Ok((temporary, file)),
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(error) => return Err(failed(&temporary, error)),
-            }
-        }
-    }
-
-    /// Syncs the directory, so a rename or a removal in it is durable. A failure only weakens how
-    /// soon, and is not reported.
-    fn sync(&self) {
-        if let Ok(dir) = File::open(&self.dir) {
-            let _ = dir.sync_all();
-        }
+        self.dir.file(PREFIX, "a commission id", &commission.0.0)
     }
 }
 
@@ -420,10 +307,8 @@ fn read(
     path: &Path,
     commission: &CommissionId,
 ) -> Result<Option<ResumeContextData>, ResumeStoreError> {
-    let text = match fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(failed(path, error)),
+    let Some(text) = read_text(path)? else {
+        return Ok(None);
     };
     decode(&text, commission)
         .map(Some)
@@ -580,6 +465,7 @@ fn backend_name(backend: Backend) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state_dir::{LOCK, TEMPORARY};
 
     fn context(commission: &str) -> ResumeContextData {
         ResumeContextData {

@@ -21,7 +21,10 @@
 //! keeps its commission's resume context there before the commission runs, then runs it through
 //! Commission's `run_with_suspension` over the directory's suspension store instead, so the
 //! Suspension a withheld approval leaves outlives the process. Its output and stop reasons are the
-//! same.
+//! same. A resume ([`crate::intent::resume_with_state`], `resume`) continues that commission
+//! through Commission's `resume_after_grant`, under the authority provider over its grant
+//! ([`crate::grant::GrantAuthority`]), with `repository.merge` handed off
+//! ([`crate::handoff::HandoffEffects`]); its output and stop reasons are a run's too.
 //!
 //! It ends with a [`SliceRun`] and its [`StopReason`] (`intake.routing.SliceRun` and
 //! `intake.routing.StopReason` in `ess/intake/domains/routing.yaml`), read from the runtime's
@@ -70,6 +73,13 @@
 //! then indented `effect:` and `evidence:` lines; further lines of an effect are indented and
 //! start with `|`), and last `stopped: <reason>`, with its detail in parentheses where it has one.
 //!
+//! A run with a state directory or a resume that stops [`StopReason::ApprovalRequired`] prints
+//! that line only when the commission holds a Suspension `approve` can approve
+//! ([`ApprovalGate`]): it prints `stopped: ApprovalRequired (<action>), nothing suspended` when it
+//! holds none, and a resume prints `stopped: MergeHandedOff (<request>, HEAD <head>)` when the
+//! case's `HEAD` is one the commission already handed off. A run without a state directory prints
+//! as it always did.
+//!
 //! # Identity
 //!
 //! A [`SliceRun`] carries the specification's `protocol`, `steps` and `stop_reason`. Its `run_id`
@@ -92,12 +102,14 @@ use b10x_loom_commission::model::responsibility::{
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
+use b10x_loom_commission::ports::effect::EffectPort;
 use b10x_loom_commission::ports::evidence::ObservationPort;
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_commission::ports::suspension::SuspensionPort;
 use b10x_loom_commission::runtime::{
-    LoopContext, LoopEnd, LoopError, LoopFailure, run_until_blocked, run_with_suspension,
+    LoopContext, LoopEnd, LoopError, LoopFailure, ResumeError, resume_after_grant,
+    run_until_blocked, run_with_suspension,
 };
 use b10x_loom_executor::model::run::{CatalogueEntry, SelectionStrategy};
 use b10x_loom_executor::selection::{Choice, SelectionContext, SelectorError};
@@ -113,6 +125,7 @@ use crate::context_metrics::{ContextMetrics, ContextPolicy, MeasuredModel};
 use crate::effect::{Console, LocalEffects, refuse};
 use crate::executor::backend_name;
 use crate::executor::{ExecuteError, LocalExecutor, TestCommand, fresh_uuid, now};
+use crate::handoff::{HandoffEffects, MergeHandoffStore};
 use crate::selector::{ArgumentsError, Briefing, ModelArguments, ModelSelector, NO_ACTION};
 use crate::verifier::{TestResultVerifier, VerifyError};
 
@@ -171,6 +184,31 @@ pub struct SliceRun {
     /// The actions the run awaits approval for, in frontier order; empty unless it stopped
     /// [`StopReason::ApprovalRequired`].
     pub approvals: Vec<String>,
+    /// What a run with a state directory that stopped [`StopReason::ApprovalRequired`] left to
+    /// approve; [`ApprovalGate::Approvable`] for every other run.
+    pub gate: ApprovalGate,
+}
+
+/// What a run that stopped [`StopReason::ApprovalRequired`] left for `approve`. A run without a
+/// state directory (`run_until_blocked`) holds nothing anyone could approve and is always
+/// [`ApprovalGate::Approvable`], printed as it always was.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ApprovalGate {
+    /// The stop line reads `stopped: ApprovalRequired (<action>)`: with a state directory, the
+    /// commission holds a Suspension `approve` can approve.
+    #[default]
+    Approvable,
+    /// The commission holds no Suspension: `stopped: ApprovalRequired (<action>), nothing
+    /// suspended`. Nothing can be approved.
+    NothingSuspended,
+    /// The case's `HEAD` is one the commission already handed off:
+    /// `stopped: MergeHandedOff (<request>, HEAD <head>)`. Nothing is left to approve for it.
+    HandedOff {
+        /// The request that handed it off.
+        action_request_id: String,
+        /// The `HEAD` handed off.
+        head: String,
+    },
 }
 
 /// Why a run ended without a stop reason.
@@ -211,6 +249,9 @@ pub enum SliceError {
     Loop(LoopError),
     /// The run's state directory could not keep what it holds: the resume context.
     State(String),
+    /// A resume continued nothing, or its continued loop stopped without a run outcome: why, as
+    /// Commission's `resume_after_grant` answered.
+    Resume(ResumeError),
 }
 
 impl fmt::Display for SliceError {
@@ -236,6 +277,7 @@ impl fmt::Display for SliceError {
             Self::Complete(outcome) => write!(f, "the case completed as `{outcome}`"),
             Self::Loop(error) => write!(f, "the runtime stopped: {error}"),
             Self::State(why) => write!(f, "the state directory cannot be used: {why}"),
+            Self::Resume(error) => write!(f, "the resume stopped: {error}"),
         }
     }
 }
@@ -393,7 +435,7 @@ fn run_measured<S: FallibleCaseStore>(
             test: &request.test,
             runner: Arc::clone(&request.runner),
         },
-        None,
+        Mode::Once,
     )
 }
 
@@ -403,6 +445,29 @@ fn run_measured<S: FallibleCaseStore>(
 pub(crate) struct Holding<'h> {
     pub(crate) suspensions: &'h dyn SuspensionPort,
     pub(crate) keep: &'h dyn Fn(&CommissionData) -> Result<(), SliceError>,
+}
+
+/// What a resume continues a held commission through (`resume`): the commission as its resume
+/// context names it, the store its Suspension is held in, the authority provider over its grant,
+/// and the store a granted `repository.merge` is handed off into.
+pub(crate) struct Resuming<'r> {
+    pub(crate) commission: CommissionData,
+    pub(crate) suspensions: &'r dyn SuspensionPort,
+    pub(crate) authority: &'r dyn AuthorityProvider,
+    pub(crate) handoffs: &'r MergeHandoffStore,
+    /// The workspace, as the resume context keeps it and the hand-off records it.
+    pub(crate) workspace: String,
+}
+
+/// How [`drive`] runs the commission.
+#[derive(Clone, Copy)]
+pub(crate) enum Mode<'m> {
+    /// Once, through `run_until_blocked`, holding nothing.
+    Once,
+    /// Through `run_with_suspension`, holding the commission ([`Holding`]).
+    Holding(&'m Holding<'m>),
+    /// Through `resume_after_grant`, continuing the commission's suspended run ([`Resuming`]).
+    Resuming(&'m Resuming<'m>),
 }
 
 pub(crate) enum Execution<'a> {
@@ -429,10 +494,13 @@ pub(crate) fn drive<S: FallibleCaseStore>(
     out: &mut dyn Write,
     briefing: Briefing,
     execution: Execution<'_>,
-    holding: Option<&Holding<'_>>,
+    mode: Mode<'_>,
 ) -> Result<SliceRun, SliceError> {
-    let commission = commission(&case);
-    if let Some(holding) = holding {
+    let commission = match &mode {
+        Mode::Resuming(resuming) => Commission::new(resuming.commission.clone()),
+        _ => commission(&case),
+    };
+    if let Mode::Holding(holding) = &mode {
         (holding.keep)(commission.data())?;
     }
     let chosen = Arc::new(Mutex::new(None));
@@ -456,7 +524,11 @@ pub(crate) fn drive<S: FallibleCaseStore>(
         console: &console,
     };
     let query = matches!(&execution, Execution::Clock { .. });
-    let effects: Box<dyn b10x_loom_commission::ports::effect::EffectPort + '_> = match execution {
+    let workspace = match &execution {
+        Execution::Software { workspace, .. } => Some(workspace.to_path_buf()),
+        Execution::Clock { .. } => None,
+    };
+    let local: Box<dyn EffectPort + '_> = match execution {
         Execution::Software {
             workspace,
             test,
@@ -488,38 +560,71 @@ pub(crate) fn drive<S: FallibleCaseStore>(
             &console,
         )),
     };
+    // A resume hands a granted `repository.merge` off; nothing else performs one.
+    let held_head = || implementation_revision(governor, &case);
+    let handoff = match (&mode, workspace) {
+        (Mode::Resuming(resuming), Some(workspace)) => Some(HandoffEffects::new(
+            &*local,
+            resuming.handoffs,
+            workspace,
+            resuming.workspace.clone(),
+            &held_head,
+            briefing.clone(),
+            &console,
+            protocol == LOCAL_PROTOCOL,
+        )),
+        _ => None,
+    };
+    let effects: &dyn EffectPort = match &handoff {
+        Some(handoff) => handoff,
+        None => &*local,
+    };
     let reads = Reads {
         frontiers,
         governor,
     };
     let seed = case.0.clone();
-    let mut runs = Generated::new(RunStore::new(move || RunId(fresh_uuid("run", &seed))));
+    let runs = move || RunStore::new(move || RunId(fresh_uuid("run", &seed)));
     let mut context = SliceContext {
         case: case.0.clone(),
         budget,
     };
-    let result = match holding {
-        Some(holding) => run_with_suspension(
+    let result = match &mode {
+        Mode::Holding(holding) => run_with_suspension(
             &reads,
             &step,
             &NoDelegatedAuthority,
-            &*effects,
+            effects,
             &commission,
-            &mut runs,
+            &mut Generated::new(runs()),
             holding.suspensions,
             &mut context,
-        ),
-        None => run_until_blocked(
+        )
+        .map_err(loop_failed),
+        Mode::Once => run_until_blocked(
             &reads,
             &step,
             &NoDelegatedAuthority,
-            &*effects,
+            effects,
             &commission,
-            &mut runs,
+            &mut Generated::new(runs()),
             &mut context,
-        ),
+        )
+        .map_err(loop_failed),
+        Mode::Resuming(resuming) => resume_after_grant(
+            &reads,
+            &step,
+            resuming.authority,
+            effects,
+            &commission,
+            &mut runs(),
+            resuming.suspensions,
+            &mut context,
+        )
+        .map_err(SliceError::Resume),
     };
-    drop(effects);
+    drop(handoff);
+    drop(local);
     drop(step);
     let failure = console.take_failure();
     let context_failure = briefing.failure();
@@ -541,14 +646,7 @@ pub(crate) fn drive<S: FallibleCaseStore>(
         return Err(SliceError::Context(why));
     }
 
-    let end = match result {
-        Ok(end) => end,
-        Err(LoopError {
-            failure: LoopFailure::Governor(error),
-            ..
-        }) => return Err(SliceError::Governor(error)),
-        Err(error) => return Err(SliceError::Loop(error)),
-    };
+    let end = result?;
     if query && let RunOutcome::Completed(ref complete) = end.outcome {
         return stop(
             out,
@@ -558,11 +656,98 @@ pub(crate) fn drive<S: FallibleCaseStore>(
             Some(complete.outcome.clone()),
         );
     }
-    finish(out, protocol.to_owned(), end)
+    let gate = if matches!(
+        end.outcome,
+        RunOutcome::NeedsAuthority(_) | RunOutcome::AwaitingApproval(_)
+    ) {
+        approval_gate(&mode, governor, &case, &commission.data().commission_id)?
+    } else {
+        ApprovalGate::Approvable
+    };
+    finish(out, protocol.to_owned(), end, gate)
 }
 
-/// The stop reason the runtime's `end` stands for, as the module documents, printed.
-fn finish(out: &mut dyn Write, protocol: String, end: LoopEnd) -> Result<SliceRun, SliceError> {
+/// The case's implementation revision as `governor` holds it: the `HEAD` the case is at.
+fn implementation_revision<S: FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &CaseId,
+) -> Result<String, SliceError> {
+    governor
+        .revisions(case)?
+        .remove(case::IMPLEMENTATION)
+        .ok_or_else(|| {
+            SliceError::State(format!(
+                "case {} holds no {} revision",
+                case.0,
+                case::IMPLEMENTATION
+            ))
+        })
+}
+
+/// What a run in `mode` that stopped `ApprovalRequired` left to approve: in a resume, a `HEAD`
+/// the commission already handed off first; with a state directory, whether the commission holds
+/// its Suspension. A run without one is always approvable as it prints.
+fn approval_gate<S: FallibleCaseStore>(
+    mode: &Mode<'_>,
+    governor: &CanonGovernor<S>,
+    case: &CaseId,
+    commission: &CommissionId,
+) -> Result<ApprovalGate, SliceError> {
+    let held = |suspensions: &dyn SuspensionPort| {
+        let held = suspensions.get(commission).map_err(|error| {
+            SliceError::State(format!(
+                "whether commission {} holds a Suspension cannot be read: {error}",
+                commission.0.0
+            ))
+        })?;
+        Ok(match held {
+            Some(_) => ApprovalGate::Approvable,
+            None => ApprovalGate::NothingSuspended,
+        })
+    };
+    match mode {
+        Mode::Once => Ok(ApprovalGate::Approvable),
+        Mode::Holding(holding) => held(holding.suspensions),
+        Mode::Resuming(resuming) => {
+            let head = implementation_revision(governor, case)?;
+            let commission_id = crate::handoff::CommissionId(intake_model::primitives::Uuid(
+                commission.0.0.clone(),
+            ));
+            let handed_off = resuming
+                .handoffs
+                .handed_off(&commission_id, &head)
+                .map_err(|error| SliceError::State(error.to_string()))?;
+            match handed_off {
+                Some(handoff) => Ok(ApprovalGate::HandedOff {
+                    action_request_id: handoff.action_request_id.0.0,
+                    head: handoff.head,
+                }),
+                None => held(resuming.suspensions),
+            }
+        }
+    }
+}
+
+/// The slice's failure for a loop that stopped without a run outcome: the governor's, or the
+/// runtime's own.
+fn loop_failed(error: LoopError) -> SliceError {
+    match error {
+        LoopError {
+            failure: LoopFailure::Governor(error),
+            ..
+        } => SliceError::Governor(error),
+        error => SliceError::Loop(error),
+    }
+}
+
+/// The stop reason the runtime's `end` stands for, as the module documents, printed; a stop
+/// `ApprovalRequired` as `gate` says what it left to approve.
+fn finish(
+    out: &mut dyn Write,
+    protocol: String,
+    end: LoopEnd,
+    gate: ApprovalGate,
+) -> Result<SliceRun, SliceError> {
     let steps = end.steps;
     match end.outcome {
         RunOutcome::Completed(complete) => Err(SliceError::Complete(complete.outcome)),
@@ -582,18 +767,14 @@ fn finish(out: &mut dyn Write, protocol: String, end: LoopEnd) -> Result<SliceRu
                     _ => None,
                 });
             let approvals = action.iter().cloned().collect();
-            stop(out, protocol, steps, StopReason::ApprovalRequired, action)
-                .map(|run| SliceRun { approvals, ..run })
+            gated_stop(out, protocol, steps, action, approvals, gate)
         }
         RunOutcome::AwaitingApproval(awaiting) => {
             if let Some(frontier) = &end.last_frontier {
                 print_frontier(out, frontier)?;
             }
             let detail = Some(awaiting.actions.join(", "));
-            stop(out, protocol, steps, StopReason::ApprovalRequired, detail).map(|run| SliceRun {
-                approvals: awaiting.actions,
-                ..run
-            })
+            gated_stop(out, protocol, steps, detail, awaiting.actions, gate)
         }
         RunOutcome::NoAdmissibleAction(_) | RunOutcome::NeedsExternalEvidence(_) => {
             stop(out, protocol, steps, StopReason::NothingAdmissible, None)
@@ -848,6 +1029,52 @@ fn pick(request: &SliceRequest, classifier: &dyn Model) -> Result<Pick, SliceErr
     Ok(Err((protocol, detail.to_owned(), error.to_string())))
 }
 
+/// Prints the stop line of a run that stopped `ApprovalRequired`, as `gate` says what it left to
+/// approve (see [`ApprovalGate`]), and returns the run.
+fn gated_stop(
+    out: &mut dyn Write,
+    protocol: String,
+    steps: usize,
+    detail: Option<String>,
+    approvals: Vec<String>,
+    gate: ApprovalGate,
+) -> Result<SliceRun, SliceError> {
+    let reason = StopReason::ApprovalRequired;
+    match (&gate, &detail) {
+        (ApprovalGate::Approvable, _) => {
+            return stop(out, protocol, steps, reason, detail)
+                .map(|run| SliceRun { approvals, ..run });
+        }
+        (ApprovalGate::NothingSuspended, Some(detail)) => writeln!(
+            out,
+            "stopped: {reason:?} ({}), nothing suspended",
+            printable(detail)
+        )?,
+        (ApprovalGate::NothingSuspended, None) => {
+            writeln!(out, "stopped: {reason:?}, nothing suspended")?;
+        }
+        (
+            ApprovalGate::HandedOff {
+                action_request_id,
+                head,
+            },
+            _,
+        ) => writeln!(
+            out,
+            "stopped: MergeHandedOff ({}, HEAD {})",
+            printable(action_request_id),
+            printable(head)
+        )?,
+    }
+    Ok(SliceRun {
+        protocol,
+        steps,
+        stop_reason: reason,
+        approvals,
+        gate,
+    })
+}
+
 /// Prints the stop line and returns the run.
 fn stop(
     out: &mut dyn Write,
@@ -865,6 +1092,7 @@ fn stop(
         steps,
         stop_reason,
         approvals: Vec::new(),
+        gate: ApprovalGate::Approvable,
     })
 }
 
@@ -965,13 +1193,26 @@ pub fn printable(text: &str) -> String {
 
 /// The commission the slice's Loom runs under: one per case, for the operator, with no authority.
 fn commission(case: &CaseId) -> Commission<commission_state::Assigned> {
-    Commission::new(CommissionData {
-        commission_id: CommissionId(fresh_uuid("commission", &case.0)),
-        agent_revision_id: AgentRevisionId(fresh_uuid("agent-revision", &case.0)),
-        case_id: case.clone(),
+    Commission::new(operator_commission(
+        CommissionId(fresh_uuid("commission", &case.0)),
+        AgentRevisionId(fresh_uuid("agent-revision", &case.0)),
+        case.clone(),
+    ))
+}
+
+/// A commission of the slice's: for the operator, with no authority, under these ids.
+pub(crate) fn operator_commission(
+    commission_id: CommissionId,
+    agent_revision_id: AgentRevisionId,
+    case_id: CaseId,
+) -> CommissionData {
+    CommissionData {
+        commission_id,
+        agent_revision_id,
+        case_id,
         principal: PrincipalId("operator".to_owned()),
         authority_context: AuthorityContext(json::Value::Null),
-    })
+    }
 }
 
 /// `value` as compact JSON text.
@@ -1020,7 +1261,7 @@ mod tests {
     use b10x_loom_commission::model::responsibility::{RunId, RunOutcome, RunOutcomeCaseMovedOn};
     use b10x_loom_commission::runtime::LoopEnd;
 
-    use super::{SliceRun, StopReason, finish};
+    use super::{ApprovalGate, SliceRun, StopReason, finish};
 
     /// story:moved-run-named-outcome: a run whose case moved on to a frontier that still admits an
     /// action stops as one with no admissible action does, a stop that is not a success, and its
@@ -1041,8 +1282,13 @@ mod tests {
         };
         let mut out = Vec::new();
 
-        let run = finish(&mut out, "software-change@1".to_owned(), end)
-            .unwrap_or_else(|error| panic!("the stop failed: {error}"));
+        let run = finish(
+            &mut out,
+            "software-change@1".to_owned(),
+            end,
+            ApprovalGate::Approvable,
+        )
+        .unwrap_or_else(|error| panic!("the stop failed: {error}"));
 
         assert_eq!(
             run,
@@ -1051,6 +1297,7 @@ mod tests {
                 steps: 2,
                 stop_reason: StopReason::NothingAdmissible,
                 approvals: Vec::new(),
+                gate: ApprovalGate::Approvable,
             }
         );
         assert_eq!(

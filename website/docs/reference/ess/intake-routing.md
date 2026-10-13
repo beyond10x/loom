@@ -26,6 +26,10 @@ An intent as given, the references extracted from its text, the protocol the rou
 - `context_policy` — `intake.context.ContextPolicy`
 - `threshold` — `Decimal`
 
+### `ActionRequestId`
+
+`intake.routing.ActionRequestId` wraps `Uuid` and is not interchangeable with one: the whole value of naming it separately is the crossings the model then refuses.
+
 ### `AgentRevisionId`
 
 `intake.routing.AgentRevisionId` wraps `Uuid` and is not interchangeable with one: the whole value of naming it separately is the crossings the model then refuses.
@@ -93,6 +97,40 @@ It has one state, so there is no move to permit or to forbid.
 
 No view projects it, so nothing outside this context is promised a way to observe one.
 
+### `Grant`
+
+`intake.routing.Grant`.
+
+An instance is identified by `commission_id`, a `intake.routing.CommissionId`. The name is part of the model and not a convention: a view projects the identity under that name, so a projection inventing its own would disagree with the view.
+
+It holds:
+
+- `action` — `String`
+- `capability` — `String`
+- `granted` — `Boolean`
+- `action_request_id` — `intake.routing.ActionRequestId`
+- `granted_at` — `Timestamp`
+
+It declares no relation to another entity, and no other entity names it.
+
+No invariant is declared, so nothing here constrains an instance at rest.
+
+Its state is a `intake.routing.Grant.State`, one of `Granted`. That enum is synthesised from the lifecycle rather than declared beside it, so the states a view's filter compares and the states drawn below cannot disagree.
+
+An instance is created in `Granted`. `Granted` is terminal, so an instance may rest there forever. That is declared rather than inferred from having no way out: an entity that cannot leave a state is either finished or stuck, and only its author knows which.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Granted
+    Granted --> [*]
+```
+
+It declares no moves, so nothing changes its state once it exists.
+
+It has one state, so there is no move to permit or to forbid.
+
+No view projects it, so nothing outside this context is promised a way to observe one.
+
 ### `Intent`
 
 `intake.routing.Intent`.
@@ -115,6 +153,38 @@ An instance is created in `Received`. `Received` is terminal, so an instance may
 stateDiagram-v2
     [*] --> Received
     Received --> [*]
+```
+
+It declares no moves, so nothing changes its state once it exists.
+
+It has one state, so there is no move to permit or to forbid.
+
+No view projects it, so nothing outside this context is promised a way to observe one.
+
+### `MergeHandoff`
+
+`intake.routing.MergeHandoff`.
+
+An instance is identified by `action_request_id`, a `intake.routing.ActionRequestId`. The name is part of the model and not a convention: a view projects the identity under that name, so a projection inventing its own would disagree with the view.
+
+It holds:
+
+- `commission_id` — `intake.routing.CommissionId`
+- `workspace` — `String`
+- `head` — `String`
+
+It declares no relation to another entity, and no other entity names it.
+
+No invariant is declared, so nothing here constrains an instance at rest.
+
+Its state is a `intake.routing.MergeHandoff.State`, one of `Recorded`. That enum is synthesised from the lifecycle rather than declared beside it, so the states a view's filter compares and the states drawn below cannot disagree.
+
+An instance is created in `Recorded`. `Recorded` is terminal, so an instance may rest there forever. That is declared rather than inferred from having no way out: an entity that cannot leave a state is either finished or stuck, and only its author knows which.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Recorded
+    Recorded --> [*]
 ```
 
 It declares no moves, so nothing changes its state once it exists.
@@ -248,7 +318,70 @@ It has three outcomes.
 
 **`storage-failed`** — Decided outside the input: the resume context store cannot remove the context. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `intake.routing.ResumeContextStorageFailed`, carrying `reason`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
 
+### `RecordMergeHandoff`
+
+`intake.routing.RecordMergeHandoff`.
+
+It takes:
+
+- `action_request_id` — `intake.routing.ActionRequestId`
+- `commission_id` — `intake.routing.CommissionId`
+- `workspace` — `String`
+- `head` — `String`
+
+It has four outcomes.
+
+**`already-recorded`** — Taken when a record already carries the identity the command's creating branch would create, and no input-guarded refusal applies. No entity in this specification changes. It reports `intake.routing.MergeHandoffAlreadyRecorded`, carrying `action_request_id`. It emits nothing. A test reaches it by sending the command twice with one identity: the first call creates the record, the second is answered by this branch.
+
+**`head-already-handed-off`** — Taken when, of the `intake.routing.MergeHandoff` rows whose stored fields satisfy `(commission_id == input.commission_id and head == input.head)` before the outcome, at least one row is selected. No entity in this specification changes. It reports `intake.routing.HeadAlreadyHandedOff`, carrying `commission_id` and `head`. It emits nothing. A test reaches it by arranging the row of the other entity the input names, or its absence, and sending the command for it.
+
+**`recorded`** — The default branch, taken when no other outcome's condition matched. It creates a `intake.routing.MergeHandoff`, which starts in `Recorded`. The new instance's identity is published as `action_request_id` on `intake.routing.MergeHandedOff`. It emits `intake.routing.MergeHandedOff`. It sets `commission_id` from `input.commission_id`, `workspace` from `input.workspace` and `head` from `input.head`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+**`storage-failed`** — Decided outside the input: the state directory cannot record the hand-off. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `intake.routing.MergeHandoffStorageFailed`, carrying `reason`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+## Events
+
+### `MergeHandedOff`
+
+`intake.routing.MergeHandedOff`.
+
+It carries:
+
+- `action_request_id` — `intake.routing.ActionRequestId`
+- `commission_id` — `intake.routing.CommissionId`
+- `workspace` — `String`
+- `head` — `String`
+
+Emitted by `intake.routing.RecordMergeHandoff` on its `recorded` outcome.
+
+Nothing in this system reacts to it.
+
 ## Errors
+
+### `HeadAlreadyHandedOff`
+
+It carries:
+
+- `commission_id` — `intake.routing.CommissionId`
+- `head` — `String`
+
+Reported by `intake.routing.RecordMergeHandoff` on its `head-already-handed-off` outcome.
+
+### `MergeHandoffAlreadyRecorded`
+
+It carries:
+
+- `action_request_id` — `intake.routing.ActionRequestId`
+
+Reported by `intake.routing.RecordMergeHandoff` on its `already-recorded` outcome.
+
+### `MergeHandoffStorageFailed`
+
+It carries:
+
+- `reason` — `String`
+
+Reported by `intake.routing.RecordMergeHandoff` on its `storage-failed` outcome.
 
 ### `ResumeContextNotFound`
 
@@ -269,4 +402,4 @@ Reported by `intake.routing.DropResumeContext` on its `storage-failed` outcome.
 
 ---
 
-Generated from intake v1 · model digest `6a863e68d9e21bd404ea8cd1c1da3b9677c04d000b3ba83ac143ad567a38235c` · contract digest `slice-sha256/2:84cb672e6295588a6555af7a5ea613d5729877cc5cbd0c61014139830a38e52a`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from intake v1 · model digest `58fc59c73e160b3816e4c2add829c8c5a6c05ea1c6901838a7d61a911e157818` · contract digest `slice-sha256/2:e536741c76964e61806da0d3de7d62a02ca67f63158e4887c461bc05ccb95961`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

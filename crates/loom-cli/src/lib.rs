@@ -9,8 +9,10 @@
 
 use std::path::PathBuf;
 
+use b10x_loom_commission::runtime::{ResumeError, ResumeRefusal};
 pub use b10x_loom_intake_slice::context_metrics::ContextPolicy;
-use b10x_loom_intake_slice::run::StopReason;
+use b10x_loom_intake_slice::grant::ApproveRefusal;
+use b10x_loom_intake_slice::run::{ApprovalGate, SliceRun, StopReason};
 use clap::builder::TypedValueParser;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
@@ -18,11 +20,20 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 pub const DEFAULT_MODEL: &str = "gpt-5.6-sol";
 
 /// What `run --help` says about the exit status; the binary's `exit_status` decides it.
-pub const EXIT_STATUS: &str = "Exit status:
+pub const EXIT_STATUS: &str = "With --state, only a run whose last line is `stopped: ApprovalRequired (<action>)` holds a
+Suspension `approve` can approve.
+
+Exit status:
   0  the query completed (Completed) or the run reached its human gate (ApprovalRequired)
+  4  with --state, the run reached its human gate holding no Suspension:
+     `stopped: ApprovalRequired (<action>), nothing suspended`; there is nothing to approve
   3  the run stopped for another reason (NothingAdmissible, StepBudget, NoLocalExecutor, Refused, ConfinementUnavailable)
   1  the run failed
   2  the command line is not valid";
+
+/// The exit status of a run or a resume with a state directory that stopped `ApprovalRequired`
+/// holding no Suspension ([`ApprovalGate::NothingSuspended`]).
+pub const NOTHING_SUSPENDED_AT_GATE: u8 = 4;
 
 /// What `evaluate --help` says about its input, its output and its exit status.
 pub const EVALUATE_HELP: &str = "The request is one JSON object (loom.evaluation.EvaluationRequest):
@@ -39,6 +50,115 @@ Exit status:
   3  refused: standard output carries the refusal (loom.evaluation.EvaluationRefusal), and standard error names the input
   1  the request or the protocol catalog cannot be read
   2  the command line is not valid";
+
+/// What `approve --help` says about the grant and the exit status; [`approve_exit_status`]
+/// decides the status of a refusal.
+pub const APPROVE_HELP: &str =
+    "Approval performs nothing. It reads the commission's Suspension in the state directory and
+writes a grant (intake.routing.Grant) for the one request it holds, which `resume` reads; a later
+approval of the commission's next Suspension replaces it. The capability must be the one the
+suspended request needs, as `run` or `resume` named it when it stopped.
+
+Only a stop line `stopped: ApprovalRequired (<action>)` of `run --state` or `resume` leaves a
+Suspension to approve. `stopped: ApprovalRequired (<action>), nothing suspended` leaves none, and
+`stopped: MergeHandedOff (<request>, HEAD <sha>)` says that HEAD was already handed off: a merge at
+it is refused AlreadyHandedOff, and only new work, a new HEAD, is approved again.
+
+Exit status:
+  0   the grant is written
+  10  NothingSuspended: the commission holds no Suspension
+  11  InDoubt: the commission's Suspension is being resumed, so its request may have been performed
+  19  OtherCapability: the suspended request needs another capability than the one given
+  23  AlreadyHandedOff: the suspended repository.merge would hand off a HEAD the commission already handed off
+  1   the state directory cannot be used
+  2   the command line is not valid";
+
+/// What `resume --help` says about the resume and the exit status; [`resume_exit_status`]
+/// decides the status of a refusal or a failure of Commission's resume.
+pub const RESUME_HELP: &str = "The run is rebuilt from the commission's resume context: the same intent, route, workspace (validated
+again), test command, step budget, confinement and agent model; the route is used only when the intent,
+the protocol catalog and the context policy are still the ones it was accepted for. The workspace's HEAD
+is reported to the case first, so a commit made since the Suspension is refused CaseMoved. The grant
+`approve` wrote allows only the request the commission's Suspension holds, and only while it is held. A
+granted repository.merge is performed as a merge hand-off: a record of the commission, the request, the
+workspace and its HEAD (intake.routing.MergeHandoff, merge-<hex of the request id>.json in the state
+directory), only at the HEAD the case holds and once per HEAD of a commission. No Git ref moves; merging
+happens outside Loom. The request is performed once, the Suspension is released, and the run goes on as
+`run` does. The model does not see the steps before the Suspension.
+
+When the resumed run reaches its human gate again, its last line says what is left to approve:
+  stopped: ApprovalRequired (<action>)                    a Suspension `approve` can approve
+  stopped: ApprovalRequired (<action>), nothing suspended  nothing to approve
+  stopped: MergeHandedOff (<request>, HEAD <sha>)          the case is at a HEAD this commission
+                                                           already handed off; nothing to approve
+
+Exit status:
+  0   the resumed run reached its human gate again (ApprovalRequired, or MergeHandedOff)
+  4   the resumed run reached its human gate holding no Suspension (ApprovalRequired, nothing suspended)
+  3   the resumed run stopped for another reason (NothingAdmissible, StepBudget, NoLocalExecutor, ConfinementUnavailable)
+  10  NothingSuspended: the commission holds no Suspension, or another resume took and released it first
+  11  InDoubt: a resume took the Suspension and did not release it; its request is never performed again
+  12  OtherRequest: the Suspension is now held for another request than the one revalidated
+  13  OtherCommission: the Suspension or its run names another commission, case or run revision
+  14  CaseMoved: the case is no longer at the revision the request was suspended at
+  15  NotAdmitted: the current frontier refuses the request's action
+  16  NotGranted: no grant allows the request
+  17  NotPerformed: nothing performs the request's action
+  18  RunNotSuspended: the run store does not hold the run suspended
+  20  the suspension store could not be read; nothing was resumed
+  21  the governor could not answer before the run resumed; nothing was resumed
+  22  the run could not be resumed, the Suspension could not be taken or released, or the resumed
+      loop stopped without a run outcome
+  1   anything else failed: the state directory, the resume context, the workspace, the models
+  2   the command line is not valid
+Nothing is performed on any status from 10 to 21.";
+
+/// The exit status of a resume Commission refused, as [`RESUME_HELP`] states it: one per
+/// refusal.
+pub fn resume_refusal_status(refusal: &ResumeRefusal) -> u8 {
+    match refusal {
+        ResumeRefusal::NothingSuspended => 10,
+        ResumeRefusal::InDoubt { .. } => 11,
+        ResumeRefusal::OtherRequest { .. } => 12,
+        ResumeRefusal::OtherCommission => 13,
+        ResumeRefusal::CaseMoved { .. } => 14,
+        ResumeRefusal::NotAdmitted(_) => 15,
+        ResumeRefusal::NotGranted(_) => 16,
+        ResumeRefusal::NotPerformed => 17,
+        ResumeRefusal::RunNotSuspended(_) => 18,
+    }
+}
+
+/// The exit status of a resume that returned no run outcome, as [`RESUME_HELP`] states it.
+pub fn resume_exit_status(error: &ResumeError) -> u8 {
+    match error {
+        ResumeError::Refused(refusal) => resume_refusal_status(refusal),
+        ResumeError::Store(_) => 20,
+        ResumeError::Governor(_) => 21,
+        ResumeError::Loop(_) => 22,
+    }
+}
+
+/// The exit status of a refused approval, as [`APPROVE_HELP`] states it.
+pub fn approve_exit_status(refusal: &ApproveRefusal) -> u8 {
+    match refusal {
+        ApproveRefusal::NothingSuspended => 10,
+        ApproveRefusal::InDoubt { .. } => 11,
+        ApproveRefusal::OtherCapability { .. } => 19,
+        ApproveRefusal::AlreadyHandedOff(_) => 23,
+        ApproveRefusal::Store(_) => 1,
+    }
+}
+
+/// The exit status `run` and `resume` return for `run`: [`exit_status`] of its stop reason, but
+/// [`NOTHING_SUSPENDED_AT_GATE`] for a run with a state directory that stopped at its human gate
+/// holding no Suspension, as [`EXIT_STATUS`] and [`RESUME_HELP`] state it.
+pub fn run_exit_status(run: &SliceRun) -> u8 {
+    match run.gate {
+        ApprovalGate::NothingSuspended => NOTHING_SUSPENDED_AT_GATE,
+        ApprovalGate::Approvable | ApprovalGate::HandedOff { .. } => exit_status(run.stop_reason),
+    }
+}
 
 pub mod evaluate;
 pub mod events;
@@ -86,6 +206,40 @@ pub enum Command {
     Evaluate(EvaluateArgs),
     /// Host a plugin, or print what it proposed. A plugin reads and proposes; it never sends.
     Plugin(PluginArgs),
+    /// Approve the request a commission's Suspension holds: write a grant into the state
+    /// directory. Approval performs nothing; `resume` does.
+    #[command(after_help = APPROVE_HELP)]
+    Approve(ApproveArgs),
+    /// Continue a commission's suspended run after its approval: perform the suspended request
+    /// once, release the Suspension, and run on until the run stops.
+    #[command(after_help = RESUME_HELP)]
+    Resume(ResumeArgs),
+}
+
+/// The arguments of `b10x-loom approve`.
+#[derive(Debug, Args)]
+pub struct ApproveArgs {
+    /// The commission whose Suspension is approved: the id its resume context and Suspension carry.
+    #[arg(value_name = "COMMISSION")]
+    pub commission: String,
+    /// The capability approved; it must be the one the suspended request needs.
+    #[arg(value_name = "CAPABILITY")]
+    pub capability: String,
+    /// The state directory `run --state` kept the commission in. It must exist.
+    #[arg(long, value_name = "DIR")]
+    pub state: PathBuf,
+}
+
+/// The arguments of `b10x-loom resume`.
+#[derive(Debug, Args)]
+pub struct ResumeArgs {
+    /// The commission whose suspended run is continued.
+    #[arg(value_name = "COMMISSION")]
+    pub commission: String,
+    /// The state directory `run --state` kept the commission in, and `approve` wrote its grant
+    /// into. It must exist; the merge hand-off is recorded there.
+    #[arg(long, value_name = "DIR")]
+    pub state: PathBuf,
 }
 
 /// What `plugin run --help` says about the configuration, the models, the output and the exit
@@ -326,6 +480,179 @@ mod tests {
             StopReason::ConfinementUnavailable,
         ] {
             assert_eq!(exit_status(reason), 3);
+        }
+    }
+
+    /// Every refusal and failure of a resume, and every refusal of an approval that is not a
+    /// store failure, has a status of its own, none of them one `run`, clap or a signal takes
+    /// (0, 1, 2, 3, 4, 130), and the help names each one by its status. An approval refusal shares a
+    /// status only with the resume refusal of the same name.
+    #[test]
+    fn each_resume_refusal_has_its_own_exit_status() {
+        use b10x_loom_commission::model::primitives::Uuid;
+        use b10x_loom_commission::model::responsibility::{
+            ActionRequestId, GovernorError, ResumeRunOutcome, RevalidateActionRequestOutcome,
+        };
+        use b10x_loom_commission::ports::authority::{AuthorityCheck, AuthorityProviderError};
+        use b10x_loom_commission::ports::suspension::SuspensionStoreError;
+        use b10x_loom_commission::runtime::{LoopError, LoopFailure};
+
+        let request = || ActionRequestId(Uuid("request".to_owned()));
+        let refusals = [
+            ("NothingSuspended", ResumeRefusal::NothingSuspended),
+            (
+                "InDoubt",
+                ResumeRefusal::InDoubt {
+                    action_request_id: request(),
+                },
+            ),
+            (
+                "OtherRequest",
+                ResumeRefusal::OtherRequest {
+                    action_request_id: request(),
+                    held_action_request_id: request(),
+                },
+            ),
+            ("OtherCommission", ResumeRefusal::OtherCommission),
+            (
+                "CaseMoved",
+                ResumeRefusal::CaseMoved {
+                    expected_case_revision: 1,
+                    current_case_revision: 2,
+                },
+            ),
+            (
+                "NotAdmitted",
+                ResumeRefusal::NotAdmitted(RevalidateActionRequestOutcome::Admitted),
+            ),
+            (
+                "NotGranted",
+                ResumeRefusal::NotGranted(AuthorityCheck::Refused(AuthorityProviderError::new(
+                    "x",
+                ))),
+            ),
+            ("NotPerformed", ResumeRefusal::NotPerformed),
+            (
+                "RunNotSuspended",
+                ResumeRefusal::RunNotSuspended(ResumeRunOutcome::WrongStateUnknownInstance),
+            ),
+        ];
+        let mut errors: Vec<(String, ResumeError)> = refusals
+            .into_iter()
+            .map(|(name, refusal)| (name.to_owned(), ResumeError::Refused(refusal)))
+            .collect();
+        errors.extend([
+            (
+                "the suspension store".to_owned(),
+                ResumeError::Store(SuspensionStoreError::new("x")),
+            ),
+            (
+                "the governor".to_owned(),
+                ResumeError::Governor(GovernorError::UnknownCase),
+            ),
+            (
+                "the run could not be resumed".to_owned(),
+                ResumeError::Loop(LoopError {
+                    run_id: None,
+                    failure: LoopFailure::Governor(GovernorError::GovernorUnavailable),
+                    suspension: None,
+                    suspension_reason: None,
+                }),
+            ),
+        ]);
+        let mut seen = std::collections::BTreeSet::new();
+        for (name, error) in &errors {
+            let status = resume_exit_status(error);
+            assert!(seen.insert(status), "{name}: {status} is taken twice");
+            assert!(
+                ![0, 1, 2, 3, 4, 130].contains(&status),
+                "{name}: {status} is taken"
+            );
+            let line = format!("  {status:<3} {name}");
+            assert!(
+                RESUME_HELP.contains(&line),
+                "the help names {name} as {status}: {line:?}"
+            );
+        }
+
+        for (name, refusal, resumed) in [
+            (
+                "NothingSuspended",
+                ApproveRefusal::NothingSuspended,
+                Some(ResumeRefusal::NothingSuspended),
+            ),
+            (
+                "InDoubt",
+                ApproveRefusal::InDoubt {
+                    action_request_id: "request".to_owned(),
+                },
+                Some(ResumeRefusal::InDoubt {
+                    action_request_id: request(),
+                }),
+            ),
+            (
+                "OtherCapability",
+                ApproveRefusal::OtherCapability { held: None },
+                None,
+            ),
+            (
+                "AlreadyHandedOff",
+                ApproveRefusal::AlreadyHandedOff(
+                    b10x_loom_intake_slice::handoff::HeadAlreadyHandedOff {
+                        commission_id: b10x_loom_intake_slice::handoff::CommissionId(
+                            intake_model::primitives::Uuid("commission".to_owned()),
+                        ),
+                        head: "0123abcd".to_owned(),
+                    },
+                ),
+                None,
+            ),
+        ] {
+            let status = approve_exit_status(&refusal);
+            let line = format!("  {status:<3} {name}");
+            assert!(APPROVE_HELP.contains(&line), "{name}: {line:?}");
+            match resumed {
+                Some(resumed) => assert_eq!(status, resume_refusal_status(&resumed), "{name}"),
+                None => assert!(
+                    seen.insert(status) && ![0, 1, 2, 3, 4, 130].contains(&status),
+                    "{name}: {status} is taken"
+                ),
+            }
+        }
+    }
+
+    /// A run or a resume with a state directory that stopped at its human gate holding no
+    /// Suspension has a status of its own, which both helps name; every other run's status is its
+    /// stop reason's, a hand-off's gate included.
+    #[test]
+    fn a_gate_with_nothing_suspended_has_its_own_exit_status() {
+        let run = |gate: ApprovalGate| SliceRun {
+            protocol: "software-change@1".to_owned(),
+            steps: 3,
+            stop_reason: StopReason::ApprovalRequired,
+            approvals: vec!["repository.merge".to_owned()],
+            gate,
+        };
+        assert_eq!(run_exit_status(&run(ApprovalGate::Approvable)), 0);
+        let handed_off = ApprovalGate::HandedOff {
+            action_request_id: "request".to_owned(),
+            head: "0123abcd".to_owned(),
+        };
+        assert_eq!(run_exit_status(&run(handed_off)), 0);
+        let status = run_exit_status(&run(ApprovalGate::NothingSuspended));
+        assert_eq!(status, NOTHING_SUSPENDED_AT_GATE);
+        assert!(![0, 1, 2, 3, 130].contains(&status));
+        assert!(EXIT_STATUS.contains(&format!("  {status}  with --state")));
+        assert!(RESUME_HELP.contains(&format!(
+            "  {status:<3} the resumed run reached its human gate holding no Suspension"
+        )));
+        for help in [EXIT_STATUS, APPROVE_HELP, RESUME_HELP] {
+            assert!(
+                help.contains("`stopped: ApprovalRequired (<action>)`")
+                    || help.contains("stopped: ApprovalRequired (<action>)  "),
+                "{help}"
+            );
+            assert!(help.contains("nothing suspended"), "{help}");
         }
     }
 

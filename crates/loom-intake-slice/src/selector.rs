@@ -206,6 +206,27 @@ impl Briefing {
         }
     }
 
+    /// Adds a performed merge hand-off and its report to the transcript, as a system query's
+    /// observation is added.
+    pub(crate) fn record_handoff(
+        &self,
+        proposal: &ExecutorOutcomeProposedAction,
+        report: serde_json::Value,
+    ) {
+        let mut brief = self.brief();
+        if let Some(working) = &mut brief.working {
+            working.append(
+                &proposal.action,
+                recorded_arguments(proposal),
+                report,
+                Vec::new(),
+            );
+        } else {
+            drop(brief);
+            self.push(format!("{}\n{}", proposal.action, report));
+        }
+    }
+
     /// Adds a performed action and its report to the transcript.
     pub fn record(&self, proposal: &ExecutorOutcomeProposedAction, report: &Report) {
         let mut brief = self.brief();
