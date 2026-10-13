@@ -225,8 +225,12 @@ Commission's history was merged into Loom, and its files keep their Commission p
 `loom-commission-docs` and `loom-commission-xtask`. A run suspended on a withheld approval
 outlives its process only through the suspension port the host implements
 (`ports::suspension`, `run_with_suspension`, `resume_after_grant`); `run_until_blocked` takes
-none. `crates/loom-commission-testkit/tests/approval_suspend_resume.rs` holds it across a real
-process restart. Design and contract notes are under
+none. The port answers the Suspension's commands (`HoldSuspension`, `TakeSuspension`,
+`ReleaseSuspension`), each atomically, decided by `decide_hold`, `decide_take` and
+`decide_release`: a resume takes the Suspension before it performs anything and releases it after,
+a `Resuming` one is in doubt and never taken again, and a commission holding one starts no new Run
+through `run_with_suspension`. `crates/loom-commission-testkit/tests/approval_suspend_resume.rs`
+holds it across a real process restart. Design and contract notes are under
 `docs/commission/`. Its tasks are in `Taskfile.commission.yml`, included under the `commission:`
 namespace.
 

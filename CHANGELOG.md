@@ -18,7 +18,18 @@ under **Unreleased** until the next release.
   request once, at the case revision it was suspended at, and refuses, performing nothing, when
   nothing is stored or the case revision moved. Callers of `run_until_blocked`, which passes no
   suspension port, see no change in how a Run ends. The testkit's `FileSuspensionStore` is a
-  file-backed store for tests.
+  file-backed store for tests, and `SuspensionStore` the port over memory.
+- A Suspension is consumed once, as `ess/commission/` declares it: the port answers
+  `HoldSuspension`, `TakeSuspension` and `ReleaseSuspension`, each atomically. A resume takes the
+  Suspension (`Pending` to `Resuming`) before it performs anything and releases it once the effect
+  port answered and the governor observed it, so of two racing resumes only one performs the
+  request; the other is refused (`ResumeRefusal::NothingSuspended` or `InDoubt`). A resume that
+  stopped between take and release (a crash, a failing effect port or governor) leaves the
+  Suspension `Resuming`: every later resume is refused `ResumeRefusal::InDoubt`, naming the
+  request, and performs nothing, so the request is never performed twice and never dropped without
+  a durable trace; settling it is the host's. `run_with_suspension` starts no Run of a commission
+  that holds a Suspension in either state (`LoopFailure::CommissionSuspended`) and performs
+  nothing.
 
 ### Changed
 
@@ -27,6 +38,10 @@ under **Unreleased** until the next release.
   `ResumeRunBehavior` itself, as `RunStore` does, and `Generated` forwards it. A caller that
   matches `ResumeRunOutcome` exhaustively adds an arm; a run store of its own used through
   `Generated` for `ResumeRun` implements the obligation.
+- **Breaking:** `LoopFailure` gains `CommissionSuspended`, `SuspensionStore`, `SuspensionNotHeld`
+  and `SuspensionNotReleased`, which only `run_with_suspension` and `resume_after_grant` report. A
+  caller that matches `LoopFailure` exhaustively adds the arms; `run_until_blocked` reports none
+  of them.
 
 ## [0.16.0] - 2026-10-12
 
