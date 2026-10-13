@@ -35,8 +35,8 @@ use b10x_loom_commission::model::responsibility::{
     ActionRequestId, AgentRevisionId, AuthorityContext, AuthorityVerdict,
     AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData, CommissionId,
     EffectOutcome, EffectOutcomePerformed, EvidenceData, EvidenceId, ObservationId, PrincipalId,
-    RunId, RunOutcome, RunOutcomeNeedsAuthority, RunState, SuspensionReason, Unit,
-    commission_state,
+    RunId, RunOutcome, RunOutcomeNeedsAuthority, RunState, SuspensionReason, SuspensionState,
+    SuspensionStateConflict, Unit, commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -135,7 +135,7 @@ fn approval_suspends_and_resumes_across_a_process_restart() {
     assert_eq!(
         resumed.get("suspension_after"),
         "none",
-        "the suspension was consumed by the resume"
+        "the resume took the Suspension and released it once the merge was performed"
     );
 }
 
@@ -174,8 +174,13 @@ fn suspend_child(dir: &Path) {
     let stored = suspensions
         .get(&commission.data().commission_id)
         .expect("the suspension store reads")
-        .expect("the run was suspended into the store")
-        .into_data();
+        .expect("the run was suspended into the store");
+    assert_eq!(
+        stored.state,
+        SuspensionState::Pending,
+        "the Suspension is held Pending, for a resume to take"
+    );
+    let stored = stored.data;
     let revision = governor.current_revision(&case).expect("current revision");
     let mut record = Record::default();
     record.set("pid", std::process::id());
@@ -676,6 +681,8 @@ struct Adapter<'g> {
     case: &'g CaseId,
     ids: &'g Ids,
     calls: Mutex<Vec<Call>>,
+    /// An action the port fails on, answering an error without performing it.
+    fails_on: Option<&'static str>,
 }
 
 impl<'g> Adapter<'g> {
@@ -685,7 +692,13 @@ impl<'g> Adapter<'g> {
             case,
             ids,
             calls: Mutex::default(),
+            fails_on: None,
         }
+    }
+
+    fn failing_on(mut self, action: &'static str) -> Self {
+        self.fails_on = Some(action);
+        self
     }
 
     fn calls(&self) -> Vec<Call> {
@@ -708,6 +721,12 @@ impl EffectPort for Adapter<'_> {
         request: &AdmittedRequest,
     ) -> Result<EffectOutcome, EffectError> {
         let request = request.data();
+        if self.fails_on == Some(request.action.as_str()) {
+            return Err(EffectError::new(format!(
+                "the connector did not answer for {}",
+                request.action
+            )));
+        }
         lock(&self.calls).push(Call {
             action: request.action.clone(),
             request: request.action_request_id.0.0.clone(),
@@ -945,5 +964,180 @@ fn a_resume_the_provider_still_withholds_is_refused_and_invokes_nothing() {
             .expect("the store reads")
             .is_some(),
         "the refused resume leaves the Suspension stored"
+    );
+}
+
+/// Runs the commission in `dir` until the merge is withheld, leaving its Suspension held
+/// `Pending`, and answers the request it holds.
+fn suspended_on_merge(
+    governor: &Gov,
+    case: &CaseId,
+    ids: &Ids,
+    suspensions: &FileSuspensionStore,
+) -> ActionRequestId {
+    let adapter = Adapter::new(governor, case, ids);
+    let model = Model::picking([TESTS_RUN, MERGE]);
+    let loom = loom(&model, governor, "chg-1842-suspend-on-merge");
+    run_with_suspension(
+        governor,
+        &loom,
+        &withholding(),
+        &adapter,
+        &commission(case),
+        &mut run_store(0x500),
+        suspensions,
+        &mut Context::starting_at(0x300),
+    )
+    .unwrap_or_else(|error| panic!("the loop failed: {error}"));
+    let held = suspensions
+        .get(&commission(case).data().commission_id)
+        .expect("the store reads")
+        .expect("the Suspension is held");
+    assert_eq!(held.state, SuspensionState::Pending);
+    held.data.action_request_id
+}
+
+/// A commission holding a Suspension starts no new Run through `run_with_suspension`: the start is
+/// refused, naming the Suspension's state and request, before the governor, the executor, the
+/// provider or the effect port is asked; the Suspension stays `Pending` for its resume.
+#[test]
+fn a_new_run_of_a_commission_holding_a_suspension_is_refused_and_performs_nothing() {
+    let dir = store_dir("new-run-refused");
+    let (governor, case, ids) = opened_case(&dir);
+    let suspensions = suspensions(&dir);
+    let request = suspended_on_merge(&governor, &case, &ids, &suspensions);
+
+    let granting =
+        StaticAuthorityProvider::new().answer(MERGE, AuthorityVerdict::Allow(Unit(true)));
+    let adapter = Adapter::new(&governor, &case, &ids);
+    let model = Model::picking([MERGE]);
+    let loom = loom(&model, &governor, "chg-1842-new-run-refused");
+    let mut runs = run_store(0x600);
+    let refused = run_with_suspension(
+        &governor,
+        &loom,
+        &granting,
+        &adapter,
+        &commission(&case),
+        &mut runs,
+        &suspensions,
+        &mut Context::starting_at(0x700),
+    )
+    .expect_err("a commission holding a Suspension starts no Run");
+    assert_eq!(refused.run_id, None, "no Run was started");
+    assert_eq!(
+        refused.failure,
+        LoopFailure::CommissionSuspended(SuspensionStateConflict {
+            state: SuspensionState::Pending,
+            action_request_id: request,
+        }),
+        "the refusal names the Suspension's state and request"
+    );
+    assert!(runs.list().is_empty(), "the run store holds no Run");
+    assert!(adapter.invoked().is_empty(), "nothing was invoked");
+    assert!(granting.asked().is_empty(), "the provider was not asked");
+    assert!(model.offered().is_empty(), "the executor was not run");
+    assert_eq!(
+        suspensions
+            .get(&commission(&case).data().commission_id)
+            .expect("the store reads")
+            .map(|held| held.state),
+        Some(SuspensionState::Pending),
+        "the Suspension stays held for its resume"
+    );
+}
+
+/// An effect port that fails on the taken request leaves its performance in doubt: the
+/// Suspension stays `Resuming`, every later resume is refused naming the request and performs
+/// nothing, and no new Run of the commission starts. The merge is never invoked twice.
+#[test]
+fn an_effect_port_failing_after_the_take_leaves_the_request_in_doubt() {
+    let dir = store_dir("in-doubt");
+    let (governor, case, ids) = opened_case(&dir);
+    let suspensions = suspensions(&dir);
+    let request = suspended_on_merge(&governor, &case, &ids, &suspensions);
+    let granting =
+        || StaticAuthorityProvider::new().answer(MERGE, AuthorityVerdict::Allow(Unit(true)));
+
+    let failing = Adapter::new(&governor, &case, &ids).failing_on(MERGE);
+    let model = Model::picking([]);
+    let loom_failing = loom(&model, &governor, "chg-1842-in-doubt");
+    let failed = resume_after_grant(
+        &governor,
+        &loom_failing,
+        &granting(),
+        &failing,
+        &commission(&case),
+        &mut run_store(0x600),
+        &suspensions,
+        &mut Context::starting_at(0x700),
+    );
+    assert!(
+        matches!(
+            &failed,
+            Err(ResumeError::Loop(error)) if matches!(error.failure, LoopFailure::Effect(_))
+        ),
+        "the effect port's failure ends the resume: {failed:?}"
+    );
+    let held = suspensions
+        .get(&commission(&case).data().commission_id)
+        .expect("the store reads")
+        .expect("the Suspension stays stored");
+    assert_eq!(
+        held.state,
+        SuspensionState::Resuming,
+        "taken, never released"
+    );
+    assert_eq!(held.data.action_request_id, request);
+
+    let retry = Adapter::new(&governor, &case, &ids);
+    let model = Model::picking([MERGE]);
+    let loom_retry = loom(&model, &governor, "chg-1842-in-doubt-retry");
+    let provider = granting();
+    let retried = resume_after_grant(
+        &governor,
+        &loom_retry,
+        &provider,
+        &retry,
+        &commission(&case),
+        &mut run_store(0x800),
+        &suspensions,
+        &mut Context::starting_at(0x900),
+    );
+    assert_eq!(
+        retried.err(),
+        Some(ResumeError::Refused(ResumeRefusal::InDoubt {
+            action_request_id: request.clone(),
+        })),
+        "a resume of a Suspension in doubt is refused, naming its request"
+    );
+    let rerun = run_with_suspension(
+        &governor,
+        &loom_retry,
+        &provider,
+        &retry,
+        &commission(&case),
+        &mut run_store(0xa00),
+        &suspensions,
+        &mut Context::starting_at(0xb00),
+    );
+    assert_eq!(
+        rerun.err().map(|error| error.failure),
+        Some(LoopFailure::CommissionSuspended(SuspensionStateConflict {
+            state: SuspensionState::Resuming,
+            action_request_id: request,
+        })),
+        "no new Run starts while the request is in doubt"
+    );
+    assert!(retry.invoked().is_empty(), "nothing was invoked again");
+    assert!(provider.asked().is_empty(), "the provider was not asked");
+    assert!(model.offered().is_empty(), "the executor was not run");
+    assert_eq!(
+        suspensions
+            .get(&commission(&case).data().commission_id)
+            .expect("the store reads")
+            .map(|held| held.state),
+        Some(SuspensionState::Resuming),
+        "the Suspension stays as the durable trace of the request in doubt"
     );
 }
