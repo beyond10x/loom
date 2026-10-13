@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-13T07:10:09Z",
+  "actor": "human:timo",
+  "artifact": "epic:governor",
+  "kind": "epic",
+  "revision": 1,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "acceptance held on main 3bd6e45 by implemented stories canon-governor and governor-restart-durability: crates/loom-governor/tests/governed_case.rs:33 (frontier and completion for chg-1842), crates/loom-governor/tests/software_change_slice.rs:64 (stale proposal refused, asserts Stale at :259), crates/loom-governor/tests/restart_durability.rs:35 (case kept across a process restart); CI task check green on PR 70"
+  }
+}

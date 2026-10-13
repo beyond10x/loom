@@ -2,14 +2,18 @@
 format: aep.planning-md/3
 id: epic:governor
 kind: epic
-status: draft
+status: implemented
 title: 'Governor: Canon behind Commission''s governor and evidence ports'
 refs:
 - provider: governor
   reference: epic:governor
 relations:
 - serves: vision:governed-autonomy
-revision: 1
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-13T07:10:09Z", actor: "human:timo", revision: 2, decided_on: {"recorded":{"test_result":1}}}
+- {from: "proposed", to: "active", at: "2026-10-13T07:10:09Z", actor: "human:timo", revision: 3, decided_on: {"recorded":{"test_result":1}}}
+- {from: "active", to: "implemented", at: "2026-10-13T07:10:09Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1}}}
 ---
 > Re-filed from `beyond10x/governor` `epic:governor` at `81fcc1e` (status there: `draft`) under Atlas ADR 0090
 > (loom `story:import-governor`).
