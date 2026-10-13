@@ -1,15 +1,16 @@
 //! I-003, approval suspend/resume across a process restart (`story:approval-suspend-resume-slice`):
 //! the ELS `software.change/1` fixture case `chg-1842`, driven through Commission's runtime with
 //! Loom as its executor, on the AEP governor (`CanonGovernor` over a `FileCaseStore`), with the
-//! testkit's file-backed suspension store as the suspension port.
+//! governor's production `FileSuspensionStore` as the suspension port.
 //!
 //! The restart is real: [`approval_suspends_and_resumes_across_a_process_restart`] runs its own
-//! test binary twice as a child process over one directory, which holds the case store and the
-//! suspension store. The first child runs the commission until `repository.merge` needs authority
-//! the provider withholds: the runtime suspends the Run (`SuspendRun`, reason `Authority`), writes
-//! the commission's Suspension through the port, and the child exits without a merge. The second
-//! child starts with a new governor, a new run store and a new suspension store over the same
-//! directory, the provider now granting the merge, and resumes the same Run from the stored
+//! test binary twice as a child process over one directory, whose state directory holds the case
+//! store and the suspension store side by side, under one lock. The first child runs the
+//! commission until `repository.merge` needs authority the provider withholds: the runtime
+//! suspends the Run (`SuspendRun`, reason `Authority`), writes the commission's Suspension through
+//! the port, and the child exits without a merge. The second child starts with a new governor, a
+//! new run store and a new suspension store over the same directory, the provider now granting the
+//! merge, and resumes the same Run from the stored
 //! Suspension alone: the merge is invoked exactly once, for the case and at the case revision
 //! recorded at suspension.
 //!
@@ -50,11 +51,10 @@ use b10x_loom_commission::runtime::{
     run_with_suspension,
 };
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
-use b10x_loom_commission_testkit::file_suspension::FileSuspensionStore;
 use b10x_loom_executor::model::run::{CatalogueEntry, SelectionStrategy};
 use b10x_loom_executor::selection::{Choice, SelectionContext};
 use b10x_loom_executor::{ActionSelector, ArgumentContext, ArgumentGenerator, Loom, SelectorError};
-use loom_governor::{CanonGovernor, FileCaseStore};
+use loom_governor::{CanonGovernor, FileCaseStore, FileSuspensionStore};
 use serde_json::Value;
 
 type Gov = CanonGovernor<FileCaseStore>;
@@ -616,14 +616,19 @@ fn a_suspension_the_store_cannot_write_fails_the_loop_naming_the_run() {
     );
 }
 
-/// A governor over the case store in `dir`.
-fn governor(dir: &Path) -> Gov {
-    Gov::new(FileCaseStore::open(dir.join("cases")).expect("the case store opens"))
+/// The one state directory under `dir` a host keeps its cases and its Suspensions in.
+fn state_dir(dir: &Path) -> PathBuf {
+    dir.join("state")
 }
 
-/// The suspension store in `dir`.
+/// A governor over the case store in `dir`'s state directory.
+fn governor(dir: &Path) -> Gov {
+    Gov::new(FileCaseStore::open(state_dir(dir)).expect("the case store opens"))
+}
+
+/// The production suspension store over the same state directory as the case store.
 fn suspensions(dir: &Path) -> FileSuspensionStore {
-    FileSuspensionStore::open(dir.join("suspensions")).expect("the suspension store opens")
+    FileSuspensionStore::open(state_dir(dir)).expect("the suspension store opens")
 }
 
 /// The fixture case opened on a governor over `dir`, with its initial evidence submitted.

@@ -6,6 +6,16 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- A production suspension store: `loom_governor::FileSuspensionStore` keeps each commission's
+  Suspension as one file in a directory, so a host can pass it to `run_with_suspension` and
+  `resume_after_grant` and resume a Run after a restart. It takes the lock and makes the
+  atomic write `FileCaseStore` makes, through the same code, so the two may share one state
+  directory, in one process or in two. A commission id over `LONGEST_COMMISSION_ID` bytes is
+  refused. The testkit's `FileSuspensionStore` now re-exports it, and
+  `b10x-loom-commission-testkit` depends on `b10x-loom-governor`.
+
 ## [0.17.0] - 2026-10-13
 
 Loom 0.17.0 lets a Commission host keep a Run that waits on an approval across a process

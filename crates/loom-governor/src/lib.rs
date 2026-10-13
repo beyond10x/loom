@@ -101,8 +101,11 @@ use b10x_loom_commission::ports::evidence::{AttributedEvidence, EvidencePort, Ob
 use b10x_loom_commission::ports::governor::Governor;
 
 mod file_store;
+mod file_suspension;
+mod locked_dir;
 
 pub use file_store::{FileCaseStore, FileStoreError};
+pub use file_suspension::{FileSuspensionStore, LONGEST_COMMISSION_ID};
 
 /// One case as the governor holds it. A durable store writes it as the `loom.governor` domain's
 /// `StoredCase` (`ess/domains/governor.yaml`), as [`FileCaseStore`] does.

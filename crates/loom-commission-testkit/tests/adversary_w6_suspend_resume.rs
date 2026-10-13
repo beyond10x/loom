@@ -1,7 +1,7 @@
 //! Adversary, wave 2026-10-13-w1 U1 (`story:approval-suspend-resume-slice`), pass 1.
 //!
 //! Each case states a property of the suspend/resume path on the `chg-1842` fixture case, over the
-//! AEP governor and the testkit's file-backed suspension store. The fixtures are copied from
+//! AEP governor and the governor's production `FileSuspensionStore`. The fixtures are copied from
 //! `approval_suspend_resume.rs`, since an integration test cannot share that file's helpers.
 
 use std::collections::{BTreeMap, VecDeque};
@@ -28,11 +28,10 @@ use b10x_loom_commission::runtime::{
     LoopContext, LoopFailure, ResumeError, ResumeRefusal, resume_after_grant, run_with_suspension,
 };
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
-use b10x_loom_commission_testkit::file_suspension::FileSuspensionStore;
 use b10x_loom_executor::model::run::{CatalogueEntry, SelectionStrategy};
 use b10x_loom_executor::selection::{Choice, SelectionContext};
 use b10x_loom_executor::{ActionSelector, ArgumentContext, ArgumentGenerator, Loom, SelectorError};
-use loom_governor::{CanonGovernor, FileCaseStore};
+use loom_governor::{CanonGovernor, FileCaseStore, FileSuspensionStore};
 use serde_json::Value;
 
 type Gov = CanonGovernor<FileCaseStore>;
