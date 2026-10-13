@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-13T15:13:56Z",
+  "actor": "human:timo",
+  "artifact": "story:release-0190",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "release run 38418346325 green on tag 0.19.0 (c53159f); GitHub Release by b10x-bot",
+    "reference": "https://github.com/beyond10x/loom/actions/runs/38418346325"
+  }
+}
