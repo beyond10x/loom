@@ -171,7 +171,7 @@ const FORCED_STORAGE_FAILURE: &str = "the scenario injected a run store failure"
 /// `storage-failed` once, before reaching the ports, which it leaves untouched.
 struct Forcing<P> {
     ports: P,
-    /// `StartRun` or `SuspendRun`, when armed.
+    /// `StartRun`, `SuspendRun` or `ResumeRun`, when armed.
     armed: Option<String>,
 }
 
@@ -229,6 +229,17 @@ impl<P: SuspendRunBehavior> SuspendRunBehavior for Forcing<P> {
     }
 }
 
+impl<P: ResumeRunBehavior> ResumeRunBehavior for Forcing<P> {
+    fn resume_run(&mut self, input: ResumeRun) -> Result<ResumeRunOutcome, UnmetObligation> {
+        if self.fires("ResumeRun") {
+            return Ok(ResumeRunOutcome::StorageFailed {
+                error: forced_failure(),
+            });
+        }
+        self.ports.resume_run(input)
+    }
+}
+
 struct Runner<P> {
     runs: Generated<Forcing<P>>,
     instances: BTreeMap<String, Value>,
@@ -238,7 +249,7 @@ struct Runner<P> {
     subject: Option<(Value, Option<Value>)>,
 }
 
-impl<P: RunStorage + StartRunBehavior + SuspendRunBehavior> Runner<P> {
+impl<P: RunStorage + StartRunBehavior + SuspendRunBehavior + ResumeRunBehavior> Runner<P> {
     fn new(ports: P) -> Self {
         Self {
             runs: Generated::new(Forcing { ports, armed: None }),
@@ -414,6 +425,9 @@ impl<P: RunStorage + StartRunBehavior + SuspendRunBehavior> Runner<P> {
                         Vec::new(),
                         Some((format!("{NS}RunStateConflict"), None)),
                     ),
+                    ResumeRunOutcome::StorageFailed { error } => {
+                        storage_failed(&error, FORCED_STORAGE_FAILURE)?
+                    }
                 };
                 Executed {
                     command: command.to_owned(),
@@ -498,7 +512,9 @@ impl<P: RunStorage + StartRunBehavior + SuspendRunBehavior> Runner<P> {
                     return Err("force without command and outcome".to_owned());
                 };
                 let short = command.strip_prefix(NS).unwrap_or(command);
-                if outcome != "storage-failed" || !matches!(short, "StartRun" | "SuspendRun") {
+                if outcome != "storage-failed"
+                    || !matches!(short, "StartRun" | "SuspendRun" | "ResumeRun")
+                {
                     return Err(format!(
                         "no external cause to inject for {command}/{outcome}"
                     ));
@@ -675,7 +691,7 @@ const RUN_SCENARIO_PREFIXES: [&str; 4] = [
 ];
 
 /// Runs every Run scenario of `suite` against fresh ports from `ports`: `(scenarios, failures)`.
-fn run_suite<P: RunStorage + StartRunBehavior + SuspendRunBehavior>(
+fn run_suite<P: RunStorage + StartRunBehavior + SuspendRunBehavior + ResumeRunBehavior>(
     suite: &Value,
     ports: impl Fn() -> P,
 ) -> (usize, Vec<String>) {
@@ -711,9 +727,10 @@ fn run_suite<P: RunStorage + StartRunBehavior + SuspendRunBehavior>(
 fn adversary2_run_the_synthesized_run_scenarios_pass_against_run_store() {
     let (count, failures) = run_suite(&suite("synthesized_run_scenarios_pass"), store);
     assert_eq!(
-        count, 11,
-        "the brief names 9 synthesized scenarios, and story:control-plane-storage adds the two \
-         storage-failed ones"
+        count, 12,
+        "the brief names 9 synthesized scenarios, story:control-plane-storage adds the two \
+         storage-failed ones of StartRun and SuspendRun, and story:approval-suspend-resume-slice \
+         the one of ResumeRun"
     );
     assert!(
         failures.is_empty(),
@@ -798,6 +815,13 @@ impl SuspendRunBehavior for ForgetsSuspension {
     }
 }
 
+/// `RunStore` answers `ResumeRun` itself; the run it writes is `Running`, which this storage keeps.
+impl ResumeRunBehavior for ForgetsSuspension {
+    fn resume_run(&mut self, input: ResumeRun) -> Result<ResumeRunOutcome, UnmetObligation> {
+        self.0.resume_run(input)
+    }
+}
+
 /// A store that lists nothing: the RunStates view goes empty.
 struct ListsNothing(RunStore);
 
@@ -825,6 +849,12 @@ impl StartRunBehavior for ListsNothing {
 impl SuspendRunBehavior for ListsNothing {
     fn suspend_run(&mut self, input: SuspendRun) -> Result<SuspendRunOutcome, UnmetObligation> {
         self.0.suspend_run(input)
+    }
+}
+
+impl ResumeRunBehavior for ListsNothing {
+    fn resume_run(&mut self, input: ResumeRun) -> Result<ResumeRunOutcome, UnmetObligation> {
+        self.0.resume_run(input)
     }
 }
 

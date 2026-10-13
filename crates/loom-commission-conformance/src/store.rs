@@ -1,18 +1,19 @@
 //! The run store a run command is answered against.
 //!
-//! `StartRun` and `SuspendRun` declare `storage-failed` as `external:` in the specification: the
-//! run store's ability to write decides it, not the input. A scenario forces it by
-//! `configure_external_outcome`, and the target answers by putting the store in the state that
+//! `StartRun`, `SuspendRun` and `ResumeRun` declare `storage-failed` as `external:` in the
+//! specification: the run store's ability to write decides it, not the input. A scenario forces it
+//! by `configure_external_outcome`, and the target answers by putting the store in the state that
 //! external condition names: the next write of the armed command cannot be made. Every other
 //! answer comes from `b10x_loom_commission::outcome::RunStore`, which holds the runs.
 
 use b10x_loom_commission::model::behaviour::RunStorage;
 use b10x_loom_commission::model::obligation::UnmetObligation;
 use b10x_loom_commission::model::responsibility::obligations::{
-    StartRunBehavior, SuspendRunBehavior,
+    ResumeRunBehavior, StartRunBehavior, SuspendRunBehavior,
 };
 use b10x_loom_commission::model::responsibility::{
-    RunId, RunSnapshot, RunStorageFailed, StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome,
+    ResumeRun, ResumeRunOutcome, RunId, RunSnapshot, RunStorageFailed, StartRun, StartRunOutcome,
+    SuspendRun, SuspendRunOutcome,
 };
 use b10x_loom_commission::outcome::RunStore;
 
@@ -26,6 +27,8 @@ pub enum Unwritable {
     StartRun,
     /// `SuspendRun`: the store cannot record the suspension.
     SuspendRun,
+    /// `ResumeRun`: the store cannot record the resumption.
+    ResumeRun,
 }
 
 /// [`RunStore`], whose next write of one run command can be made to fail.
@@ -103,5 +106,16 @@ impl SuspendRunBehavior for ScenarioStore {
             });
         }
         self.runs.suspend_run(input)
+    }
+}
+
+impl ResumeRunBehavior for ScenarioStore {
+    fn resume_run(&mut self, input: ResumeRun) -> Result<ResumeRunOutcome, UnmetObligation> {
+        if self.fails(Unwritable::ResumeRun) {
+            return Ok(ResumeRunOutcome::StorageFailed {
+                error: unwritable(),
+            });
+        }
+        self.runs.resume_run(input)
     }
 }

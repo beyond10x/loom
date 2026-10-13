@@ -6,6 +6,28 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- A suspension port for Commission's runtime (`b10x_loom_commission::ports::suspension`,
+  `SuspensionPort`), which the host implements over durable storage. Given one,
+  `run_with_suspension` suspends a Run whose request needs authority the provider withholds
+  (`SuspendRun` with `SuspensionReason::Authority`) and stores the commission's Suspension: the
+  Run, the pending action request and the reason, as `ess/commission/` now declares it. The
+  caller still gets the Run's `NeedsAuthority` end. `resume_after_grant` continues the same Run
+  from the stored Suspension, in a new process if need be: after the grant it performs the
+  request once, at the case revision it was suspended at, and refuses, performing nothing, when
+  nothing is stored or the case revision moved. Callers of `run_until_blocked`, which passes no
+  suspension port, see no change in how a Run ends. The testkit's `FileSuspensionStore` is a
+  file-backed store for tests.
+
+### Changed
+
+- **Breaking:** `ResumeRun` declares a `storage-failed` outcome (`ResumeRunOutcome::StorageFailed`,
+  `RunStorageFailed`), so it is no longer generated whole: a run store implements
+  `ResumeRunBehavior` itself, as `RunStore` does, and `Generated` forwards it. A caller that
+  matches `ResumeRunOutcome` exhaustively adds an arm; a run store of its own used through
+  `Generated` for `ResumeRun` implements the obligation.
+
 ## [0.16.0] - 2026-10-12
 
 Loom 0.16.0 lets a Run continue past a step performed under an authority grant. When the

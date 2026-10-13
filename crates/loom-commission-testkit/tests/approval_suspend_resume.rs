@@ -15,7 +15,8 @@
 //!
 //! The other cases: without a suspension port the run ends as in 0.16.0 and nothing is suspended;
 //! a resume after the case revision moved is refused and invokes nothing; a resume with nothing
-//! stored is refused; a suspension the store cannot write fails the loop, naming the Run.
+//! stored is refused; a resume the provider still withholds the merge from is refused and invokes
+//! nothing; a suspension the store cannot write fails the loop, naming the Run.
 //!
 //! The model is scripted (a selector and an argument generator), since tests make no model call.
 //! The adapter performs every action the protocol declares, `repository.merge` included, so what
@@ -888,4 +889,61 @@ impl Fixture {
             })
             .collect()
     }
+}
+
+/// A resume the provider still withholds the merge from is refused: nothing is invoked, the
+/// executor is not run, and the Suspension stays stored for a later grant.
+#[test]
+fn a_resume_the_provider_still_withholds_is_refused_and_invokes_nothing() {
+    let dir = store_dir("still-withheld");
+    let (governor, case, ids) = opened_case(&dir);
+    let suspensions = suspensions(&dir);
+    let commission = commission(&case);
+    {
+        let adapter = Adapter::new(&governor, &case, &ids);
+        let model = Model::picking([TESTS_RUN, MERGE]);
+        let loom = loom(&model, &governor, "chg-1842-still-withheld");
+        run_with_suspension(
+            &governor,
+            &loom,
+            &withholding(),
+            &adapter,
+            &commission,
+            &mut run_store(0x500),
+            &suspensions,
+            &mut Context::starting_at(0x300),
+        )
+        .unwrap_or_else(|error| panic!("the loop failed: {error}"));
+    }
+
+    let still = withholding();
+    let adapter = Adapter::new(&governor, &case, &ids);
+    let model = Model::picking([MERGE]);
+    let loom = loom(&model, &governor, "chg-1842-still-withheld-resume");
+    let resumed = resume_after_grant(
+        &governor,
+        &loom,
+        &still,
+        &adapter,
+        &commission,
+        &mut run_store(0x600),
+        &suspensions,
+        &mut Context::starting_at(0x700),
+    );
+    assert!(
+        matches!(
+            resumed,
+            Err(ResumeError::Refused(ResumeRefusal::NotGranted(_)))
+        ),
+        "no grant, no resume: {resumed:?}"
+    );
+    assert!(adapter.invoked().is_empty(), "nothing was invoked");
+    assert!(model.offered().is_empty(), "the executor was not run");
+    assert!(
+        suspensions
+            .get(&commission.data().commission_id)
+            .expect("the store reads")
+            .is_some(),
+        "the refused resume leaves the Suspension stored"
+    );
 }

@@ -7,4 +7,5 @@ pub mod fake_authority;
 pub mod fake_executor;
 pub mod fake_governor;
 pub mod fake_invoker;
+pub mod file_suspension;
 pub mod kits;

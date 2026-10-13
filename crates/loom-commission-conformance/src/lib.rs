@@ -8,7 +8,7 @@
 //!
 //! * `StartRun`, `SuspendRun` and `ResumeRun` through the generated behaviours
 //!   (`b10x_loom_commission::model::behaviour::Generated`) over `b10x_loom_commission::outcome::RunStore`,
-//!   which answers `StartRun` and `SuspendRun` itself, held in [`store`]: their `storage-failed`
+//!   which answers all three itself, held in [`store`]: their `storage-failed`
 //!   is the store failing the write a scenario forced;
 //! * `RevalidateActionRequest` by `b10x_loom_commission::action_request::revalidate`, against the
 //!   governor in [`governor`];
@@ -240,6 +240,7 @@ impl ConformanceTarget for CommissionTarget {
             }
             (START_RUN, STORAGE_FAILED) => live.runs.ports.fail_next(Unwritable::StartRun),
             (SUSPEND_RUN, STORAGE_FAILED) => live.runs.ports.fail_next(Unwritable::SuspendRun),
+            (RESUME_RUN, STORAGE_FAILED) => live.runs.ports.fail_next(Unwritable::ResumeRun),
             _ => return Err(undeclared()),
         }
         Ok(())
@@ -366,6 +367,7 @@ fn resume_run(
         }
         ResumeRunOutcome::WrongState { error } => wrong_state(RESUME_RUN, Some(error)),
         ResumeRunOutcome::WrongStateUnknownInstance => wrong_state(RESUME_RUN, None),
+        ResumeRunOutcome::StorageFailed { error } => storage_failed(RESUME_RUN, error),
     })
 }
 

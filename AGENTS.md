@@ -222,7 +222,11 @@ Commission's history was merged into Loom, and its files keep their Commission p
 `git log --follow` reaches it. Packages: `b10x-loom-commission` (the contracts and runtime, with
 `run_until_blocked`), `b10x-loom-commission-testkit` (port fakes and adapter kits),
 `b10x-loom-commission-conformance` (holds the contracts crate to its synthesized suite),
-`loom-commission-docs` and `loom-commission-xtask`. Design and contract notes are under
+`loom-commission-docs` and `loom-commission-xtask`. A run suspended on a withheld approval
+outlives its process only through the suspension port the host implements
+(`ports::suspension`, `run_with_suspension`, `resume_after_grant`); `run_until_blocked` takes
+none. `crates/loom-commission-testkit/tests/approval_suspend_resume.rs` holds it across a real
+process restart. Design and contract notes are under
 `docs/commission/`. Its tasks are in `Taskfile.commission.yml`, included under the `commission:`
 namespace.
 
