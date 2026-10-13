@@ -196,6 +196,16 @@ entities:
         type: intake.routing.ChangeKind
       - name: affects_security_boundary
         type: Boolean
+      # The host's test-path patterns, trusted context like the inputs, never a model's: globs
+      # over a path relative to the workspace root, `*` within one path segment and `**` across
+      # any number of them (`run --test-path`, repeatable; by default `tests/**`, `**/tests/**`,
+      # `test/**`, `**/test/**`, `**/*_test.*`, `**/test_*.*`, `**/*.test.*`, `**/*.spec.*`).
+      # The run performs `tests.write` only when every path it changes matches one of them;
+      # otherwise the action is refused, naming the first path outside them, before anything is
+      # written or committed. This holds for every change kind; `implementation.edit` is not
+      # restricted by them.
+      - name: test_paths
+        type: List<String>
     relations:
       - name: intent
         kind: references
@@ -237,6 +247,10 @@ entities:
         type: Optional<String>
       # The test command: the program, then its arguments.
       - name: test_command
+        type: List<String>
+      # The host's test-path patterns the run's `tests.write` is held to (SliceRun.test_paths),
+      # so a resume holds the commission's `tests.write` to the same paths.
+      - name: test_paths
         type: List<String>
       - name: max_steps
         type: Integer
