@@ -1,5 +1,6 @@
 //! Catalog-based intent orchestration. Resource initialization follows the accepted route.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::Write;
@@ -7,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::model_retry::classify_with_retries;
-use b10x_loom_commission::model::responsibility::CommissionData;
+use b10x_loom_commission::model::responsibility::{CommissionData, CommissionId};
 use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_commission::ports::suspension::SuspensionPort;
 use b10x_loom_intake_references::references;
@@ -25,7 +26,10 @@ use crate::clock::Clock;
 use crate::confinement::TestRunner;
 use crate::context_metrics::{ContextMetrics, MeasuredModel};
 use crate::executor::{TestCommand, backend_name};
-use crate::resume::{self, AcceptedRoute, CatalogDigest, ResumeContextData, ResumeContextStore};
+use crate::resume::{
+    self, AcceptedRoute, CatalogDigest, DropResumeContext, DropResumeContextOutcome,
+    ResumeContextData, ResumeContextStore,
+};
 use crate::run::{
     Execution, Holding, LOCAL_PROTOCOL, RunOptions, SliceError, SliceRun, StopReason, drive,
     printable,
@@ -303,13 +307,76 @@ pub struct ResumeHost {
     pub catalog: Option<PathBuf>,
 }
 
+impl ResumeHost {
+    /// Checks that a resume context of `request` run on this host can be kept: every path and
+    /// word it keeps as text (the workspace, made absolute, the test command, the cgroup root and
+    /// the catalog path) is UTF-8, and `max_steps` fits its integer. A host calls it before it
+    /// calls any model or opens any store, so a run that could not keep its context starts
+    /// nothing.
+    ///
+    /// # Errors
+    /// [`SliceError::State`], naming the path or word that cannot be kept.
+    pub fn check(&self, request: &IntentRequest) -> Result<(), SliceError> {
+        HostText::of(request, self).map(|_| ())
+    }
+}
+
+/// What a resume context keeps of a request and its host as text, converted in one place
+/// for [`ResumeHost::check`] and for the context itself, so the two never disagree.
+struct HostText {
+    workspace: Option<String>,
+    test_command: Vec<String>,
+    max_steps: i64,
+    cgroup_root: Option<String>,
+    catalog: Option<String>,
+}
+
+impl HostText {
+    fn of(request: &IntentRequest, host: &ResumeHost) -> Result<Self, SliceError> {
+        let test_command = std::iter::once(request.test.program())
+            .chain(request.test.args().iter().map(OsString::as_os_str))
+            .map(|word| {
+                word.to_str().map(str::to_owned).ok_or_else(|| {
+                    SliceError::State(format!("the test command word {word:?} is not UTF-8"))
+                })
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Self {
+            workspace: request
+                .workspace
+                .as_deref()
+                .map(|path| absolute_text("the workspace", path))
+                .transpose()?,
+            test_command,
+            max_steps: i64::try_from(request.max_steps)
+                .map_err(|_| SliceError::State("max_steps does not fit a 64-bit integer".into()))?,
+            cgroup_root: host
+                .cgroup_root
+                .as_deref()
+                .map(|path| absolute_text("the cgroup root", path))
+                .transpose()?,
+            catalog: host
+                .catalog
+                .as_deref()
+                .map(|path| absolute_text("the catalog", path))
+                .transpose()?,
+        })
+    }
+}
+
 /// Executes an accepted route as [`run_prepared_intent`] does, holding the commission in `state`:
 /// its resume context is kept before it runs, and it runs through Commission's
 /// `run_with_suspension`, so a withheld approval leaves a Suspension in `state.suspensions`.
+/// When the run ends, however it ends, without the commission's Suspension held, the context is
+/// removed (`intake.routing.DropResumeContext`): nothing can resume that commission. A process
+/// that dies before the run ends leaves the context behind (see [`crate::resume`]).
 ///
 /// # Errors
 /// As [`run_prepared_intent`], plus [`SliceError::State`] when the resume context cannot be kept
-/// (nothing runs then), and [`SliceError::Loop`] when the suspension store cannot be used.
+/// (nothing runs then), and [`SliceError::Loop`] when the suspension store cannot be used. A run
+/// that ended without failing is [`SliceError::State`] when the suspension store cannot say
+/// whether the commission holds its Suspension (the context is kept then) or its context cannot be
+/// removed; a run that failed reports its own failure.
 #[allow(clippy::too_many_arguments)]
 pub fn run_prepared_intent_with_state<S: FallibleCaseStore>(
     request: &IntentRequest,
@@ -324,18 +391,21 @@ pub fn run_prepared_intent_with_state<S: FallibleCaseStore>(
     metrics: &ContextMetrics,
     state: &RunState<'_>,
 ) -> Result<SliceRun, SliceError> {
+    let kept = RefCell::new(None);
     let keep = |commission: &CommissionData| {
         let context = resume_context(request, prepared, &state.host, commission)?;
         state
             .contexts
             .keep(&context)
-            .map_err(|error| SliceError::State(error.to_string()))
+            .map_err(|error| SliceError::State(error.to_string()))?;
+        *kept.borrow_mut() = Some(commission.commission_id.clone());
+        Ok(())
     };
     let holding = Holding {
         suspensions: state.suspensions,
         keep: &keep,
     };
-    run_prepared(
+    let ran = run_prepared(
         request,
         prepared,
         catalog,
@@ -347,7 +417,41 @@ pub fn run_prepared_intent_with_state<S: FallibleCaseStore>(
         options,
         metrics,
         Some(&holding),
-    )
+    );
+    let Some(commission) = kept.into_inner() else {
+        return ran;
+    };
+    let settled = settle(state, &commission);
+    match ran {
+        Ok(run) => settled.map(|()| run),
+        Err(failure) => Err(failure),
+    }
+}
+
+/// Keeps `commission`'s resume context when the commission holds its Suspension, and removes it
+/// otherwise. When the suspension store cannot say, the context is kept.
+fn settle(state: &RunState<'_>, commission: &CommissionId) -> Result<(), SliceError> {
+    let held = state.suspensions.get(commission).map_err(|error| {
+        SliceError::State(format!(
+            "whether commission {} holds a Suspension cannot be read, so its resume context is \
+             kept: {error}",
+            commission.0.0
+        ))
+    })?;
+    if held.is_some() {
+        return Ok(());
+    }
+    let input = DropResumeContext {
+        commission_id: resume::CommissionId(IntakeUuid(commission.0.0.clone())),
+    };
+    match state.contexts.remove(&input) {
+        // Gone either way: none is left for a commission nothing can resume.
+        DropResumeContextOutcome::Dropped | DropResumeContextOutcome::NotFound { .. } => Ok(()),
+        DropResumeContextOutcome::StorageFailed { error } => Err(SliceError::State(format!(
+            "commission {} holds no Suspension, and its resume context cannot be removed: {}",
+            commission.0.0, error.reason
+        ))),
+    }
 }
 
 /// The resume context of `commission`, run on `request` over `prepared`'s route.
@@ -357,14 +461,7 @@ fn resume_context(
     host: &ResumeHost,
     commission: &CommissionData,
 ) -> Result<ResumeContextData, SliceError> {
-    let test_command = std::iter::once(request.test.program())
-        .chain(request.test.args().iter().map(OsString::as_os_str))
-        .map(|word| {
-            word.to_str().map(str::to_owned).ok_or_else(|| {
-                SliceError::State(format!("the test command word {word:?} is not UTF-8"))
-            })
-        })
-        .collect::<Result<_, _>>()?;
+    let text = HostText::of(request, host)?;
     Ok(ResumeContextData {
         commission_id: resume::CommissionId(IntakeUuid(commission.commission_id.0.0.clone())),
         case_id: resume::CaseId(commission.case_id.0.clone()),
@@ -373,26 +470,13 @@ fn resume_context(
         )),
         intent: request.intent.clone(),
         route: prepared.accepted_route()?,
-        workspace: request
-            .workspace
-            .as_deref()
-            .map(|path| absolute_text("the workspace", path))
-            .transpose()?,
-        test_command,
-        max_steps: i64::try_from(request.max_steps)
-            .map_err(|_| SliceError::State("max_steps does not fit a 64-bit integer".into()))?,
+        workspace: text.workspace,
+        test_command: text.test_command,
+        max_steps: text.max_steps,
         confinement: host.confinement,
-        cgroup_root: host
-            .cgroup_root
-            .as_deref()
-            .map(|path| absolute_text("the cgroup root", path))
-            .transpose()?,
+        cgroup_root: text.cgroup_root,
         model: host.model.clone(),
-        catalog: host
-            .catalog
-            .as_deref()
-            .map(|path| absolute_text("the catalog", path))
-            .transpose()?,
+        catalog: text.catalog,
     })
 }
 

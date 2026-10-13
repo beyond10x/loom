@@ -354,7 +354,24 @@ fn execute(
             arguments, options, metrics, out, stream, &catalog, &governor, None, models,
         );
     };
-    // The state directory is opened before any model call: one that cannot be used stops here.
+    // Everything below happens before any model call. First, what the resume context keeps as
+    // text is checked, before any store touches the directory: a path that is not UTF-8 stops
+    // here and leaves the directory as it was.
+    let host = ResumeHost {
+        confinement: match arguments.confinement {
+            Confinement::Substrate => Backend::Substrate,
+            Confinement::None => Backend::None,
+        },
+        cgroup_root: arguments.cgroup_root.clone(),
+        model: arguments.model.clone(),
+        catalog: arguments.catalog.clone(),
+    };
+    host.check(&intent_request(arguments))
+        .map_err(|e| e.to_string())?;
+    // Then each store opens the directory, creating it and its lock when missing, and proves it
+    // takes a write: holding the lock, it writes, syncs and removes a temporary file. A directory
+    // that cannot be created, locked or written, a read-only one an earlier run used included,
+    // stops here.
     let unusable = |error: &dyn std::fmt::Display| format!("the state directory: {error}");
     let governor = CanonGovernor::new(FileCaseStore::open(dir).map_err(|e| unusable(&e))?)
         .with_catalog(&catalog)
@@ -364,15 +381,7 @@ fn execute(
     let state = RunState {
         suspensions: &suspensions,
         contexts: &contexts,
-        host: ResumeHost {
-            confinement: match arguments.confinement {
-                Confinement::Substrate => Backend::Substrate,
-                Confinement::None => Backend::None,
-            },
-            cgroup_root: arguments.cgroup_root.clone(),
-            model: arguments.model.clone(),
-            catalog: arguments.catalog.clone(),
-        },
+        host,
     };
     execute_on(
         arguments,
@@ -385,6 +394,20 @@ fn execute(
         Some(&state),
         models,
     )
+}
+
+/// The intent request `run`'s arguments make, with no test runner yet.
+fn intent_request(arguments: &RunArgs) -> IntentRequest {
+    let mut words = arguments.test_cmd.split_whitespace();
+    let program = words.next().unwrap_or("");
+    IntentRequest {
+        intent: arguments.intent.clone(),
+        workspace: arguments.workspace.clone(),
+        test: TestCommand::new(program, words),
+        runner: None,
+        max_steps: arguments.max_steps,
+        threshold: arguments.threshold,
+    }
 }
 
 /// Runs `run` on `governor`, holding the commission in `state` when `--state` gave one.
@@ -400,16 +423,8 @@ fn execute_on<S: FallibleCaseStore>(
     state: Option<&RunState<'_>>,
     (mut classifier_route, mut agent_route): (Option<Port>, Option<Port>),
 ) -> Result<Ending, String> {
-    let mut words = arguments.test_cmd.split_whitespace();
-    let program = words.next().unwrap_or("");
-    let mut request = IntentRequest {
-        intent: arguments.intent.clone(),
-        workspace: arguments.workspace.clone(),
-        test: TestCommand::new(program, words),
-        runner: None,
-        max_steps: arguments.max_steps,
-        threshold: arguments.threshold,
-    };
+    let program = arguments.test_cmd.split_whitespace().next().unwrap_or("");
+    let mut request = intent_request(arguments);
     let prepared = if std::env::var_os(REEXEC_MARKER).is_some() {
         let handoff = read_handoff()?;
         *metrics = ContextMetrics::restore(&handoff["metrics"], options.context_policy)?;

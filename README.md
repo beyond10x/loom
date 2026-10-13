@@ -156,7 +156,8 @@ aliases of that catalog instead, such as a self-hosted endpoint whose account ne
 credential; an unknown alias or an unreadable catalog stops the run before any model call.
 With `--state <DIR>` the run keeps its case, its commission's Suspension and a resume context in
 that directory, so a run that stops for an approval leaves what a later resume continues from;
-without it nothing outlives the run.
+a run that ends without a Suspension removes its resume context, and a directory that cannot be
+written stops the run before any model call. Without it nothing outlives the run.
 
 Since `0.2.0` tests run confined. A software-change run needs a Codex
 login and Linux with bubblewrap and delegated cgroup v2 controllers. Tests default to Substrate:

@@ -434,7 +434,11 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   `FileSuspensionStore` over `<DIR>`, keeps the commission's resume context
   (`intake.routing.ResumeContext`, `b10x_loom_intake_slice::resume::ResumeContextStore`, under
   the same lock and atomic write) before the commission runs, and runs it through
-  `run_with_suspension` (`run_prepared_intent_with_state`). Without it `run` keeps the memory
+  `run_with_suspension` (`run_prepared_intent_with_state`). A run that ends without the
+  Suspension held removes its context (`intake.routing.DropResumeContext`); a process that dies
+  first leaves one, so a reader pairs each context with its commission's Suspension. Before any
+  model call, `ResumeHost::check` refuses a path the context cannot keep as text, and each store's
+  open proves the directory takes a write. Without it `run` keeps the memory
   store and `run_until_blocked`. `crates/loom-cli/tests/run_state.rs` runs the binary to a held
   Suspension and reads `<DIR>` back through the stores.
 
