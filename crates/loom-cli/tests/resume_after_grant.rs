@@ -46,8 +46,6 @@ const NOTHING_SUSPENDED: i32 = 10;
 const NOT_GRANTED: i32 = 16;
 /// The exit status of a resume refused `CaseMoved`.
 const CASE_MOVED: i32 = 14;
-/// The exit status of an approval refused `AlreadyHandedOff`.
-const ALREADY_HANDED_OFF: i32 = 23;
 /// The exit status of a run or a resume with a state directory that stopped `ApprovalRequired`
 /// with nothing suspended.
 const NOTHING_HELD: i32 = 4;
@@ -307,11 +305,13 @@ fn a_commit_after_approve_is_refused_case_moved_and_hands_off_nothing() {
     assert_eq!(held.suspension_state(), Some(SuspensionState::Pending));
 }
 
-/// A merge the agent proposes again after the hand-off, at the same `HEAD`, is held, but its stop
-/// line says the `HEAD` was handed off, and `approve` refuses it `AlreadyHandedOff`, writing
+/// Acceptance for `story:handoff-holds-no-suspension`: after `approve` and `resume` handed off a
+/// merge at `HEAD` `h`, a merge the resumed agent proposes again at `h` holds no Suspension. The
+/// run ends `stopped: MergeHandedOff (<request>, HEAD h)`, `<DIR>` holds no Suspension and no
+/// resume context for the commission, and `approve` is refused `NothingSuspended`, writing
 /// nothing.
 #[test]
-fn approve_refuses_a_suspension_that_would_hand_off_a_head_already_handed_off() {
+fn a_merge_proposed_again_at_a_handed_off_head_holds_no_suspension_and_leaves_nothing_to_approve() {
     let scratch = Scratch::new("already-handed-off");
     let held = scratch.suspend();
     let approved = approve(&scratch, &held);
@@ -339,18 +339,34 @@ fn approve_refuses_a_suspension_that_would_hand_off_a_head_already_handed_off() 
         shown(&resumed)
     );
     assert_eq!(scratch.files(&held.state, "merge-"), 1);
+    assert_eq!(
+        held.suspension_state(),
+        None,
+        "no Suspension is held for the re-proposed merge\n{}",
+        shown(&resumed)
+    );
+    assert!(
+        ResumeContextStore::open(&held.state)
+            .unwrap()
+            .list()
+            .unwrap()
+            .contexts
+            .is_empty(),
+        "no resume context is left for the commission\n{}",
+        shown(&resumed)
+    );
 
     let grant = scratch.paths(&held.state, "grant-");
     let before = std::fs::read(&grant[0]).unwrap();
     let again = approve(&scratch, &held);
     assert_eq!(
         again.status.code(),
-        Some(ALREADY_HANDED_OFF),
+        Some(NOTHING_SUSPENDED),
         "{}",
         shown(&again)
     );
     assert!(
-        String::from_utf8_lossy(&again.stderr).contains("AlreadyHandedOff"),
+        String::from_utf8_lossy(&again.stderr).contains("NothingSuspended"),
         "{}",
         shown(&again)
     );

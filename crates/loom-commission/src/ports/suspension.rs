@@ -12,7 +12,11 @@
 //! and enacted as one atomic step over what the store holds:
 //!
 //! * `HoldSuspension` stores it `Pending`; a commission already holding one is refused
-//!   (`already-held`) and keeps it.
+//!   (`already-held`) and keeps it. A host that already settled the request the Suspension would
+//!   hold answers `settled`, with its reason
+//!   ([`SuspensionSettled`](crate::model::responsibility::SuspensionSettled)), and stores
+//!   nothing; the runtime then ends the run with nothing held. [`decide_hold`] never answers it:
+//!   only the host knows what it settled, so a host wraps its store to answer it first.
 //! * `TakeSuspension` moves it `Pending` → `Resuming` before a resume performs anything. Of two
 //!   resumes, one takes it; the other finds it `Resuming` (`wrong-state`) or gone (`not-found`).
 //! * `ReleaseSuspension` removes a `Resuming` Suspension once its request was performed; a
@@ -57,7 +61,8 @@ use crate::model::responsibility::{
 /// it, each atomically.
 pub trait SuspensionPort {
     /// `HoldSuspension`: stores the Suspension `Pending`, or refuses when its commission already
-    /// holds one, keeping that one.
+    /// holds one, keeping that one. A host that already settled the request answers `settled` and
+    /// stores nothing.
     fn hold(&self, input: HoldSuspension) -> HoldSuspensionOutcome;
 
     /// `TakeSuspension`: moves the commission's Suspension from `Pending` to `Resuming`, or refuses
