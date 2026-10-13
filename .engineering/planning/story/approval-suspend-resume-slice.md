@@ -46,7 +46,7 @@ scope:
   path: generated/rust/commission/src
 - confidence: inferred
   path: website/docs/reference/commission
-revision: 32
+revision: 33
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-13T05:12:40Z", actor: "human:timo", revision: 31}
 - {from: "proposed", to: "active", at: "2026-10-13T05:12:40Z", actor: "human:timo", revision: 32}
@@ -92,7 +92,10 @@ Observable steps (Atlas `epic:ga-vertical-slices` I-003; `epic:vertical-slices`)
 - How a run reaches `Suspended` (decided 2026-10-13 at wave planning, reversible): when the runtime
   is given a suspension port and a step needs authority the provider has not granted, the runtime
   runs `SuspendRun` with reason `Authority`, writes the Suspension through the port, and the Run
-  still ends `AwaitingApproval` for the caller. Without a suspension port the runtime behaves as in
+  still ends `NeedsAuthority` for the caller, the end a withheld grant already gave in 0.16.0
+  (`AwaitingApproval` comes only from the approval gate, where no request is pending, and writes
+  no Suspension). `ResumeRun` gains a `storage-failed` outcome, breaking for callers that match
+  `ResumeRunOutcome` exhaustively; the CHANGELOG names it. Without a suspension port the runtime behaves as in
   0.16.0, so no caller that matches `RunOutcome` sees a change. A resume entry continues the same
   run from the stored Suspension after the grant (`ResumeRun`), and refuses when the case revision
   moved.
