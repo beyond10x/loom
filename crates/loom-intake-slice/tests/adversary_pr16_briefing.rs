@@ -68,7 +68,14 @@ fn a_tests_run_on_a_dirty_tree_still_says_the_tree_had_uncommitted_changes() {
 fn briefed_test_run(dirty: bool) -> (Report, String) {
     let workspace = Workspace::new("status=broken\n");
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let case = case::open(&governor, "software-change@1", INTENT, workspace.path()).unwrap();
+    let case = case::open(
+        &governor,
+        "software-change@1",
+        INTENT,
+        workspace.path(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .unwrap();
     if dirty {
         std::fs::write(workspace.path().join("check.txt"), "status=fixed\n").unwrap();
     }

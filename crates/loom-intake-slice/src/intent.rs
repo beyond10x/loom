@@ -51,6 +51,9 @@ pub struct IntentRequest {
     pub runner: Option<Arc<dyn TestRunner>>,
     pub max_steps: usize,
     pub threshold: f64,
+    /// The case inputs the host supplies, never a model: a `software-change@1` case opens with them
+    /// ([`crate::case`], "Inputs a case starts with"); a system query declares none.
+    pub inputs: case::CaseInputs,
 }
 
 /// A route accepted for this exact intent, catalog and context policy; never authority.
@@ -539,6 +542,9 @@ pub fn resumed_request(
             .0
             .parse()
             .map_err(|_| invalid("a threshold that is not a number"))?,
+        // A resume opens no case: the held case keeps the inputs it opened with, and a resumed
+        // request's are never read.
+        inputs: case::RUN_DEFAULTS,
     })
 }
 
@@ -756,6 +762,7 @@ fn run_prepared<S: FallibleCaseStore>(
             &request.intent,
             workspace,
             catalog,
+            &request.inputs,
         )
         .map_err(SliceError::Case)?;
         drive(
@@ -782,6 +789,7 @@ fn run_prepared<S: FallibleCaseStore>(
             .open(
                 &prepared.protocol,
                 BTreeMap::from([("intent".into(), revision.clone())]),
+                loom_governor::CaseInputs::none(),
             )
             .map_err(|e| SliceError::Case(case::CaseError::Open(e)))?;
         drive(
@@ -864,6 +872,7 @@ mod tests {
             runner: None,
             max_steps: 4,
             threshold: 0.5,
+            inputs: crate::case::RUN_DEFAULTS,
         };
         let mut options = RunOptions::default();
         let prepared = PreparedIntent {
@@ -909,6 +918,7 @@ mod tests {
             runner: None,
             max_steps: 4,
             threshold: 0.35,
+            inputs: crate::case::RUN_DEFAULTS,
         };
         let options = RunOptions {
             context_policy: ContextPolicy::Bounded,

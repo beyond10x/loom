@@ -43,7 +43,7 @@ fn run_with_state_holds_a_suspension_on_a_withheld_approval() {
     let scratch = Scratch::new("holds");
     let (base_url, server) = Script::serve(vec![
         classify("software-change@1"),
-        agent("select_action", json!({"action": "repository.edit"})),
+        agent("select_action", json!({"action": "implementation.edit"})),
         agent(
             "action_arguments",
             json!({

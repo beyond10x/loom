@@ -44,7 +44,12 @@ impl GovernorFixture for Fixture {
         .map(|(artifact, revision)| (artifact.to_owned(), revision.to_owned()))
         .collect();
         governor
-            .open_case(case.clone(), "software-change@1", revisions)
+            .open_case(
+                case.clone(),
+                "software-change@1",
+                revisions,
+                software_change_inputs(),
+            )
             .expect("the held case opens");
         *self.held.lock().expect("fixture lock") = Some(case.clone());
         governor
@@ -71,4 +76,12 @@ fn the_canon_governor_passes_commissions_governor_conformance_kit() {
     let report = run(&Fixture::default());
     assert_eq!(report.ran(), Check::ALL, "every check of the kit ran");
     report.assert_passed();
+}
+
+/// The case inputs a `software-change@1` case opens with here: Loom's run defaults.
+fn software_change_inputs() -> loom_governor::CaseInputs {
+    loom_governor::CaseInputs::none()
+        .with("risk", "standard")
+        .with("change_kind", "feature")
+        .with("affects_security_boundary", "false")
 }

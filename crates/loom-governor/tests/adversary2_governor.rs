@@ -56,7 +56,7 @@ fn a_record_canon_evaluates_has_its_effect_through_the_governor() {
         let mut revisions = software_change_revisions();
         revisions.insert("implementation".to_owned(), revision.to_owned());
         let case = governor
-            .open(SOFTWARE_CHANGE, revisions.clone())
+            .open(SOFTWARE_CHANGE, revisions.clone(), software_change_inputs())
             .unwrap_or_else(|error| {
                 panic!("{label}: Canon takes {revision:?} as a revision: {error}")
             });
@@ -128,7 +128,11 @@ fn the_frontier_id_follows_canons_inputs_only() {
 
     let first = CanonGovernor::new(MemoryCaseStore::default());
     let a = first
-        .open(SOFTWARE_CHANGE, software_change_revisions())
+        .open(
+            SOFTWARE_CHANGE,
+            software_change_revisions(),
+            software_change_inputs(),
+        )
         .expect("opens");
     let mut n = 0;
     for (id, kind, result, subject, revision) in &records {
@@ -148,7 +152,11 @@ fn the_frontier_id_follows_canons_inputs_only() {
 
     let second = CanonGovernor::new(MemoryCaseStore::default());
     let b = second
-        .open(SOFTWARE_CHANGE, software_change_revisions())
+        .open(
+            SOFTWARE_CHANGE,
+            software_change_revisions(),
+            software_change_inputs(),
+        )
         .expect("opens");
     for (k, (id, kind, result, subject, revision)) in records.iter().rev().enumerate() {
         let k = u64::try_from(k).expect("small");
@@ -259,15 +267,27 @@ fn governors_over_one_store_act_as_one() {
     let reference = CanonGovernor::new(MemoryCaseStore::default());
 
     let case = first
-        .open(SOFTWARE_CHANGE, software_change_revisions())
+        .open(
+            SOFTWARE_CHANGE,
+            software_change_revisions(),
+            software_change_inputs(),
+        )
         .expect("opens");
     assert_eq!(case, CaseId("case-1".to_owned()));
     let other = second
-        .open(SOFTWARE_CHANGE, software_change_revisions())
+        .open(
+            SOFTWARE_CHANGE,
+            software_change_revisions(),
+            software_change_inputs(),
+        )
         .expect("a second governor over the same store opens the next free id");
     assert_eq!(other, CaseId("case-2".to_owned()));
     let mirrored = reference
-        .open(SOFTWARE_CHANGE, software_change_revisions())
+        .open(
+            SOFTWARE_CHANGE,
+            software_change_revisions(),
+            software_change_inputs(),
+        )
         .expect("opens");
     assert_eq!(mirrored, case);
 
@@ -361,7 +381,12 @@ fn the_kit_passes_over_an_independent_store() {
         fn hold(&self, case: &CaseId) -> Self::Governor {
             let governor = CanonGovernor::new(SharedList::default());
             governor
-                .open_case(case.clone(), SOFTWARE_CHANGE, software_change_revisions())
+                .open_case(
+                    case.clone(),
+                    SOFTWARE_CHANGE,
+                    software_change_revisions(),
+                    software_change_inputs(),
+                )
                 .expect("the held case opens");
             *self.held.borrow_mut() = Some(case.clone());
             governor
@@ -403,10 +428,18 @@ fn the_kit_passes_over_an_independent_store() {
 fn observations_are_exactly_what_was_observed_never_evidence() {
     let governor = CanonGovernor::new(MemoryCaseStore::default());
     let a = governor
-        .open(SOFTWARE_CHANGE, software_change_revisions())
+        .open(
+            SOFTWARE_CHANGE,
+            software_change_revisions(),
+            software_change_inputs(),
+        )
         .expect("opens");
     let b = governor
-        .open(SOFTWARE_CHANGE, software_change_revisions())
+        .open(
+            SOFTWARE_CHANGE,
+            software_change_revisions(),
+            software_change_inputs(),
+        )
         .expect("opens");
     let senders: u64 = 4;
     let per: u64 = 10;
@@ -508,7 +541,11 @@ fn observations_are_exactly_what_was_observed_never_evidence() {
 fn artifact_names_match_exactly() {
     let governor = CanonGovernor::new(MemoryCaseStore::default());
     let case = governor
-        .open(SOFTWARE_CHANGE, software_change_revisions())
+        .open(
+            SOFTWARE_CHANGE,
+            software_change_revisions(),
+            software_change_inputs(),
+        )
         .expect("opens");
     let held = governor.revisions(&case).expect("held");
     let lookalikes = [
@@ -533,7 +570,7 @@ fn artifact_names_match_exactly() {
         let revision = revisions.remove("implementation").expect("declared");
         revisions.insert(name.to_owned(), revision);
         assert_eq!(
-            governor.open(SOFTWARE_CHANGE, revisions),
+            governor.open(SOFTWARE_CHANGE, revisions, software_change_inputs()),
             Err(OpenError::MissingRevision {
                 artifact: "implementation".to_owned()
             }),
@@ -605,6 +642,7 @@ fn canon_record(
         subject_revision: Revision::new(revision),
         observed_at: None,
         upstream_revisions: Declarations::default(),
+        producer: None,
     }
 }
 
@@ -634,6 +672,22 @@ fn canon_claims(
         ),
         termination: None,
         revision: None,
+        inputs: Declarations::new(
+            [
+                ("risk", "standard"),
+                ("change_kind", "feature"),
+                ("affects_security_boundary", "false"),
+            ]
+            .into_iter()
+            .map(|(input, value)| {
+                (
+                    b10x_canon::model::InputId::new(input),
+                    b10x_canon::model::InputValue::new(value),
+                )
+            })
+            .collect(),
+        ),
+        independence: Declarations::default(),
     };
     let decision = evaluate(ir, &snapshot, records).expect("Canon evaluates the record");
     decision
@@ -695,4 +749,12 @@ fn observation(sender: u64, n: u64, case: &CaseId) -> ObservationData {
 
 fn uuid(n: u64) -> Uuid {
     Uuid(format!("00000000-0000-4000-8000-{n:012x}"))
+}
+
+/// The case inputs a `software-change@1` case opens with here: Loom's run defaults.
+fn software_change_inputs() -> loom_governor::CaseInputs {
+    loom_governor::CaseInputs::none()
+        .with("risk", "standard")
+        .with("change_kind", "feature")
+        .with("affects_security_boundary", "false")
 }

@@ -270,12 +270,14 @@ mod tests {
             .open(
                 "system-query@1",
                 [(INTENT.into(), "intent-1".into())].into(),
+                loom_governor::CaseInputs::none(),
             )
             .unwrap();
         let other = governor
             .open(
                 "system-query@1",
                 [(INTENT.into(), "intent-1".into())].into(),
+                loom_governor::CaseInputs::none(),
             )
             .unwrap();
         let mut out = Vec::new();
@@ -343,6 +345,7 @@ mod tests {
             .open(
                 "system-query@1",
                 [(INTENT.into(), "intent-1".into())].into(),
+                loom_governor::CaseInputs::none(),
             )
             .unwrap();
         let mut out = Vec::new();
@@ -380,6 +383,7 @@ mod tests {
                 .open(
                     "system-query@1",
                     [(INTENT.into(), "intent-1".into())].into(),
+                    loom_governor::CaseInputs::none(),
                 )
                 .unwrap();
             let mut out = Vec::new();

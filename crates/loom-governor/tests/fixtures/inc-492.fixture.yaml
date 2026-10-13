@@ -15,7 +15,7 @@ states:
   - id: initial
     add_authority: []
     add_evidence:
-      - observed_at: "2026-10-04T11:00:00Z"
+      - observed_at: "2026-10-04T11:32:00Z"
         record:
           format: canon-evidence/1
           id: health-1
@@ -23,7 +23,7 @@ states:
           result: unhealthy
           subject: service
           subject_revision: s1
-      - observed_at: "2026-10-04T11:05:00Z"
+      - observed_at: "2026-10-04T11:33:00Z"
         record:
           format: canon-evidence/1
           id: impact-1
@@ -36,6 +36,7 @@ states:
         impact.bounded: true
         service.healthy: false
         cause.identified: unknown
+        rollback.verified: unknown
       obligations:
         investigate_cause: open
         restore_service: open
@@ -50,7 +51,7 @@ states:
   - id: cause-identified
     add_authority: []
     add_evidence:
-      - observed_at: "2026-10-04T11:20:00Z"
+      - observed_at: "2026-10-04T11:34:00Z"
         record:
           format: canon-evidence/1
           id: cause-1
@@ -63,6 +64,7 @@ states:
         impact.bounded: true
         service.healthy: false
         cause.identified: true
+        rollback.verified: unknown
       obligations:
         investigate_cause: discharged
         restore_service: open
@@ -83,6 +85,7 @@ states:
         impact.bounded: true
         service.healthy: false
         cause.identified: true
+        rollback.verified: unknown
       obligations:
         investigate_cause: discharged
         restore_service: open
@@ -104,6 +107,7 @@ states:
         impact.bounded: unknown
         service.healthy: unknown
         cause.identified: unknown
+        rollback.verified: unknown
       obligations:
         investigate_cause: open
         restore_service: open
@@ -139,6 +143,7 @@ states:
         impact.bounded: unknown
         service.healthy: unknown
         cause.identified: unknown
+        rollback.verified: unknown
       obligations:
         investigate_cause: open
         restore_service: open
@@ -174,6 +179,7 @@ states:
         impact.bounded: true
         service.healthy: true
         cause.identified: unknown
+        rollback.verified: unknown
       obligations:
         investigate_cause: open
         restore_service: discharged
@@ -201,6 +207,7 @@ states:
         impact.bounded: true
         service.healthy: true
         cause.identified: true
+        rollback.verified: unknown
       obligations:
         investigate_cause: discharged
         restore_service: discharged

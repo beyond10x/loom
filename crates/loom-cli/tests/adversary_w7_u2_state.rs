@@ -30,7 +30,7 @@ const TEST_CMD: &str = "grep -qx fixed check.txt";
 fn merge_script() -> Vec<Vec<u8>> {
     vec![
         classify("software-change@1"),
-        agent("select_action", json!({"action": "repository.edit"})),
+        agent("select_action", json!({"action": "implementation.edit"})),
         agent(
             "action_arguments",
             json!({

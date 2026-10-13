@@ -60,7 +60,7 @@ fn the_example_stops_at_the_merge_approval() {
         .collect();
     assert_eq!(
         admitted,
-        ["repository.edit", "tests.run"],
+        ["implementation.edit", "tests.run"],
         "the edit and the test run are admitted, the merge is not: {end:#?}"
     );
     assert_eq!(end.effects.len(), 2, "{end:#?}");

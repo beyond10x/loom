@@ -11,6 +11,16 @@
 //! - `implementation`: the workspace's git `HEAD`, the full object name `git rev-parse` prints.
 //! - every other artifact the protocol declares: `r0`.
 //!
+//! # Inputs a case starts with
+//!
+//! The host supplies the case inputs ([`CaseInputs`], `intake.routing.CaseInputs`): `run --risk`,
+//! `--change-kind` and `--affects-security-boundary`, or an embedder's arguments; never a model,
+//! classifier or router. The case opens with each input the picked protocol declares, valued as
+//! the protocol spells it (`risk: standard`, `affects_security_boundary: false`), and with no
+//! other: a protocol that declares none (`system.query/1`, `incident.response/1`) opens with none.
+//! A declared input the host has no value for is left out, and the governor refuses the opening
+//! naming it ([`OpenError::MissingInput`]). [`RUN_DEFAULTS`] are the command line's defaults.
+//!
 //! # Workspace
 //!
 //! The workspace is the root of a non-bare git work tree: the workspace path, resolved, is the path
@@ -39,7 +49,9 @@ use std::path::{Path, PathBuf};
 use crate::git::HostGitRefusal;
 
 use b10x_loom_commission::model::responsibility::CaseId;
-use loom_governor::{CanonGovernor, FallibleCaseStore, OpenError, UpdateError};
+use loom_governor::{
+    CanonGovernor, CaseInputs as GovernedInputs, FallibleCaseStore, OpenError, UpdateError,
+};
 use loom_protocols::ProtocolCatalog;
 use sha2::{Digest, Sha256};
 
@@ -86,25 +98,75 @@ impl fmt::Display for CaseError {
 
 impl std::error::Error for CaseError {}
 
+/// The case inputs the host supplies (`intake.routing.CaseInputs`), with their values.
+pub use intake_model::routing::{CaseInputs, ChangeKind, Risk};
+
+/// The case inputs `b10x-loom run` supplies when no flag names one: `standard` risk, a `feature`,
+/// off a security boundary. With them an edit is admissible without a red test first.
+pub const RUN_DEFAULTS: CaseInputs = CaseInputs {
+    risk: Risk::Standard,
+    change_kind: ChangeKind::Feature,
+    affects_security_boundary: false,
+};
+
+/// `risk`, as `software.change/1` spells its values.
+pub fn risk_value(risk: Risk) -> &'static str {
+    match risk {
+        Risk::Trivial => "trivial",
+        Risk::Standard => "standard",
+        Risk::Elevated => "elevated",
+        Risk::Critical => "critical",
+    }
+}
+
+/// `change_kind`, as `software.change/1` spells its values.
+pub fn change_kind_value(kind: ChangeKind) -> &'static str {
+    match kind {
+        ChangeKind::Feature => "feature",
+        ChangeKind::Bugfix => "bugfix",
+        ChangeKind::Refactor => "refactor",
+    }
+}
+
+/// The value `inputs` gives the case input `input`, as the protocol spells it; `None` for an input
+/// the host supplies no value for.
+fn input_value(inputs: &CaseInputs, input: &str) -> Option<&'static str> {
+    match input {
+        "risk" => Some(risk_value(inputs.risk)),
+        "change_kind" => Some(change_kind_value(inputs.change_kind)),
+        "affects_security_boundary" => Some(if inputs.affects_security_boundary {
+            "true"
+        } else {
+            "false"
+        }),
+        _ => None,
+    }
+}
+
+/// The governor's case inputs for a protocol that declares `declared`: each declared input the
+/// host gives a value for, and no other.
+pub fn governed_inputs(inputs: &CaseInputs, declared: &[String]) -> GovernedInputs {
+    declared
+        .iter()
+        .filter_map(|input| input_value(inputs, input).map(|value| (input.clone(), value)))
+        .collect()
+}
+
 /// Opens a case on the picked protocol (`<name>@<major>`, e.g. `software-change@1`) through
-/// `governor`, starting from `intent` and the git repository at `workspace`, and returns its id.
+/// `governor`, starting from `intent`, the git repository at `workspace` and the host's `inputs`,
+/// and returns its id.
 pub fn open<S: FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     pick: &str,
     intent: &str,
     workspace: &Path,
+    inputs: &CaseInputs,
 ) -> Result<CaseId, CaseError> {
     let catalog = ProtocolCatalog::engineering().map_err(|problem| CaseError::UnknownProtocol {
         pick: pick.to_owned(),
         problem,
     })?;
-    open_declared(
-        governor,
-        pick,
-        intent,
-        workspace,
-        declared_artifacts(pick, &catalog)?,
-    )
+    open_declared(governor, pick, intent, workspace, &catalog, inputs)
 }
 
 /// Opens a workspace case using the same host catalog used for routing and governor admission.
@@ -115,17 +177,12 @@ pub fn open_with_catalog<S: FallibleCaseStore>(
     intent: &str,
     workspace: &Path,
     catalog: &ProtocolCatalog,
+    inputs: &CaseInputs,
 ) -> Result<CaseId, CaseError> {
     governor
         .validate_catalog(catalog)
         .map_err(CaseError::Open)?;
-    open_declared(
-        governor,
-        pick,
-        intent,
-        workspace,
-        declared_artifacts(pick, catalog)?,
-    )
+    open_declared(governor, pick, intent, workspace, catalog, inputs)
 }
 
 fn open_declared<S: FallibleCaseStore>(
@@ -133,8 +190,11 @@ fn open_declared<S: FallibleCaseStore>(
     pick: &str,
     intent: &str,
     workspace: &Path,
-    declared: Vec<String>,
+    catalog: &ProtocolCatalog,
+    inputs: &CaseInputs,
 ) -> Result<CaseId, CaseError> {
+    let declared = declared_artifacts(pick, catalog)?;
+    let inputs = governed_inputs(inputs, &declared_inputs(pick, catalog)?);
     let head = head(workspace, Calls::Opening)?;
     crate::git::record(workspace).map_err(CaseError::HostGit)?;
     let revisions: BTreeMap<String, String> = declared
@@ -148,7 +208,9 @@ fn open_declared<S: FallibleCaseStore>(
             (artifact, revision)
         })
         .collect();
-    governor.open(pick, revisions).map_err(CaseError::Open)
+    governor
+        .open(pick, revisions, inputs)
+        .map_err(CaseError::Open)
 }
 
 /// Checks that `workspace` is a non-bare Git worktree root with a committed HEAD and a safe
@@ -191,6 +253,17 @@ pub fn intent_revision(intent: &str) -> String {
         revision.push_str(&format!("{byte:02x}"));
     }
     revision
+}
+
+/// Every case input the admitted `pick` declares, in declaration order.
+fn declared_inputs(pick: &str, catalog: &ProtocolCatalog) -> Result<Vec<String>, CaseError> {
+    catalog
+        .get(pick)
+        .map(loom_protocols::ProtocolEntry::inputs)
+        .ok_or_else(|| CaseError::UnknownProtocol {
+            pick: pick.to_owned(),
+            problem: "the host catalog does not contain this protocol".to_owned(),
+        })
 }
 
 /// Every artifact the admitted `pick` declares, in declaration order.
@@ -325,12 +398,61 @@ mod catalog_tests {
             "change",
             Path::new("/missing-loom-workspace"),
             &different,
+            &RUN_DEFAULTS,
         )
         .unwrap_err();
         assert!(matches!(
             error,
             CaseError::Open(OpenError::InvalidProtocol { .. })
         ));
+    }
+
+    /// A software change opens with the three inputs it declares, spelled as the protocol spells
+    /// them; a protocol that declares none gets none, whatever the host supplied.
+    #[test]
+    fn a_case_gets_each_input_its_protocol_declares_and_no_other() {
+        let catalog = ProtocolCatalog::bundled().unwrap();
+        let declared = |pick: &str| declared_inputs(pick, &catalog).unwrap();
+        assert_eq!(
+            declared("software-change@1"),
+            ["risk", "change_kind", "affects_security_boundary"]
+        );
+        let bugfix = CaseInputs {
+            risk: Risk::Critical,
+            change_kind: ChangeKind::Bugfix,
+            affects_security_boundary: true,
+        };
+        assert_eq!(
+            governed_inputs(&bugfix, &declared("software-change@1"))
+                .iter()
+                .collect::<Vec<_>>(),
+            [
+                ("affects_security_boundary", "true"),
+                ("change_kind", "bugfix"),
+                ("risk", "critical"),
+            ]
+        );
+        assert_eq!(
+            governed_inputs(&RUN_DEFAULTS, &declared("software-change@1"))
+                .iter()
+                .collect::<Vec<_>>(),
+            [
+                ("affects_security_boundary", "false"),
+                ("change_kind", "feature"),
+                ("risk", "standard"),
+            ]
+        );
+        for pick in ["incident-response@1", "system-query@1"] {
+            assert!(declared(pick).is_empty(), "{pick} declares no input");
+            assert!(
+                governed_inputs(&bugfix, &declared(pick)).is_empty(),
+                "{pick}"
+            );
+        }
+        assert!(
+            governed_inputs(&bugfix, &["priority".to_owned()]).is_empty(),
+            "an input the host has no value for is left for the governor to refuse"
+        );
     }
 
     #[test]
@@ -343,7 +465,8 @@ mod catalog_tests {
                 "software-change@1",
                 "change",
                 Path::new("/missing-loom-workspace"),
-                &catalog
+                &catalog,
+                &RUN_DEFAULTS,
             ),
             Err(CaseError::Open(OpenError::InvalidProtocol { .. }))
         ));

@@ -10,6 +10,7 @@
 use std::path::PathBuf;
 
 use b10x_loom_commission::runtime::{ResumeError, ResumeRefusal};
+pub use b10x_loom_intake_slice::case::{CaseInputs, ChangeKind, Risk};
 pub use b10x_loom_intake_slice::context_metrics::ContextPolicy;
 use b10x_loom_intake_slice::grant::ApproveRefusal;
 use b10x_loom_intake_slice::run::{ApprovalGate, SliceRun, StopReason};
@@ -388,6 +389,29 @@ pub struct RunArgs {
     /// The confidence, from 0 to 1, below which the router refuses its pick.
     #[arg(long, value_name = "X", default_value_t = 0.5)]
     pub threshold: f64,
+    /// How much proof the change must carry, the software-change@1 case input `risk`: each level
+    /// owes every obligation of the level below it and one more (tests, review, provenance,
+    /// health). A protocol that declares no case input ignores it.
+    #[arg(long, value_name = "RISK", default_value = "standard", value_parser = clap::builder::PossibleValuesParser::new(["trivial", "standard", "elevated", "critical"]).map(|value| match value.as_str() {
+        "trivial" => Risk::Trivial,
+        "elevated" => Risk::Elevated,
+        "critical" => Risk::Critical,
+        _ => Risk::Standard,
+    }))]
+    pub risk: Risk,
+    /// What the change is, the software-change@1 case input `change_kind`. A bugfix edits the
+    /// implementation (implementation.edit) only once a test failed on the current revision.
+    #[arg(long, value_name = "KIND", default_value = "feature", value_parser = clap::builder::PossibleValuesParser::new(["feature", "bugfix", "refactor"]).map(|value| match value.as_str() {
+        "bugfix" => ChangeKind::Bugfix,
+        "refactor" => ChangeKind::Refactor,
+        _ => ChangeKind::Feature,
+    }))]
+    pub change_kind: ChangeKind,
+    /// Whether the change affects a security boundary, the software-change@1 case input
+    /// `affects_security_boundary`. One that does is verified only once another principal
+    /// approved its security review, which the slice never submits.
+    #[arg(long, value_name = "BOOL", default_value = "false", action = clap::ArgAction::Set, value_parser = clap::builder::PossibleValuesParser::new(["true", "false"]).map(|value| value == "true"))]
+    pub affects_security_boundary: bool,
     /// What standard output carries: lines for a person, or one JSON record per line, the last
     /// one the terminal record with the stop reason and the exit status.
     #[arg(long, value_enum, value_name = "FORMAT", default_value_t = Output::Human)]
@@ -399,6 +423,17 @@ pub struct RunArgs {
     pub state: Option<PathBuf>,
     /// What to do, as given.
     pub intent: String,
+}
+
+impl RunArgs {
+    /// The case inputs the flags give, the host's trusted context for the case `run` opens.
+    pub fn inputs(&self) -> CaseInputs {
+        CaseInputs {
+            risk: self.risk,
+            change_kind: self.change_kind,
+            affects_security_boundary: self.affects_security_boundary,
+        }
+    }
 }
 
 /// Protocol catalog management.
@@ -709,6 +744,60 @@ mod tests {
             .is_err()
         );
     }
+    /// No input flag gives the slice's run defaults; each flag takes exactly the values
+    /// `software.change/1` declares, and nothing else.
+    #[test]
+    fn the_case_input_flags_default_to_the_run_defaults_and_take_the_declared_values() {
+        let run = |extra: &[&str]| {
+            let mut argv = vec!["b10x-loom", "run", "--workspace", "."];
+            argv.extend_from_slice(extra);
+            argv.push("fix tests");
+            Cli::try_parse_from(argv).map(|cli| match cli.command {
+                Command::Run(run) => run.inputs(),
+                _ => panic!("run command"),
+            })
+        };
+        assert_eq!(
+            run(&[]).unwrap(),
+            b10x_loom_intake_slice::case::RUN_DEFAULTS
+        );
+        assert_eq!(
+            run(&[
+                "--risk",
+                "critical",
+                "--change-kind",
+                "bugfix",
+                "--affects-security-boundary",
+                "true",
+            ])
+            .unwrap(),
+            CaseInputs {
+                risk: Risk::Critical,
+                change_kind: ChangeKind::Bugfix,
+                affects_security_boundary: true,
+            }
+        );
+        for (risk, expected) in [
+            ("trivial", Risk::Trivial),
+            ("standard", Risk::Standard),
+            ("elevated", Risk::Elevated),
+        ] {
+            assert_eq!(run(&["--risk", risk]).unwrap().risk, expected);
+        }
+        assert_eq!(
+            run(&["--change-kind", "refactor"]).unwrap().change_kind,
+            ChangeKind::Refactor
+        );
+        for refused in [
+            &["--risk", "extreme"][..],
+            &["--change-kind", "chore"],
+            &["--affects-security-boundary", "yes"],
+            &["--affects-security-boundary"],
+        ] {
+            assert!(run(refused).is_err(), "{refused:?} is refused");
+        }
+    }
+
     #[test]
     fn query_requires_no_workspace_and_protocol_install_sources_are_exclusive() {
         let Command::Run(query) = Cli::try_parse_from(["b10x-loom", "run", "current time"])

@@ -1,11 +1,12 @@
 //! Performs a proposed `software.change/1` action inside the workspace (story `selector-executor`).
 //!
-//! Three actions are performed; every other one, `repository.merge` included, is refused with
-//! [`ExecuteError::NotExecuted`] before its arguments are read:
+//! Four actions are performed; every other one, `repository.merge` and `release.rollback`
+//! included, is refused with [`ExecuteError::NotExecuted`] before its arguments are read:
 //!
 //! - `repository.inspect`, `{"paths": [<path>, ...]}`: returns each file's contents
 //!   ([`Report::Inspected`]).
-//! - `repository.edit`, `{"files": [{"path": <path>, "contents": <text>}, ...], "message": <text>}`
+//! - `tests.write` and `implementation.edit`, each
+//!   `{"files": [{"path": <path>, "contents": <text>}, ...], "message": <text>}`
 //!   (`message` optional): writes the files, commits exactly those paths with the workspace's
 //!   identity and no hook or signing program, and reports the new `HEAD` to the governor as the
 //!   case's `implementation` revision ([`Report::Edited`]).
@@ -89,8 +90,13 @@ use intake_model::confinement::{AppliedConfinement, Backend, ConfinementRefusal}
 
 /// `repository.inspect`.
 pub const INSPECT: &str = "repository.inspect";
-/// `repository.edit`.
-pub const EDIT: &str = "repository.edit";
+/// `tests.write`: changes the tests, with the effect of [`IMPLEMENTATION_EDIT`].
+pub const TESTS_WRITE: &str = "tests.write";
+/// `implementation.edit`: changes the implementation. `software.change/1` admits it for a bugfix
+/// only once its regression is reproduced.
+pub const IMPLEMENTATION_EDIT: &str = "implementation.edit";
+/// The two write actions, performed alike: the files are written and committed.
+pub const WRITES: [&str; 2] = [TESTS_WRITE, IMPLEMENTATION_EDIT];
 /// `tests.run`.
 pub const TESTS_RUN: &str = "tests.run";
 /// The observation source of a test run.
@@ -247,8 +253,8 @@ impl TestRun {
 pub enum Report {
     /// `repository.inspect`: the files, in the order named.
     Inspected(Vec<InspectedFile>),
-    /// `repository.edit`: the workspace's `HEAD` afterwards, reported to the governor. Unchanged
-    /// when the edit wrote what the files already held.
+    /// `tests.write` and `implementation.edit`: the workspace's `HEAD` afterwards, reported to the
+    /// governor. Unchanged when the edit wrote what the files already held.
     Edited { revision: String },
     /// `tests.run`.
     TestsRun(TestRun),
@@ -323,7 +329,7 @@ pub fn arguments_schema(action: &str) -> serde_json::Value {
             "required": ["paths"],
             "additionalProperties": false
         }),
-        EDIT => serde_json::json!({
+        TESTS_WRITE | IMPLEMENTATION_EDIT => serde_json::json!({
             "type": "object",
             "properties": {
                 "files": {
@@ -387,7 +393,7 @@ impl<'g, S: FallibleCaseStore> LocalExecutor<'g, S> {
         proposal: &ExecutorOutcomeProposedAction,
     ) -> Result<Report, ExecuteError> {
         let action = proposal.action.as_str();
-        if ![INSPECT, EDIT, TESTS_RUN].contains(&action) {
+        if ![INSPECT, TESTS_WRITE, IMPLEMENTATION_EDIT, TESTS_RUN].contains(&action) {
             return Err(ExecuteError::NotExecuted {
                 action: action.to_owned(),
             });
@@ -401,7 +407,7 @@ impl<'g, S: FallibleCaseStore> LocalExecutor<'g, S> {
             })?;
         match action {
             INSPECT => self.inspect(&root, &arguments),
-            EDIT => self.edit(&root, &arguments),
+            TESTS_WRITE | IMPLEMENTATION_EDIT => self.edit(action, &root, &arguments),
             _ => {
                 arguments.only(&[])?;
                 self.run_tests(&root)
@@ -432,7 +438,12 @@ impl<'g, S: FallibleCaseStore> LocalExecutor<'g, S> {
         Ok(Report::Inspected(files))
     }
 
-    fn edit(&self, root: &Path, arguments: &Arguments<'_>) -> Result<Report, ExecuteError> {
+    fn edit(
+        &self,
+        action: &str,
+        root: &Path,
+        arguments: &Arguments<'_>,
+    ) -> Result<Report, ExecuteError> {
         arguments.only(&["files", "message"])?;
         let message = match arguments.member("message") {
             None => "intake-slice edit".to_owned(),
@@ -457,7 +468,7 @@ impl<'g, S: FallibleCaseStore> LocalExecutor<'g, S> {
         }
         let mut files = Vec::with_capacity(entries.len());
         for entry in entries {
-            let entry = Arguments::of(EDIT, entry)?;
+            let entry = Arguments::of(action, entry)?;
             entry.only(&["path", "contents"])?;
             let (Some(Value::Text(path)), Some(Value::Text(contents))) =
                 (entry.member("path"), entry.member("contents"))

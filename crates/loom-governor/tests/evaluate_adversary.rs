@@ -47,13 +47,15 @@ fn snapshot(protocol_id: &str, revisions: &BTreeMap<String, String>, case_revisi
         .iter()
         .map(|(artifact, revision)| (artifact.clone(), json!({"revision": revision})))
         .collect();
-    json!({
+    let mut case = json!({
         "format": "canon-case/1",
         "id": "case-1",
         "protocol": protocol_id,
         "artifacts": artifacts,
         "revision": case_revision,
-    })
+    });
+    with_inputs(&mut case);
+    case
 }
 
 fn terminated_query() -> Value {
@@ -229,7 +231,12 @@ fn adversary_evidence_the_governor_sets_aside_still_gives_the_governors_decision
         .expect("catalog");
     let case = CaseId("case-1".into());
     governor
-        .open_case(case.clone(), "system-query@1", query_revisions())
+        .open_case(
+            case.clone(),
+            "system-query@1",
+            query_revisions(),
+            loom_governor::CaseInputs::none(),
+        )
         .expect("open");
     let records = vec![
         clock("clock-1"),
@@ -296,7 +303,7 @@ fn adversary_every_bundled_protocol_matches_the_governor_through_a_superseded_re
             .expect("catalog");
         let case = CaseId("case-1".into());
         governor
-            .open_case(case.clone(), &name, revisions.clone())
+            .open_case(case.clone(), &name, revisions.clone(), inputs_for(&name))
             .expect("open");
         let check =
             |label: &str, revisions: &BTreeMap<String, String>, rev: &str, records: &[Value]| {
@@ -409,4 +416,34 @@ fn adversary_naming_a_refused_record_costs_a_bounded_multiple_of_deciding() {
         refuse <= 20.0 * decide + 0.05,
         "refusing {n} records took {refuse:.3}s against {decide:.3}s to decide them"
     );
+}
+
+/// The case inputs a case on `protocol` opens with here: Loom's run defaults for
+/// `software-change@1`, none for a protocol that declares none.
+fn inputs_for(protocol: &str) -> loom_governor::CaseInputs {
+    if protocol == "software-change@1" {
+        software_change_inputs()
+    } else {
+        loom_governor::CaseInputs::none()
+    }
+}
+
+/// The case inputs a `software-change@1` case opens with here: Loom's run defaults.
+fn software_change_inputs() -> loom_governor::CaseInputs {
+    loom_governor::CaseInputs::none()
+        .with("risk", "standard")
+        .with("change_kind", "feature")
+        .with("affects_security_boundary", "false")
+}
+
+/// Gives a `software.change` snapshot the case inputs the governor's case opened with
+/// (`software_change_inputs()`), as `CanonGovernor` gives them to Canon; any other protocol declares none.
+fn with_inputs(case: &mut serde_json::Value) {
+    if case["protocol"] == "software.change" {
+        let inputs: serde_json::Map<String, serde_json::Value> = software_change_inputs()
+            .iter()
+            .map(|(input, value)| (input.to_owned(), serde_json::Value::from(value)))
+            .collect();
+        case["inputs"] = serde_json::Value::Object(inputs);
+    }
 }

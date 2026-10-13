@@ -9,7 +9,9 @@
 //! document or the next one and never part of one. A write that fails returns [`FileStoreError`]
 //! and leaves the previous document in place, including when an update's change already ran: the
 //! change is applied to a copy. Temporary files a dead process left are removed when a store opens.
-//! A document naming a member its declaration does not, or one member twice, is refused on read.
+//! A document naming a member its declaration does not, or one member twice, is refused on read,
+//! and so is one missing a member: a case stored without its `inputs`, as Loom 0.19.0 and earlier
+//! wrote every case, is a [`FileStoreError`] naming the case, never read with inputs filled in.
 //!
 //! Every operation holds an exclusive lock on `<dir>/.lock` for its duration, so two stores over
 //! one directory, in one process or in two, never interleave a read and a write of the same file.
@@ -42,7 +44,8 @@ use b10x_loom_commission::model::responsibility::{
     CaseId, EvidenceData, EvidenceId, ObservationData, ObservationId,
 };
 use loom::governor::{
-    StoredArtifact, StoredCase, StoredCaseId, StoredEvidence, StoredEvidenceData, StoredObservation,
+    StoredArtifact, StoredCase, StoredCaseId, StoredEvidence, StoredEvidenceData, StoredInput,
+    StoredObservation,
 };
 use loom::json::{
     self, DecodeError, Value, bool_at, integer_at, items_at, member, member_at, nested, push_bool,
@@ -53,7 +56,7 @@ use loom::primitives::{Timestamp, Uuid};
 use sha2::{Digest as _, Sha256};
 
 use crate::locked_dir::{LockedDir, failed, read_if_present};
-use crate::{CaseState, FallibleCaseStore, HeldEvidence};
+use crate::{CaseInputs, CaseState, FallibleCaseStore, HeldEvidence};
 
 const OBSERVATIONS: &str = "observations.json";
 
@@ -138,9 +141,14 @@ impl FileCaseStore {
         let Some(text) = read_if_present(&path)? else {
             return Ok(None);
         };
+        // A case stored without a member its declaration has, `inputs` among them (a case an
+        // older Loom wrote), is refused naming the case: never read with a member filled in.
+        let unreadable = |error: &dyn fmt::Display| {
+            failed(&path, format!("case `{}` does not read: {error}", case.0))
+        };
         let stored = json::parse(&text)
-            .map_err(|error| failed(&path, error))
-            .and_then(|value| decode_case(&value).map_err(|error| failed(&path, error)))?;
+            .map_err(|error| unreadable(&error))
+            .and_then(|value| decode_case(&value).map_err(|error| unreadable(&error)))?;
         if stored.id.0 != case.0 {
             return Err(failed(
                 &path,
@@ -295,6 +303,14 @@ fn stored_case(state: &CaseState) -> StoredCase {
                 revision: revision.clone(),
             })
             .collect(),
+        inputs: state
+            .inputs
+            .iter()
+            .map(|(input, value)| StoredInput {
+                input: input.to_owned(),
+                value: value.to_owned(),
+            })
+            .collect(),
         evidence: state
             .evidence
             .iter()
@@ -320,7 +336,7 @@ fn stored_case(state: &CaseState) -> StoredCase {
     }
 }
 
-/// The held case a stored one describes; an error when it names one artifact twice.
+/// The held case a stored one describes; an error when it names one artifact or one input twice.
 fn held_case(stored: StoredCase) -> Result<CaseState, String> {
     let mut artifacts = std::collections::BTreeMap::new();
     for StoredArtifact { artifact, revision } in stored.artifacts {
@@ -329,11 +345,19 @@ fn held_case(stored: StoredCase) -> Result<CaseState, String> {
         }
         artifacts.insert(artifact, revision);
     }
+    let mut inputs = CaseInputs::none();
+    for StoredInput { input, value } in stored.inputs {
+        if inputs.get(&input).is_some() {
+            return Err(format!("case input `{input}` is named twice"));
+        }
+        inputs = inputs.with(input, value);
+    }
     Ok(CaseState {
         id: CaseId(stored.id.0),
         protocol: stored.protocol,
         revision: stored.revision,
         artifacts,
+        inputs,
         evidence: stored
             .evidence
             .into_iter()
@@ -442,6 +466,20 @@ fn encode_case(out: &mut String, case: &StoredCase) {
         out.push('}');
     }
     out.push(']');
+    member(out, "inputs");
+    out.push('[');
+    for (index, input) in case.inputs.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push('{');
+        member(out, "input");
+        push_text(out, &input.input);
+        member(out, "value");
+        push_text(out, &input.value);
+        out.push('}');
+    }
+    out.push(']');
     member(out, "evidence");
     out.push('[');
     for (index, held) in case.evidence.iter().enumerate() {
@@ -539,8 +577,27 @@ fn decode_case(value: &Value) -> Result<StoredCase, DecodeError> {
     exactly(
         value,
         at,
-        &["id", "protocol", "revision", "artifacts", "evidence"],
+        &[
+            "id",
+            "protocol",
+            "revision",
+            "artifacts",
+            "inputs",
+            "evidence",
+        ],
     )?;
+    let inputs = items_at(member_at(value, at, "inputs")?, "inputs", "an array")?
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            let at = format!("inputs[{index}]");
+            exactly(item, &at, &["input", "value"])?;
+            Ok(StoredInput {
+                input: text_member(item, &at, "input")?,
+                value: text_member(item, &at, "value")?,
+            })
+        })
+        .collect::<Result<_, DecodeError>>()?;
     let artifacts = items_at(member_at(value, at, "artifacts")?, "artifacts", "an array")?
         .iter()
         .enumerate()
@@ -574,6 +631,7 @@ fn decode_case(value: &Value) -> Result<StoredCase, DecodeError> {
         protocol: text_member(value, at, "protocol")?,
         revision: integer_at(member_at(value, at, "revision")?, "revision", "an integer")?,
         artifacts,
+        inputs,
         evidence,
     })
 }

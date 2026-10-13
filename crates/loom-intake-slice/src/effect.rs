@@ -13,10 +13,10 @@
 //! - an [`EffectError`] for every other failure (the workspace, git, the governor, the verifier or
 //!   the output), keeping the typed failure for the slice's caller.
 //!
-//! It performs `repository.inspect`, `repository.edit` and `tests.run`, and only when the case's
-//! protocol is `software-change@1`: for any other protocol it performs nothing, so Commission's
-//! runtime ends the run with `NoPerformableAction` before the agent is asked. The injected test
-//! runner confines executed tests (see [`crate::executor`]).
+//! It performs `repository.inspect`, `tests.write`, `implementation.edit` and `tests.run`, and only
+//! when the case's protocol is `software-change@1`: for any other protocol it performs nothing, so
+//! Commission's runtime ends the run with `NoPerformableAction` before the agent is asked. The
+//! injected test runner confines executed tests (see [`crate::executor`]).
 //!
 //! The slice builds one in [`crate::run`]; an embedder builds one with [`LocalEffects::new`] over a
 //! [`Console`] of its own.
@@ -32,7 +32,9 @@ use b10x_loom_commission::model::responsibility::{
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use loom_governor::{CanonGovernor, FallibleCaseStore};
 
-use crate::executor::{EDIT, ExecuteError, INSPECT, LocalExecutor, Report, TESTS_RUN};
+use crate::executor::{
+    ExecuteError, IMPLEMENTATION_EDIT, INSPECT, LocalExecutor, Report, TESTS_RUN, TESTS_WRITE,
+};
 use crate::run::{LOCAL_PROTOCOL, SliceError, json_text, printable};
 use crate::selector::Briefing;
 use crate::verifier::{TestResultVerifier, VerifyError};
@@ -201,7 +203,7 @@ impl<'a, 'o, S: FallibleCaseStore> LocalEffects<'a, 'o, S> {
 
 impl<S: FallibleCaseStore> EffectPort for LocalEffects<'_, '_, S> {
     fn performs(&self, action: &str) -> bool {
-        self.local && [INSPECT, EDIT, TESTS_RUN].contains(&action)
+        self.local && [INSPECT, TESTS_WRITE, IMPLEMENTATION_EDIT, TESTS_RUN].contains(&action)
     }
 
     fn invoke(

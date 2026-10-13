@@ -46,6 +46,16 @@
 //! suspended because the agent model could not be reached, or the governor holding the case
 //! complete.
 //!
+//! # Actions the slice cannot perform
+//!
+//! On a `software-change@1` case the runtime reads every frontier without the actions the slice
+//! can never perform: those that need approval or name a capability and are not among
+//! [`PERFORMED`] (`release.rollback`; see [`never_performed`]). Such an action follows the rule an
+//! action the effects do not perform and that needs no authority already follows: it is never
+//! handed to the agent, so it is never offered, never awaited at an approval gate and never held
+//! as a Suspension that no resume could perform. A proposal naming it is refused as not in the
+//! frontier. `repository.merge` stays: a resume hands it off.
+//!
 //! # Refused steps
 //!
 //! A step that is not performed still counts against the step budget, is printed as refused, and
@@ -85,7 +95,9 @@
 //! # Identity
 //!
 //! A [`SliceRun`] carries the specification's `protocol`, `steps` and `stop_reason`. Its `run_id`
-//! and `intent_id` are not assigned here: the run is not recorded anywhere yet.
+//! and `intent_id` are not assigned here: the run is not recorded anywhere yet. Its `risk`,
+//! `change_kind` and `affects_security_boundary` are the request's [`SliceRequest::inputs`] (an
+//! [`IntentRequest`](crate::intent::IntentRequest)'s, through `intent`), which the caller holds.
 
 use std::fmt::{self, Write as _};
 use std::io::{self, Write};
@@ -98,9 +110,9 @@ use b10x_loom_commission::model::primitives::Timestamp;
 use b10x_loom_commission::model::responsibility::{
     ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, AuthorityVerdict,
     AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData, CommissionId,
-    CompletionDetermination, ExecutorOutcome, Frontier, FrontierData, GovernorError, Observation,
-    ObservationId, PrincipalId, RevalidateActionRequestOutcome, RunId, RunOutcome,
-    SuspensionReason, Unit, commission_state, frontier_state, observation_state,
+    CompletionDetermination, ExecutorOutcome, Frontier, FrontierAction, FrontierData,
+    GovernorError, Observation, ObservationId, PrincipalId, RevalidateActionRequestOutcome, RunId,
+    RunOutcome, SuspensionReason, Unit, commission_state, frontier_state, observation_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
@@ -152,6 +164,9 @@ pub struct SliceRequest {
     pub max_steps: usize,
     /// The confidence, from 0 to 1, below which the router refuses its pick.
     pub threshold: f64,
+    /// The case inputs the host supplies, never a model: the case opens with each one its
+    /// protocol declares ([`crate::case`], "Inputs a case starts with").
+    pub inputs: case::CaseInputs,
 }
 
 /// Optional context policy and measurement destination for one run. Existing callers stay legacy.
@@ -413,6 +428,7 @@ fn run_measured<S: FallibleCaseStore>(
         &pick.protocol,
         &request.intent,
         &request.workspace,
+        &request.inputs,
     )
     .map_err(SliceError::Case)?;
 
@@ -584,6 +600,7 @@ pub(crate) fn drive<S: FallibleCaseStore>(
     let reads = Reads {
         frontiers,
         governor,
+        local: protocol == LOCAL_PROTOCOL,
     };
     let seed = case.0.clone();
     let runs = move || RunStore::new(move || RunId(fresh_uuid("run", &seed)));
@@ -810,9 +827,40 @@ fn finish(
 
 /// The governor as the runtime reads it: revisions, frontiers and completions from `frontiers`,
 /// observations to the governor that holds the case.
+///
+/// On a `software-change@1` case (`local`) every frontier is read without the actions the slice
+/// can never perform ([`never_performed`]): `release.rollback`, which needs a capability and which
+/// neither a run's effects nor a resume's hand-off performs. Commission hands an executor an
+/// action behind an authority gate whether or not its effect port performs it, so left in, it
+/// would be offered to the agent, end every run whose step leaves the frontier unchanged
+/// `AwaitingApproval`, and, proposed, hold a Suspension no resume can perform. Left out, it is
+/// never offered, awaited or held, as an action the slice does not perform and that needs no
+/// authority is never handed to the agent; a proposal of it is refused as not in the frontier.
 struct Reads<'a, S> {
     frontiers: &'a dyn Governor,
     governor: &'a CanonGovernor<S>,
+    local: bool,
+}
+
+/// The actions of a `software-change@1` frontier the slice performs: the local effect adapter's
+/// four, and `repository.merge`, which a resume hands off.
+pub const PERFORMED: [&str; 5] = [
+    crate::executor::INSPECT,
+    crate::executor::TESTS_WRITE,
+    crate::executor::IMPLEMENTATION_EDIT,
+    crate::executor::TESTS_RUN,
+    crate::handoff::MERGE,
+];
+
+/// Whether `entry` is an action the slice can never perform on a `software-change@1` case: one
+/// that needs approval or names a capability, and that is not among [`PERFORMED`].
+pub fn never_performed(entry: &FrontierAction) -> bool {
+    let gated = entry.status == ActionStatus::ApprovalRequired
+        || entry
+            .capability
+            .as_deref()
+            .is_some_and(|capability| !capability.is_empty());
+    gated && !PERFORMED.contains(&entry.action.as_str())
 }
 
 impl<S> Governor for Reads<'_, S> {
@@ -821,11 +869,53 @@ impl<S> Governor for Reads<'_, S> {
     }
 
     fn frontier(&self, case: &CaseId) -> Result<Frontier<frontier_state::Issued>, GovernorError> {
-        self.frontiers.frontier(case)
+        let frontier = self.frontiers.frontier(case)?;
+        Ok(if self.local {
+            performable(frontier)
+        } else {
+            frontier
+        })
     }
 
     fn completion(&self, case: &CaseId) -> Result<CompletionDetermination, GovernorError> {
         self.frontiers.completion(case)
+    }
+}
+
+/// `frontier` without the actions the slice can never perform ([`never_performed`]); same id, case
+/// and revision.
+pub fn performable(frontier: Frontier<frontier_state::Issued>) -> Frontier<frontier_state::Issued> {
+    let mut data = frontier.into_data();
+    data.actions.retain(|entry| !never_performed(entry));
+    Frontier::new(data)
+}
+
+/// A governor of `software-change@1` cases read as the slice reads one for Commission's runtime:
+/// every frontier [`performable`], everything else and every observation the governor's own. An
+/// embedder that runs the slice's effects under its own loop reads the governor through it, so
+/// `release.rollback` is never offered, awaited or held.
+pub struct SliceReads<'g, G: ?Sized>(pub &'g G);
+
+impl<G: Governor + ?Sized> Governor for SliceReads<'_, G> {
+    fn current_revision(&self, case: &CaseId) -> Result<i64, GovernorError> {
+        self.0.current_revision(case)
+    }
+
+    fn frontier(&self, case: &CaseId) -> Result<Frontier<frontier_state::Issued>, GovernorError> {
+        self.0.frontier(case).map(performable)
+    }
+
+    fn completion(&self, case: &CaseId) -> Result<CompletionDetermination, GovernorError> {
+        self.0.completion(case)
+    }
+}
+
+impl<G: ObservationPort + ?Sized> ObservationPort for SliceReads<'_, G> {
+    fn observe(
+        &self,
+        observation: Observation<observation_state::Reported>,
+    ) -> Result<(), GovernorError> {
+        self.0.observe(observation)
     }
 }
 

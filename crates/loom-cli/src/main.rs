@@ -544,6 +544,7 @@ fn intent_request(arguments: &RunArgs) -> IntentRequest {
         runner: None,
         max_steps: arguments.max_steps,
         threshold: arguments.threshold,
+        inputs: arguments.inputs(),
     }
 }
 

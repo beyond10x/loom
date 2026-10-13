@@ -687,13 +687,13 @@ mod tests {
         );
         assert!(held(other_commission).is_some());
 
-        let edit = port.hold(hold(commission, "repository.edit"));
+        let edit = port.hold(hold(commission, "implementation.edit"));
         assert!(
             matches!(edit, HoldSuspensionOutcome::Held { .. }),
             "{edit:?}"
         );
         let stored = held(commission).expect("another action is held");
-        assert_eq!(stored.data.action, "repository.edit");
+        assert_eq!(stored.data.action, "implementation.edit");
 
         let suspensions = FileSuspensionStore::open(dir.path().join("fresh")).unwrap();
         let at_new_work: HeldHead<'_> = &|| Ok("4567cdef".to_owned());

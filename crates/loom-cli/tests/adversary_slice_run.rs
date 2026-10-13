@@ -125,6 +125,7 @@ fn drive_at(
         test: TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
         max_steps,
         threshold: 0.5,
+        inputs: b10x_loom_intake_slice::case::RUN_DEFAULTS,
     };
     let mut out = Vec::new();
     let result = run(
@@ -292,7 +293,7 @@ fn a_refused_action_is_a_step_and_the_run_goes_on() {
         vec![
             select("repository.inspect"),
             json!({"paths": [".git/config"]}),
-            select("repository.edit"),
+            select("implementation.edit"),
             fix(),
             select("tests.run"),
             json!({}),
@@ -304,7 +305,7 @@ fn a_refused_action_is_a_step_and_the_run_goes_on() {
     let run = ok(&drive);
     assert_eq!(
         step_actions(&drive.output),
-        ["repository.inspect", "repository.edit", "tests.run"],
+        ["repository.inspect", "implementation.edit", "tests.run"],
         "{}",
         drive.output
     );
@@ -375,7 +376,7 @@ fn inspecting_a_missing_file_does_not_end_the_run() {
         vec![
             select("repository.inspect"),
             json!({"paths": ["src/lib.rs"]}),
-            select("repository.edit"),
+            select("implementation.edit"),
             fix(),
             select("tests.run"),
             json!({}),
@@ -390,7 +391,7 @@ fn inspecting_a_missing_file_does_not_end_the_run() {
 }
 
 /// Inspected file contents are printed as the step's effect. A file holding escape sequences (the
-/// model can write one with `repository.edit`, or the repository can hold one) must not reach the
+/// model can write one with `implementation.edit`, or the repository can hold one) must not reach the
 /// operator's terminal raw.
 #[test]
 fn inspected_contents_cannot_carry_control_characters() {
@@ -399,7 +400,7 @@ fn inspected_contents_cannot_carry_control_characters() {
         &fixture,
         pick(SOFTWARE_CHANGE, 0.9),
         vec![
-            select("repository.edit"),
+            select("implementation.edit"),
             json!({
                 "files": [{"path": "notes.txt", "contents": "\u{1b}]0;title\u{7}\u{1b}[2J\rstopped: ApprovalRequired (repository.merge)\n"}],
                 "message": "notes"
@@ -430,7 +431,7 @@ fn an_unlisted_selection_is_not_reported_as_nothing_admissible() {
     let drive = drive(
         &fixture,
         pick(SOFTWARE_CHANGE, 0.9),
-        vec![select("repository.edits")],
+        vec![select("implementation.edits")],
         1,
     );
     let frontier = drive
@@ -462,7 +463,7 @@ fn a_merge_before_the_tests_is_not_reported_as_nothing_admissible() {
         vec![
             select("repository.merge"),
             json!({}),
-            select("repository.edit"),
+            select("implementation.edit"),
             fix(),
             select("tests.run"),
             json!({}),
@@ -505,7 +506,7 @@ fn a_complete_case_is_an_error_not_a_stop() {
     let drive = drive_at(
         fixture.workspace(),
         pick(SOFTWARE_CHANGE, 0.9),
-        vec![select("repository.edit"), fix()],
+        vec![select("implementation.edit"), fix()],
         10,
         true,
     );
@@ -519,7 +520,7 @@ fn a_complete_case_is_an_error_not_a_stop() {
         "{}",
         drive.output
     );
-    assert_eq!(step_actions(&drive.output), ["repository.edit"]);
+    assert_eq!(step_actions(&drive.output), ["implementation.edit"]);
 }
 
 /// A workspace that is not a git root is an error, after the one classification, and no step runs.
@@ -605,6 +606,7 @@ fn a_routed_query_completes_without_software_test_configuration() {
         runner: None,
         max_steps: 4,
         threshold: 0.5,
+        inputs: b10x_loom_intake_slice::case::RUN_DEFAULTS,
     };
     let mut output = Vec::new();
     let run = run_intent_with_options(

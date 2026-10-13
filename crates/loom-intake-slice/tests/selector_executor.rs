@@ -14,7 +14,7 @@
 //! the call's arguments `{"action": <id>}`; an argument reply is the action's arguments verbatim:
 //!
 //! - `repository.inspect`: `{"paths": [<path>, ...]}`;
-//! - `repository.edit`: `{"files": [{"path": <path>, "contents": <text>}, ...], "message": <text>}`;
+//! - `implementation.edit`: `{"files": [{"path": <path>, "contents": <text>}, ...], "message": <text>}`;
 //! - `tests.run`: `{}`.
 //!
 //! The recorded run: inspect; tests.run while the check still fails, under a model answer claiming
@@ -75,7 +75,14 @@ fn refused_confinement_produces_no_observation_or_passing_evidence() {
     }
     let fixture = Fixture::new();
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let case = case::open(&governor, PICK, INTENT, fixture.workspace()).unwrap();
+    let case = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        fixture.workspace(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .unwrap();
     let before = governor.observations().len();
     let executor = LocalExecutor::new(
         &governor,
@@ -97,7 +104,14 @@ fn explicit_unconfined_execution_is_named_in_each_observation() {
     use b10x_loom_intake_slice::{confinement::Backend, executor::UnconfinedRunner};
     let fixture = Fixture::new();
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let case = case::open(&governor, PICK, INTENT, fixture.workspace()).unwrap();
+    let case = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        fixture.workspace(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .unwrap();
     let executor = LocalExecutor::new(
         &governor,
         case,
@@ -156,7 +170,14 @@ fn a_failing_test_is_edited_and_then_passes() {
     );
 
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let case = case::open(&governor, PICK, INTENT, workspace).expect("the case opens");
+    let case = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        workspace,
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("the case opens");
     let commission = commission(&case);
 
     let model = Recorded::new(vec![
@@ -167,7 +188,7 @@ fn a_failing_test_is_edited_and_then_passes() {
         Reply::select("tests.run", Some(CLAIM)),
         Reply::arguments(json!({}), Some(CLAIM)),
         // 3. an edit with one path inside and one outside the workspace.
-        Reply::select("repository.edit", None),
+        Reply::select("implementation.edit", None),
         Reply::arguments(
             json!({
                 "files": [
@@ -179,7 +200,7 @@ fn a_failing_test_is_edited_and_then_passes() {
             None,
         ),
         // 4. the edit that fixes the check.
-        Reply::select("repository.edit", None),
+        Reply::select("implementation.edit", None),
         Reply::arguments(
             json!({
                 "files": [{"path": "check.txt", "contents": "fixed\n"}],
@@ -264,7 +285,7 @@ fn a_failing_test_is_edited_and_then_passes() {
 
     // 3. An edit that names a path outside the workspace is refused, and writes nothing.
     let reach = next();
-    assert_eq!(reach.action, "repository.edit");
+    assert_eq!(reach.action, "implementation.edit");
     let before = governor.current_revision(&case).expect("revision");
     assert!(
         matches!(
@@ -281,7 +302,7 @@ fn a_failing_test_is_edited_and_then_passes() {
 
     // 4. The edit commits a new revision and reports it to the governor.
     let edit = next();
-    assert_eq!(edit.action, "repository.edit");
+    assert_eq!(edit.action, "implementation.edit");
     let report = executor.execute(&edit).expect("the edit is performed");
     let fixed = fixture.head();
     assert_ne!(fixed, first, "the edit commits a new revision");
@@ -386,7 +407,7 @@ fn a_failing_test_is_edited_and_then_passes() {
                 "selection {n} carries the reference {reference:?}"
             );
         }
-        for action in ["repository.inspect", "repository.edit", "tests.run"] {
+        for action in ["repository.inspect", "implementation.edit", "tests.run"] {
             assert!(sent.contains(action), "selection {n} lists {action}");
         }
     }
@@ -407,7 +428,7 @@ fn a_failing_test_is_edited_and_then_passes() {
     ];
     for path in &refused {
         let edit = proposal(
-            "repository.edit",
+            "implementation.edit",
             &json!({"files": [{"path": path, "contents": "escaped\n"}], "message": "escape"}),
         );
         assert!(
@@ -441,7 +462,14 @@ fn a_failing_test_is_edited_and_then_passes() {
 fn a_test_command_past_its_timeout_is_killed_and_fails() {
     let fixture = Fixture::new();
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let case = case::open(&governor, PICK, INTENT, fixture.workspace()).expect("the case opens");
+    let case = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        fixture.workspace(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("the case opens");
     let executor = LocalExecutor::new(
         &governor,
         case.clone(),
@@ -485,7 +513,14 @@ fn a_test_command_past_its_timeout_is_killed_and_fails() {
 fn a_test_commands_output_is_kept_as_its_tail() {
     let fixture = Fixture::new();
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let case = case::open(&governor, PICK, INTENT, fixture.workspace()).expect("the case opens");
+    let case = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        fixture.workspace(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("the case opens");
     let executor = LocalExecutor::new(
         &governor,
         case,
@@ -505,7 +540,7 @@ fn a_test_commands_output_is_kept_as_its_tail() {
 }
 
 /// A path the workspace's git ignores is neither read by `repository.inspect` (an ignored secret
-/// never reaches the model) nor written by `repository.edit`, and an edit naming one writes nothing.
+/// never reaches the model) nor written by `implementation.edit`, and an edit naming one writes nothing.
 #[test]
 fn an_ignored_path_is_neither_read_nor_written() {
     let fixture = Fixture::new();
@@ -515,7 +550,14 @@ fn an_ignored_path_is_neither_read_nor_written() {
     std::fs::write(fixture.workspace().join("secret.local"), "token\n").expect("write a secret");
     let head = fixture.head();
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let case = case::open(&governor, PICK, INTENT, fixture.workspace()).expect("the case opens");
+    let case = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        fixture.workspace(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("the case opens");
     let executor = LocalExecutor::new(
         &governor,
         case,
@@ -535,7 +577,7 @@ fn an_ignored_path_is_neither_read_nor_written() {
         "an ignored file is not read: {inspected:?}"
     );
     let edited = executor.execute(&proposal(
-        "repository.edit",
+        "implementation.edit",
         &json!({
             "files": [
                 {"path": "check.txt", "contents": "fixed\n"},
@@ -566,7 +608,14 @@ fn an_ignored_path_is_neither_read_nor_written() {
 fn a_test_run_is_verified_once() {
     let fixture = Fixture::new();
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let case = case::open(&governor, PICK, INTENT, fixture.workspace()).expect("the case opens");
+    let case = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        fixture.workspace(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("the case opens");
     let executor = LocalExecutor::new(
         &governor,
         case.clone(),

@@ -564,6 +564,7 @@ pub fn governed() -> (CanonGovernor<MemoryCaseStore>, CaseId) {
         .open(
             "inbound-answer@1",
             [("item".to_owned(), "1700000000.000100".to_owned())].into(),
+            loom_sdk::CaseInputs::none(),
         )
         .expect("the case opens");
     (governor, case)

@@ -125,7 +125,7 @@ fn the_slice_stops_for_each_reason() {
             name: "main path",
             pick: pick(SOFTWARE_CHANGE, 0.9),
             agent: vec![
-                json!({"action": "repository.edit"}),
+                json!({"action": "implementation.edit"}),
                 json!({
                     "files": [{"path": "check.txt", "contents": "fixed\n"}],
                     "message": "fix the check"
@@ -141,8 +141,8 @@ fn the_slice_stops_for_each_reason() {
     );
     assert_picked(&output, SOFTWARE_CHANGE);
     let performed = steps(&output);
-    assert_eq!(performed, ["repository.edit", "tests.run"], "{output}");
-    let edit = line_starting(&output, "step 1: repository.edit");
+    assert_eq!(performed, ["implementation.edit", "tests.run"], "{output}");
+    let edit = line_starting(&output, "step 1: implementation.edit");
     assert!(
         edit.contains("check.txt"),
         "a step prints its arguments: {output}"
@@ -196,7 +196,7 @@ fn the_slice_stops_for_each_reason() {
             name: "a step budget of 1",
             pick: pick(SOFTWARE_CHANGE, 0.9),
             agent: vec![
-                json!({"action": "repository.edit"}),
+                json!({"action": "implementation.edit"}),
                 json!({
                     "files": [{"path": "check.txt", "contents": "fixed\n"}],
                     "message": "fix the check"
@@ -207,7 +207,7 @@ fn the_slice_stops_for_each_reason() {
         },
     );
     assert_picked(&output, SOFTWARE_CHANGE);
-    assert_eq!(steps(&output), ["repository.edit"], "{output}");
+    assert_eq!(steps(&output), ["implementation.edit"], "{output}");
     assert_stopped(&output, "stopped: StepBudget");
     assert_eq!(run.stop_reason, StopReason::StepBudget);
     assert_eq!(run.steps, 1);
@@ -303,7 +303,7 @@ fn the_run_stops_at_the_approval_gate_when_the_model_idles() {
             agent: vec![
                 json!({"action": "repository.inspect"}),
                 json!({"paths": ["check.txt"]}),
-                json!({"action": "repository.edit"}),
+                json!({"action": "implementation.edit"}),
                 json!({
                     "files": [{"path": "check.txt", "contents": "fixed\n"}],
                     "message": "fix the check"
@@ -322,7 +322,7 @@ fn the_run_stops_at_the_approval_gate_when_the_model_idles() {
         steps(&output),
         [
             "repository.inspect",
-            "repository.edit",
+            "implementation.edit",
             "tests.run",
             "tests.run"
         ],
@@ -356,14 +356,14 @@ fn a_step_that_moves_the_frontier_at_the_gate_goes_on() {
             name: "an edit at the approval gate",
             pick: pick(SOFTWARE_CHANGE, 0.9),
             agent: vec![
-                json!({"action": "repository.edit"}),
+                json!({"action": "implementation.edit"}),
                 json!({
                     "files": [{"path": "check.txt", "contents": "fixed\n"}],
                     "message": "fix the check"
                 }),
                 json!({"action": "tests.run"}),
                 json!({}),
-                json!({"action": "repository.edit"}),
+                json!({"action": "implementation.edit"}),
                 json!({
                     "files": [{"path": "notes.txt", "contents": "a note\n"}],
                     "message": "add a note"
@@ -380,9 +380,9 @@ fn a_step_that_moves_the_frontier_at_the_gate_goes_on() {
     assert_eq!(
         steps(&output),
         [
-            "repository.edit",
+            "implementation.edit",
             "tests.run",
-            "repository.edit",
+            "implementation.edit",
             "tests.run",
             "tests.run"
         ],
@@ -404,7 +404,7 @@ fn a_refused_selection_at_the_gate_stops_for_approval() {
             name: "an unlisted selection at the approval gate",
             pick: pick(SOFTWARE_CHANGE, 0.9),
             agent: vec![
-                json!({"action": "repository.edit"}),
+                json!({"action": "implementation.edit"}),
                 json!({
                     "files": [{"path": "check.txt", "contents": "fixed\n"}],
                     "message": "fix the check"
@@ -419,7 +419,7 @@ fn a_refused_selection_at_the_gate_stops_for_approval() {
     );
     assert_eq!(
         steps(&output),
-        ["repository.edit", "tests.run", "repository.publish"],
+        ["implementation.edit", "tests.run", "repository.publish"],
         "{output}"
     );
     assert_eq!(count_starting(&output, "effect: refused:"), 1, "{output}");
@@ -441,7 +441,7 @@ fn the_slice_runs_on_commissions_runtime() {
             name: "main path on the runtime",
             pick: pick(SOFTWARE_CHANGE, 0.9),
             agent: vec![
-                json!({"action": "repository.edit"}),
+                json!({"action": "implementation.edit"}),
                 json!({
                     "files": [{"path": "check.txt", "contents": "fixed\n"}],
                     "message": "fix the check"
@@ -481,7 +481,7 @@ fn the_slice_runs_on_commissions_runtime() {
     assert_eq!(
         edit.payload.member("action"),
         Some(&b10x_loom_commission::model::json::Value::Text(
-            "repository.edit".to_owned()
+            "implementation.edit".to_owned()
         )),
         "{edit:?}"
     );
@@ -644,6 +644,7 @@ fn drive_with_runner(
         test: TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
         max_steps: row.max_steps,
         threshold: THRESHOLD,
+        inputs: b10x_loom_intake_slice::case::RUN_DEFAULTS,
     };
     let mut out = Vec::new();
     let result = run(
@@ -953,7 +954,7 @@ fn adversary_the_gate_stops_before_the_budget_on_the_last_step() {
             agent: vec![
                 json!({"action": "repository.inspect"}),
                 json!({"paths": ["check.txt"]}),
-                json!({"action": "repository.edit"}),
+                json!({"action": "implementation.edit"}),
                 json!({
                     "files": [{"path": "check.txt", "contents": "fixed\n"}],
                     "message": "fix the check"
@@ -971,7 +972,7 @@ fn adversary_the_gate_stops_before_the_budget_on_the_last_step() {
         steps(&output),
         [
             "repository.inspect",
-            "repository.edit",
+            "implementation.edit",
             "tests.run",
             "tests.run"
         ],

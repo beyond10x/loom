@@ -17,8 +17,10 @@
 //!    call does not admit.
 //!
 //! The model is scripted (a selector and an argument generator), since tests make no model call.
-//! The adapter performs every action the protocol declares, `repository.merge` included, so what
-//! keeps an action from it is the governor, Commission and Loom, never the adapter's own filter.
+//! The adapter performs every action Loom performs, `repository.merge` included, so what keeps an
+//! action from it is the governor, Commission and Loom, never the adapter's own filter. The runtime
+//! reads the frontier as Loom's slice does ([`AsTheSliceReads`]): without `release.rollback`,
+//! which needs a capability and which no effect of Loom performs.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
@@ -38,8 +40,8 @@ use b10x_loom_commission::model::responsibility::{
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
-use b10x_loom_commission::ports::evidence::submit_evidence;
-use b10x_loom_commission::ports::governor::Governor as _;
+use b10x_loom_commission::ports::evidence::{ObservationPort, submit_evidence};
+use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_commission::runtime::{EXECUTOR_SOURCE, LoopContext, LoopEnd, run_until_blocked};
 use b10x_loom_commission_testkit::fake_authority::{AuthorityQuery, StaticAuthorityProvider};
 use b10x_loom_executor::model::run::{CatalogueEntry, CatalogueEntryStatus, SelectionStrategy};
@@ -54,7 +56,9 @@ const PROTOCOL: &str = "software-change@1";
 const CASE: &str = "CHG-1842";
 const PRODUCER: &str = "service:ci";
 const INSPECT: &str = "repository.inspect";
-const EDIT: &str = "repository.edit";
+const EDIT: &str = "implementation.edit";
+const TESTS_WRITE: &str = "tests.write";
+const ROLLBACK: &str = "release.rollback";
 const TESTS_RUN: &str = "tests.run";
 const MERGE: &str = "repository.merge";
 const TESTS_PASS: &str = "tests.pass";
@@ -67,7 +71,12 @@ fn software_change_case_on_the_aep_governor_keeps_merge_behind_fresh_evidence_an
     let governor = Gov::new(MemoryCaseStore::default());
     let case = CaseId(CASE.to_owned());
     governor
-        .open_case(case.clone(), PROTOCOL, fixture.revisions())
+        .open_case(
+            case.clone(),
+            PROTOCOL,
+            fixture.revisions(),
+            inputs_of(&fixture.0),
+        )
         .expect("the fixture case opens on software.change/1");
     assert_eq!(
         governor.revisions(&case).expect("revisions")["implementation"],
@@ -92,7 +101,10 @@ fn software_change_case_on_the_aep_governor_keeps_merge_behind_fresh_evidence_an
     let r2 = governor.current_revision(&case).expect("current revision");
 
     // 1. Stale R1 evidence: `tests.pass` is unknown at R2, not true.
-    let first = governor.frontier(&case).expect("frontier").into_data();
+    let first = AsTheSliceReads(&governor)
+        .frontier(&case)
+        .expect("frontier")
+        .into_data();
     assert_eq!(first.case_revision, r2);
     assert_eq!(
         claim(&first, TESTS_PASS),
@@ -120,6 +132,7 @@ fn software_change_case_on_the_aep_governor_keeps_merge_behind_fresh_evidence_an
             (EDIT.to_owned(), CatalogueEntryStatus::Admissible),
             (INSPECT.to_owned(), CatalogueEntryStatus::Admissible),
             (TESTS_RUN.to_owned(), CatalogueEntryStatus::Admissible),
+            (TESTS_WRITE.to_owned(), CatalogueEntryStatus::Admissible),
         ]),
         "the tool set at R2 with R1 evidence leaves merge out"
     );
@@ -338,7 +351,7 @@ fn drive<E: b10x_loom_commission::ports::executor::AgentExecutor>(
         RunId(uuid(RUNS.fetch_add(1, Ordering::SeqCst)))
     }));
     run_until_blocked(
-        governor,
+        &AsTheSliceReads(governor),
         executor,
         authority,
         adapter,
@@ -356,7 +369,7 @@ fn r1_control(fixture: &Fixture, records: &[Value]) -> FrontierData {
     let mut revisions = fixture.revisions();
     revisions.insert("implementation".to_owned(), "R1".to_owned());
     governor
-        .open_case(case.clone(), PROTOCOL, revisions)
+        .open_case(case.clone(), PROTOCOL, revisions, inputs_of(&fixture.0))
         .expect("the control case opens");
     let ids = Ids::default();
     for record in records {
@@ -576,7 +589,8 @@ struct Call {
     frontier_revision: i64,
 }
 
-/// The trusted action adapter: performs every action `software.change/1` declares and records
+/// The trusted action adapter: performs every action of `software.change/1` Loom performs
+/// (every one but `release.rollback`) and records
 /// each invocation against the frontier current at the call. A test run submits the passing
 /// result for the implementation revision the case holds, as the local slice submits evidence from
 /// the test command it runs itself.
@@ -608,7 +622,7 @@ impl<'g> Adapter<'g> {
 
 impl EffectPort for Adapter<'_> {
     fn performs(&self, action: &str) -> bool {
-        [INSPECT, EDIT, TESTS_RUN, MERGE].contains(&action)
+        [INSPECT, TESTS_WRITE, EDIT, TESTS_RUN, MERGE].contains(&action)
     }
 
     fn invoke(
@@ -725,5 +739,73 @@ impl Fixture {
                 record
             })
             .collect()
+    }
+}
+
+/// The case inputs a fixture's case gives; a value YAML reads as a boolean is its text.
+fn inputs_of(fixture: &serde_json::Value) -> loom_governor::CaseInputs {
+    fixture["case"]["inputs"]
+        .as_object()
+        .expect("case inputs")
+        .iter()
+        .map(|(input, value)| {
+            let value = match value {
+                serde_json::Value::String(text) => text.clone(),
+                other => other.to_string(),
+            };
+            (input.clone(), value)
+        })
+        .collect()
+}
+
+/// The governor as Loom's slice reads it for Commission's runtime (`crates/loom-intake-slice`,
+/// `run::Reads`): `release.rollback`, which needs a capability and which no effect of Loom
+/// performs, in a run or in a resume, is left out of every frontier, so it is never offered,
+/// awaited or held. Everything else, and every write, is the governor's.
+struct AsTheSliceReads<'g>(&'g Gov);
+
+impl Governor for AsTheSliceReads<'_> {
+    fn current_revision(
+        &self,
+        case: &CaseId,
+    ) -> Result<i64, b10x_loom_commission::model::responsibility::GovernorError> {
+        self.0.current_revision(case)
+    }
+
+    fn frontier(
+        &self,
+        case: &CaseId,
+    ) -> Result<
+        b10x_loom_commission::model::responsibility::Frontier<
+            b10x_loom_commission::model::responsibility::frontier_state::Issued,
+        >,
+        b10x_loom_commission::model::responsibility::GovernorError,
+    > {
+        let mut data = self.0.frontier(case)?.into_data();
+        data.actions.retain(|action| action.action != ROLLBACK);
+        Ok(b10x_loom_commission::model::responsibility::Frontier::new(
+            data,
+        ))
+    }
+
+    fn completion(
+        &self,
+        case: &CaseId,
+    ) -> Result<
+        b10x_loom_commission::model::responsibility::CompletionDetermination,
+        b10x_loom_commission::model::responsibility::GovernorError,
+    > {
+        self.0.completion(case)
+    }
+}
+
+impl ObservationPort for AsTheSliceReads<'_> {
+    fn observe(
+        &self,
+        observation: b10x_loom_commission::model::responsibility::Observation<
+            b10x_loom_commission::model::responsibility::observation_state::Reported,
+        >,
+    ) -> Result<(), b10x_loom_commission::model::responsibility::GovernorError> {
+        self.0.observe(observation)
     }
 }

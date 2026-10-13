@@ -59,6 +59,7 @@ fn request(workspace: Option<PathBuf>, runner: Arc<Runner>) -> IntentRequest {
         test: TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
         max_steps: 8,
         threshold: 0.5,
+        inputs: b10x_loom_intake_slice::case::RUN_DEFAULTS,
     }
 }
 fn classifier() -> Recorded {
@@ -92,7 +93,7 @@ fn software_intent_edits_tests_current_revision_and_stops_for_merge_approval_in_
         let agent = Recorded::new(
             [
                 action("tests.run", json!({})),
-                action("repository.edit", edit("fixed\n")),
+                action("implementation.edit", edit("fixed\n")),
                 action("tests.run", json!({})),
                 action("repository.merge", json!({})),
             ]
@@ -224,7 +225,7 @@ fn passing_software_test_becomes_stale_after_an_edit_through_the_general_entrypo
     let agent = Recorded::new(
         [
             action("tests.run", json!({})),
-            action("repository.edit", edit("broken\n")),
+            action("implementation.edit", edit("broken\n")),
         ]
         .concat(),
     );

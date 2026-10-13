@@ -514,6 +514,7 @@ mod run_tests {
             test: TestCommand::new("true", [] as [&str; 0]),
             max_steps: 1,
             threshold: 2.0,
+            inputs: crate::case::RUN_DEFAULTS,
         };
         let governor = CanonGovernor::new(MemoryCaseStore::default());
         let mut out = Vec::new();
