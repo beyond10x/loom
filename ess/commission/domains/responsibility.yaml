@@ -353,6 +353,14 @@ types:
       - name: action
         type: String
 
+  # story:approval-suspend-resume-slice: what identifies a Suspension, the commission it belongs to,
+  # so a commission holds at most one.
+  - name: commission.responsibility.SuspensionKey
+    kind: struct
+    fields:
+      - name: commission_id
+        type: commission.responsibility.CommissionId
+
   # docs/contracts/protocol-core.md: three-valued truth.
   - name: commission.responsibility.Truth
     kind: enum
@@ -512,6 +520,14 @@ entities:
         target: commission.responsibility.ActionBinding
         cardinality: many
         via: commission_id
+      # story:approval-suspend-resume-slice (decision-blocker:suspension-durable-record, B): the
+      # commission's suspension pending an approval, at most one. It lives and dies with the
+      # commission, never with the case, and is kept by a suspension port the host implements.
+      - name: suspension
+        kind: owns
+        target: commission.responsibility.Suspension
+        cardinality: one
+        via: commission_id
     lifecycle:
       initial: Assigned
       states: [Assigned]
@@ -600,6 +616,59 @@ entities:
       transitions:
         - {name: suspend, from: [Running], to: Suspended}
         - {name: resume, from: [Suspended], to: Running}
+
+  # story:approval-suspend-resume-slice (decision-blocker:suspension-durable-record, B): a run
+  # suspended on an approval, as a new process resumes it from durable state alone. Its identity
+  # holds the commission's id, so a commission holds at most one; `commission_id` repeats it for the
+  # relation, as on ActionBinding. It holds the run it suspended (its id and
+  # the case revision the run started against, `run_case_revision`), the pending action request
+  # (its id, case, `expected_case_revision`, action and arguments, as the run made it) and the
+  # reason the run was suspended for. Resuming continues that same run (`ResumeRun`) at the
+  # request's revision; a resume finding the case at another revision is refused, and nothing is
+  # performed.
+  - name: commission.responsibility.Suspension
+    identity:
+      name: suspension
+      type: commission.responsibility.SuspensionKey
+    fields:
+      - name: commission_id
+        type: commission.responsibility.CommissionId
+      - name: run_id
+        type: commission.responsibility.RunId
+      - name: run_case_revision
+        type: Integer
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
+      - name: case_id
+        type: commission.responsibility.CaseId
+      - name: expected_case_revision
+        type: Integer
+      - name: action
+        type: String
+      - name: arguments
+        type: commission.responsibility.ProposedActionArguments
+      - name: reason
+        type: commission.responsibility.SuspensionReason
+    relations:
+      - name: run
+        kind: references
+        target: commission.responsibility.Run
+        cardinality: one
+        via: run_id
+      - name: action_request
+        kind: references
+        target: commission.responsibility.ActionRequest
+        cardinality: one
+        via: action_request_id
+      - name: case
+        kind: references
+        target: commission.responsibility.Case
+        cardinality: one
+        via: case_id
+    lifecycle:
+      initial: Pending
+      states: [Pending]
+      terminal: [Pending]
 
   # docs/commission/contracts/frontier.md: the bridge between governance and execution, for one case revision.
   # Its claims, obligations and actions are Commission's own value types (story M-002): none has an
@@ -803,8 +872,9 @@ commands:
         external: the run store cannot hold the new run
         error: commission.responsibility.RunStorageFailed
 
-  # The reason is reported, not stored on Run: where a suspension is kept is open
-  # (decision-blocker:suspension-durable-record).
+  # The reason is carried by the command and its event, not stored on Run. A run suspended on an
+  # approval keeps its reason on the commission's Suspension, with the pending request
+  # (story:approval-suspend-resume-slice, decision-blocker:suspension-durable-record, B).
   - name: commission.responsibility.SuspendRun
     input:
       - name: run_id
@@ -842,6 +912,10 @@ commands:
       - name: wrong-state
         wrong_state: true
         error: commission.responsibility.RunStateConflict
+      # story:approval-suspend-resume-slice: a durable run store that cannot write the resumption.
+      - name: storage-failed
+        external: the run store cannot record the resumption
+        error: commission.responsibility.RunStorageFailed
 
   # Immediately before anything is done with a request, the request as the run built it is
   # revalidated. The case's current revision and frontier come from the governor, never from the
