@@ -6,6 +6,18 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-13
+
+Loom 0.19.0 lets a host settle a hold before anything is held. Commission's `HoldSuspension` gains
+the outcome `settled`: a suspension port that answers it leaves no Suspension and nothing to
+approve, and the run ends as a loop without a port ends it. `b10x-loom resume` answers it for a
+merge the agent proposes again at a `HEAD` its commission already handed off, so the run stops
+`MergeHandedOff`, nothing waits on an approval, and `approve` answers `NothingSuspended`. The
+state directory and the governor's `FileCaseStore` and `FileSuspensionStore` read only regular
+files as records; a symbolic link is refused, never followed. Breaking for exhaustive matches of
+`HoldSuspensionOutcome` (`Settled`) and `LoopFailure` (`NotResumed`), and for a run store given to
+`run_with_suspension` that does not implement `ResumeRunBehavior`.
+
 ### Added
 
 - A suspension port can answer that the host already settled a hold: Commission's
