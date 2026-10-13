@@ -164,11 +164,31 @@ fn an_input_spelled_otherwise_is_refused_and_nothing_is_stored() {
         value: value.to_owned(),
     };
     let rows: Vec<(&str, CaseInputs, OpenError)> = vec![
-        ("upper", defaults().with("Risk", "standard"), undeclared("Risk")),
-        ("padded", defaults().with("risk ", "standard"), undeclared("risk ")),
-        ("empty-name", defaults().with("", "standard"), undeclared("")),
-        ("value-case", defaults().with("risk", "Standard"), unlisted("risk", "Standard")),
-        ("value-empty", defaults().with("change_kind", ""), unlisted("change_kind", "")),
+        (
+            "upper",
+            defaults().with("Risk", "standard"),
+            undeclared("Risk"),
+        ),
+        (
+            "padded",
+            defaults().with("risk ", "standard"),
+            undeclared("risk "),
+        ),
+        (
+            "empty-name",
+            defaults().with("", "standard"),
+            undeclared(""),
+        ),
+        (
+            "value-case",
+            defaults().with("risk", "Standard"),
+            unlisted("risk", "Standard"),
+        ),
+        (
+            "value-empty",
+            defaults().with("change_kind", ""),
+            unlisted("change_kind", ""),
+        ),
         (
             "bool-case",
             defaults().with("affects_security_boundary", "True"),
@@ -244,11 +264,14 @@ fn every_input_combination_opens_exactly_the_applicable_obligations() {
                     .collect();
                 open.sort_unstable();
                 assert_eq!(open, expected, "{label}: the frontier's open obligations");
-                assert_eq!(frontier.obligations.len(), 6, "{label}: every obligation listed");
+                assert_eq!(
+                    frontier.obligations.len(),
+                    6,
+                    "{label}: every obligation listed"
+                );
 
                 let mut snapshot = software_snapshot();
-                snapshot["inputs"] =
-                    json!({"risk": risk, "change_kind": kind, "affects_security_boundary": boundary});
+                snapshot["inputs"] = json!({"risk": risk, "change_kind": kind, "affects_security_boundary": boundary});
                 let decision = evaluate(&catalog, &request(&snapshot))
                     .unwrap_or_else(|refusal| panic!("{label} is decided: {refusal:?}"));
                 let mut decided: Vec<&str> = decision
