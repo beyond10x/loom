@@ -2,8 +2,8 @@
   "provenance": {
     "system": "commission",
     "specification_version": "v1",
-    "source_digest": "1ba42c043f9934dcbbb38e6d540f230eda0871defa63756e7c3db7d01b3050c3",
-    "contract_digest": "9f2ffaa60ef43fd8f3ad719e5f980e33a4fc329e9ba4c5a990bbcfa1579a3135"
+    "source_digest": "8c7b1dfdf553739c49d885d9964fdf5699206173f9b1feaf7f84c83a7e4a3cbf",
+    "contract_digest": "d3ed463c053e0bbbeac480510ab245c329c31ebddce9fd6ac57905e9fb52fbaf"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -453,6 +453,20 @@
     },
     {
       "kind": "domain_type",
+      "source": "commission.responsibility.Suspension.State",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "commission.responsibility.SuspensionKey",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "commission.responsibility.SuspensionReason",
       "disposition": {
         "disposition": "generated"
@@ -557,6 +571,13 @@
       }
     },
     {
+      "kind": "entity_lifecycle",
+      "source": "commission.responsibility.Suspension",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
       "kind": "command_contract",
       "source": "commission.responsibility.ResumeRun",
       "disposition": {
@@ -567,7 +588,12 @@
       "kind": "command_behavior",
       "source": "commission.responsibility.ResumeRun",
       "disposition": {
-        "disposition": "generated"
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "the fields of error `commission.responsibility.RunStorageFailed`, which the specification gives no source, in `storage-failed`"
+        },
+        "contract": "given `commission.responsibility.ResumeRun` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `resumed` otherwise, takes `resume` of `commission.responsibility.Run`, emits `commission.responsibility.RunResumed`; `wrong-state` from a state no declared move starts in, error `commission.responsibility.RunStateConflict`, and for an instance no record carries, without the error's fields; `storage-failed` externally decided (the run store cannot record the resumption), error `commission.responsibility.RunStorageFailed`"
       }
     },
     {

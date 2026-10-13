@@ -131,6 +131,7 @@ Lifecycle: states `Assigned`; initial `Assigned`; terminal `Assigned`.
 | `case` | references | [Case](#case) | one | `case_id` |
 | `runs` | owns | [Run](#run) | many | `commission_id` |
 | `bindings` | owns | [ActionBinding](#actionbinding) | many | `commission_id` |
+| `suspension` | owns | [Suspension](#suspension) | one | `commission_id` |
 
 ### ConnectorEndpoint
 
@@ -216,6 +217,30 @@ Lifecycle: states `Running`, `Suspended`; initial `Running`; terminal none.
 |---|---|---|---|---|
 | `requests` | owns | [ActionRequest](#actionrequest) | many | `run_id` |
 
+### Suspension
+
+Identity: `suspension`, [`SuspensionKey`](./types.mdx#suspensionkey).
+
+| Field | Type |
+|---|---|
+| `commission_id` | [`CommissionId`](./types.mdx#commissionid) |
+| `run_id` | [`RunId`](./types.mdx#runid) |
+| `run_case_revision` | `integer` |
+| `action_request_id` | [`ActionRequestId`](./types.mdx#actionrequestid) |
+| `case_id` | [`CaseId`](./types.mdx#caseid) |
+| `expected_case_revision` | `integer` |
+| `action` | `string` |
+| `arguments` | [`ProposedActionArguments`](./types.mdx#proposedactionarguments) |
+| `reason` | [`SuspensionReason`](./types.mdx#suspensionreason) |
+
+Lifecycle: states `Pending`; initial `Pending`; terminal `Pending`.
+
+| Relation | Kind | Target | Cardinality | Via |
+|---|---|---|---|---|
+| `run` | references | [Run](#run) | one | `run_id` |
+| `action_request` | references | [ActionRequest](#actionrequest) | one | `action_request_id` |
+| `case` | references | [Case](#case) | one | `case_id` |
+
 ### Commands
 
 #### ResumeRun
@@ -228,6 +253,7 @@ Lifecycle: states `Running`, `Suspended`; initial `Running`; terminal none.
 |---|---|---|---|---|
 | `resumed` | otherwise | moves Run by `resume`, from `Suspended` to `Running` | `RunResumed` | none |
 | `wrong-state` | wrong state | refused | none | `RunStateConflict` |
+| `storage-failed` | external | none | none | `RunStorageFailed` |
 
 #### RevalidateActionRequest
 

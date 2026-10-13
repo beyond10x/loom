@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 1ba42c043f9934dcbbb38e6d540f230eda0871defa63756e7c3db7d01b3050c3
-// contract digest 9f2ffaa60ef43fd8f3ad719e5f980e33a4fc329e9ba4c5a990bbcfa1579a3135
+// model digest 8c7b1dfdf553739c49d885d9964fdf5699206173f9b1feaf7f84c83a7e4a3cbf
+// contract digest d3ed463c053e0bbbeac480510ab245c329c31ebddce9fd6ac57905e9fb52fbaf
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -54,27 +54,9 @@ impl<P> Generated<P> {
     }
 }
 
-/// `commission.responsibility.ResumeRun`, generated: every outcome is one the specification fully determines.
-impl<P> crate::responsibility::obligations::ResumeRunBehavior for Generated<P>
-where
-    P: RunStorage,
-{
+impl<P: crate::responsibility::obligations::ResumeRunBehavior> crate::responsibility::obligations::ResumeRunBehavior for Generated<P> {
     fn resume_run(&mut self, input: crate::responsibility::ResumeRun) -> Result<crate::responsibility::ResumeRunOutcome, UnmetObligation> {
-        let _ = &input;
-        // `resumed`: the default.
-        let Some(held) = RunStorage::get(&self.ports, &input.run_id) else {
-            return Ok(crate::responsibility::ResumeRunOutcome::WrongStateUnknownInstance);
-        };
-        let _ = &held;
-        let held_state = held.state;
-        let moved = match held.refine() {
-            crate::responsibility::AnyRun::Suspended(instance) => crate::responsibility::AnyRun::Running(instance.resume()),
-            _ => return Ok(crate::responsibility::ResumeRunOutcome::WrongState { error: crate::responsibility::RunStateConflict { state: held_state } }),
-        };
-        let next = moved.snapshot();
-        let answer = crate::responsibility::ResumeRunOutcome::Resumed { run_resumed: crate::responsibility::RunResumed { run_id: input.run_id.clone() } };
-        RunStorage::put(&mut self.ports, next);
-        return Ok(answer);
+        crate::responsibility::obligations::ResumeRunBehavior::resume_run(&mut self.ports, input)
     }
 }
 
