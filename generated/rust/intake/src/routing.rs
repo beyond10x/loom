@@ -1,6 +1,6 @@
 // generated from intake v1
-// model digest e5f987ee3613bbc2c1f7decd667a2b91fb1819f149cc970316814040874257c4
-// contract digest 3bcee985eed31b4d9ea384c5bf3512a98619ba6016205bfe0291f1860171e18a
+// model digest 6a863e68d9e21bd404ea8cd1c1da3b9677c04d000b3ba83ac143ad567a38235c
+// contract digest 3c2bf8b3896629e198b3ad7d91d750b1b57d6d5df6039ce670e57cf6bedd69c6
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Routing — `intake.routing`.
@@ -817,6 +817,82 @@ impl AnySliceRun {
                 state: SliceRunState::Ended,
                 data: instance.into_data(),
             },
+        }
+    }
+}
+
+/// DropResumeContext — the input of `intake.routing.DropResumeContext`.
+///
+/// Everything it can result in is [`DropResumeContextOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DropResumeContext {
+    /// `commission_id` — `intake.routing.CommissionId`.
+    pub commission_id: CommissionId,
+}
+
+/// Everything `intake.routing.DropResumeContext` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DropResumeContextOutcome {
+    /// `dropped` — otherwise.
+    Dropped,
+    /// `not-found` — for an identity no record carries.
+    NotFound {
+        /// Why it was refused: `intake.routing.ResumeContextNotFound`.
+        error: ResumeContextNotFound,
+    },
+    /// `storage-failed` — externally decided (the resume context store cannot remove the context).
+    StorageFailed {
+        /// Why it was refused: `intake.routing.ResumeContextStorageFailed`.
+        error: ResumeContextStorageFailed,
+    },
+}
+
+/// The declared error `intake.routing.ResumeContextNotFound`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResumeContextNotFound {
+    /// `commission_id` — `intake.routing.CommissionId`.
+    pub commission_id: CommissionId,
+}
+
+/// The declared error `intake.routing.ResumeContextStorageFailed`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResumeContextStorageFailed {
+    /// `reason` — `String`.
+    pub reason: String,
+}
+
+/// What this bounded context owes its implementor, as typed seams.
+///
+/// One trait per obligation in the synthesis plan, each carrying the plan's own contract.
+/// [`Unimplemented`](obligations::Unimplemented) satisfies every trait by refusing in the type system, so the workspace builds —
+/// and says exactly what it cannot yet do — before a line is hand-written.
+pub mod obligations {
+    /// The behaviour `intake.routing.DropResumeContext` — an implementation obligation.
+    ///
+    /// Why it is not generated: kept an obligation by the fields of error `intake.routing.ResumeContextStorageFailed`, which the specification gives no source, in `storage-failed`.
+    ///
+    /// Contract: given `intake.routing.DropResumeContext` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `dropped` otherwise, deletes `intake.routing.ResumeContext`; `not-found` for an identity no record carries, error `intake.routing.ResumeContextNotFound`; `storage-failed` externally decided (the resume context store cannot remove the context), error `intake.routing.ResumeContextStorageFailed`.
+    pub trait DropResumeContextBehavior {
+        /// Decides and enacts exactly one declared outcome of `intake.routing.DropResumeContext`.
+        ///
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
+        fn drop_resume_context(&mut self, input: super::DropResumeContext) -> Result<super::DropResumeContextOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// Every obligation of this bounded context, refused in the type system.
+    ///
+    /// Each method returns the typed refusal naming what is owed — never a panic, never a guessed
+    /// value — so a workspace built on this stub compiles and reports its own gaps.
+    pub struct Unimplemented;
+
+    impl DropResumeContextBehavior for Unimplemented {
+        fn drop_resume_context(&mut self, _input: super::DropResumeContext) -> Result<super::DropResumeContextOutcome, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "intake.routing.DropResumeContext" })
         }
     }
 }

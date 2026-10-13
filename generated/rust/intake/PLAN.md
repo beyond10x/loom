@@ -1,14 +1,14 @@
 <!--
   generated from intake v1
-  model digest e5f987ee3613bbc2c1f7decd667a2b91fb1819f149cc970316814040874257c4
-  contract digest 3bcee985eed31b4d9ea384c5bf3512a98619ba6016205bfe0291f1860171e18a
+  model digest 6a863e68d9e21bd404ea8cd1c1da3b9677c04d000b3ba83ac143ad567a38235c
+  contract digest 3c2bf8b3896629e198b3ad7d91d750b1b57d6d5df6039ce670e57cf6bedd69c6
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — intake v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-51 capabilities: **51 generated**, **0 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+55 capabilities: **54 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -65,11 +65,15 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | entity lifecycle | `intake.routing.ProtocolPick` |
 | entity lifecycle | `intake.routing.ResumeContext` |
 | entity lifecycle | `intake.routing.SliceRun` |
+| command contract | `intake.routing.DropResumeContext` |
+| error type | `intake.routing.ResumeContextNotFound` |
+| error type | `intake.routing.ResumeContextStorageFailed` |
 
 ## Obligations — yours to implement
 
 | capability | source | why not generated | contract |
 | --- | --- | --- | --- |
+| command behaviour | `intake.routing.DropResumeContext` | kept an obligation by the fields of error `intake.routing.ResumeContextStorageFailed`, which the specification gives no source, in `storage-failed` | given `intake.routing.DropResumeContext` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `dropped` otherwise, deletes `intake.routing.ResumeContext`; `not-found` for an identity no record carries, error `intake.routing.ResumeContextNotFound`; `storage-failed` externally decided (the resume context store cannot remove the context), error `intake.routing.ResumeContextStorageFailed` |
 
 ## Refused — not represented by this synthesis
 

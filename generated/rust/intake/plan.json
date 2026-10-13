@@ -2,8 +2,8 @@
   "provenance": {
     "system": "intake",
     "specification_version": "v1",
-    "source_digest": "e5f987ee3613bbc2c1f7decd667a2b91fb1819f149cc970316814040874257c4",
-    "contract_digest": "3bcee985eed31b4d9ea384c5bf3512a98619ba6016205bfe0291f1860171e18a"
+    "source_digest": "6a863e68d9e21bd404ea8cd1c1da3b9677c04d000b3ba83ac143ad567a38235c",
+    "contract_digest": "3c2bf8b3896629e198b3ad7d91d750b1b57d6d5df6039ce670e57cf6bedd69c6"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -363,6 +363,39 @@
     {
       "kind": "entity_lifecycle",
       "source": "intake.routing.SliceRun",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "intake.routing.DropResumeContext",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "intake.routing.DropResumeContext",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "the fields of error `intake.routing.ResumeContextStorageFailed`, which the specification gives no source, in `storage-failed`"
+        },
+        "contract": "given `intake.routing.DropResumeContext` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `dropped` otherwise, deletes `intake.routing.ResumeContext`; `not-found` for an identity no record carries, error `intake.routing.ResumeContextNotFound`; `storage-failed` externally decided (the resume context store cannot remove the context), error `intake.routing.ResumeContextStorageFailed`"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "intake.routing.ResumeContextNotFound",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "intake.routing.ResumeContextStorageFailed",
       "disposition": {
         "disposition": "generated"
       }
