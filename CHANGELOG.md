@@ -6,6 +6,15 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- `task consumer-check`, run by `task check`: `consumers/pinned/`, a crate outside the workspace
+  that depends on `b10x-loom-sdk` alone by path, compiles the SDK example
+  (`crates/loom-sdk/examples/software_change.rs`) as an external crate would and runs it to
+  `ApprovalRequired (repository.merge)`, over the workspace's `Cargo.lock`. A change that breaks
+  what an embedder compiles against now fails Loom's own CI before a release. No break for
+  callers.
+
 ## [0.20.0] - 2026-10-14
 
 Loom 0.20.0 builds on engineering-protocols 0.7.0 and Canon 0.4.0, and every software change

@@ -188,3 +188,40 @@ fn the_pinned_consumer_compiles_the_sdk_example_source() {
         "consumers/pinned/src/main.rs declares no embedding code of its own: {own:?}"
     );
 }
+
+#[test]
+fn task_check_runs_the_consumer_check() {
+    let taskfile = read(&repository().join("Taskfile.yml"));
+    let body = |name: &str| -> Vec<String> {
+        let header = format!("\n  {name}:\n");
+        let start = taskfile
+            .find(&header)
+            .unwrap_or_else(|| panic!("Taskfile.yml has task `{name}`"));
+        taskfile[start + header.len()..]
+            .lines()
+            .take_while(|line| line.is_empty() || line.starts_with("    "))
+            .map(|line| line.trim().to_owned())
+            .collect()
+    };
+
+    assert!(
+        body("check")
+            .iter()
+            .any(|line| line == "- task: consumer-check"),
+        "task check runs consumer-check as its own step"
+    );
+    let steps = body("consumer-check");
+    for command in [
+        "- cp Cargo.lock consumers/pinned/Cargo.lock",
+        "- cargo test --manifest-path consumers/pinned/Cargo.toml --offline",
+    ] {
+        assert!(
+            steps.iter().any(|line| line == command),
+            "task consumer-check runs `{command}`: {steps:?}"
+        );
+    }
+    assert!(
+        !taskfile.contains("CARGO_TARGET_DIR"),
+        "the consumer builds into its own consumers/pinned/target/"
+    );
+}
