@@ -1,20 +1,21 @@
 <!--
   generated from loom v1
-  model digest 7bd35da34adec64dcc53bfc491e89e8c5b0bce8290af63cbd1ed7a79b0521a60
-  contract digest 808c695ab0db97c3e7a51bff1e79a6bb28a1c6884c34dba9b4d4f9ccec9734bf
+  model digest f0c565f298ee9caa1b09dc4438dc42639e949d2e5164c199eda007e1aa9298d7
+  contract digest 7b1aeca0c698c968fedca8a529254582b9ce4aab9fa71963aecc8219f5dba2af
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-158 capabilities: **157 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+159 capabilities: **158 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
 | capability | source |
 | --- | --- |
 | domain type | `loom.authority.Answer` |
+| domain type | `loom.authority.CaseResource` |
 | domain type | `loom.authority.HostContext` |
 | domain type | `loom.authority.Outcome` |
 | domain type | `loom.datasource.AdapterAlias` |
