@@ -527,13 +527,15 @@ fn governed(
         )
         .expect("the case opens");
     for (n, record) in records.iter().enumerate() {
+        let observation = ObservationId(uuid(2 * n as u64 + 2));
+        deliver(&governor, &observation, record);
         let evidence = EvidenceData {
             evidence_id: EvidenceId(uuid(2 * n as u64 + 1)),
             case_id: case.clone(),
             kind: record["kind"].as_str().expect("kind").to_owned(),
             subject_revision: governor.current_revision(&case).expect("revision"),
             producer: String::new(),
-            observation_ids: vec![ObservationId(uuid(2 * n as u64 + 2))],
+            observation_ids: vec![observation],
             facts: commission_json::parse(&record.to_string()).expect("facts are JSON"),
             provenance: commission_json::Value::Object(Vec::new()),
         };
@@ -641,4 +643,27 @@ fn with_inputs(case: &mut serde_json::Value) {
             .collect();
         case["inputs"] = serde_json::Value::Object(inputs);
     }
+}
+
+/// Delivers `observation`, as a host does before it submits a record citing it: the governor
+/// refuses a record citing an observation it never received. It is observed at `record`'s
+/// `observed_at`, or at a fixed instant when the record carries none.
+fn deliver(governor: &CanonGovernor<MemoryCaseStore>, observation: &ObservationId, record: &Value) {
+    use b10x_loom_commission::model::responsibility::{Observation, ObservationData};
+    use b10x_loom_commission::ports::evidence::ObservationPort as _;
+    let at = record["observed_at"]
+        .as_str()
+        .unwrap_or("2026-01-01T00:00:00Z");
+    governor
+        .observe(Observation::new(ObservationData {
+            observation_id: observation.clone(),
+            source: "host/fixture".to_owned(),
+            subject: record["subject"]
+                .as_str()
+                .unwrap_or("implementation")
+                .to_owned(),
+            observed_at: b10x_loom_commission::model::primitives::Timestamp(at.to_owned()),
+            payload: commission_json::Value::Null,
+        }))
+        .expect("the governor keeps the observation");
 }

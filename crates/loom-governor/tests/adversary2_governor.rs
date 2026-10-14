@@ -160,6 +160,10 @@ fn the_frontier_id_follows_canons_inputs_only() {
         .expect("opens");
     for (k, (id, kind, result, subject, revision)) in records.iter().rev().enumerate() {
         let k = u64::try_from(k).expect("small");
+        let facts = facts(id, kind, *result, subject, revision);
+        for cited in [0x600 + k, 0x700 + k] {
+            deliver(&second, &ObservationId(uuid(cited)), &facts);
+        }
         let evidence = EvidenceData {
             evidence_id: EvidenceId(uuid(0x500 + k)),
             case_id: b.clone(),
@@ -170,7 +174,7 @@ fn the_frontier_id_follows_canons_inputs_only() {
                 ObservationId(uuid(0x600 + k)),
                 ObservationId(uuid(0x700 + k)),
             ],
-            facts: facts(id, kind, *result, subject, revision),
+            facts,
             provenance: json::Value::Object(vec![(
                 "run".to_owned(),
                 json::Value::Text(format!("run-{k}")),
@@ -720,17 +724,45 @@ fn submit<S: CaseStore>(
     kind: &str,
     facts: json::Value,
 ) -> Result<(), b10x_loom_commission::ports::evidence::EvidenceError> {
+    let observation = ObservationId(uuid(0x8000_0000 + n));
+    deliver(governor, &observation, &facts);
     let evidence = EvidenceData {
         evidence_id: EvidenceId(uuid(n)),
         case_id: case.clone(),
         kind: kind.to_owned(),
         subject_revision: governor.current_revision(case).expect("held"),
         producer: String::new(),
-        observation_ids: vec![ObservationId(uuid(0x8000_0000 + n))],
+        observation_ids: vec![observation],
         facts,
         provenance: json::Value::Null,
     };
     submit_evidence(governor, "service:ci", evidence)
+}
+
+/// Delivers `observation`, as a host does before it submits a record citing it: the governor
+/// refuses a record citing an observation it never received. It is observed at the `observed_at`
+/// `facts` carry, or at a fixed instant when they carry none.
+fn deliver<S: CaseStore>(
+    governor: &CanonGovernor<S>,
+    observation: &ObservationId,
+    facts: &json::Value,
+) {
+    let at = match facts {
+        json::Value::Object(members) => members.iter().find_map(|(name, value)| match value {
+            json::Value::Text(at) if name == "observed_at" => Some(at.clone()),
+            _ => None,
+        }),
+        _ => None,
+    };
+    governor
+        .observe(Observation::new(ObservationData {
+            observation_id: observation.clone(),
+            source: "host/fixture".to_owned(),
+            subject: "implementation".to_owned(),
+            observed_at: Timestamp(at.unwrap_or_else(|| "2026-01-01T00:00:00Z".to_owned())),
+            payload: json::Value::Null,
+        }))
+        .expect("the governor keeps the observation");
 }
 
 /// Observation `n` of `sender`, about `case`.
