@@ -6,6 +6,19 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- The guide "Move from Commission, the governor, intake or Harness"
+  (`website/docs/guides/move-to-loom.md`) gains a "Move from Harness" section: for each of the 14
+  Harness crates, its disposition in the Harness map, the `loom_sdk` path a program imports
+  instead of a ported crate (`loom_sdk::loom::harness::wire`, `http`, `responses`, `messages`,
+  `turn_loop`, and `loom_sdk::loom::session`) or `beyond10x/harness` as the owner of a crate Loom
+  does not carry, and what changes when a program moves: tools are projected from the case's
+  frontier, a call is selected and revalidated before Loom proposes it, a consequential call
+  leaves Loom only as a proposal, and a wire's credential comes from an llm-credentials
+  reference. `harness_map.rs` holds the section to the map, and `loom-sdk`'s `harness_paths.rs`
+  compiles every path it names. No API changes.
+
 ## [0.20.0] - 2026-10-14
 
 Loom 0.20.0 builds on engineering-protocols 0.7.0 and Canon 0.4.0, and every software change

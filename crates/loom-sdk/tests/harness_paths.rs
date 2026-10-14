@@ -47,13 +47,13 @@ fn section(page: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
-
+/// Every code span of `text` that is a `loom_sdk::` path (a bare `loom_sdk` names the crate, not a path).
 /// Every code span of `text` that starts `loom_sdk`.
 fn guide_paths(text: &str) -> BTreeSet<String> {
     text.split('`')
         .skip(1)
         .step_by(2)
-        .filter(|span| *span == "loom_sdk" || span.starts_with("loom_sdk::"))
+        .filter(|span| span.starts_with("loom_sdk::"))
         .map(str::to_owned)
         .collect()
 }
@@ -82,10 +82,7 @@ fn witness_paths(source: &str) -> BTreeSet<String> {
 #[test]
 fn every_path_the_harness_guide_names_resolves() {
     let guide = guide_paths(&section(&read("../../website/docs/guides/move-to-loom.md")));
-    assert!(
-        !guide.is_empty(),
-        "the section names no loom_sdk path"
-    );
+    assert!(!guide.is_empty(), "the section names no loom_sdk path");
     let witnessed = witness_paths(&read("tests/harness_paths.rs"));
     assert_eq!(
         guide, witnessed,
