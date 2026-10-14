@@ -146,20 +146,23 @@ fn submit(governor: &CanonGovernor<MemoryCaseStore>, case: &CaseId, n: u64, reco
     // A host delivers the observation a record cites before the record: the governor takes a
     // record's `observed_at` only as the instant of an observation it received. The instant is
     // the record's own, so a record whose instant Canon cannot read is still set aside by Canon.
-    if let Some(at) = record["observed_at"].as_str() {
-        governor
-            .observe(Observation::new(ObservationData {
-                observation_id: observation.clone(),
-                source: "host/fixture".to_owned(),
-                subject: record["subject"]
-                    .as_str()
-                    .unwrap_or("implementation")
-                    .to_owned(),
-                observed_at: Timestamp(at.to_owned()),
-                payload: commission_json::Value::Null,
-            }))
-            .expect("the governor keeps the observation");
-    }
+    // The governor refuses a record citing an observation it never received, with or
+    // without an `observed_at`; a record without one is observed at a fixed instant.
+    let at = record["observed_at"]
+        .as_str()
+        .unwrap_or("2026-01-01T00:00:00Z");
+    governor
+        .observe(Observation::new(ObservationData {
+            observation_id: observation.clone(),
+            source: "host/fixture".to_owned(),
+            subject: record["subject"]
+                .as_str()
+                .unwrap_or("implementation")
+                .to_owned(),
+            observed_at: Timestamp(at.to_owned()),
+            payload: commission_json::Value::Null,
+        }))
+        .expect("the governor keeps the observation");
     let evidence = EvidenceData {
         evidence_id: EvidenceId(uuid(2 * n + 1)),
         case_id: case.clone(),
