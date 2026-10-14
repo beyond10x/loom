@@ -24,11 +24,16 @@ types:
   # dollars, each turn priced and rounded once (crates/loom-executor/src/harness/turn_loop/price.rs).
   # The cost is absent when the run has no rate card, when the card does not price the model a
   # turn reported, or when a turn that answered reported no usage.
+  # `label` is the name the executor gave its call: the workflow step it took
+  # (story dw-workflow-definition-executor, `loom.workflow.WorkflowStep.name`). It is absent for
+  # step 0 and for a call that took no named step.
   - name: loom.metering.StepUsage
     kind: struct
     fields:
       - name: step
         type: Integer
+      - name: label
+        type: Optional<String>
       - name: model_calls
         type: Integer
       - name: input_tokens
