@@ -332,10 +332,9 @@ fn ess_output_dir(build: &Path, system: &str) -> PathBuf {
         .join(system.replace('/', "-"))
 }
 
-/// One system's domain graphs (keyed by file name) and its domain pages with their index entries.
-fn ess_system(root: &Path, system: &str, ess: &Path) -> Result<(Pages, Pages, Vec<DomainEntry>)> {
-    let spec = root.join(system);
-    let model: serde_json::Value = serde_json::from_slice(&run(
+/// The compiled model of the ESS system at `spec`: `ess specify compile --format json`.
+fn compile(ess: &Path, spec: &Path) -> Result<serde_json::Value> {
+    serde_json::from_slice(&run(
         ess,
         &[
             "specify".as_ref(),
@@ -346,7 +345,13 @@ fn ess_system(root: &Path, system: &str, ess: &Path) -> Result<(Pages, Pages, Ve
             "json".as_ref(),
         ],
     )?)
-    .with_context(|| format!("parsing the compiled ESS model of {system}"))?;
+    .with_context(|| format!("parsing the compiled ESS model of {}", spec.display()))
+}
+
+/// One system's domain graphs (keyed by file name) and its domain pages with their index entries.
+fn ess_system(root: &Path, system: &str, ess: &Path) -> Result<(Pages, Pages, Vec<DomainEntry>)> {
+    let spec = root.join(system);
+    let model = compile(ess, &spec)?;
     let mut data = Pages::new();
     for (domain, graph) in graph::domain_graphs(&model)? {
         let name = format!("{}.domain-graph.json", domain.replace('.', "-"));

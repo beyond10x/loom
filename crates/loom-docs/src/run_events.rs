@@ -100,10 +100,332 @@ pub fn problems(model: &Value, page: &str, schema_version: u64) -> Result<Vec<St
     Ok(problems)
 }
 
+/// The committed V1 contract, relative to the repository root.
+pub const CONTRACT: &str = "docs/contracts/run-events-v1.json";
+
+/// The contract `model` declares, with the exit statuses `exit_help` states.
+pub fn contract(
+    _model: &Value,
+    _exit_help: &str,
+    _failed: u8,
+    _nothing_suspended: u8,
+    _schema_version: u64,
+) -> Result<Value> {
+    Ok(Value::Null)
+}
+
+/// One way a declared contract differs from the committed one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Difference {
+    /// What differs: a record kind, a field of one, an exit status or a member of the contract.
+    pub subject: String,
+    /// How it differs.
+    pub change: String,
+    /// Whether a reader of the committed contract breaks on it.
+    pub breaking: bool,
+}
+
+impl std::fmt::Display for Difference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let verdict = if self.breaking {
+            "a break"
+        } else {
+            "not a break"
+        };
+        write!(f, "{}: {} ({verdict})", self.subject, self.change)
+    }
+}
+
+/// Every difference between the `committed` contract and the `declared` one.
+pub fn differences(_committed: &Value, _declared: &Value) -> Vec<Difference> {
+    Vec::new()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    const STOP: &str = "intake.routing.StopReason";
+
+    const HELP: &str = "Exit status:\n  0  completed (Completed)\n  4  with --state, nothing suspended: `stopped: ApprovalRequired (<action>), nothing suspended`\n  3  stopped (Refused)\n  1  the run failed\n  2  the command line is not valid";
+
+    fn prim(name: &str) -> Value {
+        json!({"kind": "primitive", "name": name})
+    }
+
+    fn optional(of: Value) -> Value {
+        json!({"kind": "optional", "of": of})
+    }
+
+    /// A compiled model declaring `kinds`, each a record kind with its fields and their types.
+    fn typed(kinds: &[(&str, Vec<(&str, Value)>)], stop_reasons: &[&str]) -> Value {
+        let mut types = serde_json::Map::new();
+        let mut variants = serde_json::Map::new();
+        for (kind, fields) in kinds {
+            let record = format!("intake.events.{kind}Event");
+            variants.insert(
+                (*kind).to_owned(),
+                json!({"kind": "declared", "name": record}),
+            );
+            let fields: Vec<Value> = fields
+                .iter()
+                .map(|(name, type_ref)| json!({"name": name, "type_ref": type_ref}))
+                .collect();
+            types.insert(
+                record,
+                json!({"body": {"kind": "struct", "fields": fields}}),
+            );
+        }
+        types.insert(
+            LINE.to_owned(),
+            json!({"body": {"kind": "struct", "fields": [
+                {"name": "schema_version", "type_ref": {"kind": "declared", "name": VERSION}},
+                {"name": "event", "type_ref": {"kind": "declared", "name": UNION}}
+            ]}}),
+        );
+        types.insert(
+            UNION.to_owned(),
+            json!({"body": {"kind": "union", "tag": "kind", "variants": variants}}),
+        );
+        types.insert(
+            VERSION.to_owned(),
+            json!({"body": {"kind": "enum", "variants": ["V1"]}}),
+        );
+        types.insert(
+            STOP.to_owned(),
+            json!({"body": {"kind": "enum", "variants": stop_reasons}}),
+        );
+        json!({ "types": types })
+    }
+
+    fn route() -> (&'static str, Vec<(&'static str, Value)>) {
+        (
+            "Route",
+            vec![("protocol", prim("string")), ("accepted", prim("boolean"))],
+        )
+    }
+
+    fn terminal() -> (&'static str, Vec<(&'static str, Value)>) {
+        (
+            "Terminal",
+            vec![
+                (
+                    "stop_reason",
+                    optional(json!({"kind": "declared", "name": STOP})),
+                ),
+                ("exit_status", prim("integer")),
+            ],
+        )
+    }
+
+    fn contract_of(
+        kinds: &[(&str, Vec<(&str, Value)>)],
+        stop_reasons: &[&str],
+        help: &str,
+    ) -> Value {
+        contract(&typed(kinds, stop_reasons), help, 1, 4, 1).unwrap()
+    }
+
+    fn base() -> Value {
+        contract_of(&[route(), terminal()], &["Completed", "Refused"], HELP)
+    }
+
+    fn subjects(found: &[Difference]) -> Vec<(&str, bool)> {
+        found
+            .iter()
+            .map(|difference| (difference.subject.as_str(), difference.breaking))
+            .collect()
+    }
+
+    /// The committed snapshot is the contract `ess/intake` declares today, with the exit statuses
+    /// `b10x-loom run --help` states and the binary returns.
+    #[test]
+    fn the_v1_contract_matches_the_declared_events() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let model = crate::compile(std::path::Path::new("ess"), &root.join(SYSTEM)).unwrap();
+        let declared = contract(
+            &model,
+            b10x_loom_cli::EXIT_STATUS,
+            b10x_loom_cli::events::FAILED,
+            b10x_loom_cli::NOTHING_SUSPENDED_AT_GATE,
+            b10x_loom_cli::events::SCHEMA_VERSION,
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(root.join(CONTRACT))
+            .unwrap_or_else(|error| panic!("{CONTRACT}: {error}"));
+        let committed: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(differences(&committed, &declared), []);
+        assert_eq!(committed, declared);
+        for kind in ["Route", "Turn", "ToolCall", "Usage", "Approval", "Terminal"] {
+            assert!(committed["kinds"][kind].is_object(), "{kind}");
+        }
+        assert_eq!(
+            committed["kinds"]["Usage"]["fields"]["input_tokens"],
+            json!({"type": "Integer", "optional": true})
+        );
+        assert_eq!(committed["schema_versions"], json!(["V1"]));
+        assert_eq!(committed["exit_statuses"]["1"], json!(["failed"]));
+        assert_eq!(
+            committed["exit_statuses"]["0"],
+            json!(["ApprovalRequired", "Completed"])
+        );
+        assert_eq!(
+            text,
+            serde_json::to_string_pretty(&declared).unwrap() + "\n"
+        );
+    }
+
+    #[test]
+    fn a_removed_renamed_or_retyped_field_is_a_break() {
+        let removed = contract_of(
+            &[("Route", vec![("protocol", prim("string"))]), terminal()],
+            &["Completed", "Refused"],
+            HELP,
+        );
+        assert_eq!(
+            subjects(&differences(&base(), &removed)),
+            [("field `accepted` of `Route`", true)]
+        );
+
+        let renamed = contract_of(
+            &[
+                (
+                    "Route",
+                    vec![("pick", prim("string")), ("accepted", prim("boolean"))],
+                ),
+                terminal(),
+            ],
+            &["Completed", "Refused"],
+            HELP,
+        );
+        assert_eq!(
+            subjects(&differences(&base(), &renamed)),
+            [
+                ("field `pick` of `Route`", true),
+                ("field `protocol` of `Route`", true)
+            ]
+        );
+
+        let retyped = contract_of(
+            &[
+                (
+                    "Route",
+                    vec![("protocol", prim("string")), ("accepted", prim("string"))],
+                ),
+                terminal(),
+            ],
+            &["Completed", "Refused"],
+            HELP,
+        );
+        let found = differences(&base(), &retyped);
+        assert_eq!(subjects(&found), [("field `accepted` of `Route`", true)]);
+        assert!(
+            found[0].change.contains("Boolean") && found[0].change.contains("String"),
+            "{}",
+            found[0].change
+        );
+
+        let now_optional = contract_of(
+            &[
+                (
+                    "Route",
+                    vec![
+                        ("protocol", optional(prim("string"))),
+                        ("accepted", prim("boolean")),
+                    ],
+                ),
+                terminal(),
+            ],
+            &["Completed", "Refused"],
+            HELP,
+        );
+        assert_eq!(
+            subjects(&differences(&base(), &now_optional)),
+            [("field `protocol` of `Route`", true)]
+        );
+
+        let new_value = contract_of(
+            &[route(), terminal()],
+            &["Completed", "Refused", "StepBudget"],
+            &HELP.replace("(Refused)", "(Refused, StepBudget)"),
+        );
+        let found = differences(&base(), &new_value);
+        assert_eq!(
+            subjects(&found),
+            [
+                ("exit status 3", true),
+                ("field `stop_reason` of `Terminal`", true)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_new_record_kind_is_a_break() {
+        let added = contract_of(
+            &[
+                route(),
+                terminal(),
+                ("Usage", vec![("turn", prim("integer"))]),
+            ],
+            &["Completed", "Refused"],
+            HELP,
+        );
+        let found = differences(&base(), &added);
+        assert_eq!(subjects(&found), [("record kind `Usage`", true)]);
+        let removed = contract_of(&[terminal()], &["Completed", "Refused"], HELP);
+        assert_eq!(
+            subjects(&differences(&base(), &removed)),
+            [("record kind `Route`", true)]
+        );
+    }
+
+    #[test]
+    fn a_new_optional_field_is_not_a_break() {
+        let with = |type_ref: Value| {
+            contract_of(
+                &[
+                    (
+                        "Route",
+                        vec![
+                            ("protocol", prim("string")),
+                            ("accepted", prim("boolean")),
+                            ("reason", type_ref),
+                        ],
+                    ),
+                    terminal(),
+                ],
+                &["Completed", "Refused"],
+                HELP,
+            )
+        };
+        let found = differences(&base(), &with(optional(prim("string"))));
+        assert_eq!(subjects(&found), [("field `reason` of `Route`", false)]);
+        assert!(found[0].to_string().contains("not a break"), "{}", found[0]);
+        let found = differences(&base(), &with(prim("string")));
+        assert_eq!(subjects(&found), [("field `reason` of `Route`", true)]);
+        assert!(differences(&base(), &base()).is_empty());
+    }
+
+    #[test]
+    fn an_exit_status_that_changes_meaning_is_a_break() {
+        let moved = contract_of(
+            &[route(), terminal()],
+            &["Completed", "Refused"],
+            &HELP
+                .replace("completed (Completed)", "completed (Completed, Refused)")
+                .replace("stopped (Refused)", "stopped"),
+        );
+        assert_eq!(
+            subjects(&differences(&base(), &moved)),
+            [("exit status 0", true), ("exit status 3", true)]
+        );
+        let unstated = typed(
+            &[route(), terminal()],
+            &["Completed", "Refused", "StepBudget"],
+        );
+        assert!(contract(&unstated, HELP, 1, 4, 1).is_err());
+    }
 
     fn model() -> Value {
         let fields = |names: &[&str]| json!({"fields": names.iter().map(|name| json!({"name": name})).collect::<Vec<_>>()});
