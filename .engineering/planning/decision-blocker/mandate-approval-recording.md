@@ -2,11 +2,13 @@
 format: aep.planning-md/3
 id: decision-blocker:mandate-approval-recording
 kind: decision-blocker
-status: open
+status: cleared
 title: Nobody has decided who records the Mandate approval a resume consumes
 relations:
 - blocks: story:mandate-approval-on-resume
-revision: 1
+revision: 3
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-14T02:39:55Z", actor: "human:timo", revision: 3}
 ---
 ## Question
 
@@ -40,3 +42,10 @@ Who records the Mandate approval a resume consumes, and where does its consumpti
 
 A: it meets the story within Loom, keeps the crash order safe, and moves to B's store when
 Mandate ships one.
+
+## Decision (2026-10-14)
+
+A. `approve` writes the Mandate approval and an approval event log in the state directory;
+`resume` records `ApprovedDecisionRecorded` under the Suspension lock before it acts; the CLI
+configures Mandate from a host-trusted file behind an explicit flag, over Mandate's doubles until
+Mandate ships a policy adapter. The flag and the log go when Mandate records approvals itself.
