@@ -6,6 +6,24 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- Workflow definitions (`b10x_loom_executor::workflow`, re-exported by the SDK): a host defines a
+  workflow over one protocol as an ordered list of steps, the new `loom.workflow` domain
+  (`ess/domains/workflow.yaml`). A deterministic step names one action and literal arguments and
+  is proposed without a model; a judgement step names the actions a model may choose among and
+  instructions, and runs the governed loop narrowed to those of them the host's own narrowing admits (a step never
+  widens it); a step may wait on a
+  frontier claim (`when`). `WorkflowExecutor` implements Commission's `AgentExecutor`: it takes
+  the first step after the last performed one whose `when` holds, ends the call
+  `NeedsHumanJudgment` naming the step when the frontier does not list its action, and never
+  skips ahead on its own. `RecordingEffects` wraps the host's effect port so the workflow advances
+  past a step only once its request was `Performed`. `workflow::load` reads a YAML definition and
+  refuses, naming the step, an action outside its protocol, a repeated step name, a step name with surrounding whitespace or a judgement
+  step with no action. Commission still revalidates every proposal and Canon decides admission and
+  completion. `ProtocolEntry::actions` lists a protocol's actions for that check.
+  `b10x-loom-executor` now depends on `serde_yaml_ng`. No break.
+
 ## [0.21.0] - 2026-10-14
 
 Loom 0.21.0 lets a bugfix show its regression test failing first, and clears approvals through
