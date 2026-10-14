@@ -93,7 +93,10 @@ fn adversary_a_reordered_and_duplicated_log_does_not_replay_a_consumed_approval(
     assert_eq!(crashed.suspension_state(), Some(SuspensionState::Pending));
     let second = resume_with(&scratch, &crashed, Some(&host), Vec::new());
     assert_eq!(
-        (second.status.code(), scratch.files(&crashed.state, "merge-")),
+        (
+            second.status.code(),
+            scratch.files(&crashed.state, "merge-")
+        ),
         (Some(NOT_GRANTED), 0),
         "a consumed approval cleared again over a reordered, duplicated log\n{}",
         shown(&second)

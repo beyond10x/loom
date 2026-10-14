@@ -744,11 +744,14 @@ fn locked_packages() -> BTreeMap<String, BTreeSet<String>> {
 }
 
 /// Mandate is linked by `b10x-loom-mandate` alone: no other package of the lock depends on a
-/// Mandate crate, Commission included, and only `b10x-loom-cli` depends on `b10x-loom-mandate`
-/// (`approve --mandate` and `resume --mandate`, `story:mandate-approval-on-resume`), so the SDK and
-/// every other crate stay without it; and what it links is closed over Mandate's pure crates and
-/// serde, so no token, network or identity crate (which would hold or fetch a credential) comes
-/// with it. The provider's own source opens no file, environment variable, process or socket.
+/// Mandate crate directly, Commission included. Over the transitive closure of `Cargo.lock`, the
+/// packages that reach `b10x-loom-mandate` or a Mandate crate are exactly `b10x-loom-cli`
+/// (`approve --mandate` and `resume --mandate`, `story:mandate-approval-on-resume`) and
+/// `loom-docs`, the documentation tool that links the command line for its help text, so the SDK
+/// and every other crate stay without it, through the command line or otherwise. What it links is
+/// closed over Mandate's pure crates and serde, so no token, network or identity crate (which
+/// would hold or fetch a credential) comes with it. The provider's own source, every file under
+/// `src/` however deep, opens no file, environment variable, process or socket.
 #[test]
 fn security_mandate_is_linked_by_one_crate_and_reads_no_credential() {
     let packages = locked_packages();
@@ -757,15 +760,37 @@ fn security_mandate_is_linked_by_one_crate_and_reads_no_credential() {
         if package == "b10x-loom-mandate" || is_mandate(package) {
             continue;
         }
-        let consumer = package == "b10x-loom-cli";
         let linked: Vec<&String> = dependencies
             .iter()
-            .filter(|dependency| {
-                is_mandate(dependency) || (*dependency == "b10x-loom-mandate" && !consumer)
-            })
+            .filter(|dependency| is_mandate(dependency))
             .collect();
         assert!(linked.is_empty(), "{package} links {linked:?}");
     }
+    let reaches_mandate = |name: &str| is_mandate(name) || name == "b10x-loom-mandate";
+    let mut reaching: BTreeSet<String> = BTreeSet::new();
+    loop {
+        let before = reaching.len();
+        for (package, dependencies) in &packages {
+            if !reaches_mandate(package)
+                && dependencies
+                    .iter()
+                    .any(|dependency| reaches_mandate(dependency) || reaching.contains(dependency))
+            {
+                reaching.insert(package.clone());
+            }
+        }
+        if reaching.len() == before {
+            break;
+        }
+    }
+    let consumers: BTreeSet<String> = ["b10x-loom-cli", "loom-docs"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(
+        reaching, consumers,
+        "the packages reaching Mandate, directly or through another package"
+    );
 
     let mut reached = BTreeSet::new();
     let mut pending: Vec<String> = packages["b10x-loom-mandate"]
@@ -812,14 +837,23 @@ fn security_mandate_is_linked_by_one_crate_and_reads_no_credential() {
         );
     }
 
-    // Every source file of the crate, `src/approval.rs` included: the approval log is the command
-    // line's to keep, and this crate opens nothing.
+    // Every source file of the crate, in every directory under `src/`, `src/approval.rs`
+    // included: the approval log is the command line's to keep, and this crate opens nothing.
     let sources = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut files: Vec<PathBuf> = std::fs::read_dir(&sources)
-        .unwrap_or_else(|error| panic!("{}: {error}", sources.display()))
-        .map(|entry| entry.unwrap().path())
-        .filter(|path| path.extension().is_some_and(|extension| extension == "rs"))
-        .collect();
+    let mut files: Vec<PathBuf> = Vec::new();
+    let mut directories = vec![sources];
+    while let Some(directory) = directories.pop() {
+        for entry in std::fs::read_dir(&directory)
+            .unwrap_or_else(|error| panic!("{}: {error}", directory.display()))
+        {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                directories.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                files.push(path);
+            }
+        }
+    }
     files.sort();
     assert!(
         files.iter().any(|path| path.ends_with("lib.rs")),

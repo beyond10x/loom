@@ -388,8 +388,8 @@ fn security_an_approval_is_bound_to_its_commission_however_its_id_is_written() {
 
 /// The packages of the workspace's `Cargo.lock`, each with its direct dependencies' names.
 fn locked_packages(lock: &Path) -> BTreeMap<String, BTreeSet<String>> {
-    let text = std::fs::read_to_string(lock)
-        .unwrap_or_else(|error| panic!("{}: {error}", lock.display()));
+    let text =
+        std::fs::read_to_string(lock).unwrap_or_else(|error| panic!("{}: {error}", lock.display()));
     let mut packages: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for block in text.split("[[package]]").skip(1) {
         let name = block

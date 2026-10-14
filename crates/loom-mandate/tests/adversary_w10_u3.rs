@@ -274,8 +274,7 @@ fn adversary_no_runtime_library_reaches_mandate_through_the_command_line() {
     let unexpected: Vec<&String> = reaches
         .iter()
         .filter(|package| {
-            !is_mandate(package)
-                && !matches!(package.as_str(), "b10x-loom-cli" | "loom-docs")
+            !is_mandate(package) && !matches!(package.as_str(), "b10x-loom-cli" | "loom-docs")
         })
         .collect();
     assert!(
