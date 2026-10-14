@@ -2,11 +2,13 @@
 format: aep.planning-md/3
 id: decision-blocker:regression-test-selection
 kind: decision-blocker
-status: open
+status: cleared
 title: Nobody has decided how a bug-fix run shows its test command ran the written regression test
 relations:
 - blocks: story:regression-evidence-integrity
-revision: 1
+revision: 3
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-14T10:17:40Z", actor: "human:timo", revision: 3}
 ---
 ## Question
 
@@ -33,3 +35,7 @@ Recommendation: A.
 
 The first acceptance line of story:regression-evidence-integrity. Its second line (the governor
 refuses a record whose `observed_at` differs from its cited observation) needs no answer.
+
+## Decision (2026-10-14)
+
+A. The host names its regression-test command: `run --regression-test-command <cmd>`, with a `{path}` placeholder the slice fills with each path the run's `tests.write` committed. Only that command's result is submitted as `regression_test_result`; a host that gives no such command gets no regression result, and `red_first.required` stays open for it. The flag and its field are optional, so a run without them behaves as before apart from that.
