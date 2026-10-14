@@ -539,16 +539,18 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   carried across a resume), the executor runs once per test path those writes committed, each
   its own observation (`TestRun::regressions`, `executor::REGRESSION_RUN_SOURCE`), never from
   the suite; without the command none, so `red_first.required` stays open
-  (`crates/loom-intake-slice/tests/regression_command.rs`); a path written with what it already
-  held is no committed test path; and an
+  (`crates/loom-intake-slice/tests/regression_command.rs`); a path whose bytes at the run equal
+  its bytes before the run's first write to it (written with what it held, or written and then
+  written back) is no committed test path; and an
   `implementation_change` about the new `HEAD` for every `implementation.edit` that committed.
   Each record carries `observed_at`, the host clock's instant of its observation
   (`LocalExecutor::with_clock`, `run::run_with_clock`; `clock::SystemClock` by default), and the
   verifier's producer; the governor gives Canon `EvidenceData.producer`, never a producer in the
   facts (it removes a facts `producer` before Canon reads the record), and reads no clock. It
   takes a record's `observed_at` only as the instant of the observation the record cites and
-  that it received; otherwise it refuses the record and keeps nothing of it (a record without
-  `observed_at` is not checked), and
+  that it received: a record citing an observation it never received, with or without an
+  `observed_at`, or with any `observed_at` member other than that instant, is refused and nothing
+  of it is kept, and
   `CanonGovernor::check_evidence` names the record (`EvidenceRefusal`;
   `crates/loom-governor/tests/evidence_instant.rs`). A
   bugfix that writes its test, runs it red and then edits discharges `red_first.required`, and one
