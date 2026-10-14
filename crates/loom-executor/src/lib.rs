@@ -38,6 +38,7 @@ pub mod arguments;
 pub mod compaction;
 pub mod credentials;
 pub mod harness;
+pub mod metering;
 pub mod projection;
 pub mod recovery;
 pub mod revalidation;
@@ -66,6 +67,7 @@ use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
 
 pub use arguments::{ArgumentContext, ArgumentGenerator, EmptyObjectArguments, OverruleRefused};
+pub use metering::{MeteredExecutor, MeteredModelPort, RunMeter};
 pub use selection::{
     ActionSelector, Confidence, FirstAdmissibleSelector, HybridSelector, InvalidThreshold,
     ReasoningModelSelector, SelectorError,

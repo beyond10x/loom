@@ -2,7 +2,10 @@
 
 All notable changes to Loom are recorded here. Loom releases from source at bare-version tags such
 as `0.1.0`; nothing is on a registry, and consumers pin a tag (`tag = "0.1.0"`). Changes collect
-under **Unreleased** until the next release.
+under **Unreleased** until the next release. Every release's entry names what breaks for a
+consumer in a `Breaking:` sentence; `loom-xtask release-check` refuses an entry without one, and
+refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_ports.rs` or
+`docs/contracts/run-events-v1.json` changed since the previous tag.
 
 ## [Unreleased]
 
@@ -10,19 +13,40 @@ under **Unreleased** until the next release.
 
 - Workflow definitions (`b10x_loom_executor::workflow`, re-exported by the SDK): a host defines a
   workflow over one protocol as an ordered list of steps, the new `loom.workflow` domain
-  (`ess/domains/workflow.yaml`). A deterministic step names one action and literal arguments and
-  is proposed without a model; a judgement step names the actions a model may choose among and
-  instructions, and runs the governed loop narrowed to those of them the host's own narrowing admits (a step never
-  widens it); a step may wait on a
-  frontier claim (`when`). `WorkflowExecutor` implements Commission's `AgentExecutor`: it takes
-  the first step after the last performed one whose `when` holds, ends the call
-  `NeedsHumanJudgment` naming the step when the frontier does not list its action, and never
-  skips ahead on its own. `RecordingEffects` wraps the host's effect port so the workflow advances
-  past a step only once its request was `Performed`. `workflow::load` reads a YAML definition and
-  refuses, naming the step, an action outside its protocol, a repeated step name, a step name with surrounding whitespace or a judgement
-  step with no action. Commission still revalidates every proposal and Canon decides admission and
-  completion. `ProtocolEntry::actions` lists a protocol's actions for that check.
-  `b10x-loom-executor` now depends on `serde_yaml_ng`. No break.
+  (`ess/domains/workflow.yaml`). A deterministic step names one action and literal arguments and is
+  proposed without a model; a judgement step names the actions a model may choose among and
+  instructions, and runs the governed loop narrowed to those of them the host's own narrowing admits
+  (a step never widens it); a step may wait on a frontier claim (`when`). `WorkflowExecutor`
+  implements Commission's `AgentExecutor`: it takes the first step after the last performed one
+  whose `when` holds, ends the call `NeedsHumanJudgment` naming the step when the frontier does not
+  list its action, and never skips ahead on its own. `RecordingEffects` wraps the host's effect port
+  so the workflow advances past a step only once its request was `Performed`. `workflow::load` reads
+  a YAML definition and refuses, naming the step, an action outside its protocol, a repeated step
+  name, a step name with surrounding whitespace or a judgement step with no action. Commission still
+  revalidates every proposal and Canon decides admission and completion. `ProtocolEntry::actions`
+  lists a protocol's actions for that check. `b10x-loom-executor` now depends on `serde_yaml_ng`. No
+  break.
+- A per-run model usage report, counted at the `ModelPort` boundary. `RunMeter`,
+  `MeteredModelPort` and `MeteredExecutor` (`b10x_loom_executor::metering`, re-exported by
+  `b10x-loom-sdk`) count every `turn` of a Commission run, whoever makes it (the loop, the
+  reasoning-model selector, an argument generator, compaction, a forked port), a failed turn
+  included, and `RunMeter::report` returns the generated `loom.metering.RunUsageReport`: the
+  model calls, the input, output and cached input tokens the provider reported and the cost at the
+  run's rate card, in total and per step. A step is one executor call, counted from 1; calls made
+  outside any executor call are step 0. A cost no rate card priced is absent, never zero. New ESS
+  domain `loom.metering` (`ess/domains/metering.yaml`). No break for callers: the types are new and
+  nothing existing changes.
+
+### Changed
+
+- `loom-xtask release-check` refuses a release whose `CHANGELOG.md` entry has no `Breaking:`
+  sentence, and one that says `Breaking: none.` while a stable surface (the pinned consumer
+  `consumers/pinned/`, the host-port witness `crates/loom-sdk/tests/host_ports.rs` or the
+  run-events contract `docs/contracts/run-events-v1.json`) differs between the previous
+  bare-version tag and the tag, naming the entry and the changed files. With no previous tag only
+  the sentence is required. `release.yml` checks out the full history and its tags for the diff.
+  Breaking: none for consumers of the crates or the command; a release author now writes a
+  `Breaking:` sentence in every entry.
 
 ## [0.21.0] - 2026-10-14
 

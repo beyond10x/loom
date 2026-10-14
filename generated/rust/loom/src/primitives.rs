@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest c609715c66a9f4b846295d1ce2efb0b0fc2930d04eddbe2614231f390eca6514
-// contract digest 80154eb04deb81857ab390917c869e0ebf32a4d9a025fd65e81597c4092bbbe1
+// model digest 62fb1f69ac9f8911aee06b655bb95b31116723ead76349d3ddf6af28447267ba
+// contract digest e0c261865d168e4e8ae993fb6ca2f5f57a3df017b1198395a893d80664035495
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! How the specification's primitives are spelled in this workspace.
