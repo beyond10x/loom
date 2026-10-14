@@ -10,7 +10,7 @@ relations:
 - depends_on: story:dw-read-fanout
 - depends_on: story:dw-typed-step-outputs
 - depends_on: story:dw-bugfix-baseline
-revision: 3
+revision: 4
 ---
 ## Outcome
 
@@ -109,3 +109,12 @@ effect input; `ActionBindingKey` is unchanged.
 
 Live call-record and trace adapters (Connectors'); writes (`traffic.shift`, `release.rollback`);
 changes to `incident.response/1`; the command line.
+
+## Upstream reads
+
+Connectors scoped the call-record and trace reads as two stories of its next wave (`story:incident-call-lookup`, `story:incident-call-traces` in beyond10x/connectors):
+
+- A call lookup is two typed reads, an SQL read profile with a keyset cursor and a Loki line profile, which the workflow joins on the field each profile declares as the call id.
+- Traces are a separate Loki read from a configured trace profile.
+- Table, query text, record fields, call-id field, trace selector and masking are host-configured read profiles the operator writes in local configuration; Connectors carries only the generic profile shape, its validation and synthetic fixtures.
+- This story's fixtures hold the call and trace shapes on each profile's declared output fields and its declared call-id field, never on a platform's column names. The live call and trace reads wait for that Connectors release.
