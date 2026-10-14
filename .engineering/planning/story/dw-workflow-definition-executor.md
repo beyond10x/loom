@@ -2,13 +2,16 @@
 format: aep.planning-md/3
 id: story:dw-workflow-definition-executor
 kind: story
-status: draft
+status: active
 title: A Loom workflow definition runs its deterministic steps without a model and asks one only in judgement steps
 relations:
 - decomposes: epic:deterministic-workflows
 - serves: vision:governed-autonomy
 - depends_on: story:dw-run-model-meter
-revision: 1
+revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-14T10:13:47Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-10-14T10:14:20Z", actor: "human:timo", revision: 3}
 ---
 ## Outcome
 
