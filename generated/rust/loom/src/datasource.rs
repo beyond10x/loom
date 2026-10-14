@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 34628bdc5bd76549c594305d4c4f4b375c9a06c11e6df7ffa20f53008a3b38a8
-// contract digest ab6d91c4dd1beaa1b4a0d32129a97169409c2a72ad7e7320eb3c90eb423bf277
+// model digest c609715c66a9f4b846295d1ce2efb0b0fc2930d04eddbe2614231f390eca6514
+// contract digest 80154eb04deb81857ab390917c869e0ebf32a4d9a025fd65e81597c4092bbbe1
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Data source — `loom.datasource`.
