@@ -508,9 +508,10 @@ position is kept in process (`decision-blocker:dw-run-state-across-restart`).
 A step declares typed `outputs` (`story:dw-typed-step-outputs`; `loom.workflow.StepOutput`: a
 `name`, a JSON `pointer` into its `Performed` report and a `loom.workflow.OutputType`), and a later
 deterministic step's `Json` arguments name one at any position as `{"$step": <step>, "$output":
-<name>}`; ESS types the declaration, and the reference stays inside the `Json` arguments. When the
-executor sees a step performed it takes each output from that report and checks its type, keeping
-them in process (`WorkflowExecutor::outputs`); a reference is resolved when its step is proposed,
+<name>}`; ESS types the declaration, and the reference stays inside the `Json` arguments. When
+`RecordingEffects` records a step's request `Performed`, each output is taken from that report
+and its type checked (a run the governor completes right after it still has them), kept
+in process (`WorkflowExecutor::outputs`); a reference is resolved when its step is proposed,
 and the resolved arguments are the proposal's, which Commission revalidates like any other. No
 model supplies an output. An output absent from the report (a member named twice included) or of
 another type ends that call and every later one `NeedsHumanJudgment`, naming the step and the

@@ -36,8 +36,9 @@
 //!
 //! A step may declare typed outputs (`story:dw-typed-step-outputs`): each a [`StepOutput`], a
 //! name, a JSON pointer (RFC 6901) into the report of the step's `Performed` effect and an
-//! [`OutputType`]. When the executor sees the step performed it takes every output from that
-//! report and checks its type, and keeps them for the run, in process
+//! [`OutputType`]. When [`RecordingEffects`] records the step's request `Performed`, every output
+//! is taken from that report and its type checked, so a run that ends right after the effect
+//! still has them; they are kept for the run, in process
 //! ([`WorkflowExecutor::outputs`]). A later deterministic step's arguments may hold, at any
 //! position, `{"$step": <step>, "$output": <name>}`; the reference is resolved when the step is
 //! proposed, and the resolved arguments are the proposal's, revalidated by Commission like any
@@ -375,20 +376,81 @@ pub struct RecordedEffect {
 /// The effects a [`RecordingEffects`] recorded, shared with the [`WorkflowExecutor`] that reads
 /// them. Clones share one record.
 #[derive(Debug, Clone, Default)]
-pub struct EffectLog(Arc<Mutex<Vec<RecordedEffect>>>);
+pub struct EffectLog(Arc<Mutex<Recorded>>);
+
+/// What a log holds: the effects recorded, and the step a workflow proposed last and expects
+/// performed, whose outputs are taken when it is.
+#[derive(Debug, Default)]
+struct Recorded {
+    records: Vec<RecordedEffect>,
+    expected: Option<Expected>,
+}
+
+/// A step a [`WorkflowExecutor`] proposed: the executor's position, the step and its index, and
+/// the proposal. When the log records that proposal's request `Performed`, the step's outputs are
+/// taken from the report into that position, so a run that ends right after the effect (the
+/// governor completed the case) still has them, type-checked.
+#[derive(Debug)]
+struct Expected {
+    position: Arc<Mutex<Position>>,
+    index: usize,
+    step: WorkflowStep,
+    proposal: ExecutorOutcomeProposedAction,
+}
 
 impl EffectLog {
     /// Every effect recorded so far, in the order recorded.
     pub fn records(&self) -> Vec<RecordedEffect> {
-        self.lock().clone()
+        self.lock().records.clone()
     }
 
-    fn lock(&self) -> MutexGuard<'_, Vec<RecordedEffect>> {
+    fn lock(&self) -> MutexGuard<'_, Recorded> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn len(&self) -> usize {
-        self.lock().len()
+        self.lock().records.len()
+    }
+
+    /// Expects `expected`'s proposal next, replacing any earlier expectation.
+    fn expect(&self, expected: Expected) {
+        self.lock().expected = Some(expected);
+    }
+
+    /// Records `request` and `outcome`; when it is the expected proposal, `Performed`, settles
+    /// that step in the executor's position. The log is not held while the position is.
+    fn record(&self, request: &ActionRequestData, outcome: &EffectOutcome) {
+        let expected = {
+            let mut log = self.lock();
+            log.records.push(RecordedEffect {
+                request: request.clone(),
+                outcome: outcome.clone(),
+            });
+            let matches = log.expected.as_ref().is_some_and(|expected| {
+                matches!(outcome, EffectOutcome::Performed(_))
+                    && expected.proposal.action == request.action
+                    && expected.proposal.arguments == request.arguments
+            });
+            if matches { log.expected.take() } else { None }
+        };
+        if let (Some(expected), EffectOutcome::Performed(performed)) = (expected, outcome) {
+            let mut position = expected
+                .position
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if position
+                .outstanding
+                .as_ref()
+                .is_some_and(|outstanding| outstanding.step == expected.index)
+            {
+                settle(
+                    &mut position,
+                    expected.index,
+                    &expected.step,
+                    &performed.report,
+                );
+            }
+        }
     }
 
     /// The report of the first record from position `from` on that was `proposal`'s request,
@@ -399,6 +461,7 @@ impl EffectLog {
         proposal: &ExecutorOutcomeProposedAction,
     ) -> Option<CommissionValue> {
         self.lock()
+            .records
             .iter()
             .skip(from)
             .find_map(|recorded| match &recorded.outcome {
@@ -452,10 +515,7 @@ impl<E: EffectPort> EffectPort for RecordingEffects<E> {
         request: &AdmittedRequest,
     ) -> Result<EffectOutcome, EffectError> {
         let outcome = self.inner.invoke(commission, request)?;
-        self.log.lock().push(RecordedEffect {
-            request: request.data().clone(),
-            outcome: outcome.clone(),
-        });
+        self.log.record(request.data(), &outcome);
         Ok(outcome)
     }
 }
@@ -500,7 +560,7 @@ pub struct WorkflowExecutor<'l, S, G, V, M> {
     session: SessionData,
     definition: WorkflowDefinition,
     effects: EffectLog,
-    position: Mutex<Position>,
+    position: Arc<Mutex<Position>>,
     meter: Option<RunMeter>,
 }
 
@@ -525,7 +585,7 @@ impl<'l, S, G, V, M> WorkflowExecutor<'l, S, G, V, M> {
             session,
             definition,
             effects,
-            position: Mutex::default(),
+            position: Arc::default(),
             meter: None,
         }
     }
@@ -581,23 +641,17 @@ where
         frontier: &Frontier<frontier_state::Issued>,
     ) -> ExecutorOutcome {
         let mut position = self.position();
-        if let Some(outstanding) = position.outstanding.take()
+        // The log settles the outstanding step when it records it performed; this settles one it
+        // recorded otherwise (an expectation another executor on the same log replaced).
+        if let Some(outstanding) = position.outstanding.as_ref()
             && let Some(report) = self
                 .effects
                 .performed_since(outstanding.recorded, &outstanding.proposal)
         {
-            position.performed = Some(outstanding.step);
-            let step = &self.definition.steps[outstanding.step];
-            match produce(step, &report) {
-                Ok(outputs) => position.outputs.extend(outputs),
-                Err(unproduced) => {
-                    position.unproduced = Some(Unproduced {
-                        step: outstanding.step,
-                        ..unproduced
-                    });
-                }
-            }
+            let index = outstanding.step;
+            settle(&mut position, index, &self.definition.steps[index], &report);
         }
+        position.outstanding = None;
         if frontier.data().case_id != commission.data().case_id {
             return ExecutorOutcome::NoUsefulAction(Unit(true));
         }
@@ -684,6 +738,12 @@ where
                     step: index,
                     proposal: proposal.clone(),
                     recorded,
+                });
+                self.effects.expect(Expected {
+                    position: Arc::clone(&self.position),
+                    index,
+                    step: step.clone(),
+                    proposal: proposal.clone(),
                 });
                 ExecutorOutcome::ProposedAction(proposal)
             }
@@ -816,6 +876,22 @@ fn commission_value(value: &LoomValue) -> CommissionValue {
                 .map(|(key, value)| (key.clone(), commission_value(value)))
                 .collect(),
         ),
+    }
+}
+
+/// `step`, at `index`, performed with `report`: the position advances past it, and its outputs
+/// are taken, or the first it could not produce is kept, ending every later call.
+fn settle(position: &mut Position, index: usize, step: &WorkflowStep, report: &CommissionValue) {
+    position.outstanding = None;
+    position.performed = Some(index);
+    match produce(step, report) {
+        Ok(outputs) => position.outputs.extend(outputs),
+        Err(unproduced) => {
+            position.unproduced = Some(Unproduced {
+                step: index,
+                ..unproduced
+            });
+        }
     }
 }
 
