@@ -1104,13 +1104,16 @@ fn submit(
     kind: &str,
     facts: &Value,
 ) -> Result<(), EvidenceError> {
+    let evidence_id = EvidenceId(ids.next());
+    let observation = ObservationId(ids.next());
+    observe_at(governor, &observation, facts);
     let evidence = EvidenceData {
-        evidence_id: EvidenceId(ids.next()),
+        evidence_id,
         case_id: case.clone(),
         kind: kind.to_owned(),
         subject_revision: governor.current_revision(case).expect("held"),
         producer: String::new(),
-        observation_ids: vec![ObservationId(ids.next())],
+        observation_ids: vec![observation],
         facts: json::parse(&facts.to_string()).expect("JSON"),
         provenance: json::Value::Null,
     };
@@ -1188,5 +1191,34 @@ fn with_inputs(case: &mut serde_json::Value) {
             .map(|(input, value)| (input.to_owned(), serde_json::Value::from(value)))
             .collect();
         case["inputs"] = serde_json::Value::Object(inputs);
+    }
+}
+
+/// Delivers `observation` at `record`'s `observed_at`, as a host does before it submits the record:
+/// the governor takes a record's `observed_at` only as the instant of the observation it cites.
+fn observe_at(
+    governor: &impl b10x_loom_commission::ports::evidence::ObservationPort,
+    observation: &ObservationId,
+    record: &Value,
+) {
+    if let Some(at) = record["observed_at"].as_str() {
+        governor
+            .observe(
+                b10x_loom_commission::model::responsibility::Observation::new(
+                    b10x_loom_commission::model::responsibility::ObservationData {
+                        observation_id: observation.clone(),
+                        source: "host/fixture".to_owned(),
+                        subject: record["subject"]
+                            .as_str()
+                            .unwrap_or("implementation")
+                            .to_owned(),
+                        observed_at: b10x_loom_commission::model::primitives::Timestamp(
+                            at.to_owned(),
+                        ),
+                        payload: json::Value::Null,
+                    },
+                ),
+            )
+            .expect("the governor keeps the observation");
     }
 }

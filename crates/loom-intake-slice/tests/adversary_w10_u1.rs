@@ -13,17 +13,17 @@ use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use b10x_loom_commission::model::json as cjson;
-use b10x_loom_commission::model::primitives::Uuid;
+use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
-    EvidenceData, EvidenceId, ExecutorOutcomeProposedAction, FrontierData, ObservationId,
-    ProposedActionArguments, Truth,
+    EvidenceData, EvidenceId, ExecutorOutcomeProposedAction, FrontierData, Observation,
+    ObservationData, ObservationId, ProposedActionArguments, Truth,
 };
-use b10x_loom_commission::ports::evidence::submit_evidence;
+use b10x_loom_commission::ports::evidence::{ObservationPort as _, submit_evidence};
 use b10x_loom_commission::ports::governor::Governor as _;
 use b10x_loom_intake_slice::case::{self, CaseInputs as RunInputs, ChangeKind, Risk};
 use b10x_loom_intake_slice::clock::Clock;
 use b10x_loom_intake_slice::executor::{
-    CLOCK_WAIT, ExecuteError, LocalExecutor, TestCommand, UnconfinedRunner,
+    CLOCK_WAIT, ExecuteError, LocalExecutor, RegressionTestCommand, TestCommand, UnconfinedRunner,
 };
 use b10x_loom_intake_slice::verifier::TestResultVerifier;
 use chrono::{DateTime, FixedOffset, TimeDelta};
@@ -92,6 +92,16 @@ fn submitted_with_facts_producer(producer: Option<serde_json::Value>) -> Truth {
     if let Some(producer) = producer {
         facts["producer"] = producer;
     }
+    // The governor takes a record's `observed_at` only as its cited observation's instant.
+    governor
+        .observe(Observation::new(ObservationData {
+            observation_id: ObservationId(Uuid("00000000-0000-8000-8000-000000000002".into())),
+            source: "host/ci".into(),
+            subject: "implementation".into(),
+            observed_at: Timestamp("2026-10-03T13:20:00Z".into()),
+            payload: cjson::Value::Null,
+        }))
+        .expect("the observation is kept");
     submit_evidence(
         &governor,
         PRODUCER,
@@ -219,9 +229,10 @@ fn adversary_an_edit_before_the_regression_test_is_never_shown_first_by_a_clock_
 
 /// Canon orders records in whole seconds, so two observations in one second order `unknown`. The
 /// executor records them in different seconds: on a clock that stays inside one second until the
-/// executor waits on it, a bugfix's regression test run red and the edit right after it are
-/// observed in consecutive seconds, the edit later, so `red_first.required` is discharged, and
-/// the executor waited less than a second for it.
+/// executor waits on it, a bugfix's suite run, its regression test run red (the host's
+/// regression-test command on the written file) and the edit right after it are observed in
+/// consecutive seconds, in that order, so `red_first.required` is discharged, and the executor
+/// waited only for each second to pass: under two seconds for the two waits.
 #[test]
 fn adversary_two_observations_within_one_second_are_recorded_in_different_seconds() {
     let fixture = Fixture::new("one-second");
@@ -233,7 +244,9 @@ fn adversary_two_observations_within_one_second_are_recorded_in_different_second
         &governor,
         case.clone(),
         fixture.workspace(),
-        TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
+        TestCommand::new("grep", ["-qx", "fixed", "check.txt"]).with_regression(
+            RegressionTestCommand::new("grep -qx -f {path} check.txt").expect("a command"),
+        ),
     )
     .with_runner(Arc::new(UnconfinedRunner))
     .with_clock(&clock);
@@ -264,13 +277,18 @@ fn adversary_two_observations_within_one_second_are_recorded_in_different_second
         .collect();
     assert_eq!(
         instants,
-        ["2026-10-03T13:20:00Z", "2026-10-03T13:20:01Z"],
-        "the run and the edit read one second; the edit is recorded in the next"
+        [
+            "2026-10-03T13:20:00Z",
+            "2026-10-03T13:20:01Z",
+            "2026-10-03T13:20:02Z"
+        ],
+        "the suite, the regression test and the edit read one second; each is recorded in the \
+         next"
     );
     let waited = clock.waited();
     assert!(
-        waited > Duration::ZERO && waited < Duration::from_secs(1),
-        "the executor waited only for the second to pass: {waited:?}"
+        waited > Duration::ZERO && waited < Duration::from_secs(2),
+        "the executor waited only for each second to pass: {waited:?}"
     );
     let records: Vec<(String, String)> = governor
         .evidence(&case)
@@ -284,11 +302,11 @@ fn adversary_two_observations_within_one_second_are_recorded_in_different_second
             ("test_result".to_owned(), "2026-10-03T13:20:00Z".to_owned()),
             (
                 "regression_test_result".to_owned(),
-                "2026-10-03T13:20:00Z".to_owned()
+                "2026-10-03T13:20:01Z".to_owned()
             ),
             (
                 "implementation_change".to_owned(),
-                "2026-10-03T13:20:01Z".to_owned()
+                "2026-10-03T13:20:02Z".to_owned()
             ),
         ]
     );

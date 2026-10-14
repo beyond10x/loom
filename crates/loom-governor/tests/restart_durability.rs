@@ -479,13 +479,29 @@ fn submit<S: FallibleCaseStore>(
         Some(json::Value::Text(kind)) => kind.clone(),
         _ => panic!("facts name a kind"),
     };
+    let evidence_id = EvidenceId(ids.next());
+    let observation = ObservationId(ids.next());
+    // The governor takes a record's `observed_at` only as its cited observation's instant.
+    if let Some(json::Value::Text(at)) = facts.member("observed_at") {
+        b10x_loom_commission::ports::evidence::ObservationPort::observe(
+            governor,
+            b10x_loom_commission::model::responsibility::Observation::new(ObservationData {
+                observation_id: observation.clone(),
+                source: "host/fixture".to_owned(),
+                subject: "implementation".to_owned(),
+                observed_at: Timestamp(at.clone()),
+                payload: json::Value::Null,
+            }),
+        )
+        .expect("the governor keeps the observation");
+    }
     let evidence = EvidenceData {
-        evidence_id: EvidenceId(ids.next()),
+        evidence_id,
         case_id: case.clone(),
         kind,
         subject_revision: governor.current_revision(case).expect("current revision"),
         producer: String::new(),
-        observation_ids: vec![ObservationId(ids.next())],
+        observation_ids: vec![observation],
         facts: facts.clone(),
         provenance: json::parse(r#"{"source":"restart_durability","attempt":1.0}"#).unwrap(),
     };

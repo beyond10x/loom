@@ -169,19 +169,31 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> LocalEffects<'a, 'o, S, T>
         self.console.write(|out| print_effect(out, &report))?;
         let evidence = match self.verifier.verify(&report) {
             Ok(Some(evidence)) => {
-                // What the governor holds, not what the report says: every record citing the
-                // observation of the one the verifier named, in the order received.
+                // What the governor holds, not what the report says: every record citing only
+                // the observation of the one the verifier named or of a regression-test run that
+                // followed it, in the order received.
                 let held = self.governor.evidence(&self.case)?;
-                let cited = held
+                let mut cited = held
                     .iter()
                     .find(|record| record.evidence_id == evidence)
                     .map(|record| record.observation_ids.clone())
                     .unwrap_or_default();
+                if let Report::TestsRun(run) = &report {
+                    cited.extend(
+                        run.regressions()
+                            .iter()
+                            .map(|regression| regression.run().observation().clone()),
+                    );
+                }
                 let lines: Vec<String> = held
                     .iter()
                     .filter(|record| {
                         record.evidence_id == evidence
-                            || (!cited.is_empty() && record.observation_ids == cited)
+                            || (!record.observation_ids.is_empty()
+                                && record
+                                    .observation_ids
+                                    .iter()
+                                    .all(|observation| cited.contains(observation)))
                     })
                     .map(|record| {
                         let kind = printable(&record.kind);

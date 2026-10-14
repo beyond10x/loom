@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use b10x_loom_commission::runtime::{ResumeError, ResumeRefusal};
 pub use b10x_loom_intake_slice::case::{CaseInputs, ChangeKind, Risk};
 pub use b10x_loom_intake_slice::context_metrics::ContextPolicy;
+pub use b10x_loom_intake_slice::executor::{RegressionTestCommand, RegressionTestCommandError};
 use b10x_loom_intake_slice::grant::ApproveRefusal;
 use b10x_loom_intake_slice::run::{ApprovalGate, SliceRun, StopReason};
 pub use b10x_loom_intake_slice::test_paths::{TestPaths, TestPathsError};
@@ -446,6 +447,13 @@ pub struct RunArgs {
     /// **/*.test.* and **/*.spec.*.
     #[arg(long = "test-path", value_name = "GLOB", value_parser = test_path_pattern)]
     pub test_path: Vec<String>,
+    /// The regression-test command, run in the workspace without a shell and split at white
+    /// space, with {path} in at least one word. On a bugfix, after each tests.run that follows a
+    /// tests.write that committed, it runs once per test path those writes committed, {path}
+    /// filled, and only its result is a regression_test_result. Without it no run is one, so a
+    /// bugfix's red_first.required stays open.
+    #[arg(long, value_name = "CMD", value_parser = regression_test_command)]
+    pub regression_test_command: Option<RegressionTestCommand>,
     /// What standard output carries: lines for a person, or one JSON record per line, the last
     /// one the terminal record with the stop reason and the exit status.
     #[arg(long, value_enum, value_name = "FORMAT", default_value_t = Output::Human)]
@@ -486,6 +494,13 @@ impl RunArgs {
 /// `--test-path`'s value, refused unless it is a test-path pattern.
 fn test_path_pattern(value: &str) -> Result<String, TestPathsError> {
     TestPaths::new([value]).map(|_| value.to_owned())
+}
+
+/// `--regression-test-command`'s value, refused unless a word names `{path}`.
+fn regression_test_command(
+    value: &str,
+) -> Result<RegressionTestCommand, RegressionTestCommandError> {
+    RegressionTestCommand::new(value)
 }
 
 /// Protocol catalog management.
@@ -873,6 +888,35 @@ mod tests {
         for refused in ["", "/abs/**", "../x", "a**"] {
             assert!(
                 run(&["--test-path", refused]).is_err(),
+                "`{refused}` is refused"
+            );
+        }
+    }
+
+    /// Without `--regression-test-command` a run has none; with one it keeps the text as given;
+    /// a command naming no `{path}` word is refused.
+    #[test]
+    fn the_regression_test_command_flag_needs_the_path_placeholder() {
+        let run = |extra: &[&str]| {
+            let mut argv = vec!["b10x-loom", "run", "--workspace", "."];
+            argv.extend_from_slice(extra);
+            argv.push("fix tests");
+            Cli::try_parse_from(argv).map(|cli| match cli.command {
+                Command::Run(run) => run.regression_test_command,
+                _ => panic!("run command"),
+            })
+        };
+        assert_eq!(run(&[]).unwrap(), None);
+        assert_eq!(
+            run(&["--regression-test-command", "cargo test --test {path}"])
+                .unwrap()
+                .as_ref()
+                .map(RegressionTestCommand::text),
+            Some("cargo test --test {path}")
+        );
+        for refused in ["", "cargo test", "  "] {
+            assert!(
+                run(&["--regression-test-command", refused]).is_err(),
                 "`{refused}` is refused"
             );
         }
