@@ -13,8 +13,8 @@ under **Unreleased** until the next release.
   `implementation_change` about the new `HEAD`, and on a `bugfix` case every `tests.run` after
   the run's first `tests.write` that committed submits a `regression_test_result` beside its
   `test_result`, with the same result and citing the same observation; a `tests.write` that
-  wrote what the files already held wrote no regression test and does not count. Every record carries
-  `observed_at`, the host clock's instant of its observation, and the verifier's producer. A
+  wrote what the files already held wrote no regression test and does not count. Every record
+  carries `observed_at`, the host clock's instant of its observation, and the verifier's producer. A
   bugfix that writes its regression test, runs it red and then edits now discharges
   `red_first.required`; one that edits before any regression test leaves it open.
 - `b10x-loom run` and `resume` build their governor with `run::slice_governor`, which evaluates
@@ -39,8 +39,10 @@ under **Unreleased** until the next release.
 ### Changed
 
 - The governor gives Canon the trusted producer `submit_evidence` attributed a record to
-  (`EvidenceData.producer`), never a producer the record's facts name; a trusted producer that is
-  not a Canon identifier is given as none. A record's `observed_at` is still read from its facts.
+  (`EvidenceData.producer`), never a producer the record's facts name: a `producer` member of the
+  facts is removed before Canon reads the record, so one Canon cannot read as a principal (a null,
+  a number, an object) no longer refuses it. A trusted producer that is not a Canon identifier is
+  given as none. A record's `observed_at` is still read from its facts.
 - Breaking: the slice's public items that take a governor are generic over its evaluation time,
   `T: EvaluationTime`, defaulting to `NoEvaluationTime`: `LocalExecutor`, `TestResultVerifier`
   and `LocalEffects` gain a defaulted type parameter, and `run::run`, `run::run_with_options`,
