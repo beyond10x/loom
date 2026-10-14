@@ -9,6 +9,19 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+### Added
+
+- A per-run model usage report, counted at the `ModelPort` boundary. `RunMeter`,
+  `MeteredModelPort` and `MeteredExecutor` (`b10x_loom_executor::metering`, re-exported by
+  `b10x-loom-sdk`) count every `turn` of a Commission run, whoever makes it (the loop, the
+  reasoning-model selector, an argument generator, compaction, a forked port), a failed turn
+  included, and `RunMeter::report` returns the generated `loom.metering.RunUsageReport`: the
+  model calls, the input, output and cached input tokens the provider reported and the cost at the
+  run's rate card, in total and per step. A step is one executor call, counted from 1; calls made
+  outside any executor call are step 0. A cost no rate card priced is absent, never zero. New ESS
+  domain `loom.metering` (`ess/domains/metering.yaml`). No break for callers: the types are new and
+  nothing existing changes.
+
 ### Changed
 
 - `loom-xtask release-check` refuses a release whose `CHANGELOG.md` entry has no `Breaking:`
