@@ -18,6 +18,10 @@
 //! declaration it documents ([`run_events`]), in both modes: the page carries pasted output, so it
 //! is not generated, and it fails the run when it leaves out a record kind, a field or the schema
 //! version.
+//!
+//! It writes the V1 contract of that stream, `docs/contracts/run-events-v1.json`
+//! ([`run_events::contract`]), and in check mode compares the committed one with the declaration,
+//! failing on a difference that breaks a reader ([`run_events::differences`]).
 mod cli;
 mod crates;
 mod graph;
@@ -449,21 +453,11 @@ fn ess_outputs(root: &Path, ess: &Path) -> Result<Outputs> {
     Ok(Outputs::from([(ESS_REFERENCE, pages), (ESS_DATA, data)]))
 }
 
-/// Fails unless [`run_events::PAGE`] names everything `intake.events` declares.
-fn check_run_events(root: &Path, ess: &Path) -> Result<()> {
-    let spec = root.join(run_events::SYSTEM);
-    let model: serde_json::Value = serde_json::from_slice(&run(
-        ess,
-        &[
-            "specify".as_ref(),
-            "compile".as_ref(),
-            "--path".as_ref(),
-            spec.as_os_str(),
-            "--format".as_ref(),
-            "json".as_ref(),
-        ],
-    )?)
-    .with_context(|| format!("parsing the compiled ESS model of {}", run_events::SYSTEM))?;
+/// Fails unless [`run_events::PAGE`] names everything `intake.events` declares; then writes the
+/// V1 contract ([`run_events::CONTRACT`]) from the declaration, or, with `check`, compares the
+/// committed one with it, failing on a difference that breaks a reader and naming every one.
+fn run_events_contract(root: &Path, ess: &Path, check: bool) -> Result<()> {
+    let model = compile(ess, &root.join(run_events::SYSTEM))?;
     let page = fs::read_to_string(root.join(run_events::PAGE))
         .with_context(|| format!("{} is missing", run_events::PAGE))?;
     let missing = run_events::problems(&model, &page, b10x_loom_cli::events::SCHEMA_VERSION)?;
@@ -475,6 +469,55 @@ fn check_run_events(root: &Path, ess: &Path) -> Result<()> {
         );
     }
     println!("{}: documents every run event kind", run_events::PAGE);
+
+    let declared = run_events::contract(
+        &model,
+        b10x_loom_cli::EXIT_STATUS,
+        b10x_loom_cli::events::FAILED,
+        b10x_loom_cli::NOTHING_SUSPENDED_AT_GATE,
+        b10x_loom_cli::events::SCHEMA_VERSION,
+    )?;
+    let path = root.join(run_events::CONTRACT);
+    if !check {
+        fs::write(&path, serde_json::to_string_pretty(&declared)? + "\n")
+            .with_context(|| format!("writing {}", run_events::CONTRACT))?;
+        println!("{}: written", run_events::CONTRACT);
+        return Ok(());
+    }
+    let committed: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).with_context(|| {
+            format!(
+                "{} is missing; run `task docs-generate`",
+                run_events::CONTRACT
+            )
+        })?)
+        .with_context(|| format!("parsing {}", run_events::CONTRACT))?;
+    let found = run_events::differences(&committed, &declared);
+    let listed = found
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("; ");
+    if found.iter().any(|difference| difference.breaking) {
+        bail!(
+            "the declared intake.events breaks the V1 contract in {}: {listed}. Within schema \
+             version 1 only an optional field may be added; name the break under `Breaking:` in \
+             CHANGELOG.md and move the schema version, or keep the declaration",
+            run_events::CONTRACT
+        );
+    }
+    if found.is_empty() {
+        println!(
+            "{}: the declared intake.events keeps the V1 contract",
+            run_events::CONTRACT
+        );
+    } else {
+        println!(
+            "{}: the declared intake.events adds to the V1 contract without a break: {listed}; \
+             run `task docs-generate` to record it",
+            run_events::CONTRACT
+        );
+    }
     Ok(())
 }
 
@@ -559,7 +602,7 @@ fn main() -> Result<()> {
                     println!("{relative}: written");
                 }
             }
-            check_run_events(&root, &ess)?;
+            run_events_contract(&root, &ess, check)?;
         }
         Action::Provenance { site, commit } => {
             write_provenance(&site, &commit)?;
