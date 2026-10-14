@@ -34,6 +34,10 @@ Rust code uses it as `loom_sdk`. It re-exports, under stable module names:
 `run_until_blocked`, `LoopContext`, `LoopEnd`, `EffectPort`, `Loom`, `ActionSelector`,
 `ArgumentGenerator`, `CanonGovernor`, `CaseStore` and `MemoryCaseStore` are also at the top.
 
+[SDK stability](../reference/sdk-stability.md) names the surface Loom keeps stable within a
+release line: every port a host implements, with its `loom_sdk` path, and what is outside the
+promise.
+
 Since 0.2.0 it also exports `TestRunner`, `SubstrateRunner`,
 `UnconfinedRunner`, `TestExecution` and `ConfinementError`. `LocalExecutor::new` requires
 Substrate by default; `with_runner` accepts an explicit `Arc<dyn TestRunner>`.
