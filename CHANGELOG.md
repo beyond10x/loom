@@ -2,9 +2,23 @@
 
 All notable changes to Loom are recorded here. Loom releases from source at bare-version tags such
 as `0.1.0`; nothing is on a registry, and consumers pin a tag (`tag = "0.1.0"`). Changes collect
-under **Unreleased** until the next release.
+under **Unreleased** until the next release. Every release's entry names what breaks for a
+consumer in a `Breaking:` sentence; `loom-xtask release-check` refuses an entry without one, and
+refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_ports.rs` or
+`docs/contracts/run-events-v1.json` changed since the previous tag.
 
 ## [Unreleased]
+
+### Changed
+
+- `loom-xtask release-check` refuses a release whose `CHANGELOG.md` entry has no `Breaking:`
+  sentence, and one that says `Breaking: none.` while a stable surface (the pinned consumer
+  `consumers/pinned/`, the host-port witness `crates/loom-sdk/tests/host_ports.rs` or the
+  run-events contract `docs/contracts/run-events-v1.json`) differs between the previous
+  bare-version tag and the tag, naming the entry and the changed files. With no previous tag only
+  the sentence is required. `release.yml` checks out the full history and its tags for the diff.
+  Breaking: none for consumers of the crates or the command; a release author now writes a
+  `Breaking:` sentence in every entry.
 
 ## [0.21.0] - 2026-10-14
 
