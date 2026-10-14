@@ -33,6 +33,7 @@ pub mod executor;
 pub mod git;
 pub mod grant;
 pub mod handoff;
+pub mod mandate_log;
 pub mod results;
 pub mod resume;
 pub mod run;

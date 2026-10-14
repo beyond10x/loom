@@ -21,6 +21,7 @@ b10x-loom-governor = { path = "../loom-governor" }
 b10x-llm-tool-call = { git = "https://github.com/beyond10x/llm", tag = "0.4.0" }
 b10x-loom-commission = { path = "../loom-commission" }
 b10x-loom-intake-slice = { path = "../loom-intake-slice" }
+b10x-loom-mandate = { path = "../loom-mandate" }
 b10x-loom-plugin = { path = "../loom-plugin" }
 b10x-loom-plugin-slack = { path = "../loom-plugin-slack" }
 b10x-loom-sdk = { path = "../loom-sdk" }

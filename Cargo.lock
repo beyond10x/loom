@@ -349,6 +349,7 @@ dependencies = [
  "b10x-loom-governor",
  "b10x-loom-intake-references",
  "b10x-loom-intake-slice",
+ "b10x-loom-mandate",
  "b10x-loom-plugin",
  "b10x-loom-plugin-slack",
  "b10x-loom-protocols",
@@ -500,6 +501,7 @@ version = "0.20.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
+ "intake",
  "loom",
  "mandate-authz",
  "mandate-graph",

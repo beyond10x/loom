@@ -59,6 +59,10 @@
         {
           "name": "granted_at",
           "type": "timestamp"
+        },
+        {
+          "name": "mandate_approval",
+          "type": "Optional<MandateApprovalId>"
         }
       ],
       "id": "intake.routing.Grant",

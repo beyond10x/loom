@@ -13,6 +13,7 @@ name = "loom_mandate"
 [dependencies]
 b10x-loom-commission = { path = "../loom-commission" }
 loom = { path = "../../generated/rust/loom" }
+intake_model = { package = "intake", path = "../../generated/rust/intake" }
 mandate-authz = { git = "https://github.com/beyond10x/mandate.git", tag = "v0.9.0" }
 mandate-graph = { git = "https://github.com/beyond10x/mandate.git", tag = "v0.9.0" }
 mandate-model = { git = "https://github.com/beyond10x/mandate.git", tag = "v0.9.0" }

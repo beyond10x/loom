@@ -6,7 +6,8 @@
 //! Mandate's `mandate_authz::check` and maps the answer to Commission's verdict, as the
 //! `loom.authority` domain declares (`ess/domains/authority.yaml`, `loom::authority::Outcome`
 //! and its `answer` attribute). This is the one crate that links Mandate; Commission, the governor
-//! and the command line do not, and the command line does not use it yet.
+//! and the command line do not; the command line uses it only through [`approval`], behind
+//! `--mandate`.
 //!
 //! What Mandate is asked:
 //!
@@ -35,6 +36,13 @@
 //! that contradicts itself (an allow whose decision is not allowed, an approval requirement
 //! without a challenge) is `Contradictory`, an `Err` as well. Every failure fails toward less
 //! authority (`AGENTS.md` § Rules).
+//!
+//! [`approval`] is the second use (`story:mandate-approval-on-resume`): Mandate configured from the
+//! host file `b10x-loom approve --mandate` and `resume --mandate` name, recording an approval of
+//! the request a commission's Suspension holds and clearing it once through Mandate's
+//! `check_with_approval`.
+
+pub mod approval;
 
 use std::fmt;
 use std::sync::Mutex;

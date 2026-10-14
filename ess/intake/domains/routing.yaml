@@ -89,6 +89,87 @@ types:
     kind: newtype
     of: Uuid
 
+  # The identity of a Mandate approval (`mandate.delegation.Approval`, Mandate's `ApprovalId`)
+  # that `approve --mandate` recorded in the approval event log, and that a grant names.
+  - name: intake.routing.MandateApprovalId
+    kind: newtype
+    of: Uuid
+
+  # One entry of the Mandate approval event log a state directory keeps beside its grants
+  # (`mandate-approvals.jsonl`: one entry per line, in the order appended; an entry is appended
+  # under the directory's lock, the one the commission's Suspension is held under, and never
+  # changed). Mandate v0.9.0 has no command that records an approval, and a consumption persists
+  # only when the caller keeps the `mandate.authorization.ApprovedDecisionRecorded` event
+  # `check_with_approval` returns and applies it again on load. The log is that keeping:
+  # `approve --mandate` appends the approval it records (`ApprovalRecorded`), and
+  # `resume --mandate` folds every entry into Mandate's delegation records, asks
+  # `check_with_approval` for the request the commission's Suspension holds, and appends the event
+  # it returns (`ApprovedDecisionRecorded`) before anything is performed, all under that lock. A
+  # crash after the append leaves the approval consumed and the request unperformed: it is never
+  # performed twice. The log goes when Mandate records approvals itself.
+  - name: intake.routing.MandateApprovalEntry
+    kind: union
+    tag: kind
+    variants:
+      ApprovalRecorded: intake.routing.MandateApprovalRecorded
+      ApprovedDecisionRecorded: intake.routing.MandateApprovedDecision
+
+  # A Mandate approval (`mandate.delegation.Approval`) as `approve --mandate` records it: the
+  # approver's one-use approval of the one request the commission's Suspension holds. The ids are
+  # Mandate's: the organization, subject and actor of the verified context the host file names
+  # (`loom.authority.MandateHost.verified`), the approver it names. The action is the capability the
+  # request needs; the resource is the case, of type `loom.case`, its id derived as
+  # `loom.authority.CaseResource` declares. It expires `approval_seconds` after `recorded_at`. The
+  # commission and the request it was recorded for are kept beside it; Mandate reads neither.
+  - name: intake.routing.MandateApprovalRecorded
+    kind: struct
+    fields:
+      - name: approval
+        type: intake.routing.MandateApprovalId
+      - name: commission_id
+        type: intake.routing.CommissionId
+      - name: action_request_id
+        type: intake.routing.ActionRequestId
+      - name: organization
+        type: Uuid
+      - name: subject
+        type: Uuid
+      - name: actor
+        type: Optional<Uuid>
+      - name: action
+        type: String
+      - name: resource_type
+        type: String
+      - name: resource_id
+        type: Uuid
+      - name: approver
+        type: Uuid
+      - name: recorded_at
+        type: Timestamp
+      - name: expires_at
+        type: Timestamp
+
+  # `mandate.authorization.ApprovedDecisionRecorded` as `resume --mandate` keeps it: the allowed
+  # decision `check_with_approval` took and the approval it consumed. `context` is the verified
+  # context the request was made in and `decision` the `mandate.core.Decision`, each as Mandate
+  # writes it. Folded on load as Mandate's own delegation fold applies the event, it leaves the
+  # approval consumed, so the next `check_with_approval` with it is refused `wrong-state`.
+  - name: intake.routing.MandateApprovedDecision
+    kind: struct
+    fields:
+      - name: approval
+        type: intake.routing.MandateApprovalId
+      - name: commission_id
+        type: intake.routing.CommissionId
+      - name: action_request_id
+        type: intake.routing.ActionRequestId
+      - name: context
+        type: Json
+      - name: decision
+        type: Json
+      - name: recorded_at
+        type: Timestamp
+
   # One protocol of the catalog a route was accepted on, by its registered name and the SHA-256
   # of its definition.
   - name: intake.routing.CatalogDigest
@@ -347,6 +428,15 @@ entities:
   # commission's Suspension is held for that request, so a grant for another request, or a request
   # proposed again later in the resumed run, is not allowed by it. One grant is kept per
   # commission; a later approval of the commission's next Suspension replaces it.
+  #
+  # `mandate_approval` names the Mandate approval the grant carries: the one `approve --mandate
+  # <FILE>` recorded in the approval event log (intake.routing.MandateApprovalRecorded) for the
+  # request. A grant `approve` wrote without `--mandate` names none, and its document has no such
+  # member, as on 0.20.0. `resume --mandate <FILE>` refuses a grant that names none, and allows the
+  # request only when Mandate's `check_with_approval` clears and consumes the approval it names.
+  # Only Mandate clears a grant that names an approval: a `resume` without `--mandate` refuses it
+  # (Commission's `NotGranted`) and performs nothing, leaving the approval unconsumed; it reads a grant
+  # that names none as on 0.20.0.
   - name: intake.routing.Grant
     identity:
       name: commission_id
@@ -364,6 +454,8 @@ entities:
         type: intake.routing.ActionRequestId
       - name: granted_at
         type: Timestamp
+      - name: mandate_approval
+        type: Optional<intake.routing.MandateApprovalId>
     lifecycle:
       initial: Granted
       states: [Granted]

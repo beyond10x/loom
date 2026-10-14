@@ -67,13 +67,19 @@ Suspension to approve. `stopped: ApprovalRequired (<action>), nothing suspended`
 agent proposed again at it holds no Suspension, so approving it is refused NothingSuspended, and only
 new work, a new HEAD, is approved again.
 
+With --mandate FILE (loom.authority.MandateHost, a host-trusted JSON file), approval also records a
+Mandate approval of the request in the state directory's approval log (mandate-approvals.jsonl): the
+file's approver approves the capability on the case for the file's verified subject, expiring
+approval_seconds later; the approver is neither the verified subject nor its actor. The grant names
+it (mandate_approval), and only `resume --mandate` clears it: `resume` without --mandate refuses it.
+
 Exit status:
   0   the grant is written
   10  NothingSuspended: the commission holds no Suspension
   11  InDoubt: the commission's Suspension is being resumed, so its request may have been performed
   19  OtherCapability: the suspended request needs another capability than the one given
   23  AlreadyHandedOff: the suspended repository.merge would hand off a HEAD the commission already handed off
-  1   the state directory cannot be used
+  1   the state directory or the Mandate file cannot be used, or Mandate recorded no approval
   2   the command line is not valid";
 
 /// What `resume --help` says about the resume and the exit status; [`resume_exit_status`]
@@ -88,6 +94,14 @@ workspace and its HEAD (intake.routing.MergeHandoff, merge-<hex of the request i
 directory), only at the HEAD the case holds and once per HEAD of a commission. No Git ref moves; merging
 happens outside Loom. The request is performed once, the Suspension is released, and the run goes on as
 `run` does. The model does not see the steps before the Suspension.
+
+With --mandate FILE (loom.authority.MandateHost), the request is performed only when Mandate's
+check_with_approval clears the approval the grant names (`approve --mandate`), for the file's verified
+subject, the capability and the case; its consumption is appended to the state directory's approval
+log before anything is performed. A grant naming no approval, an expired, consumed or foreign
+approval, or any other Mandate refusal is NotGranted, and nothing is performed. Without --mandate, a
+grant naming a Mandate approval (`approve --mandate`) is NotGranted and nothing is performed: only
+Mandate clears it.
 
 When the resumed run reaches its human gate again, its last line says what is left to approve:
   stopped: ApprovalRequired (<action>)                    a Suspension `approve` can approve
@@ -105,7 +119,8 @@ Exit status:
   13  OtherCommission: the Suspension or its run names another commission, case or run revision
   14  CaseMoved: the case is no longer at the revision the request was suspended at
   15  NotAdmitted: the current frontier refuses the request's action
-  16  NotGranted: no grant allows the request
+  16  NotGranted: no grant allows the request, the grant names a Mandate approval and --mandate is
+      not given, or with --mandate Mandate did not clear its approval
   17  NotPerformed: nothing performs the request's action
   18  RunNotSuspended: the run store does not hold the run suspended
   20  the suspension store could not be read; nothing was resumed
@@ -149,7 +164,7 @@ pub fn approve_exit_status(refusal: &ApproveRefusal) -> u8 {
         ApproveRefusal::InDoubt { .. } => 11,
         ApproveRefusal::OtherCapability { .. } => 19,
         ApproveRefusal::AlreadyHandedOff(_) => 23,
-        ApproveRefusal::Store(_) => 1,
+        ApproveRefusal::Store(_) | ApproveRefusal::Mandate(_) => 1,
     }
 }
 
@@ -165,6 +180,7 @@ pub fn run_exit_status(run: &SliceRun) -> u8 {
 
 pub mod evaluate;
 pub mod events;
+pub mod mandate;
 pub mod model_catalog;
 pub mod model_port;
 pub mod plugin;
@@ -231,6 +247,11 @@ pub struct ApproveArgs {
     /// The state directory `run --state` kept the commission in. It must exist.
     #[arg(long, value_name = "DIR")]
     pub state: PathBuf,
+    /// The host-trusted Mandate file (loom.authority.MandateHost): also record a Mandate approval of
+    /// the request, by the file's approver, in the state directory's approval log; the grant names
+    /// it, and `resume --mandate` clears it through Mandate.
+    #[arg(long, value_name = "FILE")]
+    pub mandate: Option<PathBuf>,
 }
 
 /// The arguments of `b10x-loom resume`.
@@ -243,6 +264,11 @@ pub struct ResumeArgs {
     /// into. It must exist; the merge hand-off is recorded there.
     #[arg(long, value_name = "DIR")]
     pub state: PathBuf,
+    /// The host-trusted Mandate file (loom.authority.MandateHost): perform the request only when
+    /// Mandate's check_with_approval clears and consumes the approval the grant names, keeping the
+    /// consumption in the state directory's approval log first.
+    #[arg(long, value_name = "FILE")]
+    pub mandate: Option<PathBuf>,
 }
 
 /// What `plugin run --help` says about the configuration, the models, the output and the exit

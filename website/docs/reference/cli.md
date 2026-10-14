@@ -212,7 +212,7 @@ Usage: b10x-loom plugin report --state <DIR> <PLUGIN>
 Approve the request a commission's Suspension holds: write a grant into the state directory. Approval performs nothing; `resume` does
 
 ```text
-Usage: b10x-loom approve --state <DIR> <COMMISSION> <CAPABILITY>
+Usage: b10x-loom approve [OPTIONS] --state <DIR> <COMMISSION> <CAPABILITY>
 ```
 
 | Argument | Required | Default | Meaning |
@@ -220,6 +220,7 @@ Usage: b10x-loom approve --state <DIR> <COMMISSION> <CAPABILITY>
 | `<COMMISSION>` | yes | none | The commission whose Suspension is approved: the id its resume context and Suspension carry |
 | `<CAPABILITY>` | yes | none | The capability approved; it must be the one the suspended request needs |
 | `--state <DIR>` | yes | none | The state directory `run --state` kept the commission in. It must exist |
+| `--mandate <FILE>` | no | none | The host-trusted Mandate file (loom.authority.MandateHost): also record a Mandate approval of the request, by the file's approver, in the state directory's approval log; the grant names it, and `resume --mandate` clears it through Mandate |
 
 ```text
 Approval performs nothing. It reads the commission's Suspension in the state directory and
@@ -233,13 +234,19 @@ Suspension to approve. `stopped: ApprovalRequired (<action>), nothing suspended`
 agent proposed again at it holds no Suspension, so approving it is refused NothingSuspended, and only
 new work, a new HEAD, is approved again.
 
+With --mandate FILE (loom.authority.MandateHost, a host-trusted JSON file), approval also records a
+Mandate approval of the request in the state directory's approval log (mandate-approvals.jsonl): the
+file's approver approves the capability on the case for the file's verified subject, expiring
+approval_seconds later; the approver is neither the verified subject nor its actor. The grant names
+it (mandate_approval), and only `resume --mandate` clears it: `resume` without --mandate refuses it.
+
 Exit status:
   0   the grant is written
   10  NothingSuspended: the commission holds no Suspension
   11  InDoubt: the commission's Suspension is being resumed, so its request may have been performed
   19  OtherCapability: the suspended request needs another capability than the one given
   23  AlreadyHandedOff: the suspended repository.merge would hand off a HEAD the commission already handed off
-  1   the state directory cannot be used
+  1   the state directory or the Mandate file cannot be used, or Mandate recorded no approval
   2   the command line is not valid
 ```
 
@@ -248,13 +255,14 @@ Exit status:
 Continue a commission's suspended run after its approval: perform the suspended request once, release the Suspension, and run on until the run stops
 
 ```text
-Usage: b10x-loom resume --state <DIR> <COMMISSION>
+Usage: b10x-loom resume [OPTIONS] --state <DIR> <COMMISSION>
 ```
 
 | Argument | Required | Default | Meaning |
 |---|---|---|---|
 | `<COMMISSION>` | yes | none | The commission whose suspended run is continued |
 | `--state <DIR>` | yes | none | The state directory `run --state` kept the commission in, and `approve` wrote its grant into. It must exist; the merge hand-off is recorded there |
+| `--mandate <FILE>` | no | none | The host-trusted Mandate file (loom.authority.MandateHost): perform the request only when Mandate's check_with_approval clears and consumes the approval the grant names, keeping the consumption in the state directory's approval log first |
 
 ```text
 The run is rebuilt from the commission's resume context: the same intent, route, workspace (validated
@@ -267,6 +275,14 @@ workspace and its HEAD (intake.routing.MergeHandoff, merge-<hex of the request i
 directory), only at the HEAD the case holds and once per HEAD of a commission. No Git ref moves; merging
 happens outside Loom. The request is performed once, the Suspension is released, and the run goes on as
 `run` does. The model does not see the steps before the Suspension.
+
+With --mandate FILE (loom.authority.MandateHost), the request is performed only when Mandate's
+check_with_approval clears the approval the grant names (`approve --mandate`), for the file's verified
+subject, the capability and the case; its consumption is appended to the state directory's approval
+log before anything is performed. A grant naming no approval, an expired, consumed or foreign
+approval, or any other Mandate refusal is NotGranted, and nothing is performed. Without --mandate, a
+grant naming a Mandate approval (`approve --mandate`) is NotGranted and nothing is performed: only
+Mandate clears it.
 
 When the resumed run reaches its human gate again, its last line says what is left to approve:
   stopped: ApprovalRequired (<action>)                    a Suspension `approve` can approve
@@ -284,7 +300,8 @@ Exit status:
   13  OtherCommission: the Suspension or its run names another commission, case or run revision
   14  CaseMoved: the case is no longer at the revision the request was suspended at
   15  NotAdmitted: the current frontier refuses the request's action
-  16  NotGranted: no grant allows the request
+  16  NotGranted: no grant allows the request, the grant names a Mandate approval and --mandate is
+      not given, or with --mandate Mandate did not clear its approval
   17  NotPerformed: nothing performs the request's action
   18  RunNotSuspended: the run store does not hold the run suspended
   20  the suspension store could not be read; nothing was resumed
