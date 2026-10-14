@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:release-0210
 kind: story
-status: active
+status: implemented
 title: Release Loom 0.21.0
 relations:
 - depends_on: story:change-evidence-order
@@ -13,10 +13,11 @@ relations:
 - depends_on: story:command-event-contract
 - depends_on: story:sdk-host-port-stability
 - serves: vision:O1
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-14T07:10:30Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-14T07:10:30Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-14T09:49:16Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Why
 
