@@ -8,7 +8,24 @@ relations:
 - decomposes: epic:effect-bindings
 - serves: vision:O1
 - depends_on: story:mandate-authority
-revision: 1
+scope:
+- confidence: inferred
+  path: crates/loom-cli/src/lib.rs
+- confidence: inferred
+  path: crates/loom-cli/src/main.rs
+- confidence: inferred
+  path: crates/loom-cli/tests/resume_after_grant.rs
+- confidence: cited
+  path: crates/loom-intake-slice/src/grant.rs
+- confidence: cited
+  path: crates/loom-intake-slice/src/intent.rs
+- confidence: inferred
+  path: crates/loom-mandate
+- confidence: cited
+  path: ess/intake/domains/routing.yaml
+- confidence: inferred
+  path: generated/rust/intake
+revision: 9
 ---
 ## Outcome
 
