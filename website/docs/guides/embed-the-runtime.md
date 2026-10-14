@@ -61,7 +61,9 @@ An embedding that decides authority with Mandate can supply `MandateAuthority` f
 Mandate ports, it asks Mandate's `check` for each capability on the commission's case, as the
 Mandate verified context the host put in the commission's authority context (`{"verified": …}`).
 Mandate's allow is a grant, its approval requirement suspends the run as the approval gate does,
-and a Mandate outage or an authority context that is no Mandate context grants nothing.
+and a Mandate outage or an authority context that is no Mandate context grants nothing. The case
+is the Mandate resource of type `loom.case` whose id `loom_mandate::case_resource_id` derives from
+the case id (a UUID version 5, never a parse of the id); the host grants on that id in Mandate.
 
 The governor (`CanonGovernor`), the executor (`Loom`) and the loop (`run_until_blocked`) come from
 the SDK. A model-backed selector and argument generator exist too: the slice's `ModelSelector` and

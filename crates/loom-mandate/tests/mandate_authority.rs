@@ -9,7 +9,7 @@
 //! `CARGO_TARGET_TMPDIR`. Ids are synthetic.
 
 use std::cell::Cell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use b10x_loom_commission::model::behaviour::Generated;
@@ -31,7 +31,9 @@ use b10x_loom_commission_testkit::fake_executor::ScriptedExecutor;
 use b10x_loom_commission_testkit::fake_governor::{Answer as Scripted, FakeGovernor};
 use b10x_loom_commission_testkit::file_suspension::FileSuspensionStore;
 use loom::authority::{Answer, Outcome};
-use loom_mandate::{CASE_RESOURCE_TYPE, MandateAuthority, answer};
+use loom_mandate::{
+    CASE_RESOURCE_NAMESPACE, CASE_RESOURCE_TYPE, MandateAuthority, answer, case_resource_id,
+};
 use mandate_authz::agent::AgentRecords;
 use mandate_authz::decision::{DecisionIdAllocator, FixedChallenge, SequentialDecisionIds};
 use mandate_graph::double::GraphDouble;
@@ -47,8 +49,8 @@ use mandate_policy::record::{AuthorizationModel, Policy};
 use mandate_types::{
     Action, Audience, AuthorityScope, AuthoritySubject, AuthorizationModelId, AuthzRevision,
     CorrelationId, CredentialId, DenialReason, GrantId, OrganizationId, OrganizationMembershipId,
-    PolicyId, PolicyVersion, PrincipalId as MandatePrincipal, ResourceId, ResourceRef,
-    ResourceType, Timestamp, Uuid, VerifiedContext,
+    PolicyId, PolicyVersion, PrincipalId as MandatePrincipal, ResourceRef, ResourceType, Timestamp,
+    Uuid, VerifiedContext,
 };
 
 const CAPABILITY: &str = "repository.merge";
@@ -76,13 +78,17 @@ fn action() -> Action {
     Action::new(CAPABILITY)
 }
 
-fn resource() -> ResourceRef {
+/// The Mandate resource `case` is: its id derived as a host derives it, never parsed.
+fn resource_of(case: &str) -> ResourceRef {
     ResourceRef {
         resource_type: ResourceType::new(CASE_RESOURCE_TYPE),
-        resource_id: ResourceId::new(
-            Uuid::parse(CASE).unwrap_or_else(|_| panic!("CASE is a UUID")),
-        ),
+        resource_id: case_resource_id(&CaseId(case.to_owned()))
+            .unwrap_or_else(|| panic!("{case:?} derives a resource id")),
     }
+}
+
+fn resource() -> ResourceRef {
+    resource_of(CASE)
 }
 
 fn approver() -> PolicyId {
@@ -121,18 +127,26 @@ fn tenancy() -> Tenancy {
 
 /// A graph in which the subject holds `maintainer` on the case.
 fn granting_graph() -> (GraphDouble, AuthzRevision) {
+    granting_graph_on(CASE, &[])
+}
+
+/// A graph in which the subject holds `maintainer` on `case` alone; `case` and every one of
+/// `registered` are registered resources.
+fn granting_graph_on(case: &str, registered: &[&str]) -> (GraphDouble, AuthzRevision) {
     let mut graph = GraphDouble::new();
     graph.admit_subject(organization(), subject());
-    graph
-        .register_resource(&subject_context(), &resource(), None)
-        .unwrap_or_else(|error| panic!("the case is registered: {error:?}"));
+    for each in std::iter::once(case).chain(registered.iter().copied()) {
+        graph
+            .register_resource(&subject_context(), &resource_of(each), None)
+            .unwrap_or_else(|error| panic!("{each:?} is registered: {error:?}"));
+    }
     let revision = graph.record_grant(Grant::recorded(
         GrantId::new(uuid(30)),
         organization(),
         subject(),
         AuthorityScope {
             actions: vec![action()],
-            resources: vec![resource()],
+            resources: vec![resource_of(case)],
             space: None,
         },
         RELATION,
@@ -240,8 +254,13 @@ impl PolicyEvaluator for Counting<'_> {
 }
 
 fn allowing() -> PolicyDouble {
+    allowing_on(CASE)
+}
+
+/// Policy allows the subject the capability on `case` alone.
+fn allowing_on(case: &str) -> PolicyDouble {
     let mut policy = policy();
-    policy.allow(organization(), subject(), action(), resource());
+    policy.allow(organization(), subject(), action(), resource_of(case));
     policy
 }
 
@@ -256,6 +275,100 @@ fn a_request_mandate_allows_is_granted() {
         Ok(AuthorityVerdict::Allow(Unit(true)))
     );
     assert!(check_authority(&provider, &commission, CAPABILITY).allows());
+}
+
+/// Loom's own governor issues `case-<n>` ids, never UUIDs. Such a case is a Mandate resource: a
+/// host that grants on its derived resource id has the request granted.
+#[test]
+fn a_governor_case_id_is_a_mandate_resource() {
+    let case = "case-1";
+    let (graph, revision) = granting_graph_on(case, &[]);
+    let provider = authority(graph, revision, allowing_on(case));
+    let commission = commission_with(case, host_context(&subject_context()));
+
+    assert_eq!(
+        provider.decide(commission.data(), CAPABILITY),
+        Ok(AuthorityVerdict::Allow(Unit(true)))
+    );
+    assert!(check_authority(&provider, &commission, CAPABILITY).allows());
+}
+
+/// Every case id derives its own resource id, the UUID version 5 of its exact bytes under the
+/// declared namespace; two spellings of one UUID are two case ids and two resources, and a grant
+/// on one case answers for no other. The expected ids are computed outside Rust, by Python's
+/// `uuid.uuid5(UUID("735b2acd-620b-43ec-b1ab-144c2aec7ba7"), case)`, as a host in another
+/// language would compute them.
+#[test]
+fn distinct_case_ids_are_distinct_resources() {
+    let upper = CASE.to_uppercase();
+    let derived = [
+        ("case-1", "66e5ed40-d9d4-525b-80a7-5212fa83fd1a"),
+        ("case-2", "d12d7e1d-a91e-5428-a490-0a60abad69b6"),
+        (CASE, "82986055-15b4-5ab2-924f-f86b21f019a1"),
+        (upper.as_str(), "6f9dde0c-0b5e-578a-b097-1bae23424baf"),
+        ("CHG-1842", "a2b6ee2f-b4e5-5642-a222-c6ebcc5b42d5"),
+    ];
+    for (case, expected) in derived {
+        let id = case_resource_id(&CaseId(case.to_owned()))
+            .unwrap_or_else(|| panic!("{case:?} derives a resource id"));
+        assert_eq!(id.to_string(), expected, "the resource id of {case:?}");
+    }
+    assert_eq!(case_resource_id(&CaseId(String::new())), None);
+
+    let spellings = [
+        "case-1".to_owned(),
+        "Case-1".to_owned(),
+        "case-1 ".to_owned(),
+        " case-1".to_owned(),
+        "case-01".to_owned(),
+        "case-2".to_owned(),
+        CASE.to_owned(),
+        upper.clone(),
+        format!("{{{CASE}}}"),
+        CASE.replace('-', ""),
+    ];
+    let ids: BTreeSet<String> = spellings
+        .iter()
+        .map(|case| {
+            case_resource_id(&CaseId(case.clone()))
+                .unwrap_or_else(|| panic!("{case:?} derives a resource id"))
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        ids.len(),
+        spellings.len(),
+        "one resource per case id: {ids:?}"
+    );
+    assert!(
+        !ids.contains(CASE),
+        "no case id is taken as the UUID it spells: {ids:?}"
+    );
+
+    // Through the provider: the subject holds `maintainer` on CASE alone, and every other case is
+    // a registered resource, so a refusal is the grant's, not a missing resource's.
+    let others: Vec<&str> = spellings
+        .iter()
+        .map(String::as_str)
+        .filter(|case| *case != CASE)
+        .collect();
+    let (graph, revision) = granting_graph_on(CASE, &others);
+    let provider = authority(graph, revision, allowing());
+    assert_eq!(
+        provider.decide(self::commission().data(), CAPABILITY),
+        Ok(AuthorityVerdict::Allow(Unit(true))),
+        "the case the grant is on is granted"
+    );
+    for case in others {
+        let decided = provider.decide(
+            commission_with(case, host_context(&subject_context())).data(),
+            CAPABILITY,
+        );
+        assert!(
+            !matches!(decided, Ok(AuthorityVerdict::Allow(_))),
+            "case {case:?} was granted through the grant on case {CASE}: {decided:?}"
+        );
+    }
 }
 
 #[test]
@@ -565,7 +678,7 @@ fn an_authority_context_that_is_no_mandate_context_grants_nothing() {
         assert_eq!(asked.get(), 0, "{text}: Mandate was asked nothing");
     }
 
-    // A case id that is no Mandate resource id is never asked about either.
+    // A case id that derives no Mandate resource id, the empty one, is never asked about either.
     let asked = Cell::new(0);
     let (graph, revision) = granting_graph();
     let provider = authority(
@@ -576,7 +689,7 @@ fn an_authority_context_that_is_no_mandate_context_grants_nothing() {
             inner: allowing(),
         },
     );
-    let commission = commission_with("CHG-1842", host_context(&subject_context()));
+    let commission = commission_with("", host_context(&subject_context()));
     assert!(provider.decide(commission.data(), CAPABILITY).is_err());
     assert_eq!(asked.get(), 0, "Mandate was asked nothing");
 
@@ -655,4 +768,39 @@ fn every_outcome_answers_as_the_specification_declares() {
             .all(|outcome| answer(*outcome) != Answer::Allow || *outcome == Outcome::Allowed),
         "only Mandate's allow is a grant"
     );
+}
+
+/// The case resource the provider asks about is the one `loom.authority.CaseResource` declares:
+/// the resource type `loom.case`, a UUID version 5 derivation, and the namespace the crate
+/// derives under. The synthesized model carries no accessor for an enum attribute, so the crate
+/// writes the namespace again; this holds the two together.
+#[test]
+fn the_case_resource_is_derived_as_the_specification_declares() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../ess/domains/authority.yaml");
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    let domain: serde_yaml_ng::Value = serde_yaml_ng::from_str(&text)
+        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    let declared = domain["types"]
+        .as_sequence()
+        .unwrap_or_else(|| panic!("the domain declares types"))
+        .iter()
+        .find(|ty| ty["name"].as_str() == Some("loom.authority.CaseResource"))
+        .unwrap_or_else(|| panic!("the domain declares loom.authority.CaseResource"));
+    let variants = declared["variants"]
+        .as_sequence()
+        .unwrap_or_else(|| panic!("CaseResource has variants"));
+    assert_eq!(variants.len(), 1, "one case resource");
+    let attributes = &variants[0]["attributes"];
+    let attribute = |name: &str| {
+        attributes[name]
+            .as_str()
+            .unwrap_or_else(|| panic!("CaseResource declares its {name}"))
+            .to_owned()
+    };
+
+    assert_eq!(attribute("resource_type"), "loom.case");
+    assert_eq!(attribute("resource_type"), CASE_RESOURCE_TYPE);
+    assert_eq!(attribute("derivation"), "uuid-v5-of-case-id-bytes");
+    assert_eq!(attribute("namespace"), CASE_RESOURCE_NAMESPACE.to_string());
 }

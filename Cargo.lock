@@ -507,6 +507,7 @@ dependencies = [
  "mandate-types",
  "serde_json",
  "serde_yaml_ng",
+ "sha1",
 ]
 
 [[package]]

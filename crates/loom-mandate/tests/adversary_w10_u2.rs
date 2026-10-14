@@ -25,7 +25,7 @@ use b10x_loom_commission_testkit::fake_executor::ScriptedExecutor;
 use b10x_loom_commission_testkit::fake_governor::{Answer as Scripted, FakeGovernor};
 use b10x_loom_commission_testkit::file_suspension::FileSuspensionStore;
 use loom::authority::Outcome;
-use loom_mandate::{MandateAuthority, outcome};
+use loom_mandate::{MandateAuthority, case_resource_id, outcome};
 use mandate_authz::agent::AgentRecords;
 use mandate_authz::decision::{DecisionIdAllocator, Denied, FixedChallenge, SequentialDecisionIds};
 use mandate_graph::double::GraphDouble;
@@ -40,7 +40,7 @@ use mandate_policy::record::{AuthorizationModel, Policy};
 use mandate_types::{
     Action, Audience, AuthorityScope, AuthoritySubject, AuthorizationModelId, AuthzRevision,
     CorrelationId, CredentialId, DecisionId, DecisionReason, DenialReason, GrantId, OrganizationId,
-    OrganizationMembershipId, PolicyId, PolicyVersion, PrincipalId as MandatePrincipal, ResourceId,
+    OrganizationMembershipId, PolicyId, PolicyVersion, PrincipalId as MandatePrincipal,
     ResourceRef, ResourceType, Timestamp, Uuid, VerifiedContext,
 };
 
@@ -75,9 +75,8 @@ fn action() -> Action {
 fn resource_of(case: &str) -> ResourceRef {
     ResourceRef {
         resource_type: ResourceType::new(SPECIFIED_CASE_TYPE),
-        resource_id: ResourceId::new(
-            Uuid::parse(case).unwrap_or_else(|_| panic!("{case} is a UUID")),
-        ),
+        resource_id: case_resource_id(&CaseId(case.to_owned()))
+            .unwrap_or_else(|| panic!("{case} derives a resource id")),
     }
 }
 
@@ -295,7 +294,11 @@ fn a_poisoned_allocator_asks_mandate_nothing_and_grants_nothing() {
         Ok(verdict) => panic!("a poisoned allocator decides nothing, got {verdict:?}"),
     }
     assert!(!check_authority(&provider, &commission, CAPABILITY).allows());
-    assert_eq!(asked.get(), before, "Mandate was not asked after the poison");
+    assert_eq!(
+        asked.get(),
+        before,
+        "Mandate was not asked after the poison"
+    );
 }
 
 #[test]
@@ -310,10 +313,7 @@ fn a_verified_context_with_a_duplicated_member_grants_nothing() {
         // `actor` written explicitly null, where Mandate preserves absent as absent.
         verified.replacen('{', r#"{"actor":null,"#, 1),
         // A subject that is a number, and one that is an array.
-        verified.replacen('{', r#"{"#, 1).replace(
-            &format!(r#""subject":"{}""#, principal()),
-            r#""subject":2"#,
-        ),
+        verified.replace(&format!(r#""subject":"{}""#, principal()), r#""subject":2"#),
         r#"{"verified":[]}"#.to_owned(),
         r#"{"verified":"{}"}"#.to_owned(),
     ];
@@ -329,13 +329,19 @@ fn a_verified_context_with_a_duplicated_member_grants_nothing() {
             asked: &asked,
             inner: allowing(),
         });
-        let decided = provider.decide(commission_with(CASE, context_from(&text)).data(), CAPABILITY);
+        let decided = provider.decide(
+            commission_with(CASE, context_from(&text)).data(),
+            CAPABILITY,
+        );
         assert!(
             !matches!(decided, Ok(AuthorityVerdict::Allow(_))),
             "{text}: granted {decided:?}"
         );
         if index != 1 {
-            assert!(decided.is_err(), "{text}: no Mandate context, got {decided:?}");
+            assert!(
+                decided.is_err(),
+                "{text}: no Mandate context, got {decided:?}"
+            );
             assert_eq!(asked.get(), 0, "{text}: Mandate was asked nothing");
         }
     }
@@ -380,7 +386,10 @@ fn a_grant_is_on_its_case_its_capability_and_its_subject_only() {
         subject: MandatePrincipal::new(uuid(9)),
         ..subject_context()
     };
-    let decided = provider.decide(commission_with(CASE, host_context(&stranger)).data(), CAPABILITY);
+    let decided = provider.decide(
+        commission_with(CASE, host_context(&stranger)).data(),
+        CAPABILITY,
+    );
     assert!(
         !matches!(decided, Ok(AuthorityVerdict::Allow(_))),
         "another subject: {decided:?}"
@@ -421,7 +430,10 @@ fn an_answer_that_contradicts_itself_is_contradictory_and_never_a_grant() {
         ),
         (
             "a refusal whose decision allowed",
-            denied(DenialReason::Denied, decision(true, DecisionReason::Allowed)),
+            denied(
+                DenialReason::Denied,
+                decision(true, DecisionReason::Allowed),
+            ),
             Outcome::Contradictory,
         ),
         (
@@ -434,7 +446,10 @@ fn an_answer_that_contradicts_itself_is_contradictory_and_never_a_grant() {
         ),
         (
             "a refusal whose decision names allow but did not allow",
-            denied(DenialReason::Denied, decision(false, DecisionReason::Allowed)),
+            denied(
+                DenialReason::Denied,
+                decision(false, DecisionReason::Allowed),
+            ),
             Outcome::Denied,
         ),
         (
@@ -518,7 +533,8 @@ fn store_dir(name: &str) -> PathBuf {
 /// Commission's `admit` without asking authority at all, by design, so it is not a case here.)
 #[test]
 fn an_unavailable_mandate_through_run_with_suspension_performs_nothing() {
-    for (name, status) in [("approval", ActionStatus::ApprovalRequired)] {
+    {
+        let (name, status) = ("approval", ActionStatus::ApprovalRequired);
         let provider = authority(PolicyDouble::new());
         let commission = commission();
         let case = CaseId(CASE.to_owned());

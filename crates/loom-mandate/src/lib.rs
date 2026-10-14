@@ -14,7 +14,7 @@
 //! |---|---|
 //! | the verified context (subject, organization, audience, credential) | the commission's authority context, a `loom.authority.HostContext` the host filled, never the model |
 //! | the action | the capability Commission asks about |
-//! | the resource | the case: resource type [`CASE_RESOURCE_TYPE`], the commission's case id as the resource id |
+//! | the resource | the case: resource type [`CASE_RESOURCE_TYPE`], the resource id [`case_resource_id`] derives from the commission's case id |
 //! | the expected audience, the relation, the minimum revision, the attributes | the host, through the builder |
 //! | the instant | the host's clock, through the builder |
 //! | the graph, policy, role catalog, challenge issuer, delegation records, decision ids, tenancy and topology | the host, through the builder; this crate configures no policy of its own |
@@ -29,8 +29,8 @@
 //! | `Unavailable` (a port that cannot answer) | an `Err`: Commission refuses, never allows |
 //!
 //! Two failures never reach Mandate and are an `Err` too: an authority context that is no
-//! `HostContext` holding a Mandate verified context (`NoMandateContext`), and a case id that is not
-//! a UUID and so no Mandate resource id (`NoMandateResource`). A decision id allocator that
+//! `HostContext` holding a Mandate verified context (`NoMandateContext`), and the empty case id,
+//! which derives no Mandate resource id (`NoMandateResource`). A decision id allocator that
 //! panicked in an earlier decision is `Unavailable`, and Mandate is not asked. A Mandate answer
 //! that contradicts itself (an allow whose decision is not allowed, an approval requirement
 //! without a challenge) is `Contradictory`, an `Err` as well. Every failure fails toward less
@@ -61,9 +61,18 @@ use mandate_types::{
     Action, Audience, AuthzRevision, DecisionReason, DenialReason, ResourceId, ResourceRef,
     ResourceType, Timestamp, Uuid, VerifiedContext,
 };
+use sha1::{Digest, Sha1};
 
 /// The Mandate resource type a case is: every decision is about the commission's case.
 pub const CASE_RESOURCE_TYPE: &str = "loom.case";
+
+/// The namespace a case's Mandate resource id is derived under,
+/// `735b2acd-620b-43ec-b1ab-144c2aec7ba7`: the `namespace` attribute of
+/// `loom.authority.CaseResource` (`ess/domains/authority.yaml`).
+/// It never changes; changing it moves every case to another resource.
+pub const CASE_RESOURCE_NAMESPACE: Uuid = Uuid::from_bytes([
+    0x73, 0x5b, 0x2a, 0xcd, 0x62, 0x0b, 0x43, 0xec, 0xb1, 0xab, 0x14, 0x4c, 0x2a, 0xec, 0x7b, 0xa7,
+]);
 
 /// The member of a `loom.authority.HostContext` that holds Mandate's verified context.
 const VERIFIED: &str = "verified";
@@ -353,12 +362,36 @@ fn host_context(value: &Value) -> Result<HostContext, DecodeError> {
     })
 }
 
-/// The Mandate resource a case is: [`CASE_RESOURCE_TYPE`] and the case id, which must be a UUID.
+/// The Mandate resource id of a case, as `loom.authority.CaseResource` declares: the UUID version
+/// 5 (RFC 9562 § 5.5, SHA-1) of the case id's exact UTF-8 bytes under
+/// [`CASE_RESOURCE_NAMESPACE`]. The case id is never parsed, so two distinct case ids (two
+/// spellings of one UUID included) are two resources. A host computes the same id with this
+/// function, or with any UUID version 5 implementation, when it writes Mandate's graph or policy.
+/// `None` only for the empty case id, which names no case.
+#[must_use]
+pub fn case_resource_id(case: &CaseId) -> Option<ResourceId> {
+    if case.0.is_empty() {
+        return None;
+    }
+    let mut hasher = Sha1::new();
+    hasher.update(CASE_RESOURCE_NAMESPACE.as_bytes());
+    hasher.update(case.0.as_bytes());
+    let digest = hasher.finalize();
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    // The version (5) in the high nibble of octet 6, the RFC 9562 variant in octet 8.
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Some(ResourceId::new(Uuid::from_bytes(bytes)))
+}
+
+/// The Mandate resource a case is: [`CASE_RESOURCE_TYPE`] and the id [`case_resource_id`]
+/// derives. `None` only for the empty case id.
 #[must_use]
 pub fn case_resource(case: &CaseId) -> Option<ResourceRef> {
     Some(ResourceRef {
         resource_type: ResourceType::new(CASE_RESOURCE_TYPE),
-        resource_id: ResourceId::new(Uuid::parse(&case.0).ok()?),
+        resource_id: case_resource_id(case)?,
     })
 }
 
@@ -394,7 +427,7 @@ impl MandateAuthority<'_> {
         let Some(resource) = case_resource(&commission.case_id) else {
             return Decided::undecided(
                 Outcome::NoMandateResource,
-                "the case id is not a UUID, so it is no Mandate resource id",
+                "the case id is empty, so it derives no Mandate resource id",
             );
         };
         let Ok(mut allocator) = self.allocator.lock() else {
@@ -474,14 +507,21 @@ impl AuthorityProvider for MandateAuthority<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CASE_RESOURCE_TYPE, case_resource};
+    use super::{case_resource, case_resource_id};
     use b10x_loom_commission::model::responsibility::CaseId;
 
     #[test]
-    fn a_case_id_that_is_no_uuid_is_no_mandate_resource() {
-        assert_eq!(case_resource(&CaseId("CHG-1842".to_owned())), None);
-        let resource = case_resource(&CaseId("00000000-0000-4000-8000-000000000001".to_owned()))
-            .unwrap_or_else(|| panic!("a UUID case id is a resource"));
-        assert_eq!(resource.resource_type.as_str(), CASE_RESOURCE_TYPE);
+    fn only_the_empty_case_id_is_no_mandate_resource() {
+        assert_eq!(case_resource(&CaseId(String::new())), None);
+        assert_eq!(case_resource_id(&CaseId(String::new())), None);
+        for case in ["case-1", "CHG-1842", "00000000-0000-4000-8000-000000000001"] {
+            let resource = case_resource(&CaseId(case.to_owned()))
+                .unwrap_or_else(|| panic!("{case:?} is a resource"));
+            assert_eq!(resource.resource_type.as_str(), "loom.case");
+            assert_eq!(
+                Some(resource.resource_id),
+                case_resource_id(&CaseId(case.to_owned()))
+            );
+        }
     }
 }

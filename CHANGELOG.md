@@ -12,14 +12,20 @@ under **Unreleased** until the next release.
   Commission's authority port with Mandate's `check` (Mandate `v0.9.0`). A host builds it with
   its own Mandate ports and puts Mandate's verified context in the commission's authority context
   (`{"verified": …}`, `loom.authority.HostContext`); the capability is the action and the case is
-  the resource (`loom.case`, the case id as a UUID). Mandate's allow is a grant, its approval
+  the resource, of type `loom.case`. A case's resource id is derived from its case id, never
+  parsed: the UUID version 5 of the case id's exact UTF-8 bytes under the namespace
+  `735b2acd-620b-43ec-b1ab-144c2aec7ba7`, so every case id, the governor's `case-<n>` included, is
+  its own resource, and two spellings of one UUID are two. A host computes the same id with
+  `loom_mandate::case_resource_id(&CaseId)`, or any UUID version 5 implementation over that
+  namespace, when it writes Mandate's graph or policy. Mandate's allow is a grant, its approval
   requirement is Commission's `ApprovalRequired` naming the decision id, so a run through
   `run_with_suspension` holds a Suspension, and its refusals are denials. A Mandate outage, an
-  authority context that is no Mandate context and a case id that is no UUID grant nothing. No
-  product crate links it; `b10x-loom run`, `approve` and `resume` are unchanged.
-- The `loom.authority` domain (`ess/domains/authority.yaml`) declares that context and the answer
-  each outcome maps to. The `loom` specification moves to format `ess/24`; the generated
-  `loom` model gains the `authority` module and nothing else changes.
+  authority context that is no Mandate context and the empty case id grant nothing. No product
+  crate links it; `b10x-loom run`, `approve` and `resume` are unchanged.
+- The `loom.authority` domain (`ess/domains/authority.yaml`) declares that context, the case
+  resource and its derivation (`loom.authority.CaseResource`), and the answer each outcome maps
+  to. The `loom` specification moves to format `ess/24`; the generated `loom` model gains the
+  `authority` module and nothing else changes.
 
 ### Changed
 

@@ -20,8 +20,8 @@ use b10x_loom_commission::model::responsibility::{
     ProposedActionArguments, RunId, Unit, commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
-use b10x_loom_commission::ports::authority::{AuthorityCheck, check_authority};
 use b10x_loom_commission::ports::authority::AuthorityProvider;
+use b10x_loom_commission::ports::authority::{AuthorityCheck, check_authority};
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use b10x_loom_commission::runtime::{
     LoopContext, ResumeError, ResumeRefusal, resume_after_grant, run_until_blocked,
@@ -31,7 +31,9 @@ use b10x_loom_commission_testkit::fake_executor::ScriptedExecutor;
 use b10x_loom_commission_testkit::fake_governor::{Answer as Scripted, FakeGovernor};
 use b10x_loom_commission_testkit::file_suspension::FileSuspensionStore;
 use loom::authority::{Answer, Outcome};
-use loom_mandate::{CASE_RESOURCE_TYPE, MandateAuthority, answer, case_resource, outcome};
+use loom_mandate::{
+    CASE_RESOURCE_TYPE, MandateAuthority, answer, case_resource, case_resource_id, outcome,
+};
 use mandate_authz::agent::AgentRecords;
 use mandate_authz::decision::{DecisionIdAllocator, Denied, FixedChallenge, SequentialDecisionIds};
 use mandate_graph::double::GraphDouble;
@@ -47,10 +49,9 @@ use mandate_policy::port::{
 use mandate_policy::record::{AuthorizationModel, Policy};
 use mandate_types::{
     Action, Audience, AuthorityScope, AuthoritySubject, AuthorizationModelId, AuthzRevision,
-    CorrelationId, CredentialId, DecisionId, DecisionReason, DenialReason, GrantId,
-    OrganizationId, OrganizationMembershipId, PolicyId, PolicyVersion,
-    PrincipalId as MandatePrincipal, ResourceId, ResourceRef, ResourceType, Timestamp, Uuid,
-    VerifiedContext,
+    CorrelationId, CredentialId, DecisionId, DecisionReason, DenialReason, GrantId, OrganizationId,
+    OrganizationMembershipId, PolicyId, PolicyVersion, PrincipalId as MandatePrincipal,
+    ResourceRef, ResourceType, Timestamp, Uuid, VerifiedContext,
 };
 
 const CAPABILITY: &str = "repository.merge";
@@ -86,7 +87,8 @@ fn action() -> Action {
 fn resource_of(case: &str) -> ResourceRef {
     ResourceRef {
         resource_type: ResourceType::new(CASE_RESOURCE_TYPE),
-        resource_id: ResourceId::new(Uuid::parse(case).unwrap_or_else(|_| panic!("{case}"))),
+        resource_id: case_resource_id(&CaseId(case.to_owned()))
+            .unwrap_or_else(|| panic!("{case} derives a resource id")),
     }
 }
 
@@ -483,7 +485,10 @@ fn security_a_poisoned_allocator_grants_nothing_afterwards() {
     let first = catch_unwind(AssertUnwindSafe(|| {
         provider.decide(commission.data(), CAPABILITY)
     }));
-    assert!(first.is_err(), "the first decision panics with the allocator");
+    assert!(
+        first.is_err(),
+        "the first decision panics with the allocator"
+    );
 
     for _ in 0..2 {
         let decided = provider.decide(commission.data(), CAPABILITY);
@@ -650,7 +655,11 @@ fn security_an_approval_requirement_is_not_granted_on_resume() {
         &mut Context::default(),
     )
     .unwrap_or_else(|error| panic!("the loop failed: {error:?}"));
-    assert_eq!(effects.invoked.get(), 0, "nothing performed before the approval");
+    assert_eq!(
+        effects.invoked.get(),
+        0,
+        "nothing performed before the approval"
+    );
 
     let resumed = resume_after_grant(
         &governor,
@@ -668,7 +677,11 @@ fn security_an_approval_requirement_is_not_granted_on_resume() {
         )))) => {}
         other => panic!("a resume Mandate still requires approval for is refused, got {other:?}"),
     }
-    assert_eq!(effects.invoked.get(), 0, "a resume without approval performs nothing");
+    assert_eq!(
+        effects.invoked.get(),
+        0,
+        "a resume without approval performs nothing"
+    );
 }
 
 /// Two distinct Loom cases are two distinct Mandate resources. Loom compares case ids as exact
@@ -702,8 +715,8 @@ fn security_distinct_case_ids_are_distinct_mandate_resources() {
 /// The packages of the workspace's `Cargo.lock`, each with its direct dependencies' names.
 fn locked_packages() -> BTreeMap<String, BTreeSet<String>> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.lock");
-    let text =
-        std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
     let mut packages = BTreeMap::new();
     for block in text.split("[[package]]").skip(1) {
         let name = block
@@ -722,7 +735,10 @@ fn locked_packages() -> BTreeMap<String, BTreeSet<String>> {
                 }
             }
         }
-        packages.entry(name).or_insert_with(BTreeSet::new).extend(dependencies);
+        packages
+            .entry(name)
+            .or_insert_with(BTreeSet::new)
+            .extend(dependencies);
     }
     packages
 }
@@ -760,7 +776,15 @@ fn security_mandate_is_linked_by_one_crate_and_reads_no_credential() {
             pending.extend(dependencies.iter().cloned());
         }
     }
-    let allowed = ["serde", "serde_json", "serde_derive", "itoa", "ryu", "zmij", "memchr"];
+    let allowed = [
+        "serde",
+        "serde_json",
+        "serde_derive",
+        "itoa",
+        "ryu",
+        "zmij",
+        "memchr",
+    ];
     let beyond: Vec<&String> = reached
         .iter()
         .filter(|name| {
@@ -771,7 +795,12 @@ fn security_mandate_is_linked_by_one_crate_and_reads_no_credential() {
         })
         .collect();
     assert!(beyond.is_empty(), "Mandate brings {beyond:?}");
-    for credential in ["mandate-token", "mandate-client", "mandate-identity", "mandate-server"] {
+    for credential in [
+        "mandate-token",
+        "mandate-client",
+        "mandate-identity",
+        "mandate-server",
+    ] {
         assert!(
             !reached.contains(credential),
             "b10x-loom-mandate links {credential}"
@@ -781,7 +810,14 @@ fn security_mandate_is_linked_by_one_crate_and_reads_no_credential() {
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs");
     let text = std::fs::read_to_string(&source)
         .unwrap_or_else(|error| panic!("{}: {error}", source.display()));
-    for reach in ["std::env", "std::fs", "std::process", "std::net", "env!(", "option_env!("] {
+    for reach in [
+        "std::env",
+        "std::fs",
+        "std::process",
+        "std::net",
+        "env!(",
+        "option_env!(",
+    ] {
         assert!(
             !text.contains(reach),
             "{} reaches {reach}",
