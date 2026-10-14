@@ -1,0 +1,170 @@
+{
+  "contract": "b10x-loom run --output jsonl",
+  "domain": "intake.events",
+  "exit_statuses": {
+    "0": [
+      "ApprovalRequired",
+      "Completed"
+    ],
+    "1": [
+      "failed"
+    ],
+    "3": [
+      "ConfinementUnavailable",
+      "NoLocalExecutor",
+      "NothingAdmissible",
+      "Refused",
+      "StepBudget"
+    ],
+    "4": [
+      "ApprovalRequired, nothing suspended"
+    ]
+  },
+  "generated_by": "loom-docs generate, from ess/intake; task docs-check compares it with the declaration",
+  "kinds": {
+    "Approval": {
+      "fields": {
+        "actions": {
+          "optional": false,
+          "type": "List<String>"
+        }
+      }
+    },
+    "Route": {
+      "fields": {
+        "accepted": {
+          "optional": false,
+          "type": "Boolean"
+        },
+        "protocol": {
+          "optional": false,
+          "type": "String"
+        }
+      }
+    },
+    "Terminal": {
+      "fields": {
+        "error": {
+          "optional": true,
+          "type": "String"
+        },
+        "exit_status": {
+          "optional": false,
+          "type": "Integer"
+        },
+        "protocol": {
+          "optional": true,
+          "type": "String"
+        },
+        "steps": {
+          "optional": true,
+          "type": "Integer"
+        },
+        "stop_reason": {
+          "optional": true,
+          "type": "intake.routing.StopReason",
+          "values": [
+            "ApprovalRequired",
+            "Completed",
+            "ConfinementUnavailable",
+            "NoLocalExecutor",
+            "NothingAdmissible",
+            "Refused",
+            "StepBudget"
+          ]
+        }
+      }
+    },
+    "ToolCall": {
+      "fields": {
+        "arguments": {
+          "optional": false,
+          "type": "String"
+        },
+        "call_id": {
+          "optional": false,
+          "type": "String"
+        },
+        "name": {
+          "optional": false,
+          "type": "String"
+        },
+        "turn": {
+          "optional": false,
+          "type": "Integer"
+        }
+      }
+    },
+    "Turn": {
+      "fields": {
+        "model": {
+          "optional": false,
+          "type": "String"
+        },
+        "phase": {
+          "optional": false,
+          "type": "intake.context.RequestPhase",
+          "values": [
+            "Arguments",
+            "Classification",
+            "Selection"
+          ]
+        },
+        "turn": {
+          "optional": false,
+          "type": "Integer"
+        },
+        "turn_stop": {
+          "optional": false,
+          "type": "String"
+        }
+      }
+    },
+    "Usage": {
+      "fields": {
+        "cache_creation_input_tokens": {
+          "optional": true,
+          "type": "Integer"
+        },
+        "cached_input_tokens": {
+          "optional": true,
+          "type": "Integer"
+        },
+        "final_usage": {
+          "optional": false,
+          "type": "Boolean"
+        },
+        "input_tokens": {
+          "optional": true,
+          "type": "Integer"
+        },
+        "model": {
+          "optional": false,
+          "type": "String"
+        },
+        "output_tokens": {
+          "optional": true,
+          "type": "Integer"
+        },
+        "reasoning_output_tokens": {
+          "optional": true,
+          "type": "Integer"
+        },
+        "turn": {
+          "optional": false,
+          "type": "Integer"
+        }
+      }
+    }
+  },
+  "line": {
+    "members": [
+      "schema_version"
+    ],
+    "tag": "kind"
+  },
+  "schema_version": 1,
+  "schema_versions": [
+    "V1"
+  ]
+}

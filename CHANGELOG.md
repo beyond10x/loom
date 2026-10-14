@@ -33,6 +33,11 @@ under **Unreleased** until the next release.
   resource and its derivation (`loom.authority.CaseResource`), and the answer each outcome maps
   to. The `loom` specification moves to format `ess/24`; the generated `loom` model gains the
   `authority` module and nothing else changes.
+- The `run --output jsonl` records and the exit statuses are a stated contract at `schema_version` 1,
+  committed as `docs/contracts/run-events-v1.json` and checked by `task docs-check`: within the
+  version only a new optional field of an existing record kind is allowed, and any other change is
+  a break named here under `Breaking:` with a new schema version (reference: Run events,
+  Stability).
 
 ### Changed
 
