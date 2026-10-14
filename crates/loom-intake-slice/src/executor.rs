@@ -26,8 +26,10 @@
 //!   and only the last 8 KiB of each is kept. On a case whose `change_kind` is `bugfix`, when the
 //!   host gave a regression-test command ([`TestCommand::with_regression`]), a `tests.write` of
 //!   this executor committed and the work tree was clean, the run then runs that command once per
-//!   test path those writes committed with new contents, in the order first committed, `{path}`
-//!   filled, through the same runner and timeout, each delivered as its own observation
+//!   test path those writes committed whose bytes now differ from its bytes before this
+//!   executor first wrote it (a test written and then written back is none), in the order first
+//!   committed, `{path}` filled, through the same runner and timeout, each delivered as its own
+//!   observation
 //!   ([`REGRESSION_RUN_SOURCE`], [`TestRun::regressions`]).
 //!
 //! Arguments are checked before anything is done: an argument the action does not take, or one of
@@ -590,6 +592,23 @@ pub fn arguments_schema(action: &str) -> serde_json::Value {
     }
 }
 
+/// A test path a `tests.write` committed, and what the file held before the executor first wrote
+/// it.
+#[derive(Debug, Clone)]
+struct TestFile {
+    path: String,
+    file: PathBuf,
+    base: Option<Vec<u8>>,
+}
+
+impl TestFile {
+    /// Whether the file holds other bytes now than before the executor first wrote it: a test
+    /// written and then written back is no test the run wrote.
+    fn written(&self) -> bool {
+        std::fs::read(&self.file).ok() != self.base
+    }
+}
+
 /// Performs proposed actions in one workspace, for one case of `governor`.
 pub struct LocalExecutor<'g, S, T = NoEvaluationTime> {
     governor: &'g CanonGovernor<S, T>,
@@ -600,9 +619,10 @@ pub struct LocalExecutor<'g, S, T = NoEvaluationTime> {
     test_paths: TestPaths,
     clock: &'g dyn Clock,
     tests_written: Cell<bool>,
-    /// Every test path a `tests.write` of this executor committed with new contents, in the order
-    /// first committed, each once.
-    test_files: RefCell<Vec<String>>,
+    /// Every test path a `tests.write` of this executor committed, in the order first committed,
+    /// each once, with the file and the bytes it held before this executor first wrote it (none
+    /// when it did not exist). A run counts only those whose bytes now differ from these.
+    test_files: RefCell<Vec<TestFile>>,
     /// The whole UTC second of the last observation this executor delivered.
     last_observed: Cell<Option<i64>>,
 }
@@ -776,8 +796,12 @@ impl<'g, S: FallibleCaseStore, T: EvaluationTime> LocalExecutor<'g, S, T> {
             let mut test_files = self.test_files.borrow_mut();
             for (relative, file, _) in &files {
                 let path = relative.to_string_lossy().into_owned();
-                if undo.changed(file) && !test_files.contains(&path) {
-                    test_files.push(path);
+                if !test_files.iter().any(|known| known.path == path) {
+                    test_files.push(TestFile {
+                        path,
+                        file: file.clone(),
+                        base: undo.before(file),
+                    });
                 }
             }
         }
@@ -862,7 +886,14 @@ impl<'g, S: FallibleCaseStore, T: EvaluationTime> LocalExecutor<'g, S, T> {
     /// once per committed test path (see [`TestRun::regressions`]).
     fn run_tests(&self, root: &Path) -> Result<Report, ExecuteError> {
         let mut suite = self.run_command(root, &self.test, TEST_RUN_SOURCE, None)?;
-        let test_files = self.test_files.borrow().clone();
+        // A path counts only when it holds other bytes now than before the run first wrote it.
+        let test_files: Vec<String> = self
+            .test_files
+            .borrow()
+            .iter()
+            .filter(|test_file| test_file.written())
+            .map(|test_file| test_file.path.clone())
+            .collect();
         if let Some(regression) = self.test.regression()
             && suite.implementation.is_some()
             && !test_files.is_empty()
@@ -1058,13 +1089,12 @@ impl Undo {
         Ok(())
     }
 
-    /// Whether `file` holds other bytes now than it held before it was first written (a file that
-    /// did not exist did change).
-    fn changed(&self, file: &Path) -> bool {
+    /// The bytes `file` held before this write first wrote it: none when it did not exist.
+    fn before(&self, file: &Path) -> Option<Vec<u8>> {
         self.files
             .iter()
             .find(|(held, _)| held == file)
-            .is_some_and(|(_, previous)| previous.as_deref() != std::fs::read(file).ok().as_deref())
+            .and_then(|(_, previous)| previous.clone())
     }
 
     /// Puts every remembered path, directory and the index back as they were. Best effort: a path
