@@ -1,6 +1,6 @@
 // generated from intake v1
-// model digest 19ac3d8d1db2341a963fcfb8d85843ba6e1da6d764dc7e98dd4d43eed5077883
-// contract digest 09dd5b3cae539d5e002453702e5eec93d09e4697eecb6cd2f7a112ab5e12c81c
+// model digest 15e4505119390053fa8851b623b962daf68d5470099a63fc007c3c158d7c78e9
+// contract digest 1343dab00750680fd7c8f9677d3285807a17865acb4c07c8d227f83d330b8285
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Routing — `intake.routing`.
@@ -882,6 +882,8 @@ pub struct ResumeContextData {
     pub workspace: Option<String>,
     /// `test_command` — `List<String>`.
     pub test_command: Vec<String>,
+    /// `test_paths` — `List<String>`.
+    pub test_paths: Vec<String>,
     /// `max_steps` — `Integer`.
     pub max_steps: i64,
     /// `confinement` — `intake.confinement.Backend`.
@@ -1036,6 +1038,8 @@ pub struct SliceRunData {
     pub change_kind: ChangeKind,
     /// `affects_security_boundary` — `Boolean`.
     pub affects_security_boundary: bool,
+    /// `test_paths` — `List<String>`.
+    pub test_paths: Vec<String>,
 }
 
 /// The states of `intake.routing.SliceRun`, at the type level.
