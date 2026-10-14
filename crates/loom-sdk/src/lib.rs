@@ -16,6 +16,8 @@
 //! The items an embedding always touches are also re-exported at the top: [`run_until_blocked`],
 //! [`LoopContext`], [`LoopEnd`], [`EffectPort`], [`Loom`], [`ActionSelector`],
 //! [`ArgumentGenerator`], [`CanonGovernor`], [`CaseStore`] and [`MemoryCaseStore`].
+//! [`RunMeter`], [`MeteredModelPort`] and [`MeteredExecutor`] report a run's model calls, tokens
+//! and cost per executor call (`loom::metering`).
 //!
 //! `examples/software_change.rs` embeds the runtime end to end: it opens a case on
 //! `software-change@1`, runs the loop over scripted fake models and stops at
@@ -61,6 +63,7 @@ pub mod intake {
 pub use b10x_loom_commission::ports::effect::EffectPort;
 pub use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked};
 pub use b10x_loom_executor::{ActionSelector, ArgumentGenerator, Loom};
+pub use b10x_loom_executor::{MeteredExecutor, MeteredModelPort, RunMeter};
 pub use b10x_loom_intake_slice::confinement::{
     ConfinementError, SubstrateRunner, TestExecution, TestRunner,
 };
