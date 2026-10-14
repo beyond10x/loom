@@ -6,6 +6,23 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-14
+
+Loom 0.21.0 lets a bugfix show its regression test failing first, and clears approvals through
+Mandate. The slice submits evidence that `software.change/1`'s order and age rules decide: on a
+bugfix, a failing run after the first committing `tests.write` is also a
+`regression_test_result`, and a committing edit is an `implementation_change`, each with the
+host clock's `observed_at` (strictly increasing, whole seconds) and the trusted producer, so a
+bugfix that runs its regression test red before it edits discharges `red_first.required`.
+`b10x-loom-mandate` answers Commission's authority port with Mandate `v0.9.0`, and
+`b10x-loom approve --mandate` and `resume --mandate` record a Mandate approval and consume it
+once. The `run --output jsonl` records are a committed V1 contract, the SDK's stable surface
+has its page, `task check` builds an external consumer of the SDK, and the migration guide maps
+every Harness crate to Loom. Breaking: the slice's items that take a governor are generic over
+`T: EvaluationTime`, `executor::Report::Edited` gains `change`, `ExecuteError` gains `Clock`,
+and the slice's grant API (`grant::approve`, `GrantData`, `ApproveRefusal`,
+`intent::ResumeState`) carries the Mandate approval.
+
 ### Added
 
 - The SDK stability page (`website/docs/reference/sdk-stability.md`) names the stable surface of
