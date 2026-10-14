@@ -121,12 +121,14 @@ hand `run_until_blocked` in a `MeteredExecutor` on it. When the loop returns,
 output and cached input tokens the provider reported and the cost in micro-US-dollars, in total
 and per step.
 
-- Every `turn` through a metered port is one call, a failed turn included; a failed turn adds no
-  tokens.
+- Every `turn` through a metered port is one call, counted before the turn runs, so a turn that
+  fails or unwinds is a call too; it adds no tokens.
 - A step is one executor call, counted from 1. Calls made while no executor call runs are step 0,
-  listed only when there were any, so the steps always sum to the totals.
+  listed only when there were any, so the steps always sum to the totals. Executor calls on one
+  meter must not overlap, and an executor is wrapped by one `MeteredExecutor`.
 - Each turn is priced once at the rate card. Without a card, for a model the card does not list,
-  or after a turn that reported no usage, the cost is absent, never zero.
+  after a turn that reported no usage, or after a turn that failed or unwound, the cost is absent,
+  never zero.
 - The report covers what the meter saw: one process segment of the run.
 
 `crates/loom-executor/tests/run_metering.rs` drives these over scripted ports.

@@ -5,8 +5,9 @@
 //!
 //! A [`RunMeter`] is shared by the [`MeteredModelPort`]s and the [`MeteredExecutor`] of one run.
 //! Each `turn` through a metered port is one model call, whoever made it: the loop, the
-//! reasoning-model selector, an argument generator or compaction. A turn that answered adds the
-//! tokens the provider reported for it; a turn that failed is still a call and adds none.
+//! reasoning-model selector, an argument generator or compaction. The call is counted before the
+//! turn runs, so a turn that failed or unwound is still a call; a turn that answered adds the
+//! tokens the provider reported for it, and one that failed or unwound adds none.
 //!
 //! The [`MeteredExecutor`] opens one step per [`AgentExecutor::run`] call, counted from 1, and every
 //! call made while that executor call runs is counted in its step. A call made while no executor
@@ -15,8 +16,9 @@
 //!
 //! Each turn is priced once, with the run's [`RateCard`], and rounded once; a cost is the sum of its
 //! rounded turns, as [`RateCard::price`] holds. No price is reported as absent, never zero:
-//! without a rate card, for a model the card does not price, or after a turn that answered without
-//! reporting its usage, the step's cost is absent, and so is the run's.
+//! without a rate card, for a model the card does not price, after a turn that answered without
+//! reporting its usage, or after a turn that failed or unwound (its tokens, and so its cost, are
+//! unknown), the step's cost is absent, and so is the run's.
 //!
 //! The report is the generated [`RunUsageReport`] ([`RunMeter::report`]). It covers what the meter
 //! saw: one process segment of the run.
@@ -39,6 +41,10 @@ use crate::model::run::CommissionRunId;
 /// The usage of one run, shared by every metered port and the metered executor of the run.
 ///
 /// Cloning it is cheap and every clone counts into the same run.
+///
+/// Contract: executor calls on one meter do not overlap. The meter holds one open step, so two
+/// [`MeteredExecutor`] calls running at once on it count each other's model calls in whichever
+/// step opened last. `story:meter-overlapping-calls` would lift this.
 #[derive(Debug, Clone)]
 pub struct RunMeter {
     shared: Arc<Mutex<Ledger>>,
@@ -142,19 +148,24 @@ impl RunMeter {
         }
     }
 
-    /// Counts one `turn`: a call, and the usage of a turn that answered.
-    fn record(&self, answered: Option<Option<&Usage>>) {
+    /// Counts one call in the open step, before its `turn` runs, so a turn that fails or unwinds
+    /// is still a call. Returns the step the call's usage belongs to.
+    fn call(&self) -> usize {
+        let mut ledger = self.ledger();
+        let open = ledger.open;
+        let tally = &mut ledger.tallies[open];
+        tally.calls = tally.calls.saturating_add(1);
+        open
+    }
+
+    /// Adds the usage a counted call reported to its `step`. Without one (a turn that failed or
+    /// unwound, or an answer without usage) the tokens are unknown, so no price can be stated.
+    fn record(&self, step: usize, reported: Option<&Usage>) {
         let mut guard = self.ledger();
         let ledger = &mut *guard;
         let card = ledger.prices.as_ref();
-        let tally = &mut ledger.tallies[ledger.open];
-        tally.calls = tally.calls.saturating_add(1);
-        let Some(reported) = answered else {
-            // A failed turn is a call the provider reported nothing for.
-            return;
-        };
+        let tally = &mut ledger.tallies[step];
         let Some(usage) = reported else {
-            // An answer without usage: the tokens are unknown, so no price can be stated.
             tally.cost_micro_usd = None;
             return;
         };
@@ -217,9 +228,36 @@ fn metered_turn(
     request: &TurnRequest,
     sink: &mut dyn StreamSink,
 ) -> Result<TurnOutcome, WireError> {
+    let mut call = Call {
+        meter,
+        step: meter.call(),
+        settled: false,
+    };
     let outcome = port.turn(request, sink);
-    meter.record(outcome.as_ref().ok().map(|answer| answer.usage.as_ref()));
+    call.settled = true;
+    meter.record(
+        call.step,
+        outcome
+            .as_ref()
+            .ok()
+            .and_then(|answer| answer.usage.as_ref()),
+    );
     outcome
+}
+
+/// A call counted before its `turn`: when the turn unwinds, its cost is unknown.
+struct Call<'m> {
+    meter: &'m RunMeter,
+    step: usize,
+    settled: bool,
+}
+
+impl Drop for Call<'_> {
+    fn drop(&mut self) {
+        if !self.settled {
+            self.meter.record(self.step, None);
+        }
+    }
 }
 
 impl<M: ModelPort> ModelPort for MeteredModelPort<M> {
@@ -274,6 +312,10 @@ impl ModelPort for MeteredFork<'_> {
 }
 
 /// An [`AgentExecutor`] that opens one step of a [`RunMeter`] per `run` call of `E`.
+///
+/// Contract: an executor is wrapped by one `MeteredExecutor`, and its calls on one meter do not
+/// overlap ([`RunMeter`]). A `MeteredExecutor` over another of the same meter opens two steps for
+/// one executor call. `story:meter-overlapping-calls` would lift this.
 #[derive(Debug)]
 pub struct MeteredExecutor<E> {
     inner: E,
