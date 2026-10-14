@@ -41,7 +41,7 @@ fn an_unresolvable_reference_is_not_reported_as_an_unreachable_model() {
     let reference = json!({"result": "result-not-in-this-run", "sha256": "0".repeat(64),
         "select": {"kind": "whole"}, "rendering": "text"});
     let agent = Scripted::new(vec![
-        ("select_action", json!({"action": "repository.edit"})),
+        ("select_action", json!({"action": "implementation.edit"})),
         (
             "action_arguments",
             json!({"files": [{"path": "check.txt", "contents": {"segments": [{"ref": reference}]}}],
@@ -58,6 +58,8 @@ fn an_unresolvable_reference_is_not_reported_as_an_unreachable_model() {
             test: TestCommand::new("grep", ["-q", "status=fixed", "check.txt"]),
             max_steps: 1,
             threshold: 0.5,
+            inputs: b10x_loom_intake_slice::case::RUN_DEFAULTS,
+            test_paths: b10x_loom_intake_slice::test_paths::TestPaths::default(),
         },
         &governor,
         &governor,

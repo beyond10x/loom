@@ -35,8 +35,14 @@ fn the_slice_case_starts_where_the_workspace_is() {
     let head = workspace.head();
 
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let opened = case::open(&governor, PICK, INTENT, workspace.path())
-        .expect("a software-change@1 case opens on a git workspace");
+    let opened = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        workspace.path(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("a software-change@1 case opens on a git workspace");
 
     let revisions = governor
         .revisions(&opened)
@@ -60,15 +66,28 @@ fn the_slice_case_starts_where_the_workspace_is() {
     // different text a different one, and it is neither `r0` nor the workspace's HEAD.
     assert_ne!(intent_revision, "r0");
     assert_ne!(intent_revision, head);
-    let again = case::open(&governor, PICK, INTENT, workspace.path()).expect("a second case opens");
+    let again = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        workspace.path(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("a second case opens");
     assert_ne!(again, opened, "the governor opens a new case");
     assert_eq!(
         governor.revisions(&again).expect("held")["intent"],
         intent_revision,
         "the same intent text gives the same intent revision"
     );
-    let other = case::open(&governor, PICK, "rename the config flag", workspace.path())
-        .expect("a case for another intent opens");
+    let other = case::open(
+        &governor,
+        PICK,
+        "rename the config flag",
+        workspace.path(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("a case for another intent opens");
     assert_ne!(
         governor.revisions(&other).expect("held")["intent"],
         intent_revision,
@@ -86,7 +105,10 @@ fn the_slice_case_starts_where_the_workspace_is() {
     assert_eq!(frontier.case_id, opened);
     assert_eq!(frontier.case_revision, before);
     let actions = by_name(&frontier.actions);
-    assert_eq!(actions["repository.edit"].status, ActionStatus::Admissible);
+    assert_eq!(
+        actions["implementation.edit"].status,
+        ActionStatus::Admissible
+    );
     assert_eq!(actions["tests.run"].status, ActionStatus::Admissible);
     let merge = actions["repository.merge"];
     assert_eq!(merge.status, ActionStatus::Blocked);

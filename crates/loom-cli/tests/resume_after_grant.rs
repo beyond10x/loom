@@ -229,7 +229,7 @@ fn approve_refuses_another_capability_and_a_commission_with_nothing_suspended() 
     let other = scratch.command(&[
         "approve",
         &held.commission,
-        "repository.edit",
+        "implementation.edit",
         "--state",
         held.state_text(),
     ]);
@@ -390,7 +390,7 @@ fn new_work_after_a_hand_off_is_approved_and_handed_off_at_its_own_head() {
     assert_eq!(approved.status.code(), Some(0), "{}", shown(&approved));
 
     let (base_url, server) = Script::serve(vec![
-        agent("select_action", json!({"action": "repository.edit"})),
+        agent("select_action", json!({"action": "implementation.edit"})),
         agent(
             "action_arguments",
             json!({
@@ -489,7 +489,7 @@ fn a_resume_at_the_gate_with_nothing_suspended_says_so() {
     let approved = approve(&scratch, &held);
     assert_eq!(approved.status.code(), Some(0), "{}", shown(&approved));
     let (base_url, server) = Script::serve(vec![
-        agent("select_action", json!({"action": "repository.edit"})),
+        agent("select_action", json!({"action": "implementation.edit"})),
         agent(
             "action_arguments",
             json!({
@@ -595,7 +595,7 @@ impl Scratch {
     fn run(&self, max_steps: usize, state: bool, last: &str) -> Output {
         let (base_url, server) = Script::serve(vec![
             classify("software-change@1"),
-            agent("select_action", json!({"action": "repository.edit"})),
+            agent("select_action", json!({"action": "implementation.edit"})),
             agent(
                 "action_arguments",
                 json!({

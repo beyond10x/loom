@@ -9,19 +9,19 @@ source: crates/loom-cli, crates/loom-sdk/examples/software_change.rs, docs/quali
 # Getting started
 
 You need a Rust toolchain (edition 2024) and `git`. Nothing is on a registry, so you build from
-the repository at the release tag, `0.19.0`.
+the repository at the release tag, `0.20.0`.
 
 ## Build the command line
 
 ```console
-git clone --branch 0.19.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.20.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.19.0
+b10x-loom 0.20.0
 ```
 
 `b10x-loom run --help` lists its flags and exit statuses; the [CLI reference](./reference/cli.md)
@@ -40,20 +40,23 @@ cargo run --locked -p b10x-loom-sdk --example software_change
 
 ```text
 workspace: target/loom-sdk-example
-step 1: repository.edit {"files":[{"path":"check.txt","contents":"fixed\n"}],"message":"fix the check"}
-  effect: committed; HEAD is b03958b42159325c1c16f74ec4b26292a962b734
+step 1: implementation.edit {"files":[{"path":"check.txt","contents":"fixed\n"}],"message":"fix the check"}
+  effect: committed; HEAD is 4d93a3d80863e4a00cc77924bc1de54520a70e99
   evidence: none
 step 2: tests.run {}
   effect: the test command exited with 0
+    | confinement: none
   evidence: test_result pass
 stopped: ApprovalRequired (repository.merge)
 ```
 
 The commit id differs on every run. What happened:
 
-1. The governor evaluated the case with Canon and issued a frontier: edit, inspect and run tests
-   admissible, merge blocked.
-2. Loom selected `repository.edit` and generated its arguments; the runtime rechecked the proposal
+1. The example opened the case with the inputs a host gives every software change (`risk`
+   `standard`, `change_kind` `feature`, `affects_security_boundary` `false`, the defaults of
+   `b10x-loom run`). The governor evaluated the case with Canon and issued a frontier: write tests,
+   edit the implementation, inspect and run tests admissible, merge blocked.
+2. Loom selected `implementation.edit` and generated its arguments; the runtime rechecked the proposal
    and the local effect adapter committed the file. The governor moved the case to the new
    revision.
 3. Loom selected `tests.run`; the adapter ran `grep -qx fixed check.txt`, and the verifier, not the
@@ -92,7 +95,10 @@ frontier: repository.edit (admissible), repository.inspect (admissible), reposit
 stopped: ApprovalRequired (repository.merge)
 ```
 
-The excerpt is cut (`…`); the record has the full transcript, five steps, exit status 0.
+The excerpt is cut (`…`); the record has the full transcript, five steps, exit status 0. The
+record predates engineering-protocols `0.5.0`, which split `repository.edit` into `tests.write`
+and `implementation.edit`: a run today proposes `implementation.edit` for step 3, and its frontier
+lists both write actions.
 [Run an intent](./guides/run-an-intent.md) explains each line and what to check before you point
 it at a work tree.
 

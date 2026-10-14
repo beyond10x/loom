@@ -79,7 +79,9 @@ types:
       - name: value
         type: loom.evaluation.ClaimValue
 
-  # One obligation, open unless Canon holds it discharged.
+  # One obligation, open exactly when Canon reports it open. One Canon holds discharged is not
+  # open, and neither is one Canon reports not applicable: the case's inputs do not select it (a
+  # review a trivial-risk change does not owe).
   - name: loom.evaluation.DecidedObligation
     kind: struct
     fields:

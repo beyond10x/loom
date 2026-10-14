@@ -48,6 +48,25 @@ port its first target declares, never falls back to another target, and needs an
 a credential, because the command line supplies none. An alias the catalog does not declare, or a
 catalog that cannot be read, stops the run with exit status 1 before any model call.
 
+A software change opens with three case inputs, which you give and no model does:
+`--risk <trivial|standard|elevated|critical>` (default `standard`) selects the obligations the
+change owes (tests at every level, a review from `standard`, release provenance from `elevated`,
+a healthy deployment at `critical`); `--change-kind <feature|bugfix|refactor>` (default `feature`)
+makes a bugfix reproduce its regression first, so `implementation.edit` is admissible only once a
+test failed on the current revision; `--affects-security-boundary <true|false>` (default `false`)
+makes the implementation verified only after another principal approved a security review, which
+the slice never submits, so such a run never reaches the merge. With the defaults a run behaves
+as it did before the inputs existed. An obligation the inputs do not select is not open. A
+protocol without inputs, such as a system query, ignores the three flags.
+
+`tests.write` writes only test paths, for every change kind: a path that none of the test-path
+patterns matches refuses the whole action, naming that path, before anything is written, so a
+bugfix cannot change its implementation through `tests.write` before a test failed.
+`implementation.edit` is not held to them. `--test-path <GLOB>`, repeatable, gives your own
+patterns in place of the defaults (`tests/**`, `**/tests/**`, `test/**`, `**/test/**`,
+`**/*_test.*`, `**/test_*.*`, `**/*.test.*`, `**/*.spec.*`); a pattern is relative to the
+workspace root, `*` matching within one path segment and `**` across any number of them.
+
 `--state <DIR>` keeps the run in a directory, created when missing: the governed case, the
 commission's Suspension when the run stops for an approval, and the commission's resume context
 (the intent, the accepted route, the workspace, the test command, the step budget, the
@@ -87,17 +106,19 @@ observation name this choice. Confined observations include the actual Substrate
 
 ## Read the output
 
-The lines below are from the [live run of 2026-10-05][live], abbreviated.
+The lines below are from the [live run of 2026-10-05][live], abbreviated, with its
+`repository.edit` written as the action that replaced it: since engineering-protocols `0.5.0` the
+slice writes tests with `tests.write` and edits the implementation with `implementation.edit`.
 
 | Line | Meaning |
 |---|---|
 | `reference: <kind> <value>` | A tracker key, chat permalink, merge or pull request or URL found in the intent, extracted without a model |
 | `picked software-change@1 (confidence 0.98)` and `reason:` lines | The router's proposal of a protocol. A proposal, never authority |
 | `refused: <why>` | The router refused its own pick: outside the registry, or below `--threshold`. No case is opened |
-| `frontier: repository.edit (admissible), …, repository.merge (blocked), …` | What the governor's evaluation admits before a step |
-| `step 3: repository.edit {…}` | The action Loom proposed and the runtime admitted, with its arguments |
+| `frontier: implementation.edit (admissible), …, repository.merge (blocked), …` | What the governor's evaluation admits before a step |
+| `step 3: implementation.edit {…}` | The action Loom proposed and the runtime admitted, with its arguments |
 | `effect: committed; HEAD is f9fa1bc…` | What the local effect adapter did; further lines (`\|`) are command output or file contents |
-| `effect: refused: <reason>` | The adapter refused the action (a path outside the work tree, an argument the action does not take); the step still counts |
+| `effect: refused: <reason>` | The adapter refused the action (a path outside the work tree, a `tests.write` path outside the test paths, an argument the action does not take); the step still counts |
 | `evidence: test_result pass` | Evidence the verifier submitted from the test command's exit status. A model's words are never evidence |
 | `stopped: ApprovalRequired (repository.merge)` | Why the run ended |
 

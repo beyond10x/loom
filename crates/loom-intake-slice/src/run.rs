@@ -46,6 +46,16 @@
 //! suspended because the agent model could not be reached, or the governor holding the case
 //! complete.
 //!
+//! # Actions the slice cannot perform
+//!
+//! On a `software-change@1` case the runtime reads every frontier without the actions the slice
+//! can never perform: those that need approval or name a capability and are not among
+//! [`PERFORMED`] (`release.rollback`; see [`never_performed`]). Such an action follows the rule an
+//! action the effects do not perform and that needs no authority already follows: it is never
+//! handed to the agent, so it is never offered, never awaited at an approval gate and never held
+//! as a Suspension that no resume could perform. A proposal naming it is refused as not in the
+//! frontier. `repository.merge` stays: a resume hands it off.
+//!
 //! # Refused steps
 //!
 //! A step that is not performed still counts against the step budget, is printed as refused, and
@@ -58,8 +68,9 @@
 //! - arguments the model wrote that cannot become the action's arguments: edit contents that do
 //!   not resolve, or a stored-result lookup after the last one allowed
 //!   ([`ArgumentsError::Refused`]). Nothing is proposed, so Commission admits nothing;
-//! - an action the executor refuses (a path outside the workspace, an ignored path, arguments the
-//!   action does not take), and a `repository.inspect` that cannot read a path it names.
+//! - an action the executor refuses (a path outside the workspace, an ignored path, a
+//!   `tests.write` path outside the request's [`SliceRequest::test_paths`], arguments the action
+//!   does not take), and a `repository.inspect` that cannot read a path it names.
 //!
 //! # Terminal safety
 //!
@@ -85,7 +96,13 @@
 //! # Identity
 //!
 //! A [`SliceRun`] carries the specification's `protocol`, `steps` and `stop_reason`. Its `run_id`
-//! and `intent_id` are not assigned here: the run is not recorded anywhere yet.
+//! and `intent_id` are not assigned here: the run is not recorded anywhere yet. Its `risk`,
+//! `change_kind` and `affects_security_boundary` are the request's [`SliceRequest::inputs`] (an
+//! [`IntentRequest`](crate::intent::IntentRequest)'s, through `intent`), which the caller holds;
+//! for a resume, the held case's, which
+//! [`resumed_request`](crate::intent::resumed_request) reads from the governor. Its
+//! `test_paths` are the request's [`SliceRequest::test_paths`], and a resume's those its resume
+//! context keeps.
 
 use std::fmt::{self, Write as _};
 use std::io::{self, Write};
@@ -98,9 +115,9 @@ use b10x_loom_commission::model::primitives::Timestamp;
 use b10x_loom_commission::model::responsibility::{
     ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, AuthorityVerdict,
     AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData, CommissionId,
-    CompletionDetermination, ExecutorOutcome, Frontier, FrontierData, GovernorError, Observation,
-    ObservationId, PrincipalId, RevalidateActionRequestOutcome, RunId, RunOutcome,
-    SuspensionReason, Unit, commission_state, frontier_state, observation_state,
+    CompletionDetermination, ExecutorOutcome, Frontier, FrontierAction, FrontierData,
+    GovernorError, Observation, ObservationId, PrincipalId, RevalidateActionRequestOutcome, RunId,
+    RunOutcome, SuspensionReason, Unit, commission_state, frontier_state, observation_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
@@ -119,14 +136,14 @@ use b10x_loom_executor::{ActionSelector, ArgumentContext, ArgumentGenerator, Loo
 use b10x_loom_intake_references::references;
 use b10x_loom_intake_router::{ProtocolPick, RouterError};
 use llm_core::Model;
-use loom_governor::{CanonGovernor, FallibleCaseStore};
+use loom_governor::{CanonGovernor, EvaluationTime, FallibleCaseStore};
 
 use crate::case::{self, CaseError};
 use crate::confinement::TestRunner;
 use crate::context_metrics::{ContextMetrics, ContextPolicy, MeasuredModel};
 use crate::effect::{Console, LocalEffects, refuse};
 use crate::executor::backend_name;
-use crate::executor::{ExecuteError, LocalExecutor, TestCommand, fresh_uuid, now};
+use crate::executor::{ExecuteError, LocalExecutor, TestCommand, TestPaths, fresh_uuid, now};
 use crate::handoff::{HandoffEffects, MergeHandoffStore, SettledHandoffs};
 use crate::selector::{ArgumentsError, Briefing, ModelArguments, ModelSelector, NO_ACTION};
 use crate::verifier::{TestResultVerifier, VerifyError};
@@ -152,6 +169,12 @@ pub struct SliceRequest {
     pub max_steps: usize,
     /// The confidence, from 0 to 1, below which the router refuses its pick.
     pub threshold: f64,
+    /// The case inputs the host supplies, never a model: the case opens with each one its
+    /// protocol declares ([`crate::case`], "Inputs a case starts with").
+    pub inputs: case::CaseInputs,
+    /// The host's test-path patterns, never a model's: `tests.write` changes only paths they
+    /// match ([`crate::test_paths`]); `TestPaths::default()` for the defaults.
+    pub test_paths: TestPaths,
 }
 
 /// Optional context policy and measurement destination for one run. Existing callers stay legacy.
@@ -413,6 +436,7 @@ fn run_measured<S: FallibleCaseStore>(
         &pick.protocol,
         &request.intent,
         &request.workspace,
+        &request.inputs,
     )
     .map_err(SliceError::Case)?;
 
@@ -436,6 +460,7 @@ fn run_measured<S: FallibleCaseStore>(
             workspace: &request.workspace,
             test: &request.test,
             runner: Arc::clone(&request.runner),
+            test_paths: &request.test_paths,
         },
         Mode::Once,
     )
@@ -477,6 +502,7 @@ pub(crate) enum Execution<'a> {
         workspace: &'a std::path::Path,
         test: &'a TestCommand,
         runner: Arc<dyn TestRunner>,
+        test_paths: &'a TestPaths,
     },
     Clock {
         clock: &'a dyn crate::clock::Clock,
@@ -535,6 +561,7 @@ pub(crate) fn drive<S: FallibleCaseStore>(
             workspace,
             test,
             runner,
+            test_paths,
         } => Box::new(LocalEffects::new(
             LocalExecutor::new(
                 governor,
@@ -542,7 +569,8 @@ pub(crate) fn drive<S: FallibleCaseStore>(
                 workspace.to_path_buf(),
                 test.clone(),
             )
-            .with_runner(runner),
+            .with_runner(runner)
+            .with_test_paths(test_paths.clone()),
             TestResultVerifier::new(governor, case.clone(), PRODUCER),
             governor,
             case.clone(),
@@ -584,6 +612,7 @@ pub(crate) fn drive<S: FallibleCaseStore>(
     let reads = Reads {
         frontiers,
         governor,
+        local: protocol == LOCAL_PROTOCOL,
     };
     let seed = case.0.clone();
     let runs = move || RunStore::new(move || RunId(fresh_uuid("run", &seed)));
@@ -810,9 +839,40 @@ fn finish(
 
 /// The governor as the runtime reads it: revisions, frontiers and completions from `frontiers`,
 /// observations to the governor that holds the case.
+///
+/// On a `software-change@1` case (`local`) every frontier is read without the actions the slice
+/// can never perform ([`never_performed`]): `release.rollback`, which needs a capability and which
+/// neither a run's effects nor a resume's hand-off performs. Commission hands an executor an
+/// action behind an authority gate whether or not its effect port performs it, so left in, it
+/// would be offered to the agent, end every run whose step leaves the frontier unchanged
+/// `AwaitingApproval`, and, proposed, hold a Suspension no resume can perform. Left out, it is
+/// never offered, awaited or held, as an action the slice does not perform and that needs no
+/// authority is never handed to the agent; a proposal of it is refused as not in the frontier.
 struct Reads<'a, S> {
     frontiers: &'a dyn Governor,
     governor: &'a CanonGovernor<S>,
+    local: bool,
+}
+
+/// The actions of a `software-change@1` frontier the slice performs: the local effect adapter's
+/// four, and `repository.merge`, which a resume hands off.
+pub const PERFORMED: [&str; 5] = [
+    crate::executor::INSPECT,
+    crate::executor::TESTS_WRITE,
+    crate::executor::IMPLEMENTATION_EDIT,
+    crate::executor::TESTS_RUN,
+    crate::handoff::MERGE,
+];
+
+/// Whether `entry` is an action the slice can never perform on a `software-change@1` case: one
+/// that needs approval or names a capability, and that is not among [`PERFORMED`].
+pub fn never_performed(entry: &FrontierAction) -> bool {
+    let gated = entry.status == ActionStatus::ApprovalRequired
+        || entry
+            .capability
+            .as_deref()
+            .is_some_and(|capability| !capability.is_empty());
+    gated && !PERFORMED.contains(&entry.action.as_str())
 }
 
 impl<S> Governor for Reads<'_, S> {
@@ -821,11 +881,63 @@ impl<S> Governor for Reads<'_, S> {
     }
 
     fn frontier(&self, case: &CaseId) -> Result<Frontier<frontier_state::Issued>, GovernorError> {
-        self.frontiers.frontier(case)
+        let frontier = self.frontiers.frontier(case)?;
+        Ok(if self.local {
+            performable(frontier)
+        } else {
+            frontier
+        })
     }
 
     fn completion(&self, case: &CaseId) -> Result<CompletionDetermination, GovernorError> {
         self.frontiers.completion(case)
+    }
+}
+
+/// `frontier` without the actions the slice can never perform ([`never_performed`]); same id, case
+/// and revision.
+pub fn performable(frontier: Frontier<frontier_state::Issued>) -> Frontier<frontier_state::Issued> {
+    let mut data = frontier.into_data();
+    data.actions.retain(|entry| !never_performed(entry));
+    Frontier::new(data)
+}
+
+/// A governor read as the slice reads one for Commission's runtime: a frontier of a
+/// `software-change@1` case [`performable`], and the frontier of a case on any other protocol
+/// passed through unchanged, so an action that awaits approval there (an incident's
+/// `release.rollback`) stays in sight of the host. Everything else and every observation are the
+/// governor's own. An embedder that runs the slice's effects under its own loop reads the
+/// governor through it, so on a software change `release.rollback` is never offered, awaited or
+/// held. The case's protocol is the one the governor holds it under
+/// ([`CanonGovernor::protocol`]).
+pub struct SliceReads<'g, G: ?Sized>(pub &'g G);
+
+impl<S: FallibleCaseStore, T: EvaluationTime> Governor for SliceReads<'_, CanonGovernor<S, T>> {
+    fn current_revision(&self, case: &CaseId) -> Result<i64, GovernorError> {
+        self.0.current_revision(case)
+    }
+
+    fn frontier(&self, case: &CaseId) -> Result<Frontier<frontier_state::Issued>, GovernorError> {
+        let local = self.0.protocol(case)? == LOCAL_PROTOCOL;
+        let frontier = self.0.frontier(case)?;
+        Ok(if local {
+            performable(frontier)
+        } else {
+            frontier
+        })
+    }
+
+    fn completion(&self, case: &CaseId) -> Result<CompletionDetermination, GovernorError> {
+        self.0.completion(case)
+    }
+}
+
+impl<G: ObservationPort + ?Sized> ObservationPort for SliceReads<'_, G> {
+    fn observe(
+        &self,
+        observation: Observation<observation_state::Reported>,
+    ) -> Result<(), GovernorError> {
+        self.0.observe(observation)
     }
 }
 

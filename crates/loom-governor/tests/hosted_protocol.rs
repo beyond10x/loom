@@ -43,7 +43,13 @@ fn hosted_protocol_projects_and_expires_evidence() {
         .with_protocol_yaml("hosted-delivery@1", PROTOCOL)
         .unwrap()
         .with_evaluation_time(|_: &CaseId| now.lock().unwrap().clone());
-    let case = governor.open("hosted-delivery@1", revisions()).unwrap();
+    let case = governor
+        .open(
+            "hosted-delivery@1",
+            revisions(),
+            loom_governor::CaseInputs::none(),
+        )
+        .unwrap();
     assert!(matches!(
         governor.completion(&case).unwrap(),
         CompletionDetermination::Open(_)
@@ -168,7 +174,11 @@ fn storage_failures_are_unavailable_without_retry() {
     .with_protocol("hosted-delivery@1", &model())
     .unwrap();
     assert!(matches!(
-        governor.open("hosted-delivery@1", revisions()),
+        governor.open(
+            "hosted-delivery@1",
+            revisions(),
+            loom_governor::CaseInputs::none()
+        ),
         Err(OpenError::StoreUnavailable { .. })
     ));
     assert_eq!(*inserts.lock().unwrap(), 1);
@@ -235,7 +245,13 @@ fn failed_writes_are_not_acknowledged_and_recovery_preserves_revision() {
     })
     .with_protocol("hosted-delivery@1", &model())
     .unwrap();
-    let case = governor.open("hosted-delivery@1", revisions()).unwrap();
+    let case = governor
+        .open(
+            "hosted-delivery@1",
+            revisions(),
+            loom_governor::CaseInputs::none(),
+        )
+        .unwrap();
     fail.store(true, Ordering::SeqCst);
     assert!(matches!(
         governor.update_revision(&case, "implementation", "r2"),

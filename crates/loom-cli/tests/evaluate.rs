@@ -135,7 +135,12 @@ fn the_subcommand_decides_what_canon_governor_decides() {
             .expect("the catalog is admitted");
         let case = CaseId("case-1".into());
         governor
-            .open_case(case.clone(), protocol, revisions.clone())
+            .open_case(
+                case.clone(),
+                protocol,
+                revisions.clone(),
+                inputs_for(protocol),
+            )
             .expect("the case opens");
         for (n, record) in records.iter().enumerate() {
             submit(&governor, &case, n as u64, record);
@@ -351,13 +356,15 @@ fn snapshot(protocol_id: &str, revisions: &BTreeMap<String, String>) -> Value {
         .iter()
         .map(|(artifact, revision)| (artifact.clone(), json!({"revision": revision})))
         .collect();
-    json!({
+    let mut case = json!({
         "format": "canon-case/1",
         "id": "case-1",
         "protocol": protocol_id,
         "artifacts": artifacts,
         "revision": "r1",
-    })
+    });
+    with_inputs(&mut case);
+    case
 }
 
 fn query_revisions() -> BTreeMap<String, String> {
@@ -404,4 +411,36 @@ fn record(id: &str, kind: &str, result: &str, subject: &str, revision: &str) -> 
         "subject": subject,
         "subject_revision": revision,
     })
+}
+
+/// The case inputs a case on `protocol` opens with here: Loom's run defaults for
+/// `software-change@1`, none for a protocol that declares none.
+fn inputs_for(protocol: &str) -> loom_governor::CaseInputs {
+    if protocol == "software-change@1" {
+        software_change_inputs()
+    } else {
+        loom_governor::CaseInputs::none()
+    }
+}
+
+/// The case inputs a `software-change@1` case opens with here: Loom's run defaults.
+fn software_change_inputs() -> loom_governor::CaseInputs {
+    loom_governor::CaseInputs::try_from_pairs([
+        ("risk", "standard"),
+        ("change_kind", "feature"),
+        ("affects_security_boundary", "false"),
+    ])
+    .expect("distinct inputs")
+}
+
+/// Gives a `software.change` snapshot the case inputs the governor's case opened with
+/// (`software_change_inputs()`), as `CanonGovernor` gives them to Canon; any other protocol declares none.
+fn with_inputs(case: &mut serde_json::Value) {
+    if case["protocol"] == "software.change" {
+        let inputs: serde_json::Map<String, serde_json::Value> = software_change_inputs()
+            .iter()
+            .map(|(input, value)| (input.to_owned(), serde_json::Value::from(value)))
+            .collect();
+        case["inputs"] = serde_json::Value::Object(inputs);
+    }
 }

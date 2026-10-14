@@ -2,7 +2,10 @@
 //!
 //! The example creates a scratch git repository with one failing check (`check.txt` holds
 //! `broken`; the test command is `grep -qx fixed check.txt`), opens a case on `software-change@1`
-//! through the governor, and runs Commission's runtime over it with Loom as the executor.
+//! through the governor with the command line's default case inputs (`case::RUN_DEFAULTS`: standard
+//! risk, a feature, off a security boundary), and runs Commission's runtime over it with Loom as
+//! the executor, reading the governor as the slice does (`SliceReads`: without
+//! `release.rollback`, which nothing in Loom performs).
 //!
 //! Loom's selector and argument generator are scripted fakes: no model, no network. The script
 //! edits the check, runs the test and then selects the merge. The slice's local effect adapter
@@ -39,6 +42,7 @@ use loom_sdk::commission::ports::authority::{AuthorityProvider, AuthorityProvide
 use loom_sdk::intake::slice::case;
 use loom_sdk::intake::slice::effect::{Console, LocalEffects};
 use loom_sdk::intake::slice::executor::{LocalExecutor, TestCommand};
+use loom_sdk::intake::slice::run::SliceReads;
 use loom_sdk::intake::slice::selector::Briefing;
 use loom_sdk::intake::slice::verifier::TestResultVerifier;
 use loom_sdk::loom::arguments::ArgumentContext;
@@ -62,7 +66,7 @@ pub const PRODUCER: &str = "loom-sdk-example/verifier";
 /// JSON text.
 pub const SCRIPT: [(&str, &str); 3] = [
     (
-        "repository.edit",
+        "implementation.edit",
         r#"{"files":[{"path":"check.txt","contents":"fixed\n"}],"message":"fix the check"}"#,
     ),
     ("tests.run", "{}"),
@@ -96,7 +100,7 @@ pub fn run(workspace: &Path) -> Result<LoopEnd, Box<dyn Error>> {
     // The governor holds the case and evaluates its protocol; the case starts at the repository's
     // HEAD.
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let case = case::open(&governor, PROTOCOL, INTENT, &workspace)?;
+    let case = case::open(&governor, PROTOCOL, INTENT, &workspace, &case::RUN_DEFAULTS)?;
 
     // Loom proposes; the runtime revalidates each proposal against the frontier and the authority
     // provider, and hands what it admits to the slice's local effect adapter, which performs it in
@@ -121,7 +125,7 @@ pub fn run(workspace: &Path) -> Result<LoopEnd, Box<dyn Error>> {
     );
     let mut runs = Generated::new(RunStore::new(|| RunId(fresh(Kind::Run))));
     let end = run_until_blocked(
-        &governor,
+        &SliceReads(&governor),
         &loom,
         &NoGrant,
         &effects,

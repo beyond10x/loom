@@ -31,7 +31,13 @@ fn adversary2_a_work_tree_root_whose_name_ends_in_a_space_opens() {
     workspace.commit("README.md", "first\n");
 
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let opened = case::open(&governor, PICK, INTENT, workspace.path());
+    let opened = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        workspace.path(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    );
     let opened = match opened {
         Ok(opened) => opened,
         Err(error) => panic!(
@@ -55,7 +61,13 @@ fn adversary2_a_work_tree_root_whose_path_is_not_utf8_opens() {
     workspace.commit("README.md", "first\n");
 
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let opened = case::open(&governor, PICK, INTENT, workspace.path());
+    let opened = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        workspace.path(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    );
     let opened = match opened {
         Ok(opened) => opened,
         Err(error) => panic!(
@@ -76,7 +88,13 @@ fn adversary2_a_work_tree_root_whose_path_is_not_utf8_opens() {
 #[test]
 fn adversary2_paths_that_resolve_to_a_work_tree_root_open_on_its_head() {
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let implementation = |workspace: &Path| match case::open(&governor, PICK, INTENT, workspace) {
+    let implementation = |workspace: &Path| match case::open(
+        &governor,
+        PICK,
+        INTENT,
+        workspace,
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    ) {
         Ok(opened) => governor.revisions(&opened).expect("held")["implementation"].clone(),
         Err(error) => panic!("{workspace:?} opens a case: {error}"),
     };
@@ -189,7 +207,13 @@ fn adversary2_a_git_directory_is_not_a_workspace() {
     let workspace = Repo::new("dot-git");
     workspace.commit("README.md", "first\n");
     let dot_git = workspace.path().join(".git");
-    let result = case::open(&governor, PICK, INTENT, &dot_git);
+    let result = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        &dot_git,
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    );
     assert!(
         matches!(result, Err(CaseError::Workspace { .. })),
         "a `.git` directory is not a workspace; it opened {result:?}"
@@ -219,7 +243,13 @@ fn adversary2_a_git_directory_is_not_a_workspace() {
             elsewhere.to_str().expect("the scratch path is UTF-8"),
         ],
     );
-    let result = case::open(&governor, PICK, INTENT, &bare);
+    let result = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        &bare,
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    );
     assert!(
         matches!(result, Err(CaseError::Workspace { .. })),
         "a bare repository with core.worktree is not a workspace; it opened {result:?}"

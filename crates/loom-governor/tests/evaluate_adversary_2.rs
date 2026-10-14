@@ -120,6 +120,7 @@ fn snapshot(revisions: &BTreeMap<String, String>, termination: Option<&str>) -> 
         "artifacts": artifacts,
         "revision": "r1",
     });
+    with_inputs(&mut case);
     if let Some(outcome) = termination {
         case["termination"] = json!(outcome);
     }
@@ -308,7 +309,12 @@ fn adversary2_set_aside_and_reordered_records_report_what_the_governor_reports()
         .expect("catalog");
     let case = CaseId("case-1".into());
     governor
-        .open_case(case.clone(), "software-change@1", revisions.clone())
+        .open_case(
+            case.clone(),
+            "software-change@1",
+            revisions.clone(),
+            software_change_inputs(),
+        )
         .expect("open");
     for (n, r) in records.iter().enumerate() {
         submit(&governor, &case, n as u64, r);
@@ -385,4 +391,26 @@ fn adversary2_the_set_aside_path_costs_a_bounded_multiple_of_deciding() {
         filter <= 40.0 * decide + 0.25,
         "setting one record aside among {n} took {filter:.3}s against {decide:.3}s to decide them"
     );
+}
+
+/// The case inputs a `software-change@1` case opens with here: Loom's run defaults.
+fn software_change_inputs() -> loom_governor::CaseInputs {
+    loom_governor::CaseInputs::try_from_pairs([
+        ("risk", "standard"),
+        ("change_kind", "feature"),
+        ("affects_security_boundary", "false"),
+    ])
+    .expect("distinct inputs")
+}
+
+/// Gives a `software.change` snapshot the case inputs the governor's case opened with
+/// (`software_change_inputs()`), as `CanonGovernor` gives them to Canon; any other protocol declares none.
+fn with_inputs(case: &mut serde_json::Value) {
+    if case["protocol"] == "software.change" {
+        let inputs: serde_json::Map<String, serde_json::Value> = software_change_inputs()
+            .iter()
+            .map(|(input, value)| (input.to_owned(), serde_json::Value::from(value)))
+            .collect();
+        case["inputs"] = serde_json::Value::Object(inputs);
+    }
 }

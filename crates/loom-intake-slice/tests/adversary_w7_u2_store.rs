@@ -42,6 +42,7 @@ fn context(n: usize, intent: &str) -> ResumeContextData {
             "fixed".into(),
             "check.txt".into(),
         ],
+        test_paths: vec!["tests/**".into()],
         max_steps: 6,
         confinement: Backend::None,
         cgroup_root: None,

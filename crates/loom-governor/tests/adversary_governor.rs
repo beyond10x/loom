@@ -37,7 +37,7 @@ fn an_unrelated_artifact_revision_keeps_implementation_evidence() {
     let governor = Gov::new(MemoryCaseStore::default());
     let mut ids = Ids::default();
     let case = governor
-        .open(SOFTWARE_CHANGE, fixture_revisions())
+        .open(SOFTWARE_CHANGE, fixture_revisions(), fixture_inputs())
         .expect("opens");
     let pass = record("tests-r2", "test_result", "pass", "implementation", "R2");
     submit_record(&governor, &case, &mut ids, &pass).expect("taken");
@@ -77,7 +77,7 @@ fn evidence_for_a_superseded_revision_is_kept_and_unused() {
     let governor = Gov::new(MemoryCaseStore::default());
     let mut ids = Ids::default();
     let case = governor
-        .open(SOFTWARE_CHANGE, fixture_revisions())
+        .open(SOFTWARE_CHANGE, fixture_revisions(), fixture_inputs())
         .expect("opens");
     governor
         .update_revision(&case, "implementation", "R3")
@@ -117,7 +117,7 @@ fn evidence_for_a_superseded_revision_is_kept_and_unused() {
 fn a_refused_revision_update_moves_nothing() {
     let governor = Gov::new(MemoryCaseStore::default());
     let case = governor
-        .open(SOFTWARE_CHANGE, fixture_revisions())
+        .open(SOFTWARE_CHANGE, fixture_revisions(), fixture_inputs())
         .expect("opens");
     let revisions = governor.revisions(&case).expect("revisions");
 
@@ -233,8 +233,12 @@ fn random_walk(seed: u64, pool: &Pool) {
         .collect();
     let first = Gov::new(MemoryCaseStore::default());
     let second = Gov::new(MemoryCaseStore::default());
-    let case = first.open(pool.protocol, opening.clone()).expect("opens");
-    let replay = second.open(pool.protocol, opening).expect("opens");
+    let case = first
+        .open(pool.protocol, opening.clone(), inputs_for(pool.protocol))
+        .expect("opens");
+    let replay = second
+        .open(pool.protocol, opening, inputs_for(pool.protocol))
+        .expect("opens");
     assert_eq!(case, replay);
 
     let mut rng = Rng(seed);
@@ -337,6 +341,7 @@ fn the_frontier_lists_each_obligation_as_canon_decides_it() {
         .open(
             INCIDENT_RESPONSE,
             revs(&[("service", "svc1"), ("release", "rel1")]),
+            loom_governor::CaseInputs::none(),
         )
         .expect("opens");
     assert_eq!(
@@ -385,7 +390,7 @@ fn the_frontier_claims_are_the_fixture_claims_in_every_state() {
     let governor = Gov::new(MemoryCaseStore::default());
     let mut ids = Ids::default();
     let case = governor
-        .open(SOFTWARE_CHANGE, fixture_revisions())
+        .open(SOFTWARE_CHANGE, fixture_revisions(), fixture_inputs())
         .expect("opens");
     let mut seen = 0;
     for state in fixture["states"].as_array().expect("states") {
@@ -432,7 +437,7 @@ fn completion_follows_canon_when_a_revision_moves_after_acceptance() {
     let governor = Gov::new(MemoryCaseStore::default());
     let mut ids = Ids::default();
     let case = governor
-        .open(SOFTWARE_CHANGE, fixture_revisions())
+        .open(SOFTWARE_CHANGE, fixture_revisions(), fixture_inputs())
         .expect("opens");
     let records = [
         record("tests-r2", "test_result", "pass", "implementation", "R2"),
@@ -490,7 +495,7 @@ fn evidence_that_does_not_apply_is_kept_and_never_breaks_the_case() {
     let governor = Gov::new(MemoryCaseStore::default());
     let mut ids = Ids::default();
     let case = governor
-        .open(SOFTWARE_CHANGE, fixture_revisions())
+        .open(SOFTWARE_CHANGE, fixture_revisions(), fixture_inputs())
         .expect("opens");
     let mut applied: Vec<Value> = Vec::new();
     let mut kept = 0;
@@ -558,7 +563,7 @@ fn evidence_for_an_unknown_case_is_refused_and_kept_nowhere() {
     let governor = Gov::new(MemoryCaseStore::default());
     let mut ids = Ids::default();
     let case = governor
-        .open(SOFTWARE_CHANGE, fixture_revisions())
+        .open(SOFTWARE_CHANGE, fixture_revisions(), fixture_inputs())
         .expect("opens");
     let unknown = CaseId("case-404".to_owned());
     let rec = record("t-1", "test_result", "pass", "implementation", "R2");
@@ -594,7 +599,12 @@ fn a_held_case_is_never_opened_again() {
     let mut ids = Ids::default();
     let held = CaseId("case-1".to_owned());
     governor
-        .open_case(held.clone(), SOFTWARE_CHANGE, fixture_revisions())
+        .open_case(
+            held.clone(),
+            SOFTWARE_CHANGE,
+            fixture_revisions(),
+            fixture_inputs(),
+        )
         .expect("opens");
     governor
         .update_revision(&held, "implementation", "R3")
@@ -603,7 +613,12 @@ fn a_held_case_is_never_opened_again() {
     submit_record(&governor, &held, &mut ids, &rec).expect("taken");
 
     assert_eq!(
-        governor.open_case(held.clone(), SOFTWARE_CHANGE, fixture_revisions()),
+        governor.open_case(
+            held.clone(),
+            SOFTWARE_CHANGE,
+            fixture_revisions(),
+            fixture_inputs()
+        ),
         Err(OpenError::CaseExists {
             case: "case-1".to_owned()
         })
@@ -617,7 +632,7 @@ fn a_held_case_is_never_opened_again() {
     assert_eq!(claim(&governor, &held, "tests.pass"), "true");
 
     let next = governor
-        .open(SOFTWARE_CHANGE, fixture_revisions())
+        .open(SOFTWARE_CHANGE, fixture_revisions(), fixture_inputs())
         .expect("opens");
     assert_eq!(next, CaseId("case-2".to_owned()));
     assert_eq!(governor.current_revision(&next).expect("held"), 1);
@@ -642,7 +657,11 @@ fn refused_opens_hold_nothing() {
         "software-change@1 ",
         "software-change@1@1",
     ] {
-        match governor.open(protocol, fixture_revisions()) {
+        match governor.open(
+            protocol,
+            fixture_revisions(),
+            loom_governor::CaseInputs::none(),
+        ) {
             Err(OpenError::UnknownProtocol { protocol: named }) => assert_eq!(named, protocol),
             other => panic!("protocol {protocol:?} is refused as unknown, got {other:?}"),
         }
@@ -651,7 +670,7 @@ fn refused_opens_hold_nothing() {
     let mut extra = fixture_revisions();
     extra.insert("extra".to_owned(), "x1".to_owned());
     assert_eq!(
-        governor.open(SOFTWARE_CHANGE, extra),
+        governor.open(SOFTWARE_CHANGE, extra, fixture_inputs()),
         Err(OpenError::UndeclaredArtifact {
             artifact: "extra".to_owned()
         })
@@ -659,7 +678,7 @@ fn refused_opens_hold_nothing() {
     let mut empty = fixture_revisions();
     empty.insert("plan".to_owned(), String::new());
     assert_eq!(
-        governor.open(SOFTWARE_CHANGE, empty),
+        governor.open(SOFTWARE_CHANGE, empty, fixture_inputs()),
         Err(OpenError::InvalidRevision {
             artifact: "plan".to_owned()
         })
@@ -668,13 +687,19 @@ fn refused_opens_hold_nothing() {
     assert!(matches!(
         governor.open(
             SOFTWARE_CHANGE,
-            revs(&[("service", "svc1"), ("release", "rel1")])
+            revs(&[("service", "svc1"), ("release", "rel1")]),
+            fixture_inputs()
         ),
         Err(OpenError::MissingRevision { .. })
     ));
     for bad in ["", " case", "case 1", "case\t1"] {
         assert_eq!(
-            governor.open_case(CaseId(bad.to_owned()), SOFTWARE_CHANGE, fixture_revisions()),
+            governor.open_case(
+                CaseId(bad.to_owned()),
+                SOFTWARE_CHANGE,
+                fixture_revisions(),
+                fixture_inputs()
+            ),
             Err(OpenError::InvalidCaseId {
                 case: bad.to_owned()
             })
@@ -686,7 +711,7 @@ fn refused_opens_hold_nothing() {
         "no refused open holds a case"
     );
     let first = governor
-        .open(SOFTWARE_CHANGE, fixture_revisions())
+        .open(SOFTWARE_CHANGE, fixture_revisions(), fixture_inputs())
         .expect("opens");
     assert_eq!(first, CaseId("case-1".to_owned()));
 }
@@ -704,7 +729,7 @@ fn the_governor_never_supplies_authority() {
     let governor = Gov::new(MemoryCaseStore::default());
     let mut ids = Ids::default();
     let case = governor
-        .open(SOFTWARE_CHANGE, fixture_revisions())
+        .open(SOFTWARE_CHANGE, fixture_revisions(), fixture_inputs())
         .expect("opens");
     let mut approval_seen = false;
     for state in fixture["states"].as_array().expect("states") {
@@ -744,7 +769,7 @@ fn concurrent_writes_are_all_recorded() {
     let ir = ir_of("software-change", 1);
     let governor = Gov::new(MemoryCaseStore::default());
     let case = governor
-        .open(SOFTWARE_CHANGE, fixture_revisions())
+        .open(SOFTWARE_CHANGE, fixture_revisions(), fixture_inputs())
         .expect("opens");
     let writers = 4;
     let per = 8;
@@ -953,6 +978,8 @@ fn canon(
         "protocol": ir.protocol.id.as_str(),
         "artifacts": artifacts,
     });
+    let mut snapshot = snapshot;
+    with_inputs(&mut snapshot);
     let yaml = |value: &Value| serde_yaml_ng::to_value(value).expect("JSON is YAML");
     let snapshot = case_from_value(&yaml(&snapshot)).expect("snapshot");
     let mut seen = BTreeSet::new();
@@ -1117,5 +1144,49 @@ impl Rng {
         self.0 ^= self.0 >> 27;
         let value = self.0.wrapping_mul(0x2545_f491_4f6c_dd1d);
         usize::try_from(value % u64::try_from(n).expect("small")).expect("small")
+    }
+}
+
+/// The `chg-1842` fixture's case inputs.
+fn fixture_inputs() -> loom_governor::CaseInputs {
+    inputs_of(&fixture())
+}
+
+/// The case inputs a fixture's case gives; a value YAML reads as a boolean is its text.
+fn inputs_of(fixture: &serde_json::Value) -> loom_governor::CaseInputs {
+    let pairs: Vec<(String, String)> = fixture["case"]["inputs"]
+        .as_object()
+        .expect("case inputs")
+        .iter()
+        .map(|(input, value)| {
+            let value = match value {
+                serde_json::Value::String(text) => text.clone(),
+                other => other.to_string(),
+            };
+            (input.clone(), value)
+        })
+        .collect();
+    loom_governor::CaseInputs::try_from_pairs(pairs).expect("distinct inputs")
+}
+
+/// The case inputs a case on `protocol` opens with here: the `chg-1842` fixture.s for
+/// `software-change@1`, none for a protocol that declares none.
+fn inputs_for(protocol: &str) -> loom_governor::CaseInputs {
+    if protocol == "software-change@1" {
+        fixture_inputs()
+    } else {
+        loom_governor::CaseInputs::none()
+    }
+}
+
+/// Gives a `software.change` snapshot the case inputs the governor's case opened with
+/// (`fixture_inputs()`), as `CanonGovernor` gives them to Canon; any other protocol declares none.
+fn with_inputs(case: &mut serde_json::Value) {
+    if case["protocol"] == "software.change" {
+        let inputs: serde_json::Map<String, serde_json::Value> = fixture_inputs()
+            .iter()
+            .map(|(input, value)| (input.to_owned(), serde_json::Value::from(value)))
+            .collect();
+        case["inputs"] = serde_json::Value::Object(inputs);
     }
 }

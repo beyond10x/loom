@@ -166,7 +166,7 @@ fn edit(files: serde_json::Value, message: Option<&str>) -> ExecutorOutcomePropo
     if let Some(message) = message {
         arguments["message"] = json!(message);
     }
-    proposal("repository.edit", &arguments)
+    proposal("implementation.edit", &arguments)
 }
 
 fn proposal(action: &str, arguments: &serde_json::Value) -> ExecutorOutcomeProposedAction {
@@ -250,7 +250,14 @@ impl Fixture {
 
     fn open(&self) -> (CanonGovernor<MemoryCaseStore>, CaseId) {
         let governor = CanonGovernor::new(MemoryCaseStore::default());
-        let case = case::open(&governor, PICK, INTENT, &self.workspace).expect("the case opens");
+        let case = case::open(
+            &governor,
+            PICK,
+            INTENT,
+            &self.workspace,
+            &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+        )
+        .expect("the case opens");
         (governor, case)
     }
 

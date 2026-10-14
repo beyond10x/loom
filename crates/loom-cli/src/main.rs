@@ -190,7 +190,7 @@ fn resume(arguments: &ResumeArgs, out: &mut dyn Write) -> Result<SliceRun, Slice
             Arc::new(runner)
         }
     };
-    let request = resumed_request(&context, Some(runner))?;
+    let request = resumed_request(&context, &governor, Some(runner))?;
     resume_with_state(
         &context, &request, &catalog, &governor, &governor, &*agent, out, &state,
     )
@@ -503,7 +503,7 @@ fn execute(
         model: arguments.model.clone(),
         catalog: arguments.catalog.clone(),
     };
-    host.check(&intent_request(arguments))
+    host.check(&intent_request(arguments)?)
         .map_err(|e| e.to_string())?;
     // Then each store opens the directory, creating it and its lock when missing, and proves it
     // takes a write: holding the lock, it writes, syncs and removes a temporary file. A directory
@@ -533,18 +533,21 @@ fn execute(
     )
 }
 
-/// The intent request `run`'s arguments make, with no test runner yet.
-fn intent_request(arguments: &RunArgs) -> IntentRequest {
+/// The intent request `run`'s arguments make, with no test runner yet; refused when the
+/// `--test-path` patterns are not patterns.
+fn intent_request(arguments: &RunArgs) -> Result<IntentRequest, String> {
     let mut words = arguments.test_cmd.split_whitespace();
     let program = words.next().unwrap_or("");
-    IntentRequest {
+    Ok(IntentRequest {
         intent: arguments.intent.clone(),
         workspace: arguments.workspace.clone(),
         test: TestCommand::new(program, words),
         runner: None,
         max_steps: arguments.max_steps,
         threshold: arguments.threshold,
-    }
+        inputs: arguments.inputs(),
+        test_paths: arguments.test_paths().map_err(|e| e.to_string())?,
+    })
 }
 
 /// Runs `run` on `governor`, holding the commission in `state` when `--state` gave one.
@@ -561,7 +564,7 @@ fn execute_on<S: FallibleCaseStore>(
     (mut classifier_route, mut agent_route): (Option<Port>, Option<Port>),
 ) -> Result<Ending, String> {
     let program = arguments.test_cmd.split_whitespace().next().unwrap_or("");
-    let mut request = intent_request(arguments);
+    let mut request = intent_request(arguments)?;
     let prepared = if std::env::var_os(REEXEC_MARKER).is_some() {
         let handoff = read_handoff()?;
         *metrics = ContextMetrics::restore(&handoff["metrics"], options.context_policy)?;

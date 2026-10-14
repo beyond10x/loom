@@ -1,14 +1,18 @@
 //! Performs a proposed `software.change/1` action inside the workspace (story `selector-executor`).
 //!
-//! Three actions are performed; every other one, `repository.merge` included, is refused with
-//! [`ExecuteError::NotExecuted`] before its arguments are read:
+//! Four actions are performed; every other one, `repository.merge` and `release.rollback`
+//! included, is refused with [`ExecuteError::NotExecuted`] before its arguments are read:
 //!
 //! - `repository.inspect`, `{"paths": [<path>, ...]}`: returns each file's contents
 //!   ([`Report::Inspected`]).
-//! - `repository.edit`, `{"files": [{"path": <path>, "contents": <text>}, ...], "message": <text>}`
+//! - `tests.write` and `implementation.edit`, each
+//!   `{"files": [{"path": <path>, "contents": <text>}, ...], "message": <text>}`
 //!   (`message` optional): writes the files, commits exactly those paths with the workspace's
 //!   identity and no hook or signing program, and reports the new `HEAD` to the governor as the
-//!   case's `implementation` revision ([`Report::Edited`]).
+//!   case's `implementation` revision ([`Report::Edited`]). `tests.write` writes only test paths:
+//!   a path the host's test-path patterns ([`TestPaths`], [`LocalExecutor::with_test_paths`]) do
+//!   not match refuses it with [`ExecuteError::NotATestPath`], naming the first such path, for
+//!   every change kind. `implementation.edit` is not restricted by them.
 //! - `tests.run`, `{}`: runs the configured [`TestCommand`] in the workspace, without a shell, and
 //!   delivers what it observed to the governor as an observation ([`Report::TestsRun`]). The
 //!   command is killed at its timeout ([`TestCommand::DEFAULT_TIMEOUT`] unless
@@ -31,11 +35,12 @@
 //! neither leave the workspace through `repository.inspect` nor be written beside a commit that
 //! does not hold it.
 //!
-//! An edit is checked whole before any file is written: one refused path refuses the edit, and
-//! nothing is written. Once writing starts the edit is atomic: if a write, `git add` or `git commit`
-//! fails (a NUL in the message, a path git refuses), every written path is put back to its
-//! previous bytes or removed, the directories made for it are removed and the git index is restored,
-//! so the work tree is as it was. Putting back is best effort; a path that cannot be put back is
+//! An edit is checked whole before any file is written: one refused path (outside the workspace,
+//! not a test path for `tests.write`, ignored) refuses the edit, and nothing is written. Once
+//! writing starts the edit is atomic: if a write, `git add` or `git commit` fails (a NUL in the
+//! message, a path git refuses), every written path is put back to its previous bytes or removed,
+//! the directories made for it are removed and the git index is restored, so the work tree is as
+//! it was. Putting back is best effort; a path that cannot be put back is
 //! left as it is, and the next `tests.run` then finds an unclean work tree, which yields no
 //! evidence. An edit whose commit succeeded but whose new `HEAD` the governor did not record keeps
 //! its commit and returns [`ExecuteError::Case`].
@@ -85,12 +90,19 @@ use sha2::{Digest, Sha256};
 use crate::case::{self, CaseError, REDIRECTING_GIT_VARIABLES};
 use crate::confinement::{ConfinementError, SubstrateRunner, TestExecution, TestRunner};
 use crate::git::{self, HostGitRefusal};
+pub use crate::test_paths::TestPaths;
 use intake_model::confinement::{AppliedConfinement, Backend, ConfinementRefusal};
 
 /// `repository.inspect`.
 pub const INSPECT: &str = "repository.inspect";
-/// `repository.edit`.
-pub const EDIT: &str = "repository.edit";
+/// `tests.write`: changes the tests, with the effect of [`IMPLEMENTATION_EDIT`], on the host's
+/// test paths only ([`TestPaths`]).
+pub const TESTS_WRITE: &str = "tests.write";
+/// `implementation.edit`: changes the implementation. `software.change/1` admits it for a bugfix
+/// only once its regression is reproduced.
+pub const IMPLEMENTATION_EDIT: &str = "implementation.edit";
+/// The two write actions, performed alike: the files are written and committed.
+pub const WRITES: [&str; 2] = [TESTS_WRITE, IMPLEMENTATION_EDIT];
 /// `tests.run`.
 pub const TESTS_RUN: &str = "tests.run";
 /// The observation source of a test run.
@@ -247,8 +259,8 @@ impl TestRun {
 pub enum Report {
     /// `repository.inspect`: the files, in the order named.
     Inspected(Vec<InspectedFile>),
-    /// `repository.edit`: the workspace's `HEAD` afterwards, reported to the governor. Unchanged
-    /// when the edit wrote what the files already held.
+    /// `tests.write` and `implementation.edit`: the workspace's `HEAD` afterwards, reported to the
+    /// governor. Unchanged when the edit wrote what the files already held.
     Edited { revision: String },
     /// `tests.run`.
     TestsRun(TestRun),
@@ -280,6 +292,8 @@ pub enum ExecuteError {
     OutsideWorkspace { path: String },
     /// The workspace's git ignores `path`; the executor neither reads nor writes it.
     Ignored { path: String },
+    /// `tests.write` names `path`, which none of the host's test-path patterns matches.
+    NotATestPath { path: String },
     /// The arguments are not what `action` takes.
     InvalidArguments { action: String, problem: String },
     /// The workspace, git or the test command failed.
@@ -300,6 +314,11 @@ impl fmt::Display for ExecuteError {
             Self::NotExecuted { action } => write!(f, "the slice never executes `{action}`"),
             Self::OutsideWorkspace { path } => write!(f, "`{path}` is outside the workspace"),
             Self::Ignored { path } => write!(f, "`{path}` is ignored by the workspace's git"),
+            Self::NotATestPath { path } => write!(
+                f,
+                "`{path}` is not a test path: `{TESTS_WRITE}` writes only paths the host's \
+                 test-path patterns match; `{IMPLEMENTATION_EDIT}` changes the implementation"
+            ),
             Self::InvalidArguments { action, problem } => {
                 write!(f, "invalid arguments for `{action}`: {problem}")
             }
@@ -323,7 +342,7 @@ pub fn arguments_schema(action: &str) -> serde_json::Value {
             "required": ["paths"],
             "additionalProperties": false
         }),
-        EDIT => serde_json::json!({
+        TESTS_WRITE | IMPLEMENTATION_EDIT => serde_json::json!({
             "type": "object",
             "properties": {
                 "files": {
@@ -356,10 +375,13 @@ pub struct LocalExecutor<'g, S> {
     workspace: PathBuf,
     test: TestCommand,
     runner: Arc<dyn TestRunner>,
+    test_paths: TestPaths,
 }
 
 impl<'g, S: FallibleCaseStore> LocalExecutor<'g, S> {
-    /// An executor for `case` in the git work tree at `workspace`, running `test` for `tests.run`.
+    /// An executor for `case` in the git work tree at `workspace`, running `test` for `tests.run`,
+    /// with `tests.write` held to [`TestPaths::DEFAULTS`] until
+    /// [`LocalExecutor::with_test_paths`] gives the host's own.
     pub fn new(
         governor: &'g CanonGovernor<S>,
         case: CaseId,
@@ -372,7 +394,15 @@ impl<'g, S: FallibleCaseStore> LocalExecutor<'g, S> {
             workspace: workspace.into(),
             test,
             runner: Arc::new(SubstrateRunner::new(None)),
+            test_paths: TestPaths::default(),
         }
+    }
+
+    /// Hold `tests.write` to the host's `test_paths`: trusted context, never a model's.
+    #[must_use]
+    pub fn with_test_paths(mut self, test_paths: TestPaths) -> Self {
+        self.test_paths = test_paths;
+        self
     }
 
     /// Select an explicit test runner. The default constructor requires Substrate.
@@ -387,7 +417,7 @@ impl<'g, S: FallibleCaseStore> LocalExecutor<'g, S> {
         proposal: &ExecutorOutcomeProposedAction,
     ) -> Result<Report, ExecuteError> {
         let action = proposal.action.as_str();
-        if ![INSPECT, EDIT, TESTS_RUN].contains(&action) {
+        if ![INSPECT, TESTS_WRITE, IMPLEMENTATION_EDIT, TESTS_RUN].contains(&action) {
             return Err(ExecuteError::NotExecuted {
                 action: action.to_owned(),
             });
@@ -401,7 +431,7 @@ impl<'g, S: FallibleCaseStore> LocalExecutor<'g, S> {
             })?;
         match action {
             INSPECT => self.inspect(&root, &arguments),
-            EDIT => self.edit(&root, &arguments),
+            TESTS_WRITE | IMPLEMENTATION_EDIT => self.edit(action, &root, &arguments),
             _ => {
                 arguments.only(&[])?;
                 self.run_tests(&root)
@@ -432,7 +462,12 @@ impl<'g, S: FallibleCaseStore> LocalExecutor<'g, S> {
         Ok(Report::Inspected(files))
     }
 
-    fn edit(&self, root: &Path, arguments: &Arguments<'_>) -> Result<Report, ExecuteError> {
+    fn edit(
+        &self,
+        action: &str,
+        root: &Path,
+        arguments: &Arguments<'_>,
+    ) -> Result<Report, ExecuteError> {
         arguments.only(&["files", "message"])?;
         let message = match arguments.member("message") {
             None => "intake-slice edit".to_owned(),
@@ -457,7 +492,7 @@ impl<'g, S: FallibleCaseStore> LocalExecutor<'g, S> {
         }
         let mut files = Vec::with_capacity(entries.len());
         for entry in entries {
-            let entry = Arguments::of(EDIT, entry)?;
+            let entry = Arguments::of(action, entry)?;
             entry.only(&["path", "contents"])?;
             let (Some(Value::Text(path)), Some(Value::Text(contents))) =
                 (entry.member("path"), entry.member("contents"))
@@ -469,6 +504,15 @@ impl<'g, S: FallibleCaseStore> LocalExecutor<'g, S> {
                 return Err(entry.invalid(&format!("`{path}` is a directory")));
             }
             files.push((relative, file, contents.as_str()));
+        }
+        if action == TESTS_WRITE
+            && let Some((outside, _, _)) = files
+                .iter()
+                .find(|(relative, _, _)| !self.test_paths.matches(relative))
+        {
+            return Err(ExecuteError::NotATestPath {
+                path: outside.to_string_lossy().into_owned(),
+            });
         }
         let relatives: Vec<&OsStr> = files.iter().map(|(rel, _, _)| rel.as_os_str()).collect();
         refuse_ignored(root, &relatives)?;

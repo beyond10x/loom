@@ -1,14 +1,14 @@
 <!--
   generated from intake v1
-  model digest 58fc59c73e160b3816e4c2add829c8c5a6c05ea1c6901838a7d61a911e157818
-  contract digest c7bf5a36bfa3d72e856cecfa8dd5cf67906769eb0ed8049fb9d732fc4c997443
+  model digest 15e4505119390053fa8851b623b962daf68d5470099a63fc007c3c158d7c78e9
+  contract digest 1343dab00750680fd7c8f9677d3285807a17865acb4c07c8d227f83d330b8285
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — intake v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-66 capabilities: **64 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+69 capabilities: **67 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -51,7 +51,9 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `intake.routing.ActionRequestId` |
 | domain type | `intake.routing.AgentRevisionId` |
 | domain type | `intake.routing.CaseId` |
+| domain type | `intake.routing.CaseInputs` |
 | domain type | `intake.routing.CatalogDigest` |
+| domain type | `intake.routing.ChangeKind` |
 | domain type | `intake.routing.CommissionId` |
 | domain type | `intake.routing.ExtractedReference.State` |
 | domain type | `intake.routing.Grant.State` |
@@ -61,6 +63,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `intake.routing.ProtocolPick.State` |
 | domain type | `intake.routing.ReferenceKind` |
 | domain type | `intake.routing.ResumeContext.State` |
+| domain type | `intake.routing.Risk` |
 | domain type | `intake.routing.SliceRun.State` |
 | domain type | `intake.routing.StopReason` |
 | entity lifecycle | `intake.routing.ExtractedReference` |

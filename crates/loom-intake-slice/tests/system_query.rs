@@ -44,6 +44,8 @@ fn request(workspace: Option<PathBuf>) -> IntentRequest {
         test: TestCommand::new("must-never-run", std::iter::empty::<&str>()),
         max_steps: 2,
         threshold: 0.5,
+        inputs: b10x_loom_intake_slice::case::RUN_DEFAULTS,
+        test_paths: b10x_loom_intake_slice::test_paths::TestPaths::default(),
     }
 }
 fn classifier(protocol: &str) -> Recorded {
@@ -199,7 +201,7 @@ fn fabricated_clock_arguments_and_write_selection_never_read_the_clock() {
             select(READ_TIME),
             args(json!({"utc":"forged","evidence":"observed"})),
         ],
-        vec![select("repository.edit")],
+        vec![select("implementation.edit")],
     ] {
         let catalog = ProtocolCatalog::bundled().unwrap();
         let gov = CanonGovernor::new(MemoryCaseStore::default())

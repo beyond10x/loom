@@ -3,8 +3,8 @@
 //!
 //! The same filed session, in the build `cargo test -p b10x-loom-executor` makes, where nothing
 //! turns on `serde_json`'s `arbitrary_precision`. Here the session loads; in a build that links
-//! `b10x-loom-governor` (engineering-protocols 0.3.0 and Canon 0.1.0 turn the feature on) the same
-//! file is refused.
+//! `b10x-loom-governor` (engineering-protocols 0.7.0 and Canon 0.4.0 turn the feature on, as
+//! 0.3.0 and 0.1.0 did) the same file is refused.
 
 use b10x_loom_executor::harness::responses;
 use b10x_loom_executor::harness::wire::{CallId, Item, ToolCall, ToolName};

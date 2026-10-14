@@ -45,7 +45,7 @@ fn inspected_file_is_composed_and_written_without_model_repeating_the_payload() 
     let agent = Recorded::new(vec![
         selection("repository.inspect"),
         arguments(json!({"paths": ["check.txt"]})),
-        selection("repository.edit"),
+        selection("implementation.edit"),
         Reply::Lookup {
             start: payload.start,
             end: payload.end,
@@ -129,7 +129,7 @@ fn inspected_file_is_composed_and_written_without_model_repeating_the_payload() 
     );
     let last_prompt = user_text(&seen[6].0);
     assert!(
-        last_prompt.contains("repository.edit"),
+        last_prompt.contains("implementation.edit"),
         "the edited action remains in history"
     );
     assert!(
@@ -147,7 +147,7 @@ fn forged_digest_is_a_refused_step_the_model_is_told_about() {
     let agent = Recorded::new(vec![
         selection("repository.inspect"),
         arguments(json!({"paths": ["check.txt"]})),
-        selection("repository.edit"),
+        selection("implementation.edit"),
         Reply::Compose {
             start: payload.start,
             end: payload.end,
@@ -178,7 +178,7 @@ fn forged_digest_is_a_refused_step_the_model_is_told_about() {
     let output = String::from_utf8(output).unwrap();
     assert!(
         output.contains(
-            "step 2: repository.edit (not proposed)\n  effect: refused: the edit contents do not \
+            "step 2: implementation.edit (not proposed)\n  effect: refused: the edit contents do not \
              resolve: result SHA-256 does not match retained observation\n  evidence: none\n"
         ),
         "the refused step is printed with its reason:\n{output}"
@@ -190,7 +190,7 @@ fn forged_digest_is_a_refused_step_the_model_is_told_about() {
     let seen = agent.seen.lock().unwrap();
     assert!(
         user_text(&seen[4].0).contains(
-            "repository.edit\nrefused: the edit contents do not resolve: result SHA-256 does \
+            "implementation.edit\nrefused: the edit contents do not resolve: result SHA-256 does \
              not match retained observation"
         ),
         "the next selection is told why the edit was not made:\n{}",
@@ -206,7 +206,7 @@ fn a_lookup_after_the_eighth_refuses_the_step_and_the_model_is_told() {
     let mut script = vec![
         selection("repository.inspect"),
         arguments(json!({"paths": ["check.txt"]})),
-        selection("repository.edit"),
+        selection("implementation.edit"),
     ];
     script.extend((0..9).map(|_| arguments(json!({"$list_results": 0}))));
     script.extend([
@@ -229,7 +229,7 @@ fn a_lookup_after_the_eighth_refuses_the_step_and_the_model_is_told() {
     assert_eq!(result.steps, 3);
     let output = String::from_utf8(output).unwrap();
     assert!(
-        output.contains("step 2: repository.edit (not proposed)\n  effect: refused: "),
+        output.contains("step 2: implementation.edit (not proposed)\n  effect: refused: "),
         "{output}"
     );
     assert_eq!(workspace.read(), "status=broken\n");
@@ -238,7 +238,7 @@ fn a_lookup_after_the_eighth_refuses_the_step_and_the_model_is_told() {
     let seen = agent.seen.lock().unwrap();
     let told = user_text(&seen[12].0);
     assert!(
-        told.contains("repository.edit\nrefused: ") && told.contains("after the 8 allowed"),
+        told.contains("implementation.edit\nrefused: ") && told.contains("after the 8 allowed"),
         "the next selection is told why the edit was not made:\n{told}"
     );
 }
@@ -306,7 +306,7 @@ fn resolving_a_reference_does_not_bypass_the_current_admission_frontier() {
     let agent = Recorded::new(vec![
         selection("repository.inspect"),
         arguments(json!({"paths": ["check.txt"]})),
-        selection("repository.edit"),
+        selection("implementation.edit"),
         Reply::Compose {
             start: payload.start,
             end: payload.end,
@@ -317,7 +317,7 @@ fn resolving_a_reference_does_not_bypass_the_current_admission_frontier() {
         },
         // Revalidation refuses the first proposal against the changed frontier. The runtime
         // reloads it; proposing again now reports the explicit operator approval requirement.
-        selection("repository.edit"),
+        selection("implementation.edit"),
         Reply::Compose {
             start: payload.start,
             end: payload.end,
@@ -348,8 +348,8 @@ fn resolving_a_reference_does_not_bypass_the_current_admission_frontier() {
     );
     agent.assert_consumed();
     let seen = agent.seen.lock().unwrap();
-    assert!(user_text(&seen[2].0).contains("repository.edit (admissible)"));
-    assert!(user_text(&seen[4].0).contains("repository.edit (needs approval)"));
+    assert!(user_text(&seen[2].0).contains("implementation.edit (admissible)"));
+    assert!(user_text(&seen[4].0).contains("implementation.edit (needs approval)"));
     assert_eq!(
         workspace.read(),
         payload.original,
@@ -364,7 +364,7 @@ fn ordinary_literal_arguments_still_use_the_existing_executor() {
     let workspace = Workspace::new("status=broken\n");
     let classifier = classifier();
     let agent = Recorded::new(vec![
-        selection("repository.edit"),
+        selection("implementation.edit"),
         arguments(
             json!({"files": [{"path": "check.txt", "contents": "status=fixed\n"}], "message": "fix fixture"}),
         ),
@@ -432,7 +432,14 @@ fn command_output_reference_describes_only_the_captured_tail() {
     );
     let workspace = Workspace::new(&source);
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let case = case::open(&governor, "software-change@1", INTENT, workspace.path()).unwrap();
+    let case = case::open(
+        &governor,
+        "software-change@1",
+        INTENT,
+        workspace.path(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .unwrap();
     let executor = LocalExecutor::new(
         &governor,
         case,
@@ -555,6 +562,8 @@ fn request(workspace: &Workspace, max_steps: usize) -> SliceRequest {
         test: TestCommand::new("grep", ["-q", "status=fixed", "check.txt"]),
         max_steps,
         threshold: 0.5,
+        inputs: b10x_loom_intake_slice::case::RUN_DEFAULTS,
+        test_paths: b10x_loom_intake_slice::test_paths::TestPaths::default(),
     }
 }
 
@@ -573,9 +582,9 @@ impl Governor for ApprovalAfterGeneration<'_> {
         let mut data = self.governor.frontier(case)?.into_data();
         if self.gate.load(Ordering::SeqCst) {
             for action in &mut data.actions {
-                if action.action == "repository.edit" {
+                if action.action == "implementation.edit" {
                     action.status = ActionStatus::ApprovalRequired;
-                    action.capability = Some("fixture.repository.edit".into());
+                    action.capability = Some("fixture.implementation.edit".into());
                     action.reasons = vec!["fixture now requires operator approval".into()];
                 }
             }

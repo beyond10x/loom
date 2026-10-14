@@ -33,9 +33,9 @@ the whole boundary.
 
 ## Status
 
-Version `0.19.0`, released from source at the tag `0.19.0`
-([release](https://github.com/beyond10x/loom/releases/tag/0.19.0)). Nothing is on a registry: you
-install from the tag or depend on it with `tag = "0.19.0"`. `b10x-loom run` completed a live run
+Version `0.20.0`, released from source at the tag `0.20.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.20.0)). Nothing is on a registry: you
+install from the tag or depend on it with `tag = "0.20.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -88,6 +88,17 @@ without a port ends it. `b10x-loom resume` uses it for a merge the agent propose
 regular files as records; a symbolic link is refused, never followed. Callers that match
 `HoldSuspensionOutcome` or `LoopFailure` exhaustively add `Settled` and `NotResumed`, and the run
 store given to `run_with_suspension` implements `ResumeRunBehavior`, as `RunStore` does.
+
+Since `0.20.0` Loom builds on engineering-protocols `0.7.0` and Canon `0.4.0` (`tag = "0.4.0"`;
+a consumer that adds Canon itself pins the same tag), and every `software-change@1` case opens
+with the case inputs the protocol declares: `risk`, `change_kind` and
+`affects_security_boundary`, given by the host and never by a model (`b10x-loom run --risk`,
+`--change-kind`, `--affects-security-boundary`; `CaseInputs` for an embedding). The governor
+refuses an undeclared input, an unlisted value or a missing one before anything is stored, and
+`CanonGovernor::open` and `open_case` take the inputs as a third argument. The slice performs
+`tests.write` and `implementation.edit` where it performed `repository.edit`, and never offers
+`release.rollback`, which it cannot perform. An obligation the case's inputs do not select is not
+open. A state directory 0.19.0 wrote a case into is not resumed: its case has no inputs.
 
 Since `0.18.0` the command line keeps a run that waits on an approval and continues it after the
 grant: `b10x-loom run --state <DIR>` keeps the case, the commission's Suspension (in a
@@ -142,14 +153,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.19.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.20.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.19.0
+b10x-loom 0.20.0
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -167,6 +178,14 @@ For a software change, it prints each step with its effect and evidence and ends
 3 another stop, 1 a failure, 2 an invalid command line. With `--output jsonl` standard output is
 one JSON record per line instead, the last one the terminal record with the stop reason and that
 exit status ([run events](https://beyond10x.github.io/loom/docs/reference/run-events)).
+A software change opens with the case inputs `--risk <trivial|standard|elevated|critical>`
+(default `standard`), `--change-kind <feature|bugfix|refactor>` (default `feature`) and
+`--affects-security-boundary <true|false>` (default `false`); with the defaults an edit needs no
+failing test first, and with `--change-kind bugfix` `implementation.edit` waits for a test that
+failed on the current revision. `tests.write` writes only test paths, matched by the repeatable
+`--test-path <GLOB>` (by default `tests/**`, `**/tests/**`, `test/**`, `**/test/**`,
+`**/*_test.*`, `**/test_*.*`, `**/*.test.*` and `**/*.spec.*`); `implementation.edit` is not
+held to them.
 `--model` and `--classifier-model` name Codex models (default `gpt-5.6-sol`). With
 `--catalog <PATH>`, an [llm](https://beyond10x.github.io/llm/) catalog file, both name route
 aliases of that catalog instead, such as a self-hosted endpoint whose account needs no
@@ -228,7 +247,7 @@ A supervisor that keeps its own case record calls `loom_governor::evaluate` (or 
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.19.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.20.0" }
 ```
 
 The example below
@@ -242,8 +261,8 @@ cargo run --locked -p b10x-loom-sdk --example software_change
 
 ```text
 workspace: target/loom-sdk-example
-step 1: repository.edit {"files":[{"path":"check.txt","contents":"fixed\n"}],"message":"fix the check"}
-  effect: committed; HEAD is ef2262e9165ef00b2f5cadf487f81dbf3ed120fe
+step 1: implementation.edit {"files":[{"path":"check.txt","contents":"fixed\n"}],"message":"fix the check"}
+  effect: committed; HEAD is 4d93a3d80863e4a00cc77924bc1de54520a70e99
   evidence: none
 step 2: tests.run {}
   effect: the test command exited with 0

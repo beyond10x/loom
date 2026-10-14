@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-14T01:53:08Z",
+  "actor": "human:timo",
+  "artifact": "story:engineering-protocols-070-pin",
+  "kind": "story",
+  "revision": 33,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "full gate on 2e171f8: task check steps (spec x3, both ESS gates, three drifts, both no-hand-model, conform, commission:conform, deps-guard, fmt, clippy -D warnings, cargo test --workspace --no-fail-fast 1715 passed 0 failed, docs-check, commission:docs-drift), task plan, release-check 0.20.0 and task website exit 0",
+    "reference": "~/.cache/loom-w16/full-gate.log"
+  }
+}

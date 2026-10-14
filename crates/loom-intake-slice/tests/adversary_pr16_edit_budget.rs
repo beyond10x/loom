@@ -44,14 +44,14 @@ fn two_files_composed_from_one_full_size_capture_exceed_the_per_edit_budget() {
 
     let one = briefing
         .resolve_arguments(
-            "repository.edit",
+            "implementation.edit",
             json!({"files": [file("a.txt")], "message": "copy"}),
         )
         .expect("one 16 MiB expansion is within the per-edit budget");
     assert_eq!(one["files"][0]["contents"].as_str().unwrap().len(), MIB16);
 
     let two = briefing.resolve_arguments(
-        "repository.edit",
+        "implementation.edit",
         json!({"files": [file("a.txt"), file("b.txt")], "message": "copy"}),
     );
     assert!(

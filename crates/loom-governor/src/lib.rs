@@ -5,9 +5,28 @@
 //!
 //! [`CanonGovernor`] implements Commission's [`Governor`], [`EvidencePort`] and [`ObservationPort`]
 //! over Canon. A case is opened on a built-in or host-registered protocol, named `<name>@<major>`
-//! (`software-change@1`), with the caller's revision of every artifact the protocol declares
-//! ([`CanonGovernor::open`]). Its only other writes are a new artifact revision
-//! ([`CanonGovernor::update_revision`]), evidence and observations.
+//! (`software-change@1`), with the caller's revision of every artifact the protocol declares and
+//! the value of every case input it declares ([`CaseInputs`], [`CanonGovernor::open`]). Its only
+//! other writes are a new artifact revision ([`CanonGovernor::update_revision`]), evidence and
+//! observations.
+//!
+//! # Case inputs
+//!
+//! A case input is configuration the case fixes when it opens (`software.change/1` declares
+//! `risk`, `change_kind` and `affects_security_boundary`). The host supplies the values, as
+//! trusted context; the governor checks them against the protocol before anything is stored: an
+//! input the protocol does not declare ([`OpenError::UndeclaredInput`]), a value its input does
+//! not list ([`OpenError::UnlistedInputValue`]) and a declared input left out
+//! ([`OpenError::MissingInput`]) are each refused naming the input. A protocol that declares no
+//! input opens with none. One input given twice never replaces the first: [`CaseInputs::with`]
+//! and [`CaseInputs::try_from_pairs`] refuse it ([`OpenError::RepeatedInput`]). The inputs are
+//! held with the case and given to Canon with every evaluation; they never change.
+//!
+//! Every read of a held case checks its inputs again, as at opening: a case whose stored inputs
+//! do not satisfy its protocol (a declared input missing, an empty list included, an undeclared
+//! one, an unlisted value) is never decided and its inputs are never reported. The governor
+//! answers `GovernorUnavailable` for it, as for any store failure, and [`FileCaseStore`] refuses
+//! to read such a case of a built-in protocol, naming the case and the input.
 //!
 //! # Evaluation
 //!
@@ -22,7 +41,8 @@
 //! The frontier lists every action the protocol declares, with Canon's status, the capability the
 //! action requires (when it requires one) and, unless it is admissible, Canon's reasons, each
 //! written as the compact JSON Canon gives it. It also lists every claim's value and every
-//! obligation, open unless Canon holds it discharged. It is issued for the case's current
+//! obligation, open exactly when Canon reports it `open`: one Canon holds `discharged` or
+//! `not_applicable` (the case's inputs do not select it) is not open. It is issued for the case's current
 //! revision, under a frontier id derived from the case, that revision and Canon's decision bytes.
 //!
 //! `completion` reports `Complete` with an outcome only when exactly one declared outcome is
@@ -62,10 +82,10 @@
 //!
 //! # Dependencies
 //!
-//! Canon is the library `b10x-canon-engineering` uses, tag `0.1.0`, pinned by `Cargo.lock` to
-//! commit `761239f`, so the protocol model the ELS registry returns is the one this crate
+//! Canon is the library `b10x-canon-engineering` uses, tag `0.4.0`, pinned by `Cargo.lock` to
+//! commit `7c2cec1`, so the protocol model the ELS registry returns is the one this crate
 //! compiles. Commission is the path dependency `b10x-loom-commission`, built from this
-//! repository's own tree, and `b10x-canon-engineering` is pinned to tag `0.3.0` of
+//! repository's own tree, and `b10x-canon-engineering` is pinned to tag `0.7.0` of
 //! beyond10x/engineering-protocols.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -87,8 +107,8 @@ use b10x_canon::eval::{
 };
 use b10x_canon::ir::{Ir, compile};
 use b10x_canon::model::{
-    ArtifactId, CASE_FORMAT, Case, CaseArtifact, Decision, Declarations, EvidenceRecord, Revision,
-    Truth as CanonTruth, is_identifier,
+    ArtifactId, CASE_FORMAT, Case, CaseArtifact, Decision, Declarations, EvidenceRecord, InputId,
+    InputValue, Revision, Truth as CanonTruth, is_identifier,
 };
 use b10x_loom_commission::model::json;
 use b10x_loom_commission::model::primitives::Uuid;
@@ -119,8 +139,80 @@ pub struct CaseState {
     pub revision: i64,
     /// The current revision of every artifact the protocol declares.
     pub artifacts: BTreeMap<String, String>,
+    /// The value of every case input the protocol declares, as the case opened with them.
+    pub inputs: CaseInputs,
     /// Every evidence record received for the case, in the order received.
     pub evidence: Vec<HeldEvidence>,
+}
+
+/// The value of each case input a case opens with, keyed by input id (`risk` → `standard`): the
+/// host's trusted context, never a model's. [`CanonGovernor::open`] checks them against the
+/// inputs the protocol declares; a protocol that declares none opens with
+/// [`CaseInputs::none`]. Giving an input a second value is refused
+/// ([`OpenError::RepeatedInput`]), never a replacement of the first.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CaseInputs {
+    values: BTreeMap<String, String>,
+}
+
+impl CaseInputs {
+    /// No input: what a case of a protocol that declares none opens with.
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// These inputs and `input` with `value`.
+    ///
+    /// # Errors
+    /// [`OpenError::RepeatedInput`] when these inputs already give `input` a value.
+    pub fn with(
+        mut self,
+        input: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Result<Self, OpenError> {
+        let input = input.into();
+        if self.values.contains_key(&input) {
+            return Err(OpenError::RepeatedInput { input });
+        }
+        self.values.insert(input, value.into());
+        Ok(self)
+    }
+
+    /// The inputs `pairs` give, each input once.
+    ///
+    /// # Errors
+    /// [`OpenError::RepeatedInput`] naming the first input given a second time.
+    pub fn try_from_pairs<I: Into<String>, V: Into<String>>(
+        pairs: impl IntoIterator<Item = (I, V)>,
+    ) -> Result<Self, OpenError> {
+        pairs
+            .into_iter()
+            .try_fold(Self::none(), |inputs, (input, value)| {
+                inputs.with(input, value)
+            })
+    }
+
+    /// The value given for `input`, if any.
+    pub fn get(&self, input: &str) -> Option<&str> {
+        self.values.get(input).map(String::as_str)
+    }
+
+    /// Every input and its value, in input order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.values
+            .iter()
+            .map(|(input, value)| (input.as_str(), value.as_str()))
+    }
+
+    /// Whether no input is given.
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
+    /// How many inputs are given.
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
 }
 
 /// An evidence record as received, and whether it applies.
@@ -278,6 +370,14 @@ pub enum OpenError {
     UndeclaredArtifact { artifact: String },
     /// The revision given for `artifact` is not an identifier.
     InvalidRevision { artifact: String },
+    /// The inputs give `input`, which the protocol does not declare.
+    UndeclaredInput { input: String },
+    /// The inputs give `input` the value `value`, which the input does not list.
+    UnlistedInputValue { input: String, value: String },
+    /// The protocol declares `input`, and the inputs give no value for it.
+    MissingInput { input: String },
+    /// The inputs give `input` a second value.
+    RepeatedInput { input: String },
     /// The case id is not an identifier.
     InvalidCaseId { case: String },
     /// A case with this id is already held.
@@ -305,6 +405,19 @@ impl fmt::Display for OpenError {
                     f,
                     "the revision of artifact `{artifact}` is not an identifier"
                 )
+            }
+            Self::UndeclaredInput { input } => {
+                write!(f, "case input `{input}` is not declared by the protocol")
+            }
+            Self::UnlistedInputValue { input, value } => write!(
+                f,
+                "case input `{input}` does not list the value `{value}` among its values"
+            ),
+            Self::MissingInput { input } => {
+                write!(f, "no value is given for declared case input `{input}`")
+            }
+            Self::RepeatedInput { input } => {
+                write!(f, "case input `{input}` is given more than one value")
             }
             Self::InvalidCaseId { case } => write!(f, "case id `{case}` is not an identifier"),
             Self::CaseExists { case } => write!(f, "case `{case}` is already held"),
@@ -500,19 +613,22 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
     }
 
     /// Opens a case on registered `protocol` (`<name>@<major>`) with `revisions`, the
-    /// revision of every artifact the protocol declares, under the first free id `case-<n>`.
+    /// revision of every artifact the protocol declares, and `inputs`, the value of every case
+    /// input it declares, under the first free id `case-<n>`. Nothing is stored when either is
+    /// refused (see the crate documentation, "Case inputs").
     pub fn open(
         &self,
         protocol: &str,
         revisions: BTreeMap<String, String>,
+        inputs: CaseInputs,
     ) -> Result<CaseId, OpenError> {
-        checked(self.protocol_ir(protocol)?, &revisions)?;
+        checked(self.protocol_ir(protocol)?, &revisions, &inputs)?;
         let mut n = 1u64;
         loop {
             let case = CaseId(format!("case-{n}"));
             if self
                 .store
-                .insert(opened(&case, protocol, &revisions))
+                .insert(opened(&case, protocol, &revisions, &inputs))
                 .map_err(|e| OpenError::StoreUnavailable {
                     problem: e.to_string(),
                 })?
@@ -529,14 +645,15 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
         case: CaseId,
         protocol: &str,
         revisions: BTreeMap<String, String>,
+        inputs: CaseInputs,
     ) -> Result<(), OpenError> {
         if !is_identifier(&case.0) {
             return Err(OpenError::InvalidCaseId { case: case.0 });
         }
-        checked(self.protocol_ir(protocol)?, &revisions)?;
+        checked(self.protocol_ir(protocol)?, &revisions, &inputs)?;
         if self
             .store
-            .insert(opened(&case, protocol, &revisions))
+            .insert(opened(&case, protocol, &revisions, &inputs))
             .map_err(|e| OpenError::StoreUnavailable {
                 problem: e.to_string(),
             })?
@@ -586,6 +703,18 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
         Ok(self.held(case)?.artifacts)
     }
 
+    /// The value of every case input the case opened with; `GovernorUnavailable` when the
+    /// held inputs do not satisfy the case's protocol (see the crate documentation, "Case
+    /// inputs").
+    pub fn inputs(&self, case: &CaseId) -> Result<CaseInputs, GovernorError> {
+        Ok(self.held(case)?.inputs)
+    }
+
+    /// The registered protocol, `<name>@<major>`, the case is held under.
+    pub fn protocol(&self, case: &CaseId) -> Result<String, GovernorError> {
+        Ok(self.held(case)?.protocol)
+    }
+
     /// Every evidence record received for the case, in the order received.
     pub fn evidence(&self, case: &CaseId) -> Result<Vec<EvidenceData>, GovernorError> {
         Ok(self
@@ -603,19 +732,29 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             .map_err(|_| GovernorError::GovernorUnavailable)
     }
 
+    /// The held case, after checking its inputs against its protocol as at opening.
     fn held(&self, case: &CaseId) -> Result<CaseState, GovernorError> {
-        self.store
+        self.held_with_ir(case).map(|(state, _)| state)
+    }
+
+    /// The held case and its compiled protocol; `GovernorUnavailable` when the store fails, the
+    /// protocol is not registered or the case's inputs do not satisfy it.
+    fn held_with_ir(&self, case: &CaseId) -> Result<(CaseState, Ir), GovernorError> {
+        let state = self
+            .store
             .get(case)
             .map_err(|_| GovernorError::GovernorUnavailable)?
-            .ok_or(GovernorError::UnknownCase)
+            .ok_or(GovernorError::UnknownCase)?;
+        let ir = self
+            .protocol_ir(&state.protocol)
+            .map_err(|_| GovernorError::GovernorUnavailable)?;
+        checked_inputs(&ir, &state.inputs).map_err(|_| GovernorError::GovernorUnavailable)?;
+        Ok((state, ir))
     }
 
     /// Canon's decision for the case as held now, and the compiled protocol it was made under.
     fn decide(&self, case: &CaseId) -> Result<(CaseState, Ir, Decision), GovernorError> {
-        let state = self.held(case)?;
-        let ir = self
-            .protocol_ir(&state.protocol)
-            .map_err(|_| GovernorError::GovernorUnavailable)?;
+        let (state, ir) = self.held_with_ir(case)?;
         let records: Vec<EvidenceRecord> = state
             .evidence
             .iter()
@@ -703,10 +842,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> Governor for CanonGovernor<S, T> {
 impl<S: FallibleCaseStore, T: EvaluationTime> EvidencePort for CanonGovernor<S, T> {
     fn receive(&self, evidence: AttributedEvidence) -> Result<(), GovernorError> {
         let data = evidence.into_evidence().into_data();
-        let state = self.held(&data.case_id)?;
-        let ir = self
-            .protocol_ir(&state.protocol)
-            .map_err(|_| GovernorError::GovernorUnavailable)?;
+        let (_, ir) = self.held_with_ir(&data.case_id)?;
         let case = data.case_id.clone();
         let at = self
             .time
@@ -733,8 +869,62 @@ impl<S: FallibleCaseStore, T: EvaluationTime> ObservationPort for CanonGovernor<
     }
 }
 
-/// The compiled protocol, after checking `revisions` against what it declares.
-fn checked(ir: Ir, revisions: &BTreeMap<String, String>) -> Result<Ir, OpenError> {
+/// The compiled protocol, after checking `revisions` and `inputs` against what it declares.
+fn checked(
+    ir: Ir,
+    revisions: &BTreeMap<String, String>,
+    inputs: &CaseInputs,
+) -> Result<Ir, OpenError> {
+    let ir = checked_revisions(ir, revisions)?;
+    checked_inputs(&ir, inputs)?;
+    Ok(ir)
+}
+
+/// Checks `inputs` against the case inputs `ir` declares, as Canon checks a case's: each input
+/// given, in input order, is declared and has a value its input lists; then each declared input,
+/// in input order, is given.
+fn checked_inputs(ir: &Ir, inputs: &CaseInputs) -> Result<(), OpenError> {
+    for (input, value) in inputs.iter() {
+        let Some(declared) = ir.inputs.get(&InputId::new(input)) else {
+            return Err(OpenError::UndeclaredInput {
+                input: input.to_owned(),
+            });
+        };
+        if !declared
+            .values
+            .iter()
+            .any(|listed| listed.as_str() == value)
+        {
+            return Err(OpenError::UnlistedInputValue {
+                input: input.to_owned(),
+                value: value.to_owned(),
+            });
+        }
+    }
+    if let Some(missing) = ir
+        .inputs
+        .keys()
+        .find(|input| inputs.get(input.as_str()).is_none())
+    {
+        return Err(OpenError::MissingInput {
+            input: missing.as_str().to_owned(),
+        });
+    }
+    Ok(())
+}
+
+/// Checks `inputs` against the case inputs the ELS built-in `protocol` declares, when it names
+/// one; a protocol that is not built in is the registering governor's to check.
+pub(crate) fn checked_builtin_inputs(protocol: &str, inputs: &CaseInputs) -> Result<(), OpenError> {
+    match protocol_ir(protocol) {
+        Ok(ir) => checked_inputs(&ir, inputs),
+        Err(OpenError::UnknownProtocol { .. }) => Ok(()),
+        Err(other) => Err(other),
+    }
+}
+
+/// The compiled protocol, after checking `revisions` against the artifacts it declares.
+fn checked_revisions(ir: Ir, revisions: &BTreeMap<String, String>) -> Result<Ir, OpenError> {
     if let Some(artifact) = ir
         .artifacts
         .keys()
@@ -773,12 +963,18 @@ fn representable(protocol: &str, ir: &Ir) -> Result<(), OpenError> {
 }
 
 /// A case just opened: revision 1, no evidence.
-fn opened(case: &CaseId, protocol: &str, revisions: &BTreeMap<String, String>) -> CaseState {
+fn opened(
+    case: &CaseId,
+    protocol: &str,
+    revisions: &BTreeMap<String, String>,
+    inputs: &CaseInputs,
+) -> CaseState {
     CaseState {
         id: case.clone(),
         protocol: protocol.to_owned(),
         revision: 1,
         artifacts: revisions.clone(),
+        inputs: inputs.clone(),
         evidence: Vec::new(),
     }
 }
@@ -834,6 +1030,16 @@ fn snapshot(ir: &Ir, state: &CaseState) -> Case {
         ),
         termination: None,
         revision: Some(Revision::new(format!("r{}", state.revision))),
+        inputs: Declarations::new(
+            state
+                .inputs
+                .iter()
+                .map(|(input, value)| (InputId::new(input), InputValue::new(value)))
+                .collect(),
+        ),
+        // Who is independent of the case's work is not resolved here: no producer is listed, so
+        // a claim that demands an independent producer stays unknown.
+        independence: Declarations::default(),
     }
 }
 
@@ -987,7 +1193,8 @@ fn project(ir: &Ir, decision: &Decision) -> Option<Projection> {
         .map(|entry| {
             (
                 entry["id"].as_str().unwrap_or_default().to_owned(),
-                entry["status"] != "discharged",
+                // Open only as Canon reports it: `discharged` and `not_applicable` are not open.
+                entry["status"] == "open",
             )
         })
         .collect();

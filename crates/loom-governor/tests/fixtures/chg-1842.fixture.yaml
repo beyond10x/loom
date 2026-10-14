@@ -7,6 +7,10 @@ case:
   format: canon-case/1
   id: CHG-1842
   protocol: software.change
+  inputs:
+    risk: standard
+    change_kind: refactor
+    affects_security_boundary: false
   artifacts:
     intent: {revision: i1}
     system_specification: {revision: s1}
@@ -27,7 +31,7 @@ states:
           result: pass
           subject: implementation
           subject_revision: R1
-      - observed_at: "2026-10-04T10:05:00Z"
+      - observed_at: "2026-10-04T11:36:00Z"
         record:
           format: canon-evidence/1
           id: health-d0
@@ -43,16 +47,21 @@ states:
         release.proven: unknown
         deployment.healthy: true
         objective.realized: unknown
+        regression.reproduced: unknown
+        regression.shown_first: unknown
+        security.reviewed: unknown
       actions:
         repository.inspect: admissible
-        repository.edit: admissible
+        tests.write: admissible
+        implementation.edit: admissible
         tests.run: admissible
+        release.rollback: approval-required
         repository.merge: blocked
 
   - id: tests-pass-r2
     add_authority: []
     add_evidence:
-      - observed_at: "2026-10-04T11:00:00Z"
+      - observed_at: "2026-10-04T11:40:00Z"
         record:
           format: canon-evidence/1
           id: tests-r2
@@ -68,10 +77,15 @@ states:
         release.proven: unknown
         deployment.healthy: true
         objective.realized: unknown
+        regression.reproduced: unknown
+        regression.shown_first: unknown
+        security.reviewed: unknown
       actions:
         repository.inspect: admissible
-        repository.edit: admissible
+        tests.write: admissible
+        implementation.edit: admissible
         tests.run: admissible
+        release.rollback: approval-required
         repository.merge: approval-required
 
   - id: merge-approved
@@ -86,16 +100,21 @@ states:
         release.proven: unknown
         deployment.healthy: true
         objective.realized: unknown
+        regression.reproduced: unknown
+        regression.shown_first: unknown
+        security.reviewed: unknown
       actions:
         repository.inspect: admissible
-        repository.edit: admissible
+        tests.write: admissible
+        implementation.edit: admissible
         tests.run: admissible
+        release.rollback: approval-required
         repository.merge: admissible
 
   - id: review-rejected
     add_authority: []
     add_evidence:
-      - observed_at: "2026-10-04T11:10:00Z"
+      - observed_at: "2026-10-04T11:44:00Z"
         record:
           format: canon-evidence/1
           id: review-r2
@@ -111,16 +130,21 @@ states:
         release.proven: unknown
         deployment.healthy: true
         objective.realized: unknown
+        regression.reproduced: unknown
+        regression.shown_first: unknown
+        security.reviewed: unknown
       actions:
         repository.inspect: admissible
-        repository.edit: admissible
+        tests.write: admissible
+        implementation.edit: admissible
         tests.run: admissible
+        release.rollback: approval-required
         repository.merge: admissible
 
   - id: objective-unmet
     add_authority: []
     add_evidence:
-      - observed_at: "2026-10-04T11:20:00Z"
+      - observed_at: "2026-10-04T11:48:00Z"
         record:
           format: canon-evidence/1
           id: objective-i1
@@ -136,16 +160,21 @@ states:
         release.proven: unknown
         deployment.healthy: true
         objective.realized: false
+        regression.reproduced: unknown
+        regression.shown_first: unknown
+        security.reviewed: unknown
       actions:
         repository.inspect: admissible
-        repository.edit: admissible
+        tests.write: admissible
+        implementation.edit: admissible
         tests.run: admissible
+        release.rollback: approval-required
         repository.merge: admissible
 
   - id: deployment-unhealthy
     add_authority: []
     add_evidence:
-      - observed_at: "2026-10-04T11:30:00Z"
+      - observed_at: "2026-10-04T11:52:00Z"
         record:
           format: canon-evidence/1
           id: health-d0-unhealthy
@@ -161,16 +190,21 @@ states:
         release.proven: unknown
         deployment.healthy: unknown
         objective.realized: false
+        regression.reproduced: unknown
+        regression.shown_first: unknown
+        security.reviewed: unknown
       actions:
         repository.inspect: admissible
-        repository.edit: admissible
+        tests.write: admissible
+        implementation.edit: admissible
         tests.run: admissible
+        release.rollback: approval-required
         repository.merge: admissible
 
   - id: tests-fail-r2
     add_authority: []
     add_evidence:
-      - observed_at: "2026-10-04T11:40:00Z"
+      - observed_at: "2026-10-04T11:56:00Z"
         record:
           format: canon-evidence/1
           id: tests-r2-fail
@@ -186,8 +220,13 @@ states:
         release.proven: unknown
         deployment.healthy: unknown
         objective.realized: false
+        regression.reproduced: unknown
+        regression.shown_first: unknown
+        security.reviewed: unknown
       actions:
         repository.inspect: admissible
-        repository.edit: admissible
+        tests.write: admissible
+        implementation.edit: admissible
         tests.run: admissible
+        release.rollback: approval-required
         repository.merge: blocked

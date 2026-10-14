@@ -33,7 +33,12 @@ fn a_case_id_the_governor_accepts_is_one_the_file_store_can_hold() {
         let case = CaseId(id.clone());
         let memory = CanonGovernor::new(MemoryCaseStore::default());
         assert_eq!(
-            memory.open_case(case.clone(), PROTOCOL, fixture_revisions()),
+            memory.open_case(
+                case.clone(),
+                PROTOCOL,
+                fixture_revisions(),
+                fixture_inputs()
+            ),
             Ok(()),
             "the in-memory governor takes the id ({} bytes)",
             id.len()
@@ -41,7 +46,12 @@ fn a_case_id_the_governor_accepts_is_one_the_file_store_can_hold() {
         let dir = store_dir(&format!("long-id-{}", id.len()));
         let governor = CanonGovernor::new(FileCaseStore::open(&dir).expect("the store opens"));
         assert_eq!(
-            governor.open_case(case.clone(), PROTOCOL, fixture_revisions()),
+            governor.open_case(
+                case.clone(),
+                PROTOCOL,
+                fixture_revisions(),
+                fixture_inputs()
+            ),
             Ok(()),
             "the file-backed governor takes the same id ({} bytes)",
             id.len()
@@ -135,7 +145,7 @@ fn a_temporary_file_left_by_an_earlier_life_with_the_same_pid_does_not_fail_a_wr
         )
         .unwrap();
         let governor = CanonGovernor::new(FileCaseStore::open(&dir).expect("the store opens"));
-        let opened = governor.open(PROTOCOL, fixture_revisions());
+        let opened = governor.open(PROTOCOL, fixture_revisions(), fixture_inputs());
         assert!(
             opened.is_ok(),
             "the first write after a restart succeeds: {opened:?}"
@@ -175,10 +185,20 @@ fn facts_nested_past_sixty_one_levels_are_refused_by_the_file_store_alone() {
     let file = CanonGovernor::new(FileCaseStore::open(&dir).expect("the store opens"));
     let case = CaseId("case-deep".to_owned());
     memory
-        .open_case(case.clone(), PROTOCOL, fixture_revisions())
+        .open_case(
+            case.clone(),
+            PROTOCOL,
+            fixture_revisions(),
+            fixture_inputs(),
+        )
         .unwrap();
-    file.open_case(case.clone(), PROTOCOL, fixture_revisions())
-        .unwrap();
+    file.open_case(
+        case.clone(),
+        PROTOCOL,
+        fixture_revisions(),
+        fixture_inputs(),
+    )
+    .unwrap();
     let evidence = |n: u64, depth: usize| EvidenceData {
         evidence_id: EvidenceId(uuid(n)),
         case_id: case.clone(),
@@ -255,6 +275,11 @@ fn an_awkward_case_and_its_observations_round_trip_exactly() {
                     ("\u{0}".to_owned(), "\u{10ffff}".to_owned()),
                     ("b".to_owned(), String::new()),
                 ]),
+                inputs: loom_governor::CaseInputs::try_from_pairs([
+                    ("\u{0}", "\u{10ffff}\""),
+                    ("risk", ""),
+                ])
+                .expect("distinct inputs"),
                 evidence: (0..3)
                     .map(|n| HeldEvidence {
                         data: EvidenceData {
@@ -393,6 +418,7 @@ fn plain_state(case: &CaseId) -> CaseState {
         protocol: PROTOCOL.to_owned(),
         revision: 1,
         artifacts: BTreeMap::from([("intent".to_owned(), "i1".to_owned())]),
+        inputs: fixture_inputs(),
         evidence: Vec::new(),
     }
 }
@@ -441,4 +467,31 @@ fn fixture_revisions() -> BTreeMap<String, String> {
             )
         })
         .collect()
+}
+
+/// The `chg-1842` fixture's case inputs.
+fn fixture_inputs() -> loom_governor::CaseInputs {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/chg-1842.fixture.yaml");
+    let fixture: serde_json::Value =
+        serde_yaml_ng::from_str(&std::fs::read_to_string(path).unwrap())
+            .expect("the fixture reads");
+    inputs_of(&fixture)
+}
+
+/// The case inputs a fixture's case gives; a value YAML reads as a boolean is its text.
+fn inputs_of(fixture: &serde_json::Value) -> loom_governor::CaseInputs {
+    let pairs: Vec<(String, String)> = fixture["case"]["inputs"]
+        .as_object()
+        .expect("case inputs")
+        .iter()
+        .map(|(input, value)| {
+            let value = match value {
+                serde_json::Value::String(text) => text.clone(),
+                other => other.to_string(),
+            };
+            (input.clone(), value)
+        })
+        .collect();
+    loom_governor::CaseInputs::try_from_pairs(pairs).expect("distinct inputs")
 }

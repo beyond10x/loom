@@ -1,6 +1,6 @@
 // generated from intake v1
-// model digest 58fc59c73e160b3816e4c2add829c8c5a6c05ea1c6901838a7d61a911e157818
-// contract digest c7bf5a36bfa3d72e856cecfa8dd5cf67906769eb0ed8049fb9d732fc4c997443
+// model digest 15e4505119390053fa8851b623b962daf68d5470099a63fc007c3c158d7c78e9
+// contract digest 1343dab00750680fd7c8f9677d3285807a17865acb4c07c8d227f83d330b8285
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Routing — `intake.routing`.
@@ -36,6 +36,17 @@ pub struct AgentRevisionId(pub crate::primitives::Uuid);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CaseId(pub String);
 
+/// CaseInputs — `intake.routing.CaseInputs`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaseInputs {
+    /// `risk` — `intake.routing.Risk`.
+    pub risk: Risk,
+    /// `change_kind` — `intake.routing.ChangeKind`.
+    pub change_kind: ChangeKind,
+    /// `affects_security_boundary` — `Boolean`.
+    pub affects_security_boundary: bool,
+}
+
 /// CatalogDigest — `intake.routing.CatalogDigest`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogDigest {
@@ -43,6 +54,17 @@ pub struct CatalogDigest {
     pub name: String,
     /// `digest` — `String`.
     pub digest: String,
+}
+
+/// ChangeKind — `intake.routing.ChangeKind`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeKind {
+    /// `Feature`.
+    Feature,
+    /// `Bugfix`.
+    Bugfix,
+    /// `Refactor`.
+    Refactor,
 }
 
 /// CommissionId — `intake.routing.CommissionId`: a distinct wrapper around `Uuid`.
@@ -130,6 +152,19 @@ pub enum ReferenceKind {
 pub enum ResumeContextState {
     /// `Kept`.
     Kept,
+}
+
+/// Risk — `intake.routing.Risk`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Risk {
+    /// `Trivial`.
+    Trivial,
+    /// `Standard`.
+    Standard,
+    /// `Elevated`.
+    Elevated,
+    /// `Critical`.
+    Critical,
 }
 
 /// The states of `intake.routing.SliceRun`, as runtime values.
@@ -847,6 +882,8 @@ pub struct ResumeContextData {
     pub workspace: Option<String>,
     /// `test_command` — `List<String>`.
     pub test_command: Vec<String>,
+    /// `test_paths` — `List<String>`.
+    pub test_paths: Vec<String>,
     /// `max_steps` — `Integer`.
     pub max_steps: i64,
     /// `confinement` — `intake.confinement.Backend`.
@@ -995,6 +1032,14 @@ pub struct SliceRunData {
     pub stop_reason: StopReason,
     /// `approvals` — `List<String>`.
     pub approvals: Vec<String>,
+    /// `risk` — `intake.routing.Risk`.
+    pub risk: Risk,
+    /// `change_kind` — `intake.routing.ChangeKind`.
+    pub change_kind: ChangeKind,
+    /// `affects_security_boundary` — `Boolean`.
+    pub affects_security_boundary: bool,
+    /// `test_paths` — `List<String>`.
+    pub test_paths: Vec<String>,
 }
 
 /// The states of `intake.routing.SliceRun`, at the type level.

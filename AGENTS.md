@@ -275,10 +275,26 @@ a repeated id is refused. The time and the records are judged once each, never b
 on prefixes. `crates/loom-governor/tests/evaluate.rs` and `evaluate_adversary.rs` hold it against
 `CanonGovernor`; `crates/loom-cli/tests/evaluate.rs` holds the subcommand against the library.
 
-Canon is named by the reference `b10x-canon-engineering` uses (`tag = "0.1.0"`), pinned by
+A case opens with the value of every case input its protocol declares (`CaseInputs`;
+`software.change/1` declares `risk`, `change_kind` and `affects_security_boundary`), given by the
+host as trusted context, never by a model. `open` and `open_case` refuse an input the protocol does
+not declare (`UndeclaredInput`), a value it does not list (`UnlistedInputValue`) and a declared
+input left out (`MissingInput`), each naming the input, before anything is stored; a protocol that
+declares none opens with `CaseInputs::none()`. `FileCaseStore` keeps them in `StoredCase.inputs`,
+and a case stored without them (as 0.19.0 wrote every case) is refused as a store failure naming
+the case, never filled with defaults. `CaseInputs` refuses one input given twice
+(`RepeatedInput`), never replacing the first. Every read of a held case checks its inputs again as
+at opening: a case whose stored inputs do not satisfy its protocol (an empty list included) is
+never decided and its inputs are never reported (`GovernorUnavailable`), and `FileCaseStore`
+refuses such a case of a built-in protocol naming the case and the input
+(`crates/loom-intake-slice/tests/adversary_w9_u1_inputs.rs`,
+`a_stored_case_with_unusable_inputs_is_never_decided`). An obligation is `open` only when Canon
+reports it `open`: one Canon reports `not_applicable` (the case's inputs do not select it) or `discharged` is not.
+
+Canon is named by the reference `b10x-canon-engineering` uses (`tag = "0.4.0"`), pinned by
 `Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon with
 `cargo update -p b10x-canon -p b10x-canon-engineering` together with the `b10x-canon-engineering`
-tag (now `0.3.0`); any other crate that adds Canon uses the same reference.
+tag (now `0.7.0`); any other crate that adds Canon uses the same reference.
 
 ## Connectors
 
@@ -427,6 +443,32 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   `run_until_blocked`. It has no loop of its own; keep it small. It executes `software.change/1`
   actions inside the given workspace and `system.query/1` through the host clock, never merges, pushes or deploys, and never supplies
   authority on the operator's behalf. It submits evidence from the test command it runs itself.
+  It performs `tests.write` and `implementation.edit` (each a committed write, reporting the new
+  `HEAD`), `repository.inspect` and `tests.run`; a resume hands off `repository.merge`. On a
+  `software-change@1` case the runtime reads every frontier without the actions the slice can
+  never perform (`run::never_performed`: gated and not in `run::PERFORMED`, which is
+  `release.rollback`), so such an action is never offered, awaited or held as a Suspension, and a
+  proposal of it is refused as not in the frontier; `crates/loom-cli/tests/slice_run.rs`
+  (`the_run_never_offers_or_awaits_release_rollback`) holds it. `run::SliceReads` filters only a
+  `software-change@1` case's frontier and passes any other protocol's through unchanged.
+- `tests.write` writes only test paths: the slice performs it only when every path it changes
+  matches one of the host's test-path patterns (`test_paths::TestPaths`), and otherwise refuses it
+  naming the first path outside them before anything is written, for every change kind, so a
+  bugfix cannot change its implementation through `tests.write` before a red test;
+  `implementation.edit` is not restricted. The patterns are trusted context: `run --test-path
+  <GLOB>`, repeatable, replacing the defaults (`tests/**`, `**/tests/**`, `test/**`,
+  `**/test/**`, `**/*_test.*`, `**/test_*.*`, `**/*.test.*`, `**/*.spec.*`), or
+  `SliceRequest::test_paths`; the resume context keeps them (`intake.routing.SliceRun.test_paths`,
+  `ResumeContext.test_paths`). `crates/loom-intake-slice/tests/selector_executor.rs`
+  (`tests_write_writes_only_the_hosts_test_paths`) holds it. A resume's request carries the held
+  case's inputs, read from the governor (`intent::resumed_request`).
+- `run --risk <trivial|standard|elevated|critical>` (default `standard`), `--change-kind
+  <feature|bugfix|refactor>` (default `feature`) and `--affects-security-boundary <true|false>`
+  (default `false`) are the case inputs (`intake.routing.CaseInputs`, `case::RUN_DEFAULTS`),
+  given to every protocol that declares them and to no other; no model, classifier or router
+  sets one. With the defaults a run reaches the outcomes it reached before the inputs; with
+  `--change-kind bugfix` an `implementation.edit` is admissible only once a test failed on the
+  current revision (`a_bugfix_edits_the_implementation_only_after_a_failing_test`).
 - `b10x-loom-cli` is `b10x-loom`. Its clap definition is the library (`src/lib.rs`, `Cli`), which
   `loom-docs` renders. The library also holds `evaluate`, the JSON codec of `b10x-loom evaluate`
   over the generated `loom.evaluation` types, and `exit_status` and `events`, the writer of
