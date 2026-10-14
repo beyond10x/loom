@@ -237,10 +237,11 @@ entities:
   # - `test_result`: every `tests.run` on a committed revision, its `result` `pass` or `fail`;
   # - `regression_test_result`: beside that run's `test_result`, with the same `result`, from
   #   every `tests.run` of a case whose `change_kind` is `bugfix` that comes after the run's first
-  #   performed `tests.write`. One observation then yields both records, and no other record. Both
-  #   rest on trusted inputs only, the case's change kind and the run's own history, never on a
-  #   model's argument; a run before any performed `tests.write`, and every run of a `feature` or
-  #   `refactor` case, yields none;
+  #   `tests.write` that committed. One observation then yields both records, and no other record.
+  #   Both rest on trusted inputs only, the case's change kind and the run's own history, never on
+  #   a model's argument; a run before any `tests.write` that committed, and every run of a
+  #   `feature` or `refactor` case, yields none. A `tests.write` that commits nothing (it wrote
+  #   what the files already held) writes no regression test, and a refused one writes nothing;
   # - `implementation_change`: every performed `implementation.edit` that committed, moving the
   #   workspace's `HEAD`, with no `result`. A refused edit, an edit that wrote what the files
   #   already held, and a `tests.write` submit none.
@@ -251,7 +252,14 @@ entities:
   # run or the edit, which the record cites. `observed_at` is the host clock's instant of that
   # observation, in UTC to the second, written into the record; the governor reads no clock for
   # it. Canon orders records by it in whole seconds, so two records observed in one second order
-  # `unknown`. `producer` is the verifier's, the trusted producer of the submission: the governor
+  # `unknown`; the slice therefore keeps its observations' instants strictly increasing in whole
+  # seconds: an observation's instant is strictly later, in whole seconds, than the previous
+  # observation the run's executor recorded. Before it records an observation whose host-clock
+  # second is not later than the previous one's, the executor waits for the host clock to pass
+  # that second, at most about 2 seconds; a clock that still has not passed it (one that stepped
+  # back) fails the step, naming both instants, before the observation is recorded or any record
+  # is submitted for it. An edit already committed stays committed, with no record about it.
+  # `producer` is the verifier's, the trusted producer of the submission: the governor
   # gives Canon that producer, never one the record's own facts name.
   - name: intake.routing.SliceEvidence
     identity:

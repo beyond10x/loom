@@ -57,7 +57,8 @@
 //! from its spelling as Canon's YAML reader reads a number, and an object with a member named twice
 //! carries no record. The record's `producer` is the trusted one `submit_evidence` attributed the
 //! evidence to (`EvidenceData.producer`), never one its facts name: a producer in the facts is
-//! replaced, and a trusted producer that is not a Canon identifier (it holds whitespace) is given
+//! removed before Canon reads the record, so it never decides whether the record applies, and a
+//! trusted producer that is not a Canon identifier (it holds whitespace) is given
 //! as none, so its record satisfies no demand for independence. Its `observed_at` is read from the
 //! facts, as the host wrote it; the governor reads no clock. Every record received for a held case is
 //! kept, in the order received ([`CanonGovernor::evidence`]); it applies only when its facts read
@@ -1049,10 +1050,16 @@ fn snapshot(ir: &Ir, state: &CaseState) -> Case {
 
 /// The `canon-evidence/1` record `data`'s facts carry, when they carry one of its kind, naming
 /// the trusted producer `submit_evidence` attributed it to. A producer the facts name is never
-/// read; a trusted producer Canon would refuse as an identifier (one holding whitespace) is named
-/// as no producer, which satisfies no demand for independence.
+/// read: its `producer` member is removed before Canon reads the record, so whatever it holds (a
+/// null, a number, an object) never decides whether the record applies. A trusted producer Canon
+/// would refuse as an identifier (one holding whitespace) is named as no producer, which
+/// satisfies no demand for independence.
 fn canon_record(data: &EvidenceData) -> Option<EvidenceRecord> {
-    let mut record = evidence_from_value(&canon_value(&data.facts)?).ok()?;
+    let mut value = canon_value(&data.facts)?;
+    if let serde_yaml_ng::Value::Mapping(members) = &mut value {
+        members.remove("producer");
+    }
+    let mut record = evidence_from_value(&value).ok()?;
     record.producer = is_identifier(&data.producer).then(|| Principal::new(data.producer.as_str()));
     (record.kind.as_str() == data.kind).then_some(record)
 }

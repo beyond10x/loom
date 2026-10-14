@@ -506,17 +506,24 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   (`verifier::TestResultVerifier`) from what the executor did: a `test_result` for every
   `tests.run` on a committed revision; beside it, with the same result and citing the same
   observation, a `regression_test_result` when the case's `change_kind` is `bugfix` and the
-  executor performed a `tests.write` before the run (its own history, not carried across a
-  resume); and an `implementation_change` about the new `HEAD` for every `implementation.edit`
-  that committed. Each record carries `observed_at`, the host clock's instant of its observation
+  executor performed a `tests.write` that committed before the run (its own history, not
+  carried across a resume; one that wrote what the files already held wrote no test); and an
+  `implementation_change` about the new `HEAD` for every `implementation.edit` that committed.
+  Each record carries `observed_at`, the host clock's instant of its observation
   (`LocalExecutor::with_clock`, `run::run_with_clock`; `clock::SystemClock` by default), and the
   verifier's producer; the governor gives Canon `EvidenceData.producer`, never a producer in the
-  facts, and reads no clock. A bugfix that writes its test, runs it red and then edits discharges
-  `red_first.required`, and one that edits before any regression test leaves it open. Canon
-  orders records in whole seconds: an edit observed in the same second as the red run orders
-  `unknown` and leaves it open too, so tests set the instants with an injected clock. The governor `b10x-loom` builds is `run::slice_governor`,
-  generic over `T: EvaluationTime` through the slice, evaluating at the host instant
-  (`clock::HostTime`), so an evidence kind's `max_age` expires an old observation.
+  facts (it removes a facts `producer` before Canon reads the record), and reads no clock. A
+  bugfix that writes its test, runs it red and then edits discharges `red_first.required`, and one
+  that edits before any regression test leaves it open. Canon orders records in whole seconds,
+  so the executor keeps its observations' instants strictly increasing in whole seconds: it
+  waits on the clock (`Clock::wait`, at most `executor::CLOCK_WAIT`, 2 s) for the previous
+  observation's second to pass, and a clock that still has not (one that stepped back) fails the
+  step with `ExecuteError::Clock`, naming both instants, before the observation is delivered or a
+  record submitted; an edit already committed stays committed. Tests set the instants with an
+  injected clock that advances when waited on
+  (`crates/loom-intake-slice/tests/adversary_w10_u1.rs`). The governor `b10x-loom` builds is
+  `run::slice_governor`, generic over `T: EvaluationTime` through the slice, evaluating at the
+  host instant (`clock::HostTime`), so an evidence kind's `max_age` expires an old observation.
   `crates/loom-cli/tests/slice_run.rs` holds it
   (`a_bugfix_red_regression_test_before_its_edit_discharges_red_first`,
   `a_slice_governor_expires_an_operational_observation_after_max_age`).
