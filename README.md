@@ -33,9 +33,9 @@ the whole boundary.
 
 ## Status
 
-Version `0.21.0`, released from source at the tag `0.21.0`
-([release](https://github.com/beyond10x/loom/releases/tag/0.21.0)). Nothing is on a registry: you
-install from the tag or depend on it with `tag = "0.21.0"`. `b10x-loom run` completed a live run
+Version `0.22.0`, released from source at the tag `0.22.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.22.0)). Nothing is on a registry: you
+install from the tag or depend on it with `tag = "0.22.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -153,14 +153,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.21.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.22.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.21.0
+b10x-loom 0.22.0
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -185,7 +185,10 @@ failing test first, and with `--change-kind bugfix` `implementation.edit` waits 
 failed on the current revision. `tests.write` writes only test paths, matched by the repeatable
 `--test-path <GLOB>` (by default `tests/**`, `**/tests/**`, `test/**`, `**/test/**`,
 `**/*_test.*`, `**/test_*.*`, `**/*.test.*` and `**/*.spec.*`); `implementation.edit` is not
-held to them.
+held to them. A bugfix's regression test result comes only from `--regression-test-command
+<CMD>`, a command with `{path}` in a word, run once per test path the run's `tests.write`
+committed after each test run; without it no run is a regression result, so
+`red_first.required` stays open.
 `--model` and `--classifier-model` name Codex models (default `gpt-5.6-sol`). With
 `--catalog <PATH>`, an [llm](https://beyond10x.github.io/llm/) catalog file, both name route
 aliases of that catalog instead, such as a self-hosted endpoint whose account needs no
@@ -256,7 +259,7 @@ A supervisor that keeps its own case record calls `loom_governor::evaluate` (or 
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.21.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.22.0" }
 ```
 
 The example below
@@ -278,6 +281,30 @@ step 2: tests.run {}
     | confinement: none
   evidence: test_result pass
 stopped: ApprovalRequired (repository.merge)
+```
+
+A workflow whose steps are known needs no model for them. `loom_sdk::loom::workflow::load` reads a
+YAML definition over a catalog protocol, checked against `ProtocolEntry::actions`, and
+`loom_sdk::WorkflowExecutor` runs it as the executor: a deterministic step proposes its action
+with its literal arguments and asks no model, a judgement step asks the model only among the
+actions it names, and the workflow advances past a step only once the effect port, wrapped in
+`loom_sdk::RecordingEffects`, performed it. Commission still revalidates every proposal.
+A step may declare typed `outputs` from its performed effect's report (a name, a JSON pointer and
+a type), and a later deterministic step's arguments name one as `{$step: <step>, $output:
+<name>}`: the runtime fills it in with no model call, and an output absent from the report or of
+another type ends the run `NeedsHumanJudgment` naming the step and the output, with nothing
+proposed.
+
+```yaml
+name: change
+protocol: software-change@1
+steps:
+  - {name: inspect, kind: Deterministic, action: repository.inspect, arguments: {}}
+  - name: edit
+    kind: Judgement
+    actions: [implementation.edit]
+    instructions: Edit the implementation so the failing test passes.
+  - {name: test, kind: Deterministic, action: tests.run, arguments: {}}
 ```
 
 [Embed the runtime](https://beyond10x.github.io/loom/docs/guides/embed-the-runtime) walks through

@@ -3,7 +3,7 @@ title: Embed the runtime
 sidebar_position: 2
 description: Depend on b10x-loom-sdk, supply the selector, argument generator, authority provider and loop context, and run a governed case until it is blocked.
 lede: An application embeds a governed agent through one crate, b10x-loom-sdk. It supplies the parts that decide and the parts that act; Loom, Commission's runtime and the governor do the rest.
-source: crates/loom-sdk/src/lib.rs, crates/loom-sdk/examples/software_change.rs, crates/loom-sdk/tests/example_runs.rs, crates/loom-mandate/src/lib.rs
+source: crates/loom-sdk/src/lib.rs, crates/loom-sdk/examples/software_change.rs, crates/loom-sdk/tests/example_runs.rs, crates/loom-mandate/src/lib.rs, crates/loom-executor/src/metering.rs
 ---
 
 # Embed the runtime
@@ -26,7 +26,7 @@ Nothing is on a registry. Depend on the release tag:
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.21.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.22.0" }
 ```
 
 Rust code uses it as `loom_sdk`. It re-exports, under stable module names:
@@ -109,6 +109,32 @@ let end = run_until_blocked(
 `end` is a `LoopEnd`: its `outcome` (`NeedsAuthority` or `AwaitingApproval` here), the action
 requests with their revalidation, the effects, and the last frontier. The example turns it into
 `ApprovalRequired (repository.merge)`.
+
+## Meter a run
+
+`RunMeter`, `MeteredModelPort` and `MeteredExecutor` (top-level in the SDK, from
+`loom_sdk::loom::metering`) report what one run spent on its model. Create one `RunMeter`, with
+the run's `RateCard` or none; wrap every `ModelPort` the run uses in a `MeteredModelPort` on that
+meter (the loop's, the reasoning-model selector's, an argument generator's), and the executor you
+hand `run_until_blocked` in a `MeteredExecutor` on it. When the loop returns,
+`meter.report(&end.run_id)` is a `loom.metering.RunUsageReport`: the model calls, the input,
+output and cached input tokens the provider reported and the cost in micro-US-dollars, in total
+and per step.
+
+- Every `turn` through a metered port is one call, counted before the turn runs, so a turn that
+  fails or unwinds is a call too; it adds no tokens.
+- A step is one executor call, counted from 1. Calls made while no executor call runs are step 0,
+  listed only when there were any, so the steps always sum to the totals. Executor calls on one
+  meter must not overlap, and an executor is wrapped by one `MeteredExecutor`.
+- A step's `label` names what its executor call did: a `WorkflowExecutor` built
+  `.with_meter(&meter)` labels each call with the workflow step it took, so a judgement step's
+  model calls read under its name. Step 0 and a call that took no step carry no label.
+- Each turn is priced once at the rate card. Without a card, for a model the card does not list,
+  after a turn that reported no usage, or after a turn that failed or unwound, the cost is absent,
+  never zero.
+- The report covers what the meter saw: one process segment of the run.
+
+`crates/loom-executor/tests/run_metering.rs` drives these over scripted ports.
 
 ## What holds whatever you supply
 

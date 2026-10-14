@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:release-names-embedder-breaks
 kind: story
-status: draft
+status: implemented
 title: release-check refuses a release entry that does not name what breaks for a consumer
 relations:
 - decomposes: epic:loom-foundation-for-consumers
@@ -10,7 +10,11 @@ relations:
 - depends_on: story:pinned-consumer-check
 - depends_on: story:sdk-host-port-stability
 - depends_on: story:command-event-contract
-revision: 1
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-14T10:13:48Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-10-14T10:14:20Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-14T21:39:17Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 

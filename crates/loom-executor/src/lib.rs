@@ -38,11 +38,13 @@ pub mod arguments;
 pub mod compaction;
 pub mod credentials;
 pub mod harness;
+pub mod metering;
 pub mod projection;
 pub mod recovery;
 pub mod revalidation;
 pub mod selection;
 pub mod session;
+pub mod workflow;
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
@@ -65,6 +67,7 @@ use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
 
 pub use arguments::{ArgumentContext, ArgumentGenerator, EmptyObjectArguments, OverruleRefused};
+pub use metering::{MeteredExecutor, MeteredModelPort, RunMeter};
 pub use selection::{
     ActionSelector, Confidence, FirstAdmissibleSelector, HybridSelector, InvalidThreshold,
     ReasoningModelSelector, SelectorError,

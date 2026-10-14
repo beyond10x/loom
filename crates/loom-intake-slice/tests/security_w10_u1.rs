@@ -24,7 +24,9 @@ use b10x_loom_commission::model::responsibility::{
 use b10x_loom_commission::ports::governor::Governor as _;
 use b10x_loom_intake_slice::case::{self, CaseInputs, ChangeKind, Risk};
 use b10x_loom_intake_slice::clock::Clock;
-use b10x_loom_intake_slice::executor::{ExecuteError, LocalExecutor, Report, TestCommand};
+use b10x_loom_intake_slice::executor::{
+    ExecuteError, LocalExecutor, RegressionTestCommand, Report, TestCommand,
+};
 use b10x_loom_intake_slice::verifier::{TestResultVerifier, VerifyError};
 use chrono::{DateTime, FixedOffset};
 use loom_governor::{CanonGovernor, MemoryCaseStore};
@@ -357,11 +359,15 @@ fn executor<'g>(
     case: &CaseId,
     fixture: &Fixture,
 ) -> LocalExecutor<'g, MemoryCaseStore> {
+    // The host's regression-test command reads the written test file as the line `check.txt`
+    // must hold, so only it, never the suite, is a regression result.
     LocalExecutor::new(
         governor,
         case.clone(),
         fixture.workspace(),
-        TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
+        TestCommand::new("grep", ["-qx", "fixed", "check.txt"]).with_regression(
+            RegressionTestCommand::new("grep -qx -f {path} check.txt").expect("a command"),
+        ),
     )
     .with_runner(std::sync::Arc::new(
         b10x_loom_intake_slice::executor::UnconfinedRunner,

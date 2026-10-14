@@ -8,12 +8,12 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use b10x_loom_commission::model::json as commission_json;
-use b10x_loom_commission::model::primitives::Uuid;
+use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
     ActionStatus as FrontierStatus, CaseId, CompletionDetermination, EvidenceData, EvidenceId,
-    ObservationId, Truth,
+    Observation, ObservationData, ObservationId, Truth,
 };
-use b10x_loom_commission::ports::evidence::submit_evidence;
+use b10x_loom_commission::ports::evidence::{ObservationPort as _, submit_evidence};
 use b10x_loom_commission::ports::governor::Governor as _;
 use loom_governor::model::evaluation::{
     ActionStatus, CaseSnapshot, ClaimValue, EvaluationDecision, EvaluationInput, EvaluationRequest,
@@ -142,13 +142,34 @@ fn uuid(n: u64) -> Uuid {
 }
 
 fn submit(governor: &CanonGovernor<MemoryCaseStore>, case: &CaseId, n: u64, record: &Value) {
+    let observation = ObservationId(uuid(2 * n + 2));
+    // A host delivers the observation a record cites before the record: the governor takes a
+    // record's `observed_at` only as the instant of an observation it received. The instant is
+    // the record's own, so a record whose instant Canon cannot read is still set aside by Canon.
+    // The governor refuses a record citing an observation it never received, with or
+    // without an `observed_at`; a record without one is observed at a fixed instant.
+    let at = record["observed_at"]
+        .as_str()
+        .unwrap_or("2026-01-01T00:00:00Z");
+    governor
+        .observe(Observation::new(ObservationData {
+            observation_id: observation.clone(),
+            source: "host/fixture".to_owned(),
+            subject: record["subject"]
+                .as_str()
+                .unwrap_or("implementation")
+                .to_owned(),
+            observed_at: Timestamp(at.to_owned()),
+            payload: commission_json::Value::Null,
+        }))
+        .expect("the governor keeps the observation");
     let evidence = EvidenceData {
         evidence_id: EvidenceId(uuid(2 * n + 1)),
         case_id: case.clone(),
         kind: record["kind"].as_str().expect("kind").to_owned(),
         subject_revision: governor.current_revision(case).expect("revision"),
         producer: String::new(),
-        observation_ids: vec![ObservationId(uuid(2 * n + 2))],
+        observation_ids: vec![observation],
         facts: commission_json::parse(&record.to_string()).expect("facts are JSON"),
         provenance: commission_json::Value::Object(Vec::new()),
     };

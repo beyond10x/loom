@@ -29,7 +29,7 @@ use crate::case;
 use crate::clock::Clock;
 use crate::confinement::TestRunner;
 use crate::context_metrics::{ContextMetrics, MeasuredModel};
-use crate::executor::{TestCommand, TestPaths, backend_name};
+use crate::executor::{RegressionTestCommand, TestCommand, TestPaths, backend_name};
 use crate::grant::{GrantAuthority, GrantStore, MandateApprovals};
 use crate::handoff::MergeHandoffStore;
 use crate::resume::{
@@ -541,10 +541,17 @@ pub fn resumed_request<S: FallibleCaseStore, T: EvaluationTime>(
         .test_command
         .split_first()
         .ok_or_else(|| invalid("no test program"))?;
+    let mut test = TestCommand::new(program, args);
+    if let Some(regression) = &context.regression_test_command {
+        test = test.with_regression(
+            RegressionTestCommand::new(regression.as_str())
+                .map_err(|error| invalid(&format!("a regression-test command refused: {error}")))?,
+        );
+    }
     Ok(IntentRequest {
         intent: context.intent.clone(),
         workspace: context.workspace.as_ref().map(PathBuf::from),
-        test: TestCommand::new(program, args),
+        test,
         runner,
         max_steps: usize::try_from(context.max_steps)
             .map_err(|_| invalid("a step budget that is not a count"))?,
@@ -721,6 +728,10 @@ fn resume_context(
         workspace: text.workspace,
         test_command: text.test_command,
         test_paths: request.test_paths.patterns().to_vec(),
+        regression_test_command: request
+            .test
+            .regression()
+            .map(|command| command.text().to_owned()),
         max_steps: text.max_steps,
         confinement: host.confinement,
         cgroup_root: text.cgroup_root,
@@ -955,6 +966,7 @@ mod tests {
             workspace: Some("/work/space".to_owned()),
             test_command: vec!["grep".to_owned(), "-qx".to_owned()],
             test_paths: test_paths.iter().map(|&p| p.to_owned()).collect(),
+            regression_test_command: Some("grep -qx -f {path} check.txt".to_owned()),
             max_steps: 6,
             confinement: Backend::None,
             cgroup_root: None,
@@ -973,6 +985,11 @@ mod tests {
             }
         );
         assert_eq!(request.test_paths.patterns(), ["spec/**"]);
+        assert_eq!(
+            request.test.regression().map(RegressionTestCommand::text),
+            Some("grep -qx -f {path} check.txt"),
+            "the kept regression-test command is the resumed request's"
+        );
 
         for refused in [
             resumed_request(&context(&case, &[]), &governor, None),

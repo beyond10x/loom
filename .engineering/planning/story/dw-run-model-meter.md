@@ -2,12 +2,16 @@
 format: aep.planning-md/3
 id: story:dw-run-model-meter
 kind: story
-status: draft
+status: implemented
 title: A run reports its model calls, tokens and cost per step, counted at the model port
 relations:
 - decomposes: epic:deterministic-workflows
 - serves: vision:governed-autonomy
-revision: 1
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-14T10:13:47Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-10-14T10:14:20Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-14T21:39:17Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 

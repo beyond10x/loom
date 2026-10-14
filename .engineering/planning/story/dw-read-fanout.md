@@ -7,6 +7,7 @@ title: Admitted reads proposed together run concurrently, each invoked once thro
 relations:
 - decomposes: epic:deterministic-workflows
 - serves: vision:governed-autonomy
+- informed_by: architecture-decision-record:read-fan-out
 revision: 1
 ---
 ## Outcome

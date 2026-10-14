@@ -337,7 +337,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-cli"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -365,14 +365,14 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-commission"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "commission",
 ]
 
 [[package]]
 name = "b10x-loom-commission-conformance"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "b10x-loom-commission",
  "ess-conformance",
@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-commission-testkit"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-executor",
@@ -394,7 +394,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-conformance"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "b10x-loom-executor",
  "ess-conformance",
@@ -404,7 +404,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-connectors"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
@@ -417,7 +417,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-executor"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "b10x-llm-credentials",
  "b10x-loom-commission",
@@ -428,6 +428,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "serde_yaml_ng",
  "sha2 0.11.0",
  "thiserror",
  "tokio",
@@ -436,7 +437,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-governor"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "b10x-canon",
  "b10x-canon-engineering",
@@ -452,14 +453,14 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-intake-references"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "regex",
 ]
 
 [[package]]
 name = "b10x-loom-intake-router"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "b10x-canon-engineering",
  "b10x-llm-core",
@@ -471,7 +472,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-intake-slice"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "b10x-canon-engineering",
  "b10x-llm-core",
@@ -497,7 +498,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-mandate"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
@@ -515,7 +516,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-plugin"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-tool-call",
@@ -528,7 +529,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-plugin-slack"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-loom-plugin",
@@ -539,7 +540,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-protocols"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "b10x-canon",
  "b10x-canon-engineering",
@@ -552,7 +553,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-sdk"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-connectors",
@@ -565,7 +566,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-selector-laya"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-http",
@@ -2908,7 +2909,7 @@ version = "1.0.0"
 
 [[package]]
 name = "loom-commission-docs"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "clap",
  "serde_json",
@@ -2916,7 +2917,7 @@ dependencies = [
 
 [[package]]
 name = "loom-commission-xtask"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "clap",
  "proc-macro2",
@@ -2926,7 +2927,7 @@ dependencies = [
 
 [[package]]
 name = "loom-docs"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "b10x-loom-cli",
@@ -2936,7 +2937,7 @@ dependencies = [
 
 [[package]]
 name = "loom-xtask"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "clap",
  "proc-macro2",
@@ -3594,9 +3595,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.45"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "once_cell",
  "ring",
@@ -4050,7 +4051,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

@@ -69,6 +69,16 @@ patterns in place of the defaults (`tests/**`, `**/tests/**`, `test/**`, `**/tes
 `**/*_test.*`, `**/test_*.*`, `**/*.test.*`, `**/*.spec.*`); a pattern is relative to the
 workspace root, `*` matching within one path segment and `**` across any number of them.
 
+A bugfix's regression test is the file its `tests.write` wrote, and only a command that runs that
+file says whether it fails. `--regression-test-command <CMD>` names one: split at white space
+like `--test-cmd`, with `{path}` in at least one word (for example
+`cargo test --test {path}` for a runner that takes a file, or `sh {path}`). On a bugfix, after
+every `tests.run` that follows a committing `tests.write`, the slice runs it once per test path
+those writes committed, with `{path}` filled, each run its own observation, and submits a
+`regression_test_result` from each. The suite's failure is never one: a suite that does not read
+the written file says nothing about it. Without the flag no run is a regression result, so
+`red_first.required` stays open.
+
 `--state <DIR>` keeps the run in a directory, created when missing: the governed case, the
 commission's Suspension when the run stops for an approval, and the commission's resume context
 (the intent, the accepted route, the workspace, the test command, the step budget, the
@@ -137,7 +147,7 @@ slice writes tests with `tests.write` and edits the implementation with `impleme
 | `effect: committed; HEAD is f9fa1bc…` | What the local effect adapter did; further lines (`\|`) are command output or file contents |
 | `effect: refused: <reason>` | The adapter refused the action (a path outside the work tree, a `tests.write` path outside the test paths, an argument the action does not take); the step still counts |
 | `evidence: test_result pass` | Evidence the verifier submitted from the test command's exit status. A model's words are never evidence |
-| `evidence: test_result fail, regression_test_result fail` | On a `--change-kind bugfix` run, every test run after the first `tests.write` that committed also submits a regression test result. One that fails before the first `implementation.edit`, in an earlier second (Canon orders whole seconds), discharges `red_first.required`. Loom records each observation in a later second than the one before, waiting up to 2 seconds for the clock to pass it; a clock that stepped back fails the step instead |
+| `evidence: test_result fail, regression_test_result fail` | On a `--change-kind bugfix` run with `--regression-test-command`, every test run after the first `tests.write` that committed also runs that command once per committed test path and submits a regression test result from each, with that command's own result. One that fails before the first `implementation.edit`, in an earlier second (Canon orders whole seconds), discharges `red_first.required`. Loom records each observation in a later second than the one before, waiting up to 2 seconds for the clock to pass it; a clock that stepped back fails the step instead |
 | `evidence: implementation_change` | An `implementation.edit` committed; the record is about the new `HEAD`. Every record carries the host clock's `observed_at` and the verifier as its producer |
 | `stopped: ApprovalRequired (repository.merge)` | Why the run ended |
 

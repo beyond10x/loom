@@ -1,0 +1,69 @@
+# What one Commission run spent on its model (story dw-run-model-meter): the model calls, the
+# tokens the provider reported and the cost at a declared rate card, in total and per step. Calls
+# are counted at the `ModelPort` boundary (crates/loom-executor/src/harness/wire/port.rs), one per
+# `turn`, whether the turn answered or failed; a step is one `AgentExecutor::run` call of the run
+# (crates/loom-commission/src/runtime.rs, module docs item 6), counted from 1. The report is a
+# value a host reads when the run ends: it has no lifecycle, so the domain declares types only.
+domain: loom.metering
+
+summary: >-
+  One run's usage report: how many model calls it made, the input, output and cached input tokens
+  the provider reported for them and their cost in millionths of a US dollar at the run's rate
+  card, in total and for each executor call of the run. A cost no rate card priced is absent,
+  never zero.
+
+naming:
+  wire: metering
+  display: Metering
+
+types:
+  # One executor call of the run: its number, counted from 1, the model calls made while it ran,
+  # (step 0, listed only when there was such a call, holds the calls made while no executor call
+  # ran, so the steps always sum to the totals),
+  # the tokens the provider reported for the calls that answered, and their cost in micro-US-
+  # dollars, each turn priced and rounded once (crates/loom-executor/src/harness/turn_loop/price.rs).
+  # The cost is absent when the run has no rate card, when the card does not price the model a
+  # turn reported, when a turn that answered reported no usage, or when a turn failed (its tokens,
+  # and so its cost, are unknown).
+  # `label` is the name the executor gave its call: the workflow step it took
+  # (story dw-workflow-definition-executor, `loom.workflow.WorkflowStep.name`). It is absent for
+  # step 0 and for a call that took no named step.
+  - name: loom.metering.StepUsage
+    kind: struct
+    fields:
+      - name: step
+        type: Integer
+      - name: label
+        type: Optional<String>
+      - name: model_calls
+        type: Integer
+      - name: input_tokens
+        type: Integer
+      - name: output_tokens
+        type: Integer
+      - name: cached_input_tokens
+        type: Integer
+      - name: cost_micro_usd
+        type: Optional<Integer>
+
+  # One run's report: the commission run it covers, as a typed id (`loom.run.CommissionRunId`,
+  # Commission's `commission.responsibility.RunId`; ESS cannot name another system's entity), the
+  # totals over every step, and the steps in order. The totals are the sums of the steps; the
+  # cost is absent when any step's cost is absent. It covers one process segment of the run.
+  - name: loom.metering.RunUsageReport
+    kind: struct
+    fields:
+      - name: commission_run
+        type: loom.run.CommissionRunId
+      - name: model_calls
+        type: Integer
+      - name: input_tokens
+        type: Integer
+      - name: output_tokens
+        type: Integer
+      - name: cached_input_tokens
+        type: Integer
+      - name: cost_micro_usd
+        type: Optional<Integer>
+      - name: steps
+        type: List<loom.metering.StepUsage>

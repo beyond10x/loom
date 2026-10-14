@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-14T21:39:16Z",
+  "actor": "human:timo",
+  "artifact": "story:dw-run-model-meter",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adv-w11-u1-pass-1",
+    "review": "review-result:adv-w11-u1-pass-1",
+    "outcome": "fixed"
+  }
+}

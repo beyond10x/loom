@@ -890,6 +890,44 @@ fn drive_clocked(
     inputs: CaseInputs,
     clock: &dyn Clock,
 ) -> Driven {
+    drive_tested(
+        fixture,
+        row,
+        runner,
+        inputs,
+        clock,
+        TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
+    )
+}
+
+/// The `--regression-test-command` `run` parses from `command`.
+fn regression_flag(command: &str) -> b10x_loom_cli::RegressionTestCommand {
+    let argv = [
+        "b10x-loom",
+        "run",
+        "--workspace",
+        ".",
+        "--regression-test-command",
+        command,
+        INTENT,
+    ];
+    match Cli::try_parse_from(argv).expect("the flags parse").command {
+        CliCommand::Run(run) => run
+            .regression_test_command
+            .expect("the flag gives a command"),
+        _ => panic!("`run` parses as the run command"),
+    }
+}
+
+/// [`drive_clocked`] with the test command `test`.
+fn drive_tested(
+    fixture: &Fixture,
+    row: Row,
+    runner: std::sync::Arc<dyn b10x_loom_intake_slice::confinement::TestRunner>,
+    inputs: CaseInputs,
+    clock: &dyn Clock,
+    test: TestCommand,
+) -> Driven {
     let classifier = Recorded::new("recorded-classifier", vec![row.pick]);
     let agent = Recorded::new("recorded-agent", row.agent);
     let governor = CanonGovernor::new(MemoryCaseStore::default());
@@ -903,7 +941,7 @@ fn drive_clocked(
         runner,
         intent: INTENT.to_owned(),
         workspace: fixture.workspace().to_path_buf(),
-        test: TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
+        test,
         max_steps: row.max_steps,
         threshold: THRESHOLD,
         inputs,
@@ -953,6 +991,31 @@ fn drive_clocked(
         requests: agent.requests(),
         evidence,
         frontier,
+    }
+}
+
+/// Delivers every observation `evidence` cites at its facts' `observed_at`, as a host does before
+/// it submits the record: the governor takes a record's `observed_at` only as the instant of the
+/// observation it cites and received.
+fn deliver_cited(
+    governor: &impl b10x_loom_commission::ports::evidence::ObservationPort,
+    evidence: &EvidenceData,
+) {
+    let Some(CommissionJson::Text(at)) = evidence.facts.member("observed_at") else {
+        return;
+    };
+    for observation in &evidence.observation_ids {
+        governor
+            .observe(
+                b10x_loom_commission::model::responsibility::Observation::new(ObservationData {
+                    observation_id: observation.clone(),
+                    source: "host/fixture".to_owned(),
+                    subject: "implementation".to_owned(),
+                    observed_at: b10x_loom_commission::model::primitives::Timestamp(at.clone()),
+                    payload: CommissionJson::Null,
+                }),
+            )
+            .expect("the governor keeps the observation");
     }
 }
 
@@ -1375,14 +1438,16 @@ fn fix_the_check() -> Value {
 
 /// A bugfix that writes its regression test, runs it red, then edits: the first regression test
 /// result fails and is observed before the implementation's first change, so
-/// `regression.shown_first` holds and `red_first.required` is discharged. The test run after the
-/// `tests.write` submits a `regression_test_result` beside its `test_result`, both citing the run's
-/// one observation; the edit submits one `implementation_change`.
+/// `regression.shown_first` holds and `red_first.required` is discharged. The run is given
+/// `--regression-test-command 'grep -qx -f {path} check.txt'`, which runs the written test file:
+/// the test run after the `tests.write` submits a `test_result` from the suite and a
+/// `regression_test_result` from that command, each citing its own observation; the edit submits
+/// one `implementation_change`.
 #[test]
 fn a_bugfix_red_regression_test_before_its_edit_discharges_red_first() {
     let fixture = Fixture::new("red-first");
     let clock = Stepping::new();
-    let driven = drive_clocked(
+    let driven = drive_tested(
         &fixture,
         Row {
             name: "a bugfix whose regression test fails before its edit",
@@ -1390,7 +1455,7 @@ fn a_bugfix_red_regression_test_before_its_edit_discharges_red_first() {
             agent: vec![
                 json!({"action": "tests.write"}),
                 json!({
-                    "files": [{"path": "tests/regression.txt", "contents": "check.txt reads fixed\n"}],
+                    "files": [{"path": "tests/regression.txt", "contents": "fixed\n"}],
                     "message": "the regression test"
                 }),
                 json!({"action": "tests.run"}),
@@ -1408,6 +1473,8 @@ fn a_bugfix_red_regression_test_before_its_edit_discharges_red_first() {
         std::sync::Arc::new(b10x_loom_intake_slice::executor::UnconfinedRunner),
         run_inputs(&["--change-kind", "bugfix"]),
         &clock,
+        TestCommand::new("grep", ["-qx", "fixed", "check.txt"])
+            .with_regression(regression_flag("grep -qx -f {path} check.txt")),
     );
     let output = &driven.output;
     assert_eq!(
@@ -1450,9 +1517,9 @@ fn a_bugfix_red_regression_test_before_its_edit_discharges_red_first() {
         ],
         "{output}"
     );
-    assert_eq!(
+    assert_ne!(
         evidence[0].observation_ids, evidence[1].observation_ids,
-        "one observation yields both results"
+        "the regression result cites the regression test's own run, not the suite's"
     );
     assert_eq!(fact(&evidence[1], "result"), "fail");
     assert_eq!(fact(&evidence[4], "result"), "pass");
@@ -1688,23 +1755,20 @@ fn slice_evidence_carries_observed_at_and_the_trusted_producer() {
         r#"{"format":"canon-evidence/1","id":"forged-producer","kind":"test_result","subject":"implementation","subject_revision":"r1","result":"pass","observed_at":"2026-10-03T13:20:00Z","producer":"a model said so"}"#,
     )
     .expect("facts");
-    submit_evidence(
-        &governor,
-        PRODUCER,
-        EvidenceData {
-            evidence_id: EvidenceId(Uuid("00000000-0000-8000-8000-000000000001".into())),
-            case_id: case.clone(),
-            kind: "test_result".into(),
-            subject_revision: 1,
-            producer: String::new(),
-            observation_ids: vec![ObservationId(Uuid(
-                "00000000-0000-8000-8000-000000000002".into(),
-            ))],
-            facts,
-            provenance: CommissionJson::Null,
-        },
-    )
-    .expect("submitted");
+    let forged = EvidenceData {
+        evidence_id: EvidenceId(Uuid("00000000-0000-8000-8000-000000000001".into())),
+        case_id: case.clone(),
+        kind: "test_result".into(),
+        subject_revision: 1,
+        producer: String::new(),
+        observation_ids: vec![ObservationId(Uuid(
+            "00000000-0000-8000-8000-000000000002".into(),
+        ))],
+        facts,
+        provenance: CommissionJson::Null,
+    };
+    deliver_cited(&governor, &forged);
+    submit_evidence(&governor, PRODUCER, forged).expect("submitted");
     let frontier = governor.frontier(&case).expect("a frontier").into_data();
     assert_eq!(
         claim(&frontier, "tests.pass"),
@@ -1755,12 +1819,10 @@ fn a_slice_governor_expires_an_operational_observation_after_max_age() {
     let case = governor
         .open(SOFTWARE_CHANGE, revisions(), inputs())
         .expect("a critical software change opens");
-    submit_evidence(
-        &governor,
-        "host:operations",
-        observation(1, TimeDelta::minutes(31), &case),
-    )
-    .expect("submitted");
+    // The host delivers each record's observation before it submits the record.
+    let old_record = observation(1, TimeDelta::minutes(31), &case);
+    deliver_cited(&governor, &old_record);
+    submit_evidence(&governor, "host:operations", old_record).expect("submitted");
     let frontier = governor.frontier(&case).expect("a frontier").into_data();
     assert_ne!(claim(&frontier, "deployment.healthy"), Truth::True);
     assert!(
@@ -1774,24 +1836,18 @@ fn a_slice_governor_expires_an_operational_observation_after_max_age() {
     let old = clockless
         .open(SOFTWARE_CHANGE, revisions(), inputs())
         .expect("opens");
-    submit_evidence(
-        &clockless,
-        "host:operations",
-        observation(2, TimeDelta::minutes(31), &old),
-    )
-    .expect("submitted");
+    let clockless_record = observation(2, TimeDelta::minutes(31), &old);
+    deliver_cited(&clockless, &clockless_record);
+    submit_evidence(&clockless, "host:operations", clockless_record).expect("submitted");
     let frontier = clockless.frontier(&old).expect("a frontier").into_data();
     assert!(
         !obligation_open(&frontier, "health.required"),
         "with no evaluation time nothing expires: {frontier:?}"
     );
 
-    submit_evidence(
-        &governor,
-        "host:operations",
-        observation(3, TimeDelta::minutes(1), &case),
-    )
-    .expect("submitted");
+    let fresh_record = observation(3, TimeDelta::minutes(1), &case);
+    deliver_cited(&governor, &fresh_record);
+    submit_evidence(&governor, "host:operations", fresh_record).expect("submitted");
     let frontier = governor.frontier(&case).expect("a frontier").into_data();
     assert_eq!(claim(&frontier, "deployment.healthy"), Truth::True);
     assert!(

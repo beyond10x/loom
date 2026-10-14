@@ -2,11 +2,13 @@
 format: aep.planning-md/3
 id: decision-blocker:action-argument-schema
 kind: decision-blocker
-status: open
+status: cleared
 title: Nobody has decided where a frontier action's argument schema comes from
 relations:
 - blocks: epic:fast-selector
-revision: 2
+revision: 4
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-14T20:22:49Z", actor: "human:timo", revision: 4}
 ---
 ## Question
 
@@ -36,3 +38,7 @@ Decomposition of `epic:fast-selector`; Atlas ADR 0073; `docs/examples/laya-fast-
 
 Left open on 2026-10-07: every answer changes what Canon or a protocol declares, and no scheduled
 story needs it. The blocker stays open until a story does.
+
+## Decision (2026-10-14)
+
+A. The Canon protocol definition declares one argument schema per action. Loom reads it from the protocol it loads and refuses an action whose generated arguments do not match it. The frontier action and the Connector operation carry no schema of their own. The contract between Canon and Loom is recorded in architecture-decision-record:action-argument-schema-from-protocol; what Canon must declare is asked of Canon.

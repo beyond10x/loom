@@ -2,9 +2,107 @@
 
 All notable changes to Loom are recorded here. Loom releases from source at bare-version tags such
 as `0.1.0`; nothing is on a registry, and consumers pin a tag (`tag = "0.1.0"`). Changes collect
-under **Unreleased** until the next release.
+under **Unreleased** until the next release. Every release's entry names what breaks for a
+consumer in a `Breaking:` sentence; `loom-xtask release-check` refuses an entry without one, and
+refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_ports.rs` or
+`docs/contracts/run-events-v1.json` changed since the previous tag.
 
 ## [Unreleased]
+
+## [0.22.0] - 2026-10-14
+
+Loom 0.22.0 starts deterministic workflows. A run's model usage report (`RunMeter`,
+`MeteredModelPort`, `MeteredExecutor`, the `loom.metering` domain) counts every model call of a
+Commission run at the `ModelPort` boundary, with the tokens and the cost per step, each step
+labelled with the workflow step it took. A workflow definition (`loom.workflow`,
+`WorkflowExecutor`) proposes its deterministic steps without a model and asks one only in a
+judgement step, among the actions that step and the host both admit, and a step's typed outputs
+fill a later step's arguments without a model. `loom-xtask release-check` refuses an entry without
+a `Breaking:` sentence, and `Breaking: none.` when a stable surface changed since the previous tag.
+A bugfix's `regression_test_result` runs the test the run wrote (`--regression-test-command`), and
+the governor takes a record's `observed_at` only as the instant of an observation it received.
+rustls moves to 0.23.46 for RUSTSEC-2026-0346, RUSTSEC-2026-0347, RUSTSEC-2026-0348 and
+RUSTSEC-2026-0349. Breaking: a bugfix run without `--regression-test-command` no longer discharges
+`red_first.required`, `ResumeContextData` gains `regression_test_command`, and the governor
+refuses a record that cites an observation it never received or gives it another instant.
+
+### Added
+
+- Workflow definitions (`b10x_loom_executor::workflow`, re-exported by the SDK): a host defines a
+  workflow over one protocol as an ordered list of steps, the new `loom.workflow` domain
+  (`ess/domains/workflow.yaml`). A deterministic step names one action and literal arguments and is
+  proposed without a model; a judgement step names the actions a model may choose among and
+  instructions, and runs the governed loop narrowed to those of them the host's own narrowing admits
+  (a step never widens it); a step may wait on a frontier claim (`when`). `WorkflowExecutor`
+  implements Commission's `AgentExecutor`: it takes the first step after the last performed one
+  whose `when` holds, ends the call `NeedsHumanJudgment` naming the step when the frontier does not
+  list its action, and never skips ahead on its own. `RecordingEffects` wraps the host's effect port
+  so the workflow advances past a step only once its request was `Performed`. `workflow::load` reads
+  a YAML definition and refuses, naming the step, an action outside its protocol, a repeated step
+  name, a step name with surrounding whitespace or a judgement step with no action. Commission still
+  revalidates every proposal and Canon decides admission and completion. `ProtocolEntry::actions`
+  lists a protocol's actions for that check. `b10x-loom-executor` now depends on `serde_yaml_ng`. No
+  break.
+- Typed step outputs in workflow definitions: a step declares `outputs`, each a name, a JSON pointer
+  into its performed effect's report and a type (`loom.workflow.StepOutput`,
+  `loom.workflow.OutputType`: `String`, `Integer`, `Boolean`, `Json` or a list of one of them),
+  and a later deterministic step's arguments name one as `{"$step": <step>, "$output": <name>}`;
+  the executor fills it in when the step is proposed, with no model call, and Commission
+  revalidates the resolved arguments like any other. An output absent from the report or of
+  another type, or one its step did not produce in the run, ends the call `NeedsHumanJudgment`
+  naming the step and the output (a new `output` member), and nothing is proposed.
+  `workflow::load` refuses a reference to a later, unknown or undeclared output, a malformed
+  reference or pointer and an output declared twice. `WorkflowExecutor::outputs` lists what the
+  run produced; outputs are kept in process. Breaking for a caller that builds
+  `loom.workflow.WorkflowStep` itself: it has the new field `outputs`. A definition that already
+  used `$step` or `$output` as a member name in its arguments is now read as a reference.
+- A per-run model usage report, counted at the `ModelPort` boundary. `RunMeter`,
+  `MeteredModelPort` and `MeteredExecutor` (`b10x_loom_executor::metering`, re-exported by
+  `b10x-loom-sdk`) count every `turn` of a Commission run, whoever makes it (the loop, the
+  reasoning-model selector, an argument generator, compaction, a forked port), a failed turn
+  included, and `RunMeter::report` returns the generated `loom.metering.RunUsageReport`: the
+  model calls, the input, output and cached input tokens the provider reported and the cost at the
+  run's rate card, in total and per step. A step is one executor call, counted from 1; calls made
+  outside any executor call are step 0. A step's `label` names the workflow step the call took when
+  a `WorkflowExecutor` is built `.with_meter(&meter)`, and is absent otherwise. A cost no rate
+  card priced is absent, never zero; a turn that failed or unwound is a call whose cost is unknown,
+  so its step's and the run's cost are absent. Executor calls on one meter do not overlap, and an
+  executor is wrapped by one `MeteredExecutor`. New ESS domain `loom.metering`
+  (`ess/domains/metering.yaml`). No break for callers: the types are new and nothing existing
+  changes.
+
+### Changed
+
+- `loom-xtask release-check` refuses a release whose `CHANGELOG.md` entry has no `Breaking:`
+  sentence, and one that says `Breaking: none.` while a stable surface (the pinned consumer
+  `consumers/pinned/`, the host-port witness `crates/loom-sdk/tests/host_ports.rs` or the
+  run-events contract `docs/contracts/run-events-v1.json`) differs between the previous
+  bare-version tag and the tag, naming the entry and the changed files. With no previous tag only
+  the sentence is required. `release.yml` checks out the full history and its tags for the diff.
+  Breaking: none for consumers of the crates or the command; a release author now writes a
+  `Breaking:` sentence in every entry.
+- A bugfix's `regression_test_result` is the result of running the regression test the run wrote,
+  never of the whole suite. `b10x-loom run --regression-test-command <CMD>` names the command,
+  split at white space with `{path}` in at least one word; on a bugfix, after every `tests.run`
+  that follows a committing `tests.write`, the slice runs it once per test path those writes
+  committed (a path whose bytes at the run equal its bytes before the run's first write to it,
+  written with what it held or written and then written back, is none), `{path}` filled, through the same
+  confined runner, each run its own observation (`executor::REGRESSION_RUN_SOURCE`), and submits a
+  `regression_test_result` from each. The suite's run is a `test_result` only. Without the flag
+  no run is a regression result, so `red_first.required` stays open. The resume context keeps the
+  command (`intake.routing.SliceRun.regression_test_command`,
+  `ResumeContext.regression_test_command`); a context kept by 0.21.0 reads as having none.
+  Library callers give it with `TestCommand::with_regression(RegressionTestCommand::new(..)?)`;
+  a suite run's regression runs are `TestRun::regressions`. Breaking: a bugfix run without the
+  flag no longer discharges `red_first.required`; `ResumeContextData` gains
+  `regression_test_command`.
+- The governor takes a record's `observed_at` only as the instant of the observation it cites:
+  a record that cites an observation the governor never received, with or without an
+  `observed_at`, or one of whose `observed_at` members is not the text of each cited
+  observation's `observed_at`, is refused (`GovernorUnavailable`, as Commission's evidence port
+  names no record) and nothing of it is kept. `CanonGovernor::check_evidence` names the record
+  and the reason (`EvidenceRefusal`). Breaking: a host that submits a record before delivering
+  the observation it cites, or with another instant, is refused.
 
 ## [0.21.0] - 2026-10-14
 

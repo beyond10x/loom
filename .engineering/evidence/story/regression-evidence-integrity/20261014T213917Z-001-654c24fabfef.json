@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-14T21:39:17Z",
+  "actor": "human:timo",
+  "artifact": "story:regression-evidence-integrity",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:sec-w11-u5-pass-1",
+    "review": "review-result:sec-w11-u5-pass-1",
+    "outcome": "fixed"
+  }
+}

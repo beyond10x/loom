@@ -202,6 +202,26 @@ fn a_failed_write_is_an_error_and_leaves_the_case_as_it_was() {
         .expect("the case opens");
     let before = governor.current_revision(&case).expect("current revision");
     let frontier = governor.frontier(&case).expect("frontier").into_data();
+    let mut ids = Ids::default();
+    let evidence = governor_evidence(&case, &mut ids, before);
+    // The cited observation is delivered while the store is writable, so the record is refused
+    // for the store's failure, not because the governor never received its observation.
+    for cited in &evidence.observation_ids {
+        governor
+            .observe(Observation::new(ObservationData {
+                observation_id: cited.clone(),
+                source: "host/fixture".to_owned(),
+                subject: "implementation".to_owned(),
+                observed_at: Timestamp("2026-10-04T10:00:00Z".to_owned()),
+                payload: json::Value::Null,
+            }))
+            .expect("the store keeps the observation");
+    }
+    assert_eq!(
+        governor.check_evidence(&evidence),
+        Ok(()),
+        "the record passes the evidence check before the store becomes unwritable"
+    );
 
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
     assert!(
@@ -210,8 +230,6 @@ fn a_failed_write_is_an_error_and_leaves_the_case_as_it_was() {
          CAP_DAC_OVERRIDE"
     );
     let update = governor.update_revision(&case, "release", "v9");
-    let mut ids = Ids::default();
-    let evidence = governor_evidence(&case, &mut ids, before);
     let submitted = submit_evidence(&governor, PRODUCER, evidence);
     let opened = governor.open(PROTOCOL, fixture_revisions(), fixture_inputs());
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -241,9 +259,13 @@ fn a_failed_write_is_an_error_and_leaves_the_case_as_it_was() {
     );
     let names = file_names(&dir);
     assert_eq!(
-        names.iter().filter(|name| name.as_str() != ".lock").count(),
+        names
+            .iter()
+            .filter(|name| name.as_str() != ".lock" && name.as_str() != "observations.json")
+            .count(),
         1,
-        "the case's file and the lock, no temporary file left behind: {names:?}"
+        "the case's file, the observations and the lock, no temporary file left behind: \
+         {names:?}"
     );
 }
 
@@ -479,13 +501,33 @@ fn submit<S: FallibleCaseStore>(
         Some(json::Value::Text(kind)) => kind.clone(),
         _ => panic!("facts name a kind"),
     };
+    let evidence_id = EvidenceId(ids.next());
+    let observation = ObservationId(ids.next());
+    // The governor refuses a record citing an observation it never received, and takes its
+    // `observed_at` only as that observation's instant; a record without one is observed at a
+    // fixed instant.
+    let at = match facts.member("observed_at") {
+        Some(json::Value::Text(at)) => at.clone(),
+        _ => "2026-01-01T00:00:00Z".to_owned(),
+    };
+    b10x_loom_commission::ports::evidence::ObservationPort::observe(
+        governor,
+        b10x_loom_commission::model::responsibility::Observation::new(ObservationData {
+            observation_id: observation.clone(),
+            source: "host/fixture".to_owned(),
+            subject: "implementation".to_owned(),
+            observed_at: Timestamp(at),
+            payload: json::Value::Null,
+        }),
+    )
+    .expect("the governor keeps the observation");
     let evidence = EvidenceData {
-        evidence_id: EvidenceId(ids.next()),
+        evidence_id,
         case_id: case.clone(),
         kind,
         subject_revision: governor.current_revision(case).expect("current revision"),
         producer: String::new(),
-        observation_ids: vec![ObservationId(ids.next())],
+        observation_ids: vec![observation],
         facts: facts.clone(),
         provenance: json::parse(r#"{"source":"restart_durability","attempt":1.0}"#).unwrap(),
     };

@@ -24,7 +24,7 @@ control-plane path, and fails when either table here and the code disagree.
 
   ```toml
   [dependencies]
-  b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.21.0" }
+  b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.22.0" }
   ```
 
 - Outside the promise:

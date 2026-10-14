@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "34628bdc5bd76549c594305d4c4f4b375c9a06c11e6df7ffa20f53008a3b38a8",
-    "contract_digest": "ab6d91c4dd1beaa1b4a0d32129a97169409c2a72ad7e7320eb3c90eb423bf277"
+    "source_digest": "ebfc92fb53805a9a16de554fd9d3e6c265d63244389bce4ae4d41cfc30d4b1a2",
+    "contract_digest": "fc0dfef86e7a35fb5a515d27ee479e5ae5cf255204bd26277a1352735120b25c"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -244,6 +244,20 @@
     {
       "kind": "domain_type",
       "source": "loom.governor.StoredObservation",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.metering.RunUsageReport",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.metering.StepUsage",
       "disposition": {
         "disposition": "generated"
       }
@@ -622,6 +636,69 @@
     {
       "kind": "domain_type",
       "source": "loom.slack.SlackConfig",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.workflow.DeterministicStep",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.workflow.JudgementStep",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.workflow.OutputType",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.workflow.StepCondition",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.workflow.StepKind",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.workflow.StepOutput",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.workflow.Truth",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.workflow.WorkflowDefinition",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.workflow.WorkflowStep",
       "disposition": {
         "disposition": "generated"
       }

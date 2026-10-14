@@ -14,19 +14,21 @@
 //!   revision the record is about;
 //! - the case revision, the observation the executor delivered and the host clock's instant of
 //!   that observation (`observed_at`);
-//! - whether the executor had performed a `tests.write` that committed before the run
-//!   ([`TestRun::after_tests_write`]);
+//! - the regression-test command's runs that followed a suite run ([`TestRun::regressions`]),
+//!   which the executor makes only from the host's command and the test paths its own
+//!   `tests.write` actions committed;
 //!
 //! and, from the governor, the case's `change_kind` input, which the host gave when the case
 //! opened. Nothing a model says, in text or in arguments, reaches it.
 //!
 //! # What it submits
 //!
-//! - For a test run: one `test_result`, and, on a case whose `change_kind` is `bugfix` and when
-//!   the executor had performed a `tests.write` that committed before the run, one
-//!   `regression_test_result` beside it with the same `result`. Both cite the run's one
-//!   observation. A `tests.write` that wrote what the files already held wrote no regression
-//!   test, and no run after it is one.
+//! - For a test run: one `test_result` from the suite, citing its observation; and, on a case
+//!   whose `change_kind` is `bugfix`, one `regression_test_result` per regression-test run that
+//!   followed it, from that run's exit status alone and citing that run's own observation. The
+//!   suite's result is never a `regression_test_result`: without a regression-test command
+//!   ([`crate::executor::TestCommand::with_regression`]) no run yields one. A regression run on
+//!   uncommitted changes yields none.
 //! - For an `implementation.edit` that committed: one `implementation_change` about the new
 //!   `HEAD`, with no `result`, citing the edit's observation.
 //!
@@ -58,7 +60,9 @@ pub use intake_model::routing::{SliceEvidenceData, SliceEvidenceKind, SliceEvide
 use loom_governor::{CanonGovernor, EvaluationTime, FallibleCaseStore, NoEvaluationTime};
 
 use crate::case::IMPLEMENTATION;
-use crate::executor::{Change, EDIT_SOURCE, Report, TEST_RUN_SOURCE, TestRun, fresh_uuid};
+use crate::executor::{
+    Change, EDIT_SOURCE, REGRESSION_RUN_SOURCE, Report, TEST_RUN_SOURCE, TestRun, fresh_uuid,
+};
 
 /// The evidence kind of a test run.
 pub const TEST_RESULT: &str = "test_result";
@@ -157,6 +161,29 @@ impl<'g, S: FallibleCaseStore, T: EvaluationTime> TestResultVerifier<'g, S, T> {
     }
 
     fn verify_run(&self, run: &TestRun) -> Result<EvidenceId, VerifyError> {
+        let first = self.submit_run(run, SliceEvidenceKind::TestResult, TEST_RUN_SOURCE)?;
+        if !run.regressions().is_empty() && self.bugfix()? {
+            for regression in run.regressions() {
+                // A regression run on uncommitted changes is about no revision: no record.
+                if regression.run().implementation().is_some() {
+                    self.submit_run(
+                        regression.run(),
+                        SliceEvidenceKind::RegressionTestResult,
+                        REGRESSION_RUN_SOURCE,
+                    )?;
+                }
+            }
+        }
+        Ok(first)
+    }
+
+    /// Submits one record of `kind` from `run`'s exit status, citing its observation.
+    fn submit_run(
+        &self,
+        run: &TestRun,
+        kind: SliceEvidenceKind,
+        source: &str,
+    ) -> Result<EvidenceId, VerifyError> {
         let mut cited = self.uncited(run.case(), run.observation())?;
         let implementation = run.implementation().ok_or(VerifyError::NoRevision)?;
         let result = if run.exit_code() == Some(0) {
@@ -164,31 +191,24 @@ impl<'g, S: FallibleCaseStore, T: EvaluationTime> TestResultVerifier<'g, S, T> {
         } else {
             SliceEvidenceResult::Fail
         };
-        let regression = run.after_tests_write() && self.bugfix()?;
         let provenance = Value::Object(vec![
-            ("source".to_owned(), Value::Text(TEST_RUN_SOURCE.to_owned())),
+            ("source".to_owned(), Value::Text(source.to_owned())),
             (
                 "exit_code".to_owned(),
                 run.exit_code()
                     .map_or(Value::Null, |code| Value::Number(code.to_string())),
             ),
         ]);
-        let submit = |kind| {
-            let evidence = self.evidence(
-                kind,
-                implementation,
-                Some(result),
-                run.observation(),
-                run.observed_at(),
-            );
-            self.submit(&evidence, run.case_revision(), provenance.clone())
-        };
-        let first = submit(SliceEvidenceKind::TestResult)?;
+        let evidence = self.evidence(
+            kind,
+            implementation,
+            Some(result),
+            run.observation(),
+            run.observed_at(),
+        );
+        let id = self.submit(&evidence, run.case_revision(), provenance)?;
         cited.insert(run.observation().0.0.clone());
-        if regression {
-            submit(SliceEvidenceKind::RegressionTestResult)?;
-        }
-        Ok(first)
+        Ok(id)
     }
 
     fn verify_change(&self, change: &Change) -> Result<EvidenceId, VerifyError> {

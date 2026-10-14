@@ -55,6 +55,15 @@ impl ProtocolEntry {
             .map(|case| case.inputs.ids().map(ToString::to_string).collect())
             .unwrap_or_default()
     }
+    /// The actions this definition declares, in declaration order: what a workflow definition
+    /// over it may name (`b10x_loom_executor::workflow::load`).
+    pub fn actions(&self) -> Vec<String> {
+        self.model
+            .actions
+            .iter()
+            .map(|(id, _)| id.to_string())
+            .collect()
+    }
     /// Require the exact clock contract supported by the local host, irrespective of naming.
     /// Descriptive text and protocol header identity do not affect execution semantics.
     pub fn clock_compatible(&self) -> Result<(), String> {

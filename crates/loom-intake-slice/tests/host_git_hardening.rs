@@ -473,7 +473,8 @@ fn every_host_git_command_goes_through_a_hardened_helper() {
         }
     }
     const SOURCE_HELPER: &str = "crates/loom-protocols/src/git.rs";
-    let helpers = [HELPER, SOURCE_HELPER];
+    const RELEASE_HELPER: &str = "crates/loom-xtask/src/release.rs";
+    let helpers = [HELPER, SOURCE_HELPER, RELEASE_HELPER];
     let bypassing: Vec<&(String, String)> = starts
         .iter()
         .filter(|(file, _)| !helpers.contains(&file.as_str()))

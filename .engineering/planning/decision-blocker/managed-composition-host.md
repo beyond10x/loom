@@ -2,14 +2,16 @@
 format: aep.planning-md/3
 id: decision-blocker:managed-composition-host
 kind: decision-blocker
-status: open
+status: cleared
 title: Nobody has decided which managed services Commission composes, or whether Agent Platform hosts commissions
 refs:
 - provider: commission
   reference: decision-blocker:managed-composition-host
 relations:
 - blocks: story:managed-composition
-revision: 2
+revision: 4
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-14T20:16:58Z", actor: "human:timo", revision: 4}
 ---
 > Re-filed from `beyond10x/commission` `decision-blocker:managed-composition-host` at `e61e4f0` (status there: `open`) under Atlas ADR 0090
 > (loom `story:import-commission`). Paths below are Commission's: `ess/` is now `ess/commission/`,
@@ -45,3 +47,7 @@ Commission owns agent revisions in managed mode.
 
 Left open on 2026-10-07: nothing scheduled depends on it, and `story:managed-composition` stays
 deferred and unscheduled. The blocker stays open.
+
+## Decision (2026-10-14)
+
+B. Agent Platform is one adapter among several, not the host of commissions. Commission owns agent revisions and the commissions bound to them in every mode, managed included. The managed services a managed Commission uses are ports a host fills; Loom declares no host or control-plane entity for them. Nothing changes now: story:managed-composition stays draft and deferred.

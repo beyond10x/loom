@@ -93,6 +93,8 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | Every selection gets one `SelectionRecord` equal to it, with `fell_back_to` on the overruled fast selection naming the replacement's strategy; a selection refused at the execution boundary raises its session's `boundary_refusals` by one and adds no record; neither is evidence | `crates/loom-executor/tests/selection_telemetry.rs` (`selection_telemetry_is_recorded`) |
 | Laya selects behind the confidence fallback; arguments are generated once, only for the finally selected action, and an action outside the frontier never reaches argument generation or revalidation | `crates/loom-selector-laya/tests/laya_arguments_slice.rs` (`a_choice_outside_the_frontier_is_rejected_and_never_reaches_arguments_or_revalidation`) |
 | A blocked or merge-seeking pick is never proposed | `crates/loom-executor/tests/adversary_executor_admission.rs` |
+| A workflow asks a model only in a judgement step, offering it only that step's actions; a step whose action the frontier does not list ends `NeedsHumanJudgment` naming it and nothing is proposed; a step advances only once its request was `Performed`; a definition naming an action outside its protocol is refused at load, naming the step | `crates/loom-executor/tests/workflow_executor.rs` (`deterministic_steps_call_no_model`, `a_judgement_step_offers_the_model_only_its_actions`, `a_step_the_frontier_does_not_list_ends_needing_human_judgment`, `a_step_advances_only_after_its_effect_was_performed`, `a_definition_naming_an_action_outside_its_protocol_is_refused`) |
+| A later step's arguments carry an earlier step's typed output with no model call, and a missing or mistyped output, or one its step did not produce, proposes nothing and ends `NeedsHumanJudgment` naming the step and the output; a reference to a later, unknown or undeclared output is refused at load | `crates/loom-executor/tests/workflow_step_outputs.rs` (`a_later_step_reads_an_earlier_output_without_a_model`, `a_mistyped_output_ends_needing_human_judgment`, `an_absent_output_ends_needing_human_judgment`, `a_reference_to_a_later_or_unknown_step_is_refused_at_load`, `outputs_are_identical_on_a_rerun_with_the_same_reports`) |
 | A stale or unlisted request is refused at revalidation | `crates/loom-commission-testkit/tests/action_request.rs`, `crates/loom-executor/tests/adversary_run_revalidation.rs`, `crates/loom-executor/tests/selection_revalidation.rs` |
 | Unknown capabilities and panicking authority providers yield no grant | `crates/loom-commission-testkit/tests/adversary_authority_fail_closed.rs` |
 | Commission names no executor, Canon, `model-provider-deny.txt`, Connectors or Mandate crate | `task commission:deps-guard` (`crates/loom-commission-testkit/tests/executor_port.rs`) |
@@ -107,6 +109,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | A read through Connectors is performed naming its audit record; a write without a recorded attempt is an error | `crates/loom-connectors/tests/connectors_invoker.rs` (`an_admitted_read_is_performed_with_its_result_and_names_its_audit_record`, `a_write_without_a_recorded_attempt_is_still_an_error`), `crates/loom-commission-testkit/tests/effect_invocation.rs` (`a_performed_that_names_another_record_than_its_binding_requires_is_not_answered`) |
 | The executor answers the commands of `ess/` as their synthesized scenarios specify, except `not-in-frontier`, which the conformance target answers | `task conform` (`crates/loom-conformance/tests/conform.rs`, `ess_conformance_report`); the membership rule: `crates/loom-executor/tests/adversary_run_revalidation.rs` (`not_in_frontier_follows_the_frontier_actions`) |
 | The router refuses a pick outside the registry or below the threshold | `crates/loom-intake-router/tests/adversary_classify.rs` |
+| A metered run reports one model call per `ModelPort::turn`, failed turns included, one step per executor call, and tokens and cost per step that sum to the run's; a cost no rate card priced is absent, never zero | `crates/loom-executor/tests/run_metering.rs` (`the_reported_calls_equal_the_turns_the_model_port_saw`, `a_step_counts_the_selector_and_argument_calls_made_in_it`, `cost_is_absent_without_a_rate_card_and_for_an_unlisted_model`) |
 | Model or provider JSON nested past 128 levels is refused | `crates/loom-executor/tests/json_depth.rs` |
 | No hand-written type shadows an ESS-declared one | `task no-hand-model`, `task commission:no-hand-model` |
 | Ported Harness modules keep the import limits their crates had; `turn_loop` alone may also name the generated model (`crate::model`), for `LoopStop` | `crates/loom-executor/tests/adversary_harness_port_boundaries.rs` (`the_boundaries_harness_enforced_by_crate_still_hold_between_modules`), `crates/loom-executor/tests/adversary2_harness_port.rs` (`each_ported_module_names_only_what_its_harness_manifest_allowed`) |
@@ -115,6 +118,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | The SDK stability page (`website/docs/reference/sdk-stability.md`) lists exactly the ports a host implements and the `loom_sdk` paths control-plane imports, each resolving through `loom_sdk`; a change to that surface updates the page and names any break under `Breaking:` in `CHANGELOG.md` | `crates/loom-sdk/tests/host_ports.rs` (`a_host_implements_every_port_through_loom_sdk_alone`, `the_stability_page_lists_exactly_the_ports_this_test_implements`, `every_control_plane_path_on_the_page_resolves`) |
 | The `run --output jsonl` records and exit statuses change within `schema_version` 1 only by a new optional field; any other change fails the gate until the committed contract moves | `task docs-check` (`crates/loom-docs/src/run_events.rs`, `the_v1_contract_matches_the_declared_events`, `a_removed_renamed_or_retyped_field_is_a_break`, `a_new_record_kind_is_a_break`, `a_new_optional_field_is_not_a_break`) |
 | A release tag equals the workspace version and has a CHANGELOG entry | `loom-xtask release-check`, run by `release.yml` (`crates/loom-xtask/tests/release_check.rs`) |
+| A release's CHANGELOG entry says what breaks for a consumer: it has a `Breaking:` sentence, and `Breaking: none.` is refused when `consumers/pinned/`, `crates/loom-sdk/tests/host_ports.rs` or `docs/contracts/run-events-v1.json` changed since the previous tag; `release.yml` fetches the history and tags it diffs | `loom-xtask release-check` (`crates/loom-xtask/tests/release_check.rs`: `release_check_names_an_entry_without_a_breaking_sentence`, `release_check_refuses_breaking_none_when_a_stable_surface_changed_since_the_previous_tag`, `release_check_accepts_breaking_none_when_no_stable_surface_changed`, `release_check_passes_on_the_first_tag`, `release_workflow_verifies_the_tag_and_reuses_the_check`) |
 | The documented embedding builds and runs to `ApprovalRequired (repository.merge)` as an external crate: `consumers/pinned/` is its own workspace, depends on `b10x-loom-sdk` alone by path, includes `crates/loom-sdk/examples/software_change.rs` by `#[path]` and resolves one copy of each Loom and Canon crate | `task consumer-check` (`consumers/pinned/tests/embedding.rs`, `the_pinned_consumer_stops_at_approval_required`), `crates/loom-xtask/tests/pinned_consumer.rs` |
 
 ## ESS
@@ -478,6 +482,45 @@ crate (`b10x-loom-cli`, `b10x-loom-sdk`) depends on it, so Loom builds and runs 
 `crates/loom-selector-laya/tests/laya_selector.rs` holds both, the dependency rule over the
 resolved graph `cargo metadata` reports.
 
+## Workflow definitions
+
+`b10x_loom_executor::workflow` (`story:dw-workflow-definition-executor`) runs a Loom workflow
+definition, the `loom.workflow` domain (`ess/domains/workflow.yaml`), as Commission's
+`AgentExecutor`. A definition names its protocol by catalog reference and orders its steps: a
+deterministic step (one `action`, literal `arguments`) is proposed without a model; a judgement
+step runs the governed loop (`LoopExecutor`) narrowed to its `actions` that the host's own
+narrowing (`LoopConfig::admits`) admits, never widening it, with its `instructions` as the run's
+instructions; `when` makes a step wait on a frontier claim, never on a model.
+`WorkflowExecutor` takes the first step after the last performed one whose `when` holds; a step
+whose actions the frontier does not list as `Admissible` or `ApprovalRequired` ends the call
+`NeedsHumanJudgment`, naming the step and the frontier's reasons, and nothing later is taken
+instead. `RecordingEffects` wraps the host's effect port into an `EffectLog` the executor reads: a
+step advances only once the request it proposed was `Performed`, and a refused or stale one is
+proposed again, bounded by Commission's idle rule. Commission revalidates every proposal, a
+deterministic one included. `workflow::load` reads YAML into the generated types and checks it
+against the protocol's actions, which the host supplies (`loom_protocols::ProtocolEntry::actions`,
+so the executor does not depend on `loom-protocols`): every action is its protocol's, step names
+are unique, with no surrounding whitespace, and a judgement step names an action; a refusal names
+the step. Built `.with_meter(&meter)` under a `MeteredExecutor` on the same `RunMeter`, it labels
+each metered step (`loom.metering.StepUsage.label`) with the workflow step the call took. The
+position is kept in process (`decision-blocker:dw-run-state-across-restart`).
+
+A step declares typed `outputs` (`story:dw-typed-step-outputs`; `loom.workflow.StepOutput`: a
+`name`, a JSON `pointer` into its `Performed` report and a `loom.workflow.OutputType`), and a later
+deterministic step's `Json` arguments name one at any position as `{"$step": <step>, "$output":
+<name>}`; ESS types the declaration, and the reference stays inside the `Json` arguments. When
+`RecordingEffects` records a step's request `Performed`, each output is taken from that report
+and its type checked (a run the governor completes right after it still has them), kept
+in process (`WorkflowExecutor::outputs`); a reference is resolved when its step is proposed,
+and the resolved arguments are the proposal's, which Commission revalidates like any other. No
+model supplies an output. An output absent from the report (a member named twice included) or of
+another type ends that call and every later one `NeedsHumanJudgment`, naming the step and the
+output (`output`), and nothing more is proposed; a reference to an output its step did not produce
+in the run (the step was skipped) does the same naming the referring step. `load` refuses,
+naming the referring step, a reference to a later step, to itself, to an unknown step or to an
+undeclared output, and a malformed reference; and, naming the declaring step, an output declared
+twice or a malformed pointer.
+
 ## Intake and the command line
 
 The CLI's `Briefing` owns single-intent working context. `--context-policy bounded` is opt-in;
@@ -531,15 +574,28 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   current revision (`a_bugfix_edits_the_implementation_only_after_a_failing_test`).
 - The slice's evidence is `intake.routing.SliceEvidence`, submitted only by the verifier
   (`verifier::TestResultVerifier`) from what the executor did: a `test_result` for every
-  `tests.run` on a committed revision; beside it, with the same result and citing the same
-  observation, a `regression_test_result` when the case's `change_kind` is `bugfix` and the
-  executor performed a `tests.write` that committed before the run (its own history, not
-  carried across a resume; one that wrote what the files already held wrote no test); and an
+  `tests.run` on a committed revision; a `regression_test_result` only from the host's
+  regression-test command (`run --regression-test-command <CMD>`, `{path}` in a word;
+  `executor::RegressionTestCommand`, `TestCommand::with_regression`, kept in the resume context
+  as `intake.routing.ResumeContext.regression_test_command`), which on a `bugfix` case, after a
+  `tests.run` that follows a `tests.write` that committed (the executor's own history, not
+  carried across a resume), the executor runs once per test path those writes committed, each
+  its own observation (`TestRun::regressions`, `executor::REGRESSION_RUN_SOURCE`), never from
+  the suite; without the command none, so `red_first.required` stays open
+  (`crates/loom-intake-slice/tests/regression_command.rs`); a path whose bytes at the run equal
+  its bytes before the run's first write to it (written with what it held, or written and then
+  written back) is no committed test path; and an
   `implementation_change` about the new `HEAD` for every `implementation.edit` that committed.
   Each record carries `observed_at`, the host clock's instant of its observation
   (`LocalExecutor::with_clock`, `run::run_with_clock`; `clock::SystemClock` by default), and the
   verifier's producer; the governor gives Canon `EvidenceData.producer`, never a producer in the
-  facts (it removes a facts `producer` before Canon reads the record), and reads no clock. A
+  facts (it removes a facts `producer` before Canon reads the record), and reads no clock. It
+  takes a record's `observed_at` only as the instant of the observation the record cites and
+  that it received: a record citing an observation it never received, with or without an
+  `observed_at`, or with any `observed_at` member other than that instant, is refused and nothing
+  of it is kept, and
+  `CanonGovernor::check_evidence` names the record (`EvidenceRefusal`;
+  `crates/loom-governor/tests/evidence_instant.rs`). A
   bugfix that writes its test, runs it red and then edits discharges `red_first.required`, and one
   that edits before any regression test leaves it open. Canon orders records in whole seconds,
   so the executor keeps its observations' instants strictly increasing in whole seconds: it
@@ -664,7 +720,9 @@ workspace version and nothing is on a registry. Consumers pin `tag = "<version>"
 3. An annotated tag by `b10x-bot[bot]` on that commit: `b10x-gates bot … -- tag -a <version> -m
    "Loom <version>" <commit>`, then `-- push origin <version>`.
 4. `release` (`.github/workflows/release.yml`) green on the tag. It runs `loom-xtask release-check`
-   (the tag equals the workspace version and `CHANGELOG.md` has its entry) and then `check.yml` on
+   (the tag equals the workspace version and `CHANGELOG.md` has its entry, with a `Breaking:`
+   sentence that says `none` only when no stable surface changed since the previous tag, so the
+   job checks out the full history and its tags) and then `check.yml` on
    the tagged commit. It is read-only, needs no secret and creates no release.
 5. The GitHub Release for the tag, created by the bot (`b10x-gates api --method POST --path
    /repos/beyond10x/loom/releases`), named `<version>`, its notes the version's CHANGELOG entry.

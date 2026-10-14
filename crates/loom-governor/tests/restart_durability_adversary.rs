@@ -211,6 +211,13 @@ fn facts_nested_past_sixty_one_levels_are_refused_by_the_file_store_alone() {
         provenance: json::Value::Null,
     };
 
+    // The cited observations reach both governors first: a record citing an observation the
+    // governor never received is refused whatever its facts.
+    for depth in [1, 61, 62, 63] {
+        deliver(&memory, &evidence(depth as u64, depth));
+        deliver(&file, &evidence(depth as u64, depth));
+    }
+
     for depth in [1, 61] {
         let record = evidence(depth as u64, depth);
         assert!(submit_evidence(&memory, "service:ci", record.clone()).is_ok());
@@ -494,4 +501,22 @@ fn inputs_of(fixture: &serde_json::Value) -> loom_governor::CaseInputs {
         })
         .collect();
     loom_governor::CaseInputs::try_from_pairs(pairs).expect("distinct inputs")
+}
+
+/// Delivers every observation `record` cites, as a host does before it submits the record: the
+/// governor refuses a record citing an observation it never received.
+fn deliver<S: FallibleCaseStore>(governor: &CanonGovernor<S>, record: &EvidenceData) {
+    use b10x_loom_commission::model::responsibility::Observation;
+    use b10x_loom_commission::ports::evidence::ObservationPort as _;
+    for cited in &record.observation_ids {
+        governor
+            .observe(Observation::new(ObservationData {
+                observation_id: cited.clone(),
+                source: "host/fixture".to_owned(),
+                subject: "implementation".to_owned(),
+                observed_at: Timestamp("2026-01-01T00:00:00Z".to_owned()),
+                payload: json::Value::Null,
+            }))
+            .expect("the governor keeps the observation");
+    }
 }

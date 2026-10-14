@@ -60,7 +60,12 @@
 //! removed before Canon reads the record, so it never decides whether the record applies, and a
 //! trusted producer that is not a Canon identifier (it holds whitespace) is given
 //! as none, so its record satisfies no demand for independence. Its `observed_at` is read from the
-//! facts, as the host wrote it; the governor reads no clock. Every record received for a held case is
+//! facts, as the host wrote it; the governor reads no clock. It is taken only as the instant of
+//! the observation the record cites: a record citing an observation this governor never received
+//! (with or without an `observed_at`), or one of whose `observed_at` members is not the text of
+//! each cited observation's `observed_at`, is refused (`GovernorUnavailable`, Commission's error
+//! naming no record) and nothing of it is kept; [`CanonGovernor::check_evidence`] gives the
+//! [`EvidenceRefusal`] naming the record. Every record received for a held case is
 //! kept, in the order received ([`CanonGovernor::evidence`]); it applies only when its facts read
 //! as such a record and Canon evaluates the case with it and the records that already apply
 //! without refusal (a declared kind and subject, an id used once). Whether it applies is decided
@@ -465,6 +470,57 @@ impl fmt::Display for UpdateError {
 
 impl std::error::Error for UpdateError {}
 
+/// Why the governor refuses an evidence record's `observed_at` ([`CanonGovernor::check_evidence`]),
+/// naming the record by its evidence id. A refused record is not kept.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EvidenceRefusal {
+    /// The record cites `observation`, which this governor never received.
+    ObservationNotReceived {
+        evidence: String,
+        observation: String,
+    },
+    /// The record's `observed_at` is not the instant of `observation`, which it cites.
+    ObservedAtDiffers {
+        evidence: String,
+        observation: String,
+        observed_at: String,
+        observation_at: String,
+    },
+    /// The observations received could not be read, so the record was not checked.
+    Unavailable { evidence: String },
+}
+
+impl fmt::Display for EvidenceRefusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ObservationNotReceived {
+                evidence,
+                observation,
+            } => write!(
+                f,
+                "evidence `{evidence}` cites observation `{observation}`, which the governor \
+                 never received"
+            ),
+            Self::ObservedAtDiffers {
+                evidence,
+                observation,
+                observed_at,
+                observation_at,
+            } => write!(
+                f,
+                "evidence `{evidence}` is observed at `{observed_at}`, not at `{observation_at}`, \
+                 the instant of observation `{observation}` it cites"
+            ),
+            Self::Unavailable { evidence } => write!(
+                f,
+                "evidence `{evidence}` was not checked: the observations received cannot be read"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for EvidenceRefusal {}
+
 /// A governor that decides with Canon, over cases kept in `S`.
 #[derive(Debug, Default)]
 pub struct CanonGovernor<S, T = NoEvaluationTime> {
@@ -844,10 +900,74 @@ impl<S: FallibleCaseStore, T: EvaluationTime> Governor for CanonGovernor<S, T> {
     }
 }
 
+impl<S: FallibleCaseStore, T> CanonGovernor<S, T> {
+    /// Whether the governor takes `data`: every observation the record cites was received by this
+    /// governor ([`CanonGovernor::try_observations`]), whether or not its facts carry an
+    /// `observed_at`, and every `observed_at` member of its facts is the text of each cited
+    /// observation's `observed_at`. A record that fails either is refused by
+    /// [`EvidencePort::receive`], which keeps nothing of it; this names the record and why (see
+    /// the module documentation, "Evidence").
+    ///
+    /// # Errors
+    /// [`EvidenceRefusal`], naming the record.
+    pub fn check_evidence(&self, data: &EvidenceData) -> Result<(), EvidenceRefusal> {
+        let evidence = data.evidence_id.0.0.clone();
+        // Every member named `observed_at`, so a second one with another instant is checked too.
+        let observed_at: Vec<&json::Value> = match &data.facts {
+            json::Value::Object(members) => members
+                .iter()
+                .filter(|(name, _)| name == "observed_at")
+                .map(|(_, value)| value)
+                .collect(),
+            _ => Vec::new(),
+        };
+        if data.observation_ids.is_empty() {
+            return Ok(());
+        }
+        let received = self
+            .store
+            .observations()
+            .map_err(|_| EvidenceRefusal::Unavailable {
+                evidence: evidence.clone(),
+            })?;
+        for cited in &data.observation_ids {
+            let Some(observation) = received
+                .iter()
+                .find(|observation| &observation.observation_id == cited)
+            else {
+                return Err(EvidenceRefusal::ObservationNotReceived {
+                    evidence,
+                    observation: cited.0.0.clone(),
+                });
+            };
+            for value in &observed_at {
+                match value {
+                    json::Value::Text(at) if *at == observation.observed_at.0 => {}
+                    other => {
+                        return Err(EvidenceRefusal::ObservedAtDiffers {
+                            evidence,
+                            observation: cited.0.0.clone(),
+                            observed_at: match other {
+                                json::Value::Text(at) => at.clone(),
+                                _ => "a value that is not text".to_owned(),
+                            },
+                            observation_at: observation.observed_at.0.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 impl<S: FallibleCaseStore, T: EvaluationTime> EvidencePort for CanonGovernor<S, T> {
     fn receive(&self, evidence: AttributedEvidence) -> Result<(), GovernorError> {
         let data = evidence.into_evidence().into_data();
         let (_, ir) = self.held_with_ir(&data.case_id)?;
+        // Commission's `GovernorError` names no record; `check_evidence` names it for the host.
+        self.check_evidence(&data)
+            .map_err(|_| GovernorError::GovernorUnavailable)?;
         let case = data.case_id.clone();
         let at = self
             .time
