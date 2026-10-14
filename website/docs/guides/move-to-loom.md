@@ -1,13 +1,13 @@
 ---
-title: Move from Commission, the governor or intake
+title: Move from Commission, the governor, intake or Harness
 sidebar_label: Move to Loom's crates
 sidebar_position: 3
-description: The repositories Loom absorbed are archived; this page maps their crates, libraries and command to Loom's.
-lede: Commission, the governor and intake now live in Loom under new package and library names. A consumer of the archived repositories changes its dependency lines and its use paths; behaviour is unchanged.
-source: Atlas ADR 0090; CHANGELOG.md (Unreleased); crates/loom-executor/tests/crate_names.rs
+description: The repositories Loom absorbed are archived, and Loom succeeds Harness; this page maps their crates, libraries and command to Loom's.
+lede: Commission, the governor and intake now live in Loom under new package and library names. A consumer of the archived repositories changes its dependency lines and its use paths; behaviour is unchanged. A Harness program imports the ported crates from loom_sdk and keeps Harness for the crates Loom does not carry.
+source: Atlas ADR 0090; CHANGELOG.md (Unreleased); crates/loom-executor/tests/crate_names.rs; docs/design/harness-map.md; crates/loom-executor/tests/harness_map.rs; crates/loom-sdk/tests/harness_paths.rs
 ---
 
-# Move from Commission, the governor or intake
+# Move from Commission, the governor, intake or Harness
 
 `beyond10x/commission`, `beyond10x/governor` and `beyond10x/intake` are archived, and their READMEs
 point here. Their code and history are in Loom (Atlas ADR 0090). Two things change for a consumer:
@@ -58,3 +58,63 @@ An application that uses several of them can depend on `b10x-loom-sdk` alone; se
   uses the same reference, or it builds a second Canon whose types do not match.
 
 The [crate list](../reference/crates.md) is generated from the workspace and is the current list.
+
+## Move from Harness
+
+Loom succeeds [Harness](https://beyond10x.github.io/ecosystem/harness/)
+([GitHub](https://github.com/beyond10x/harness)). Harness itself is unchanged and stays in
+service, so a program moves when it is ready. Each Harness crate has the disposition the
+repository's
+[Harness to Loom module map](https://github.com/beyond10x/loom/blob/main/docs/design/harness-map.md)
+gives it:
+
+- `port`: the crate's source is carried into `b10x-loom-executor`, relicensed Apache-2.0, and a
+  program imports it from `b10x-loom-sdk` (`use loom_sdk::loom::…`) instead of the Harness crate.
+  The paths below are the types a Harness program reaches for first; each module keeps the
+  Harness crate's other public items.
+- `not carried`: Loom does not take the crate. It stays with Harness, and a program that needs it
+  keeps its Harness dependency for that crate.
+
+| Harness crate | Disposition | `loom_sdk` path | Owner instead | What changes |
+|---|---|---|---|---|
+| `harness-wire` | port | `loom_sdk::loom::harness::wire::ModelPort`, `loom_sdk::loom::harness::wire::ToolPort`, `loom_sdk::loom::harness::wire::BearerSource` | — | The values and ports keep their shape. In a governed run Loom implements `ToolPort` itself from the frontier, and no tool runs through it. |
+| `harness-http` | port | `loom_sdk::loom::harness::http::HttpTransport`, `loom_sdk::loom::harness::http::RetryPolicy` | — | Nothing: the same framing, retry rule and status mapping. |
+| `harness-responses` | port | `loom_sdk::loom::harness::responses::ResponsesClient` | — | Nothing: the same Responses projection and headers. |
+| `harness-messages` | port | `loom_sdk::loom::harness::messages::MessagesClient` | — | Nothing: the same Messages projection and headers. |
+| `harness-loop` | port | `loom_sdk::loom::harness::turn_loop::AgentLoop` | — | The module is `turn_loop`, as `loop` is a Rust keyword. A governed run goes through `loom_sdk::Loom` (`run_loop`, `resume_loop`), which publishes the frontier's catalogue and answers every tool call; see below. |
+| `harness-cli` | port | `loom_sdk::loom::session` | — | Only session filing, resume by id, the refusal of a session recorded on another wire, and filing however the run ended are carried. A Harness version 1 session file is refused by name. |
+| `harness-credential` | not carried | — | `beyond10x/harness` | A wire takes a `BearerSource`; Loom's resolves a credential reference (see below). |
+| `harness-flow` | not carried | — | `beyond10x/harness` | Loom serves one bounded run; a workflow over several sessions stays with Harness. |
+| `harness-substrate` | not carried | — | `beyond10x/harness` | Loom has no tool source of its own. |
+| `harness-tools` | not carried | — | `beyond10x/harness` | Loom has no tool source of its own. |
+| `harness-toolchain` | not carried | — | `beyond10x/harness` | Toolchain providers are engineering-domain semantics, not Loom's. |
+| `harness-mcp` | not carried | — | `beyond10x/harness` | Loom has no tool source of its own. |
+| `harness-app-server` | not carried | — | `beyond10x/harness` | Loom is driven through Commission's `AgentExecutor`, not a JSON-RPC server. |
+| `harness-xtask` | not carried | — | `beyond10x/harness` | Harness's own gate. |
+
+### What changes when the loop moves
+
+- **Tools come from the frontier, not a registration.** A Harness `ToolPort` publishes whatever
+  tools the program registered, and a `TurnEnvironmentProvider` can only narrow them. In Loom the
+  catalogue a turn offers is projected from the case's current frontier, read again before every
+  turn, so the tools change as the case moves
+  ([action selection](../concepts/action-selection.md)). A program attaches no tool source to a
+  governed run.
+- **A tool call is a selection.** The model's call is selected from that turn's catalogue, given
+  its arguments and revalidated against the case's current revision, frontier and authority
+  before Loom proposes it. A call that fails is denied to the model, which chooses again on the
+  next turn's catalogue ([action selection](../concepts/action-selection.md)).
+- **A consequential call leaves Loom only as a proposal.** Loom runs no frontier action: the run
+  stops at an approval checkpoint immediately before the effect and returns a `ProposedAction`,
+  which the Commission runtime rechecks and invokes through the effect port the embedder
+  supplies ([where Loom ends](../concepts/where-loom-ends.md)). A Harness program that ran its
+  tools inside the loop moves that work to the effect port.
+- **A credential comes from a reference.** `harness-credential` is not carried, and Loom reads no
+  credential file or credential environment variable
+  ([what Loom is not](../index.md)). A wire takes its credential from a `BearerSource`:
+  `loom_sdk::loom::credentials::ResolvedBearer` resolves the credential reference a run
+  configuration names through a resolver of llm's `b10x-llm-credentials` that the embedder
+  injects, so no secret value sits in any configuration.
+
+Budgets as a Commission suspension are planned, and `b10x-loom run` does not use the loop yet; see
+[Commission and Harness](../concepts/commission-and-harness.md#harness-the-predecessor).
