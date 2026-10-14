@@ -548,24 +548,25 @@ fn observe_at(
     observation: &ObservationId,
     record: &Value,
 ) {
-    if let Some(at) = record["observed_at"].as_str() {
-        governor
-            .observe(
-                b10x_loom_commission::model::responsibility::Observation::new(
-                    b10x_loom_commission::model::responsibility::ObservationData {
-                        observation_id: observation.clone(),
-                        source: "host/fixture".to_owned(),
-                        subject: record["subject"]
-                            .as_str()
-                            .unwrap_or("implementation")
-                            .to_owned(),
-                        observed_at: b10x_loom_commission::model::primitives::Timestamp(
-                            at.to_owned(),
-                        ),
-                        payload: json::Value::Null,
-                    },
-                ),
-            )
-            .expect("the governor keeps the observation");
-    }
+    // The governor refuses a record citing an observation it never received, with or
+    // without an `observed_at`; a record without one is observed at a fixed instant.
+    let at = record["observed_at"]
+        .as_str()
+        .unwrap_or("2026-01-01T00:00:00Z");
+    governor
+        .observe(
+            b10x_loom_commission::model::responsibility::Observation::new(
+                b10x_loom_commission::model::responsibility::ObservationData {
+                    observation_id: observation.clone(),
+                    source: "host/fixture".to_owned(),
+                    subject: record["subject"]
+                        .as_str()
+                        .unwrap_or("implementation")
+                        .to_owned(),
+                    observed_at: b10x_loom_commission::model::primitives::Timestamp(at.to_owned()),
+                    payload: json::Value::Null,
+                },
+            ),
+        )
+        .expect("the governor keeps the observation");
 }

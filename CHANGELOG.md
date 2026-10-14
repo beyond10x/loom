@@ -36,7 +36,8 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
   never of the whole suite. `b10x-loom run --regression-test-command <CMD>` names the command,
   split at white space with `{path}` in at least one word; on a bugfix, after every `tests.run`
   that follows a committing `tests.write`, the slice runs it once per test path those writes
-  committed (a path written with what it already held is none), `{path}` filled, through the same
+  committed (a path whose bytes at the run equal its bytes before the run's first write to it,
+  written with what it held or written and then written back, is none), `{path}` filled, through the same
   confined runner, each run its own observation (`executor::REGRESSION_RUN_SOURCE`), and submits a
   `regression_test_result` from each. The suite's run is a `test_result` only. Without the flag
   no run is a regression result, so `red_first.required` stays open. The resume context keeps the
@@ -47,13 +48,12 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
   flag no longer discharges `red_first.required`; `ResumeContextData` gains
   `regression_test_command`.
 - The governor takes a record's `observed_at` only as the instant of the observation it cites:
-  a record whose facts carry an `observed_at` and that cites an observation the governor never
-  received, or whose `observed_at` is not the text of each cited observation's `observed_at`, is
-  refused (`GovernorUnavailable`, as Commission's evidence port names no record) and nothing of
-  it is kept. A record without an `observed_at` is not checked.
-  `CanonGovernor::check_evidence` names the record and the reason (`EvidenceRefusal`). Breaking:
-  a host that submits a record with `observed_at` before delivering its observation, or with
-  another instant, is refused.
+  a record that cites an observation the governor never received, with or without an
+  `observed_at`, or one of whose `observed_at` members is not the text of each cited
+  observation's `observed_at`, is refused (`GovernorUnavailable`, as Commission's evidence port
+  names no record) and nothing of it is kept. `CanonGovernor::check_evidence` names the record
+  and the reason (`EvidenceRefusal`). Breaking: a host that submits a record before delivering
+  the observation it cites, or with another instant, is refused.
 
 ## [0.21.0] - 2026-10-14
 

@@ -61,11 +61,11 @@
 //! trusted producer that is not a Canon identifier (it holds whitespace) is given
 //! as none, so its record satisfies no demand for independence. Its `observed_at` is read from the
 //! facts, as the host wrote it; the governor reads no clock. It is taken only as the instant of
-//! the observation the record cites: a record citing an observation this governor never received,
-//! or whose `observed_at` is not the text of each cited observation's `observed_at`, is refused
-//! (`GovernorUnavailable`, Commission's error naming no record) and nothing of it is kept;
-//! [`CanonGovernor::check_evidence`] gives the [`EvidenceRefusal`] naming the record. A record
-//! whose facts carry no `observed_at` has no instant to take and is not checked. Every record received for a held case is
+//! the observation the record cites: a record citing an observation this governor never received
+//! (with or without an `observed_at`), or one of whose `observed_at` members is not the text of
+//! each cited observation's `observed_at`, is refused (`GovernorUnavailable`, Commission's error
+//! naming no record) and nothing of it is kept; [`CanonGovernor::check_evidence`] gives the
+//! [`EvidenceRefusal`] naming the record. Every record received for a held case is
 //! kept, in the order received ([`CanonGovernor::evidence`]); it applies only when its facts read
 //! as such a record and Canon evaluates the case with it and the records that already apply
 //! without refusal (a declared kind and subject, an id used once). Whether it applies is decided
@@ -901,26 +901,27 @@ impl<S: FallibleCaseStore, T: EvaluationTime> Governor for CanonGovernor<S, T> {
 }
 
 impl<S: FallibleCaseStore, T> CanonGovernor<S, T> {
-    /// Whether the governor takes `data`'s `observed_at`, when its facts carry one: every
-    /// observation the record cites was received by this governor
-    /// ([`CanonGovernor::try_observations`]), and the `observed_at` is the text of each cited
+    /// Whether the governor takes `data`: every observation the record cites was received by this
+    /// governor ([`CanonGovernor::try_observations`]), whether or not its facts carry an
+    /// `observed_at`, and every `observed_at` member of its facts is the text of each cited
     /// observation's `observed_at`. A record that fails either is refused by
     /// [`EvidencePort::receive`], which keeps nothing of it; this names the record and why (see
-    /// the module documentation, "Evidence"). A record whose facts carry no `observed_at` has no
-    /// instant to take and is not checked.
+    /// the module documentation, "Evidence").
     ///
     /// # Errors
     /// [`EvidenceRefusal`], naming the record.
     pub fn check_evidence(&self, data: &EvidenceData) -> Result<(), EvidenceRefusal> {
         let evidence = data.evidence_id.0.0.clone();
-        let observed_at = match &data.facts {
+        // Every member named `observed_at`, so a second one with another instant is checked too.
+        let observed_at: Vec<&json::Value> = match &data.facts {
             json::Value::Object(members) => members
                 .iter()
-                .find(|(name, _)| name == "observed_at")
-                .map(|(_, value)| value),
-            _ => None,
+                .filter(|(name, _)| name == "observed_at")
+                .map(|(_, value)| value)
+                .collect(),
+            _ => Vec::new(),
         };
-        if observed_at.is_none() {
+        if data.observation_ids.is_empty() {
             return Ok(());
         }
         let received = self
@@ -939,19 +940,20 @@ impl<S: FallibleCaseStore, T> CanonGovernor<S, T> {
                     observation: cited.0.0.clone(),
                 });
             };
-            match observed_at {
-                None => {}
-                Some(json::Value::Text(at)) if *at == observation.observed_at.0 => {}
-                Some(other) => {
-                    return Err(EvidenceRefusal::ObservedAtDiffers {
-                        evidence,
-                        observation: cited.0.0.clone(),
-                        observed_at: match other {
-                            json::Value::Text(at) => at.clone(),
-                            _ => "a value that is not text".to_owned(),
-                        },
-                        observation_at: observation.observed_at.0.clone(),
-                    });
+            for value in &observed_at {
+                match value {
+                    json::Value::Text(at) if *at == observation.observed_at.0 => {}
+                    other => {
+                        return Err(EvidenceRefusal::ObservedAtDiffers {
+                            evidence,
+                            observation: cited.0.0.clone(),
+                            observed_at: match other {
+                                json::Value::Text(at) => at.clone(),
+                                _ => "a value that is not text".to_owned(),
+                            },
+                            observation_at: observation.observed_at.0.clone(),
+                        });
+                    }
                 }
             }
         }
