@@ -6,6 +6,25 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- `b10x-loom-mandate` (`loom_mandate`), a new opt-in crate: `MandateAuthority` answers
+  Commission's authority port with Mandate's `check` (Mandate `v0.9.0`). A host builds it with
+  its own Mandate ports and puts Mandate's verified context in the commission's authority context
+  (`{"verified": …}`, `loom.authority.HostContext`); the capability is the action and the case is
+  the resource (`loom.case`, the case id as a UUID). Mandate's allow is a grant, its approval
+  requirement is Commission's `ApprovalRequired` naming the decision id, so a run through
+  `run_with_suspension` holds a Suspension, and its refusals are denials. A Mandate outage, an
+  authority context that is no Mandate context and a case id that is no UUID grant nothing. No
+  product crate links it; `b10x-loom run`, `approve` and `resume` are unchanged.
+- The `loom.authority` domain (`ess/domains/authority.yaml`) declares that context and the answer
+  each outcome maps to. The `loom` specification moves to format `ess/24`; the generated
+  `loom` model gains the `authority` module and nothing else changes.
+
+### Changed
+
+- `task commission:deps-guard` also refuses any Mandate crate in `b10x-loom-commission`'s graph.
+
 ## [0.20.0] - 2026-10-14
 
 Loom 0.20.0 builds on engineering-protocols 0.7.0 and Canon 0.4.0, and every software change

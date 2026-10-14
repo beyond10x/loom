@@ -3,7 +3,7 @@ title: Embed the runtime
 sidebar_position: 2
 description: Depend on b10x-loom-sdk, supply the selector, argument generator, authority provider and loop context, and run a governed case until it is blocked.
 lede: An application embeds a governed agent through one crate, b10x-loom-sdk. It supplies the parts that decide and the parts that act; Loom, Commission's runtime and the governor do the rest.
-source: crates/loom-sdk/src/lib.rs, crates/loom-sdk/examples/software_change.rs, crates/loom-sdk/tests/example_runs.rs
+source: crates/loom-sdk/src/lib.rs, crates/loom-sdk/examples/software_change.rs, crates/loom-sdk/tests/example_runs.rs, crates/loom-mandate/src/lib.rs
 ---
 
 # Embed the runtime
@@ -55,6 +55,13 @@ its output and test observations say `confinement: none`.
 | Ids, the time and the step budget, which no model may supply | `LoopContext` | `Clock`: a fixed time, a counter for ids, 10 steps |
 | Something that performs admitted actions | `EffectPort` | `LocalEffects`, the slice's adapter over a git work tree |
 | The commission: who the run works for, on which case | `Commission` | an operator with no authority context |
+
+An embedding that decides authority with Mandate can supply `MandateAuthority` from
+`b10x-loom-mandate`, a separate opt-in crate the SDK does not re-export: built with the host's
+Mandate ports, it asks Mandate's `check` for each capability on the commission's case, as the
+Mandate verified context the host put in the commission's authority context (`{"verified": …}`).
+Mandate's allow is a grant, its approval requirement suspends the run as the approval gate does,
+and a Mandate outage or an authority context that is no Mandate context grants nothing.
 
 The governor (`CanonGovernor`), the executor (`Loom`) and the loop (`run_until_blocked`) come from
 the SDK. A model-backed selector and argument generator exist too: the slice's `ModelSelector` and
