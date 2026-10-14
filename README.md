@@ -33,9 +33,9 @@ the whole boundary.
 
 ## Status
 
-Version `0.20.0`, released from source at the tag `0.20.0`
-([release](https://github.com/beyond10x/loom/releases/tag/0.20.0)). Nothing is on a registry: you
-install from the tag or depend on it with `tag = "0.20.0"`. `b10x-loom run` completed a live run
+Version `0.21.0`, released from source at the tag `0.21.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.21.0)). Nothing is on a registry: you
+install from the tag or depend on it with `tag = "0.21.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -153,14 +153,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.20.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.21.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.20.0
+b10x-loom 0.21.0
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -204,6 +204,15 @@ resume context, so there is nothing to approve. Each refusal of a
 resume has its own exit status (10 to 22, listed by `b10x-loom resume --help`). Only a last line
 `stopped: ApprovalRequired (<action>)` leaves something to approve: `..., nothing suspended`
 (exit 4) and `stopped: MergeHandedOff (<request>, HEAD <sha>)` leave nothing.
+With `--mandate <FILE>`, a host-trusted Mandate file (`loom.authority.MandateHost`: the verified
+context, the approver, the approver policy, the relation, the capabilities and those needing an
+approval), `approve` also records a Mandate approval of the request in the state directory's
+approval log (`mandate-approvals.jsonl`), which the grant names, and `resume` performs the request
+only when Mandate's `check_with_approval` clears and consumes that approval, keeping the
+consumption in the log before anything is performed. A second resume with the same approval, an
+expired one and a grant naming none are refused `NotGranted` (16) and perform nothing. The file's
+approver is neither its verified subject nor its actor. Only Mandate clears a grant naming an
+approval: `resume` without `--mandate` refuses it `NotGranted` (16) and performs nothing.
 
 Since `0.2.0` tests run confined. A software-change run needs a Codex
 login and Linux with bubblewrap and delegated cgroup v2 controllers. Tests default to Substrate:
@@ -247,7 +256,7 @@ A supervisor that keeps its own case record calls `loom_governor::evaluate` (or 
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.20.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.21.0" }
 ```
 
 The example below
@@ -262,8 +271,8 @@ cargo run --locked -p b10x-loom-sdk --example software_change
 ```text
 workspace: target/loom-sdk-example
 step 1: implementation.edit {"files":[{"path":"check.txt","contents":"fixed\n"}],"message":"fix the check"}
-  effect: committed; HEAD is 4d93a3d80863e4a00cc77924bc1de54520a70e99
-  evidence: none
+  effect: committed; HEAD is 6c1b876de066f060c9d564596f480534df880904
+  evidence: implementation_change
 step 2: tests.run {}
   effect: the test command exited with 0
     | confinement: none
@@ -272,7 +281,8 @@ stopped: ApprovalRequired (repository.merge)
 ```
 
 [Embed the runtime](https://beyond10x.github.io/loom/docs/guides/embed-the-runtime) walks through
-its code.
+its code. [SDK stability](https://beyond10x.github.io/loom/docs/reference/sdk-stability) names the
+surface kept stable within a release line, every port a host implements among it.
 
 ## Crates
 
@@ -287,6 +297,7 @@ its code.
 | `b10x-loom-plugin` | The plugin host: polls a plugin, classifies each item and answers it in a governed read-only turn over Connectors data sources, one record line per item |
 | `b10x-loom-plugin-slack` | The slack-handler plugin: walks the Slack channels the bot is a member of, read only, and proposes answers to the messages nobody answered; `b10x-loom plugin run slack-handler` hosts it |
 | `b10x-loom-governor` | Evaluates a case's protocol with Canon and issues the frontier; executes nothing |
+| `b10x-loom-mandate` | Opt-in: Commission's authority port answered by Mandate's `check` (Mandate `v0.9.0`), with the host's Mandate ports; a Mandate failure grants nothing. `b10x-loom approve` and `resume` use it behind `--mandate`; the SDK does not link it |
 | `b10x-loom-selector-laya` | Experimental: a fast typed action selector over a local or hosted Laya endpoint (`POST /v1/systemone`); no product crate links it |
 | `b10x-loom-intake-router`, `-references`, `-slice` | Route an intent to a protocol, extract its references, and run the local slice over a git work tree |
 

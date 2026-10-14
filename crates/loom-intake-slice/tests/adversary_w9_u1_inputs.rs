@@ -122,7 +122,7 @@ fn a_committed_tests_write_does_not_carry_an_earlier_red_result_forward() {
             &json!({"files": [{"path": "tests/regression.txt", "contents": "fixed\n"}]}),
         ))
         .expect("tests.write is performed");
-    let Report::Edited { revision: head } = written else {
+    let Report::Edited { revision: head, .. } = written else {
         panic!("tests.write reports the new HEAD: {written:?}");
     };
     assert_eq!(head, fixture.head());

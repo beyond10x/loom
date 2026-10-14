@@ -521,6 +521,276 @@ fn a_resume_at_the_gate_with_nothing_suspended_says_so() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Acceptance for `story:mandate-approval-on-resume`: with `--mandate <FILE>`, `approve` records a
+// Mandate approval of the held request in the state directory's approval log
+// (`mandate-approvals.jsonl`) and the grant names it, and `resume` performs the request only when
+// Mandate's `check_with_approval` clears and consumes it, keeping the consumption in the log first.
+
+/// The exit status of `approve` or `resume` that could not use its input or state directory.
+const FAILED: i32 = 1;
+
+/// A recorded, unexpired approval clears the held request once: the resume hands the merge off,
+/// and the log keeps the approval and, after it, the event that consumed it.
+#[test]
+fn a_recorded_approval_clears_the_held_request_once() {
+    let scratch = Scratch::new("mandate-clears");
+    let held = scratch.suspend();
+    let host = scratch.mandate_host(3600);
+
+    let approved = approve_with(&scratch, &held, Some(&host));
+    assert_eq!(approved.status.code(), Some(0), "{}", shown(&approved));
+    let log = scratch.mandate_log(&held.state);
+    assert_eq!(log.len(), 1, "one approval recorded: {log:?}");
+    assert_eq!(log[0]["kind"], json!("ApprovalRecorded"));
+    assert_eq!(log[0]["action"], json!("repository.merge"));
+    assert_eq!(log[0]["action_request_id"], json!(held.action_request_id));
+    assert_eq!(log[0]["approver"], json!(APPROVER));
+    assert_eq!(log[0]["subject"], json!(SUBJECT));
+    assert_eq!(
+        scratch.files(&held.state, "merge-"),
+        0,
+        "approve merges nothing"
+    );
+
+    let refs = scratch.refs();
+    let resumed = resume_with(&scratch, &held, Some(&host), script_after_merge());
+    assert_eq!(resumed.status.code(), Some(0), "{}", shown(&resumed));
+    assert!(
+        String::from_utf8_lossy(&resumed.stdout)
+            .lines()
+            .any(|line| line.starts_with("step 1: repository.merge")),
+        "{}",
+        shown(&resumed)
+    );
+    let handoffs = scratch.documents(&held.state, "merge-");
+    assert_eq!(handoffs.len(), 1, "one merge hand-off: {handoffs:?}");
+    assert_eq!(
+        handoffs[0]["action_request_id"],
+        json!(held.action_request_id)
+    );
+    assert_eq!(scratch.refs(), refs, "the resume moved no Git ref");
+    assert_eq!(held.suspension_state(), None, "the Suspension is released");
+
+    let log = scratch.mandate_log(&held.state);
+    assert_eq!(log.len(), 2, "the consumption is kept: {log:?}");
+    assert_eq!(log[1]["kind"], json!("ApprovedDecisionRecorded"));
+    assert_eq!(log[1]["approval"], log[0]["approval"]);
+    assert_eq!(log[1]["action_request_id"], json!(held.action_request_id));
+    assert_eq!(log[1]["decision"]["allowed"], json!(true));
+}
+
+/// A second resume with the same approval is refused by Mandate and performs nothing, across
+/// separate processes. The first resume consumed the approval and performed the merge; the second
+/// runs over the state directory as it was before the first performed anything, with the first
+/// one's log: what a crash after the consumption was kept leaves. Mandate refuses the consumed
+/// approval `wrong-state`: no hand-off, no commit, no model call, and the Suspension stays held.
+#[test]
+fn a_second_resume_with_the_same_approval_is_refused_and_performs_nothing() {
+    let scratch = Scratch::new("mandate-second");
+    let held = scratch.suspend();
+    let host = scratch.mandate_host(3600);
+    let approved = approve_with(&scratch, &held, Some(&host));
+    assert_eq!(approved.status.code(), Some(0), "{}", shown(&approved));
+    let before = scratch.root.join("state-before-resume");
+    copy_dir(&held.state, &before);
+
+    let first = resume_with(&scratch, &held, Some(&host), script_after_merge());
+    assert_eq!(first.status.code(), Some(0), "{}", shown(&first));
+    assert_eq!(scratch.files(&held.state, "merge-"), 1);
+
+    // The state as the first resume left it before it performed anything, with its log.
+    std::fs::copy(held.state.join(MANDATE_LOG), before.join(MANDATE_LOG)).unwrap();
+    let crashed = Held {
+        state: before,
+        commission: held.commission.clone(),
+        action_request_id: held.action_request_id.clone(),
+        workspace: held.workspace.clone(),
+    };
+    assert_eq!(crashed.suspension_state(), Some(SuspensionState::Pending));
+    let head = scratch.head();
+    let refs = scratch.refs();
+    let second = resume_with(&scratch, &crashed, Some(&host), Vec::new());
+    assert_eq!(
+        second.status.code(),
+        Some(NOT_GRANTED),
+        "{}",
+        shown(&second)
+    );
+    let stderr = String::from_utf8_lossy(&second.stderr);
+    assert!(stderr.contains("NotGranted"), "{}", shown(&second));
+    assert!(stderr.contains("wrong-state"), "{}", shown(&second));
+    assert_eq!(scratch.files(&crashed.state, "merge-"), 0, "no hand-off");
+    assert_eq!(scratch.head(), head, "no commit");
+    assert_eq!(scratch.refs(), refs, "no Git ref moved");
+    assert_eq!(crashed.suspension_state(), Some(SuspensionState::Pending));
+    assert_eq!(
+        scratch.mandate_log(&crashed.state).len(),
+        2,
+        "nothing more is consumed"
+    );
+}
+
+/// An expired approval is refused and performs nothing: a host whose approvals last no time
+/// records one that has expired when the resume presents it.
+#[test]
+fn an_expired_approval_is_refused_and_performs_nothing() {
+    let scratch = Scratch::new("mandate-expired");
+    let held = scratch.suspend();
+    let host = scratch.mandate_host(0);
+    let approved = approve_with(&scratch, &held, Some(&host));
+    assert_eq!(approved.status.code(), Some(0), "{}", shown(&approved));
+    let log = scratch.mandate_log(&held.state);
+    assert_eq!(log[0]["expires_at"], log[0]["recorded_at"], "{log:?}");
+
+    let resumed = resume_with(&scratch, &held, Some(&host), Vec::new());
+    assert_eq!(
+        resumed.status.code(),
+        Some(NOT_GRANTED),
+        "{}",
+        shown(&resumed)
+    );
+    assert!(
+        String::from_utf8_lossy(&resumed.stderr).contains("Mandate refused"),
+        "{}",
+        shown(&resumed)
+    );
+    assert_eq!(
+        scratch.files(&held.state, "merge-"),
+        0,
+        "nothing handed off"
+    );
+    assert_eq!(held.suspension_state(), Some(SuspensionState::Pending));
+    assert_eq!(
+        scratch.mandate_log(&held.state).len(),
+        1,
+        "nothing consumed"
+    );
+}
+
+/// The grant names its Mandate approval; a grant without one (an `approve` without `--mandate`
+/// replaced it) is refused when `resume` is given `--mandate`, and nothing is performed.
+#[test]
+fn the_grant_names_its_mandate_approval() {
+    let scratch = Scratch::new("mandate-grant");
+    let held = scratch.suspend();
+    let host = scratch.mandate_host(3600);
+    let approved = approve_with(&scratch, &held, Some(&host));
+    assert_eq!(approved.status.code(), Some(0), "{}", shown(&approved));
+    let grants = scratch.documents(&held.state, "grant-");
+    let log = scratch.mandate_log(&held.state);
+    assert_eq!(grants.len(), 1);
+    assert_eq!(
+        grants[0]["mandate_approval"], log[0]["approval"],
+        "{grants:?}"
+    );
+
+    let plain = approve_with(&scratch, &held, None);
+    assert_eq!(plain.status.code(), Some(0), "{}", shown(&plain));
+    let grants = scratch.documents(&held.state, "grant-");
+    assert_eq!(grants[0].get("mandate_approval"), None, "{grants:?}");
+
+    let resumed = resume_with(&scratch, &held, Some(&host), Vec::new());
+    assert_eq!(
+        resumed.status.code(),
+        Some(NOT_GRANTED),
+        "{}",
+        shown(&resumed)
+    );
+    assert!(
+        String::from_utf8_lossy(&resumed.stderr).contains("names no Mandate approval"),
+        "{}",
+        shown(&resumed)
+    );
+    assert_eq!(
+        scratch.files(&held.state, "merge-"),
+        0,
+        "nothing handed off"
+    );
+    assert_eq!(held.suspension_state(), Some(SuspensionState::Pending));
+    assert_eq!(
+        scratch.mandate_log(&held.state).len(),
+        1,
+        "nothing consumed"
+    );
+}
+
+/// A Mandate file that cannot configure Mandate is refused before anything is approved.
+#[test]
+fn approve_refuses_a_mandate_file_it_cannot_use_and_writes_nothing() {
+    let scratch = Scratch::new("mandate-bad-file");
+    let held = scratch.suspend();
+    let host = scratch.root.join("mandate-bad.json");
+    std::fs::write(&host, "{\"verified\": {}}\n").unwrap();
+    let refused = approve_with(&scratch, &held, Some(&host));
+    assert_eq!(refused.status.code(), Some(FAILED), "{}", shown(&refused));
+    assert_eq!(
+        scratch.files(&held.state, "grant-"),
+        0,
+        "no grant is written"
+    );
+    assert!(
+        !held.state.join(MANDATE_LOG).exists(),
+        "no approval is recorded"
+    );
+}
+
+const MANDATE_LOG: &str = "mandate-approvals.jsonl";
+const SUBJECT: &str = "22222222-2222-4222-8222-222222222222";
+const APPROVER: &str = "99999999-9999-4999-8999-999999999999";
+
+/// The resumed agent's answers after the merge: it runs the tests, and the run stops at the
+/// merge's gate at the HEAD it handed off.
+fn script_after_merge() -> Vec<Vec<u8>> {
+    vec![
+        agent("select_action", json!({"action": "tests.run"})),
+        agent("action_arguments", json!({})),
+    ]
+}
+
+fn approve_with(scratch: &Scratch, held: &Held, mandate: Option<&Path>) -> Output {
+    let mut args = vec![
+        "approve",
+        &held.commission,
+        "repository.merge",
+        "--state",
+        held.state_text(),
+    ];
+    if let Some(mandate) = mandate {
+        args.extend(["--mandate", mandate.to_str().unwrap()]);
+    }
+    scratch.command(&args)
+}
+
+/// Runs `resume`, with `--mandate` when given, answering the agent with `script`.
+fn resume_with(
+    scratch: &Scratch,
+    held: &Held,
+    mandate: Option<&Path>,
+    script: Vec<Vec<u8>>,
+) -> Output {
+    let (base_url, server) = Script::serve(script);
+    scratch.catalog(&base_url);
+    let mut args = vec!["resume", &held.commission, "--state", held.state_text()];
+    if let Some(mandate) = mandate {
+        args.extend(["--mandate", mandate.to_str().unwrap()]);
+    }
+    let output = scratch.command(&args);
+    server.finish();
+    output
+}
+
+/// Copies the regular files of `from` into `to`, created.
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_type().unwrap().is_file() {
+            std::fs::copy(entry.path(), to.join(entry.file_name())).unwrap();
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Fixtures.
 
 /// A commission `run --state` left suspended on the merge.
@@ -720,6 +990,41 @@ impl Scratch {
             .collect();
         paths.sort();
         paths
+    }
+
+    /// A host-trusted Mandate file (`loom.authority.MandateHost`) whose approvals last `seconds`:
+    /// the subject holds `maintainer` on the case for `repository.merge` and `tests.run`, and
+    /// `repository.merge` needs an approval.
+    fn mandate_host(&self, seconds: i64) -> PathBuf {
+        let path = self.root.join(format!("mandate-{seconds}.json"));
+        let host = json!({
+            "verified": {
+                "subject": SUBJECT,
+                "organization": "11111111-1111-4111-8111-111111111111",
+                "audience": "loom",
+                "credential": "77777777-7777-4777-8777-777777777777",
+                "correlation": "correlation-resume"
+            },
+            "approver": APPROVER,
+            "approver_policy": "40404040-4040-4040-8040-404040404040",
+            "relation": "maintainer",
+            "capabilities": ["repository.merge", "tests.run"],
+            "approval_required": ["repository.merge"],
+            "approval_seconds": seconds
+        });
+        std::fs::write(&path, format!("{host:#}\n")).unwrap();
+        path
+    }
+
+    /// The entries of `dir`'s Mandate approval log, in order.
+    fn mandate_log(&self, dir: &Path) -> Vec<Value> {
+        match std::fs::read_to_string(dir.join(MANDATE_LOG)) {
+            Ok(text) => text
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect(),
+            Err(_) => Vec::new(),
+        }
     }
 
     fn files(&self, dir: &Path, prefix: &str) -> usize {

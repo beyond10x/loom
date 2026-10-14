@@ -6,6 +6,137 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-14
+
+Loom 0.21.0 lets a bugfix show its regression test failing first, and clears approvals through
+Mandate. The slice submits evidence that `software.change/1`'s order and age rules decide: on a
+bugfix, a failing run after the first committing `tests.write` is also a
+`regression_test_result`, and a committing edit is an `implementation_change`, each with the
+host clock's `observed_at` (strictly increasing, whole seconds) and the trusted producer, so a
+bugfix that runs its regression test red before it edits discharges `red_first.required`.
+`b10x-loom-mandate` answers Commission's authority port with Mandate `v0.9.0`, and
+`b10x-loom approve --mandate` and `resume --mandate` record a Mandate approval and consume it
+once. The `run --output jsonl` records are a committed V1 contract, the SDK's stable surface
+has its page, `task check` builds an external consumer of the SDK, and the migration guide maps
+every Harness crate to Loom. Breaking: the slice's items that take a governor are generic over
+`T: EvaluationTime`, `executor::Report::Edited` gains `change`, `ExecuteError` gains `Clock`,
+and the slice's grant API (`grant::approve`, `GrantData`, `ApproveRefusal`,
+`intent::ResumeState`) carries the Mandate approval.
+
+### Added
+
+- The SDK stability page (`website/docs/reference/sdk-stability.md`) names the stable surface of
+  `b10x-loom-sdk`: the twenty ports a host implements with their `loom_sdk` paths, the types and
+  functions an embedding calls, and every `loom_sdk` path control-plane imports. The surface stays
+  stable within a release line and a break is named here under `Breaking:`; items not on the
+  page, `#[doc(hidden)]` items and generated model types are outside the promise.
+  `crates/loom-sdk/tests/host_ports.rs` implements every listed port through `loom_sdk` paths
+  alone and fails when the page and the crate disagree. No API change.
+- `b10x-loom-mandate` (`loom_mandate`), a new opt-in crate: `MandateAuthority` answers
+  Commission's authority port with Mandate's `check` (Mandate `v0.9.0`). A host builds it with
+  its own Mandate ports and puts Mandate's verified context in the commission's authority context
+  (`{"verified": …}`, `loom.authority.HostContext`); the capability is the action and the case is
+  the resource, of type `loom.case`. A case's resource id is derived from its case id, never
+  parsed: the UUID version 5 of the case id's exact UTF-8 bytes under the namespace
+  `735b2acd-620b-43ec-b1ab-144c2aec7ba7`, so every case id, the governor's `case-<n>` included, is
+  its own resource, and two spellings of one UUID are two. A host computes the same id with
+  `loom_mandate::case_resource_id(&CaseId)`, or any UUID version 5 implementation over that
+  namespace, when it writes Mandate's graph or policy. Mandate's allow is a grant, its approval
+  requirement is Commission's `ApprovalRequired` naming the decision id, so a run through
+  `run_with_suspension` holds a Suspension, and its refusals are denials. A Mandate outage, an
+  authority context that is no Mandate context and the empty case id grant nothing.
+  `b10x-loom approve` and `resume` use it behind `--mandate` (below); `run` does not.
+- `b10x-loom approve --mandate <FILE>` and `resume --mandate <FILE>` clear a resume's approval
+  through Mandate v0.9.0's `check_with_approval`. `FILE` is a host-trusted Mandate file
+  (`loom.authority.MandateHost`: the verified context, the approver, the approver policy, the
+  relation, the capabilities and those needing an approval, and `approval_seconds`), from which
+  Loom builds Mandate's own doubles for the case until Mandate ships a policy adapter. `approve`
+  records a Mandate approval of the held request in the state directory's approval event log
+  (`mandate-approvals.jsonl`, `intake.routing.MandateApprovalEntry`) and the grant names it
+  (`intake.routing.Grant.mandate_approval`, a member only a grant carrying one has); `resume`
+  performs the request only when Mandate clears and consumes that approval, appending
+  `ApprovedDecisionRecorded` to the log under the state directory's lock before anything is
+  performed. A second resume with the same approval, an expired approval, one naming another
+  subject, action or resource, one recorded for another commission or request however its id is
+  written, and a grant naming none are refused `NotGranted` (16) and perform nothing. The file's
+  approver is neither its verified subject nor its verified actor. Only Mandate clears a grant
+  naming an approval: `resume` without `--mandate` refuses it `NotGranted` and performs nothing.
+  Without `--mandate` both commands are otherwise unchanged, and a grant written by 0.20.0 still
+  reads. `b10x-loom-cli` now links `b10x-loom-mandate` (new `loom_mandate::approval`); the SDK
+  does not. The flag and the log go when Mandate records approvals itself.
+  Breaking: `b10x_loom_intake_slice::grant::approve` takes a `mandate` argument,
+  `intent::ResumeState` gains a `mandate` field, `grant::GrantData` gains `mandate_approval` and
+  `grant::ApproveRefusal` gains `Mandate`.
+- The `loom.authority` domain (`ess/domains/authority.yaml`) declares that context, the case
+  resource and its derivation (`loom.authority.CaseResource`), and the answer each outcome maps
+  to. The `loom` specification moves to format `ess/24`; the generated `loom` model gains the
+  `authority` module and nothing else changes.
+- The `run --output jsonl` records and the exit statuses are a stated contract at `schema_version` 1,
+  committed as `docs/contracts/run-events-v1.json` and checked by `task docs-check`: within the
+  version only a new optional field of an existing record kind is allowed, and any other change is
+  a break named here under `Breaking:` with a new schema version (reference: Run events,
+  Stability).
+- `task consumer-check`, run by `task check`: `consumers/pinned/`, a crate outside the workspace
+  that depends on `b10x-loom-sdk` alone by path, compiles the SDK example
+  (`crates/loom-sdk/examples/software_change.rs`) as an external crate would and runs it to
+  `ApprovalRequired (repository.merge)`, over the workspace's `Cargo.lock`. A change that breaks
+  what an embedder compiles against now fails Loom's own CI before a release. No break for
+  callers.
+- The guide "Move from Commission, the governor, intake or Harness"
+  (`website/docs/guides/move-to-loom.md`) gains a "Move from Harness" section: for each of the 14
+  Harness crates, its disposition in the Harness map, the `loom_sdk` path a program imports
+  instead of a ported crate (`loom_sdk::loom::harness::wire`, `http`, `responses`, `messages`,
+  `turn_loop`, and `loom_sdk::loom::session`) or `beyond10x/harness` as the owner of a crate Loom
+  does not carry, and what changes when a program moves: tools are projected from the case's
+  frontier, a call is selected and revalidated before Loom proposes it, a consequential call
+  leaves Loom only as a proposal, and a wire's credential comes from an llm-credentials
+  reference. `harness_map.rs` holds the section to the map, and `loom-sdk`'s `harness_paths.rs`
+  compiles every path it names. No API changes.
+- The slice submits evidence that `software.change/1`'s order, independence and age rules can
+  decide (`intake.routing.SliceEvidence`): every `implementation.edit` that commits submits an
+  `implementation_change` about the new `HEAD`, and on a `bugfix` case every `tests.run` after
+  the run's first `tests.write` that committed submits a `regression_test_result` beside its
+  `test_result`, with the same result and citing the same observation; a `tests.write` that
+  wrote what the files already held wrote no regression test and does not count. Every record
+  carries `observed_at`, the host clock's instant of its observation, and the verifier's producer. A
+  bugfix that writes its regression test, runs it red and then edits now discharges
+  `red_first.required`; one that edits before any regression test leaves it open.
+- `b10x-loom run` and `resume` build their governor with `run::slice_governor`, which evaluates
+  at the host instant (`clock::HostTime`, `clock::ClockTime`, `clock::SystemClock`), so an
+  evidence kind's `max_age` (`operational_observation`, 30 minutes) expires an old observation.
+- `run::run_with_clock` and `LocalExecutor::with_clock` take the host clock an observation's
+  instant is read from; `run`, `run_with_options` and `LocalExecutor::new` read
+  `clock::SystemClock`, as do the `intent` functions (the clock they are given stays the time
+  query's) and a resume.
+- An edit's observation (`executor::EDIT_SOURCE`) is delivered to the governor beside a test
+  run's, and the step prints every record it submitted (`evidence: test_result fail,
+  regression_test_result fail`; `evidence: implementation_change`).
+- The executor's observation instants are strictly increasing in whole seconds, the unit Canon
+  orders records by: before it delivers an observation in the same second as its previous one,
+  or an earlier one, it waits on the clock (`Clock::wait`, a thread sleep by default) for that
+  second to pass, at most `executor::CLOCK_WAIT` (2 seconds). A clock that still has not passed
+  it (one that stepped back) fails the step with `ExecuteError::Clock`, naming both instants,
+  before the observation is delivered, so no record is submitted for it; an edit already
+  committed stays committed. A host clock stepping back no longer shows a regression test first
+  for an edit made before it.
+
+### Changed
+
+- `task commission:deps-guard` also refuses any Mandate crate in `b10x-loom-commission`'s graph.
+- The governor gives Canon the trusted producer `submit_evidence` attributed a record to
+  (`EvidenceData.producer`), never a producer the record's facts name: a `producer` member of the
+  facts is removed before Canon reads the record, so one Canon cannot read as a principal (a null,
+  a number, an object) no longer refuses it. A trusted producer that is not a Canon identifier is
+  given as none. A record's `observed_at` is still read from its facts.
+- Breaking: the slice's public items that take a governor are generic over its evaluation time,
+  `T: EvaluationTime`, defaulting to `NoEvaluationTime`: `LocalExecutor`, `TestResultVerifier`
+  and `LocalEffects` gain a defaulted type parameter, and `run::run`, `run::run_with_options`,
+  `case::open`, `case::open_with_catalog`, `case::report_head` and the `intent` functions take a
+  `CanonGovernor<S, T>`. `loom-governor`'s public API is unchanged.
+- Breaking: `executor::Report::Edited` gains `change: Option<Change>`, so a pattern names it
+  `Edited { revision, .. }`; `TestRun` gains `observed_at()` and `after_tests_write()`;
+  `ExecuteError` gains `Clock`.
+
 ## [0.20.0] - 2026-10-14
 
 Loom 0.20.0 builds on engineering-protocols 0.7.0 and Canon 0.4.0, and every software change

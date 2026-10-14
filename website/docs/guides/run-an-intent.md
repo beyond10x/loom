@@ -53,7 +53,9 @@ A software change opens with three case inputs, which you give and no model does
 change owes (tests at every level, a review from `standard`, release provenance from `elevated`,
 a healthy deployment at `critical`); `--change-kind <feature|bugfix|refactor>` (default `feature`)
 makes a bugfix reproduce its regression first, so `implementation.edit` is admissible only once a
-test failed on the current revision; `--affects-security-boundary <true|false>` (default `false`)
+test failed on the current revision, and owes `red_first.required`: discharged only when the run
+writes its regression test with `tests.write`, runs it red, and only then edits the
+implementation; `--affects-security-boundary <true|false>` (default `false`)
 makes the implementation verified only after another principal approved a security review, which
 the slice never submits, so such a run never reaches the merge. With the defaults a run behaves
 as it did before the inputs existed. An obligation the inputs do not select is not open. A
@@ -99,6 +101,21 @@ performs nothing exits with the status of its refusal, `NotGranted` (16) without
 `NothingSuspended` (10) once the Suspension is released among them; the
 [CLI reference](../reference/cli.md) lists every status.
 
+Both commands take `--mandate <FILE>` to clear the approval through Mandate instead of Loom's grant
+alone. `FILE` is a JSON file you trust as the host (`loom.authority.MandateHost`): Mandate's
+verified context the commission acts in, the approver's principal (neither the subject nor its
+actor), the policy
+naming the approver, the relation, the capabilities, those that need an approval, and how many
+seconds an approval lasts. With it, `approve` also records a Mandate approval of the held request
+by that approver in the state directory's approval log, `mandate-approvals.jsonl`, and the grant
+names it. `resume` then performs the request only when Mandate's `check_with_approval` clears and
+consumes that approval for the subject, the capability and the case, and it writes the
+consumption to the log before anything is performed: a second resume with the same approval, an
+expired approval and a grant naming none are refused `NotGranted` (16) and perform nothing. Loom
+configures Mandate from the file over Mandate's own in-memory ports until Mandate ships a policy
+adapter. Without `--mandate`, both commands behave as before, except that `resume` refuses a grant
+naming a Mandate approval `NotGranted` (16) and performs nothing: only Mandate clears it.
+
 `--confinement substrate` is the default. `--cgroup-root` selects an explicit delegated
 root. Tests retain their 300-second timeout, with 8 GiB memory and 2,048-process limits.
 Only `--confinement none` runs with your rights and environment; the run output and every test
@@ -120,6 +137,8 @@ slice writes tests with `tests.write` and edits the implementation with `impleme
 | `effect: committed; HEAD is f9fa1bc…` | What the local effect adapter did; further lines (`\|`) are command output or file contents |
 | `effect: refused: <reason>` | The adapter refused the action (a path outside the work tree, a `tests.write` path outside the test paths, an argument the action does not take); the step still counts |
 | `evidence: test_result pass` | Evidence the verifier submitted from the test command's exit status. A model's words are never evidence |
+| `evidence: test_result fail, regression_test_result fail` | On a `--change-kind bugfix` run, every test run after the first `tests.write` that committed also submits a regression test result. One that fails before the first `implementation.edit`, in an earlier second (Canon orders whole seconds), discharges `red_first.required`. Loom records each observation in a later second than the one before, waiting up to 2 seconds for the clock to pass it; a clock that stepped back fails the step instead |
+| `evidence: implementation_change` | An `implementation.edit` committed; the record is about the new `HEAD`. Every record carries the host clock's `observed_at` and the verifier as its producer |
 | `stopped: ApprovalRequired (repository.merge)` | Why the run ended |
 
 For a program rather than a person, `--output jsonl` writes one JSON record per line instead,

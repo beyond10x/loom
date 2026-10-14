@@ -8,6 +8,7 @@ use std::sync::Arc;
 use b10x_llm_tool_call::codex_model;
 use b10x_loom_cli::evaluate::{decision_json, refusal_json, refused_input, request_from_json};
 use b10x_loom_cli::events::{EventStream, FAILED};
+use b10x_loom_cli::mandate::{self, Mandate};
 use b10x_loom_cli::model_catalog::ModelCatalog;
 use b10x_loom_cli::plugin::{is_proposal, recorded, report_line, turn_models};
 use b10x_loom_cli::regular_file;
@@ -22,16 +23,18 @@ use b10x_loom_intake_slice::confinement::{
 };
 use b10x_loom_intake_slice::context_metrics::ContextMetrics;
 use b10x_loom_intake_slice::executor::{TestCommand, UnconfinedRunner};
-use b10x_loom_intake_slice::grant::{self, GrantStore, approve};
+use b10x_loom_intake_slice::grant::{self, GrantStore, MandateApprovals, approve};
 use b10x_loom_intake_slice::handoff::MergeHandoffStore;
 use b10x_loom_intake_slice::intent::{
     IntentRequest, Preparation, PreparedIntent, ResumeHost, ResumeState, RunState,
     held_resume_context, prepare_intent, resume_with_state, resumed_request, run_prepared_intent,
     run_prepared_intent_with_state,
 };
+use b10x_loom_intake_slice::mandate_log::MandateApprovalLog;
 use b10x_loom_intake_slice::resume::ResumeContextStore;
 use b10x_loom_intake_slice::run::{
     ApprovalGate, LOCAL_PROTOCOL, RunOptions, SliceError, SliceRun, StopReason, printable,
+    slice_governor,
 };
 use b10x_loom_plugin_slack::{SlackHandler, config as slack_config};
 use clap::Parser;
@@ -39,7 +42,8 @@ use intake_model::confinement::Backend;
 use llm_core::Model;
 use llm_models::Port;
 use loom_governor::{
-    CanonGovernor, FallibleCaseStore, FileCaseStore, FileSuspensionStore, MemoryCaseStore,
+    CanonGovernor, EvaluationTime, FallibleCaseStore, FileCaseStore, FileSuspensionStore,
+    MemoryCaseStore,
 };
 use loom_protocols::{InstallStore, ProtocolCatalog};
 use serde_json::{Value, json};
@@ -81,6 +85,28 @@ fn existing_state(dir: &Path) -> Result<(), String> {
 /// Runs `approve`, as `APPROVE_HELP` states: writes the grant and performs nothing.
 fn approve_command(arguments: &ApproveArgs) -> ExitCode {
     let dir = &arguments.state;
+    // The Mandate file is read before anything in the state directory is opened.
+    let hosted = match arguments
+        .mandate
+        .as_deref()
+        .map(mandate::read_host)
+        .transpose()
+    {
+        Ok(hosted) => hosted,
+        Err(error) => return failed(&error),
+    };
+    let log = match &hosted {
+        Some(_) => match existing_state(dir).and_then(|()| {
+            MandateApprovalLog::open(dir).map_err(|e| format!("the state directory: {e}"))
+        }) {
+            Ok(log) => Some(log),
+            Err(error) => return failed(&error),
+        },
+        None => None,
+    };
+    let mandate = hosted
+        .zip(log.as_ref())
+        .map(|(hosted, log)| Mandate::new(hosted, log, grant::now));
     let stores = existing_state(dir).and_then(|()| {
         let unusable = |error: &dyn std::fmt::Display| format!("the state directory: {error}");
         Ok((
@@ -110,6 +136,9 @@ fn approve_command(arguments: &ApproveArgs) -> ExitCode {
         &arguments.commission,
         &arguments.capability,
         grant::now(),
+        mandate
+            .as_ref()
+            .map(|mandate| mandate as &dyn MandateApprovals),
     ) {
         Ok(granted) => {
             println!(
@@ -119,6 +148,9 @@ fn approve_command(arguments: &ApproveArgs) -> ExitCode {
                 printable(&granted.action),
                 printable(&granted.commission_id.0.0)
             );
+            if let Some(approval) = &granted.mandate_approval {
+                println!("mandate approval {}", printable(&approval.0.0));
+            }
             ExitCode::SUCCESS
         }
         Err(refusal) => {
@@ -150,16 +182,33 @@ fn resume_command(arguments: &ResumeArgs) -> ExitCode {
 fn resume(arguments: &ResumeArgs, out: &mut dyn Write) -> Result<SliceRun, SliceError> {
     let dir = &arguments.state;
     let unusable = |error: &dyn std::fmt::Display| SliceError::State(error.to_string());
+    // The Mandate file is read before anything in the state directory is opened.
+    let hosted = arguments
+        .mandate
+        .as_deref()
+        .map(mandate::read_host)
+        .transpose()
+        .map_err(SliceError::Context)?;
     existing_state(dir).map_err(SliceError::State)?;
     let suspensions = FileSuspensionStore::open(dir).map_err(|e| unusable(&e))?;
     let contexts = ResumeContextStore::open(dir).map_err(|e| unusable(&e))?;
     let grants = GrantStore::open(dir).map_err(|e| unusable(&e))?;
     let handoffs = MergeHandoffStore::open(dir).map_err(|e| unusable(&e))?;
+    let log = match &hosted {
+        Some(_) => Some(MandateApprovalLog::open(dir).map_err(|e| unusable(&e))?),
+        None => None,
+    };
+    let mandate = hosted
+        .zip(log.as_ref())
+        .map(|(hosted, log)| Mandate::new(hosted, log, grant::now));
     let state = ResumeState {
         suspensions: &suspensions,
         contexts: &contexts,
         grants: &grants,
         handoffs: &handoffs,
+        mandate: mandate
+            .as_ref()
+            .map(|mandate| mandate as &dyn MandateApprovals),
     };
     // The context is read only for a commission that holds a Suspension; nothing else is opened,
     // and no model is called, before.
@@ -167,9 +216,11 @@ fn resume(arguments: &ResumeArgs, out: &mut dyn Write) -> Result<SliceRun, Slice
     let catalog = InstallStore::user()
         .and_then(|store| store.catalog())
         .map_err(SliceError::Context)?;
-    let governor = CanonGovernor::new(FileCaseStore::open(dir).map_err(|e| unusable(&e))?)
-        .with_catalog(&catalog)
-        .map_err(|e| SliceError::Context(e.to_string()))?;
+    let governor = slice_governor(
+        FileCaseStore::open(dir).map_err(|e| unusable(&e))?,
+        &catalog,
+    )
+    .map_err(|e| SliceError::Context(e.to_string()))?;
     let agent = match &context.catalog {
         Some(path) => Box::new(
             ModelCatalog::read(Path::new(path))
@@ -484,9 +535,8 @@ fn execute(
     let catalog = InstallStore::user()?.catalog()?;
     let models = (classifier_route.take(), agent_route.take());
     let Some(dir) = &arguments.state else {
-        let governor = CanonGovernor::new(MemoryCaseStore::default())
-            .with_catalog(&catalog)
-            .map_err(|e| e.to_string())?;
+        let governor =
+            slice_governor(MemoryCaseStore::default(), &catalog).map_err(|e| e.to_string())?;
         return execute_on(
             arguments, options, metrics, out, stream, &catalog, &governor, None, models,
         );
@@ -510,9 +560,11 @@ fn execute(
     // that cannot be created, locked or written, a read-only one an earlier run used included,
     // stops here.
     let unusable = |error: &dyn std::fmt::Display| format!("the state directory: {error}");
-    let governor = CanonGovernor::new(FileCaseStore::open(dir).map_err(|e| unusable(&e))?)
-        .with_catalog(&catalog)
-        .map_err(|e| e.to_string())?;
+    let governor = slice_governor(
+        FileCaseStore::open(dir).map_err(|e| unusable(&e))?,
+        &catalog,
+    )
+    .map_err(|e| e.to_string())?;
     let suspensions = FileSuspensionStore::open(dir).map_err(|e| unusable(&e))?;
     let contexts = ResumeContextStore::open(dir).map_err(|e| unusable(&e))?;
     let state = RunState {
@@ -552,14 +604,14 @@ fn intent_request(arguments: &RunArgs) -> Result<IntentRequest, String> {
 
 /// Runs `run` on `governor`, holding the commission in `state` when `--state` gave one.
 #[allow(clippy::too_many_arguments)]
-fn execute_on<S: FallibleCaseStore>(
+fn execute_on<S: FallibleCaseStore, T: EvaluationTime>(
     arguments: &RunArgs,
     options: &RunOptions,
     metrics: &mut ContextMetrics,
     out: &mut dyn Write,
     stream: Option<&EventStream>,
     catalog: &ProtocolCatalog,
-    governor: &CanonGovernor<S>,
+    governor: &CanonGovernor<S, T>,
     state: Option<&RunState<'_>>,
     (mut classifier_route, mut agent_route): (Option<Port>, Option<Port>),
 ) -> Result<Ending, String> {

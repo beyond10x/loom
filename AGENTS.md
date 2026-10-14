@@ -95,7 +95,9 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | A blocked or merge-seeking pick is never proposed | `crates/loom-executor/tests/adversary_executor_admission.rs` |
 | A stale or unlisted request is refused at revalidation | `crates/loom-commission-testkit/tests/action_request.rs`, `crates/loom-executor/tests/adversary_run_revalidation.rs`, `crates/loom-executor/tests/selection_revalidation.rs` |
 | Unknown capabilities and panicking authority providers yield no grant | `crates/loom-commission-testkit/tests/adversary_authority_fail_closed.rs` |
-| Commission names no executor, Canon, `model-provider-deny.txt` or Connectors crate | `task commission:deps-guard` (`crates/loom-commission-testkit/tests/executor_port.rs`) |
+| Commission names no executor, Canon, `model-provider-deny.txt`, Connectors or Mandate crate | `task commission:deps-guard` (`crates/loom-commission-testkit/tests/executor_port.rs`) |
+| A Mandate authority provider grants only on Mandate's allow: a Mandate outage, an authority context that is no Mandate context and the empty case id grant nothing, every outcome answers as `loom.authority` declares, and each case id is its own Mandate resource, `case-<n>` included, so a grant on one case answers for no other | `crates/loom-mandate/tests/mandate_authority.rs` (`an_unavailable_mandate_grants_nothing`, `an_authority_context_that_is_no_mandate_context_grants_nothing`, `every_outcome_answers_as_the_specification_declares`, `a_governor_case_id_is_a_mandate_resource`, `distinct_case_ids_are_distinct_resources`), `crates/loom-mandate/tests/adversary_w10_u2.rs`, `crates/loom-mandate/tests/security_w10_u2.rs` |
+| With `--mandate`, a resume performs the held request only when Mandate's `check_with_approval` clears and consumes the approval the grant names, kept in the state directory's log before anything is performed: a second resume with it, an expired approval, one naming another subject, action or resource, one recorded for another commission however its id is written, and a grant naming none are refused and perform nothing; without `--mandate`, a grant naming an approval is refused and performs nothing; the approver is neither the verified subject nor its actor; only `b10x-loom-cli` links `b10x-loom-mandate`, and only it and `loom-docs` reach Mandate over `Cargo.lock` | `crates/loom-cli/tests/resume_after_grant.rs` (`a_recorded_approval_clears_the_held_request_once`, `a_second_resume_with_the_same_approval_is_refused_and_performs_nothing`, `an_expired_approval_is_refused_and_performs_nothing`, `the_grant_names_its_mandate_approval`), `crates/loom-cli/tests/adversary_w10_u3.rs` (`adversary_a_resume_without_mandate_does_not_perform_a_grant_naming_a_mandate_approval`), `crates/loom-cli/tests/security_w10_u3.rs` (`security_an_approval_is_bound_to_its_commission_however_its_id_is_written`), `crates/loom-mandate/tests/mandate_approval.rs` (`an_approval_naming_another_subject_action_or_resource_is_refused`), `crates/loom-mandate/tests/adversary_w10_u3.rs` (`adversary_a_host_file_whose_approver_is_the_acting_actor_is_refused`), `crates/loom-mandate/tests/security_w10_u2.rs` |
 | An executor's report that the case moved is decided by the governor and judged on the case's current frontier, reloaded once | `crates/loom-commission-testkit/tests/moved_case_outcome.rs`, `crates/loom-executor/tests/adversary_w1_runtime_stale.rs`, `crates/loom-executor/tests/adversary_w1p2_runtime_windows.rs` |
 | An executor is never handed an unperformed action that needs no authority; an effect is invoked once, through its binding | `crates/loom-commission-testkit/tests/effect_invocation.rs` (`effect_invoked_only_through_its_binding`) |
 | A consequential action leaves Loom only as a proposal, and the executor links no Connectors crate | `crates/loom-executor/tests/connector_boundary.rs` (`consequential_actions_leave_loom_only_as_a_proposal`) |
@@ -110,7 +112,10 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | Ported Harness modules keep the import limits their crates had; `turn_loop` alone may also name the generated model (`crate::model`), for `LoopStop` | `crates/loom-executor/tests/adversary_harness_port_boundaries.rs` (`the_boundaries_harness_enforced_by_crate_still_hold_between_modules`), `crates/loom-executor/tests/adversary2_harness_port.rs` (`each_ported_module_names_only_what_its_harness_manifest_allowed`) |
 | Package and library names are the `loom-` names | `crates/loom-executor/tests/crate_names.rs` |
 | No manifest names an archived Commission, governor or intake repository | `crates/loom-executor/tests/governor_import.rs`, `intake_import.rs`, `commission_import.rs` |
+| The SDK stability page (`website/docs/reference/sdk-stability.md`) lists exactly the ports a host implements and the `loom_sdk` paths control-plane imports, each resolving through `loom_sdk`; a change to that surface updates the page and names any break under `Breaking:` in `CHANGELOG.md` | `crates/loom-sdk/tests/host_ports.rs` (`a_host_implements_every_port_through_loom_sdk_alone`, `the_stability_page_lists_exactly_the_ports_this_test_implements`, `every_control_plane_path_on_the_page_resolves`) |
+| The `run --output jsonl` records and exit statuses change within `schema_version` 1 only by a new optional field; any other change fails the gate until the committed contract moves | `task docs-check` (`crates/loom-docs/src/run_events.rs`, `the_v1_contract_matches_the_declared_events`, `a_removed_renamed_or_retyped_field_is_a_break`, `a_new_record_kind_is_a_break`, `a_new_optional_field_is_not_a_break`) |
 | A release tag equals the workspace version and has a CHANGELOG entry | `loom-xtask release-check`, run by `release.yml` (`crates/loom-xtask/tests/release_check.rs`) |
+| The documented embedding builds and runs to `ApprovalRequired (repository.merge)` as an external crate: `consumers/pinned/` is its own workspace, depends on `b10x-loom-sdk` alone by path, includes `crates/loom-sdk/examples/software_change.rs` by `#[path]` and resolves one copy of each Loom and Canon crate | `task consumer-check` (`consumers/pinned/tests/embedding.rs`, `the_pinned_consumer_stops_at_approval_required`), `crates/loom-xtask/tests/pinned_consumer.rs` |
 
 ## ESS
 
@@ -164,8 +169,11 @@ Before a change is reported done, in this order:
 1. `task check`: the three specification validations, both ESS gates, all three drift checks, both
    no-hand-model checks, Loom's and Commission's conformance suites, the dependency guard,
    `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
-   `cargo test --workspace --locked`, then `task docs-check` and `task commission:docs-drift`.
-   CI runs exactly this (`check.yml`, job `loom / task check`).
+   `cargo test --workspace --locked`, `task consumer-check`, then `task docs-check` and
+   `task commission:docs-drift`. CI runs exactly this (`check.yml`, job `loom / task check`).
+   `task consumer-check` copies the root `Cargo.lock` to `consumers/pinned/` and builds and tests
+   that crate offline into its own `consumers/pinned/target/`; it is outside the workspace, so
+   `cargo test --workspace` does not reach it.
 2. `task plan` (`aep plan artifact validate`) when the planning store changed. `task check` does
    not run it.
 3. `task website` when anything under `website/` changed, or a generated page did. CI's
@@ -204,6 +212,7 @@ cache; never delete a `target/` by hand.
 | `website/docs/reference/cli.md` | `loom-docs`, from `b10x_loom_cli::Cli` (`crates/loom-cli/src/lib.rs`) | `task docs-generate` | `task docs-check` |
 | `website/docs/reference/crates.md` | `loom-docs`, from `cargo metadata` | `task docs-generate` | `task docs-check` |
 | `website/docs/reference/ess/`, `website/data/ess/` | `loom-docs`, from `ess/` and `ess/intake/` | `task docs-generate` | `task docs-check` |
+| `docs/contracts/run-events-v1.json` | `loom-docs`, the V1 contract of `run --output jsonl` from `ess/intake/` and `b10x_loom_cli::events` | `task docs-generate` | `task docs-check`, failing only on a break |
 | `website/docs/reference/commission/` | `loom-commission-docs`, from `ess/commission/` | `task commission:docs` | `task commission:docs-drift` |
 
 Never edit these by hand; change the source and regenerate. The generated Rust is never formatted:
@@ -335,6 +344,57 @@ connections revalidate --adapter <alias>`, which the client never runs.
 `crates/loom-connectors/tests/connectors_cli.rs` and `connectors_cli_adversary.rs` hold it against
 the fake `tests/fixtures/connectors/fake-connectors`, which logs its argv.
 
+## Mandate
+
+`b10x-loom-mandate` (`crates/loom-mandate`, library `loom_mandate`) is the one crate that links
+Mandate: `mandate-authz`, `mandate-types`, `mandate-model`, `mandate-graph` and `mandate-policy`
+at tag `v0.9.0`. Move them together. `MandateAuthority` implements Commission's
+`AuthorityProvider` over `mandate_authz::check`; its builder takes every Mandate port (graph,
+policy, role catalog, challenge issuer, delegation records, decision ids), the tenancy and
+topology, and the host's audience, relation, minimum revision, attributes and clock; it configures
+no policy. The subject is Mandate's verified context, which the host puts in the commission's
+authority context as a `loom.authority.HostContext` (`{"verified": …}`); the action is the
+capability; the resource is the case, of type `loom.case`. A case id is opaque (Loom's governor
+issues `case-<n>`), so its Mandate resource id is derived, never parsed: the UUID version 5 of
+the case id's exact UTF-8 bytes under the namespace `735b2acd-620b-43ec-b1ab-144c2aec7ba7`
+(`loom.authority.CaseResource`). Two distinct case ids, two spellings of one UUID included, are two
+resources. A host computes a case's resource id with `loom_mandate::case_resource_id(&CaseId)`,
+or any UUID version 5 implementation over that namespace, when it writes Mandate's graph or policy;
+`the_case_resource_is_derived_as_the_specification_declares` holds the namespace to the
+specification. The `loom.authority` domain (`ess/domains/authority.yaml`) declares each outcome
+and the answer it maps to, as the `answer` attribute of `loom.authority.Outcome`; ESS synthesis
+generates no accessor for it, so `loom_mandate::answer` writes it once and
+`every_outcome_answers_as_the_specification_declares` holds the two together. Mandate's
+`Unavailable`, an authority context that does not decode, the empty case id (which derives no
+resource id) and a contradictory answer are an `Err`, which Commission refuses. It is opt-in:
+`b10x-loom-cli` alone links it, behind `--mandate` (below); `b10x-loom run` does not use it.
+
+`loom_mandate::approval` (`story:mandate-approval-on-resume`) clears a resume's approval through
+Mandate v0.9.0's `check_with_approval`. Mandate records no approval itself, so Loom keeps one:
+`approve --mandate <FILE>` appends a Mandate `Approval` of the held request (by the file's
+approver, expiring `approval_seconds` later) to the state directory's approval event log
+(`mandate-approvals.jsonl`, `intake.routing.MandateApprovalEntry`,
+`b10x_loom_intake_slice::mandate_log`) and the grant names it (`Grant.mandate_approval`).
+`resume --mandate <FILE>` lets `GrantAuthority` allow the held request only when
+`HostedMandate::clear` (over every log entry, folded as Mandate's own delegation fold) answers the
+`ApprovedDecisionRecorded` event, which is appended before anything is performed, under the
+directory's lock: a crash after it leaves the request unperformed, never performed twice, and the
+same approval is refused `wrong-state` afterwards. `FILE` is host-trusted
+(`loom.authority.MandateHost`): the verified context, the approver (neither the verified subject
+nor its actor), the approver policy, the relation, the capabilities and those needing an approval;
+Loom builds Mandate's own doubles from it for the case until Mandate ships a policy adapter. The
+commission and request an approval is bound to are checked on the record Mandate reads: found by
+the approval's parsed UUID, never its text, and the last one recorded, as Mandate's lookup takes
+it. A grant naming no approval is refused under `--mandate`; only Mandate clears a grant naming
+one, so `resume` without the flag refuses it `NotGranted` and performs nothing. Otherwise, without
+the flag, `approve` and `resume` are as on 0.20.0.
+The flag and the log go when Mandate records approvals itself. `loom_mandate`'s source opens no
+file: the slice's `mandate_log` keeps the log, and the command line (`b10x_loom_cli::mandate`)
+joins the two. Since this story `b10x-loom-cli`
+links `b10x-loom-mandate`, the one crate that does (the SDK does not), and `approve` and `resume`
+use it only behind `--mandate`; `b10x-loom run` does not use it. Over the closure of `Cargo.lock`,
+only `b10x-loom-cli` and `loom-docs`, which links it for its help text, reach Mandate.
+
 ## Plugin host
 
 `b10x-loom-plugin` (`crates/loom-plugin`) hosts a plugin (ADR `plugin-hooks`): a crate linked at
@@ -442,8 +502,8 @@ verified evidence. The store expires with its briefing and grants no cross-run a
 - `b10x-loom-intake-slice` is the local effect adapter (`LocalEffects`) and a thin caller of
   `run_until_blocked`. It has no loop of its own; keep it small. It executes `software.change/1`
   actions inside the given workspace and `system.query/1` through the host clock, never merges, pushes or deploys, and never supplies
-  authority on the operator's behalf. It submits evidence from the test command it runs itself.
-  It performs `tests.write` and `implementation.edit` (each a committed write, reporting the new
+  authority on the operator's behalf. It submits evidence only from what it did itself (§ the
+  slice's evidence below). It performs `tests.write` and `implementation.edit` (each a committed write, reporting the new
   `HEAD`), `repository.inspect` and `tests.run`; a resume hands off `repository.merge`. On a
   `software-change@1` case the runtime reads every frontier without the actions the slice can
   never perform (`run::never_performed`: gated and not in `run::PERFORMED`, which is
@@ -469,6 +529,31 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   sets one. With the defaults a run reaches the outcomes it reached before the inputs; with
   `--change-kind bugfix` an `implementation.edit` is admissible only once a test failed on the
   current revision (`a_bugfix_edits_the_implementation_only_after_a_failing_test`).
+- The slice's evidence is `intake.routing.SliceEvidence`, submitted only by the verifier
+  (`verifier::TestResultVerifier`) from what the executor did: a `test_result` for every
+  `tests.run` on a committed revision; beside it, with the same result and citing the same
+  observation, a `regression_test_result` when the case's `change_kind` is `bugfix` and the
+  executor performed a `tests.write` that committed before the run (its own history, not
+  carried across a resume; one that wrote what the files already held wrote no test); and an
+  `implementation_change` about the new `HEAD` for every `implementation.edit` that committed.
+  Each record carries `observed_at`, the host clock's instant of its observation
+  (`LocalExecutor::with_clock`, `run::run_with_clock`; `clock::SystemClock` by default), and the
+  verifier's producer; the governor gives Canon `EvidenceData.producer`, never a producer in the
+  facts (it removes a facts `producer` before Canon reads the record), and reads no clock. A
+  bugfix that writes its test, runs it red and then edits discharges `red_first.required`, and one
+  that edits before any regression test leaves it open. Canon orders records in whole seconds,
+  so the executor keeps its observations' instants strictly increasing in whole seconds: it
+  waits on the clock (`Clock::wait`, at most `executor::CLOCK_WAIT`, 2 s) for the previous
+  observation's second to pass, and a clock that still has not (one that stepped back) fails the
+  step with `ExecuteError::Clock`, naming both instants, before the observation is delivered or a
+  record submitted; an edit already committed stays committed. Tests set the instants with an
+  injected clock that advances when waited on
+  (`crates/loom-intake-slice/tests/adversary_w10_u1.rs`). The governor `b10x-loom` builds is
+  `run::slice_governor`, generic over `T: EvaluationTime` through the slice, evaluating at the
+  host instant (`clock::HostTime`), so an evidence kind's `max_age` expires an old observation.
+  `crates/loom-cli/tests/slice_run.rs` holds it
+  (`a_bugfix_red_regression_test_before_its_edit_discharges_red_first`,
+  `a_slice_governor_expires_an_operational_observation_after_max_age`).
 - `b10x-loom-cli` is `b10x-loom`. Its clap definition is the library (`src/lib.rs`, `Cli`), which
   `loom-docs` renders. The library also holds `evaluate`, the JSON codec of `b10x-loom evaluate`
   over the generated `loom.evaluation` types, and `exit_status` and `events`, the writer of
@@ -508,6 +593,9 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   its own exit status (`resume_exit_status`, `RESUME_HELP`).
   `crates/loom-cli/tests/resume_after_grant.rs` runs `run`, `approve` and `resume` as separate
   processes.
+- With `--mandate <FILE>`, `approve` and `resume` clear the approval through Mandate (§ Mandate);
+  a Mandate refusal is `NotGranted` (16) and performs nothing. A `resume` without `--mandate`
+  refuses a grant naming a Mandate approval `NotGranted` (16) and performs nothing.
 
 The injected `TestRunner` defaults to Substrate 0.7.10, with host and wire pinned together.
 Tests get no network, a cleared environment, read-only source and Rust toolchain, writes only

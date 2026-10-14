@@ -13,6 +13,11 @@
 //!    ([`crate::effect::LocalEffects`]), which performs it and lets the verifier submit evidence.
 //!    The slice has no loop of its own.
 //!
+//! Every observation's instant is read from the host clock: [`SystemClock`] for [`run`] and
+//! [`run_with_options`], the caller's for [`run_with_clock`]. The governor is generic over its
+//! evaluation time; the one a host builds for the slice ([`slice_governor`]) evaluates at the
+//! host instant, so an evidence kind's `max_age` expires an old observation.
+//!
 //! The runtime runs under a commission for the operator with no authority, and an authority
 //! provider that answers every capability with approval required: the slice never supplies
 //! authority on the operator's behalf. Its step budget is the request's `max_steps`.
@@ -136,9 +141,11 @@ use b10x_loom_executor::{ActionSelector, ArgumentContext, ArgumentGenerator, Loo
 use b10x_loom_intake_references::references;
 use b10x_loom_intake_router::{ProtocolPick, RouterError};
 use llm_core::Model;
-use loom_governor::{CanonGovernor, EvaluationTime, FallibleCaseStore};
+use loom_governor::{CanonGovernor, EvaluationTime, FallibleCaseStore, OpenError};
+use loom_protocols::ProtocolCatalog;
 
 use crate::case::{self, CaseError};
+use crate::clock::{Clock, ClockTime, HostTime, SystemClock};
 use crate::confinement::TestRunner;
 use crate::context_metrics::{ContextMetrics, ContextPolicy, MeasuredModel};
 use crate::effect::{Console, LocalEffects, refuse};
@@ -153,6 +160,21 @@ pub const LOCAL_PROTOCOL: &str = "software-change@1";
 
 /// The producer the slice's verifier attributes its evidence to.
 pub const PRODUCER: &str = "intake-slice/verifier";
+
+/// The governor a slice host builds over `store`: the host `catalog` admitted, evaluating at
+/// the host instant ([`HostTime`]), so an evidence kind's `max_age` expires an observation older
+/// than it. `b10x-loom run` and `resume` build theirs with it.
+///
+/// # Errors
+/// [`CanonGovernor::with_catalog`]'s.
+pub fn slice_governor<S: FallibleCaseStore>(
+    store: S,
+    catalog: &ProtocolCatalog,
+) -> Result<CanonGovernor<S, HostTime>, OpenError> {
+    Ok(CanonGovernor::new(store)
+        .with_catalog(catalog)?
+        .with_evaluation_time(ClockTime(SystemClock)))
+}
 
 /// What one run is asked to do.
 #[derive(Clone)]
@@ -331,9 +353,9 @@ impl From<GovernorError> for SliceError {
 /// # Errors
 /// A [`SliceError`] for every failure that is not a [`StopReason`] (see the module
 /// documentation). What was printed before the failure stays printed.
-pub fn run<S: FallibleCaseStore>(
+pub fn run<S: FallibleCaseStore, T: EvaluationTime>(
     request: &SliceRequest,
-    governor: &CanonGovernor<S>,
+    governor: &CanonGovernor<S, T>,
     frontiers: &dyn Governor,
     classifier: &dyn Model,
     agent: &dyn Model,
@@ -355,12 +377,40 @@ pub fn run<S: FallibleCaseStore>(
 /// # Errors
 /// As [`run`], plus explicit context capacity and report output failures. A report output failure
 /// retains any original run failure; already printed output and completed effects remain visible.
-pub fn run_with_options<S: FallibleCaseStore>(
+pub fn run_with_options<S: FallibleCaseStore, T: EvaluationTime>(
     request: &SliceRequest,
-    governor: &CanonGovernor<S>,
+    governor: &CanonGovernor<S, T>,
     frontiers: &dyn Governor,
     classifier: &dyn Model,
     agent: &dyn Model,
+    out: &mut dyn Write,
+    options: &RunOptions,
+) -> Result<SliceRun, SliceError> {
+    run_with_clock(
+        request,
+        governor,
+        frontiers,
+        classifier,
+        agent,
+        &SystemClock,
+        out,
+        options,
+    )
+}
+
+/// [`run_with_options`], reading every observation's instant from the host's `clock`, never a
+/// model's.
+///
+/// # Errors
+/// As [`run_with_options`].
+#[allow(clippy::too_many_arguments)]
+pub fn run_with_clock<S: FallibleCaseStore, T: EvaluationTime>(
+    request: &SliceRequest,
+    governor: &CanonGovernor<S, T>,
+    frontiers: &dyn Governor,
+    classifier: &dyn Model,
+    agent: &dyn Model,
+    clock: &dyn Clock,
     out: &mut dyn Write,
     options: &RunOptions,
 ) -> Result<SliceRun, SliceError> {
@@ -373,6 +423,7 @@ pub fn run_with_options<S: FallibleCaseStore>(
         frontiers,
         &classifier,
         &agent,
+        clock,
         out,
         options,
         &metrics,
@@ -389,12 +440,13 @@ pub fn run_with_options<S: FallibleCaseStore>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_measured<S: FallibleCaseStore>(
+fn run_measured<S: FallibleCaseStore, T: EvaluationTime>(
     request: &SliceRequest,
-    governor: &CanonGovernor<S>,
+    governor: &CanonGovernor<S, T>,
     frontiers: &dyn Governor,
     classifier: &dyn Model,
     agent: &dyn Model,
+    clock: &dyn Clock,
     out: &mut dyn Write,
     options: &RunOptions,
     metrics: &ContextMetrics,
@@ -461,6 +513,7 @@ fn run_measured<S: FallibleCaseStore>(
             test: &request.test,
             runner: Arc::clone(&request.runner),
             test_paths: &request.test_paths,
+            clock,
         },
         Mode::Once,
     )
@@ -503,6 +556,8 @@ pub(crate) enum Execution<'a> {
         test: &'a TestCommand,
         runner: Arc<dyn TestRunner>,
         test_paths: &'a TestPaths,
+        /// The host clock every observation's instant is read from.
+        clock: &'a dyn Clock,
     },
     Clock {
         clock: &'a dyn crate::clock::Clock,
@@ -511,12 +566,12 @@ pub(crate) enum Execution<'a> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn drive<S: FallibleCaseStore>(
+pub(crate) fn drive<S: FallibleCaseStore, T: EvaluationTime>(
     intent: &str,
     protocol: &str,
     case: CaseId,
     budget: usize,
-    governor: &CanonGovernor<S>,
+    governor: &CanonGovernor<S, T>,
     frontiers: &dyn Governor,
     agent: &dyn Model,
     out: &mut dyn Write,
@@ -562,6 +617,7 @@ pub(crate) fn drive<S: FallibleCaseStore>(
             test,
             runner,
             test_paths,
+            clock,
         } => Box::new(LocalEffects::new(
             LocalExecutor::new(
                 governor,
@@ -570,7 +626,8 @@ pub(crate) fn drive<S: FallibleCaseStore>(
                 test.clone(),
             )
             .with_runner(runner)
-            .with_test_paths(test_paths.clone()),
+            .with_test_paths(test_paths.clone())
+            .with_clock(clock),
             TestResultVerifier::new(governor, case.clone(), PRODUCER),
             governor,
             case.clone(),
@@ -701,8 +758,8 @@ pub(crate) fn drive<S: FallibleCaseStore>(
 }
 
 /// The case's implementation revision as `governor` holds it: the `HEAD` the case is at.
-fn implementation_revision<S: FallibleCaseStore>(
-    governor: &CanonGovernor<S>,
+fn implementation_revision<S: FallibleCaseStore, T: EvaluationTime>(
+    governor: &CanonGovernor<S, T>,
     case: &CaseId,
 ) -> Result<String, SliceError> {
     governor
@@ -720,9 +777,9 @@ fn implementation_revision<S: FallibleCaseStore>(
 /// What a run in `mode` that stopped `ApprovalRequired` left to approve: in a resume, a `HEAD`
 /// the commission already handed off first; with a state directory, whether the commission holds
 /// its Suspension. A run without one is always approvable as it prints.
-fn approval_gate<S: FallibleCaseStore>(
+fn approval_gate<S: FallibleCaseStore, T: EvaluationTime>(
     mode: &Mode<'_>,
-    governor: &CanonGovernor<S>,
+    governor: &CanonGovernor<S, T>,
     case: &CaseId,
     commission: &CommissionId,
 ) -> Result<ApprovalGate, SliceError> {
@@ -848,9 +905,9 @@ fn finish(
 /// `AwaitingApproval`, and, proposed, hold a Suspension no resume can perform. Left out, it is
 /// never offered, awaited or held, as an action the slice does not perform and that needs no
 /// authority is never handed to the agent; a proposal of it is refused as not in the frontier.
-struct Reads<'a, S> {
+struct Reads<'a, S, T> {
     frontiers: &'a dyn Governor,
-    governor: &'a CanonGovernor<S>,
+    governor: &'a CanonGovernor<S, T>,
     local: bool,
 }
 
@@ -875,7 +932,7 @@ pub fn never_performed(entry: &FrontierAction) -> bool {
     gated && !PERFORMED.contains(&entry.action.as_str())
 }
 
-impl<S> Governor for Reads<'_, S> {
+impl<S, T> Governor for Reads<'_, S, T> {
     fn current_revision(&self, case: &CaseId) -> Result<i64, GovernorError> {
         self.frontiers.current_revision(case)
     }
@@ -941,7 +998,7 @@ impl<G: ObservationPort + ?Sized> ObservationPort for SliceReads<'_, G> {
     }
 }
 
-impl<S: FallibleCaseStore> ObservationPort for Reads<'_, S> {
+impl<S: FallibleCaseStore, T: EvaluationTime> ObservationPort for Reads<'_, S, T> {
     fn observe(
         &self,
         observation: Observation<observation_state::Reported>,

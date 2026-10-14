@@ -1,19 +1,24 @@
 <!--
   generated from loom v1
-  model digest 7dee72f34c381236c680e35cdb45af40bf2db94a72cb4522d2a152d83bc8c88e
-  contract digest f8b677a3f783a96b6bdc38dd5c82bd4daa181f4d17fdbb94ab55827348c3f45f
+  model digest 34628bdc5bd76549c594305d4c4f4b375c9a06c11e6df7ffa20f53008a3b38a8
+  contract digest ab6d91c4dd1beaa1b4a0d32129a97169409c2a72ad7e7320eb3c90eb423bf277
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-155 capabilities: **154 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+160 capabilities: **159 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
 | capability | source |
 | --- | --- |
+| domain type | `loom.authority.Answer` |
+| domain type | `loom.authority.CaseResource` |
+| domain type | `loom.authority.HostContext` |
+| domain type | `loom.authority.MandateHost` |
+| domain type | `loom.authority.Outcome` |
 | domain type | `loom.datasource.AdapterAlias` |
 | domain type | `loom.datasource.ConnectionId` |
 | domain type | `loom.datasource.ConnectorsCliConfig` |

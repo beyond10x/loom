@@ -33,7 +33,8 @@ Every Harness crate has one disposition. Six are ported into Loom: the wire, its
 model-API projections, the loop, and session transcripts. Eight are not carried and stay with
 Harness. The repository's
 [Harness to Loom module map](https://github.com/beyond10x/loom/blob/main/docs/design/harness-map.md)
-lists them.
+lists them, and [Move from Harness](../guides/move-to-loom.md#move-from-harness) gives each crate's
+`loom_sdk` path or owner and what changes for a program that moves.
 
 :::caution[Planned]
 The provider wires, messages, responses, HTTP, the turn loop, sessions, transcripts and streaming

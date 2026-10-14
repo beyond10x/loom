@@ -2,8 +2,8 @@ domain: intake.routing
 
 summary: >-
   An intent as given, the references extracted from its text, the protocol the router proposes
-  for it, and the slice run that works the intent until it is blocked. A pick is a proposal, never
-  authority.
+  for it, the slice run that works the intent until it is blocked, and the evidence that run
+  submits from what it did itself. A pick is a proposal, never authority.
 
 naming:
   wire: routing
@@ -55,6 +55,19 @@ types:
       - name: affects_security_boundary
         type: Boolean
 
+  # The kind of an evidence record the slice submits (intake.routing.SliceEvidence), one of the
+  # kinds `software.change/1` declares: `test_result`, `regression_test_result` and
+  # `implementation_change`, in this order.
+  - name: intake.routing.SliceEvidenceKind
+    kind: enum
+    variants: [TestResult, RegressionTestResult, ImplementationChange]
+
+  # What a test run the slice observed found: `pass` when the test command exited 0, `fail` for
+  # any other exit, an end by a signal or a timeout.
+  - name: intake.routing.SliceEvidenceResult
+    kind: enum
+    variants: [Pass, Fail]
+
   # Commission's ids, mirrored as local newtypes rather than named across systems (as
   # ess/domains/governor.yaml mirrors the case id): commission.responsibility.CommissionId,
   # commission.responsibility.AgentRevisionId and commission.responsibility.CaseId.
@@ -75,6 +88,87 @@ types:
   - name: intake.routing.ActionRequestId
     kind: newtype
     of: Uuid
+
+  # The identity of a Mandate approval (`mandate.delegation.Approval`, Mandate's `ApprovalId`)
+  # that `approve --mandate` recorded in the approval event log, and that a grant names.
+  - name: intake.routing.MandateApprovalId
+    kind: newtype
+    of: Uuid
+
+  # One entry of the Mandate approval event log a state directory keeps beside its grants
+  # (`mandate-approvals.jsonl`: one entry per line, in the order appended; an entry is appended
+  # under the directory's lock, the one the commission's Suspension is held under, and never
+  # changed). Mandate v0.9.0 has no command that records an approval, and a consumption persists
+  # only when the caller keeps the `mandate.authorization.ApprovedDecisionRecorded` event
+  # `check_with_approval` returns and applies it again on load. The log is that keeping:
+  # `approve --mandate` appends the approval it records (`ApprovalRecorded`), and
+  # `resume --mandate` folds every entry into Mandate's delegation records, asks
+  # `check_with_approval` for the request the commission's Suspension holds, and appends the event
+  # it returns (`ApprovedDecisionRecorded`) before anything is performed, all under that lock. A
+  # crash after the append leaves the approval consumed and the request unperformed: it is never
+  # performed twice. The log goes when Mandate records approvals itself.
+  - name: intake.routing.MandateApprovalEntry
+    kind: union
+    tag: kind
+    variants:
+      ApprovalRecorded: intake.routing.MandateApprovalRecorded
+      ApprovedDecisionRecorded: intake.routing.MandateApprovedDecision
+
+  # A Mandate approval (`mandate.delegation.Approval`) as `approve --mandate` records it: the
+  # approver's one-use approval of the one request the commission's Suspension holds. The ids are
+  # Mandate's: the organization, subject and actor of the verified context the host file names
+  # (`loom.authority.MandateHost.verified`), the approver it names. The action is the capability the
+  # request needs; the resource is the case, of type `loom.case`, its id derived as
+  # `loom.authority.CaseResource` declares. It expires `approval_seconds` after `recorded_at`. The
+  # commission and the request it was recorded for are kept beside it; Mandate reads neither.
+  - name: intake.routing.MandateApprovalRecorded
+    kind: struct
+    fields:
+      - name: approval
+        type: intake.routing.MandateApprovalId
+      - name: commission_id
+        type: intake.routing.CommissionId
+      - name: action_request_id
+        type: intake.routing.ActionRequestId
+      - name: organization
+        type: Uuid
+      - name: subject
+        type: Uuid
+      - name: actor
+        type: Optional<Uuid>
+      - name: action
+        type: String
+      - name: resource_type
+        type: String
+      - name: resource_id
+        type: Uuid
+      - name: approver
+        type: Uuid
+      - name: recorded_at
+        type: Timestamp
+      - name: expires_at
+        type: Timestamp
+
+  # `mandate.authorization.ApprovedDecisionRecorded` as `resume --mandate` keeps it: the allowed
+  # decision `check_with_approval` took and the approval it consumed. `context` is the verified
+  # context the request was made in and `decision` the `mandate.core.Decision`, each as Mandate
+  # writes it. Folded on load as Mandate's own delegation fold applies the event, it leaves the
+  # approval consumed, so the next `check_with_approval` with it is refused `wrong-state`.
+  - name: intake.routing.MandateApprovedDecision
+    kind: struct
+    fields:
+      - name: approval
+        type: intake.routing.MandateApprovalId
+      - name: commission_id
+        type: intake.routing.CommissionId
+      - name: action_request_id
+        type: intake.routing.ActionRequestId
+      - name: context
+        type: Json
+      - name: decision
+        type: Json
+      - name: recorded_at
+        type: Timestamp
 
   # One protocol of the catalog a route was accepted on, by its registered name and the SHA-256
   # of its definition.
@@ -217,6 +311,60 @@ entities:
       states: [Ended]
       terminal: [Ended]
 
+  # One evidence record the slice submits on a `software-change@1` case, made from what the slice
+  # did itself and never from what a model says (Atlas ADR 0074), so that `software.change/1`'s
+  # order, independence and age rules can decide on it. Which run produces which kind:
+  #
+  # - `test_result`: every `tests.run` on a committed revision, its `result` `pass` or `fail`;
+  # - `regression_test_result`: beside that run's `test_result`, with the same `result`, from
+  #   every `tests.run` of a case whose `change_kind` is `bugfix` that comes after the run's first
+  #   `tests.write` that committed. One observation then yields both records, and no other record.
+  #   Both rest on trusted inputs only, the case's change kind and the run's own history, never on
+  #   a model's argument; a run before any `tests.write` that committed, and every run of a
+  #   `feature` or `refactor` case, yields none. A `tests.write` that commits nothing (it wrote
+  #   what the files already held) writes no regression test, and a refused one writes nothing;
+  # - `implementation_change`: every performed `implementation.edit` that committed, moving the
+  #   workspace's `HEAD`, with no `result`. A refused edit, an edit that wrote what the files
+  #   already held, and a `tests.write` submit none.
+  #
+  # A run on uncommitted changes is about no revision and yields no record. `subject_revision` is
+  # the implementation revision, the `HEAD`, the record is about: the one the tests ran on, or the
+  # new one the edit committed. `observation_id` is the observation the slice delivered for the
+  # run or the edit, which the record cites. `observed_at` is the host clock's instant of that
+  # observation, in UTC to the second, written into the record; the governor reads no clock for
+  # it. Canon orders records by it in whole seconds, so two records observed in one second order
+  # `unknown`; the slice therefore keeps its observations' instants strictly increasing in whole
+  # seconds: an observation's instant is strictly later, in whole seconds, than the previous
+  # observation the run's executor recorded. Before it records an observation whose host-clock
+  # second is not later than the previous one's, the executor waits for the host clock to pass
+  # that second, at most about 2 seconds; a clock that still has not passed it (one that stepped
+  # back) fails the step, naming both instants, before the observation is recorded or any record
+  # is submitted for it. An edit already committed stays committed, with no record about it.
+  # `producer` is the verifier's, the trusted producer of the submission: the governor
+  # gives Canon that producer, never one the record's own facts name.
+  - name: intake.routing.SliceEvidence
+    identity:
+      name: evidence_id
+      type: Uuid
+    fields:
+      - name: kind
+        type: intake.routing.SliceEvidenceKind
+      - name: subject_revision
+        type: String
+      # Absent for an `implementation_change`.
+      - name: result
+        type: Optional<intake.routing.SliceEvidenceResult>
+      - name: observation_id
+        type: Uuid
+      - name: observed_at
+        type: Timestamp
+      - name: producer
+        type: String
+    lifecycle:
+      initial: Submitted
+      states: [Submitted]
+      terminal: [Submitted]
+
   # What a later resume needs to rebuild a commission's run without the arguments of the run that
   # started it, kept by `run --state` beside the case and the commission's Suspension, before the
   # commission runs. The run id and the request a resume continues are in the Suspension, not
@@ -280,6 +428,15 @@ entities:
   # commission's Suspension is held for that request, so a grant for another request, or a request
   # proposed again later in the resumed run, is not allowed by it. One grant is kept per
   # commission; a later approval of the commission's next Suspension replaces it.
+  #
+  # `mandate_approval` names the Mandate approval the grant carries: the one `approve --mandate
+  # <FILE>` recorded in the approval event log (intake.routing.MandateApprovalRecorded) for the
+  # request. A grant `approve` wrote without `--mandate` names none, and its document has no such
+  # member, as on 0.20.0. `resume --mandate <FILE>` refuses a grant that names none, and allows the
+  # request only when Mandate's `check_with_approval` clears and consumes the approval it names.
+  # Only Mandate clears a grant that names an approval: a `resume` without `--mandate` refuses it
+  # (Commission's `NotGranted`) and performs nothing, leaving the approval unconsumed; it reads a grant
+  # that names none as on 0.20.0.
   - name: intake.routing.Grant
     identity:
       name: commission_id
@@ -297,6 +454,8 @@ entities:
         type: intake.routing.ActionRequestId
       - name: granted_at
         type: Timestamp
+      - name: mandate_approval
+        type: Optional<intake.routing.MandateApprovalId>
     lifecycle:
       initial: Granted
       states: [Granted]

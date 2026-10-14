@@ -107,7 +107,7 @@ fn a_run_that_edits_and_commits_runs_no_workspace_hook_and_no_fsmonitor() {
             }),
         ))
         .expect("the edit is committed");
-    let Report::Edited { revision } = &edited else {
+    let Report::Edited { revision, .. } = &edited else {
         panic!("an edit reports its revision: {edited:?}");
     };
     assert_ne!(revision, &first, "the edit made a commit");

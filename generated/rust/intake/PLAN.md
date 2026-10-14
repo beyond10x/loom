@@ -1,14 +1,14 @@
 <!--
   generated from intake v1
-  model digest 15e4505119390053fa8851b623b962daf68d5470099a63fc007c3c158d7c78e9
-  contract digest 1343dab00750680fd7c8f9677d3285807a17865acb4c07c8d227f83d330b8285
+  model digest e60812f8d93986883e7eb9eaead5a33f69aa8ec4ba4ad5dac90558b5ae4a3fe1
+  contract digest eb6c2ebb4e7c6d4291d5129ac0f5125413961abd75b1d64c349d43673e1a433b
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — intake v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-69 capabilities: **67 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+77 capabilities: **75 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -59,11 +59,18 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `intake.routing.Grant.State` |
 | domain type | `intake.routing.Intent.State` |
 | domain type | `intake.routing.IntentId` |
+| domain type | `intake.routing.MandateApprovalEntry` |
+| domain type | `intake.routing.MandateApprovalId` |
+| domain type | `intake.routing.MandateApprovalRecorded` |
+| domain type | `intake.routing.MandateApprovedDecision` |
 | domain type | `intake.routing.MergeHandoff.State` |
 | domain type | `intake.routing.ProtocolPick.State` |
 | domain type | `intake.routing.ReferenceKind` |
 | domain type | `intake.routing.ResumeContext.State` |
 | domain type | `intake.routing.Risk` |
+| domain type | `intake.routing.SliceEvidence.State` |
+| domain type | `intake.routing.SliceEvidenceKind` |
+| domain type | `intake.routing.SliceEvidenceResult` |
 | domain type | `intake.routing.SliceRun.State` |
 | domain type | `intake.routing.StopReason` |
 | entity lifecycle | `intake.routing.ExtractedReference` |
@@ -72,6 +79,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | entity lifecycle | `intake.routing.MergeHandoff` |
 | entity lifecycle | `intake.routing.ProtocolPick` |
 | entity lifecycle | `intake.routing.ResumeContext` |
+| entity lifecycle | `intake.routing.SliceEvidence` |
 | entity lifecycle | `intake.routing.SliceRun` |
 | command contract | `intake.routing.DropResumeContext` |
 | command contract | `intake.routing.RecordMergeHandoff` |

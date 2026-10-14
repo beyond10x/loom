@@ -10,7 +10,7 @@ custom_edit_url: null
 
 # Routing
 
-An intent as given, the references extracted from its text, the protocol the router proposes for it, and the slice run that works the intent until it is blocked. A pick is a proposal, never authority.
+An intent as given, the references extracted from its text, the protocol the router proposes for it, the slice run that works the intent until it is blocked, and the evidence that run submits from what it did itself. A pick is a proposal, never authority.
 
 `intake.routing` is one of intake's bounded contexts. [All domains](./index.mdx).
 
@@ -65,6 +65,45 @@ An intent as given, the references extracted from its text, the protocol the rou
 
 `intake.routing.IntentId` wraps `Uuid` and is not interchangeable with one: the whole value of naming it separately is the crossings the model then refuses.
 
+### `MandateApprovalEntry`
+
+`intake.routing.MandateApprovalEntry` is one of two shapes, told apart by a `kind` field — tagged, so a decoder never has to guess which branch it is reading:
+
+- `ApprovalRecorded` — `intake.routing.MandateApprovalRecorded`
+- `ApprovedDecisionRecorded` — `intake.routing.MandateApprovedDecision`
+
+### `MandateApprovalId`
+
+`intake.routing.MandateApprovalId` wraps `Uuid` and is not interchangeable with one: the whole value of naming it separately is the crossings the model then refuses.
+
+### `MandateApprovalRecorded`
+
+`intake.routing.MandateApprovalRecorded` is a record of 12 fields:
+
+- `approval` — `intake.routing.MandateApprovalId`
+- `commission_id` — `intake.routing.CommissionId`
+- `action_request_id` — `intake.routing.ActionRequestId`
+- `organization` — `Uuid`
+- `subject` — `Uuid`
+- `actor` — `Optional<Uuid>`, which may be absent
+- `action` — `String`
+- `resource_type` — `String`
+- `resource_id` — `Uuid`
+- `approver` — `Uuid`
+- `recorded_at` — `Timestamp`
+- `expires_at` — `Timestamp`
+
+### `MandateApprovedDecision`
+
+`intake.routing.MandateApprovedDecision` is a record of six fields:
+
+- `approval` — `intake.routing.MandateApprovalId`
+- `commission_id` — `intake.routing.CommissionId`
+- `action_request_id` — `intake.routing.ActionRequestId`
+- `context` — `Json`
+- `decision` — `Json`
+- `recorded_at` — `Timestamp`
+
 ### `ReferenceKind`
 
 `intake.routing.ReferenceKind` is one of `JiraIssue`, `SlackMessage`, `GitlabIssue`, `GitlabMergeRequest`, `GithubIssue`, `GithubPullRequest` and `Url`.
@@ -73,11 +112,19 @@ An intent as given, the references extracted from its text, the protocol the rou
 
 `intake.routing.Risk` is one of `Trivial`, `Standard`, `Elevated` and `Critical`.
 
+### `SliceEvidenceKind`
+
+`intake.routing.SliceEvidenceKind` is one of `TestResult`, `RegressionTestResult` and `ImplementationChange`.
+
+### `SliceEvidenceResult`
+
+`intake.routing.SliceEvidenceResult` is one of `Pass` and `Fail`.
+
 ### `StopReason`
 
 `intake.routing.StopReason` is one of `ApprovalRequired`, `NothingAdmissible`, `StepBudget`, `NoLocalExecutor`, `Refused`, `ConfinementUnavailable` and `Completed`.
 
-One of the types above is reached by nothing else in this system: `intake.routing.CaseInputs`. No entity, view, command, event, error or crossing names it, so it is either vocabulary something outside this specification uses or a leftover — and only a person can tell which.
+Two of the types above are reached by nothing else in this system: `intake.routing.CaseInputs` and `intake.routing.MandateApprovalEntry`. No entity, view, command, event, error or crossing names them, so it is either vocabulary something outside this specification uses or a leftover — and only a person can tell which.
 
 ## Entities
 
@@ -128,6 +175,7 @@ It holds:
 - `granted` — `Boolean`
 - `action_request_id` — `intake.routing.ActionRequestId`
 - `granted_at` — `Timestamp`
+- `mandate_approval` — `Optional<intake.routing.MandateApprovalId>`, which may be absent
 
 It declares no relation to another entity, and no other entity names it.
 
@@ -285,6 +333,41 @@ It has one state, so there is no move to permit or to forbid.
 
 No view projects it, so nothing outside this context is promised a way to observe one.
 
+### `SliceEvidence`
+
+`intake.routing.SliceEvidence`.
+
+An instance is identified by `evidence_id`, a `Uuid`. The name is part of the model and not a convention: a view projects the identity under that name, so a projection inventing its own would disagree with the view.
+
+It holds:
+
+- `kind` — `intake.routing.SliceEvidenceKind`
+- `subject_revision` — `String`
+- `result` — `Optional<intake.routing.SliceEvidenceResult>`, which may be absent
+- `observation_id` — `Uuid`
+- `observed_at` — `Timestamp`
+- `producer` — `String`
+
+It declares no relation to another entity, and no other entity names it.
+
+No invariant is declared, so nothing here constrains an instance at rest.
+
+Its state is a `intake.routing.SliceEvidence.State`, one of `Submitted`. That enum is synthesised from the lifecycle rather than declared beside it, so the states a view's filter compares and the states drawn below cannot disagree.
+
+An instance is created in `Submitted`. `Submitted` is terminal, so an instance may rest there forever. That is declared rather than inferred from having no way out: an entity that cannot leave a state is either finished or stuck, and only its author knows which.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Submitted
+    Submitted --> [*]
+```
+
+It declares no moves, so nothing changes its state once it exists.
+
+It has one state, so there is no move to permit or to forbid.
+
+No view projects it, so nothing outside this context is promised a way to observe one.
+
 ### `SliceRun`
 
 `intake.routing.SliceRun`.
@@ -425,4 +508,4 @@ Reported by `intake.routing.DropResumeContext` on its `storage-failed` outcome.
 
 ---
 
-Generated from intake v1 · model digest `15e4505119390053fa8851b623b962daf68d5470099a63fc007c3c158d7c78e9` · contract digest `slice-sha256/2:5aebcb9eff4901d82e5d03e77da6e63898205d9628615f5e2b56334c7833e536`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from intake v1 · model digest `e60812f8d93986883e7eb9eaead5a33f69aa8ec4ba4ad5dac90558b5ae4a3fe1` · contract digest `slice-sha256/2:4ac42af991c4855c48e7242515ea7354ae9f42246a6b20b3ee63d8289756a819`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

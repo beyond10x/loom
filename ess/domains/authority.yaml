@@ -1,0 +1,123 @@
+# How a host answers Commission's authority port with Mandate (story mandate-authority). Nouns are
+# read from Commission's port (crates/loom-commission/src/ports/authority.rs: `decide` gets the
+# commission and the capability and answers an `AuthorityVerdict`, or fails to decide) and from
+# Mandate v0.9.0's `mandate_authz::check`, which returns a `mandate.core.Decision` or a
+# `mandate.authorization.Denied` naming a `mandate.core.DenialReason`. Each decision is taken at
+# the call and nothing is held between two, so the domain declares types only: no entity, no
+# lifecycle.
+#
+# What Mandate is asked: the subject is the verified context the host put in the commission's
+# authority context, never anything a model supplied; the action is the capability Commission
+# asks about; the resource is the case, resource type `loom.case`, its resource id derived from the
+# commission's case id as `loom.authority.CaseResource` declares (never parsed from it).
+domain: loom.authority
+
+summary: >-
+  One authority decision taken by Mandate for Commission: the context the host supplies in the
+  commission's authority context, and how each outcome of Mandate's check, and each failure to
+  ask it, maps to Commission's answer. A failure grants nothing.
+
+naming:
+  wire: authority
+  display: Authority
+
+types:
+  # What the provider answers Commission. `Allow`, `ApprovalRequired` and `Deny` are Commission's
+  # three verdicts; `Undecided` is a failure to decide, which Commission refuses (its
+  # `check_authority` turns it into a refusal that never allows).
+  - name: loom.authority.Answer
+    kind: enum
+    variants: [Allow, ApprovalRequired, Deny, Undecided]
+
+  # The context the host supplies, as the commission's authority context holds it. `verified` is
+  # Mandate's `mandate.core.VerifiedContext`, the credential-derived subject, organization and
+  # audience, as Mandate writes it; the host validated the credential before it filled it. An
+  # authority context that is not this document, or whose `verified` is not that context, is no
+  # Mandate context: nothing is asked of Mandate and the answer is `Undecided`.
+  - name: loom.authority.HostContext
+    kind: struct
+    fields:
+      - name: verified
+        type: Json
+
+  # The Mandate resource a case is. A case id is opaque (`commission.responsibility.CaseId`, a
+  # String the governor issues: Loom's own governor issues `case-<n>`), and a Mandate resource id
+  # is a UUID, so the resource id is derived, never parsed: it is the UUID version 5 (RFC 9562
+  # § 5.5, SHA-1) of the case id's exact UTF-8 bytes under the fixed `namespace` below. No case
+  # id is read as a UUID, even one that is spelled as one, so two distinct case ids (two spellings
+  # of one UUID included) are two resources, and one id is the same resource in every decision.
+  # A host computes the same id when it writes Mandate's graph or policy. The namespace never
+  # changes: changing it moves every case to another resource. The empty case id names no case
+  # and is derived to nothing: it is `NoMandateResource`.
+  - name: loom.authority.CaseResource
+    kind: enum
+    attributes:
+      - {name: resource_type, type: String}
+      - {name: derivation, type: String}
+      - {name: namespace, type: String}
+    variants:
+      - name: Case
+        attributes:
+          resource_type: loom.case
+          derivation: uuid-v5-of-case-id-bytes
+          namespace: 735b2acd-620b-43ec-b1ab-144c2aec7ba7
+
+  # The host-trusted file `b10x-loom approve --mandate <FILE>` and `resume --mandate <FILE>`
+  # configure Mandate from (story mandate-approval-on-resume), until Mandate ships a policy
+  # adapter. Loom builds Mandate's own doubles from it for the commission's case: a tenancy in
+  # which `verified`'s subject is a member of its organization, a graph in which that subject holds
+  # `relation` on the case (`CaseResource`) for every one of `capabilities`, a role catalog in which
+  # `relation` carries them, and a policy that allows each of them on the case, except those of
+  # `approval_required`, which it allows only after an approval. No model and no command line
+  # argument supplies any of it.
+  #
+  # `verified` is the Mandate verified context the commission acts in (`mandate.core.VerifiedContext`
+  # as Mandate writes it); a resume puts it in the commission's authority context as a `HostContext`.
+  # `approver` is the operator's Mandate principal, who approves with `approve --mandate`; it is
+  # neither `verified`'s subject nor its actor (the principal the subject acts through, when it
+  # names one), as an approval is a second party's. `approver_policy` is the Mandate policy
+  # naming the approver, the policy an approval-required decision's challenge names. An approval
+  # `approve --mandate` records expires `approval_seconds` after it was recorded; an approval is
+  # cleared only before it expires, so `0` makes every approval expired when it is first presented.
+  # Every capability of `approval_required` is one of `capabilities`.
+  - name: loom.authority.MandateHost
+    kind: struct
+    fields:
+      - name: verified
+        type: Json
+      - name: approver
+        type: Uuid
+      - name: approver_policy
+        type: Uuid
+      - name: relation
+        type: String
+      - name: capabilities
+        type: List<String>
+      - name: approval_required
+        type: List<String>
+      - name: approval_seconds
+        type: Integer
+
+  # Every way one decision can end, and the answer each one is. The first eight are Mandate's: an
+  # allowed decision and each `mandate.core.DenialReason` a refusal names. `Unavailable` is
+  # Mandate's own failure to decide (a port that cannot answer, a challenge it cannot express), so
+  # it decides nothing. The last three never reach Mandate: the authority context is no Mandate
+  # context, the case id is empty and so derives no Mandate resource id (`CaseResource`), or a
+  # Mandate answer contradicts itself (an allow whose decision is not allowed, an approval
+  # requirement with no challenge).
+  - name: loom.authority.Outcome
+    kind: enum
+    attributes:
+      - {name: answer, type: loom.authority.Answer}
+    variants:
+      - {name: Allowed, attributes: {answer: Allow}}
+      - {name: ApprovalRequired, attributes: {answer: ApprovalRequired}}
+      - {name: Denied, attributes: {answer: Deny}}
+      - {name: InvalidCredential, attributes: {answer: Deny}}
+      - {name: TenantMismatch, attributes: {answer: Deny}}
+      - {name: AudienceMismatch, attributes: {answer: Deny}}
+      - {name: StaleEpoch, attributes: {answer: Deny}}
+      - {name: Unavailable, attributes: {answer: Undecided}}
+      - {name: NoMandateContext, attributes: {answer: Undecided}}
+      - {name: NoMandateResource, attributes: {answer: Undecided}}
+      - {name: Contradictory, attributes: {answer: Undecided}}

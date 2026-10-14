@@ -5,3 +5,5 @@
 /website/.docusaurus/
 /generated/rust/loom/.ess-output/
 /generated/rust/intake/.ess-output/
+/consumers/*/target/
+/consumers/*/Cargo.lock

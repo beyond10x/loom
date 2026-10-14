@@ -50,7 +50,8 @@ use crate::git::HostGitRefusal;
 
 use b10x_loom_commission::model::responsibility::CaseId;
 use loom_governor::{
-    CanonGovernor, CaseInputs as GovernedInputs, FallibleCaseStore, OpenError, UpdateError,
+    CanonGovernor, CaseInputs as GovernedInputs, EvaluationTime, FallibleCaseStore, OpenError,
+    UpdateError,
 };
 use loom_protocols::ProtocolCatalog;
 use sha2::{Digest, Sha256};
@@ -191,8 +192,8 @@ pub fn run_inputs(governed: &GovernedInputs) -> Option<CaseInputs> {
 /// Opens a case on the picked protocol (`<name>@<major>`, e.g. `software-change@1`) through
 /// `governor`, starting from `intent`, the git repository at `workspace` and the host's `inputs`,
 /// and returns its id.
-pub fn open<S: FallibleCaseStore>(
-    governor: &CanonGovernor<S>,
+pub fn open<S: FallibleCaseStore, T: EvaluationTime>(
+    governor: &CanonGovernor<S, T>,
     pick: &str,
     intent: &str,
     workspace: &Path,
@@ -207,8 +208,8 @@ pub fn open<S: FallibleCaseStore>(
 
 /// Opens a workspace case using the same host catalog used for routing and governor admission.
 /// Query cases without a workspace initialize their artifacts directly through the governor.
-pub fn open_with_catalog<S: FallibleCaseStore>(
-    governor: &CanonGovernor<S>,
+pub fn open_with_catalog<S: FallibleCaseStore, T: EvaluationTime>(
+    governor: &CanonGovernor<S, T>,
     pick: &str,
     intent: &str,
     workspace: &Path,
@@ -221,8 +222,8 @@ pub fn open_with_catalog<S: FallibleCaseStore>(
     open_declared(governor, pick, intent, workspace, catalog, inputs)
 }
 
-fn open_declared<S: FallibleCaseStore>(
-    governor: &CanonGovernor<S>,
+fn open_declared<S: FallibleCaseStore, T: EvaluationTime>(
+    governor: &CanonGovernor<S, T>,
     pick: &str,
     intent: &str,
     workspace: &Path,
@@ -270,8 +271,8 @@ pub fn current_head(workspace: &Path) -> Result<String, CaseError> {
 
 /// Reports the workspace's current `HEAD` as the case's `implementation` revision and returns the
 /// case revision the governor holds afterwards (one higher when `HEAD` moved, unchanged otherwise).
-pub fn report_head<S: FallibleCaseStore>(
-    governor: &CanonGovernor<S>,
+pub fn report_head<S: FallibleCaseStore, T: EvaluationTime>(
+    governor: &CanonGovernor<S, T>,
     case: &CaseId,
     workspace: &Path,
 ) -> Result<i64, CaseError> {

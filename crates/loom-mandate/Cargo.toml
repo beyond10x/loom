@@ -1,0 +1,27 @@
+[package]
+name = "b10x-loom-mandate"
+description = "Answers Commission's authority port with Mandate: each decision is Mandate's check, mapped to a grant, an approval requirement or a denial, and a Mandate failure grants nothing."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "loom_mandate"
+
+[dependencies]
+b10x-loom-commission = { path = "../loom-commission" }
+loom = { path = "../../generated/rust/loom" }
+intake_model = { package = "intake", path = "../../generated/rust/intake" }
+mandate-authz = { git = "https://github.com/beyond10x/mandate.git", tag = "v0.9.0" }
+mandate-graph = { git = "https://github.com/beyond10x/mandate.git", tag = "v0.9.0" }
+mandate-model = { git = "https://github.com/beyond10x/mandate.git", tag = "v0.9.0" }
+mandate-policy = { git = "https://github.com/beyond10x/mandate.git", tag = "v0.9.0" }
+mandate-types = { git = "https://github.com/beyond10x/mandate.git", tag = "v0.9.0" }
+serde_json = "1"
+sha1 = "0.10"
+
+[dev-dependencies]
+b10x-loom-commission-testkit = { path = "../loom-commission-testkit" }
+serde_yaml_ng = "0.10"

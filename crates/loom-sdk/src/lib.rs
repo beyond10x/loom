@@ -20,6 +20,18 @@
 //! `examples/software_change.rs` embeds the runtime end to end: it opens a case on
 //! `software-change@1`, runs the loop over scripted fake models and stops at
 //! `ApprovalRequired (repository.merge)`.
+//!
+//! # Stability
+//!
+//! The stable surface of this crate is named on one page, `website/docs/reference/sdk-stability.md`
+//! (<https://beyond10x.github.io/loom/docs/reference/sdk-stability>): the ports a host implements,
+//! the types and functions an embedding calls, and every `loom_sdk` path control-plane imports. It
+//! stays stable within a release line, and a release that breaks any of it names each break in its
+//! `CHANGELOG.md` entry under `Breaking:`. A consumer pins a bare-version tag
+//! (`tag = "<version>"`) and moves by changing it. Items not on the page, `#[doc(hidden)]` items and
+//! generated model types are outside that promise; a generated type changes with its ESS
+//! declaration, and a release names such a change as a break. `tests/host_ports.rs` implements
+//! every listed port through `loom_sdk` paths alone and fails when the page and this crate disagree.
 
 /// Commission's contracts and runtime (`b10x-loom-commission`).
 pub use b10x_loom_commission as commission;

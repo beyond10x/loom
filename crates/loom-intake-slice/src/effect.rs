@@ -3,7 +3,9 @@
 //!
 //! Commission's runtime hands [`LocalEffects`] each action request it admitted; the adapter
 //! performs it in the workspace with [`LocalExecutor`], lets the [`TestResultVerifier`] submit
-//! evidence for a test run, prints the step, and records it in the briefing. It answers:
+//! evidence for a test run or an `implementation.edit` that committed, prints the step with every
+//! record submitted for it (`evidence: test_result fail, regression_test_result fail`), and
+//! records it in the briefing. It answers:
 //!
 //! - `Performed`, carrying the executor's report as text, for a performed action. No Connector
 //!   performs it, so it names no attempt;
@@ -31,7 +33,7 @@ use b10x_loom_commission::model::responsibility::{
     EffectOutcomeRefused, ExecutorOutcomeProposedAction, commission_state,
 };
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
-use loom_governor::{CanonGovernor, FallibleCaseStore};
+use loom_governor::{CanonGovernor, EvaluationTime, FallibleCaseStore, NoEvaluationTime};
 
 use crate::executor::{
     ExecuteError, IMPLEMENTATION_EDIT, INSPECT, LocalExecutor, Report, TESTS_RUN, TESTS_WRITE,
@@ -94,22 +96,22 @@ impl<'o> Console<'o> {
 }
 
 /// The local effect adapter (see the module documentation).
-pub struct LocalEffects<'a, 'o, S> {
-    executor: LocalExecutor<'a, S>,
-    verifier: TestResultVerifier<'a, S>,
-    governor: &'a CanonGovernor<S>,
+pub struct LocalEffects<'a, 'o, S, T = NoEvaluationTime> {
+    executor: LocalExecutor<'a, S, T>,
+    verifier: TestResultVerifier<'a, S, T>,
+    governor: &'a CanonGovernor<S, T>,
     case: CaseId,
     briefing: Briefing,
     console: &'a Console<'o>,
     local: bool,
 }
 
-impl<'a, 'o, S: FallibleCaseStore> LocalEffects<'a, 'o, S> {
+impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> LocalEffects<'a, 'o, S, T> {
     /// An adapter for `case`, opened on `protocol`, performing through `executor`.
     pub fn new(
-        executor: LocalExecutor<'a, S>,
-        verifier: TestResultVerifier<'a, S>,
-        governor: &'a CanonGovernor<S>,
+        executor: LocalExecutor<'a, S, T>,
+        verifier: TestResultVerifier<'a, S, T>,
+        governor: &'a CanonGovernor<S, T>,
         case: CaseId,
         protocol: &str,
         briefing: Briefing,
@@ -167,15 +169,36 @@ impl<'a, 'o, S: FallibleCaseStore> LocalEffects<'a, 'o, S> {
         self.console.write(|out| print_effect(out, &report))?;
         let evidence = match self.verifier.verify(&report) {
             Ok(Some(evidence)) => {
-                // What the governor holds, not what the report says.
+                // What the governor holds, not what the report says: every record citing the
+                // observation of the one the verifier named, in the order received.
                 let held = self.governor.evidence(&self.case)?;
-                let record = held.iter().find(|record| record.evidence_id == evidence);
-                let kind = record.map_or("unknown", |record| record.kind.as_str());
-                let result = match record.and_then(|record| record.facts.member("result")) {
-                    Some(json::Value::Text(result)) => result.as_str(),
-                    _ => "unknown",
-                };
-                format!("{} {}", printable(kind), printable(result))
+                let cited = held
+                    .iter()
+                    .find(|record| record.evidence_id == evidence)
+                    .map(|record| record.observation_ids.clone())
+                    .unwrap_or_default();
+                let lines: Vec<String> = held
+                    .iter()
+                    .filter(|record| {
+                        record.evidence_id == evidence
+                            || (!cited.is_empty() && record.observation_ids == cited)
+                    })
+                    .map(|record| {
+                        let kind = printable(&record.kind);
+                        match record.facts.member("result") {
+                            Some(json::Value::Text(result)) => {
+                                format!("{kind} {}", printable(result))
+                            }
+                            Some(_) => format!("{kind} unknown"),
+                            None => kind,
+                        }
+                    })
+                    .collect();
+                if lines.is_empty() {
+                    "unknown".to_owned()
+                } else {
+                    lines.join(", ")
+                }
             }
             Ok(None) => "none".to_owned(),
             Err(VerifyError::NoRevision) => format!("none ({})", VerifyError::NoRevision),
@@ -203,7 +226,7 @@ impl<'a, 'o, S: FallibleCaseStore> LocalEffects<'a, 'o, S> {
     }
 }
 
-impl<S: FallibleCaseStore> EffectPort for LocalEffects<'_, '_, S> {
+impl<S: FallibleCaseStore, T: EvaluationTime> EffectPort for LocalEffects<'_, '_, S, T> {
     fn performs(&self, action: &str) -> bool {
         self.local && [INSPECT, TESTS_WRITE, IMPLEMENTATION_EDIT, TESTS_RUN].contains(&action)
     }
