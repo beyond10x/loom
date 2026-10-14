@@ -272,7 +272,8 @@ stopped: ApprovalRequired (repository.merge)
 ```
 
 [Embed the runtime](https://beyond10x.github.io/loom/docs/guides/embed-the-runtime) walks through
-its code.
+its code. [SDK stability](https://beyond10x.github.io/loom/docs/reference/sdk-stability) names the
+surface kept stable within a release line, every port a host implements among it.
 
 ## Crates
 

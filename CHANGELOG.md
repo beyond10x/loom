@@ -6,6 +6,16 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- The SDK stability page (`website/docs/reference/sdk-stability.md`) names the stable surface of
+  `b10x-loom-sdk`: the twenty ports a host implements with their `loom_sdk` paths, the types and
+  functions an embedding calls, and every `loom_sdk` path control-plane imports. The surface stays
+  stable within a release line and a break is named here under `Breaking:`; items not on the
+  page, `#[doc(hidden)]` items and generated model types are outside the promise.
+  `crates/loom-sdk/tests/host_ports.rs` implements every listed port through `loom_sdk` paths
+  alone and fails when the page and the crate disagree. No API change.
+
 ## [0.20.0] - 2026-10-14
 
 Loom 0.20.0 builds on engineering-protocols 0.7.0 and Canon 0.4.0, and every software change
