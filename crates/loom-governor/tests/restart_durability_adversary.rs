@@ -275,9 +275,11 @@ fn an_awkward_case_and_its_observations_round_trip_exactly() {
                     ("\u{0}".to_owned(), "\u{10ffff}".to_owned()),
                     ("b".to_owned(), String::new()),
                 ]),
-                inputs: loom_governor::CaseInputs::none()
-                    .with("\u{0}", "\u{10ffff}\"")
-                    .with("risk", ""),
+                inputs: loom_governor::CaseInputs::try_from_pairs([
+                    ("\u{0}", "\u{10ffff}\""),
+                    ("risk", ""),
+                ])
+                .expect("distinct inputs"),
                 evidence: (0..3)
                     .map(|n| HeldEvidence {
                         data: EvidenceData {
@@ -479,7 +481,7 @@ fn fixture_inputs() -> loom_governor::CaseInputs {
 
 /// The case inputs a fixture's case gives; a value YAML reads as a boolean is its text.
 fn inputs_of(fixture: &serde_json::Value) -> loom_governor::CaseInputs {
-    fixture["case"]["inputs"]
+    let pairs: Vec<(String, String)> = fixture["case"]["inputs"]
         .as_object()
         .expect("case inputs")
         .iter()
@@ -490,5 +492,6 @@ fn inputs_of(fixture: &serde_json::Value) -> loom_governor::CaseInputs {
             };
             (input.clone(), value)
         })
-        .collect()
+        .collect();
+    loom_governor::CaseInputs::try_from_pairs(pairs).expect("distinct inputs")
 }

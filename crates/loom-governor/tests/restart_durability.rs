@@ -444,7 +444,14 @@ fn sample_state(case: &CaseId) -> loom_governor::CaseState {
         protocol: PROTOCOL.to_owned(),
         revision: 1,
         artifacts: BTreeMap::from([("intent".to_owned(), "i1".to_owned())]),
-        inputs: CaseInputs::none().with("risk", "standard"),
+        // Every input `software-change@1` declares: a stored case whose inputs do not satisfy its
+        // protocol is not read back.
+        inputs: CaseInputs::try_from_pairs([
+            ("risk", "standard"),
+            ("change_kind", "feature"),
+            ("affects_security_boundary", "false"),
+        ])
+        .expect("distinct inputs"),
         evidence: Vec::new(),
     }
 }
@@ -534,7 +541,7 @@ fn fixture() -> Value {
 
 /// The `chg-1842` fixture's case inputs; a value YAML reads as a boolean is its text.
 fn fixture_inputs() -> CaseInputs {
-    fixture()["case"]["inputs"]
+    let pairs: Vec<(String, String)> = fixture()["case"]["inputs"]
         .as_object()
         .expect("case inputs")
         .iter()
@@ -545,7 +552,8 @@ fn fixture_inputs() -> CaseInputs {
             };
             (input.clone(), value)
         })
-        .collect()
+        .collect();
+    CaseInputs::try_from_pairs(pairs).expect("distinct inputs")
 }
 
 /// The `chg-1842` fixture's artifact revisions.

@@ -12,6 +12,12 @@
 //! A document naming a member its declaration does not, or one member twice, is refused on read,
 //! and so is one missing a member: a case stored without its `inputs`, as Loom 0.19.0 and earlier
 //! wrote every case, is a [`FileStoreError`] naming the case, never read with inputs filled in.
+//! So is a case whose inputs name one input twice, and a case of an ELS built-in protocol
+//! (`software-change@1`) whose inputs that protocol refuses as an opening would (a declared input
+//! missing, an empty list included, an undeclared one, an unlisted value), naming the case and
+//! the input. A protocol that is not built in is checked by the governor that registered it, on
+//! every read ([`crate::CanonGovernor`]); a host catalog that binds a built-in's name to another
+//! definition has its cases checked against the built-in here.
 //!
 //! Every operation holds an exclusive lock on `<dir>/.lock` for its duration, so two stores over
 //! one directory, in one process or in two, never interleave a read and a write of the same file.
@@ -56,7 +62,7 @@ use loom::primitives::{Timestamp, Uuid};
 use sha2::{Digest as _, Sha256};
 
 use crate::locked_dir::{LockedDir, failed, read_if_present};
-use crate::{CaseInputs, CaseState, FallibleCaseStore, HeldEvidence};
+use crate::{CaseInputs, CaseState, FallibleCaseStore, HeldEvidence, checked_builtin_inputs};
 
 const OBSERVATIONS: &str = "observations.json";
 
@@ -345,13 +351,19 @@ fn held_case(stored: StoredCase) -> Result<CaseState, String> {
         }
         artifacts.insert(artifact, revision);
     }
-    let mut inputs = CaseInputs::none();
-    for StoredInput { input, value } in stored.inputs {
-        if inputs.get(&input).is_some() {
-            return Err(format!("case input `{input}` is named twice"));
-        }
-        inputs = inputs.with(input, value);
-    }
+    let inputs = CaseInputs::try_from_pairs(
+        stored
+            .inputs
+            .into_iter()
+            .map(|StoredInput { input, value }| (input, value)),
+    )
+    .map_err(|error| format!("case `{}`: {error}", stored.id.0))?;
+    checked_builtin_inputs(&stored.protocol, &inputs).map_err(|error| {
+        format!(
+            "case `{}` holds inputs its protocol `{}` refuses: {error}",
+            stored.id.0, stored.protocol
+        )
+    })?;
     Ok(CaseState {
         id: CaseId(stored.id.0),
         protocol: stored.protocol,

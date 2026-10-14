@@ -57,7 +57,7 @@ const PREFIX: &str = "resume-";
 pub const LONGEST_COMMISSION_ID: usize = crate::state_dir::LONGEST_ID;
 
 /// The members a kept context has, in the order written.
-const MEMBERS: [&str; 12] = [
+const MEMBERS: [&str; 13] = [
     "commission_id",
     "case_id",
     "agent_revision_id",
@@ -65,6 +65,7 @@ const MEMBERS: [&str; 12] = [
     "route",
     "workspace",
     "test_command",
+    "test_paths",
     "max_steps",
     "confinement",
     "cgroup_root",
@@ -337,6 +338,7 @@ fn encode(context: &ResumeContextData) -> String {
         },
         "workspace": context.workspace,
         "test_command": context.test_command,
+        "test_paths": context.test_paths,
         "max_steps": context.max_steps,
         "confinement": backend_name(context.confinement),
         "cgroup_root": context.cgroup_root,
@@ -390,6 +392,17 @@ fn decode(text: &str, commission: &CommissionId) -> Result<ResumeContextData, St
                 word.as_str()
                     .map(str::to_owned)
                     .ok_or_else(|| "test_command holds a word that is not text".to_owned())
+            })
+            .collect::<Result<_, _>>()?,
+        test_paths: object["test_paths"]
+            .as_array()
+            .ok_or("test_paths is not a list")?
+            .iter()
+            .map(|pattern| {
+                pattern
+                    .as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| "test_paths holds a pattern that is not text".to_owned())
             })
             .collect::<Result<_, _>>()?,
         max_steps: object["max_steps"]
@@ -487,6 +500,7 @@ mod tests {
             },
             workspace: Some("/work/space".to_owned()),
             test_command: vec!["grep".to_owned(), "-qx".to_owned()],
+            test_paths: vec!["tests/**".to_owned()],
             max_steps: 20,
             confinement: Backend::Substrate,
             cgroup_root: None,

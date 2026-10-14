@@ -150,11 +150,23 @@ fn a_committed_tests_write_does_not_carry_an_earlier_red_result_forward() {
 #[test]
 fn an_input_spelled_otherwise_is_refused_and_nothing_is_stored() {
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let defaults = || {
-        CaseInputs::none()
-            .with("risk", "standard")
-            .with("change_kind", "feature")
-            .with("affects_security_boundary", "false")
+    // The defaults with `input` given `value`: the input's default value replaced in the list
+    // the inputs are built from, or one more input, so each input is given once (a second value
+    // for one input is refused where the inputs are built).
+    let given = |input: &str, value: &str| {
+        let mut pairs: Vec<(String, String)> = [
+            ("risk", "standard"),
+            ("change_kind", "feature"),
+            ("affects_security_boundary", "false"),
+        ]
+        .into_iter()
+        .map(|(name, default)| (name.to_owned(), default.to_owned()))
+        .collect();
+        match pairs.iter_mut().find(|(name, _)| name == input) {
+            Some(pair) => value.clone_into(&mut pair.1),
+            None => pairs.push((input.to_owned(), value.to_owned())),
+        }
+        CaseInputs::try_from_pairs(pairs).expect("each input once")
     };
     let undeclared = |input: &str| OpenError::UndeclaredInput {
         input: input.to_owned(),
@@ -164,39 +176,27 @@ fn an_input_spelled_otherwise_is_refused_and_nothing_is_stored() {
         value: value.to_owned(),
     };
     let rows: Vec<(&str, CaseInputs, OpenError)> = vec![
-        (
-            "upper",
-            defaults().with("Risk", "standard"),
-            undeclared("Risk"),
-        ),
-        (
-            "padded",
-            defaults().with("risk ", "standard"),
-            undeclared("risk "),
-        ),
-        (
-            "empty-name",
-            defaults().with("", "standard"),
-            undeclared(""),
-        ),
+        ("upper", given("Risk", "standard"), undeclared("Risk")),
+        ("padded", given("risk ", "standard"), undeclared("risk ")),
+        ("empty-name", given("", "standard"), undeclared("")),
         (
             "value-case",
-            defaults().with("risk", "Standard"),
+            given("risk", "Standard"),
             unlisted("risk", "Standard"),
         ),
         (
             "value-empty",
-            defaults().with("change_kind", ""),
+            given("change_kind", ""),
             unlisted("change_kind", ""),
         ),
         (
             "bool-case",
-            defaults().with("affects_security_boundary", "True"),
+            given("affects_security_boundary", "True"),
             unlisted("affects_security_boundary", "True"),
         ),
         (
             "bool-number",
-            defaults().with("affects_security_boundary", "0"),
+            given("affects_security_boundary", "0"),
             unlisted("affects_security_boundary", "0"),
         ),
     ];
@@ -248,10 +248,12 @@ fn every_input_combination_opens_exactly_the_applicable_obligations() {
                 expected.sort_unstable();
 
                 let governor = CanonGovernor::new(MemoryCaseStore::default());
-                let inputs = CaseInputs::none()
-                    .with("risk", risk)
-                    .with("change_kind", kind)
-                    .with("affects_security_boundary", boundary);
+                let inputs = CaseInputs::try_from_pairs([
+                    ("risk", risk),
+                    ("change_kind", kind),
+                    ("affects_security_boundary", boundary),
+                ])
+                .expect("distinct inputs");
                 let case = governor
                     .open(SOFTWARE, revisions(), inputs)
                     .unwrap_or_else(|error| panic!("{label} opens: {error}"));
@@ -426,10 +428,12 @@ fn bugfix() -> RunInputs {
 }
 
 fn bugfix_governed() -> CaseInputs {
-    CaseInputs::none()
-        .with("risk", "standard")
-        .with("change_kind", "bugfix")
-        .with("affects_security_boundary", "false")
+    CaseInputs::try_from_pairs([
+        ("risk", "standard"),
+        ("change_kind", "bugfix"),
+        ("affects_security_boundary", "false"),
+    ])
+    .expect("distinct inputs")
 }
 
 fn revisions() -> BTreeMap<String, String> {

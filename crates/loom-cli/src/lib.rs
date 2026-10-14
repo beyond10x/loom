@@ -14,6 +14,7 @@ pub use b10x_loom_intake_slice::case::{CaseInputs, ChangeKind, Risk};
 pub use b10x_loom_intake_slice::context_metrics::ContextPolicy;
 use b10x_loom_intake_slice::grant::ApproveRefusal;
 use b10x_loom_intake_slice::run::{ApprovalGate, SliceRun, StopReason};
+pub use b10x_loom_intake_slice::test_paths::{TestPaths, TestPathsError};
 use clap::builder::TypedValueParser;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
@@ -412,6 +413,13 @@ pub struct RunArgs {
     /// approved its security review, which the slice never submits.
     #[arg(long, value_name = "BOOL", default_value = "false", action = clap::ArgAction::Set, value_parser = clap::builder::PossibleValuesParser::new(["true", "false"]).map(|value| value == "true"))]
     pub affects_security_boundary: bool,
+    /// A test-path pattern, repeatable: tests.write changes only paths one of them matches, for
+    /// every change kind; a path outside them refuses the action before anything is written.
+    /// Relative to the workspace root; `*` within one path segment, `**` across any number.
+    /// Without one: tests/**, **/tests/**, test/**, **/test/**, **/*_test.*, **/test_*.*,
+    /// **/*.test.* and **/*.spec.*.
+    #[arg(long = "test-path", value_name = "GLOB", value_parser = test_path_pattern)]
+    pub test_path: Vec<String>,
     /// What standard output carries: lines for a person, or one JSON record per line, the last
     /// one the terminal record with the stop reason and the exit status.
     #[arg(long, value_enum, value_name = "FORMAT", default_value_t = Output::Human)]
@@ -434,6 +442,24 @@ impl RunArgs {
             affects_security_boundary: self.affects_security_boundary,
         }
     }
+
+    /// The test-path patterns the flags give, the host's trusted context `tests.write` is held
+    /// to: every `--test-path`, or the defaults without one.
+    ///
+    /// # Errors
+    /// [`TestPathsError`] naming a pattern that is not one.
+    pub fn test_paths(&self) -> Result<TestPaths, TestPathsError> {
+        if self.test_path.is_empty() {
+            Ok(TestPaths::default())
+        } else {
+            TestPaths::new(self.test_path.iter().cloned())
+        }
+    }
+}
+
+/// `--test-path`'s value, refused unless it is a test-path pattern.
+fn test_path_pattern(value: &str) -> Result<String, TestPathsError> {
+    TestPaths::new([value]).map(|_| value.to_owned())
 }
 
 /// Protocol catalog management.
@@ -795,6 +821,34 @@ mod tests {
             &["--affects-security-boundary"],
         ] {
             assert!(run(refused).is_err(), "{refused:?} is refused");
+        }
+    }
+
+    /// Without `--test-path` the default patterns apply; each `--test-path` adds one, in the
+    /// order given, replacing the defaults; a value that is not a pattern is refused.
+    #[test]
+    fn the_test_path_flag_repeats_and_replaces_the_defaults() {
+        let run = |extra: &[&str]| {
+            let mut argv = vec!["b10x-loom", "run", "--workspace", "."];
+            argv.extend_from_slice(extra);
+            argv.push("fix tests");
+            Cli::try_parse_from(argv).map(|cli| match cli.command {
+                Command::Run(run) => run.test_paths().expect("checked patterns"),
+                _ => panic!("run command"),
+            })
+        };
+        assert_eq!(run(&[]).unwrap(), TestPaths::default());
+        assert_eq!(
+            run(&["--test-path", "spec/**", "--test-path", "**/*_spec.rb"])
+                .unwrap()
+                .patterns(),
+            ["spec/**", "**/*_spec.rb"]
+        );
+        for refused in ["", "/abs/**", "../x", "a**"] {
+            assert!(
+                run(&["--test-path", refused]).is_err(),
+                "`{refused}` is refused"
+            );
         }
     }
 

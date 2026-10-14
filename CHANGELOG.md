@@ -23,7 +23,20 @@ under **Unreleased** until the next release.
   `implementation.edit` is admissible only once a test failed on the current revision.
 - The specification's `intake.routing.SliceRun` declares the run's `risk`, `change_kind` and
   `affects_security_boundary`, the inputs of its request; the slice's `run::SliceRun` leaves them
-  with the request the caller holds, as it leaves `run_id`.
+  with the request the caller holds, as it leaves `run_id`. A resume's request carries the inputs
+  the held case opened with, read from the governor.
+- `tests.write` writes only test paths: the slice performs it only when every path it changes
+  matches one of the host's test-path patterns, and otherwise refuses it before anything is
+  written or committed, naming the first path outside them (`executor::ExecuteError::NotATestPath`,
+  a refused step the agent is told about). The rule holds for every change kind, so a bugfix
+  cannot change its implementation through `tests.write` before a test failed;
+  `implementation.edit` is not restricted. The patterns are the host's trusted context:
+  `b10x-loom run --test-path <GLOB>`, repeatable, replacing the defaults `tests/**`,
+  `**/tests/**`, `test/**`, `**/test/**`, `**/*_test.*`, `**/test_*.*`, `**/*.test.*` and
+  `**/*.spec.*` (`test_paths::TestPaths`, `LocalExecutor::with_test_paths`). The specification
+  declares them as `intake.routing.SliceRun.test_paths`, and `intake.routing.ResumeContext` keeps
+  them, so a resume holds `tests.write` to the same paths.
+- `CanonGovernor::protocol` names the protocol a case is held under.
 
 ### Changed
 
@@ -37,7 +50,21 @@ under **Unreleased** until the next release.
   (`OpenError::UnlistedInputValue`) and a declared input left out (`OpenError::MissingInput`),
   each naming the input; an exhaustive match of `OpenError` adds the three. `CaseState` gains
   `inputs`. `case::open` and `case::open_with_catalog` take the host's `CaseInputs`, and
-  `SliceRequest` and `IntentRequest` gain `inputs`.
+  `SliceRequest` and `IntentRequest` gain `inputs` and `test_paths`.
+- Breaking: `CaseInputs` refuses a second value for one input, never replacing the first:
+  `CaseInputs::with` returns `Result<CaseInputs, OpenError>`, `FromIterator` is replaced by
+  `CaseInputs::try_from_pairs`, and `OpenError` gains `RepeatedInput` (an exhaustive match adds
+  it). `case::governed_inputs` returns a `Result`.
+- Breaking: a held case whose inputs do not satisfy its protocol (a declared input missing, an
+  empty list included, an undeclared one, an unlisted value) is never decided: every read of it
+  through the governor (`frontier`, `completion`, `current_revision`, `revisions`, `inputs`,
+  `evidence`, evidence received) answers `GovernorUnavailable`, and `FileCaseStore` refuses to
+  read such a case of a built-in protocol as a store failure naming the case and the input. A
+  case of a protocol the governor no longer has registered is likewise `GovernorUnavailable` on
+  every read.
+- Breaking: `intent::resumed_request` takes the governor, and its request carries the held case's
+  inputs (was the run defaults). A resume context without `test_paths`, as 0.19.0 wrote every
+  one, is refused as a state failure, like the case 0.19.0 stored beside it.
 - Breaking: `loom.governor`'s `StoredCase` gains `inputs`, a list of `{input, value}`.
   `FileCaseStore` refuses a case file without it as a store failure naming the case (`case <id>
   does not read: ...`), never filling in defaults: a state directory 0.19.0 wrote a case into is
@@ -56,7 +83,9 @@ under **Unreleased** until the next release.
   (`run::never_performed`, `run::PERFORMED`, `run::SliceReads` for an embedder's own loop):
   `release.rollback`, new on that frontier, is never offered to the agent, never awaited at an
   approval gate and never held as a Suspension; a proposal of it is refused as not in the
-  frontier.
+  frontier. `SliceReads` reads a `CanonGovernor` and filters only a `software-change@1` case's
+  frontier: on any other protocol (an incident's `release.rollback`, `traffic.shift`) it passes
+  the frontier through unchanged.
 
 ## [0.19.0] - 2026-10-13
 

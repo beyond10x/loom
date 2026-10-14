@@ -328,7 +328,7 @@ fn a_software_change_case_opens_with_its_three_inputs_and_refuses_any_other() {
 
     let mut left_out = CaseInputs::none();
     for (input, value) in inputs.iter().filter(|(input, _)| *input != "change_kind") {
-        left_out = left_out.with(input, value);
+        left_out = left_out.with(input, value).expect("distinct inputs");
     }
     let error = refused("left-out", left_out);
     assert_eq!(
@@ -339,7 +339,13 @@ fn a_software_change_case_opens_with_its_three_inputs_and_refuses_any_other() {
     );
     assert!(error.to_string().contains("`change_kind`"), "{error}");
 
-    let error = refused("undeclared", inputs.clone().with("priority", "high"));
+    let error = refused(
+        "undeclared",
+        inputs
+            .clone()
+            .with("priority", "high")
+            .expect("a new input"),
+    );
     assert_eq!(
         error,
         OpenError::UndeclaredInput {
@@ -348,7 +354,12 @@ fn a_software_change_case_opens_with_its_three_inputs_and_refuses_any_other() {
     );
     assert!(error.to_string().contains("`priority`"), "{error}");
 
-    let error = refused("unlisted", inputs.clone().with("risk", "extreme"));
+    let but_risk = CaseInputs::try_from_pairs(inputs.iter().filter(|(input, _)| *input != "risk"))
+        .expect("distinct inputs");
+    let error = refused(
+        "unlisted",
+        but_risk.with("risk", "extreme").expect("risk given once"),
+    );
     assert_eq!(
         error,
         OpenError::UnlistedInputValue {
@@ -369,6 +380,29 @@ fn a_software_change_case_opens_with_its_three_inputs_and_refuses_any_other() {
         },
         "the first declared input, in input order, is named"
     );
+
+    // A second value for one input is refused where the inputs are built, never a replacement
+    // of the first: through `with` and through `try_from_pairs` alike.
+    let repeated = OpenError::RepeatedInput {
+        input: "risk".to_owned(),
+    };
+    assert_eq!(
+        inputs.clone().with("risk", "critical"),
+        Err(repeated.clone())
+    );
+    assert_eq!(
+        inputs.clone().with("risk", "standard"),
+        Err(repeated.clone())
+    );
+    assert_eq!(
+        CaseInputs::try_from_pairs([
+            ("risk", "standard"),
+            ("change_kind", "refactor"),
+            ("risk", "critical"),
+        ]),
+        Err(repeated.clone())
+    );
+    assert!(repeated.to_string().contains("`risk`"), "{repeated}");
 }
 
 /// A protocol that declares no case input opens with none, and refuses one.
@@ -389,7 +423,7 @@ fn a_protocol_without_inputs_opens_with_none() {
         governor.open(
             "incident-response@1",
             revisions,
-            CaseInputs::none().with("risk", "standard")
+            CaseInputs::try_from_pairs([("risk", "standard")]).expect("distinct inputs")
         ),
         Err(OpenError::UndeclaredInput {
             input: "risk".to_owned()
@@ -406,7 +440,14 @@ fn a_trivial_case_reports_no_not_applicable_obligation_open() {
     let fixture = Fixture::load();
     let ir = software_change_ir();
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let inputs = fixture.inputs().with("risk", "trivial");
+    let inputs = CaseInputs::try_from_pairs(
+        fixture
+            .inputs()
+            .iter()
+            .filter(|(input, _)| *input != "risk"),
+    )
+    .and_then(|inputs| inputs.with("risk", "trivial"))
+    .expect("each input once");
     let case = governor
         .open(PROTOCOL, fixture.revisions(), inputs)
         .expect("a trivial case opens");
@@ -670,18 +711,20 @@ impl Fixture {
 
     /// The case's inputs, as the fixture gives them; a value YAML reads as a boolean is its text.
     fn inputs(&self) -> CaseInputs {
-        self.0["case"]["inputs"]
-            .as_object()
-            .expect("case inputs")
-            .iter()
-            .map(|(input, value)| {
-                let value = match value {
-                    Value::String(text) => text.clone(),
-                    other => other.to_string(),
-                };
-                (input.clone(), value)
-            })
-            .collect()
+        CaseInputs::try_from_pairs(
+            self.0["case"]["inputs"]
+                .as_object()
+                .expect("case inputs")
+                .iter()
+                .map(|(input, value)| {
+                    let value = match value {
+                        Value::String(text) => text.clone(),
+                        other => other.to_string(),
+                    };
+                    (input.clone(), value)
+                }),
+        )
+        .expect("distinct inputs")
     }
 
     /// The fixture's `canon-case/1` snapshot, with `changed` artifact revisions replaced.

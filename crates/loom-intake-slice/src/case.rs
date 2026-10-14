@@ -145,11 +145,47 @@ fn input_value(inputs: &CaseInputs, input: &str) -> Option<&'static str> {
 
 /// The governor's case inputs for a protocol that declares `declared`: each declared input the
 /// host gives a value for, and no other.
-pub fn governed_inputs(inputs: &CaseInputs, declared: &[String]) -> GovernedInputs {
-    declared
-        .iter()
-        .filter_map(|input| input_value(inputs, input).map(|value| (input.clone(), value)))
-        .collect()
+///
+/// # Errors
+/// [`OpenError::RepeatedInput`] when `declared` names one input twice.
+pub fn governed_inputs(
+    inputs: &CaseInputs,
+    declared: &[String],
+) -> Result<GovernedInputs, OpenError> {
+    GovernedInputs::try_from_pairs(
+        declared
+            .iter()
+            .filter_map(|input| input_value(inputs, input).map(|value| (input.clone(), value))),
+    )
+}
+
+/// The run's case inputs a case held with `governed` opened with: `None` unless it holds exactly
+/// `risk`, `change_kind` and `affects_security_boundary`, each with a value `software.change/1`
+/// lists.
+pub fn run_inputs(governed: &GovernedInputs) -> Option<CaseInputs> {
+    let risk = match governed.get("risk")? {
+        "trivial" => Risk::Trivial,
+        "standard" => Risk::Standard,
+        "elevated" => Risk::Elevated,
+        "critical" => Risk::Critical,
+        _ => return None,
+    };
+    let change_kind = match governed.get("change_kind")? {
+        "feature" => ChangeKind::Feature,
+        "bugfix" => ChangeKind::Bugfix,
+        "refactor" => ChangeKind::Refactor,
+        _ => return None,
+    };
+    let affects_security_boundary = match governed.get("affects_security_boundary")? {
+        "true" => true,
+        "false" => false,
+        _ => return None,
+    };
+    (governed.len() == 3).then_some(CaseInputs {
+        risk,
+        change_kind,
+        affects_security_boundary,
+    })
 }
 
 /// Opens a case on the picked protocol (`<name>@<major>`, e.g. `software-change@1`) through
@@ -194,7 +230,8 @@ fn open_declared<S: FallibleCaseStore>(
     inputs: &CaseInputs,
 ) -> Result<CaseId, CaseError> {
     let declared = declared_artifacts(pick, catalog)?;
-    let inputs = governed_inputs(inputs, &declared_inputs(pick, catalog)?);
+    let inputs =
+        governed_inputs(inputs, &declared_inputs(pick, catalog)?).map_err(CaseError::Open)?;
     let head = head(workspace, Calls::Opening)?;
     crate::git::record(workspace).map_err(CaseError::HostGit)?;
     let revisions: BTreeMap<String, String> = declared
@@ -407,6 +444,57 @@ mod catalog_tests {
         ));
     }
 
+    /// A held case's inputs read back as the run's inputs they were opened from, for every
+    /// value; anything but exactly the three, with listed values, reads as none.
+    #[test]
+    fn a_held_case_gives_back_the_run_inputs_it_opened_with() {
+        let declared: Vec<String> = ["risk", "change_kind", "affects_security_boundary"]
+            .map(str::to_owned)
+            .to_vec();
+        for risk in [
+            Risk::Trivial,
+            Risk::Standard,
+            Risk::Elevated,
+            Risk::Critical,
+        ] {
+            for change_kind in [
+                ChangeKind::Feature,
+                ChangeKind::Bugfix,
+                ChangeKind::Refactor,
+            ] {
+                for affects_security_boundary in [true, false] {
+                    let inputs = CaseInputs {
+                        risk,
+                        change_kind,
+                        affects_security_boundary,
+                    };
+                    let governed = governed_inputs(&inputs, &declared).expect("distinct");
+                    assert_eq!(run_inputs(&governed), Some(inputs));
+                }
+            }
+        }
+        let governed = |pairs: &[(&str, &str)]| {
+            GovernedInputs::try_from_pairs(pairs.iter().copied()).expect("distinct")
+        };
+        for pairs in [
+            &[][..],
+            &[("risk", "standard"), ("change_kind", "feature")],
+            &[
+                ("risk", "standard"),
+                ("change_kind", "hotfix"),
+                ("affects_security_boundary", "false"),
+            ],
+            &[
+                ("risk", "standard"),
+                ("change_kind", "feature"),
+                ("affects_security_boundary", "false"),
+                ("priority", "high"),
+            ],
+        ] {
+            assert_eq!(run_inputs(&governed(pairs)), None, "{pairs:?}");
+        }
+    }
+
     /// A software change opens with the three inputs it declares, spelled as the protocol spells
     /// them; a protocol that declares none gets none, whatever the host supplied.
     #[test]
@@ -424,6 +512,7 @@ mod catalog_tests {
         };
         assert_eq!(
             governed_inputs(&bugfix, &declared("software-change@1"))
+                .expect("distinct inputs")
                 .iter()
                 .collect::<Vec<_>>(),
             [
@@ -434,6 +523,7 @@ mod catalog_tests {
         );
         assert_eq!(
             governed_inputs(&RUN_DEFAULTS, &declared("software-change@1"))
+                .expect("distinct inputs")
                 .iter()
                 .collect::<Vec<_>>(),
             [
@@ -445,12 +535,16 @@ mod catalog_tests {
         for pick in ["incident-response@1", "system-query@1"] {
             assert!(declared(pick).is_empty(), "{pick} declares no input");
             assert!(
-                governed_inputs(&bugfix, &declared(pick)).is_empty(),
+                governed_inputs(&bugfix, &declared(pick))
+                    .expect("distinct inputs")
+                    .is_empty(),
                 "{pick}"
             );
         }
         assert!(
-            governed_inputs(&bugfix, &["priority".to_owned()]).is_empty(),
+            governed_inputs(&bugfix, &["priority".to_owned()])
+                .expect("distinct inputs")
+                .is_empty(),
             "an input the host has no value for is left for the governor to refuse"
         );
     }

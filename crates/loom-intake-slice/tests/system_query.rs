@@ -45,6 +45,7 @@ fn request(workspace: Option<PathBuf>) -> IntentRequest {
         max_steps: 2,
         threshold: 0.5,
         inputs: b10x_loom_intake_slice::case::RUN_DEFAULTS,
+        test_paths: b10x_loom_intake_slice::test_paths::TestPaths::default(),
     }
 }
 fn classifier(protocol: &str) -> Recorded {

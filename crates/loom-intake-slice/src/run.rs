@@ -68,8 +68,9 @@
 //! - arguments the model wrote that cannot become the action's arguments: edit contents that do
 //!   not resolve, or a stored-result lookup after the last one allowed
 //!   ([`ArgumentsError::Refused`]). Nothing is proposed, so Commission admits nothing;
-//! - an action the executor refuses (a path outside the workspace, an ignored path, arguments the
-//!   action does not take), and a `repository.inspect` that cannot read a path it names.
+//! - an action the executor refuses (a path outside the workspace, an ignored path, a
+//!   `tests.write` path outside the request's [`SliceRequest::test_paths`], arguments the action
+//!   does not take), and a `repository.inspect` that cannot read a path it names.
 //!
 //! # Terminal safety
 //!
@@ -97,7 +98,11 @@
 //! A [`SliceRun`] carries the specification's `protocol`, `steps` and `stop_reason`. Its `run_id`
 //! and `intent_id` are not assigned here: the run is not recorded anywhere yet. Its `risk`,
 //! `change_kind` and `affects_security_boundary` are the request's [`SliceRequest::inputs`] (an
-//! [`IntentRequest`](crate::intent::IntentRequest)'s, through `intent`), which the caller holds.
+//! [`IntentRequest`](crate::intent::IntentRequest)'s, through `intent`), which the caller holds;
+//! for a resume, the held case's, which
+//! [`resumed_request`](crate::intent::resumed_request) reads from the governor. Its
+//! `test_paths` are the request's [`SliceRequest::test_paths`], and a resume's those its resume
+//! context keeps.
 
 use std::fmt::{self, Write as _};
 use std::io::{self, Write};
@@ -131,14 +136,14 @@ use b10x_loom_executor::{ActionSelector, ArgumentContext, ArgumentGenerator, Loo
 use b10x_loom_intake_references::references;
 use b10x_loom_intake_router::{ProtocolPick, RouterError};
 use llm_core::Model;
-use loom_governor::{CanonGovernor, FallibleCaseStore};
+use loom_governor::{CanonGovernor, EvaluationTime, FallibleCaseStore};
 
 use crate::case::{self, CaseError};
 use crate::confinement::TestRunner;
 use crate::context_metrics::{ContextMetrics, ContextPolicy, MeasuredModel};
 use crate::effect::{Console, LocalEffects, refuse};
 use crate::executor::backend_name;
-use crate::executor::{ExecuteError, LocalExecutor, TestCommand, fresh_uuid, now};
+use crate::executor::{ExecuteError, LocalExecutor, TestCommand, TestPaths, fresh_uuid, now};
 use crate::handoff::{HandoffEffects, MergeHandoffStore, SettledHandoffs};
 use crate::selector::{ArgumentsError, Briefing, ModelArguments, ModelSelector, NO_ACTION};
 use crate::verifier::{TestResultVerifier, VerifyError};
@@ -167,6 +172,9 @@ pub struct SliceRequest {
     /// The case inputs the host supplies, never a model: the case opens with each one its
     /// protocol declares ([`crate::case`], "Inputs a case starts with").
     pub inputs: case::CaseInputs,
+    /// The host's test-path patterns, never a model's: `tests.write` changes only paths they
+    /// match ([`crate::test_paths`]); `TestPaths::default()` for the defaults.
+    pub test_paths: TestPaths,
 }
 
 /// Optional context policy and measurement destination for one run. Existing callers stay legacy.
@@ -452,6 +460,7 @@ fn run_measured<S: FallibleCaseStore>(
             workspace: &request.workspace,
             test: &request.test,
             runner: Arc::clone(&request.runner),
+            test_paths: &request.test_paths,
         },
         Mode::Once,
     )
@@ -493,6 +502,7 @@ pub(crate) enum Execution<'a> {
         workspace: &'a std::path::Path,
         test: &'a TestCommand,
         runner: Arc<dyn TestRunner>,
+        test_paths: &'a TestPaths,
     },
     Clock {
         clock: &'a dyn crate::clock::Clock,
@@ -551,6 +561,7 @@ pub(crate) fn drive<S: FallibleCaseStore>(
             workspace,
             test,
             runner,
+            test_paths,
         } => Box::new(LocalEffects::new(
             LocalExecutor::new(
                 governor,
@@ -558,7 +569,8 @@ pub(crate) fn drive<S: FallibleCaseStore>(
                 workspace.to_path_buf(),
                 test.clone(),
             )
-            .with_runner(runner),
+            .with_runner(runner)
+            .with_test_paths(test_paths.clone()),
             TestResultVerifier::new(governor, case.clone(), PRODUCER),
             governor,
             case.clone(),
@@ -890,19 +902,29 @@ pub fn performable(frontier: Frontier<frontier_state::Issued>) -> Frontier<front
     Frontier::new(data)
 }
 
-/// A governor of `software-change@1` cases read as the slice reads one for Commission's runtime:
-/// every frontier [`performable`], everything else and every observation the governor's own. An
-/// embedder that runs the slice's effects under its own loop reads the governor through it, so
-/// `release.rollback` is never offered, awaited or held.
+/// A governor read as the slice reads one for Commission's runtime: a frontier of a
+/// `software-change@1` case [`performable`], and the frontier of a case on any other protocol
+/// passed through unchanged, so an action that awaits approval there (an incident's
+/// `release.rollback`) stays in sight of the host. Everything else and every observation are the
+/// governor's own. An embedder that runs the slice's effects under its own loop reads the
+/// governor through it, so on a software change `release.rollback` is never offered, awaited or
+/// held. The case's protocol is the one the governor holds it under
+/// ([`CanonGovernor::protocol`]).
 pub struct SliceReads<'g, G: ?Sized>(pub &'g G);
 
-impl<G: Governor + ?Sized> Governor for SliceReads<'_, G> {
+impl<S: FallibleCaseStore, T: EvaluationTime> Governor for SliceReads<'_, CanonGovernor<S, T>> {
     fn current_revision(&self, case: &CaseId) -> Result<i64, GovernorError> {
         self.0.current_revision(case)
     }
 
     fn frontier(&self, case: &CaseId) -> Result<Frontier<frontier_state::Issued>, GovernorError> {
-        self.0.frontier(case).map(performable)
+        let local = self.0.protocol(case)? == LOCAL_PROTOCOL;
+        let frontier = self.0.frontier(case)?;
+        Ok(if local {
+            performable(frontier)
+        } else {
+            frontier
+        })
     }
 
     fn completion(&self, case: &CaseId) -> Result<CompletionDetermination, GovernorError> {

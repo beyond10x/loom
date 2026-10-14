@@ -835,6 +835,7 @@ fn drive_with_inputs(
         max_steps: row.max_steps,
         threshold: THRESHOLD,
         inputs,
+        test_paths: b10x_loom_intake_slice::test_paths::TestPaths::default(),
     };
     let mut out = Vec::new();
     let result = run(

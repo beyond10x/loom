@@ -8,7 +8,8 @@
 //! - `Performed`, carrying the executor's report as text, for a performed action. No Connector
 //!   performs it, so it names no attempt;
 //! - `Refused`, carrying the reason, for an action the executor refuses (a path outside the
-//!   workspace, an ignored path, arguments the action does not take, an action it never performs)
+//!   workspace, an ignored path, a `tests.write` path outside the host's test paths, arguments the
+//!   action does not take, an action it never performs)
 //!   and for a `repository.inspect` that cannot read a path it names. The model is told why;
 //! - an [`EffectError`] for every other failure (the workspace, git, the governor, the verifier or
 //!   the output), keeping the typed failure for the slice's caller.
@@ -153,6 +154,7 @@ impl<'a, 'o, S: FallibleCaseStore> LocalEffects<'a, 'o, S> {
                 refused @ (ExecuteError::NotExecuted { .. }
                 | ExecuteError::OutsideWorkspace { .. }
                 | ExecuteError::Ignored { .. }
+                | ExecuteError::NotATestPath { .. }
                 | ExecuteError::InvalidArguments { .. }),
             ) => return self.refuse(action, &refused.to_string()),
             // An inspect that cannot read a path (most often one that does not exist) changed

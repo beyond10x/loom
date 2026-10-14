@@ -602,6 +602,115 @@ fn an_ignored_path_is_neither_read_nor_written() {
     assert!(matches!(inspected, Report::Inspected(ref files) if files.len() == 2));
 }
 
+/// `tests.write` writes only paths the host's test-path patterns match, for every change kind:
+/// one path outside them refuses the whole action, naming the first such path, before anything is
+/// written or committed. A test path is written and committed. `implementation.edit` is not held
+/// to them. The host's own patterns replace the defaults.
+#[test]
+fn tests_write_writes_only_the_hosts_test_paths() {
+    use b10x_loom_intake_slice::case::{CaseInputs, ChangeKind, Risk};
+    use b10x_loom_intake_slice::test_paths::TestPaths;
+    for change_kind in [
+        ChangeKind::Feature,
+        ChangeKind::Bugfix,
+        ChangeKind::Refactor,
+    ] {
+        let fixture = Fixture::new();
+        let governor = CanonGovernor::new(MemoryCaseStore::default());
+        let inputs = CaseInputs {
+            risk: Risk::Standard,
+            change_kind,
+            affects_security_boundary: false,
+        };
+        let case = case::open(&governor, PICK, INTENT, fixture.workspace(), &inputs)
+            .expect("the case opens");
+        let executor = LocalExecutor::new(
+            &governor,
+            case.clone(),
+            fixture.workspace(),
+            TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
+        )
+        .with_runner(std::sync::Arc::new(
+            b10x_loom_intake_slice::executor::UnconfinedRunner,
+        ));
+        let head = fixture.head();
+        let written = executor.execute(&proposal(
+            "tests.write",
+            &json!({
+                "files": [
+                    {"path": "tests/check_test.txt", "contents": "a test\n"},
+                    {"path": "./check.txt", "contents": "fixed\n"},
+                    {"path": "src/lib.rs", "contents": "fn main() {}\n"}
+                ],
+                "message": "a test and the implementation"
+            }),
+        ));
+        assert!(
+            matches!(written, Err(ExecuteError::NotATestPath { ref path }) if path == "check.txt"),
+            "{change_kind:?}: refused naming the first path outside the test paths: {written:?}"
+        );
+        assert_eq!(fixture.head(), head, "{change_kind:?}: nothing committed");
+        assert_eq!(fixture.status(), "", "{change_kind:?}: nothing written");
+        assert_eq!(fixture.read("check.txt"), "broken\n");
+
+        let Report::Edited { revision } = executor
+            .execute(&proposal(
+                "tests.write",
+                &json!({"files": [{"path": "tests/check_test.txt", "contents": "a test\n"}]}),
+            ))
+            .expect("a test path is written")
+        else {
+            panic!("tests.write reports an edit");
+        };
+        assert_eq!(revision, fixture.head(), "{change_kind:?}: committed");
+        assert_ne!(revision, head);
+        if change_kind != ChangeKind::Bugfix {
+            executor
+                .execute(&proposal(
+                    "implementation.edit",
+                    &json!({"files": [{"path": "check.txt", "contents": "fixed\n"}]}),
+                ))
+                .expect("implementation.edit is not held to the test paths");
+            assert_eq!(fixture.read("check.txt"), "fixed\n");
+        }
+    }
+
+    let fixture = Fixture::new();
+    let governor = CanonGovernor::new(MemoryCaseStore::default());
+    let case = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        fixture.workspace(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("the case opens");
+    let executor = LocalExecutor::new(
+        &governor,
+        case,
+        fixture.workspace(),
+        TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
+    )
+    .with_runner(std::sync::Arc::new(
+        b10x_loom_intake_slice::executor::UnconfinedRunner,
+    ))
+    .with_test_paths(TestPaths::new(["spec/**"]).expect("a pattern"));
+    let refused = executor.execute(&proposal(
+        "tests.write",
+        &json!({"files": [{"path": "tests/check_test.txt", "contents": "a test\n"}]}),
+    ));
+    assert!(
+        matches!(refused, Err(ExecuteError::NotATestPath { ref path }) if path == "tests/check_test.txt"),
+        "the host's patterns replace the defaults: {refused:?}"
+    );
+    executor
+        .execute(&proposal(
+            "tests.write",
+            &json!({"files": [{"path": "spec/check_spec.txt", "contents": "a test\n"}]}),
+        ))
+        .expect("a path the host's pattern matches is written");
+}
+
 /// One test run yields one evidence record: verifying it again, through the same verifier or
 /// another for the same case, is refused and submits nothing. A new run is verified.
 #[test]

@@ -561,7 +561,7 @@ impl Fixture {
 
 /// The case inputs a fixture's case gives; a value YAML reads as a boolean is its text.
 fn inputs_of(fixture: &serde_json::Value) -> loom_governor::CaseInputs {
-    fixture["case"]["inputs"]
+    let pairs: Vec<(String, String)> = fixture["case"]["inputs"]
         .as_object()
         .expect("case inputs")
         .iter()
@@ -572,5 +572,6 @@ fn inputs_of(fixture: &serde_json::Value) -> loom_governor::CaseInputs {
             };
             (input.clone(), value)
         })
-        .collect()
+        .collect();
+    loom_governor::CaseInputs::try_from_pairs(pairs).expect("distinct inputs")
 }

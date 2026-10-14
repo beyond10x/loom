@@ -193,6 +193,10 @@
           "type": "List<string>"
         },
         {
+          "name": "test_paths",
+          "type": "List<string>"
+        },
+        {
           "name": "max_steps",
           "type": "integer"
         },
@@ -262,6 +266,10 @@
         {
           "name": "affects_security_boundary",
           "type": "boolean"
+        },
+        {
+          "name": "test_paths",
+          "type": "List<string>"
         }
       ],
       "id": "intake.routing.SliceRun",

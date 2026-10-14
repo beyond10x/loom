@@ -80,8 +80,10 @@ fn the_canon_governor_passes_commissions_governor_conformance_kit() {
 
 /// The case inputs a `software-change@1` case opens with here: Loom's run defaults.
 fn software_change_inputs() -> loom_governor::CaseInputs {
-    loom_governor::CaseInputs::none()
-        .with("risk", "standard")
-        .with("change_kind", "feature")
-        .with("affects_security_boundary", "false")
+    loom_governor::CaseInputs::try_from_pairs([
+        ("risk", "standard"),
+        ("change_kind", "feature"),
+        ("affects_security_boundary", "false"),
+    ])
+    .expect("distinct inputs")
 }

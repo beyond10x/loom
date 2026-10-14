@@ -59,6 +59,7 @@ fn an_unresolvable_reference_is_not_reported_as_an_unreachable_model() {
             max_steps: 1,
             threshold: 0.5,
             inputs: b10x_loom_intake_slice::case::RUN_DEFAULTS,
+            test_paths: b10x_loom_intake_slice::test_paths::TestPaths::default(),
         },
         &governor,
         &governor,

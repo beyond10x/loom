@@ -395,10 +395,12 @@ fn adversary2_the_set_aside_path_costs_a_bounded_multiple_of_deciding() {
 
 /// The case inputs a `software-change@1` case opens with here: Loom's run defaults.
 fn software_change_inputs() -> loom_governor::CaseInputs {
-    loom_governor::CaseInputs::none()
-        .with("risk", "standard")
-        .with("change_kind", "feature")
-        .with("affects_security_boundary", "false")
+    loom_governor::CaseInputs::try_from_pairs([
+        ("risk", "standard"),
+        ("change_kind", "feature"),
+        ("affects_security_boundary", "false"),
+    ])
+    .expect("distinct inputs")
 }
 
 /// Gives a `software.change` snapshot the case inputs the governor's case opened with

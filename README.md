@@ -182,7 +182,10 @@ A software change opens with the case inputs `--risk <trivial|standard|elevated|
 (default `standard`), `--change-kind <feature|bugfix|refactor>` (default `feature`) and
 `--affects-security-boundary <true|false>` (default `false`); with the defaults an edit needs no
 failing test first, and with `--change-kind bugfix` `implementation.edit` waits for a test that
-failed on the current revision.
+failed on the current revision. `tests.write` writes only test paths, matched by the repeatable
+`--test-path <GLOB>` (by default `tests/**`, `**/tests/**`, `test/**`, `**/test/**`,
+`**/*_test.*`, `**/test_*.*`, `**/*.test.*` and `**/*.spec.*`); `implementation.edit` is not
+held to them.
 `--model` and `--classifier-model` name Codex models (default `gpt-5.6-sol`). With
 `--catalog <PATH>`, an [llm](https://beyond10x.github.io/llm/) catalog file, both name route
 aliases of that catalog instead, such as a self-hosted endpoint whose account needs no

@@ -126,6 +126,7 @@ fn drive_at(
         max_steps,
         threshold: 0.5,
         inputs: b10x_loom_intake_slice::case::RUN_DEFAULTS,
+        test_paths: b10x_loom_intake_slice::test_paths::TestPaths::default(),
     };
     let mut out = Vec::new();
     let result = run(
@@ -607,6 +608,7 @@ fn a_routed_query_completes_without_software_test_configuration() {
         max_steps: 4,
         threshold: 0.5,
         inputs: b10x_loom_intake_slice::case::RUN_DEFAULTS,
+        test_paths: b10x_loom_intake_slice::test_paths::TestPaths::default(),
     };
     let mut output = Vec::new();
     let run = run_intent_with_options(
