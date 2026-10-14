@@ -73,8 +73,9 @@ types:
   #
   # `verified` is the Mandate verified context the commission acts in (`mandate.core.VerifiedContext`
   # as Mandate writes it); a resume puts it in the commission's authority context as a `HostContext`.
-  # `approver` is the operator's Mandate principal, who approves with `approve --mandate`; it is never
-  # `verified`'s subject, as an approval is a second party's. `approver_policy` is the Mandate policy
+  # `approver` is the operator's Mandate principal, who approves with `approve --mandate`; it is
+  # neither `verified`'s subject nor its actor (the principal the subject acts through, when it
+  # names one), as an approval is a second party's. `approver_policy` is the Mandate policy
   # naming the approver, the policy an approval-required decision's challenge names. An approval
   # `approve --mandate` records expires `approval_seconds` after it was recorded; an approval is
   # cleared only before it expires, so `0` makes every approval expired when it is first presented.

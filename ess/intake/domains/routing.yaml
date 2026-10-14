@@ -425,8 +425,10 @@ entities:
   # <FILE>` recorded in the approval event log (intake.routing.MandateApprovalRecorded) for the
   # request. A grant `approve` wrote without `--mandate` names none, and its document has no such
   # member, as on 0.20.0. `resume --mandate <FILE>` refuses a grant that names none, and allows the
-  # request only when Mandate's `check_with_approval` clears and consumes the approval it names;
-  # `resume` without `--mandate` reads no approval.
+  # request only when Mandate's `check_with_approval` clears and consumes the approval it names.
+  # Only Mandate clears a grant that names an approval: a `resume` without `--mandate` refuses it
+  # (Commission's `NotGranted`) and performs nothing, leaving the approval unconsumed; it reads a grant
+  # that names none as on 0.20.0.
   - name: intake.routing.Grant
     identity:
       name: commission_id
