@@ -485,7 +485,8 @@ pub struct ResumeState<'s> {
     pub handoffs: &'s MergeHandoffStore,
     /// Mandate, when `resume --mandate` configured it: the held request is then allowed only once
     /// Mandate cleared and consumed the approval the grant names
-    /// ([`GrantAuthority::with_mandate`]). `None` resumes as without Mandate.
+    /// ([`GrantAuthority::with_mandate`]). `None` resumes as without Mandate, except that a grant
+    /// naming a Mandate approval is denied: only Mandate clears it.
     pub mandate: Option<&'s dyn MandateApprovals>,
 }
 

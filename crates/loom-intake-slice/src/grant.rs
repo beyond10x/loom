@@ -25,9 +25,11 @@
 //! [`MandateApprovals`] the host built from its Mandate file takes part: [`approve`] records a
 //! Mandate approval for the held request and the grant names it (`mandate_approval`), and
 //! [`GrantAuthority`] allows the held request only when Mandate clears and consumes the approval
-//! the grant names; a grant naming none is refused. Without it both behave as before, and a grant
-//! names no approval: its document has no `mandate_approval` member, as a grant written before the
-//! member was declared has none.
+//! the grant names; a grant naming none is refused. Without it [`approve`] writes a grant naming no
+//! approval: its document has no `mandate_approval` member, as a grant written before the member
+//! was declared has none, and [`GrantAuthority`] allows such a grant as before. Only Mandate clears
+//! a grant naming an approval: without it [`GrantAuthority`] denies one, so leaving out Mandate
+//! performs nothing and leaves the approval unconsumed.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -360,7 +362,9 @@ pub struct GrantAuthority<'a> {
 
 impl<'a> GrantAuthority<'a> {
     /// A provider over `grant`, the one kept for the commission if any, that checks it against
-    /// the commission's Suspension in `suspensions` at every call.
+    /// the commission's Suspension in `suspensions` at every call. Without
+    /// [`GrantAuthority::with_mandate`] it denies a grant naming a Mandate approval, which only
+    /// Mandate clears.
     pub fn new(grant: Option<GrantData>, suspensions: &'a dyn SuspensionPort) -> Self {
         Self {
             grant,
@@ -407,28 +411,31 @@ impl AuthorityProvider for GrantAuthority<'_> {
         commission: &CommissionData,
         capability: &str,
     ) -> Result<AuthorityVerdict, AuthorityProviderError> {
-        if self
-            .allows(commission, capability)
-            .map_err(AuthorityProviderError::new)?
+        if let Some(grant) = &self.grant
+            && self
+                .allows(commission, capability)
+                .map_err(AuthorityProviderError::new)?
         {
-            let (Some(mandate), Some(grant)) = (self.mandate, &self.grant) else {
-                return Ok(AuthorityVerdict::Allow(Unit(true)));
-            };
-            // The held request, granted: with Mandate it is allowed only once Mandate cleared and
-            // consumed the approval the grant names.
-            let Some(approval) = &grant.mandate_approval else {
-                return Ok(AuthorityVerdict::Deny(AuthorityVerdictDeny {
-                    reason: format!(
-                        "the grant for `{capability}` names no Mandate approval; approve it with --mandate"
-                    ),
-                }));
-            };
-            return Ok(
-                match mandate.clear(commission, capability, grant, approval) {
-                    Ok(()) => AuthorityVerdict::Allow(Unit(true)),
-                    Err(reason) => AuthorityVerdict::Deny(AuthorityVerdictDeny { reason }),
-                },
-            );
+            // The held request, granted. Only Mandate clears a grant naming a Mandate approval,
+            // consuming it; a grant naming none is allowed only without Mandate.
+            let deny = |reason: String| AuthorityVerdict::Deny(AuthorityVerdictDeny { reason });
+            return Ok(match (self.mandate, &grant.mandate_approval) {
+                (None, None) => AuthorityVerdict::Allow(Unit(true)),
+                (None, Some(approval)) => deny(format!(
+                    "the grant for `{capability}` names Mandate approval {}, which only Mandate \
+                     clears; resume it with --mandate",
+                    approval.0.0
+                )),
+                (Some(_), None) => deny(format!(
+                    "the grant for `{capability}` names no Mandate approval; approve it with --mandate"
+                )),
+                (Some(mandate), Some(approval)) => {
+                    match mandate.clear(commission, capability, grant, approval) {
+                        Ok(()) => AuthorityVerdict::Allow(Unit(true)),
+                        Err(reason) => deny(reason),
+                    }
+                }
+            });
         }
         Ok(AuthorityVerdict::ApprovalRequired(
             AuthorityVerdictApprovalRequired {
@@ -670,6 +677,18 @@ mod tests {
         let mut withheld = granted.clone();
         withheld.granted = false;
         assert!(!allows(Some(withheld), "repository.merge"), "not granted");
+        // A grant naming a Mandate approval is Mandate's to clear: without it, it is denied.
+        let mut carried = granted.clone();
+        carried.mandate_approval = Some(MandateApprovalId(Uuid(
+            "00000000-0000-4000-8000-0000000000ab".to_owned(),
+        )));
+        assert!(
+            matches!(
+                GrantAuthority::new(Some(carried), &suspensions).decide(&commission, "repository.merge"),
+                Ok(AuthorityVerdict::Deny(AuthorityVerdictDeny { reason })) if reason.contains("--mandate")
+            ),
+            "a grant naming a Mandate approval, without Mandate"
+        );
 
         suspensions.take(TakeSuspension {
             suspension: key.clone(),
