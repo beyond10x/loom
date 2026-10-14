@@ -334,8 +334,9 @@ entities:
   #   history, never on a model's argument; a run before any `tests.write` that committed, every
   #   run of a `feature` or `refactor` case, and every run of a host that gave no regression-test
   #   command yields none. A `tests.write` that commits nothing (it wrote what the files already
-  #   held) writes no regression test, a path it wrote with what the file already held is no
-  #   committed test path, and a refused one writes nothing;
+  #   held) writes no regression test, a path whose bytes when the run runs equal its bytes
+  #   before the run's first write to it (written with what it held, or written and then
+  #   written back) is no committed test path, and a refused one writes nothing;
   # - `implementation_change`: every performed `implementation.edit` that committed, moving the
   #   workspace's `HEAD`, with no `result`. A refused edit, an edit that wrote what the files
   #   already held, and a `tests.write` submit none.
