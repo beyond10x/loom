@@ -201,6 +201,10 @@
           "type": "List<string>"
         },
         {
+          "name": "regression_test_command",
+          "type": "Optional<string>"
+        },
+        {
           "name": "max_steps",
           "type": "integer"
         },
@@ -317,6 +321,10 @@
         {
           "name": "test_paths",
           "type": "List<string>"
+        },
+        {
+          "name": "regression_test_command",
+          "type": "Optional<string>"
         }
       ],
       "id": "intake.routing.SliceRun",

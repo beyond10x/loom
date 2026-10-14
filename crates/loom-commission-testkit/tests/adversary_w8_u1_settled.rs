@@ -344,13 +344,16 @@ impl Ids {
 
 fn submit(governor: &Gov, case: &CaseId, ids: &Ids, record: &Value) {
     let facts = json::parse(&record.to_string()).expect("facts are JSON");
+    let evidence_id = EvidenceId(ids.next());
+    let observation = ObservationId(ids.next());
+    observe_at(governor, &observation, record);
     let evidence = EvidenceData {
-        evidence_id: EvidenceId(ids.next()),
+        evidence_id,
         case_id: case.clone(),
         kind: record["kind"].as_str().expect("kind").to_owned(),
         subject_revision: governor.current_revision(case).expect("current revision"),
         producer: String::new(),
-        observation_ids: vec![ObservationId(ids.next())],
+        observation_ids: vec![observation],
         facts,
         provenance: json::Value::Object(vec![(
             "source".to_owned(),
@@ -574,4 +577,33 @@ fn inputs_of(fixture: &serde_json::Value) -> loom_governor::CaseInputs {
         })
         .collect();
     loom_governor::CaseInputs::try_from_pairs(pairs).expect("distinct inputs")
+}
+
+/// Delivers `observation` at `record`'s `observed_at`, as a host does before it submits the record:
+/// the governor takes a record's `observed_at` only as the instant of the observation it cites.
+fn observe_at(
+    governor: &impl b10x_loom_commission::ports::evidence::ObservationPort,
+    observation: &ObservationId,
+    record: &Value,
+) {
+    if let Some(at) = record["observed_at"].as_str() {
+        governor
+            .observe(
+                b10x_loom_commission::model::responsibility::Observation::new(
+                    b10x_loom_commission::model::responsibility::ObservationData {
+                        observation_id: observation.clone(),
+                        source: "host/fixture".to_owned(),
+                        subject: record["subject"]
+                            .as_str()
+                            .unwrap_or("implementation")
+                            .to_owned(),
+                        observed_at: b10x_loom_commission::model::primitives::Timestamp(
+                            at.to_owned(),
+                        ),
+                        payload: json::Value::Null,
+                    },
+                ),
+            )
+            .expect("the governor keeps the observation");
+    }
 }

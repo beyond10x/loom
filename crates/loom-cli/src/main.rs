@@ -590,10 +590,14 @@ fn execute(
 fn intent_request(arguments: &RunArgs) -> Result<IntentRequest, String> {
     let mut words = arguments.test_cmd.split_whitespace();
     let program = words.next().unwrap_or("");
+    let mut test = TestCommand::new(program, words);
+    if let Some(regression) = &arguments.regression_test_command {
+        test = test.with_regression(regression.clone());
+    }
     Ok(IntentRequest {
         intent: arguments.intent.clone(),
         workspace: arguments.workspace.clone(),
-        test: TestCommand::new(program, words),
+        test,
         runner: None,
         max_steps: arguments.max_steps,
         threshold: arguments.threshold,

@@ -43,6 +43,7 @@ fn context(n: usize, intent: &str) -> ResumeContextData {
             "check.txt".into(),
         ],
         test_paths: vec!["tests/**".into()],
+        regression_test_command: None,
         max_steps: 6,
         confinement: Backend::None,
         cgroup_root: None,

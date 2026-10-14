@@ -55,6 +55,20 @@ fn hosted_protocol_projects_and_expires_evidence() {
         CompletionDetermination::Open(_)
     ));
     let facts = json::parse(r#"{"format":"canon-evidence/1","id":"verified-1","kind":"verified","subject":"implementation","subject_revision":"r1","observed_at":"2026-10-06T10:00:00Z","result":"pass"}"#).unwrap();
+    // The governor takes a record's `observed_at` only as its cited observation's instant.
+    b10x_loom_commission::ports::evidence::ObservationPort::observe(
+        &governor,
+        b10x_loom_commission::model::responsibility::Observation::new(ObservationData {
+            observation_id: ObservationId(Uuid("00000000-0000-0000-0000-000000000002".into())),
+            source: "trusted:test-runner".into(),
+            subject: "implementation".into(),
+            observed_at: b10x_loom_commission::model::primitives::Timestamp(
+                "2026-10-06T10:00:00Z".into(),
+            ),
+            payload: json::Value::Null,
+        }),
+    )
+    .unwrap();
     submit_evidence(
         &governor,
         "trusted:test-runner",

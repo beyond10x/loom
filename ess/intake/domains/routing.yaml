@@ -300,6 +300,15 @@ entities:
       # restricted by them.
       - name: test_paths
         type: List<String>
+      # The host's regression-test command, trusted context like the test command, never a
+      # model's (`run --regression-test-command`): split at white space like the test command,
+      # with `{path}` in at least one word, which the run fills with a path its `tests.write`
+      # committed. On a `bugfix` case, after each `tests.run` that comes after a `tests.write`
+      # that committed, the run runs it once per test path its `tests.write` actions committed,
+      # in the order first committed, and only that command's result is a
+      # `regression_test_result`. Absent, no run yields a `regression_test_result`.
+      - name: regression_test_command
+        type: Optional<String>
     relations:
       - name: intent
         kind: references
@@ -316,13 +325,17 @@ entities:
   # order, independence and age rules can decide on it. Which run produces which kind:
   #
   # - `test_result`: every `tests.run` on a committed revision, its `result` `pass` or `fail`;
-  # - `regression_test_result`: beside that run's `test_result`, with the same `result`, from
-  #   every `tests.run` of a case whose `change_kind` is `bugfix` that comes after the run's first
-  #   `tests.write` that committed. One observation then yields both records, and no other record.
-  #   Both rest on trusted inputs only, the case's change kind and the run's own history, never on
-  #   a model's argument; a run before any `tests.write` that committed, and every run of a
-  #   `feature` or `refactor` case, yields none. A `tests.write` that commits nothing (it wrote
-  #   what the files already held) writes no regression test, and a refused one writes nothing;
+  # - `regression_test_result`: the result of the host's regression-test command
+  #   (SliceRun.regression_test_command) run on one test path a `tests.write` committed, never of
+  #   the suite. On a case whose `change_kind` is `bugfix`, after every `tests.run` that comes
+  #   after the run's first `tests.write` that committed, the run runs that command once per
+  #   committed test path, each its own observation, and each yields one record citing it. It
+  #   rests on trusted inputs only, the case's change kind, the host's command and the run's own
+  #   history, never on a model's argument; a run before any `tests.write` that committed, every
+  #   run of a `feature` or `refactor` case, and every run of a host that gave no regression-test
+  #   command yields none. A `tests.write` that commits nothing (it wrote what the files already
+  #   held) writes no regression test, a path it wrote with what the file already held is no
+  #   committed test path, and a refused one writes nothing;
   # - `implementation_change`: every performed `implementation.edit` that committed, moving the
   #   workspace's `HEAD`, with no `result`. A refused edit, an edit that wrote what the files
   #   already held, and a `tests.write` submit none.
@@ -400,6 +413,11 @@ entities:
       # so a resume holds the commission's `tests.write` to the same paths.
       - name: test_paths
         type: List<String>
+      # The host's regression-test command (SliceRun.regression_test_command), as given, so a
+      # resume runs the commission's regression tests with the same command; absent when the run
+      # was given none.
+      - name: regression_test_command
+        type: Optional<String>
       - name: max_steps
         type: Integer
       # How the test command is confined, and the delegated cgroup root, when one was given.

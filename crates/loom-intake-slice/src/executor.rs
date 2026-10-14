@@ -23,7 +23,12 @@
 //!   command is killed at its timeout ([`TestCommand::DEFAULT_TIMEOUT`] unless
 //!   [`TestCommand::with_timeout`] sets another), with its process group on Unix; the run is then
 //!   marked timed out and has no exit code. Its standard output and error are read while it runs,
-//!   and only the last 8 KiB of each is kept.
+//!   and only the last 8 KiB of each is kept. On a case whose `change_kind` is `bugfix`, when the
+//!   host gave a regression-test command ([`TestCommand::with_regression`]), a `tests.write` of
+//!   this executor committed and the work tree was clean, the run then runs that command once per
+//!   test path those writes committed with new contents, in the order first committed, `{path}`
+//!   filled, through the same runner and timeout, each delivered as its own observation
+//!   ([`REGRESSION_RUN_SOURCE`], [`TestRun::regressions`]).
 //!
 //! Arguments are checked before anything is done: an argument the action does not take, or one of
 //! the wrong type, is [`ExecuteError::InvalidArguments`]. A commit message holding a control
@@ -82,7 +87,7 @@
 //! is not delivered, so no record is submitted for it; an edit already committed stays committed.
 //! The previous observation is this executor's own, so a resume starts afresh.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
@@ -128,6 +133,8 @@ pub const TESTS_RUN: &str = "tests.run";
 pub const TEST_RUN_SOURCE: &str = "intake-slice/tests.run";
 /// The observation source of an `implementation.edit` that committed.
 pub const EDIT_SOURCE: &str = "intake-slice/implementation.edit";
+/// The observation source of a regression-test command's run on one committed test path.
+pub const REGRESSION_RUN_SOURCE: &str = "intake-slice/regression-test.run";
 /// The most the executor waits, in all, for the host clock to pass the second of its previous
 /// observation before it delivers the next one.
 pub const CLOCK_WAIT: Duration = Duration::from_secs(2);
@@ -137,12 +144,81 @@ const MIN_CLOCK_PAUSE: Duration = Duration::from_millis(1);
 /// The most output of a test run kept in its report: the tail, in bytes.
 const OUTPUT_TAIL: usize = 8 * 1024;
 
-/// The command `tests.run` runs in the workspace: a program and its arguments, never a shell line.
+/// The host's regression-test command (`intake.routing.SliceRun.regression_test_command`): the
+/// text as given, split at white space like the test command, with [`RegressionTestCommand::PATH`]
+/// in at least one word. The executor fills it, in every word, with one test path a `tests.write`
+/// committed, and runs the result without a shell, under the test command's timeout and runner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegressionTestCommand {
+    text: String,
+}
+
+/// Why a regression-test command was refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegressionTestCommandError {
+    /// The command as given.
+    pub command: String,
+}
+
+impl fmt::Display for RegressionTestCommandError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "the regression-test command `{}` names no `{}` word, so it would not run the test \
+             file a tests.write committed",
+            self.command,
+            RegressionTestCommand::PATH
+        )
+    }
+}
+
+impl std::error::Error for RegressionTestCommandError {}
+
+impl RegressionTestCommand {
+    /// The placeholder the executor fills with a committed test path.
+    pub const PATH: &'static str = "{path}";
+
+    /// The command `text` gives.
+    ///
+    /// # Errors
+    /// [`RegressionTestCommandError`] when no word of `text` holds [`RegressionTestCommand::PATH`]
+    /// (an empty command included).
+    pub fn new(text: impl Into<String>) -> Result<Self, RegressionTestCommandError> {
+        let text = text.into();
+        if text
+            .split_whitespace()
+            .any(|word| word.contains(Self::PATH))
+        {
+            Ok(Self { text })
+        } else {
+            Err(RegressionTestCommandError { command: text })
+        }
+    }
+
+    /// The command as given.
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// The command that runs the test at `path`, under `timeout`.
+    fn for_path(&self, path: &str, timeout: Duration) -> TestCommand {
+        let mut words = self
+            .text
+            .split_whitespace()
+            .map(|word| word.replace(Self::PATH, path));
+        let program = words.next().unwrap_or_default();
+        TestCommand::new(program, words.collect::<Vec<_>>()).with_timeout(timeout)
+    }
+}
+
+/// The command `tests.run` runs in the workspace: a program and its arguments, never a shell line,
+/// and the host's regression-test command when it gave one ([`TestCommand::with_regression`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestCommand {
     program: OsString,
     args: Vec<OsString>,
     timeout: Duration,
+    regression: Option<RegressionTestCommand>,
 }
 
 impl TestCommand {
@@ -158,6 +234,7 @@ impl TestCommand {
             program: program.into(),
             args: args.into_iter().map(Into::into).collect(),
             timeout: Self::DEFAULT_TIMEOUT,
+            regression: None,
         }
     }
 
@@ -165,6 +242,23 @@ impl TestCommand {
     #[must_use]
     pub fn with_timeout(self, timeout: Duration) -> Self {
         Self { timeout, ..self }
+    }
+
+    /// The same command, with the host's regression-test command: on a bugfix, every `tests.run`
+    /// after a `tests.write` that committed also runs it once per committed test path
+    /// ([`TestRun::regressions`]), and only its result is a `regression_test_result`. Without one,
+    /// no run is a regression test.
+    #[must_use]
+    pub fn with_regression(self, regression: RegressionTestCommand) -> Self {
+        Self {
+            regression: Some(regression),
+            ..self
+        }
+    }
+
+    /// The host's regression-test command, when it gave one.
+    pub fn regression(&self) -> Option<&RegressionTestCommand> {
+        self.regression.as_ref()
     }
 
     /// The executable selected by the operator.
@@ -214,9 +308,38 @@ pub struct TestRun {
     applied: Box<AppliedConfinement>,
     observed_at: Timestamp,
     after_tests_write: bool,
+    regressions: Vec<RegressionRun>,
+}
+
+/// One run of the host's regression-test command on one committed test path, made by a
+/// `tests.run` after the suite's run. Only the executor makes one.
+#[derive(Debug, Clone)]
+pub struct RegressionRun {
+    path: String,
+    run: TestRun,
+}
+
+impl RegressionRun {
+    /// The committed test path the command ran with `{path}` filled.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// The command's run: its own observation, exit status and revision.
+    pub fn run(&self) -> &TestRun {
+        &self.run
+    }
 }
 
 impl TestRun {
+    /// The regression-test command's runs that followed this suite run, one per test path the
+    /// executor's `tests.write` actions committed, in the order first committed: empty unless the
+    /// case is a bugfix, the host gave a regression-test command, a `tests.write` committed before
+    /// the run, and the work tree was clean. A regression run's own list is empty.
+    pub fn regressions(&self) -> &[RegressionRun] {
+        &self.regressions
+    }
+
     /// The host clock's instant of the run's observation, UTC to the second.
     pub fn observed_at(&self) -> &Timestamp {
         &self.observed_at
@@ -358,7 +481,19 @@ impl fmt::Display for Report {
                 Ok(())
             }
             Self::Edited { revision, .. } => write!(f, "committed; HEAD is {revision}"),
-            Self::TestsRun(run) => write!(f, "{}\n{}", run.summary(), run.output),
+            Self::TestsRun(run) => {
+                write!(f, "{}\n{}", run.summary(), run.output)?;
+                for regression in &run.regressions {
+                    write!(
+                        f,
+                        "\nregression test {}: {}\n{}",
+                        regression.path,
+                        regression.run.summary(),
+                        regression.run.output
+                    )?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -465,6 +600,9 @@ pub struct LocalExecutor<'g, S, T = NoEvaluationTime> {
     test_paths: TestPaths,
     clock: &'g dyn Clock,
     tests_written: Cell<bool>,
+    /// Every test path a `tests.write` of this executor committed with new contents, in the order
+    /// first committed, each once.
+    test_files: RefCell<Vec<String>>,
     /// The whole UTC second of the last observation this executor delivered.
     last_observed: Cell<Option<i64>>,
 }
@@ -489,6 +627,7 @@ impl<'g, S: FallibleCaseStore, T: EvaluationTime> LocalExecutor<'g, S, T> {
             test_paths: TestPaths::default(),
             clock: &SystemClock,
             tests_written: Cell::new(false),
+            test_files: RefCell::new(Vec::new()),
             last_observed: Cell::new(None),
         }
     }
@@ -634,6 +773,13 @@ impl<'g, S: FallibleCaseStore, T: EvaluationTime> LocalExecutor<'g, S, T> {
         // held changed nothing, so no later run follows a regression test it wrote.
         if action == TESTS_WRITE && committed {
             self.tests_written.set(true);
+            let mut test_files = self.test_files.borrow_mut();
+            for (relative, file, _) in &files {
+                let path = relative.to_string_lossy().into_owned();
+                if undo.changed(file) && !test_files.contains(&path) {
+                    test_files.push(path);
+                }
+            }
         }
         let change = if action == IMPLEMENTATION_EDIT && committed {
             Some(self.observe_change(&revision, case_revision)?)
@@ -712,7 +858,43 @@ impl<'g, S: FallibleCaseStore, T: EvaluationTime> LocalExecutor<'g, S, T> {
         })
     }
 
+    /// Runs the suite, then, on a bugfix whose host gave a regression-test command, that command
+    /// once per committed test path (see [`TestRun::regressions`]).
     fn run_tests(&self, root: &Path) -> Result<Report, ExecuteError> {
+        let mut suite = self.run_command(root, &self.test, TEST_RUN_SOURCE, None)?;
+        let test_files = self.test_files.borrow().clone();
+        if let Some(regression) = self.test.regression()
+            && suite.implementation.is_some()
+            && !test_files.is_empty()
+            && self.bugfix()?
+        {
+            for path in test_files {
+                let command = regression.for_path(&path, self.test.timeout);
+                let run = self.run_command(root, &command, REGRESSION_RUN_SOURCE, Some(&path))?;
+                suite.regressions.push(RegressionRun { path, run });
+            }
+        }
+        Ok(Report::TestsRun(suite))
+    }
+
+    /// Whether the case is a bugfix, as the host gave its `change_kind` when it opened.
+    fn bugfix(&self) -> Result<bool, ExecuteError> {
+        let inputs = self
+            .governor
+            .inputs(&self.case)
+            .map_err(ExecuteError::Governor)?;
+        Ok(inputs.get("change_kind") == Some("bugfix"))
+    }
+
+    /// Runs `command` in the workspace and delivers its observation from `source`, naming the
+    /// committed test `path` a regression-test run ran.
+    fn run_command(
+        &self,
+        root: &Path,
+        command: &TestCommand,
+        source: &str,
+        path: Option<&str>,
+    ) -> Result<TestRun, ExecuteError> {
         let clean = git_output(root, &with_paths(&["status", "--porcelain"], &[]))?
             .stdout
             .is_empty();
@@ -723,14 +905,14 @@ impl<'g, S: FallibleCaseStore, T: EvaluationTime> LocalExecutor<'g, S, T> {
             .map_err(ExecuteError::Governor)?;
         let finished = self
             .runner
-            .run(&self.test, root)
+            .run(command, root)
             .map_err(ExecuteError::Confinement)?;
         let exit_code = finished.exit_code;
         let observation = ObservationId(fresh_uuid("observation", &self.case.0));
         let mut payload = vec![
             (
                 "command".to_owned(),
-                Value::Array(self.test.describe().into_iter().map(Value::Text).collect()),
+                Value::Array(command.describe().into_iter().map(Value::Text).collect()),
             ),
             (
                 "exit_code".to_owned(),
@@ -747,30 +929,34 @@ impl<'g, S: FallibleCaseStore, T: EvaluationTime> LocalExecutor<'g, S, T> {
         ));
         payload.push(("timed_out".to_owned(), Value::Bool(finished.timed_out)));
         payload.push(("confinement".to_owned(), observation_confinement(&finished)));
+        if let Some(path) = path {
+            payload.push(("test_path".to_owned(), Value::Text(path.to_owned())));
+        }
         let (observed_at, second) = self.next_instant()?;
         self.governor
             .observe(Observation::new(ObservationData {
                 observation_id: observation.clone(),
-                source: TEST_RUN_SOURCE.to_owned(),
+                source: source.to_owned(),
                 subject: case::IMPLEMENTATION.to_owned(),
                 observed_at: observed_at.clone(),
                 payload: Value::Object(payload),
             }))
             .map_err(ExecuteError::Governor)?;
         self.last_observed.set(Some(second));
-        Ok(Report::TestsRun(TestRun {
+        Ok(TestRun {
             case: self.case.clone(),
             observation,
             exit_code,
             implementation,
             case_revision,
             timed_out: finished.timed_out,
-            timeout: self.test.timeout,
+            timeout: command.timeout,
             output: finished.output,
             applied: Box::new(finished.applied),
             observed_at,
             after_tests_write: self.tests_written.get(),
-        }))
+            regressions: Vec::new(),
+        })
     }
 }
 
@@ -870,6 +1056,15 @@ impl Undo {
         };
         self.files.push((file.to_path_buf(), previous));
         Ok(())
+    }
+
+    /// Whether `file` holds other bytes now than it held before it was first written (a file that
+    /// did not exist did change).
+    fn changed(&self, file: &Path) -> bool {
+        self.files
+            .iter()
+            .find(|(held, _)| held == file)
+            .is_some_and(|(_, previous)| previous.as_deref() != std::fs::read(file).ok().as_deref())
     }
 
     /// Puts every remembered path, directory and the index back as they were. Best effort: a path

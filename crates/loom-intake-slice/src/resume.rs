@@ -11,7 +11,9 @@
 //! over its target, so a reader sees no document or the whole one. Before anything is written it
 //! is read back and compared with what was meant. A context is kept once: a second one for the
 //! same commission is refused and changes nothing. A document naming a member its declaration does
-//! not, missing one, or holding another commission's context is refused on read; a listing holds
+//! not, missing one, or holding another commission's context is refused on read, except that one
+//! without `regression_test_command` (kept before that field was declared) reads it as absent; a
+//! listing holds
 //! every context it can read and names each file it cannot ([`ResumeContexts`]), so one damaged
 //! file hides no other.
 //!
@@ -57,7 +59,7 @@ const PREFIX: &str = "resume-";
 pub const LONGEST_COMMISSION_ID: usize = crate::state_dir::LONGEST_ID;
 
 /// The members a kept context has, in the order written.
-const MEMBERS: [&str; 13] = [
+const MEMBERS: [&str; 14] = [
     "commission_id",
     "case_id",
     "agent_revision_id",
@@ -66,12 +68,17 @@ const MEMBERS: [&str; 13] = [
     "workspace",
     "test_command",
     "test_paths",
+    "regression_test_command",
     "max_steps",
     "confinement",
     "cgroup_root",
     "model",
     "catalog",
 ];
+
+/// The members a kept context may lack, read as absent: a context kept before its field was
+/// declared (0.21.0 and earlier) names no regression-test command.
+const OPTIONAL_MEMBERS: [&str; 1] = ["regression_test_command"];
 
 /// The members a kept route has.
 const ROUTE_MEMBERS: [&str; 5] = [
@@ -339,6 +346,7 @@ fn encode(context: &ResumeContextData) -> String {
         "workspace": context.workspace,
         "test_command": context.test_command,
         "test_paths": context.test_paths,
+        "regression_test_command": context.regression_test_command,
         "max_steps": context.max_steps,
         "confinement": backend_name(context.confinement),
         "cgroup_root": context.cgroup_root,
@@ -353,14 +361,14 @@ fn encode(context: &ResumeContextData) -> String {
 /// The context `text` holds, refused unless it is `commission`'s and names exactly its members.
 fn decode(text: &str, commission: &CommissionId) -> Result<ResumeContextData, String> {
     let value: Value = serde_json::from_str(text).map_err(|error| error.to_string())?;
-    let object = exactly(&value, &MEMBERS, "the context")?;
-    let route = exactly(&object["route"], &ROUTE_MEMBERS, "route")?;
+    let object = exactly(&value, &MEMBERS, &OPTIONAL_MEMBERS, "the context")?;
+    let route = exactly(&object["route"], &ROUTE_MEMBERS, &[], "route")?;
     let catalog = route["catalog"]
         .as_array()
         .ok_or("route.catalog is not a list")?
         .iter()
         .map(|entry| {
-            let entry = exactly(entry, &["name", "digest"], "a route.catalog entry")?;
+            let entry = exactly(entry, &["name", "digest"], &[], "a route.catalog entry")?;
             Ok(CatalogDigest {
                 name: text_of(entry, "name")?,
                 digest: text_of(entry, "digest")?,
@@ -405,6 +413,7 @@ fn decode(text: &str, commission: &CommissionId) -> Result<ResumeContextData, St
                     .ok_or_else(|| "test_paths holds a pattern that is not text".to_owned())
             })
             .collect::<Result<_, _>>()?,
+        regression_test_command: optional_text(object, "regression_test_command")?,
         max_steps: object["max_steps"]
             .as_i64()
             .ok_or("max_steps is not an integer")?,
@@ -426,10 +435,11 @@ fn decode(text: &str, commission: &CommissionId) -> Result<ResumeContextData, St
     Ok(context)
 }
 
-/// `value` as an object naming exactly `members`.
+/// `value` as an object naming exactly `members`, of which it may lack those in `optional`.
 fn exactly<'v>(
     value: &'v Value,
     members: &[&str],
+    optional: &[&str],
     what: &str,
 ) -> Result<&'v Map<String, Value>, String> {
     let object = value
@@ -440,7 +450,10 @@ fn exactly<'v>(
             "{what} names `{unknown}`, which it does not declare"
         ));
     }
-    if let Some(missing) = members.iter().find(|member| !object.contains_key(**member)) {
+    if let Some(missing) = members
+        .iter()
+        .find(|member| !object.contains_key(**member) && !optional.contains(member))
+    {
         return Err(format!("{what} has no `{missing}`"));
     }
     Ok(object)
@@ -454,9 +467,9 @@ fn text_of(object: &Map<String, Value>, member: &str) -> Result<String, String> 
 }
 
 fn optional_text(object: &Map<String, Value>, member: &str) -> Result<Option<String>, String> {
-    match &object[member] {
-        Value::Null => Ok(None),
-        Value::String(text) => Ok(Some(text.clone())),
+    match object.get(member) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) => Ok(Some(text.clone())),
         _ => Err(format!("`{member}` is neither text nor null")),
     }
 }
@@ -501,6 +514,7 @@ mod tests {
             workspace: Some("/work/space".to_owned()),
             test_command: vec!["grep".to_owned(), "-qx".to_owned()],
             test_paths: vec!["tests/**".to_owned()],
+            regression_test_command: Some("grep -qx -f {path} check.txt".to_owned()),
             max_steps: 20,
             confinement: Backend::Substrate,
             cgroup_root: None,
