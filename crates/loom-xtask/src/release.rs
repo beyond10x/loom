@@ -245,15 +245,26 @@ fn changed_surfaces(root: &Path, tag: &str) -> Result<Option<(String, Vec<String
 }
 
 /// Runs `git -C <root> <args>` and returns its standard output; the caller's `GIT_DIR` and
-/// work-tree overrides are dropped so the repository read is `<root>`'s.
+/// work-tree overrides are dropped so the repository read is `<root>`'s, and neither system,
+/// global nor repository configuration can start a hook, a monitor or a prompt.
 fn git(root: &Path, args: &[&str]) -> Result<String, String> {
     let out = Command::new("git")
         .arg("-C")
         .arg(root)
+        .args([
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.fsmonitor=false",
+        ])
         .args(args)
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(std::process::Stdio::null())
         .output()
         .map_err(|e| format!("run git {} in {}: {e}", args.join(" "), root.display()))?;
     if out.status.success() {
