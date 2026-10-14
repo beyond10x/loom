@@ -14,7 +14,7 @@
 //!   whose local configuration points `core.hooksPath` at `.git/hooks` (so the operator's global
 //!   setting cannot hide the hooks) holds hooks for every step of a commit, each writing a marker
 //!   outside the work tree, and sets `core.fsmonitor` to a command writing another. A case is
-//!   opened on it and the slice's executor performs `repository.inspect`, `repository.edit` (which
+//!   opened on it and the slice's executor performs `repository.inspect`, `implementation.edit` (which
 //!   commits) and `tests.run`: every entry through which Loom runs git. No marker may exist
 //!   afterwards. The same fixture then runs plain `git status` and `git commit` itself and the
 //!   pre-commit and fsmonitor markers must appear, so the planted commands are shown to be live.
@@ -73,7 +73,14 @@ fn a_run_that_edits_and_commits_runs_no_workspace_hook_and_no_fsmonitor() {
     let first = fixture.head();
 
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let case = case::open(&governor, PICK, INTENT, fixture.workspace()).expect("the case opens");
+    let case = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        fixture.workspace(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("the case opens");
     let executor = LocalExecutor::new(
         &governor,
         case.clone(),
@@ -93,7 +100,7 @@ fn a_run_that_edits_and_commits_runs_no_workspace_hook_and_no_fsmonitor() {
     assert!(matches!(inspected, Report::Inspected(_)), "{inspected:?}");
     let edited = executor
         .execute(&proposal(
-            "repository.edit",
+            "implementation.edit",
             &json!({
                 "files": [{"path": "check.txt", "contents": "fixed\n"}],
                 "message": "fix the check"
@@ -181,7 +188,14 @@ fn a_gpg_program_a_test_plants_never_runs() {
 fn planted_by_the_test_command(fixture: &Fixture, plant: &str) -> Vec<String> {
     let first = fixture.head();
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let case = case::open(&governor, PICK, INTENT, fixture.workspace()).expect("the case opens");
+    let case = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        fixture.workspace(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("the case opens");
     let executor = LocalExecutor::new(
         &governor,
         case.clone(),
@@ -201,7 +215,7 @@ fn planted_by_the_test_command(fixture: &Fixture, plant: &str) -> Vec<String> {
     assert!(fixture.markers().is_empty(), "planting fired a marker");
 
     let edited = executor.execute(&proposal(
-        "repository.edit",
+        "implementation.edit",
         &json!({
             "files": [{"path": "check.txt", "contents": "fixed\n"}],
             "message": "fix the check"
@@ -246,7 +260,14 @@ fn a_workspace_no_case_opened_is_refused_host_git() {
     let unopened = Fixture::unplanted();
     let first = unopened.head();
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let case = case::open(&governor, PICK, INTENT, opened.workspace()).expect("the case opens");
+    let case = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        opened.workspace(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("the case opens");
     let executor = LocalExecutor::new(
         &governor,
         case,
@@ -259,7 +280,7 @@ fn a_workspace_no_case_opened_is_refused_host_git() {
     for (action, arguments) in [
         ("repository.inspect", json!({"paths": ["check.txt"]})),
         (
-            "repository.edit",
+            "implementation.edit",
             json!({"files": [{"path": "check.txt", "contents": "fixed\n"}]}),
         ),
         ("tests.run", json!({})),
@@ -295,7 +316,13 @@ fn a_program_key_in_the_workspace_config_refuses_the_open() {
         let program = fixture.planted("planted", "exit 0");
         fixture.git(&["config", key, &program.to_string_lossy()]);
         let governor = CanonGovernor::new(MemoryCaseStore::default());
-        let opened = case::open(&governor, PICK, INTENT, fixture.workspace());
+        let opened = case::open(
+            &governor,
+            PICK,
+            INTENT,
+            fixture.workspace(),
+            &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+        );
         assert!(
             matches!(
                 &opened,
@@ -321,7 +348,14 @@ fn a_commondir_a_test_plants_is_refused() {
         common = common.display()
     );
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let case = case::open(&governor, PICK, INTENT, fixture.workspace()).expect("the case opens");
+    let case = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        fixture.workspace(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("the case opens");
     let executor = LocalExecutor::new(
         &governor,
         case,
@@ -339,7 +373,7 @@ fn a_commondir_a_test_plants_is_refused() {
     };
     assert_eq!(run.exit_code(), Some(0), "the plant ran: {run:?}");
     let edited = executor.execute(&proposal(
-        "repository.edit",
+        "implementation.edit",
         &json!({"files": [{"path": "check.txt", "contents": "fixed\n"}]}),
     ));
     assert!(
@@ -376,7 +410,14 @@ fn a_linked_worktree_opens_and_commits() {
         &linked.to_string_lossy(),
     ]);
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let case = case::open(&governor, PICK, INTENT, &linked).expect("a linked worktree opens");
+    let case = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        &linked,
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("a linked worktree opens");
     let executor = LocalExecutor::new(
         &governor,
         case,
@@ -388,7 +429,7 @@ fn a_linked_worktree_opens_and_commits() {
     ));
     let edited = executor
         .execute(&proposal(
-            "repository.edit",
+            "implementation.edit",
             &json!({"files": [{"path": "check.txt", "contents": "fixed\n"}]}),
         ))
         .expect("the edit commits in the linked worktree");

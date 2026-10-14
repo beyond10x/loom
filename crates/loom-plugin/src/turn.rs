@@ -174,7 +174,7 @@ pub fn turn(
         .with_catalog(&catalog)
         .map_err(|error| PluginError::Turn(error.to_string()))?;
     let revisions = BTreeMap::from([(ITEM.to_owned(), item.revision.clone())]);
-    let case = match governor.open(PROTOCOL, revisions) {
+    let case = match governor.open(PROTOCOL, revisions, loom_sdk::CaseInputs::none()) {
         Ok(case) => case,
         Err(error) => {
             return Ok(stopped(

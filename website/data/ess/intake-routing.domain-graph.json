@@ -193,6 +193,10 @@
           "type": "List<string>"
         },
         {
+          "name": "test_paths",
+          "type": "List<string>"
+        },
+        {
           "name": "max_steps",
           "type": "integer"
         },
@@ -249,6 +253,22 @@
         },
         {
           "name": "approvals",
+          "type": "List<string>"
+        },
+        {
+          "name": "risk",
+          "type": "Risk"
+        },
+        {
+          "name": "change_kind",
+          "type": "ChangeKind"
+        },
+        {
+          "name": "affects_security_boundary",
+          "type": "boolean"
+        },
+        {
+          "name": "test_paths",
           "type": "List<string>"
         }
       ],

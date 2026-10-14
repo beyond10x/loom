@@ -11,6 +11,10 @@
 //! [`Frontiers`], which passes them on unchanged and counts the frontiers issued, except in the
 //! nothing-admissible case, where it records every action of the frontier as blocked.
 //!
+//! The case inputs are the ones `b10x-loom run`'s own command line gives ([`run_inputs`]): with no
+//! input flag, the run defaults (`standard`, `feature`, off a security boundary), under which every
+//! case below reaches the outcome it reached before the inputs existed.
+//!
 //! Since `story:runtime-merge` the loop is Commission's runtime (`run_until_blocked`, Atlas ADR
 //! 0082): it reads the frontier before each Loom run and again to revalidate each proposal, so
 //! the frontier counts below count both reads.
@@ -35,6 +39,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use b10x_loom_cli::{CaseInputs, ChangeKind, Cli, Command as CliCommand};
 use b10x_loom_commission::model::responsibility::{
     ActionStatus, CaseId, CompletionDetermination, Frontier, GovernorError, ObservationData,
     frontier_state,
@@ -43,6 +48,7 @@ use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_intake_references::references;
 use b10x_loom_intake_slice::executor::TestCommand;
 use b10x_loom_intake_slice::run::{SliceRequest, StopReason, run};
+use clap::Parser;
 use llm_core::{
     BoxFuture, CallId, Cancel, Capabilities, Error, Id, Item, Model, Protocol, Provenance,
     StopReason as TurnStop, StreamSink, ToolCall, ToolChoice, TurnObservation, TurnOutcome,
@@ -125,7 +131,7 @@ fn the_slice_stops_for_each_reason() {
             name: "main path",
             pick: pick(SOFTWARE_CHANGE, 0.9),
             agent: vec![
-                json!({"action": "repository.edit"}),
+                json!({"action": "implementation.edit"}),
                 json!({
                     "files": [{"path": "check.txt", "contents": "fixed\n"}],
                     "message": "fix the check"
@@ -141,8 +147,8 @@ fn the_slice_stops_for_each_reason() {
     );
     assert_picked(&output, SOFTWARE_CHANGE);
     let performed = steps(&output);
-    assert_eq!(performed, ["repository.edit", "tests.run"], "{output}");
-    let edit = line_starting(&output, "step 1: repository.edit");
+    assert_eq!(performed, ["implementation.edit", "tests.run"], "{output}");
+    let edit = line_starting(&output, "step 1: implementation.edit");
     assert!(
         edit.contains("check.txt"),
         "a step prints its arguments: {output}"
@@ -196,7 +202,7 @@ fn the_slice_stops_for_each_reason() {
             name: "a step budget of 1",
             pick: pick(SOFTWARE_CHANGE, 0.9),
             agent: vec![
-                json!({"action": "repository.edit"}),
+                json!({"action": "implementation.edit"}),
                 json!({
                     "files": [{"path": "check.txt", "contents": "fixed\n"}],
                     "message": "fix the check"
@@ -207,7 +213,7 @@ fn the_slice_stops_for_each_reason() {
         },
     );
     assert_picked(&output, SOFTWARE_CHANGE);
-    assert_eq!(steps(&output), ["repository.edit"], "{output}");
+    assert_eq!(steps(&output), ["implementation.edit"], "{output}");
     assert_stopped(&output, "stopped: StepBudget");
     assert_eq!(run.stop_reason, StopReason::StepBudget);
     assert_eq!(run.steps, 1);
@@ -303,7 +309,7 @@ fn the_run_stops_at_the_approval_gate_when_the_model_idles() {
             agent: vec![
                 json!({"action": "repository.inspect"}),
                 json!({"paths": ["check.txt"]}),
-                json!({"action": "repository.edit"}),
+                json!({"action": "implementation.edit"}),
                 json!({
                     "files": [{"path": "check.txt", "contents": "fixed\n"}],
                     "message": "fix the check"
@@ -322,7 +328,7 @@ fn the_run_stops_at_the_approval_gate_when_the_model_idles() {
         steps(&output),
         [
             "repository.inspect",
-            "repository.edit",
+            "implementation.edit",
             "tests.run",
             "tests.run"
         ],
@@ -356,14 +362,14 @@ fn a_step_that_moves_the_frontier_at_the_gate_goes_on() {
             name: "an edit at the approval gate",
             pick: pick(SOFTWARE_CHANGE, 0.9),
             agent: vec![
-                json!({"action": "repository.edit"}),
+                json!({"action": "implementation.edit"}),
                 json!({
                     "files": [{"path": "check.txt", "contents": "fixed\n"}],
                     "message": "fix the check"
                 }),
                 json!({"action": "tests.run"}),
                 json!({}),
-                json!({"action": "repository.edit"}),
+                json!({"action": "implementation.edit"}),
                 json!({
                     "files": [{"path": "notes.txt", "contents": "a note\n"}],
                     "message": "add a note"
@@ -380,9 +386,9 @@ fn a_step_that_moves_the_frontier_at_the_gate_goes_on() {
     assert_eq!(
         steps(&output),
         [
-            "repository.edit",
+            "implementation.edit",
             "tests.run",
-            "repository.edit",
+            "implementation.edit",
             "tests.run",
             "tests.run"
         ],
@@ -404,7 +410,7 @@ fn a_refused_selection_at_the_gate_stops_for_approval() {
             name: "an unlisted selection at the approval gate",
             pick: pick(SOFTWARE_CHANGE, 0.9),
             agent: vec![
-                json!({"action": "repository.edit"}),
+                json!({"action": "implementation.edit"}),
                 json!({
                     "files": [{"path": "check.txt", "contents": "fixed\n"}],
                     "message": "fix the check"
@@ -419,7 +425,7 @@ fn a_refused_selection_at_the_gate_stops_for_approval() {
     );
     assert_eq!(
         steps(&output),
-        ["repository.edit", "tests.run", "repository.publish"],
+        ["implementation.edit", "tests.run", "repository.publish"],
         "{output}"
     );
     assert_eq!(count_starting(&output, "effect: refused:"), 1, "{output}");
@@ -441,7 +447,7 @@ fn the_slice_runs_on_commissions_runtime() {
             name: "main path on the runtime",
             pick: pick(SOFTWARE_CHANGE, 0.9),
             agent: vec![
-                json!({"action": "repository.edit"}),
+                json!({"action": "implementation.edit"}),
                 json!({
                     "files": [{"path": "check.txt", "contents": "fixed\n"}],
                     "message": "fix the check"
@@ -481,7 +487,7 @@ fn the_slice_runs_on_commissions_runtime() {
     assert_eq!(
         edit.payload.member("action"),
         Some(&b10x_loom_commission::model::json::Value::Text(
-            "repository.edit".to_owned()
+            "implementation.edit".to_owned()
         )),
         "{edit:?}"
     );
@@ -596,6 +602,160 @@ fn the_exit_status_says_how_the_run_ended() {
     );
 }
 
+/// `b10x-loom run --change-kind bugfix`: an `implementation.edit` before a test failed on the
+/// current revision is not admissible (`software.change/1`, the edit's precondition
+/// `regression.reproduced`), so the agent's first edit is refused and commits nothing. Once
+/// `tests.run` failed on that revision the edit is admissible, and the run reaches the approval gate
+/// as a feature does. The same first edit under no input flag is performed (`the_slice_stops_for_each_reason`).
+#[test]
+fn a_bugfix_edits_the_implementation_only_after_a_failing_test() {
+    let inputs = run_inputs(&["--change-kind", "bugfix"]);
+    assert_eq!(inputs.change_kind, ChangeKind::Bugfix);
+    let edit = json!({
+        "files": [{"path": "check.txt", "contents": "fixed\n"}],
+        "message": "fix the check"
+    });
+    let fixture = Fixture::new("bugfix");
+    let first = fixture.head();
+    let (run, output, _, _, _) = drive_with_inputs(
+        &fixture,
+        Row {
+            name: "a bugfix that edits before its test failed",
+            pick: pick(SOFTWARE_CHANGE, 0.9),
+            agent: vec![
+                json!({"action": "implementation.edit"}),
+                json!({"action": "tests.run"}),
+                json!({}),
+                json!({"action": "implementation.edit"}),
+                edit,
+                json!({"action": "tests.run"}),
+                json!({}),
+                json!({"action": "repository.merge"}),
+                json!({}),
+            ],
+            max_steps: 10,
+            nothing_admissible: false,
+        },
+        std::sync::Arc::new(b10x_loom_intake_slice::executor::UnconfinedRunner),
+        inputs,
+    );
+    assert_picked(&output, SOFTWARE_CHANGE);
+    assert_eq!(
+        steps(&output),
+        [
+            "implementation.edit",
+            "tests.run",
+            "implementation.edit",
+            "tests.run"
+        ],
+        "{output}"
+    );
+    let refused: Vec<&str> = output
+        .lines()
+        .filter(|line| line.trim_start().starts_with("effect: refused:"))
+        .collect();
+    assert_eq!(
+        refused.len(),
+        1,
+        "only the edit before the failing test is refused: {output}"
+    );
+    let lines: Vec<&str> = output.lines().collect();
+    let first_step = lines
+        .iter()
+        .position(|line| line.starts_with("step 1: "))
+        .expect("a first step");
+    assert!(
+        lines[first_step + 1..]
+            .iter()
+            .take_while(|line| !line.starts_with("step 2: "))
+            .any(|line| line.trim_start().starts_with("effect: refused:")),
+        "the refused step is the first edit: {output}"
+    );
+    assert_eq!(
+        count_lines(&output, "evidence: test_result fail"),
+        1,
+        "{output}"
+    );
+    assert_eq!(
+        count_lines(&output, "evidence: test_result pass"),
+        1,
+        "{output}"
+    );
+    assert_stopped(&output, "stopped: ApprovalRequired (repository.merge)");
+    assert_eq!(run.stop_reason, StopReason::ApprovalRequired);
+    assert_eq!(
+        fixture
+            .git(&["rev-list", "--count", &format!("{first}..HEAD")])
+            .trim(),
+        "1",
+        "only the edit after the failing test committed: {output}"
+    );
+    assert_eq!(fixture.git(&["show", "HEAD:check.txt"]), "fixed\n");
+}
+
+/// The rule for an action the slice can never perform (`release.rollback`, which needs a capability
+/// and which neither a run's effects nor a resume's hand-off performs): it follows the rule of an
+/// action the effects do not perform, and is never in the frontier the run reads
+/// (`run::never_performed`). The agent is never offered it, a proposal of it is refused as any
+/// action outside the frontier is, and the run neither awaits approval for it nor stops at a gate
+/// it would make: an inspection that leaves the frontier unchanged goes on.
+#[test]
+fn the_run_never_offers_or_awaits_release_rollback() {
+    let fixture = Fixture::new("rollback");
+    let (run, output, _, _, requests) = drive_with_inputs(
+        &fixture,
+        Row {
+            name: "an agent that proposes a rollback",
+            pick: pick(SOFTWARE_CHANGE, 0.9),
+            agent: vec![
+                json!({"action": "release.rollback"}),
+                json!({"action": "repository.inspect"}),
+                json!({"paths": ["check.txt"]}),
+                json!({"action": "implementation.edit"}),
+                json!({
+                    "files": [{"path": "check.txt", "contents": "fixed\n"}],
+                    "message": "fix the check"
+                }),
+                json!({"action": "tests.run"}),
+                json!({}),
+                json!({"action": "repository.merge"}),
+                json!({}),
+            ],
+            max_steps: 10,
+            nothing_admissible: false,
+        },
+        std::sync::Arc::new(b10x_loom_intake_slice::executor::UnconfinedRunner),
+        run_inputs(&[]),
+    );
+    assert!(
+        requests[0].contains("repository.inspect") && !requests[0].contains("release.rollback"),
+        "the first selection offers the frontier without the rollback: {}",
+        requests[0]
+    );
+    assert_eq!(
+        steps(&output),
+        [
+            "release.rollback",
+            "repository.inspect",
+            "implementation.edit",
+            "tests.run"
+        ],
+        "{output}"
+    );
+    assert_eq!(
+        count_starting(&output, "effect: refused:"),
+        1,
+        "the proposed rollback is refused, never awaited: {output}"
+    );
+    assert!(
+        !output.contains("ApprovalRequired (release.rollback)"),
+        "{output}"
+    );
+    assert_stopped(&output, "stopped: ApprovalRequired (repository.merge)");
+    assert_eq!(run.stop_reason, StopReason::ApprovalRequired);
+    assert_eq!(run.steps, 4);
+}
+
 /// Runs the slice for `row` on `fixture`; returns the run, its output and the frontiers issued.
 fn drive(fixture: &Fixture, row: Row) -> (b10x_loom_intake_slice::run::SliceRun, String, usize) {
     let (slice, output, frontiers, _) = drive_observed(fixture, row);
@@ -629,6 +789,36 @@ fn drive_with_runner(
     usize,
     Vec<ObservationData>,
 ) {
+    let (slice, output, frontiers, observations, _) =
+        drive_with_inputs(fixture, row, runner, run_inputs(&[]));
+    (slice, output, frontiers, observations)
+}
+
+/// The case inputs `b10x-loom run` gives the case for `flags`, parsed by its own command line.
+fn run_inputs(flags: &[&str]) -> CaseInputs {
+    let mut argv = vec!["b10x-loom", "run", "--workspace", "."];
+    argv.extend_from_slice(flags);
+    argv.push(INTENT);
+    match Cli::try_parse_from(argv).expect("the flags parse").command {
+        CliCommand::Run(run) => run.inputs(),
+        _ => panic!("`run` parses as the run command"),
+    }
+}
+
+/// [`drive_with_runner`] with the case `inputs`, also returning every request the agent was asked,
+/// as JSON, in order.
+fn drive_with_inputs(
+    fixture: &Fixture,
+    row: Row,
+    runner: std::sync::Arc<dyn b10x_loom_intake_slice::confinement::TestRunner>,
+    inputs: CaseInputs,
+) -> (
+    b10x_loom_intake_slice::run::SliceRun,
+    String,
+    usize,
+    Vec<ObservationData>,
+    Vec<String>,
+) {
     let classifier = Recorded::new("recorded-classifier", vec![row.pick]);
     let agent = Recorded::new("recorded-agent", row.agent);
     let governor = CanonGovernor::new(MemoryCaseStore::default());
@@ -644,6 +834,8 @@ fn drive_with_runner(
         test: TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
         max_steps: row.max_steps,
         threshold: THRESHOLD,
+        inputs,
+        test_paths: b10x_loom_intake_slice::test_paths::TestPaths::default(),
     };
     let mut out = Vec::new();
     let result = run(
@@ -671,7 +863,13 @@ fn drive_with_runner(
     );
     assert_references(&output, row.name);
     let issued = frontiers.issued.load(Ordering::SeqCst);
-    (slice, output, issued, governor.observations())
+    (
+        slice,
+        output,
+        issued,
+        governor.observations(),
+        agent.requests(),
+    )
 }
 
 /// The references the intent holds are printed first, in order, one line each.
@@ -793,6 +991,8 @@ struct Recorded {
     capabilities: Capabilities,
     script: Mutex<VecDeque<Value>>,
     asked: AtomicUsize,
+    /// Every request the model was asked, as JSON, in order.
+    requests: Mutex<Vec<String>>,
 }
 
 impl Recorded {
@@ -814,7 +1014,12 @@ impl Recorded {
             },
             script: Mutex::new(script.into()),
             asked: AtomicUsize::new(0),
+            requests: Mutex::new(Vec::new()),
         }
+    }
+
+    fn requests(&self) -> Vec<String> {
+        self.requests.lock().expect("requests").clone()
     }
 
     fn remaining(&self) -> usize {
@@ -857,6 +1062,10 @@ impl Model for Recorded {
                     self.provenance.model.as_str()
                 );
             };
+            self.requests
+                .lock()
+                .expect("requests")
+                .push(serde_json::to_string(request).expect("a request is JSON"));
             let asked = self.asked.fetch_add(1, Ordering::SeqCst) + 1;
             Ok(TurnOutcome {
                 stop_reason: TurnStop::ToolCalls,
@@ -953,7 +1162,7 @@ fn adversary_the_gate_stops_before_the_budget_on_the_last_step() {
             agent: vec![
                 json!({"action": "repository.inspect"}),
                 json!({"paths": ["check.txt"]}),
-                json!({"action": "repository.edit"}),
+                json!({"action": "implementation.edit"}),
                 json!({
                     "files": [{"path": "check.txt", "contents": "fixed\n"}],
                     "message": "fix the check"
@@ -971,7 +1180,7 @@ fn adversary_the_gate_stops_before_the_budget_on_the_last_step() {
         steps(&output),
         [
             "repository.inspect",
-            "repository.edit",
+            "implementation.edit",
             "tests.run",
             "tests.run"
         ],

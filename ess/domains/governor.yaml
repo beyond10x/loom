@@ -9,8 +9,9 @@ domain: loom.governor
 
 summary: >-
   The governor's held case as a store writes it: the case id, the protocol that governs it, the
-  case revision, the current revision of every declared artifact, and every evidence record
-  received with whether it applies; and the observations kept beside the cases.
+  case revision, the current revision of every declared artifact, the value of every case input
+  the protocol declares, and every evidence record received with whether it applies; and the
+  observations kept beside the cases.
 
 naming:
   wire: governor
@@ -63,9 +64,26 @@ types:
       - name: applies
         type: Boolean
 
+  # The value of one case input the case's protocol declares (`risk: standard`), as the host
+  # supplied it when the case opened. Fixed for the life of the case.
+  - name: loom.governor.StoredInput
+    kind: struct
+    fields:
+      - name: input
+        type: String
+      - name: value
+        type: String
+
   # One held case. `protocol` is the registered name, `<name>@<major>`; `revision` is 1 when
   # opened and one more with each artifact revision recorded; `artifacts` are in artifact order;
-  # `evidence` is every record received, in the order received.
+  # `inputs` are the value of every case input the protocol declares, in input order, and empty
+  # for a protocol that declares none; `evidence` is every record received, in the order
+  # received. A case stored without `inputs` is not read: the store reports it as a failure
+  # naming the case, and never fills the inputs in. Nor is one whose `inputs` do not satisfy its
+  # protocol, checked as at opening: a declared input missing (an empty list for a protocol that
+  # declares inputs included), an input given twice, one the protocol does not declare, or a
+  # value its input does not list. Such a case is a store failure naming the case and the input;
+  # it is never decided and its inputs are never reported.
   - name: loom.governor.StoredCase
     kind: struct
     fields:
@@ -77,6 +95,8 @@ types:
         type: Integer
       - name: artifacts
         type: List<loom.governor.StoredArtifact>
+      - name: inputs
+        type: List<loom.governor.StoredInput>
       - name: evidence
         type: List<loom.governor.StoredEvidence>
 

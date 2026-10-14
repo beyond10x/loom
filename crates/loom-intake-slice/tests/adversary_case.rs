@@ -36,7 +36,14 @@ fn adversary_intent_revision_is_the_documented_sha256_literal() {
     let workspace = Repo::new("intent-literal");
     workspace.commit("README.md", "first\n");
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let opened = case::open(&governor, PICK, INTENT, workspace.path()).expect("the case opens");
+    let opened = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        workspace.path(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("the case opens");
     assert_eq!(
         governor.revisions(&opened).expect("held")["intent"],
         format!("intent-sha256-{INTENT_SHA256}"),
@@ -55,7 +62,13 @@ fn adversary_a_plain_directory_inside_another_repository_has_no_head() {
     std::fs::create_dir_all(&inner).expect("create the inner directory");
 
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let result = case::open(&governor, PICK, INTENT, &inner);
+    let result = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        &inner,
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    );
     let leaked = result
         .as_ref()
         .ok()
@@ -88,7 +101,13 @@ fn adversary_a_bare_repository_is_not_a_workspace() {
     let _bare = Cleanup(bare.clone());
 
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let result = case::open(&governor, PICK, INTENT, &bare);
+    let result = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        &bare,
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    );
     assert!(
         matches!(result, Err(CaseError::Workspace { .. })),
         "a bare repository is not a workspace; it opened {result:?}"
@@ -147,8 +166,14 @@ fn adversary_git_dir_child_process() {
         return;
     };
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let opened = case::open(&governor, PICK, INTENT, Path::new(&workspace))
-        .expect("the case opens on the workspace");
+    let opened = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        Path::new(&workspace),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("the case opens on the workspace");
     let other = std::env::var(CHILD_OTHER_HEAD).unwrap_or_default();
     assert_eq!(
         governor.revisions(&opened).expect("held")["implementation"],
@@ -165,7 +190,14 @@ fn adversary_report_head_when_head_stays_and_when_it_moves_back() {
     workspace.commit("README.md", "first\n");
     let first = workspace.head();
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let opened = case::open(&governor, PICK, INTENT, workspace.path()).expect("opens");
+    let opened = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        workspace.path(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("opens");
     assert_eq!(governor.current_revision(&opened).expect("held"), 1);
 
     assert_eq!(
@@ -223,8 +255,14 @@ fn adversary_every_registry_protocol_opens_on_a_git_workspace() {
                 (artifact.as_str().to_owned(), revision)
             })
             .collect();
-        let opened = case::open(&governor, &pick, INTENT, workspace.path())
-            .unwrap_or_else(|error| panic!("{pick} opens: {error}"));
+        let opened = case::open(
+            &governor,
+            &pick,
+            INTENT,
+            workspace.path(),
+            &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+        )
+        .unwrap_or_else(|error| panic!("{pick} opens: {error}"));
         assert_eq!(
             governor.revisions(&opened).expect("held"),
             expected,
@@ -260,7 +298,13 @@ fn adversary_malformed_picks_are_refused_before_git_runs() {
         "no-such-protocol@1",
         "software-change@4294967296",
     ] {
-        let result = case::open(&governor, pick, INTENT, &not_a_repository);
+        let result = case::open(
+            &governor,
+            pick,
+            INTENT,
+            &not_a_repository,
+            &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+        );
         assert!(
             matches!(&result, Err(CaseError::UnknownProtocol { pick: named, .. }) if named == pick),
             "`{pick}` is refused as an unknown protocol: {result:?}"
@@ -275,13 +319,25 @@ fn adversary_head_boundaries() {
 
     let unborn = Repo::new("unborn");
     assert!(matches!(
-        case::open(&governor, PICK, INTENT, unborn.path()),
+        case::open(
+            &governor,
+            PICK,
+            INTENT,
+            unborn.path(),
+            &b10x_loom_intake_slice::case::RUN_DEFAULTS
+        ),
         Err(CaseError::Workspace { .. })
     ));
 
     let missing = scratch("missing");
     assert!(matches!(
-        case::open(&governor, PICK, INTENT, &missing),
+        case::open(
+            &governor,
+            PICK,
+            INTENT,
+            &missing,
+            &b10x_loom_intake_slice::case::RUN_DEFAULTS
+        ),
         Err(CaseError::Workspace { .. })
     ));
 
@@ -293,7 +349,14 @@ fn adversary_head_boundaries() {
         detached.path(),
         &["checkout", "--quiet", "--detach", &first],
     );
-    let opened = case::open(&governor, PICK, INTENT, detached.path()).expect("opens detached");
+    let opened = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        detached.path(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("opens detached");
     assert_eq!(
         governor.revisions(&opened).expect("held")["implementation"],
         first

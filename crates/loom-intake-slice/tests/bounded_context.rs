@@ -102,7 +102,7 @@ fn long_workflow(policy: ContextPolicy) -> WorkflowOutcome {
         }));
         script.push(reply("select_action", |request| {
             assert_retrieved_failure(request);
-            json!({"action": "repository.edit"})
+            json!({"action": "implementation.edit"})
         }));
         script.push(args(json!({"$list_history": 0})));
         script.push(reply("action_arguments", |request| {
@@ -117,7 +117,7 @@ fn long_workflow(policy: ContextPolicy) -> WorkflowOutcome {
             json!({"$list_results": 0})
         }));
     } else {
-        script.push(select("repository.edit"));
+        script.push(select("implementation.edit"));
     }
     let suffix_start = original.find("status=broken").unwrap();
     script.push(reply("action_arguments", move |request| {
@@ -135,7 +135,7 @@ fn long_workflow(policy: ContextPolicy) -> WorkflowOutcome {
     script.extend([
         select("tests.run"),
         args(json!({})),
-        select("repository.edit"),
+        select("implementation.edit"),
     ]);
     let revised = final_file.clone();
     script.push(reply("action_arguments", move |request| {
@@ -381,12 +381,12 @@ fn history_retrieval_cannot_bypass_an_approval_requirement_changed_after_generat
         select("repository.inspect"),
         args(json!({"paths": ["check.txt"]})),
         args_for("select_action", json!({"$list_history": 0})),
-        select("repository.edit"),
+        select("implementation.edit"),
         reply("action_arguments", move |_| {
             trigger.store(true, Ordering::SeqCst);
             json!({"files": [{"path": "check.txt", "contents": "status=fixed\n"}]})
         }),
-        select("repository.edit"),
+        select("implementation.edit"),
         args(json!({"files": [{"path": "check.txt", "contents": "status=fixed\n"}]})),
     ]);
     let governor = CanonGovernor::new(MemoryCaseStore::default());
@@ -424,7 +424,7 @@ fn a_ninth_lookup_stops_selection_or_refuses_arguments_without_another_lookup() 
         let workspace = Workspace::new("status=broken\n");
         let mut script = Vec::new();
         if stage == "action_arguments" {
-            script.push(select("repository.edit"));
+            script.push(select("implementation.edit"));
         }
         script.extend((0..9).map(|_| args_for(stage, json!({"$list_history": 0}))));
         if stage == "action_arguments" {
@@ -474,7 +474,7 @@ fn a_ninth_lookup_stops_selection_or_refuses_arguments_without_another_lookup() 
 fn final_step_capacity_failure_preserves_completed_effects_and_writes_the_report() {
     let workspace = Workspace::new("status=broken\n");
     let agent = Recorded::new(vec![
-        select("repository.edit"),
+        select("implementation.edit"),
         args(json!({"files": [{"path": "check.txt", "contents": "status=fixed\n"}]})),
         select("repository.inspect"),
         args(json!({"paths": vec!["check.txt"; 1025]})),
@@ -501,7 +501,7 @@ fn final_step_capacity_failure_preserves_completed_effects_and_writes_the_report
     );
     assert_eq!(workspace.read(), "status=fixed\n");
     let output = String::from_utf8(output).unwrap();
-    assert!(output.contains("step 1: repository.edit"));
+    assert!(output.contains("step 1: implementation.edit"));
     assert!(output.contains("step 2: repository.inspect"));
     assert!(output.contains("status=fixed"));
     agent.assert_consumed();
@@ -579,6 +579,8 @@ fn request(workspace: &Workspace, max_steps: usize) -> SliceRequest {
         test: TestCommand::new("grep", ["-q", "status=fixed", "check.txt"]),
         max_steps,
         threshold: 0.5,
+        inputs: b10x_loom_intake_slice::case::RUN_DEFAULTS,
+        test_paths: b10x_loom_intake_slice::test_paths::TestPaths::default(),
     }
 }
 
@@ -821,9 +823,9 @@ impl Governor for ApprovalAfterGeneration<'_> {
         let mut data = self.governor.frontier(case)?.into_data();
         if self.gate.load(Ordering::SeqCst) {
             for action in &mut data.actions {
-                if action.action == "repository.edit" {
+                if action.action == "implementation.edit" {
                     action.status = ActionStatus::ApprovalRequired;
-                    action.capability = Some("fixture.repository.edit".into());
+                    action.capability = Some("fixture.implementation.edit".into());
                     action.reasons = vec!["fixture now requires operator approval".into()];
                 }
             }

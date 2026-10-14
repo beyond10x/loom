@@ -22,7 +22,9 @@ use b10x_loom_commission::model::responsibility::{
 };
 use b10x_loom_commission::ports::evidence::{ObservationPort as _, submit_evidence};
 use b10x_loom_commission::ports::governor::Governor as _;
-use loom_governor::{CanonGovernor, FallibleCaseStore, FileCaseStore, MemoryCaseStore, OpenError};
+use loom_governor::{
+    CanonGovernor, CaseInputs, FallibleCaseStore, FileCaseStore, MemoryCaseStore, OpenError,
+};
 use serde_json::Value;
 
 const PROTOCOL: &str = "software-change@1";
@@ -63,6 +65,12 @@ fn a_case_survives_a_process_restart() {
     assert!(
         after.contains("current_revision: 2"),
         "the artifact revision was recorded:\n{after}"
+    );
+    assert!(
+        after.contains(
+            r#"inputs: [("affects_security_boundary", "false"), ("change_kind", "refactor"), ("risk", "standard")]"#
+        ),
+        "the case inputs it opened with outlive the process:\n{after}"
     );
     assert!(
         after.contains("ApprovalRequired"),
@@ -119,7 +127,7 @@ fn read_case(dir: &Path) {
 /// revision and an observation.
 fn script<S: FallibleCaseStore>(governor: &CanonGovernor<S>) -> CaseId {
     let case = governor
-        .open(PROTOCOL, fixture_revisions())
+        .open(PROTOCOL, fixture_revisions(), fixture_inputs())
         .expect("a case with every declared artifact opens");
     let mut ids = Ids::default();
 
@@ -164,12 +172,14 @@ fn record<S: FallibleCaseStore>(governor: &CanonGovernor<S>, case: &CaseId, path
     let frontier = governor.frontier(case).expect("frontier").into_data();
     let completion = governor.completion(case).expect("completion");
     let revisions = governor.revisions(case).expect("revisions");
+    let inputs = governor.inputs(case).expect("inputs");
     let evidence = governor.evidence(case).expect("evidence");
     let observations = governor.try_observations().expect("observations");
     writeln!(out, "current_revision: {revision}").unwrap();
     writeln!(out, "frontier: {frontier:#?}").unwrap();
     writeln!(out, "completion: {completion:?}").unwrap();
     writeln!(out, "revisions: {revisions:#?}").unwrap();
+    writeln!(out, "inputs: {:?}", inputs.iter().collect::<Vec<_>>()).unwrap();
     writeln!(out, "evidence: {evidence:#?}").unwrap();
     writeln!(out, "observations: {observations:#?}").unwrap();
     std::fs::write(path, out).expect("the answers are written");
@@ -188,7 +198,7 @@ fn a_failed_write_is_an_error_and_leaves_the_case_as_it_was() {
     let dir = store_dir("failed-write");
     let governor = CanonGovernor::new(FileCaseStore::open(&dir).expect("the store opens"));
     let case = governor
-        .open(PROTOCOL, fixture_revisions())
+        .open(PROTOCOL, fixture_revisions(), fixture_inputs())
         .expect("the case opens");
     let before = governor.current_revision(&case).expect("current revision");
     let frontier = governor.frontier(&case).expect("frontier").into_data();
@@ -203,7 +213,7 @@ fn a_failed_write_is_an_error_and_leaves_the_case_as_it_was() {
     let mut ids = Ids::default();
     let evidence = governor_evidence(&case, &mut ids, before);
     let submitted = submit_evidence(&governor, PRODUCER, evidence);
-    let opened = governor.open(PROTOCOL, fixture_revisions());
+    let opened = governor.open(PROTOCOL, fixture_revisions(), fixture_inputs());
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     assert!(
@@ -242,7 +252,7 @@ fn an_unreadable_case_file_is_an_error_never_a_panic() {
     let dir = store_dir("unreadable");
     let governor = CanonGovernor::new(FileCaseStore::open(&dir).expect("the store opens"));
     let case = governor
-        .open(PROTOCOL, fixture_revisions())
+        .open(PROTOCOL, fixture_revisions(), fixture_inputs())
         .expect("the case opens");
     let files: Vec<String> = file_names(&dir)
         .into_iter()
@@ -268,6 +278,51 @@ fn an_unreadable_case_file_is_an_error_never_a_panic() {
     assert!(
         store.get(&case).is_err(),
         "the unreadable file is left as it was"
+    );
+}
+
+/// A case stored without `inputs`, as Loom 0.19.0 wrote every case, is the store's failure naming
+/// the case, never a case read with its inputs filled in; the governor answers it unavailable.
+#[test]
+fn a_case_stored_without_its_inputs_is_refused_naming_it() {
+    let dir = store_dir("no-inputs");
+    let governor = CanonGovernor::new(FileCaseStore::open(&dir).expect("the store opens"));
+    let case = governor
+        .open(PROTOCOL, fixture_revisions(), fixture_inputs())
+        .expect("the case opens");
+    let files: Vec<String> = file_names(&dir)
+        .into_iter()
+        .filter(|name| name.starts_with("case-"))
+        .collect();
+    assert_eq!(files.len(), 1, "one file per case: {files:?}");
+    let path = dir.join(&files[0]);
+    let mut document: Value = serde_json::from_str(&read(&path)).expect("the case is JSON");
+    assert_eq!(
+        document["inputs"],
+        serde_json::json!([
+            {"input": "affects_security_boundary", "value": "false"},
+            {"input": "change_kind", "value": "refactor"},
+            {"input": "risk", "value": "standard"},
+        ]),
+        "the store writes every input, in input order"
+    );
+    document
+        .as_object_mut()
+        .expect("an object")
+        .remove("inputs");
+    std::fs::write(&path, document.to_string()).unwrap();
+
+    let error = FileCaseStore::open(&dir)
+        .expect("the store opens")
+        .get(&case)
+        .expect_err("a case without inputs is not read");
+    assert!(
+        error.problem.contains(&format!("case `{}`", case.0)) && error.problem.contains("inputs"),
+        "the failure names the case and the missing inputs: {error}"
+    );
+    assert_eq!(
+        governor.current_revision(&case),
+        Err(GovernorError::GovernorUnavailable)
     );
 }
 
@@ -389,6 +444,14 @@ fn sample_state(case: &CaseId) -> loom_governor::CaseState {
         protocol: PROTOCOL.to_owned(),
         revision: 1,
         artifacts: BTreeMap::from([("intent".to_owned(), "i1".to_owned())]),
+        // Every input `software-change@1` declares: a stored case whose inputs do not satisfy its
+        // protocol is not read back.
+        inputs: CaseInputs::try_from_pairs([
+            ("risk", "standard"),
+            ("change_kind", "feature"),
+            ("affects_security_boundary", "false"),
+        ])
+        .expect("distinct inputs"),
         evidence: Vec::new(),
     }
 }
@@ -467,13 +530,35 @@ fn read(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
 }
 
-/// The `chg-1842` fixture's artifact revisions.
-fn fixture_revisions() -> BTreeMap<String, String> {
+/// The `chg-1842` fixture.
+fn fixture() -> Value {
     let manifest = std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR");
     let path = PathBuf::from(manifest).join("tests/fixtures/chg-1842.fixture.yaml");
     let fixture: Value = serde_yaml_ng::from_str(&read(&path)).expect("the fixture reads");
     assert_eq!(fixture["id"], "chg-1842");
-    fixture["case"]["artifacts"]
+    fixture
+}
+
+/// The `chg-1842` fixture's case inputs; a value YAML reads as a boolean is its text.
+fn fixture_inputs() -> CaseInputs {
+    let pairs: Vec<(String, String)> = fixture()["case"]["inputs"]
+        .as_object()
+        .expect("case inputs")
+        .iter()
+        .map(|(input, value)| {
+            let value = match value {
+                Value::String(text) => text.clone(),
+                other => other.to_string(),
+            };
+            (input.clone(), value)
+        })
+        .collect();
+    CaseInputs::try_from_pairs(pairs).expect("distinct inputs")
+}
+
+/// The `chg-1842` fixture's artifact revisions.
+fn fixture_revisions() -> BTreeMap<String, String> {
+    fixture()["case"]["artifacts"]
         .as_object()
         .expect("case artifacts")
         .iter()

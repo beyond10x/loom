@@ -206,7 +206,7 @@ mod tests {
             },
             Vec::new(),
         );
-        context.append("repository.edit", "{}".into(), report, Vec::new());
+        context.append("implementation.edit", "{}".into(), report, Vec::new());
         let first = context.text();
         let stable = first.split("\nCurrent working state:").next().unwrap();
         let report = context.observe(
@@ -215,7 +215,7 @@ mod tests {
             },
             Vec::new(),
         );
-        context.append("repository.edit", "{}".into(), report, Vec::new());
+        context.append("implementation.edit", "{}".into(), report, Vec::new());
         let second = context.text();
         assert!(second.starts_with(stable));
         assert!(second.contains("\"latest_revision\":\"B\""));

@@ -20,7 +20,7 @@
 //!
 //! `tests/fixtures/inc-492.fixture.yaml` is a byte-for-byte copy of
 //! `fixtures/incident-response/inc-492.fixture.yaml` in beyond10x/engineering-protocols at tag
-//! `0.3.0`, the release this crate depends on; `b10x-canon-engineering` does not expose its
+//! `0.7.0`, the release this crate depends on; `b10x-canon-engineering` does not expose its
 //! fixtures.
 
 use std::collections::BTreeMap;
@@ -59,7 +59,11 @@ fn leaving_emergency_mode_keeps_the_investigation_open_until_the_cause_is_identi
     let fixture = Fixture::load();
     let governor = CanonGovernor::new(MemoryCaseStore::default());
     let case = governor
-        .open(PROTOCOL, fixture.revisions())
+        .open(
+            PROTOCOL,
+            fixture.revisions(),
+            loom_governor::CaseInputs::none(),
+        )
         .expect("the fixture's case opens on incident.response/1");
     let commission = commission(&case);
     let mut ids = Ids::default();

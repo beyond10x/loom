@@ -43,7 +43,7 @@ fn run_with_state_holds_a_suspension_on_a_withheld_approval() {
     let scratch = Scratch::new("holds");
     let (base_url, server) = Script::serve(vec![
         classify("software-change@1"),
-        agent("select_action", json!({"action": "repository.edit"})),
+        agent("select_action", json!({"action": "implementation.edit"})),
         agent(
             "action_arguments",
             json!({
@@ -111,6 +111,11 @@ fn run_with_state_holds_a_suspension_on_a_withheld_approval() {
         "{context:?}"
     );
     assert_eq!(context.test_command, ["grep", "-qx", "fixed", "check.txt"]);
+    assert_eq!(
+        context.test_paths,
+        b10x_loom_intake_slice::test_paths::TestPaths::DEFAULTS,
+        "the context keeps the test-path patterns the run held tests.write to"
+    );
     assert_eq!(context.max_steps, 6);
     assert_eq!(context.confinement, Backend::None);
     assert_eq!(context.cgroup_root, None);

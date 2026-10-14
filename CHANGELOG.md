@@ -6,6 +6,87 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- Case inputs: a case opens with the value of every case input its protocol declares, given by
+  the host as trusted context and never by a model (`loom_governor::CaseInputs`, re-exported by
+  `loom_sdk`). `software-change@1` declares `risk` (`trivial`, `standard`, `elevated`,
+  `critical`), `change_kind` (`feature`, `bugfix`, `refactor`) and `affects_security_boundary`
+  (`true`, `false`); `incident-response@1`, `system-query@1` and `inbound-answer@1` declare none
+  and open with `CaseInputs::none()`. Canon decides each evaluation with them, and
+  `CanonGovernor::inputs` returns them.
+- `b10x-loom run --risk <trivial|standard|elevated|critical>` (default `standard`),
+  `--change-kind <feature|bugfix|refactor>` (default `feature`) and
+  `--affects-security-boundary <true|false>` (default `false`) give a software change its inputs
+  (`intake.routing.CaseInputs`; `b10x_loom_intake_slice::case::RUN_DEFAULTS`). With the defaults a
+  run reaches the outcomes it reached in 0.19.0; with `--change-kind bugfix` an
+  `implementation.edit` is admissible only once a test failed on the current revision.
+- The specification's `intake.routing.SliceRun` declares the run's `risk`, `change_kind` and
+  `affects_security_boundary`, the inputs of its request; the slice's `run::SliceRun` leaves them
+  with the request the caller holds, as it leaves `run_id`. A resume's request carries the inputs
+  the held case opened with, read from the governor.
+- `tests.write` writes only test paths: the slice performs it only when every path it changes
+  matches one of the host's test-path patterns, and otherwise refuses it before anything is
+  written or committed, naming the first path outside them (`executor::ExecuteError::NotATestPath`,
+  a refused step the agent is told about). The rule holds for every change kind, so a bugfix
+  cannot change its implementation through `tests.write` before a test failed;
+  `implementation.edit` is not restricted. The patterns are the host's trusted context:
+  `b10x-loom run --test-path <GLOB>`, repeatable, replacing the defaults `tests/**`,
+  `**/tests/**`, `test/**`, `**/test/**`, `**/*_test.*`, `**/test_*.*`, `**/*.test.*` and
+  `**/*.spec.*` (`test_paths::TestPaths`, `LocalExecutor::with_test_paths`). The specification
+  declares them as `intake.routing.SliceRun.test_paths`, and `intake.routing.ResumeContext` keeps
+  them, so a resume holds `tests.write` to the same paths.
+- `CanonGovernor::protocol` names the protocol a case is held under.
+
+### Changed
+
+- Loom builds on `b10x-canon-engineering` `0.7.0` and `b10x-canon` `0.4.0` (was `0.3.0` and
+  `0.1.0`); `Cargo.lock` holds one copy of each. A consumer that adds Canon itself moves to
+  `tag = "0.4.0"`. `loom-protocols` records revision `0.7.0`, and the bundled catalogue gains
+  `ml-experiment@1`, which no slice executes (`NoLocalExecutor`).
+- Breaking: `CanonGovernor::open` and `open_case` take the case inputs as a third argument, and
+  refuse, before anything is stored, an input the protocol does not declare
+  (`OpenError::UndeclaredInput`), a value its input does not list
+  (`OpenError::UnlistedInputValue`) and a declared input left out (`OpenError::MissingInput`),
+  each naming the input; an exhaustive match of `OpenError` adds the three. `CaseState` gains
+  `inputs`. `case::open` and `case::open_with_catalog` take the host's `CaseInputs`, and
+  `SliceRequest` and `IntentRequest` gain `inputs` and `test_paths`.
+- Breaking: `CaseInputs` refuses a second value for one input, never replacing the first:
+  `CaseInputs::with` returns `Result<CaseInputs, OpenError>`, `FromIterator` is replaced by
+  `CaseInputs::try_from_pairs`, and `OpenError` gains `RepeatedInput` (an exhaustive match adds
+  it). `case::governed_inputs` returns a `Result`.
+- Breaking: a held case whose inputs do not satisfy its protocol (a declared input missing, an
+  empty list included, an undeclared one, an unlisted value) is never decided: every read of it
+  through the governor (`frontier`, `completion`, `current_revision`, `revisions`, `inputs`,
+  `evidence`, evidence received) answers `GovernorUnavailable`, and `FileCaseStore` refuses to
+  read such a case of a built-in protocol as a store failure naming the case and the input. A
+  case of a protocol the governor no longer has registered is likewise `GovernorUnavailable` on
+  every read.
+- Breaking: `intent::resumed_request` takes the governor, and its request carries the held case's
+  inputs (was the run defaults). A resume context without `test_paths`, as 0.19.0 wrote every
+  one, is refused as a state failure, like the case 0.19.0 stored beside it.
+- Breaking: `loom.governor`'s `StoredCase` gains `inputs`, a list of `{input, value}`.
+  `FileCaseStore` refuses a case file without it as a store failure naming the case (`case <id>
+  does not read: ...`), never filling in defaults: a state directory 0.19.0 wrote a case into is
+  not resumed by this release; start a new run.
+- Breaking: the slice performs `tests.write` and `implementation.edit`, the two write actions of
+  `software.change/1`, where it performed `repository.edit`, with the same effect (a committed
+  write reporting the new `HEAD`); the selector's prompt and argument schema name both, and
+  `executor::EDIT` is replaced by `TESTS_WRITE` and `IMPLEMENTATION_EDIT`. Scripts and
+  hosts that name `repository.edit` name one of them.
+- An obligation is open only when Canon reports it `open`: one the case's inputs do not select
+  (`not_applicable`) is not reported owed (`FrontierObligation.open`, `DecidedObligation.open`).
+  With the default inputs `red_first.required` and `security_review.required` do not apply; where
+  they apply they stay open, since the slice submits no regression test result or security
+  review.
+- The slice reads a software change's frontier without the actions it can never perform
+  (`run::never_performed`, `run::PERFORMED`, `run::SliceReads` for an embedder's own loop):
+  `release.rollback`, new on that frontier, is never offered to the agent, never awaited at an
+  approval gate and never held as a Suspension; a proposal of it is refused as not in the
+  frontier. `SliceReads` reads a `CanonGovernor` and filters only a `software-change@1` case's
+  frontier: on any other protocol (an incident's `release.rollback`, `traffic.shift`) it passes
+  the frontier through unchanged.
+
 ## [0.19.0] - 2026-10-13
 
 Loom 0.19.0 lets a host settle a hold before anything is held. Commission's `HoldSuspension` gains

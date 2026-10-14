@@ -46,6 +46,15 @@ impl ProtocolEntry {
             .map(|(id, item)| (id.to_string(), item.description.clone().unwrap_or_default()))
             .collect()
     }
+    /// The case inputs this definition declares, in declaration order; empty when it declares
+    /// none.
+    pub fn inputs(&self) -> Vec<String> {
+        self.model
+            .case
+            .as_ref()
+            .map(|case| case.inputs.ids().map(ToString::to_string).collect())
+            .unwrap_or_default()
+    }
     /// Require the exact clock contract supported by the local host, irrespective of naming.
     /// Descriptive text and protocol header identity do not affect execution semantics.
     pub fn clock_compatible(&self) -> Result<(), String> {
@@ -132,7 +141,7 @@ impl ProtocolCatalog {
                 ProtocolSource {
                     kind: SourceKind::Engineering,
                     location: "engineering-protocols".into(),
-                    revision: "0.3.0".into(),
+                    revision: "0.7.0".into(),
                     path: format!("protocols/{name}/{major}.yaml"),
                 },
             )?;

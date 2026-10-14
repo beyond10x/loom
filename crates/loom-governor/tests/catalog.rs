@@ -43,17 +43,26 @@ fn host_catalog_definitions_open_and_project_without_builtin_special_cases() {
         .open(
             "custom-clock@1",
             BTreeMap::from([("intent".into(), "query-1".into())]),
+            loom_governor::CaseInputs::none(),
         )
         .unwrap();
     let frontier = governor.frontier(&case).unwrap().into_data();
     assert_eq!(frontier.actions.len(), 1);
     assert_eq!(frontier.actions[0].action, "system.time.read");
     assert!(matches!(
-        governor.open("software-change@1", BTreeMap::new()),
+        governor.open(
+            "software-change@1",
+            BTreeMap::new(),
+            software_change_inputs()
+        ),
         Err(OpenError::UnknownProtocol { .. })
     ));
     assert!(matches!(
-        governor.open("custom-clock@2", BTreeMap::new()),
+        governor.open(
+            "custom-clock@2",
+            BTreeMap::new(),
+            loom_governor::CaseInputs::none()
+        ),
         Err(OpenError::UnknownProtocol { .. })
     ));
 }
@@ -125,4 +134,14 @@ fn case_initializer_must_use_the_same_definition_bytes_as_the_governor() {
         governor.validate_catalog(&ProtocolCatalog::engineering().unwrap()),
         Err(OpenError::InvalidProtocol { .. })
     ));
+}
+
+/// The case inputs a `software-change@1` case opens with here: Loom's run defaults.
+fn software_change_inputs() -> loom_governor::CaseInputs {
+    loom_governor::CaseInputs::try_from_pairs([
+        ("risk", "standard"),
+        ("change_kind", "feature"),
+        ("affects_security_boundary", "false"),
+    ])
+    .expect("distinct inputs")
 }

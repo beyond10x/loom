@@ -42,7 +42,7 @@ const INTENT: &str = "Fix the check in check.txt and verify the change.";
 fn to_the_merge_gate() -> Vec<(&'static str, Value)> {
     [
         action("tests.run", json!({})),
-        action("repository.edit", edit("fixed\n")),
+        action("implementation.edit", edit("fixed\n")),
         action("tests.run", json!({})),
         action("repository.merge", json!({})),
     ]
@@ -205,21 +205,21 @@ fn the_binary_ends_a_failed_run_with_a_terminal_record_carrying_its_exit_status(
 const HUMAN: &str = "picked software-change@1 (confidence 0.99)
   reason: change code
 confinement: none
-frontier: repository.edit (admissible), repository.inspect (admissible), repository.merge (blocked), tests.run (admissible)
+frontier: implementation.edit (admissible), repository.inspect (admissible), repository.merge (blocked), tests.run (admissible), tests.write (admissible)
 step 1: tests.run {}
   effect: the test command exited with 1
     | confinement: none
   evidence: test_result fail
-frontier: repository.edit (admissible), repository.inspect (admissible), repository.merge (blocked), tests.run (admissible)
-step 2: repository.edit {\"files\":[{\"contents\":\"fixed\\n\",\"path\":\"check.txt\"}],\"message\":\"update the check\"}
+frontier: implementation.edit (admissible), repository.inspect (admissible), repository.merge (blocked), tests.run (admissible), tests.write (admissible)
+step 2: implementation.edit {\"files\":[{\"contents\":\"fixed\\n\",\"path\":\"check.txt\"}],\"message\":\"update the check\"}
   effect: committed; HEAD is <commit>
   evidence: none
-frontier: repository.edit (admissible), repository.inspect (admissible), repository.merge (blocked), tests.run (admissible)
+frontier: implementation.edit (admissible), repository.inspect (admissible), repository.merge (blocked), tests.run (admissible), tests.write (admissible)
 step 3: tests.run {}
   effect: the test command exited with 0
     | confinement: none
   evidence: test_result pass
-frontier: repository.edit (admissible), repository.inspect (admissible), repository.merge (approval required), tests.run (admissible)
+frontier: implementation.edit (admissible), repository.inspect (admissible), repository.merge (approval required), tests.run (admissible), tests.write (admissible)
 stopped: ApprovalRequired (repository.merge)
 ";
 
@@ -291,6 +291,8 @@ fn request(fixture: &Fixture, max_steps: usize) -> IntentRequest {
         runner: Some(Arc::new(UnconfinedRunner)),
         max_steps,
         threshold: 0.5,
+        inputs: b10x_loom_intake_slice::case::RUN_DEFAULTS,
+        test_paths: b10x_loom_intake_slice::test_paths::TestPaths::default(),
     }
 }
 

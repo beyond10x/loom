@@ -29,7 +29,7 @@ use crate::case;
 use crate::clock::Clock;
 use crate::confinement::TestRunner;
 use crate::context_metrics::{ContextMetrics, MeasuredModel};
-use crate::executor::{TestCommand, backend_name};
+use crate::executor::{TestCommand, TestPaths, backend_name};
 use crate::grant::{GrantAuthority, GrantStore};
 use crate::handoff::MergeHandoffStore;
 use crate::resume::{
@@ -51,6 +51,12 @@ pub struct IntentRequest {
     pub runner: Option<Arc<dyn TestRunner>>,
     pub max_steps: usize,
     pub threshold: f64,
+    /// The case inputs the host supplies, never a model: a `software-change@1` case opens with them
+    /// ([`crate::case`], "Inputs a case starts with"); a system query declares none.
+    pub inputs: case::CaseInputs,
+    /// The host's test-path patterns, never a model's: `tests.write` changes only paths they
+    /// match ([`crate::test_paths`]).
+    pub test_paths: TestPaths,
 }
 
 /// A route accepted for this exact intent, catalog and context policy; never authority.
@@ -512,13 +518,17 @@ pub fn held_resume_context(
 }
 
 /// The request `context` keeps, as the run that kept it was given it: the intent, the
-/// workspace, the test command, the step budget and the threshold, with `runner`.
+/// workspace, the test command, the test-path patterns, the step budget and the threshold, with
+/// `runner`; and the case inputs the held case opened with, read from `governor`.
 ///
 /// # Errors
-/// [`SliceError::State`] when the context keeps no test program, a negative step budget or a
-/// threshold that is not a number.
-pub fn resumed_request(
+/// [`SliceError::State`] when the context keeps no test program, test-path patterns that are not
+/// patterns, a negative step budget or a threshold that is not a number, or when the held case's
+/// inputs are not a software change's; [`SliceError::Governor`] when `governor` does not give the
+/// held case's inputs.
+pub fn resumed_request<S: FallibleCaseStore>(
     context: &ResumeContextData,
+    governor: &CanonGovernor<S>,
     runner: Option<Arc<dyn TestRunner>>,
 ) -> Result<IntentRequest, SliceError> {
     let invalid = |what: &str| SliceError::State(format!("the resume context keeps {what}"));
@@ -539,6 +549,11 @@ pub fn resumed_request(
             .0
             .parse()
             .map_err(|_| invalid("a threshold that is not a number"))?,
+        // A resume opens no case: the request carries the inputs the held case opened with.
+        inputs: case::run_inputs(&governor.inputs(&CaseId(context.case_id.0.clone()))?)
+            .ok_or_else(|| invalid("a case whose inputs are not a software change's"))?,
+        test_paths: TestPaths::new(context.test_paths.iter().cloned())
+            .map_err(|error| invalid(&format!("test-path patterns refused: {error}")))?,
     })
 }
 
@@ -663,6 +678,7 @@ fn resume_prepared<S: FallibleCaseStore>(
             workspace,
             test: &request.test,
             runner: Arc::clone(runner),
+            test_paths: &request.test_paths,
         },
         Mode::Resuming(&resuming),
     )
@@ -686,6 +702,7 @@ fn resume_context(
         route: prepared.accepted_route()?,
         workspace: text.workspace,
         test_command: text.test_command,
+        test_paths: request.test_paths.patterns().to_vec(),
         max_steps: text.max_steps,
         confinement: host.confinement,
         cgroup_root: text.cgroup_root,
@@ -756,6 +773,7 @@ fn run_prepared<S: FallibleCaseStore>(
             &request.intent,
             workspace,
             catalog,
+            &request.inputs,
         )
         .map_err(SliceError::Case)?;
         drive(
@@ -772,6 +790,7 @@ fn run_prepared<S: FallibleCaseStore>(
                 workspace,
                 test: &request.test,
                 runner: Arc::clone(runner),
+                test_paths: &request.test_paths,
             },
             mode,
         )
@@ -782,6 +801,7 @@ fn run_prepared<S: FallibleCaseStore>(
             .open(
                 &prepared.protocol,
                 BTreeMap::from([("intent".into(), revision.clone())]),
+                loom_governor::CaseInputs::none(),
             )
             .map_err(|e| SliceError::Case(case::CaseError::Open(e)))?;
         drive(
@@ -854,6 +874,98 @@ mod tests {
     use super::*;
     use crate::context_metrics::ContextPolicy;
 
+    /// A resumed request carries the inputs the held case opened with, never the run defaults,
+    /// and the test-path patterns the context keeps; a context whose patterns are not patterns,
+    /// or a held case that is not a software change's, is refused.
+    #[test]
+    fn a_resumed_request_carries_the_held_cases_inputs_and_kept_test_paths() {
+        use loom_governor::{CaseInputs as Governed, MemoryCaseStore};
+        let governor = CanonGovernor::new(MemoryCaseStore::default());
+        let revisions: BTreeMap<String, String> = [
+            "intent",
+            "system_specification",
+            "plan",
+            "implementation",
+            "release",
+            "deployment",
+        ]
+        .into_iter()
+        .map(|artifact| (artifact.to_owned(), "r0".to_owned()))
+        .collect();
+        let case = governor
+            .open(
+                LOCAL_PROTOCOL,
+                revisions,
+                Governed::try_from_pairs([
+                    ("risk", "critical"),
+                    ("change_kind", "bugfix"),
+                    ("affects_security_boundary", "true"),
+                ])
+                .expect("distinct inputs"),
+            )
+            .expect("the case opens");
+        // A case on a protocol that declares no input: not a software change's inputs.
+        let incident = governor
+            .open(
+                "incident-response@1",
+                BTreeMap::from([
+                    ("service".to_owned(), "s0".to_owned()),
+                    ("release".to_owned(), "r0".to_owned()),
+                ]),
+                Governed::none(),
+            )
+            .expect("an incident opens");
+        let context = |case: &CaseId, test_paths: &[&str]| ResumeContextData {
+            commission_id: resume::CommissionId(IntakeUuid(
+                "00000000-0000-4000-8000-000000000001".to_owned(),
+            )),
+            case_id: resume::CaseId(case.0.clone()),
+            agent_revision_id: resume::AgentRevisionId(IntakeUuid(
+                "00000000-0000-4000-8000-000000000002".to_owned(),
+            )),
+            intent: "Make the failing check pass.".to_owned(),
+            route: AcceptedRoute {
+                protocol: LOCAL_PROTOCOL.to_owned(),
+                intent_revision: "intent-0".to_owned(),
+                catalog: Vec::new(),
+                context_policy: ContextPolicy::Legacy,
+                threshold: Decimal("0.5".to_owned()),
+            },
+            workspace: Some("/work/space".to_owned()),
+            test_command: vec!["grep".to_owned(), "-qx".to_owned()],
+            test_paths: test_paths.iter().map(|&p| p.to_owned()).collect(),
+            max_steps: 6,
+            confinement: Backend::None,
+            cgroup_root: None,
+            model: "lab-agent".to_owned(),
+            catalog: None,
+        };
+
+        let request = resumed_request(&context(&case, &["spec/**"]), &governor, None)
+            .expect("the request resumes");
+        assert_eq!(
+            request.inputs,
+            case::CaseInputs {
+                risk: case::Risk::Critical,
+                change_kind: case::ChangeKind::Bugfix,
+                affects_security_boundary: true,
+            }
+        );
+        assert_eq!(request.test_paths.patterns(), ["spec/**"]);
+
+        for refused in [
+            resumed_request(&context(&case, &[]), &governor, None),
+            resumed_request(&context(&case, &["../x"]), &governor, None),
+            resumed_request(&context(&incident, &["tests/**"]), &governor, None),
+        ] {
+            assert!(
+                matches!(refused, Err(SliceError::State(_))),
+                "{:?}",
+                refused.err()
+            );
+        }
+    }
+
     #[test]
     fn delegation_handoff_is_bound_to_intent_catalog_threshold_and_policy() {
         let catalog = ProtocolCatalog::bundled().unwrap();
@@ -864,6 +976,8 @@ mod tests {
             runner: None,
             max_steps: 4,
             threshold: 0.5,
+            inputs: crate::case::RUN_DEFAULTS,
+            test_paths: TestPaths::default(),
         };
         let mut options = RunOptions::default();
         let prepared = PreparedIntent {
@@ -909,6 +1023,8 @@ mod tests {
             runner: None,
             max_steps: 4,
             threshold: 0.35,
+            inputs: crate::case::RUN_DEFAULTS,
+            test_paths: TestPaths::default(),
         };
         let options = RunOptions {
             context_policy: ContextPolicy::Bounded,

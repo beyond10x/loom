@@ -4,7 +4,7 @@
 //! test writing into the workspace, planted. `crate::git` holds it with three overrides (hooks,
 //! fsmonitor, signing) plus a digest of `config`, `config.worktree` and `info/attributes` taken
 //! when the case opens. Each case below plants a program-running key by a route that digest does
-//! not see, then asks Loom for an ordinary `repository.edit`, and asserts the planted program
+//! not see, then asks Loom for an ordinary `implementation.edit`, and asserts the planted program
 //! wrote no marker.
 //!
 //! Fixture repositories live under `CARGO_TARGET_TMPDIR`; markers are written to a sibling of the
@@ -52,7 +52,14 @@ fn adversary_a_second_run_on_a_workspace_a_test_planted_runs_none_of_the_plant()
     // Run 1: the test plants; the next host git call is refused, as the unit intends.
     {
         let governor = CanonGovernor::new(MemoryCaseStore::default());
-        let case = case::open(&governor, PICK, INTENT, fixture.workspace()).expect("run 1 opens");
+        let case = case::open(
+            &governor,
+            PICK,
+            INTENT,
+            fixture.workspace(),
+            &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+        )
+        .expect("run 1 opens");
         let executor = LocalExecutor::new(
             &governor,
             case,
@@ -79,7 +86,13 @@ fn adversary_a_second_run_on_a_workspace_a_test_planted_runs_none_of_the_plant()
 
     // Run 2, a fresh `b10x-loom run --workspace` on the same directory.
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let opened = case::open(&governor, PICK, INTENT, fixture.workspace());
+    let opened = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        fixture.workspace(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    );
     let edited = opened.as_ref().ok().map(|case| {
         LocalExecutor::new(
             &governor,
@@ -121,7 +134,14 @@ fn adversary_a_commondir_a_test_plants_moves_the_config_past_the_digest() {
     let recorded_config = fixture.read(".git/config");
 
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let case = case::open(&governor, PICK, INTENT, fixture.workspace()).expect("the case opens");
+    let case = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        fixture.workspace(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("the case opens");
     let executor = LocalExecutor::new(
         &governor,
         case,
@@ -160,7 +180,7 @@ fn adversary_a_commondir_a_test_plants_moves_the_config_past_the_digest() {
 /// A repository that shares its configuration in the work tree (`git config include.path
 /// ../.gitconfig`, a known pattern) makes a work-tree file part of the configuration. `record`
 /// digests `.git/config`, which holds only the `include`, not the file it includes. The model
-/// itself, through `repository.edit` and with no test involved, writes `.gitconfig` with a clean
+/// itself, through `implementation.edit` and with no test involved, writes `.gitconfig` with a clean
 /// filter and `.gitattributes` selecting it; the same edit's `git add` then runs the filter.
 #[test]
 fn adversary_an_included_work_tree_config_the_model_edits_runs_nothing() {
@@ -169,7 +189,14 @@ fn adversary_an_included_work_tree_config_the_model_edits_runs_nothing() {
     let clean = fixture.planted("filter-clean", "cat");
 
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let case = case::open(&governor, PICK, INTENT, fixture.workspace()).expect("the case opens");
+    let case = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        fixture.workspace(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("the case opens");
     let executor = LocalExecutor::new(
         &governor,
         case,
@@ -180,7 +207,7 @@ fn adversary_an_included_work_tree_config_the_model_edits_runs_nothing() {
         b10x_loom_intake_slice::executor::UnconfinedRunner,
     ));
     let edited = executor.execute(&proposal(
-        "repository.edit",
+        "implementation.edit",
         &json!({
             "files": [
                 {"path": ".gitconfig", "contents": format!("[filter \"x\"]\n\tclean = {}\n", clean.display())},
@@ -200,7 +227,7 @@ fn adversary_an_included_work_tree_config_the_model_edits_runs_nothing() {
 
 fn edit() -> ExecutorOutcomeProposedAction {
     proposal(
-        "repository.edit",
+        "implementation.edit",
         &json!({
             "files": [{"path": "check.txt", "contents": "fixed\n"}],
             "message": "fix the check"

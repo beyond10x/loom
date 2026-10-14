@@ -1,9 +1,9 @@
 //! Adversary pass 1 for the engineering-protocols 0.3.0 pin: `serde_json`'s
 //! `arbitrary_precision`.
 //!
-//! engineering-protocols 0.3.0 (`b10x-assertion-providers`, `b10x-canon-engineering-assertions`)
-//! and Canon 0.1.0 (`b10x-canon-expr`) turn the feature on. Cargo unifies features, so every
-//! build that links `b10x-loom-governor` beside `b10x-loom-executor` (the CLI, the SDK, this test
+//! engineering-protocols 0.7.0 (`b10x-assertion-providers`, `b10x-canon-engineering-assertions`)
+//! and Canon 0.4.0 (`b10x-canon-expr`) turn the feature on, as 0.3.0 and 0.1.0 did. Cargo unifies
+//! features, so every build that links `b10x-loom-governor` beside `b10x-loom-executor` (the CLI, the SDK, this test
 //! binary through the governor's dev-dependency) builds the executor's serde types against a
 //! `serde_json` that has it, while `cargo test -p b10x-loom-executor` alone does not.
 //!

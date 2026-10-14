@@ -117,9 +117,10 @@ fn the_lockfile_holds_one_canon_and_one_registry_from_the_pinned_tags() {
     }
 }
 
-/// The CHANGELOG (Unreleased): the engineering registry, and so `ProtocolCatalog::engineering` and
-/// `::bundled`, now lists `support-triage@1`; `incident.response/1` declares `investigate_cause`.
-/// The names are the release's `protocols/` directory at engineering-protocols 0.3.0.
+/// The CHANGELOG: the engineering registry, and so `ProtocolCatalog::engineering` and `::bundled`,
+/// lists `support-triage@1` and, since engineering-protocols 0.7.0, `ml-experiment@1`;
+/// `incident.response/1` declares `investigate_cause`. The names are the release's `protocols/`
+/// directory at engineering-protocols 0.7.0.
 #[test]
 fn the_catalog_lists_what_the_changelog_says_callers_now_see() {
     let names = |catalog: &ProtocolCatalog| -> BTreeSet<String> {
@@ -133,6 +134,7 @@ fn the_catalog_lists_what_the_changelog_says_callers_now_see() {
         names(&engineering),
         BTreeSet::from([
             "incident-response@1".to_owned(),
+            "ml-experiment@1".to_owned(),
             "software-change@1".to_owned(),
             "support-triage@1".to_owned(),
         ])

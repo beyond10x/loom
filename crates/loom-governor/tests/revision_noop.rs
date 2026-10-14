@@ -15,7 +15,11 @@ const SOFTWARE_CHANGE: &str = "software-change@1";
 fn an_update_to_the_revision_already_held_changes_nothing() {
     let governor = CanonGovernor::new(MemoryCaseStore::default());
     let case = governor
-        .open(SOFTWARE_CHANGE, software_change_revisions())
+        .open(
+            SOFTWARE_CHANGE,
+            software_change_revisions(),
+            software_change_inputs(),
+        )
         .expect("opens");
 
     for (step, held, case_revision) in [("opened", "R2", 1), ("after a real update", "R3", 2)] {
@@ -65,4 +69,14 @@ fn software_change_revisions() -> BTreeMap<String, String> {
     .into_iter()
     .map(|(artifact, revision)| (artifact.to_owned(), revision.to_owned()))
     .collect()
+}
+
+/// The case inputs a `software-change@1` case opens with here: Loom's run defaults.
+fn software_change_inputs() -> loom_governor::CaseInputs {
+    loom_governor::CaseInputs::try_from_pairs([
+        ("risk", "standard"),
+        ("change_kind", "feature"),
+        ("affects_security_boundary", "false"),
+    ])
+    .expect("distinct inputs")
 }

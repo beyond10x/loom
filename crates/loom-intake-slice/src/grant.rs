@@ -482,7 +482,7 @@ mod tests {
         assert!(allows(Some(granted.clone()), "repository.merge"));
         assert!(!allows(None, "repository.merge"), "no grant");
         assert!(
-            !allows(Some(granted.clone()), "repository.edit"),
+            !allows(Some(granted.clone()), "implementation.edit"),
             "another capability"
         );
         let mut other = granted.clone();

@@ -6,7 +6,7 @@
 //!
 //! `tests/fixtures/chg-1842.fixture.yaml` is a byte-for-byte copy of
 //! `fixtures/software-change/chg-1842.fixture.yaml` in beyond10x/engineering-protocols at tag
-//! `0.3.0`, the release this crate depends on; `b10x-canon-engineering` does not expose its
+//! `0.7.0`, the release this crate depends on; `b10x-canon-engineering` does not expose its
 //! fixtures.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -19,11 +19,11 @@ use b10x_loom_commission::model::json;
 use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::{
     ActionStatus, CaseId, CompletionDetermination, EvidenceData, EvidenceId, FrontierAction,
-    ObservationId,
+    GovernorError, ObservationId,
 };
 use b10x_loom_commission::ports::evidence::submit_evidence;
 use b10x_loom_commission::ports::governor::Governor as _;
-use loom_governor::{CanonGovernor, MemoryCaseStore, OpenError};
+use loom_governor::{CanonGovernor, CaseInputs, MemoryCaseStore, OpenError};
 use serde_json::Value;
 
 const PROTOCOL: &str = "software-change@1";
@@ -42,8 +42,8 @@ fn a_governed_case_issues_the_frontier_canon_decides() {
 
 /// A case opened with a revision for every declared artifact holds them as given; one missing an
 /// artifact is refused, naming it, and so is a protocol the ELS registry does not hold. The first
-/// frontier admits `repository.edit` and `tests.run` and blocks `repository.merge` on its
-/// precondition claim.
+/// frontier admits `tests.write`, `implementation.edit` and `tests.run` and blocks
+/// `repository.merge` on its precondition claim.
 fn fresh_case(fixture: &Fixture, ir: &Ir) {
     let governor = CanonGovernor::new(MemoryCaseStore::default());
     let revisions = fixture.revisions();
@@ -60,7 +60,7 @@ fn fresh_case(fixture: &Fixture, ir: &Ir) {
     );
 
     let case = governor
-        .open(PROTOCOL, revisions.clone())
+        .open(PROTOCOL, revisions.clone(), fixture.inputs())
         .expect("a case with every declared artifact opens");
     assert_eq!(
         governor
@@ -72,11 +72,11 @@ fn fresh_case(fixture: &Fixture, ir: &Ir) {
 
     let mut missing = revisions.clone();
     missing.remove("deployment");
-    match governor.open(PROTOCOL, missing) {
+    match governor.open(PROTOCOL, missing, fixture.inputs()) {
         Err(OpenError::MissingRevision { artifact }) => assert_eq!(artifact, "deployment"),
         other => panic!("a revision map without `deployment` is refused naming it, got {other:?}"),
     }
-    match governor.open("no-such-protocol@1", revisions) {
+    match governor.open("no-such-protocol@1", revisions, fixture.inputs()) {
         Err(OpenError::UnknownProtocol { .. }) => {}
         other => panic!("a protocol the ELS registry does not hold is refused, got {other:?}"),
     }
@@ -86,7 +86,12 @@ fn fresh_case(fixture: &Fixture, ir: &Ir) {
     assert_eq!(frontier.case_id, case);
     assert_eq!(frontier.case_revision, revision);
     let actions = by_name(&frontier.actions);
-    assert_eq!(actions["repository.edit"].status, ActionStatus::Admissible);
+    assert_eq!(actions["tests.write"].status, ActionStatus::Admissible);
+    assert_eq!(
+        actions["implementation.edit"].status,
+        ActionStatus::Admissible,
+        "a refactor edits the implementation without a reproduced regression"
+    );
     assert_eq!(actions["tests.run"].status, ActionStatus::Admissible);
     let merge = actions["repository.merge"];
     assert_eq!(merge.status, ActionStatus::Blocked);
@@ -110,7 +115,7 @@ fn revision_update(fixture: &Fixture, ir: &Ir) {
     let governor = CanonGovernor::new(MemoryCaseStore::default());
     let mut ids = Ids::default();
     let case = governor
-        .open(PROTOCOL, fixture.revisions())
+        .open(PROTOCOL, fixture.revisions(), fixture.inputs())
         .expect("case opens");
 
     let pass = record("tests-r2", "test_result", "pass", "implementation", "R2");
@@ -164,7 +169,7 @@ fn completion(fixture: &Fixture, ir: &Ir) {
     let governor = CanonGovernor::new(MemoryCaseStore::default());
     let mut ids = Ids::default();
     let case = governor
-        .open(PROTOCOL, fixture.revisions())
+        .open(PROTOCOL, fixture.revisions(), fixture.inputs())
         .expect("case opens");
     let snapshot = fixture.case_snapshot(&[]);
 
@@ -214,7 +219,7 @@ fn fixture_states(fixture: &Fixture, ir: &Ir) {
     let governor = CanonGovernor::new(MemoryCaseStore::default());
     let mut ids = Ids::default();
     let case = governor
-        .open(PROTOCOL, fixture.revisions())
+        .open(PROTOCOL, fixture.revisions(), fixture.inputs())
         .expect("case opens");
     let snapshot = fixture.case_snapshot(&[]);
 
@@ -283,6 +288,221 @@ fn fixture_states(fixture: &Fixture, ir: &Ir) {
             "tests-fail-r2",
         ],
         "every state that adds evidence is checked"
+    );
+}
+
+/// `software.change/1` declares three case inputs. A case opens with all three and holds them; one
+/// left out, one the protocol does not declare and a value its input does not list are each
+/// refused naming the input, and nothing is stored: the id the refused opening named is not held.
+#[test]
+fn a_software_change_case_opens_with_its_three_inputs_and_refuses_any_other() {
+    let fixture = Fixture::load();
+    let governor = CanonGovernor::new(MemoryCaseStore::default());
+    let inputs = fixture.inputs();
+    assert_eq!(
+        inputs.iter().collect::<Vec<_>>(),
+        [
+            ("affects_security_boundary", "false"),
+            ("change_kind", "refactor"),
+            ("risk", "standard"),
+        ],
+        "the fixture gives the three inputs software.change/1 declares"
+    );
+    let case = governor
+        .open(PROTOCOL, fixture.revisions(), inputs.clone())
+        .expect("a case with all three inputs opens");
+    assert_eq!(governor.inputs(&case), Ok(inputs.clone()));
+
+    let refused = |id: &str, given: CaseInputs| {
+        let case = CaseId(id.to_owned());
+        let error = governor
+            .open_case(case.clone(), PROTOCOL, fixture.revisions(), given)
+            .expect_err("the opening is refused");
+        assert_eq!(
+            governor.current_revision(&case),
+            Err(GovernorError::UnknownCase),
+            "{id}: nothing is stored for a refused opening"
+        );
+        error
+    };
+
+    let mut left_out = CaseInputs::none();
+    for (input, value) in inputs.iter().filter(|(input, _)| *input != "change_kind") {
+        left_out = left_out.with(input, value).expect("distinct inputs");
+    }
+    let error = refused("left-out", left_out);
+    assert_eq!(
+        error,
+        OpenError::MissingInput {
+            input: "change_kind".to_owned()
+        }
+    );
+    assert!(error.to_string().contains("`change_kind`"), "{error}");
+
+    let error = refused(
+        "undeclared",
+        inputs
+            .clone()
+            .with("priority", "high")
+            .expect("a new input"),
+    );
+    assert_eq!(
+        error,
+        OpenError::UndeclaredInput {
+            input: "priority".to_owned()
+        }
+    );
+    assert!(error.to_string().contains("`priority`"), "{error}");
+
+    let but_risk = CaseInputs::try_from_pairs(inputs.iter().filter(|(input, _)| *input != "risk"))
+        .expect("distinct inputs");
+    let error = refused(
+        "unlisted",
+        but_risk.with("risk", "extreme").expect("risk given once"),
+    );
+    assert_eq!(
+        error,
+        OpenError::UnlistedInputValue {
+            input: "risk".to_owned(),
+            value: "extreme".to_owned()
+        }
+    );
+    assert!(
+        error.to_string().contains("`risk`") && error.to_string().contains("`extreme`"),
+        "{error}"
+    );
+
+    let error = refused("none", CaseInputs::none());
+    assert_eq!(
+        error,
+        OpenError::MissingInput {
+            input: "affects_security_boundary".to_owned()
+        },
+        "the first declared input, in input order, is named"
+    );
+
+    // A second value for one input is refused where the inputs are built, never a replacement
+    // of the first: through `with` and through `try_from_pairs` alike.
+    let repeated = OpenError::RepeatedInput {
+        input: "risk".to_owned(),
+    };
+    assert_eq!(
+        inputs.clone().with("risk", "critical"),
+        Err(repeated.clone())
+    );
+    assert_eq!(
+        inputs.clone().with("risk", "standard"),
+        Err(repeated.clone())
+    );
+    assert_eq!(
+        CaseInputs::try_from_pairs([
+            ("risk", "standard"),
+            ("change_kind", "refactor"),
+            ("risk", "critical"),
+        ]),
+        Err(repeated.clone())
+    );
+    assert!(repeated.to_string().contains("`risk`"), "{repeated}");
+}
+
+/// A protocol that declares no case input opens with none, and refuses one.
+#[test]
+fn a_protocol_without_inputs_opens_with_none() {
+    let governor = CanonGovernor::new(MemoryCaseStore::default());
+    let revisions: BTreeMap<String, String> = incident_ir()
+        .artifacts
+        .keys()
+        .map(|artifact| (artifact.as_str().to_owned(), "r0".to_owned()))
+        .collect();
+    let case = governor
+        .open("incident-response@1", revisions.clone(), CaseInputs::none())
+        .expect("an incident case opens with no input");
+    assert_eq!(governor.inputs(&case), Ok(CaseInputs::none()));
+    governor.frontier(&case).expect("and is decided");
+    assert_eq!(
+        governor.open(
+            "incident-response@1",
+            revisions,
+            CaseInputs::try_from_pairs([("risk", "standard")]).expect("distinct inputs")
+        ),
+        Err(OpenError::UndeclaredInput {
+            input: "risk".to_owned()
+        })
+    );
+}
+
+/// At `risk: trivial` only `tests.required` applies among the risk-selected obligations, and a
+/// refactor off a security boundary owes neither `red_first.required` nor
+/// `security_review.required`. Canon reports the others `not_applicable`; the frontier reports
+/// none of them open, and each obligation open exactly when Canon reports it `open`.
+#[test]
+fn a_trivial_case_reports_no_not_applicable_obligation_open() {
+    let fixture = Fixture::load();
+    let ir = software_change_ir();
+    let governor = CanonGovernor::new(MemoryCaseStore::default());
+    let inputs = CaseInputs::try_from_pairs(
+        fixture
+            .inputs()
+            .iter()
+            .filter(|(input, _)| *input != "risk"),
+    )
+    .and_then(|inputs| inputs.with("risk", "trivial"))
+    .expect("each input once");
+    let case = governor
+        .open(PROTOCOL, fixture.revisions(), inputs)
+        .expect("a trivial case opens");
+    let frontier = governor.frontier(&case).expect("frontier").into_data();
+    let open: BTreeMap<&str, bool> = frontier
+        .obligations
+        .iter()
+        .map(|obligation| (obligation.obligation.as_str(), obligation.open))
+        .collect();
+
+    let mut snapshot = fixture.case_snapshot(&[]);
+    snapshot["inputs"]["risk"] = Value::from("trivial");
+    let decision = canon_decision(&ir, &snapshot, &[]);
+    let statuses: BTreeMap<String, String> = decision
+        .obligations
+        .as_ref()
+        .and_then(|section| section.as_array())
+        .expect("Canon decides the obligations")
+        .iter()
+        .map(|entry| {
+            (
+                entry["id"].as_str().expect("id").to_owned(),
+                entry["status"].as_str().expect("status").to_owned(),
+            )
+        })
+        .collect();
+    let not_applicable: Vec<&str> = statuses
+        .iter()
+        .filter(|(_, status)| status.as_str() == "not_applicable")
+        .map(|(id, _)| id.as_str())
+        .collect();
+    assert_eq!(
+        not_applicable,
+        [
+            "health.required",
+            "provenance.required",
+            "red_first.required",
+            "review.required",
+            "security_review.required",
+        ],
+        "Canon leaves every obligation but tests.required not applicable at trivial risk"
+    );
+    for (obligation, status) in &statuses {
+        assert_eq!(
+            open[obligation.as_str()],
+            status == "open",
+            "{obligation} ({status}) is open exactly when Canon reports it open"
+        );
+    }
+    assert_eq!(
+        open.iter()
+            .filter(|(_, open)| **open)
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>(),
+        ["tests.required"]
     );
 }
 
@@ -395,6 +615,14 @@ fn software_change_ir() -> Ir {
     compile(&protocol).expect("Canon compiles it")
 }
 
+/// `incident.response/1` from the ELS registry, compiled by Canon.
+fn incident_ir() -> Ir {
+    let builtin =
+        canon_engineering::registry::get("incident-response", 1).expect("ELS holds the protocol");
+    let protocol = b10x_canon::model::parse(builtin.yaml).expect("Canon parses it");
+    compile(&protocol).expect("Canon compiles it")
+}
+
 /// Canon's own decision for `case` over `evidence`, with no authority decision supplied.
 fn canon_decision(ir: &Ir, case: &Value, evidence: &[Value]) -> Decision {
     let yaml = |value: &Value| serde_yaml_ng::to_value(value).expect("JSON is YAML");
@@ -479,6 +707,24 @@ impl Fixture {
                 (artifact.clone(), revision.to_owned())
             })
             .collect()
+    }
+
+    /// The case's inputs, as the fixture gives them; a value YAML reads as a boolean is its text.
+    fn inputs(&self) -> CaseInputs {
+        CaseInputs::try_from_pairs(
+            self.0["case"]["inputs"]
+                .as_object()
+                .expect("case inputs")
+                .iter()
+                .map(|(input, value)| {
+                    let value = match value {
+                        Value::String(text) => text.clone(),
+                        other => other.to_string(),
+                    };
+                    (input.clone(), value)
+                }),
+        )
+        .expect("distinct inputs")
     }
 
     /// The fixture's `canon-case/1` snapshot, with `changed` artifact revisions replaced.

@@ -8,8 +8,8 @@
 //! - [`case`] opens the slice's case through `beyond10x/governor` and reports the workspace's new
 //!   `HEAD` to it; the slice never evaluates Canon itself.
 //! - [`selector`] implements Loom's action selector and argument generator over a model.
-//! - [`executor`] performs a proposed `software.change/1` action inside the workspace; it never
-//!   merges, pushes or deploys.
+//! - [`executor`] performs a proposed `software.change/1` action inside the workspace, `tests.write`
+//!   only on the host's [`test_paths`]; it never merges, pushes or deploys.
 //! - [`git`] builds every git command the slice runs on the host: no hook, fsmonitor or signing
 //!   program runs, and a call is refused when the workspace's own configuration names a program or
 //!   changed since the case opened.
@@ -38,6 +38,7 @@ pub mod resume;
 pub mod run;
 pub mod selector;
 mod state_dir;
+pub mod test_paths;
 pub mod verifier;
 
 pub mod clock;

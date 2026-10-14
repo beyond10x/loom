@@ -148,7 +148,12 @@ fn suspend_child(dir: &Path) {
     let governor = governor(dir);
     let case = CaseId(CASE.to_owned());
     governor
-        .open_case(case.clone(), PROTOCOL, fixture.revisions())
+        .open_case(
+            case.clone(),
+            PROTOCOL,
+            fixture.revisions(),
+            inputs_of(&fixture.0),
+        )
         .expect("the fixture case opens on software.change/1");
     for record in fixture.evidence("initial") {
         submit(&governor, &case, &ids, &record);
@@ -810,7 +815,12 @@ fn opened_case(dir: &Path) -> (Gov, CaseId, Ids) {
     let governor = governor(dir);
     let case = CaseId(CASE.to_owned());
     governor
-        .open_case(case.clone(), PROTOCOL, fixture.revisions())
+        .open_case(
+            case.clone(),
+            PROTOCOL,
+            fixture.revisions(),
+            inputs_of(&fixture.0),
+        )
         .expect("the fixture case opens on software.change/1");
     for record in fixture.evidence("initial") {
         submit(&governor, &case, &ids, &record);
@@ -1023,7 +1033,13 @@ impl<'g> Adapter<'g> {
 
 impl EffectPort for Adapter<'_> {
     fn performs(&self, action: &str) -> bool {
-        ["repository.inspect", "repository.edit", TESTS_RUN, MERGE].contains(&action)
+        [
+            "repository.inspect",
+            "implementation.edit",
+            TESTS_RUN,
+            MERGE,
+        ]
+        .contains(&action)
     }
 
     fn invoke(
@@ -1451,4 +1467,21 @@ fn an_effect_port_failing_after_the_take_leaves_the_request_in_doubt() {
         Some(SuspensionState::Resuming),
         "the Suspension stays as the durable trace of the request in doubt"
     );
+}
+
+/// The case inputs a fixture's case gives; a value YAML reads as a boolean is its text.
+fn inputs_of(fixture: &serde_json::Value) -> loom_governor::CaseInputs {
+    let pairs: Vec<(String, String)> = fixture["case"]["inputs"]
+        .as_object()
+        .expect("case inputs")
+        .iter()
+        .map(|(input, value)| {
+            let value = match value {
+                serde_json::Value::String(text) => text.clone(),
+                other => other.to_string(),
+            };
+            (input.clone(), value)
+        })
+        .collect();
+    loom_governor::CaseInputs::try_from_pairs(pairs).expect("distinct inputs")
 }

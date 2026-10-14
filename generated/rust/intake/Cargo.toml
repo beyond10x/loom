@@ -1,6 +1,6 @@
 # generated from intake v1
-# model digest 58fc59c73e160b3816e4c2add829c8c5a6c05ea1c6901838a7d61a911e157818
-# contract digest c7bf5a36bfa3d72e856cecfa8dd5cf67906769eb0ed8049fb9d732fc4c997443
+# model digest 15e4505119390053fa8851b623b962daf68d5470099a63fc007c3c158d7c78e9
+# contract digest 1343dab00750680fd7c8f9677d3285807a17865acb4c07c8d227f83d330b8285
 # do not edit: regenerate with `ess synthesize --layout crate`
 
 [package]
