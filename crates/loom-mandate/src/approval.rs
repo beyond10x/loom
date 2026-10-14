@@ -251,8 +251,10 @@ impl HostedMandate {
     ///
     /// # Errors
     /// [`Refused`] naming why, and nothing is consumed: the commission's authority context is no
-    /// Mandate context, the case derives no resource, a log entry does not read back as Mandate's,
-    /// the log records the approval for another commission or request, or Mandate refused it
+    /// Mandate context, the case derives no resource, the approval id is no UUID, a log entry does
+    /// not read back as Mandate's, the record Mandate reads for the approval (found by its UUID,
+    /// however the id is written, and the last one recorded) is for another commission or
+    /// request, or Mandate refused it
     /// (unrecorded, of another organization, expired, naming another subject, actor, action or
     /// resource, already consumed, or a request Mandate refuses for another reason).
     #[allow(clippy::too_many_arguments)]
@@ -271,8 +273,16 @@ impl HostedMandate {
         })?;
         let resource = case_resource(&commission.case_id)
             .ok_or_else(|| refused("the case id is empty, so it derives no Mandate resource"))?;
-        let recorded = log.iter().find_map(|entry| match entry {
-            MandateApprovalEntry::ApprovalRecorded(recorded) if recorded.approval == *approval => {
+        let approval_id = ApprovalId::new(mandate_uuid("the approval id", &approval.0.0)?);
+        let records = fold(log)?;
+        // The record Mandate reads: by the parsed id, never its text, and the last one recorded,
+        // as Mandate's own lookup takes it, so the binding below holds for the very record
+        // Mandate clears. Every recorded id parses, or `fold` refused the log.
+        let recorded = log.iter().rev().find_map(|entry| match entry {
+            MandateApprovalEntry::ApprovalRecorded(recorded)
+                if Uuid::parse(&recorded.approval.0.0)
+                    .is_ok_and(|id| ApprovalId::new(id) == approval_id) =>
+            {
                 Some(recorded)
             }
             _ => None,
@@ -286,8 +296,6 @@ impl HostedMandate {
                 approval.0.0, recorded.action_request_id.0.0, recorded.commission_id.0.0
             )));
         }
-        let records = fold(log)?;
-        let approval_id = ApprovalId::new(mandate_uuid("the approval id", &approval.0.0)?);
         let mut allocator =
             OneDecision(DecisionId::new(mandate_uuid("the decision id", decision)?));
         let action = Action::new(capability);
