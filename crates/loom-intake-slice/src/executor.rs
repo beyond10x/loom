@@ -73,6 +73,14 @@
 //! constructor, and nothing a model says reaches them. Every observation's `observed_at` is read
 //! from the host clock ([`LocalExecutor::with_clock`], [`SystemClock`] by default); a clock that
 //! gives no instant is [`ExecuteError::Clock`], and the observation is not delivered.
+//!
+//! Canon orders records in whole seconds, so the executor keeps its observations' instants
+//! strictly increasing in whole seconds: before it delivers an observation whose host-clock
+//! second is not later than its previous observation's, it waits on the clock ([`Clock::wait`])
+//! for that second to pass, at most [`CLOCK_WAIT`] in all. A clock that still has not passed it
+//! (one that stepped back) is [`ExecuteError::Clock`], naming both instants, and the observation
+//! is not delivered, so no record is submitted for it; an edit already committed stays committed.
+//! The previous observation is this executor's own, so a resume starts afresh.
 
 use std::cell::Cell;
 use std::collections::VecDeque;
@@ -97,10 +105,11 @@ use loom_governor::{CanonGovernor, EvaluationTime, FallibleCaseStore, NoEvaluati
 use sha2::{Digest, Sha256};
 
 use crate::case::{self, CaseError, REDIRECTING_GIT_VARIABLES};
-use crate::clock::{self, Clock, SystemClock};
+use crate::clock::{Clock, SystemClock};
 use crate::confinement::{ConfinementError, SubstrateRunner, TestExecution, TestRunner};
 use crate::git::{self, HostGitRefusal};
 pub use crate::test_paths::TestPaths;
+use chrono::{DateTime, SecondsFormat, Utc};
 use intake_model::confinement::{AppliedConfinement, Backend, ConfinementRefusal};
 
 /// `repository.inspect`.
@@ -119,6 +128,11 @@ pub const TESTS_RUN: &str = "tests.run";
 pub const TEST_RUN_SOURCE: &str = "intake-slice/tests.run";
 /// The observation source of an `implementation.edit` that committed.
 pub const EDIT_SOURCE: &str = "intake-slice/implementation.edit";
+/// The most the executor waits, in all, for the host clock to pass the second of its previous
+/// observation before it delivers the next one.
+pub const CLOCK_WAIT: Duration = Duration::from_secs(2);
+/// The shortest single wait on the clock, so a reading just short of the next second still waits.
+const MIN_CLOCK_PAUSE: Duration = Duration::from_millis(1);
 
 /// The most output of a test run kept in its report: the tail, in bytes.
 const OUTPUT_TAIL: usize = 8 * 1024;
@@ -373,7 +387,9 @@ pub enum ExecuteError {
     /// Host git was refused before it ran: the workspace's git configuration changed since the
     /// case opened, or no case opened on the workspace in this process.
     HostGit(HostGitRefusal),
-    /// The host clock gave no instant for an observation, so none was delivered.
+    /// The host clock gave no instant for an observation, or one not later, in whole seconds,
+    /// than the executor's previous observation's after waiting at most [`CLOCK_WAIT`] (a clock
+    /// that stepped back), so none was delivered. An edit already committed stays committed.
     Clock(String),
 }
 
@@ -396,7 +412,7 @@ impl fmt::Display for ExecuteError {
             Self::Case(error) => error.fmt(f),
             Self::Governor(error) => write!(f, "the governor refused the observation: {error:?}"),
             Self::HostGit(refusal) => refusal.fmt(f),
-            Self::Clock(error) => write!(f, "the host clock gave no instant: {error}"),
+            Self::Clock(error) => write!(f, "the host clock gave no usable instant: {error}"),
         }
     }
 }
@@ -449,6 +465,8 @@ pub struct LocalExecutor<'g, S, T = NoEvaluationTime> {
     test_paths: TestPaths,
     clock: &'g dyn Clock,
     tests_written: Cell<bool>,
+    /// The whole UTC second of the last observation this executor delivered.
+    last_observed: Cell<Option<i64>>,
 }
 
 impl<'g, S: FallibleCaseStore, T: EvaluationTime> LocalExecutor<'g, S, T> {
@@ -471,6 +489,7 @@ impl<'g, S: FallibleCaseStore, T: EvaluationTime> LocalExecutor<'g, S, T> {
             test_paths: TestPaths::default(),
             clock: &SystemClock,
             tests_written: Cell::new(false),
+            last_observed: Cell::new(None),
         }
     }
 
@@ -624,10 +643,42 @@ impl<'g, S: FallibleCaseStore, T: EvaluationTime> LocalExecutor<'g, S, T> {
         Ok(Report::Edited { revision, change })
     }
 
+    /// The host clock's instant for the next observation, UTC to the second, with its whole
+    /// second: strictly later than the previous observation's. When the clock has not passed the
+    /// previous observation's second, it is waited on until it has, at most [`CLOCK_WAIT`] in all;
+    /// a clock that still has not (one that stepped back) is [`ExecuteError::Clock`], naming both
+    /// instants. Nothing is delivered here: the caller records the second once it delivered.
+    fn next_instant(&self) -> Result<(Timestamp, i64), ExecuteError> {
+        let mut read = self.clock.read().map_err(ExecuteError::Clock)?;
+        if let Some(previous) = self.last_observed.get() {
+            let mut waited = Duration::ZERO;
+            while read.timestamp() <= previous && waited < CLOCK_WAIT {
+                let behind = u64::try_from(previous + 1 - read.timestamp()).unwrap_or(u64::MAX);
+                let until_next = Duration::from_secs(behind).saturating_sub(Duration::from_nanos(
+                    u64::from(read.timestamp_subsec_nanos()),
+                ));
+                let pause = until_next.max(MIN_CLOCK_PAUSE).min(CLOCK_WAIT - waited);
+                self.clock.wait(pause);
+                waited += pause;
+                read = self.clock.read().map_err(ExecuteError::Clock)?;
+            }
+            if read.timestamp() <= previous {
+                return Err(ExecuteError::Clock(format!(
+                    "it reads {}, not later in whole seconds than the previous observation's {}, \
+                     after waiting {} ms for that second to pass",
+                    utc_second(read.timestamp()),
+                    utc_second(previous),
+                    waited.as_millis()
+                )));
+            }
+        }
+        Ok((Timestamp(utc_second(read.timestamp())), read.timestamp()))
+    }
+
     /// Delivers the observation of an `implementation.edit` that committed `revision`, at the host
     /// clock's instant.
     fn observe_change(&self, revision: &str, case_revision: i64) -> Result<Change, ExecuteError> {
-        let observed_at = clock::instant(self.clock).map_err(ExecuteError::Clock)?;
+        let (observed_at, second) = self.next_instant()?;
         let observation = ObservationId(fresh_uuid("observation", &self.case.0));
         self.governor
             .observe(Observation::new(ObservationData {
@@ -651,6 +702,7 @@ impl<'g, S: FallibleCaseStore, T: EvaluationTime> LocalExecutor<'g, S, T> {
                 ]),
             }))
             .map_err(ExecuteError::Governor)?;
+        self.last_observed.set(Some(second));
         Ok(Change {
             case: self.case.clone(),
             observation,
@@ -695,7 +747,7 @@ impl<'g, S: FallibleCaseStore, T: EvaluationTime> LocalExecutor<'g, S, T> {
         ));
         payload.push(("timed_out".to_owned(), Value::Bool(finished.timed_out)));
         payload.push(("confinement".to_owned(), observation_confinement(&finished)));
-        let observed_at = clock::instant(self.clock).map_err(ExecuteError::Clock)?;
+        let (observed_at, second) = self.next_instant()?;
         self.governor
             .observe(Observation::new(ObservationData {
                 observation_id: observation.clone(),
@@ -705,6 +757,7 @@ impl<'g, S: FallibleCaseStore, T: EvaluationTime> LocalExecutor<'g, S, T> {
                 payload: Value::Object(payload),
             }))
             .map_err(ExecuteError::Governor)?;
+        self.last_observed.set(Some(second));
         Ok(Report::TestsRun(TestRun {
             case: self.case.clone(),
             observation,
@@ -1274,6 +1327,14 @@ pub(crate) fn fresh_uuid(kind: &str, seed: &str) -> Uuid {
         &hex[16..20],
         &hex[20..32]
     ))
+}
+
+/// `seconds` since the Unix epoch as Canon writes an instant: UTC, `YYYY-MM-DDTHH:MM:SSZ`.
+fn utc_second(seconds: i64) -> String {
+    DateTime::<Utc>::from_timestamp(seconds, 0).map_or_else(
+        || format!("{seconds} s after the Unix epoch"),
+        |instant| instant.to_rfc3339_opts(SecondsFormat::Secs, true),
+    )
 }
 
 /// The current UTC time, RFC 3339, to the second.

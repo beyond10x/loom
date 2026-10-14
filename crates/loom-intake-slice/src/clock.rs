@@ -27,6 +27,14 @@ const PRODUCER: &str = "loom/clock-verifier";
 /// A trusted host clock. One successful call supplies one instant and its local UTC offset.
 pub trait Clock {
     fn read(&self) -> Result<DateTime<FixedOffset>, String>;
+
+    /// Lets `duration` pass on this clock before its next reading. The executor waits so when the
+    /// clock has not yet passed the second of its previous observation
+    /// ([`crate::executor::CLOCK_WAIT`] bounds the waits of one observation). A host clock sleeps
+    /// the thread, which is the default; a test clock may advance itself instead.
+    fn wait(&self, duration: std::time::Duration) {
+        std::thread::sleep(duration);
+    }
 }
 
 /// Read the operating system clock and its configured local timezone, without a subprocess.

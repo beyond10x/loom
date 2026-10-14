@@ -27,6 +27,14 @@ under **Unreleased** until the next release.
 - An edit's observation (`executor::EDIT_SOURCE`) is delivered to the governor beside a test
   run's, and the step prints every record it submitted (`evidence: test_result fail,
   regression_test_result fail`; `evidence: implementation_change`).
+- The executor's observation instants are strictly increasing in whole seconds, the unit Canon
+  orders records by: before it delivers an observation in the same second as its previous one,
+  or an earlier one, it waits on the clock (`Clock::wait`, a thread sleep by default) for that
+  second to pass, at most `executor::CLOCK_WAIT` (2 seconds). A clock that still has not passed
+  it (one that stepped back) fails the step with `ExecuteError::Clock`, naming both instants,
+  before the observation is delivered, so no record is submitted for it; an edit already
+  committed stays committed. A host clock stepping back no longer shows a regression test first
+  for an edit made before it.
 
 ### Changed
 
