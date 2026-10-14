@@ -1,6 +1,6 @@
 // generated from intake v1
-// model digest 15e4505119390053fa8851b623b962daf68d5470099a63fc007c3c158d7c78e9
-// contract digest 1343dab00750680fd7c8f9677d3285807a17865acb4c07c8d227f83d330b8285
+// model digest ae71eb0f88cab51a232b4394e603b767a9a14b86939368c466b1dd6fcfac4d3e
+// contract digest e27d5e5e01cde62ceb5184fea37602c4a6745cf4920ca3b202548b3391221985
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! protocols — `intake.protocols`.

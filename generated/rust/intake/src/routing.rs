@@ -1,11 +1,11 @@
 // generated from intake v1
-// model digest 15e4505119390053fa8851b623b962daf68d5470099a63fc007c3c158d7c78e9
-// contract digest 1343dab00750680fd7c8f9677d3285807a17865acb4c07c8d227f83d330b8285
+// model digest ae71eb0f88cab51a232b4394e603b767a9a14b86939368c466b1dd6fcfac4d3e
+// contract digest e27d5e5e01cde62ceb5184fea37602c4a6745cf4920ca3b202548b3391221985
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Routing — `intake.routing`.
 //!
-//! An intent as given, the references extracted from its text, the protocol the router proposes for it, and the slice run that works the intent until it is blocked. A pick is a proposal, never authority.
+//! An intent as given, the references extracted from its text, the protocol the router proposes for it, the slice run that works the intent until it is blocked, and the evidence that run submits from what it did itself. A pick is a proposal, never authority.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
 
@@ -165,6 +165,36 @@ pub enum Risk {
     Elevated,
     /// `Critical`.
     Critical,
+}
+
+/// The states of `intake.routing.SliceEvidence`, as runtime values.
+///
+/// Synthesised from the lifecycle, so the two cannot disagree. Which *moves* are legal is not
+/// carried here — it is carried by `SliceEvidence<S>`, where an undeclared move does not compile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SliceEvidenceState {
+    /// `Submitted`.
+    Submitted,
+}
+
+/// SliceEvidenceKind — `intake.routing.SliceEvidenceKind`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SliceEvidenceKind {
+    /// `TestResult`.
+    TestResult,
+    /// `RegressionTestResult`.
+    RegressionTestResult,
+    /// `ImplementationChange`.
+    ImplementationChange,
+}
+
+/// SliceEvidenceResult — `intake.routing.SliceEvidenceResult`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SliceEvidenceResult {
+    /// `Pass`.
+    Pass,
+    /// `Fail`.
+    Fail,
 }
 
 /// The states of `intake.routing.SliceRun`, as runtime values.
@@ -1006,6 +1036,144 @@ impl AnyResumeContext {
         match self {
             Self::Kept(instance) => ResumeContextSnapshot {
                 state: ResumeContextState::Kept,
+                data: instance.into_data(),
+            },
+        }
+    }
+}
+
+/// What SliceEvidence — `intake.routing.SliceEvidence` — holds, apart from where it is in its lifecycle.
+///
+/// The identity and every declared field. The state is deliberately not one: inside the domain it
+/// is carried by the type parameter of [`SliceEvidence<S>`], and at a boundary by [`SliceEvidenceSnapshot::state`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SliceEvidenceData {
+    /// The identity: `evidence_id` — `Uuid`.
+    pub evidence_id: crate::primitives::Uuid,
+    /// `kind` — `intake.routing.SliceEvidenceKind`.
+    pub kind: SliceEvidenceKind,
+    /// `subject_revision` — `String`.
+    pub subject_revision: String,
+    /// `result` — `Optional<intake.routing.SliceEvidenceResult>`.
+    pub result: Option<SliceEvidenceResult>,
+    /// `observation_id` — `Uuid`.
+    pub observation_id: crate::primitives::Uuid,
+    /// `observed_at` — `Timestamp`.
+    pub observed_at: crate::primitives::Timestamp,
+    /// `producer` — `String`.
+    pub producer: String,
+}
+
+/// The states of `intake.routing.SliceEvidence`, at the type level.
+///
+/// One marker type per declared state, sealed: a state the lifecycle does not declare cannot
+/// implement [`Marker`](slice_evidence_state::Marker), so [`SliceEvidence<S>`](SliceEvidence) can only ever rest in a real state.
+pub mod slice_evidence_state {
+    /// Closes [`Marker`] over the declared states.
+    mod sealed {
+        /// Implemented only by the marker types beside this module.
+        pub trait Sealed {}
+        impl Sealed for super::Submitted {}
+    }
+
+    /// A declared state of `SliceEvidence`, as a type.
+    pub trait Marker: sealed::Sealed {
+        /// The same state, as the runtime value.
+        const STATE: super::SliceEvidenceState;
+    }
+
+    /// `Submitted`. Where a new instance starts.
+    pub struct Submitted;
+
+    impl Marker for Submitted {
+        const STATE: super::SliceEvidenceState = super::SliceEvidenceState::Submitted;
+    }
+}
+
+/// SliceEvidence — `intake.routing.SliceEvidence` — with its lifecycle state carried by the type.
+///
+/// The one constructor rests in `Submitted`, and the only way to change `S` is a method generated from
+/// a declared transition. A move the specification does not declare is therefore not an error
+/// case: it does not compile. Where the state is data — wire, storage — use [`SliceEvidenceSnapshot`]
+/// and [`SliceEvidenceSnapshot::refine`].
+pub struct SliceEvidence<S: slice_evidence_state::Marker> {
+    data: SliceEvidenceData,
+    state: core::marker::PhantomData<S>,
+}
+
+impl<S: slice_evidence_state::Marker> SliceEvidence<S> {
+    /// The state this instance rests in, as the runtime value.
+    pub fn state(&self) -> SliceEvidenceState {
+        S::STATE
+    }
+
+    /// What it holds.
+    pub fn data(&self) -> &SliceEvidenceData {
+        &self.data
+    }
+
+    /// Hands the data back, giving up the typed state.
+    pub fn into_data(self) -> SliceEvidenceData {
+        self.data
+    }
+}
+
+impl SliceEvidence<slice_evidence_state::Submitted> {
+    /// A new instance, resting in `Submitted` — the only state the lifecycle starts one in.
+    pub fn new(data: SliceEvidenceData) -> Self {
+        Self {
+            data,
+            state: core::marker::PhantomData,
+        }
+    }
+}
+
+/// `intake.routing.SliceEvidence` as it crosses a boundary: the state as a value beside the data.
+///
+/// Wire and storage know states only at runtime; [`SliceEvidenceSnapshot::refine`] is the one door back
+/// into the typed lifecycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SliceEvidenceSnapshot {
+    /// Where the instance is in its lifecycle.
+    pub state: SliceEvidenceState,
+    /// What it holds.
+    pub data: SliceEvidenceData,
+}
+
+/// An `SliceEvidence` in whichever declared state it was found.
+pub enum AnySliceEvidence {
+    /// Resting in `Submitted`.
+    Submitted(SliceEvidence<slice_evidence_state::Submitted>),
+}
+
+impl SliceEvidenceSnapshot {
+    /// Refines the runtime state into the typed one.
+    ///
+    /// Total: every declared state has an arm, and an undeclared state cannot reach here because
+    /// `SliceEvidenceState` cannot spell one.
+    pub fn refine(self) -> AnySliceEvidence {
+        match self.state {
+            SliceEvidenceState::Submitted => AnySliceEvidence::Submitted(SliceEvidence {
+                data: self.data,
+                state: core::marker::PhantomData,
+            }),
+        }
+    }
+}
+
+impl AnySliceEvidence {
+    /// The state, as the runtime value.
+    pub fn state(&self) -> SliceEvidenceState {
+        match self {
+            Self::Submitted(_) => SliceEvidenceState::Submitted,
+        }
+    }
+
+    /// Back to the boundary shape.
+    pub fn snapshot(self) -> SliceEvidenceSnapshot {
+        match self {
+            Self::Submitted(instance) => SliceEvidenceSnapshot {
+                state: SliceEvidenceState::Submitted,
                 data: instance.into_data(),
             },
         }

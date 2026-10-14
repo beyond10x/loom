@@ -1,14 +1,14 @@
 <!--
   generated from intake v1
-  model digest 15e4505119390053fa8851b623b962daf68d5470099a63fc007c3c158d7c78e9
-  contract digest 1343dab00750680fd7c8f9677d3285807a17865acb4c07c8d227f83d330b8285
+  model digest ae71eb0f88cab51a232b4394e603b767a9a14b86939368c466b1dd6fcfac4d3e
+  contract digest e27d5e5e01cde62ceb5184fea37602c4a6745cf4920ca3b202548b3391221985
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — intake v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-69 capabilities: **67 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+73 capabilities: **71 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -64,6 +64,9 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `intake.routing.ReferenceKind` |
 | domain type | `intake.routing.ResumeContext.State` |
 | domain type | `intake.routing.Risk` |
+| domain type | `intake.routing.SliceEvidence.State` |
+| domain type | `intake.routing.SliceEvidenceKind` |
+| domain type | `intake.routing.SliceEvidenceResult` |
 | domain type | `intake.routing.SliceRun.State` |
 | domain type | `intake.routing.StopReason` |
 | entity lifecycle | `intake.routing.ExtractedReference` |
@@ -72,6 +75,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | entity lifecycle | `intake.routing.MergeHandoff` |
 | entity lifecycle | `intake.routing.ProtocolPick` |
 | entity lifecycle | `intake.routing.ResumeContext` |
+| entity lifecycle | `intake.routing.SliceEvidence` |
 | entity lifecycle | `intake.routing.SliceRun` |
 | command contract | `intake.routing.DropResumeContext` |
 | command contract | `intake.routing.RecordMergeHandoff` |
