@@ -3,8 +3,8 @@ use std::io::Write;
 
 use b10x_loom_commission::model::responsibility::{
     ActionRequestData, CaseId, Commission, EffectOutcome, EffectOutcomePerformed,
-    EffectOutcomeRefused, EvidenceData, EvidenceId, ExecutorOutcomeProposedAction, Observation,
-    ObservationData, ObservationId, commission_state,
+    EffectOutcomeRefused, EvidenceData, EvidenceId, ExecutorOutcomeProposedAction, GovernorError,
+    Observation, ObservationData, ObservationId, commission_state,
 };
 use b10x_loom_commission::model::{json, primitives::Timestamp};
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -12,7 +12,7 @@ use b10x_loom_commission::ports::evidence::{ObservationPort, submit_evidence};
 use b10x_loom_commission::ports::governor::Governor;
 use chrono::{DateTime, FixedOffset, SecondsFormat, Utc};
 use intake_model::query::TimeObservation;
-use loom_governor::{CanonGovernor, FallibleCaseStore};
+use loom_governor::{CanonGovernor, EvaluationTime, FallibleCaseStore, NoEvaluationTime};
 
 use crate::case::INTENT;
 use crate::effect::{Console, refuse};
@@ -50,6 +50,45 @@ impl Clock for HostClock {
     }
 }
 
+/// The operating system clock's instant, in UTC. It resolves no timezone, so it cannot fail: the
+/// clock the slice reads an observation's `observed_at` and a governor's evaluation instant from
+/// when the host gives no other.
+pub struct SystemClock;
+impl Clock for SystemClock {
+    fn read(&self) -> Result<DateTime<FixedOffset>, String> {
+        Ok(Utc::now().fixed_offset())
+    }
+}
+
+/// `clock`'s instant as Canon writes one: UTC, to the second, `YYYY-MM-DDTHH:MM:SSZ`.
+///
+/// # Errors
+/// The clock's own failure.
+pub fn instant(clock: &dyn Clock) -> Result<Timestamp, String> {
+    let read = clock.read()?;
+    Ok(Timestamp(
+        read.with_timezone(&Utc)
+            .to_rfc3339_opts(SecondsFormat::Secs, true),
+    ))
+}
+
+/// A governor's trusted evaluation instant, read from a host clock for every evaluation
+/// (`CanonGovernor::with_evaluation_time`): the slice's governor evaluates at the host instant, so
+/// an evidence kind's `max_age` expires an observation older than it. A clock that fails leaves
+/// the governor unavailable rather than evaluating with no instant.
+pub struct ClockTime<C>(pub C);
+
+impl<C: Clock> EvaluationTime for ClockTime<C> {
+    fn at(&self, _case: &CaseId) -> Result<Option<String>, GovernorError> {
+        instant(&self.0)
+            .map(|Timestamp(text)| Some(text))
+            .map_err(|_| GovernorError::GovernorUnavailable)
+    }
+}
+
+/// The evaluation time of the governor `b10x-loom` builds: the system clock's UTC instant.
+pub type HostTime = ClockTime<SystemClock>;
+
 // Private construction prevents model-supplied fields or public report values being verified.
 #[derive(Debug)]
 struct ClockReport {
@@ -58,8 +97,8 @@ struct ClockReport {
     observation: ObservationId,
 }
 
-pub(crate) struct ClockEffects<'a, 'o, S> {
-    governor: &'a CanonGovernor<S>,
+pub(crate) struct ClockEffects<'a, 'o, S, T = NoEvaluationTime> {
+    governor: &'a CanonGovernor<S, T>,
     case: CaseId,
     intent_revision: &'a str,
     clock: &'a dyn Clock,
@@ -67,9 +106,9 @@ pub(crate) struct ClockEffects<'a, 'o, S> {
     console: &'a Console<'o>,
 }
 
-impl<'a, 'o, S: FallibleCaseStore> ClockEffects<'a, 'o, S> {
+impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> ClockEffects<'a, 'o, S, T> {
     pub(crate) fn new(
-        governor: &'a CanonGovernor<S>,
+        governor: &'a CanonGovernor<S, T>,
         case: CaseId,
         intent_revision: &'a str,
         clock: &'a dyn Clock,
@@ -154,7 +193,7 @@ impl<'a, 'o, S: FallibleCaseStore> ClockEffects<'a, 'o, S> {
         let id = EvidenceId(fresh_uuid("clock-evidence", &self.case.0));
         let facts = serde_json::json!({"format":"canon-evidence/1", "id":format!("clock-{}", id.0.0),
             "kind":"system_time", "result":"observed", "subject":INTENT,
-            "subject_revision":report.value.intent_revision});
+            "subject_revision":report.value.intent_revision, "observed_at":report.value.utc});
         submit_evidence(
             self.governor,
             PRODUCER,
@@ -221,7 +260,7 @@ impl<'a, 'o, S: FallibleCaseStore> ClockEffects<'a, 'o, S> {
     }
 }
 
-impl<S: FallibleCaseStore> EffectPort for ClockEffects<'_, '_, S> {
+impl<S: FallibleCaseStore, T: EvaluationTime> EffectPort for ClockEffects<'_, '_, S, T> {
     fn performs(&self, action: &str) -> bool {
         action == READ_TIME
     }

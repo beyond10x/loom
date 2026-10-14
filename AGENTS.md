@@ -442,8 +442,8 @@ verified evidence. The store expires with its briefing and grants no cross-run a
 - `b10x-loom-intake-slice` is the local effect adapter (`LocalEffects`) and a thin caller of
   `run_until_blocked`. It has no loop of its own; keep it small. It executes `software.change/1`
   actions inside the given workspace and `system.query/1` through the host clock, never merges, pushes or deploys, and never supplies
-  authority on the operator's behalf. It submits evidence from the test command it runs itself.
-  It performs `tests.write` and `implementation.edit` (each a committed write, reporting the new
+  authority on the operator's behalf. It submits evidence only from what it did itself (§ the
+  slice's evidence below). It performs `tests.write` and `implementation.edit` (each a committed write, reporting the new
   `HEAD`), `repository.inspect` and `tests.run`; a resume hands off `repository.merge`. On a
   `software-change@1` case the runtime reads every frontier without the actions the slice can
   never perform (`run::never_performed`: gated and not in `run::PERFORMED`, which is
@@ -469,6 +469,24 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   sets one. With the defaults a run reaches the outcomes it reached before the inputs; with
   `--change-kind bugfix` an `implementation.edit` is admissible only once a test failed on the
   current revision (`a_bugfix_edits_the_implementation_only_after_a_failing_test`).
+- The slice's evidence is `intake.routing.SliceEvidence`, submitted only by the verifier
+  (`verifier::TestResultVerifier`) from what the executor did: a `test_result` for every
+  `tests.run` on a committed revision; beside it, with the same result and citing the same
+  observation, a `regression_test_result` when the case's `change_kind` is `bugfix` and the
+  executor performed a `tests.write` before the run (its own history, not carried across a
+  resume); and an `implementation_change` about the new `HEAD` for every `implementation.edit`
+  that committed. Each record carries `observed_at`, the host clock's instant of its observation
+  (`LocalExecutor::with_clock`, `run::run_with_clock`; `clock::SystemClock` by default), and the
+  verifier's producer; the governor gives Canon `EvidenceData.producer`, never a producer in the
+  facts, and reads no clock. A bugfix that writes its test, runs it red and then edits discharges
+  `red_first.required`, and one that edits before any regression test leaves it open. Canon
+  orders records in whole seconds: an edit observed in the same second as the red run orders
+  `unknown` and leaves it open too, so tests set the instants with an injected clock. The governor `b10x-loom` builds is `run::slice_governor`,
+  generic over `T: EvaluationTime` through the slice, evaluating at the host instant
+  (`clock::HostTime`), so an evidence kind's `max_age` expires an old observation.
+  `crates/loom-cli/tests/slice_run.rs` holds it
+  (`a_bugfix_red_regression_test_before_its_edit_discharges_red_first`,
+  `a_slice_governor_expires_an_operational_observation_after_max_age`).
 - `b10x-loom-cli` is `b10x-loom`. Its clap definition is the library (`src/lib.rs`, `Cli`), which
   `loom-docs` renders. The library also holds `evaluate`, the JSON codec of `b10x-loom evaluate`
   over the generated `loom.evaluation` types, and `exit_status` and `events`, the writer of

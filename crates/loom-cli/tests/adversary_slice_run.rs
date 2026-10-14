@@ -319,9 +319,17 @@ fn a_refused_action_is_a_step_and_the_run_goes_on() {
         "{}",
         drive.output
     );
+    // The refused inspect submits nothing; the edit, since story `change-evidence-order`, its
+    // `implementation_change`.
     assert_eq!(
         count_starting(&drive.output, "evidence: none"),
-        2,
+        1,
+        "{}",
+        drive.output
+    );
+    assert_eq!(
+        count_starting(&drive.output, "evidence: implementation_change"),
+        1,
         "{}",
         drive.output
     );

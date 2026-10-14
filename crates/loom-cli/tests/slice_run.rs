@@ -32,22 +32,30 @@
 //!   `evidence:` lines, the latter `evidence: test_result <result>` for a verified test run;
 //! - `stopped: <StopReason>`, with its detail in parentheses where it has one, as the last line.
 
+use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use b10x_loom_cli::{CaseInputs, ChangeKind, Cli, Command as CliCommand};
+use b10x_loom_commission::model::json::{self as commission_json, Value as CommissionJson};
+use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::{
-    ActionStatus, CaseId, CompletionDetermination, Frontier, GovernorError, ObservationData,
-    frontier_state,
+    ActionStatus, CaseId, CompletionDetermination, EvidenceData, EvidenceId, Frontier,
+    FrontierData, GovernorError, ObservationData, ObservationId, Truth, frontier_state,
 };
+use b10x_loom_commission::ports::evidence::submit_evidence;
 use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_intake_references::references;
-use b10x_loom_intake_slice::executor::TestCommand;
-use b10x_loom_intake_slice::run::{SliceRequest, StopReason, run};
+use b10x_loom_intake_slice::clock::{Clock, SystemClock};
+use b10x_loom_intake_slice::executor::{EDIT_SOURCE, TEST_RUN_SOURCE, TestCommand};
+use b10x_loom_intake_slice::run::{
+    PRODUCER, RunOptions, SliceRequest, StopReason, run_with_clock, slice_governor,
+};
+use chrono::{DateTime, FixedOffset, SecondsFormat, TimeDelta, Utc};
 use clap::Parser;
 use llm_core::{
     BoxFuture, CallId, Cancel, Capabilities, Error, Id, Item, Model, Protocol, Provenance,
@@ -55,6 +63,7 @@ use llm_core::{
     TurnRequest,
 };
 use loom_governor::{CanonGovernor, MemoryCaseStore};
+use loom_protocols::ProtocolCatalog;
 use serde_json::{Value, json};
 
 /// The intent names a tracker key and a GitHub issue in mixed case, so the issue's canonical value
@@ -125,7 +134,7 @@ fn the_slice_stops_for_each_reason() {
     // is the merge, which needs authority.
     let fixture = Fixture::new("main");
     let first = fixture.head();
-    let (run, output, frontiers) = drive(
+    let (run, output, frontiers, evidence) = drive_counted(
         &fixture,
         Row {
             name: "main path",
@@ -192,11 +201,16 @@ fn the_slice_stops_for_each_reason() {
         "nothing was merged or branched"
     );
     assert_eq!(fixture.status(), "", "the work tree is clean");
+    assert_eq!(
+        kinds(&evidence),
+        ["implementation_change", "test_result"],
+        "the edit's change and the passing run's result, and no regression test result: {output}"
+    );
 
     // A step budget of 1: the edit is performed, then the budget is used up.
     let fixture = Fixture::new("budget");
     let first = fixture.head();
-    let (run, output, frontiers) = drive(
+    let (run, output, frontiers, evidence) = drive_counted(
         &fixture,
         Row {
             name: "a step budget of 1",
@@ -223,6 +237,7 @@ fn the_slice_stops_for_each_reason() {
         "the step's frontier and its revalidation, none after the budget is used up"
     );
     assert_ne!(fixture.head(), first, "the one step was performed");
+    assert_eq!(kinds(&evidence), ["implementation_change"], "{output}");
 
     // A pick of incident-response@1: the case opens and its frontier is issued, but the slice
     // executes only software.change/1, so the agent is never asked.
@@ -468,6 +483,9 @@ fn the_slice_runs_on_commissions_runtime() {
         sources,
         [
             "executor",
+            // The committed edit's own observation, which its implementation_change cites (story
+            // `change-evidence-order`).
+            EDIT_SOURCE,
             "effect",
             "executor",
             b10x_loom_intake_slice::executor::TEST_RUN_SOURCE,
@@ -476,7 +494,7 @@ fn the_slice_runs_on_commissions_runtime() {
         ],
         "{output}"
     );
-    let edit = &observations[1];
+    let edit = &observations[2];
     assert_eq!(
         edit.payload.member("outcome"),
         Some(&b10x_loom_commission::model::json::Value::Text(
@@ -762,6 +780,26 @@ fn drive(fixture: &Fixture, row: Row) -> (b10x_loom_intake_slice::run::SliceRun,
     (slice, output, frontiers)
 }
 
+/// [`drive`], also returning every evidence record the governor holds for the case, in order.
+fn drive_counted(
+    fixture: &Fixture,
+    row: Row,
+) -> (
+    b10x_loom_intake_slice::run::SliceRun,
+    String,
+    usize,
+    Vec<EvidenceData>,
+) {
+    let driven = drive_clocked(
+        fixture,
+        row,
+        std::sync::Arc::new(b10x_loom_intake_slice::executor::UnconfinedRunner),
+        run_inputs(&[]),
+        &SystemClock,
+    );
+    (driven.run, driven.output, driven.frontiers, driven.evidence)
+}
+
 /// [`drive`], also returning every observation the governor received, in order.
 fn drive_observed(
     fixture: &Fixture,
@@ -819,6 +857,39 @@ fn drive_with_inputs(
     Vec<ObservationData>,
     Vec<String>,
 ) {
+    let driven = drive_clocked(fixture, row, runner, inputs, &SystemClock);
+    (
+        driven.run,
+        driven.output,
+        driven.frontiers,
+        driven.observations,
+        driven.requests,
+    )
+}
+
+/// What [`drive_clocked`] saw: the run, its output, the frontiers issued, every observation the
+/// governor received and every request the agent was asked, in order, and, once a case opened,
+/// every evidence record the governor holds for it, in the order received, and its frontier
+/// after the run.
+struct Driven {
+    run: b10x_loom_intake_slice::run::SliceRun,
+    output: String,
+    frontiers: usize,
+    observations: Vec<ObservationData>,
+    requests: Vec<String>,
+    evidence: Vec<EvidenceData>,
+    frontier: Option<FrontierData>,
+}
+
+/// Runs the slice for `row` on `fixture` with the case `inputs`, its observations' instants read
+/// from `clock`.
+fn drive_clocked(
+    fixture: &Fixture,
+    row: Row,
+    runner: std::sync::Arc<dyn b10x_loom_intake_slice::confinement::TestRunner>,
+    inputs: CaseInputs,
+    clock: &dyn Clock,
+) -> Driven {
     let classifier = Recorded::new("recorded-classifier", vec![row.pick]);
     let agent = Recorded::new("recorded-agent", row.agent);
     let governor = CanonGovernor::new(MemoryCaseStore::default());
@@ -826,6 +897,7 @@ fn drive_with_inputs(
         governor: &governor,
         nothing_admissible: row.nothing_admissible,
         issued: AtomicUsize::new(0),
+        case: Mutex::new(None),
     };
     let request = SliceRequest {
         runner,
@@ -838,13 +910,15 @@ fn drive_with_inputs(
         test_paths: b10x_loom_intake_slice::test_paths::TestPaths::default(),
     };
     let mut out = Vec::new();
-    let result = run(
+    let result = run_with_clock(
         &request,
         &governor,
         &frontiers,
         &classifier,
         &agent,
+        clock,
         &mut out,
+        &RunOptions::default(),
     );
     let output = String::from_utf8(out).expect("the output is UTF-8");
     let slice =
@@ -863,13 +937,91 @@ fn drive_with_inputs(
     );
     assert_references(&output, row.name);
     let issued = frontiers.issued.load(Ordering::SeqCst);
-    (
-        slice,
+    let case = frontiers.case.lock().expect("case").clone();
+    let (evidence, frontier) = match case {
+        Some(case) => (
+            governor.evidence(&case).expect("the case's evidence"),
+            Some(governor.frontier(&case).expect("a frontier").into_data()),
+        ),
+        None => (Vec::new(), None),
+    };
+    Driven {
+        run: slice,
         output,
-        issued,
-        governor.observations(),
-        agent.requests(),
-    )
+        frontiers: issued,
+        observations: governor.observations(),
+        requests: agent.requests(),
+        evidence,
+        frontier,
+    }
+}
+
+/// The kind of each of `evidence`, in order.
+fn kinds(evidence: &[EvidenceData]) -> Vec<&str> {
+    evidence.iter().map(|record| record.kind.as_str()).collect()
+}
+
+/// The text member `name` of `record`'s facts.
+fn fact<'r>(record: &'r EvidenceData, name: &str) -> &'r str {
+    match record.facts.member(name) {
+        Some(CommissionJson::Text(text)) => text,
+        other => panic!("{} has no text `{name}`: {other:?}", record.kind),
+    }
+}
+
+/// Whether `frontier` holds `obligation` open.
+fn obligation_open(frontier: &FrontierData, obligation: &str) -> bool {
+    frontier
+        .obligations
+        .iter()
+        .find(|entry| entry.obligation == obligation)
+        .unwrap_or_else(|| panic!("the frontier lists `{obligation}`: {frontier:?}"))
+        .open
+}
+
+/// `claim`'s value in `frontier`.
+fn claim(frontier: &FrontierData, claim: &str) -> Truth {
+    frontier
+        .claims
+        .iter()
+        .find(|entry| entry.claim == claim)
+        .unwrap_or_else(|| panic!("the frontier lists `{claim}`: {frontier:?}"))
+        .value
+}
+
+/// A host clock for a test: its first reading is at [`Stepping::START`] and each later one
+/// [`Stepping::STEP`] seconds after the one before, so each observation of a run falls in a second
+/// of its own.
+struct Stepping {
+    readings: AtomicI64,
+}
+
+impl Stepping {
+    /// 2026-10-03T13:20:00Z.
+    const START: i64 = 1_791_000_000;
+    const STEP: i64 = 10;
+
+    fn new() -> Self {
+        Self {
+            readings: AtomicI64::new(0),
+        }
+    }
+
+    /// The `n`th reading (from 0), as Canon writes an instant.
+    fn reading(n: i64) -> String {
+        DateTime::from_timestamp(Self::START + n * Self::STEP, 0)
+            .expect("an instant")
+            .to_rfc3339_opts(SecondsFormat::Secs, true)
+    }
+}
+
+impl Clock for Stepping {
+    fn read(&self) -> Result<DateTime<FixedOffset>, String> {
+        let n = self.readings.fetch_add(1, Ordering::SeqCst);
+        DateTime::from_timestamp(Self::START + n * Self::STEP, 0)
+            .map(|instant| instant.fixed_offset())
+            .ok_or_else(|| "no instant".to_owned())
+    }
 }
 
 /// The references the intent holds are printed first, in order, one line each.
@@ -957,6 +1109,8 @@ struct Frontiers<'g> {
     governor: &'g CanonGovernor<MemoryCaseStore>,
     nothing_admissible: bool,
     issued: AtomicUsize,
+    /// The case of the last frontier issued.
+    case: Mutex<Option<CaseId>>,
 }
 
 impl Governor for Frontiers<'_> {
@@ -966,6 +1120,7 @@ impl Governor for Frontiers<'_> {
 
     fn frontier(&self, case: &CaseId) -> Result<Frontier<frontier_state::Issued>, GovernorError> {
         self.issued.fetch_add(1, Ordering::SeqCst);
+        *self.case.lock().expect("case") = Some(case.clone());
         let frontier = self.governor.frontier(case)?;
         if !self.nothing_admissible {
             return Ok(frontier);
@@ -1189,4 +1344,458 @@ fn adversary_the_gate_stops_before_the_budget_on_the_last_step() {
     assert_stopped(&output, "stopped: ApprovalRequired (repository.merge)");
     assert_eq!(run.stop_reason, StopReason::ApprovalRequired, "{output}");
     assert_eq!(run.steps, 4);
+}
+
+// Story `change-evidence-order`: the slice's evidence lets `software.change/1`'s order,
+// independence and age rules decide (`intake.routing.SliceEvidence`).
+
+/// A revision of every artifact `software.change/1` declares, for a case a test opens itself:
+/// `implementation` at `r1`, `deployment` at `d1`.
+fn software_revisions() -> BTreeMap<String, String> {
+    [
+        ("intent", "i1"),
+        ("system_specification", "s1"),
+        ("plan", "p1"),
+        ("implementation", "r1"),
+        ("release", "v1"),
+        ("deployment", "d1"),
+    ]
+    .into_iter()
+    .map(|(artifact, revision)| (artifact.to_owned(), revision.to_owned()))
+    .collect()
+}
+
+/// The edit a run makes to fix the fixture's check.
+fn fix_the_check() -> Value {
+    json!({
+        "files": [{"path": "check.txt", "contents": "fixed\n"}],
+        "message": "fix the check"
+    })
+}
+
+/// A bugfix that writes its regression test, runs it red, then edits: the first regression test
+/// result fails and is observed before the implementation's first change, so
+/// `regression.shown_first` holds and `red_first.required` is discharged. The test run after the
+/// `tests.write` submits a `regression_test_result` beside its `test_result`, both citing the run's
+/// one observation; the edit submits one `implementation_change`.
+#[test]
+fn a_bugfix_red_regression_test_before_its_edit_discharges_red_first() {
+    let fixture = Fixture::new("red-first");
+    let clock = Stepping::new();
+    let driven = drive_clocked(
+        &fixture,
+        Row {
+            name: "a bugfix whose regression test fails before its edit",
+            pick: pick(SOFTWARE_CHANGE, 0.9),
+            agent: vec![
+                json!({"action": "tests.write"}),
+                json!({
+                    "files": [{"path": "tests/regression.txt", "contents": "check.txt reads fixed\n"}],
+                    "message": "the regression test"
+                }),
+                json!({"action": "tests.run"}),
+                json!({}),
+                json!({"action": "implementation.edit"}),
+                fix_the_check(),
+                json!({"action": "tests.run"}),
+                json!({}),
+                json!({"action": "repository.merge"}),
+                json!({}),
+            ],
+            max_steps: 10,
+            nothing_admissible: false,
+        },
+        std::sync::Arc::new(b10x_loom_intake_slice::executor::UnconfinedRunner),
+        run_inputs(&["--change-kind", "bugfix"]),
+        &clock,
+    );
+    let output = &driven.output;
+    assert_eq!(
+        steps(output),
+        [
+            "tests.write",
+            "tests.run",
+            "implementation.edit",
+            "tests.run"
+        ],
+        "{output}"
+    );
+    assert_eq!(count_starting(output, "effect: refused:"), 0, "{output}");
+    assert_eq!(
+        count_lines(
+            output,
+            "evidence: test_result fail, regression_test_result fail"
+        ),
+        1,
+        "{output}"
+    );
+    assert_eq!(
+        count_lines(
+            output,
+            "evidence: test_result pass, regression_test_result pass"
+        ),
+        1,
+        "{output}"
+    );
+    assert_stopped(output, "stopped: ApprovalRequired (repository.merge)");
+    let evidence = &driven.evidence;
+    assert_eq!(
+        kinds(evidence),
+        [
+            "test_result",
+            "regression_test_result",
+            "implementation_change",
+            "test_result",
+            "regression_test_result"
+        ],
+        "{output}"
+    );
+    assert_eq!(
+        evidence[0].observation_ids, evidence[1].observation_ids,
+        "one observation yields both results"
+    );
+    assert_eq!(fact(&evidence[1], "result"), "fail");
+    assert_eq!(fact(&evidence[4], "result"), "pass");
+    let frontier = driven.frontier.as_ref().expect("the case's frontier");
+    assert_eq!(claim(frontier, "regression.shown_first"), Truth::True);
+    assert!(
+        !obligation_open(frontier, "red_first.required"),
+        "red_first.required is discharged: {frontier:?}"
+    );
+}
+
+/// A bugfix whose suite fails before any `tests.write`, then edits: the edit is admitted (a test
+/// failed on the current revision), but no regression test result was ever submitted, so the
+/// implementation changed with no regression test shown first and `red_first.required` stays
+/// open.
+#[test]
+fn a_bugfix_edit_before_any_regression_test_leaves_red_first_open() {
+    let fixture = Fixture::new("no-red-first");
+    let first = fixture.head();
+    let clock = Stepping::new();
+    let driven = drive_clocked(
+        &fixture,
+        Row {
+            name: "a bugfix that edits with no regression test",
+            pick: pick(SOFTWARE_CHANGE, 0.9),
+            agent: vec![
+                json!({"action": "tests.run"}),
+                json!({}),
+                json!({"action": "implementation.edit"}),
+                fix_the_check(),
+                json!({"action": "tests.run"}),
+                json!({}),
+                json!({"action": "repository.merge"}),
+                json!({}),
+            ],
+            max_steps: 10,
+            nothing_admissible: false,
+        },
+        std::sync::Arc::new(b10x_loom_intake_slice::executor::UnconfinedRunner),
+        run_inputs(&["--change-kind", "bugfix"]),
+        &clock,
+    );
+    let output = &driven.output;
+    assert_eq!(
+        steps(output),
+        ["tests.run", "implementation.edit", "tests.run"],
+        "{output}"
+    );
+    assert_eq!(
+        count_starting(output, "effect: refused:"),
+        0,
+        "the edit is admitted: {output}"
+    );
+    assert_ne!(fixture.head(), first, "the edit committed");
+    assert_eq!(
+        kinds(&driven.evidence),
+        ["test_result", "implementation_change", "test_result"],
+        "{output}"
+    );
+    let frontier = driven.frontier.as_ref().expect("the case's frontier");
+    assert_ne!(claim(frontier, "regression.shown_first"), Truth::True);
+    assert!(
+        obligation_open(frontier, "red_first.required"),
+        "red_first.required stays open: {frontier:?}"
+    );
+}
+
+/// Every performed `implementation.edit` that committed submits one `implementation_change` about
+/// the new `HEAD`, citing the edit's own observation. A refused edit, a `tests.write` and an edit
+/// that wrote what the files already held submit none.
+#[test]
+fn an_edit_submits_implementation_change_about_the_new_head() {
+    let fixture = Fixture::new("change");
+    let first = fixture.head();
+    let driven = drive_clocked(
+        &fixture,
+        Row {
+            name: "edits, refused, written and repeated",
+            pick: pick(SOFTWARE_CHANGE, 0.9),
+            agent: vec![
+                json!({"action": "implementation.edit"}),
+                json!({"files": [{"path": "../outside.txt", "contents": "x\n"}]}),
+                json!({"action": "tests.write"}),
+                json!({"files": [{"path": "tests/check_test.txt", "contents": "fixed\n"}]}),
+                json!({"action": "implementation.edit"}),
+                fix_the_check(),
+                json!({"action": "implementation.edit"}),
+                fix_the_check(),
+                json!({"action": "tests.run"}),
+                json!({}),
+                json!({"action": "repository.merge"}),
+                json!({}),
+            ],
+            max_steps: 10,
+            nothing_admissible: false,
+        },
+        std::sync::Arc::new(b10x_loom_intake_slice::executor::UnconfinedRunner),
+        run_inputs(&[]),
+        &SystemClock,
+    );
+    let output = &driven.output;
+    assert_eq!(
+        steps(output),
+        [
+            "implementation.edit",
+            "tests.write",
+            "implementation.edit",
+            "implementation.edit",
+            "tests.run"
+        ],
+        "{output}"
+    );
+    assert_eq!(
+        count_starting(output, "effect: refused:"),
+        1,
+        "only the edit outside the workspace is refused: {output}"
+    );
+    assert_eq!(
+        count_lines(output, "evidence: implementation_change"),
+        1,
+        "{output}"
+    );
+    let head = fixture.head();
+    assert_eq!(
+        fixture
+            .git(&["rev-list", "--count", &format!("{first}..HEAD")])
+            .trim(),
+        "2",
+        "the test and the one edit that changed something committed: {output}"
+    );
+    let changes: Vec<&EvidenceData> = driven
+        .evidence
+        .iter()
+        .filter(|record| record.kind == "implementation_change")
+        .collect();
+    assert_eq!(changes.len(), 1, "{:?}", kinds(&driven.evidence));
+    let change = changes[0];
+    assert_eq!(fact(change, "subject"), "implementation");
+    assert_eq!(fact(change, "subject_revision"), head, "about the new HEAD");
+    assert!(
+        change.facts.member("result").is_none(),
+        "a change has no result"
+    );
+    let [observation] = change.observation_ids.as_slice() else {
+        panic!("one observation: {:?}", change.observation_ids)
+    };
+    let observed = driven
+        .observations
+        .iter()
+        .find(|seen| &seen.observation_id == observation)
+        .expect("the governor holds the cited observation");
+    assert_eq!(observed.source, EDIT_SOURCE);
+    assert_eq!(
+        observed.payload.member("implementation"),
+        Some(&CommissionJson::Text(head.clone()))
+    );
+    assert_eq!(
+        kinds(&driven.evidence),
+        ["implementation_change", "test_result"],
+        "{output}"
+    );
+}
+
+/// Every record the slice submits carries `observed_at`, the host clock's instant of the
+/// observation it cites, and the verifier's trusted producer, in the evidence and in its record.
+/// The producer reaching Canon is the trusted one: a producer the record's facts name is never
+/// read, so one Canon would refuse as an identifier does not keep a record from applying.
+#[test]
+fn slice_evidence_carries_observed_at_and_the_trusted_producer() {
+    let fixture = Fixture::new("observed-at");
+    let clock = Stepping::new();
+    let driven = drive_clocked(
+        &fixture,
+        Row {
+            name: "a run with a stepping clock",
+            pick: pick(SOFTWARE_CHANGE, 0.9),
+            agent: vec![
+                json!({"action": "implementation.edit"}),
+                fix_the_check(),
+                json!({"action": "tests.run"}),
+                json!({}),
+                json!({"action": "repository.merge"}),
+                json!({}),
+            ],
+            max_steps: 10,
+            nothing_admissible: false,
+        },
+        std::sync::Arc::new(b10x_loom_intake_slice::executor::UnconfinedRunner),
+        run_inputs(&[]),
+        &clock,
+    );
+    let output = &driven.output;
+    assert_eq!(
+        kinds(&driven.evidence),
+        ["implementation_change", "test_result"],
+        "{output}"
+    );
+    for (n, record) in driven.evidence.iter().enumerate() {
+        let expected = Stepping::reading(i64::try_from(n).expect("a count"));
+        assert_eq!(fact(record, "observed_at"), expected, "{}", record.kind);
+        assert_eq!(record.producer, PRODUCER, "{}", record.kind);
+        assert_eq!(fact(record, "producer"), PRODUCER, "{}", record.kind);
+        let cited = driven
+            .observations
+            .iter()
+            .find(|seen| record.observation_ids.contains(&seen.observation_id))
+            .expect("the cited observation");
+        assert_eq!(cited.observed_at.0, expected, "{}", record.kind);
+    }
+    assert!(
+        driven
+            .observations
+            .iter()
+            .any(|seen| seen.source == TEST_RUN_SOURCE)
+    );
+
+    // A record whose facts name a producer Canon refuses as an identifier still applies: the
+    // producer Canon reads is the one `submit_evidence` attributed it to.
+    let governor = CanonGovernor::new(MemoryCaseStore::default());
+    let case = governor
+        .open(
+            SOFTWARE_CHANGE,
+            software_revisions(),
+            loom_governor::CaseInputs::try_from_pairs([
+                ("risk", "trivial"),
+                ("change_kind", "feature"),
+                ("affects_security_boundary", "false"),
+            ])
+            .expect("inputs"),
+        )
+        .expect("a software change opens");
+    let facts = commission_json::parse(
+        r#"{"format":"canon-evidence/1","id":"forged-producer","kind":"test_result","subject":"implementation","subject_revision":"r1","result":"pass","observed_at":"2026-10-03T13:20:00Z","producer":"a model said so"}"#,
+    )
+    .expect("facts");
+    submit_evidence(
+        &governor,
+        PRODUCER,
+        EvidenceData {
+            evidence_id: EvidenceId(Uuid("00000000-0000-8000-8000-000000000001".into())),
+            case_id: case.clone(),
+            kind: "test_result".into(),
+            subject_revision: 1,
+            producer: String::new(),
+            observation_ids: vec![ObservationId(Uuid(
+                "00000000-0000-8000-8000-000000000002".into(),
+            ))],
+            facts,
+            provenance: CommissionJson::Null,
+        },
+    )
+    .expect("submitted");
+    let frontier = governor.frontier(&case).expect("a frontier").into_data();
+    assert_eq!(
+        claim(&frontier, "tests.pass"),
+        Truth::True,
+        "the record applies under its trusted producer: {frontier:?}"
+    );
+}
+
+/// The governor a slice host builds (`slice_governor`, as `b10x-loom run` and `resume` build it)
+/// evaluates at the host instant: an `operational_observation`, whose `max_age` is 30 minutes,
+/// observed 31 minutes ago no longer applies, so `deployment.healthy` does not hold and
+/// `health.required` stays open, while one observed a minute ago discharges it. A governor built
+/// with no evaluation time lets the old observation apply.
+#[test]
+fn a_slice_governor_expires_an_operational_observation_after_max_age() {
+    let catalog = ProtocolCatalog::bundled().expect("the bundled catalog");
+    let inputs = || {
+        loom_governor::CaseInputs::try_from_pairs([
+            ("risk", "critical"),
+            ("change_kind", "feature"),
+            ("affects_security_boundary", "false"),
+        ])
+        .expect("inputs")
+    };
+    let revisions = software_revisions;
+    let observation = |id: u32, ago: TimeDelta, case: &CaseId| {
+        let observed_at = (Utc::now() - ago).to_rfc3339_opts(SecondsFormat::Secs, true);
+        let facts = commission_json::parse(&format!(
+            r#"{{"format":"canon-evidence/1","id":"health-{id}","kind":"operational_observation","subject":"deployment","subject_revision":"d1","result":"healthy","observed_at":"{observed_at}"}}"#
+        ))
+        .expect("facts");
+        EvidenceData {
+            evidence_id: EvidenceId(Uuid(format!("00000000-0000-8000-8000-{id:012}"))),
+            case_id: case.clone(),
+            kind: "operational_observation".into(),
+            subject_revision: 1,
+            producer: String::new(),
+            observation_ids: vec![ObservationId(Uuid(format!(
+                "00000000-0000-8000-9000-{id:012}"
+            )))],
+            facts,
+            provenance: CommissionJson::Null,
+        }
+    };
+
+    let governor =
+        slice_governor(MemoryCaseStore::default(), &catalog).expect("the slice's governor");
+    let case = governor
+        .open(SOFTWARE_CHANGE, revisions(), inputs())
+        .expect("a critical software change opens");
+    submit_evidence(
+        &governor,
+        "host:operations",
+        observation(1, TimeDelta::minutes(31), &case),
+    )
+    .expect("submitted");
+    let frontier = governor.frontier(&case).expect("a frontier").into_data();
+    assert_ne!(claim(&frontier, "deployment.healthy"), Truth::True);
+    assert!(
+        obligation_open(&frontier, "health.required"),
+        "an observation older than 30 minutes no longer applies: {frontier:?}"
+    );
+
+    let clockless = CanonGovernor::new(MemoryCaseStore::default())
+        .with_catalog(&catalog)
+        .expect("a governor with no evaluation time");
+    let old = clockless
+        .open(SOFTWARE_CHANGE, revisions(), inputs())
+        .expect("opens");
+    submit_evidence(
+        &clockless,
+        "host:operations",
+        observation(2, TimeDelta::minutes(31), &old),
+    )
+    .expect("submitted");
+    let frontier = clockless.frontier(&old).expect("a frontier").into_data();
+    assert!(
+        !obligation_open(&frontier, "health.required"),
+        "with no evaluation time nothing expires: {frontier:?}"
+    );
+
+    submit_evidence(
+        &governor,
+        "host:operations",
+        observation(3, TimeDelta::minutes(1), &case),
+    )
+    .expect("submitted");
+    let frontier = governor.frontier(&case).expect("a frontier").into_data();
+    assert_eq!(claim(&frontier, "deployment.healthy"), Truth::True);
+    assert!(
+        !obligation_open(&frontier, "health.required"),
+        "a fresh observation discharges it: {frontier:?}"
+    );
 }

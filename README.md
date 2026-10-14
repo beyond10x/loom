@@ -262,8 +262,8 @@ cargo run --locked -p b10x-loom-sdk --example software_change
 ```text
 workspace: target/loom-sdk-example
 step 1: implementation.edit {"files":[{"path":"check.txt","contents":"fixed\n"}],"message":"fix the check"}
-  effect: committed; HEAD is 4d93a3d80863e4a00cc77924bc1de54520a70e99
-  evidence: none
+  effect: committed; HEAD is 6c1b876de066f060c9d564596f480534df880904
+  evidence: implementation_change
 step 2: tests.run {}
   effect: the test command exited with 0
     | confinement: none

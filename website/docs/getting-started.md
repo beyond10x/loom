@@ -41,8 +41,8 @@ cargo run --locked -p b10x-loom-sdk --example software_change
 ```text
 workspace: target/loom-sdk-example
 step 1: implementation.edit {"files":[{"path":"check.txt","contents":"fixed\n"}],"message":"fix the check"}
-  effect: committed; HEAD is 4d93a3d80863e4a00cc77924bc1de54520a70e99
-  evidence: none
+  effect: committed; HEAD is 6c1b876de066f060c9d564596f480534df880904
+  evidence: implementation_change
 step 2: tests.run {}
   effect: the test command exited with 0
     | confinement: none
@@ -58,7 +58,8 @@ The commit id differs on every run. What happened:
    edit the implementation, inspect and run tests admissible, merge blocked.
 2. Loom selected `implementation.edit` and generated its arguments; the runtime rechecked the proposal
    and the local effect adapter committed the file. The governor moved the case to the new
-   revision.
+   revision, and the verifier submitted an `implementation_change` about it, stamped with the host
+   clock's `observed_at`.
 3. Loom selected `tests.run`; the adapter ran `grep -qx fixed check.txt`, and the verifier, not the
    model, submitted the passing result as evidence.
 4. With the tests passing on the current revision, the merge became *approval required*. The

@@ -306,7 +306,7 @@ fn a_failing_test_is_edited_and_then_passes() {
     let report = executor.execute(&edit).expect("the edit is performed");
     let fixed = fixture.head();
     assert_ne!(fixed, first, "the edit commits a new revision");
-    let Report::Edited { revision } = &report else {
+    let Report::Edited { revision, .. } = &report else {
         panic!("an edit reports its revision: {report:?}");
     };
     assert_eq!(revision, &fixed);
@@ -653,7 +653,7 @@ fn tests_write_writes_only_the_hosts_test_paths() {
         assert_eq!(fixture.status(), "", "{change_kind:?}: nothing written");
         assert_eq!(fixture.read("check.txt"), "broken\n");
 
-        let Report::Edited { revision } = executor
+        let Report::Edited { revision, .. } = executor
             .execute(&proposal(
                 "tests.write",
                 &json!({"files": [{"path": "tests/check_test.txt", "contents": "a test\n"}]}),

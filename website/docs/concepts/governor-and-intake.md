@@ -46,6 +46,11 @@ catalog behavior; new catalog-aware entrypoints serve custom protocols.
 time makes the governor unavailable. No authority or explicit decision enters through that port.
 Evidence producers authenticate their observations before calling `submit_evidence`, including
 any product requirement for independent reviewer execution contexts.
+The producer Canon reads for a held record is the one `submit_evidence` attributed it to, never a
+`producer` the record's facts name; the record's `observed_at` comes from its facts, as the host
+wrote it, and the governor reads no clock. The governor `b10x-loom` builds for the slice
+(`run::slice_governor`) evaluates at the host instant, so an evidence kind's `max_age` (30 minutes
+for `operational_observation` in `software.change/1`) expires an old observation.
 
 Durable hosts implement `FallibleCaseStore`. Reads and writes return errors; an insert error
 stops opening the case rather than retrying another identifier. Updates are atomic, so a failed

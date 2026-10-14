@@ -21,7 +21,7 @@ use intake_model::confinement::Backend;
 use intake_model::context::ContextPolicy;
 use intake_model::primitives::{Decimal, Uuid as IntakeUuid};
 use llm_core::Model;
-use loom_governor::{CanonGovernor, FallibleCaseStore};
+use loom_governor::{CanonGovernor, EvaluationTime, FallibleCaseStore};
 use loom_protocols::ProtocolCatalog;
 use serde_json::{Value, json};
 
@@ -277,11 +277,11 @@ fn stop(
 
 /// Execute an accepted route with host-provided resources and the same immutable catalog.
 #[allow(clippy::too_many_arguments)]
-pub fn run_prepared_intent<S: FallibleCaseStore>(
+pub fn run_prepared_intent<S: FallibleCaseStore, T: EvaluationTime>(
     request: &IntentRequest,
     prepared: &PreparedIntent,
     catalog: &ProtocolCatalog,
-    governor: &CanonGovernor<S>,
+    governor: &CanonGovernor<S, T>,
     frontiers: &dyn Governor,
     agent: &dyn Model,
     clock: &dyn Clock,
@@ -391,11 +391,11 @@ impl HostText {
 /// whether the commission holds its Suspension (the context is kept then) or its context cannot be
 /// removed; a run that failed reports its own failure.
 #[allow(clippy::too_many_arguments)]
-pub fn run_prepared_intent_with_state<S: FallibleCaseStore>(
+pub fn run_prepared_intent_with_state<S: FallibleCaseStore, T: EvaluationTime>(
     request: &IntentRequest,
     prepared: &PreparedIntent,
     catalog: &ProtocolCatalog,
-    governor: &CanonGovernor<S>,
+    governor: &CanonGovernor<S, T>,
     frontiers: &dyn Governor,
     agent: &dyn Model,
     clock: &dyn Clock,
@@ -526,9 +526,9 @@ pub fn held_resume_context(
 /// patterns, a negative step budget or a threshold that is not a number, or when the held case's
 /// inputs are not a software change's; [`SliceError::Governor`] when `governor` does not give the
 /// held case's inputs.
-pub fn resumed_request<S: FallibleCaseStore>(
+pub fn resumed_request<S: FallibleCaseStore, T: EvaluationTime>(
     context: &ResumeContextData,
-    governor: &CanonGovernor<S>,
+    governor: &CanonGovernor<S, T>,
     runner: Option<Arc<dyn TestRunner>>,
 ) -> Result<IntentRequest, SliceError> {
     let invalid = |what: &str| SliceError::State(format!("the resume context keeps {what}"));
@@ -577,11 +577,11 @@ pub fn resumed_request<S: FallibleCaseStore>(
 /// [`SliceError::Case`] when the workspace no longer validates; [`SliceError::State`] when the
 /// grant cannot be read, or the context cannot be removed; and every failure of a run.
 #[allow(clippy::too_many_arguments)]
-pub fn resume_with_state<S: FallibleCaseStore>(
+pub fn resume_with_state<S: FallibleCaseStore, T: EvaluationTime>(
     context: &ResumeContextData,
     request: &IntentRequest,
     catalog: &ProtocolCatalog,
-    governor: &CanonGovernor<S>,
+    governor: &CanonGovernor<S, T>,
     frontiers: &dyn Governor,
     agent: &dyn Model,
     out: &mut dyn Write,
@@ -599,11 +599,11 @@ pub fn resume_with_state<S: FallibleCaseStore>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn resume_prepared<S: FallibleCaseStore>(
+fn resume_prepared<S: FallibleCaseStore, T: EvaluationTime>(
     context: &ResumeContextData,
     request: &IntentRequest,
     catalog: &ProtocolCatalog,
-    governor: &CanonGovernor<S>,
+    governor: &CanonGovernor<S, T>,
     frontiers: &dyn Governor,
     agent: &dyn Model,
     out: &mut dyn Write,
@@ -679,6 +679,8 @@ fn resume_prepared<S: FallibleCaseStore>(
             test: &request.test,
             runner: Arc::clone(runner),
             test_paths: &request.test_paths,
+            // A resume reads the system clock: its caller gives none.
+            clock: &crate::clock::SystemClock,
         },
         Mode::Resuming(&resuming),
     )
@@ -723,11 +725,11 @@ fn absolute_text(what: &str, path: &Path) -> Result<String, SliceError> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_prepared<S: FallibleCaseStore>(
+fn run_prepared<S: FallibleCaseStore, T: EvaluationTime>(
     request: &IntentRequest,
     prepared: &PreparedIntent,
     catalog: &ProtocolCatalog,
-    governor: &CanonGovernor<S>,
+    governor: &CanonGovernor<S, T>,
     frontiers: &dyn Governor,
     agent: &dyn Model,
     clock: &dyn Clock,
@@ -791,6 +793,9 @@ fn run_prepared<S: FallibleCaseStore>(
                 test: &request.test,
                 runner: Arc::clone(runner),
                 test_paths: &request.test_paths,
+                // An observation's instant is UTC: the system clock, which resolves no timezone
+                // and cannot fail, never the time query's `clock`, whose timezone may not resolve.
+                clock: &crate::clock::SystemClock,
             },
             mode,
         )
@@ -825,10 +830,10 @@ fn run_prepared<S: FallibleCaseStore>(
 
 /// Route and run using an injectable clock, preserving metrics on every failure.
 #[allow(clippy::too_many_arguments)]
-pub fn run_intent_with_options<S: FallibleCaseStore>(
+pub fn run_intent_with_options<S: FallibleCaseStore, T: EvaluationTime>(
     request: &IntentRequest,
     catalog: &ProtocolCatalog,
-    governor: &CanonGovernor<S>,
+    governor: &CanonGovernor<S, T>,
     frontiers: &dyn Governor,
     classifier: &dyn Model,
     agent: &dyn Model,

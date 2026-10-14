@@ -49,7 +49,7 @@ impl WorkingContext {
         self.state.recent_artifacts.drain(..excess);
         match report {
             Report::Inspected(_) => json!({"kind":"inspected"}),
-            Report::Edited { revision } => {
+            Report::Edited { revision, .. } => {
                 self.state.latest_revision = Some(revision.clone());
                 json!({"kind":"edited", "revision":revision})
             }
@@ -203,6 +203,7 @@ mod tests {
         let report = context.observe(
             &Report::Edited {
                 revision: "A".into(),
+                change: None,
             },
             Vec::new(),
         );
@@ -212,6 +213,7 @@ mod tests {
         let report = context.observe(
             &Report::Edited {
                 revision: "B".into(),
+                change: None,
             },
             Vec::new(),
         );
