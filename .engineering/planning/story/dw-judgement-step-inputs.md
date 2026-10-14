@@ -2,12 +2,16 @@
 format: aep.planning-md/3
 id: story:dw-judgement-step-inputs
 kind: story
-status: draft
+status: active
 title: A judgement step reads the earlier typed outputs it lists as data in its instructions
 relations:
 - decomposes: epic:deterministic-workflows
 - depends_on: story:dw-typed-step-outputs
-revision: 1
+- serves: vision:governed-autonomy
+revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-14T23:50:23Z", actor: "human:timo", revision: 2, correlation: "wave-2026-10-15-w1"}
+- {from: "proposed", to: "active", at: "2026-10-14T23:50:23Z", actor: "human:timo", revision: 3, correlation: "wave-2026-10-15-w1"}
 ---
 ## Outcome
 

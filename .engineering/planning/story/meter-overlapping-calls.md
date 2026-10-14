@@ -2,11 +2,15 @@
 format: aep.planning-md/3
 id: story:meter-overlapping-calls
 kind: story
-status: draft
+status: active
 title: A run meter counts overlapping and nested executor calls in their own steps
 relations:
 - decomposes: epic:deterministic-workflows
-revision: 1
+- serves: vision:governed-autonomy
+revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-14T23:50:23Z", actor: "human:timo", revision: 2, correlation: "wave-2026-10-15-w1"}
+- {from: "proposed", to: "active", at: "2026-10-14T23:50:23Z", actor: "human:timo", revision: 3, correlation: "wave-2026-10-15-w1"}
 ---
 ## Outcome
 
