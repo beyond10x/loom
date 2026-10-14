@@ -12,6 +12,14 @@ source: crates/loom-sdk/src/lib.rs, crates/loom-sdk/examples/software_change.rs,
 is a whole embedding in one file, and `crates/loom-sdk/tests/example_runs.rs` runs it in CI. This
 page walks through it. [Getting started](../getting-started.md) shows its output.
 
+CI also builds that file as an external crate would. `consumers/pinned/` in the repository is its
+own Cargo workspace, depends on `b10x-loom-sdk` alone (by path, so it checks the tree before it is
+tagged), includes the example by `#[path]` and runs it to `ApprovalRequired (repository.merge)`.
+`task consumer-check`, a step of `task check`, builds it over the workspace's `Cargo.lock` and
+fails when it no longer compiles, stops anywhere else, or resolves a second copy of a Loom or
+Canon crate. A change that breaks what this page tells you to compile against fails Loom's CI
+before a release, not your build after one.
+
 ## Depend on the SDK
 
 Nothing is on a registry. Depend on the release tag:

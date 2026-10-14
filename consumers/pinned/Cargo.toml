@@ -1,0 +1,17 @@
+# A crate outside Loom's workspace that pins Loom by path, as a consumer pins a release tag, and
+# builds the documented embedding (crates/loom-sdk/examples/software_change.rs) as an external
+# crate would. `task consumer-check` copies the root Cargo.lock here, then builds and runs it.
+
+[package]
+name = "loom-pinned-consumer"
+description = "An external crate that builds Loom's documented embedding against b10x-loom-sdk alone."
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+# Its own workspace: the root workspace (members = ["crates/*"]) neither includes nor rejects it.
+[workspace]
+
+[dependencies]
+b10x-loom-sdk = { path = "../../crates/loom-sdk" }

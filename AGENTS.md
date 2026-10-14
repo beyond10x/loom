@@ -114,6 +114,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | The SDK stability page (`website/docs/reference/sdk-stability.md`) lists exactly the ports a host implements and the `loom_sdk` paths control-plane imports, each resolving through `loom_sdk`; a change to that surface updates the page and names any break under `Breaking:` in `CHANGELOG.md` | `crates/loom-sdk/tests/host_ports.rs` (`a_host_implements_every_port_through_loom_sdk_alone`, `the_stability_page_lists_exactly_the_ports_this_test_implements`, `every_control_plane_path_on_the_page_resolves`) |
 | The `run --output jsonl` records and exit statuses change within `schema_version` 1 only by a new optional field; any other change fails the gate until the committed contract moves | `task docs-check` (`crates/loom-docs/src/run_events.rs`, `the_v1_contract_matches_the_declared_events`, `a_removed_renamed_or_retyped_field_is_a_break`, `a_new_record_kind_is_a_break`, `a_new_optional_field_is_not_a_break`) |
 | A release tag equals the workspace version and has a CHANGELOG entry | `loom-xtask release-check`, run by `release.yml` (`crates/loom-xtask/tests/release_check.rs`) |
+| The documented embedding builds and runs to `ApprovalRequired (repository.merge)` as an external crate: `consumers/pinned/` is its own workspace, depends on `b10x-loom-sdk` alone by path, includes `crates/loom-sdk/examples/software_change.rs` by `#[path]` and resolves one copy of each Loom and Canon crate | `task consumer-check` (`consumers/pinned/tests/embedding.rs`, `the_pinned_consumer_stops_at_approval_required`), `crates/loom-xtask/tests/pinned_consumer.rs` |
 
 ## ESS
 
@@ -167,8 +168,11 @@ Before a change is reported done, in this order:
 1. `task check`: the three specification validations, both ESS gates, all three drift checks, both
    no-hand-model checks, Loom's and Commission's conformance suites, the dependency guard,
    `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
-   `cargo test --workspace --locked`, then `task docs-check` and `task commission:docs-drift`.
-   CI runs exactly this (`check.yml`, job `loom / task check`).
+   `cargo test --workspace --locked`, `task consumer-check`, then `task docs-check` and
+   `task commission:docs-drift`. CI runs exactly this (`check.yml`, job `loom / task check`).
+   `task consumer-check` copies the root `Cargo.lock` to `consumers/pinned/` and builds and tests
+   that crate offline into its own `consumers/pinned/target/`; it is outside the workspace, so
+   `cargo test --workspace` does not reach it.
 2. `task plan` (`aep plan artifact validate`) when the planning store changed. `task check` does
    not run it.
 3. `task website` when anything under `website/` changed, or a generated page did. CI's

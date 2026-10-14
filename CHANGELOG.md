@@ -38,6 +38,12 @@ under **Unreleased** until the next release.
   version only a new optional field of an existing record kind is allowed, and any other change is
   a break named here under `Breaking:` with a new schema version (reference: Run events,
   Stability).
+- `task consumer-check`, run by `task check`: `consumers/pinned/`, a crate outside the workspace
+  that depends on `b10x-loom-sdk` alone by path, compiles the SDK example
+  (`crates/loom-sdk/examples/software_change.rs`) as an external crate would and runs it to
+  `ApprovalRequired (repository.merge)`, over the workspace's `Cargo.lock`. A change that breaks
+  what an embedder compiles against now fails Loom's own CI before a release. No break for
+  callers.
 
 ### Changed
 

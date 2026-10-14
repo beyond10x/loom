@@ -31,6 +31,7 @@ tasks:
       - cargo fmt --all --check
       - cargo clippy --workspace --all-targets --locked -- -D warnings
       - cargo test --workspace --locked
+      - task: consumer-check
       - task: docs-check
       - task: commission:docs-drift
 
@@ -87,6 +88,13 @@ tasks:
     desc: Run the conformance suite synthesized from ess/ with declared coverage against b10x-loom-executor and fail unless its report says conformance_status passed and every check of the report holds.
     cmds:
       - cargo test --locked -p b10x-loom-conformance --test conform
+
+  consumer-check:
+    desc: Build and run consumers/pinned, a crate outside the workspace that pins b10x-loom-sdk by path and compiles the SDK example, over the workspace's Cargo.lock.
+    cmds:
+      - cp Cargo.lock consumers/pinned/Cargo.lock
+      - cargo fmt --manifest-path consumers/pinned/Cargo.toml --check
+      - cargo test --manifest-path consumers/pinned/Cargo.toml --offline
 
   plan:
     desc: Validate the AEP planning store.
