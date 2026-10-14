@@ -59,8 +59,29 @@ types:
       Deterministic: loom.workflow.DeterministicStep
       Judgement: loom.workflow.JudgementStep
 
+  # The type a step output's value must have (story dw-typed-step-outputs): a string, an integer,
+  # a boolean, any JSON value, or a list whose every item is one of them.
+  - name: loom.workflow.OutputType
+    kind: enum
+    variants: [String, Integer, Boolean, Json, StringList, IntegerList, BooleanList, JsonList]
+
+  # A value a step produces, taken from its performed effect's report (Commission's
+  # EffectOutcomePerformed.report) at the JSON pointer `pointer` (RFC 6901) and held to `type`. A
+  # later deterministic step's arguments name it as `{"$step": <step>, "$output": <name>}` inside
+  # its Json arguments; the runtime fills it in without a model. It exists only once its step was
+  # performed in the run, and is dropped with the run.
+  - name: loom.workflow.StepOutput
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: pointer
+        type: String
+      - name: type
+        type: loom.workflow.OutputType
+
   # One step, named uniquely within its definition, taken only while its condition holds on the
-  # frontier the run is handed.
+  # frontier the run is handed. It owns the outputs it declares.
   - name: loom.workflow.WorkflowStep
     kind: struct
     fields:
@@ -70,6 +91,8 @@ types:
         type: Optional<loom.workflow.StepCondition>
       - name: kind
         type: loom.workflow.StepKind
+      - name: outputs
+        type: List<loom.workflow.StepOutput>
 
   # A workflow definition: its name, the protocol it runs over as the host's catalog names it
   # (`software-change@1`), and its steps in order. The definition owns its steps; it does not own
