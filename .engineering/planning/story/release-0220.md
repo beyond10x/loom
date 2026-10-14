@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:release-0220
 kind: story
-status: active
+status: implemented
 title: Release Loom 0.22.0
 relations:
 - depends_on: story:dw-run-model-meter
@@ -11,10 +11,11 @@ relations:
 - depends_on: story:release-names-embedder-breaks
 - depends_on: story:regression-evidence-integrity
 - serves: vision:O1
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-14T21:40:19Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-14T21:40:19Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-14T23:23:15Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Why
 
