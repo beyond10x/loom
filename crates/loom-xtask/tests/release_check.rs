@@ -8,6 +8,13 @@
 //! * `.github/workflows/release.yml` runs on a bare-version tag with read-only permissions, calls
 //!   only `release-check` in its own steps, and reuses `check.yml` on the tagged commit.
 //!
+//! `story:release-names-embedder-breaks`: the tag's entry carries a `Breaking:` sentence, and
+//! `Breaking: none.` is refused when a stable surface (`consumers/pinned/`,
+//! `crates/loom-sdk/tests/host_ports.rs`, `docs/contracts/run-events-v1.json`) changed since the
+//! previous tag. The fixture repositories are built with `git` in a temporary directory, with a
+//! local identity on each command and no global or system configuration; nothing is tagged or
+//! committed in the working tree, and nothing reaches the network.
+//!
 //! The repository is read from `CARGO_MANIFEST_DIR` at run time; fixtures land under
 //! `CARGO_TARGET_TMPDIR`.
 
@@ -16,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const CHANGELOG: &str = "# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-10-05\n\nFirst.\n";
+const CHANGELOG: &str = "# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-10-05\n\nFirst. Breaking: everything is new.\n";
 const RELEASE_TAGS: &str = "[0-9]+.[0-9]+.[0-9]+";
 
 fn repository() -> PathBuf {
@@ -80,6 +87,216 @@ fn workspace_version() -> String {
         }
     }
     panic!("Cargo.toml has no [workspace.package] version");
+}
+
+/// The three stable surfaces `release-check` diffs between tags.
+const SURFACES: [&str; 3] = [
+    "consumers/pinned/src/main.rs",
+    "crates/loom-sdk/tests/host_ports.rs",
+    "docs/contracts/run-events-v1.json",
+];
+
+/// Runs `git` in `dir` with a local identity and no global or system configuration.
+fn git(dir: &Path, args: &[&str]) {
+    let out = Command::new("git")
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .args([
+            "-c",
+            "user.name=Loom Release Fixture",
+            "-c",
+            "user.email=release-fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "tag.gpgsign=false",
+            "-c",
+            "init.defaultBranch=main",
+        ])
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("run git {args:?}: {e}"));
+    assert!(
+        out.status.success(),
+        "git {args:?} failed in {}: {}",
+        dir.display(),
+        stderr(&out)
+    );
+}
+
+fn changelog_with(entries: &[(&str, &str)]) -> String {
+    let mut text = String::from("# Changelog\n\n## [Unreleased]\n");
+    for (version, body) in entries.iter().rev() {
+        text.push_str(&format!("\n## [{version}] - 2026-10-05\n\n{body}\n"));
+    }
+    text
+}
+
+/// A git repository holding the three stable surfaces and a README, committed and tagged `0.1.0`
+/// with a `Breaking:` sentence in its entry. `change` names the files to edit before the second
+/// commit, which sets the workspace version to `0.2.0` with `second` as its entry; `tag_second`
+/// tags that commit `0.2.0`.
+fn two_tag_fixture(name: &str, change: &[&str], second: &str, tag_second: bool) -> PathBuf {
+    let first = "First. Breaking: everything is new.";
+    let root = fixture(name, "0.1.0", &changelog_with(&[("0.1.0", first)]));
+    for file in SURFACES.iter().chain(&["README.md"]) {
+        let path = root.join(file);
+        fs::create_dir_all(path.parent().unwrap_or(&root))
+            .unwrap_or_else(|e| panic!("create {}: {e}", path.display()));
+        write(&path, &format!("{file}: first\n"));
+    }
+    git(&root, &["init", "-q"]);
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "first"]);
+    git(&root, &["tag", "-a", "0.1.0", "-m", "Loom 0.1.0"]);
+
+    for file in change {
+        write(&root.join(file), &format!("{file}: second\n"));
+    }
+    write(
+        &root.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"crates/*\"]\n\n[workspace.package]\nversion = \"0.2.0\"\n\
+         edition = \"2024\"\n",
+    );
+    write(
+        &root.join("CHANGELOG.md"),
+        &changelog_with(&[("0.1.0", first), ("0.2.0", second)]),
+    );
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "second"]);
+    if tag_second {
+        git(&root, &["tag", "-a", "0.2.0", "-m", "Loom 0.2.0"]);
+    }
+    root
+}
+
+#[test]
+fn release_check_names_an_entry_without_a_breaking_sentence() {
+    // A mention of the marker in backticks is not a sentence, nor is "Breaking" without its colon.
+    let second = "Second. A break is named under `Breaking:`.\n\n### Changed\n\n- Breaking for \
+                  nobody, a habit.";
+    let changelog = changelog_with(&[("0.1.0", "First. Breaking: none."), ("0.2.0", second)]);
+    let root = fixture("no-breaking", "0.2.0", &changelog);
+    let out = release_check(&root, "0.2.0");
+    assert!(
+        !out.status.success(),
+        "release-check passed an entry without a `Breaking:` sentence"
+    );
+    assert!(
+        stderr(&out).contains("CHANGELOG.md entry [0.2.0] has no `Breaking:` sentence"),
+        "release-check did not name the entry without a `Breaking:` sentence: {}",
+        stderr(&out)
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn release_check_refuses_breaking_none_when_a_stable_surface_changed_since_the_previous_tag() {
+    for (n, surface) in SURFACES.iter().enumerate() {
+        let root = two_tag_fixture(
+            &format!("surface-{n}"),
+            &[surface, "README.md"],
+            "Second.\n\nBreaking:\nnone.",
+            true,
+        );
+        let out = release_check(&root, "0.2.0");
+        let err = stderr(&out);
+        assert!(
+            !out.status.success(),
+            "release-check passed `Breaking: none.` although {surface} changed since 0.1.0"
+        );
+        assert!(
+            err.contains("CHANGELOG.md entry [0.2.0] says `Breaking: none.`")
+                && err.contains("since 0.1.0")
+                && err.contains(surface),
+            "release-check did not name the entry and the changed surface {surface}: {err}"
+        );
+        assert!(
+            !err.contains("README.md"),
+            "release-check named a file that is no stable surface: {err}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+}
+
+#[test]
+fn release_check_refuses_breaking_none_before_the_tag_exists() {
+    // On the release commit, before the tag is pushed, the diff runs to `HEAD`.
+    let root = two_tag_fixture(
+        "untagged",
+        &["docs/contracts/run-events-v1.json"],
+        "Second. **Breaking:** None.",
+        false,
+    );
+    let out = release_check(&root, "0.2.0");
+    assert!(
+        !out.status.success()
+            && stderr(&out).contains("docs/contracts/run-events-v1.json")
+            && stderr(&out).contains("since 0.1.0"),
+        "release-check did not diff the untagged release commit against 0.1.0: {}",
+        stderr(&out)
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn release_check_accepts_breaking_none_when_no_stable_surface_changed() {
+    let root = two_tag_fixture("unchanged", &["README.md"], "Second. Breaking: none.", true);
+    let out = release_check(&root, "0.2.0");
+    assert!(
+        out.status.success(),
+        "release-check refused `Breaking: none.` although no stable surface changed: {}",
+        stderr(&out)
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn release_check_accepts_a_named_break_when_a_stable_surface_changed() {
+    let root = two_tag_fixture(
+        "named",
+        &SURFACES,
+        "Second. Breaking: `Port::call` takes a context.",
+        true,
+    );
+    let out = release_check(&root, "0.2.0");
+    assert!(
+        out.status.success(),
+        "release-check refused an entry that names its break: {}",
+        stderr(&out)
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn release_check_passes_on_the_first_tag() {
+    let root = two_tag_fixture("first", &[], "Second. Breaking: none.", false);
+    // Check out the first tag: it has no previous tag, so only the sentence is required.
+    git(&root, &["checkout", "-q", "0.1.0"]);
+    write(
+        &root.join("CHANGELOG.md"),
+        &changelog_with(&[("0.1.0", "First. Breaking: none.")]),
+    );
+    let out = release_check(&root, "0.1.0");
+    assert!(
+        out.status.success(),
+        "release-check refused `Breaking: none.` on the first tag: {}",
+        stderr(&out)
+    );
+
+    write(
+        &root.join("CHANGELOG.md"),
+        &changelog_with(&[("0.1.0", "First.")]),
+    );
+    let out = release_check(&root, "0.1.0");
+    assert!(
+        !out.status.success()
+            && stderr(&out).contains("CHANGELOG.md entry [0.1.0] has no `Breaking:` sentence"),
+        "release-check passed the first tag without a `Breaking:` sentence: {}",
+        stderr(&out)
+    );
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -304,6 +521,39 @@ fn release_workflow_verifies_the_tag_and_reuses_the_check() {
         "no job runs `loom-xtask release-check --tag` on the pushed tag"
     );
     assert!(checks, "no job reuses ./.github/workflows/check.yml");
+
+    // `release-check` diffs the stable surfaces against the previous tag, so the job that runs it
+    // checks out the full history with its tags; a shallow clone has no previous tag to diff.
+    let verify_steps = jobs
+        .values()
+        .find(|job| {
+            job["steps"]
+                .as_sequence()
+                .into_iter()
+                .flatten()
+                .any(|step| {
+                    step["run"]
+                        .as_str()
+                        .is_some_and(|run| run.contains("release-check"))
+                })
+        })
+        .and_then(|job| job["steps"].as_sequence())
+        .unwrap_or_else(|| panic!("no job of release.yml runs release-check"));
+    let checkout = verify_steps
+        .iter()
+        .find(|step| {
+            step["uses"]
+                .as_str()
+                .is_some_and(|uses| uses.starts_with("actions/checkout@"))
+        })
+        .unwrap_or_else(|| panic!("the release-check job has no actions/checkout step"));
+    assert!(
+        checkout["with"]["fetch-depth"].as_i64() == Some(0)
+            && checkout["with"]["fetch-tags"].as_bool() == Some(true),
+        "the release-check job must check out with `fetch-depth: 0` and `fetch-tags: true` so \
+         the previous tag is there to diff against: {:?}",
+        checkout["with"]
+    );
 
     let check = workflow("check.yml");
     assert!(

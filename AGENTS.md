@@ -115,6 +115,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | The SDK stability page (`website/docs/reference/sdk-stability.md`) lists exactly the ports a host implements and the `loom_sdk` paths control-plane imports, each resolving through `loom_sdk`; a change to that surface updates the page and names any break under `Breaking:` in `CHANGELOG.md` | `crates/loom-sdk/tests/host_ports.rs` (`a_host_implements_every_port_through_loom_sdk_alone`, `the_stability_page_lists_exactly_the_ports_this_test_implements`, `every_control_plane_path_on_the_page_resolves`) |
 | The `run --output jsonl` records and exit statuses change within `schema_version` 1 only by a new optional field; any other change fails the gate until the committed contract moves | `task docs-check` (`crates/loom-docs/src/run_events.rs`, `the_v1_contract_matches_the_declared_events`, `a_removed_renamed_or_retyped_field_is_a_break`, `a_new_record_kind_is_a_break`, `a_new_optional_field_is_not_a_break`) |
 | A release tag equals the workspace version and has a CHANGELOG entry | `loom-xtask release-check`, run by `release.yml` (`crates/loom-xtask/tests/release_check.rs`) |
+| A release's CHANGELOG entry says what breaks for a consumer: it has a `Breaking:` sentence, and `Breaking: none.` is refused when `consumers/pinned/`, `crates/loom-sdk/tests/host_ports.rs` or `docs/contracts/run-events-v1.json` changed since the previous tag; `release.yml` fetches the history and tags it diffs | `loom-xtask release-check` (`crates/loom-xtask/tests/release_check.rs`: `release_check_names_an_entry_without_a_breaking_sentence`, `release_check_refuses_breaking_none_when_a_stable_surface_changed_since_the_previous_tag`, `release_check_accepts_breaking_none_when_no_stable_surface_changed`, `release_check_passes_on_the_first_tag`, `release_workflow_verifies_the_tag_and_reuses_the_check`) |
 | The documented embedding builds and runs to `ApprovalRequired (repository.merge)` as an external crate: `consumers/pinned/` is its own workspace, depends on `b10x-loom-sdk` alone by path, includes `crates/loom-sdk/examples/software_change.rs` by `#[path]` and resolves one copy of each Loom and Canon crate | `task consumer-check` (`consumers/pinned/tests/embedding.rs`, `the_pinned_consumer_stops_at_approval_required`), `crates/loom-xtask/tests/pinned_consumer.rs` |
 
 ## ESS
@@ -664,7 +665,9 @@ workspace version and nothing is on a registry. Consumers pin `tag = "<version>"
 3. An annotated tag by `b10x-bot[bot]` on that commit: `b10x-gates bot … -- tag -a <version> -m
    "Loom <version>" <commit>`, then `-- push origin <version>`.
 4. `release` (`.github/workflows/release.yml`) green on the tag. It runs `loom-xtask release-check`
-   (the tag equals the workspace version and `CHANGELOG.md` has its entry) and then `check.yml` on
+   (the tag equals the workspace version and `CHANGELOG.md` has its entry, with a `Breaking:`
+   sentence that says `none` only when no stable surface changed since the previous tag, so the
+   job checks out the full history and its tags) and then `check.yml` on
    the tagged commit. It is read-only, needs no secret and creates no release.
 5. The GitHub Release for the tag, created by the bot (`b10x-gates api --method POST --path
    /repos/beyond10x/loom/releases`), named `<version>`, its notes the version's CHANGELOG entry.
