@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:regression-evidence-integrity
 kind: story
-status: active
+status: implemented
 title: A regression result runs the written test, and evidence instants match their observations
 relations:
 - informed_by: story:change-evidence-order
 - serves: vision:O1
-revision: 5
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-14T13:31:52Z", actor: "human:timo", revision: 4}
 - {from: "proposed", to: "active", at: "2026-10-14T13:31:52Z", actor: "human:timo", revision: 5}
+- {from: "active", to: "implemented", at: "2026-10-14T21:39:17Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 

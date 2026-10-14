@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-14T21:39:16Z",
+  "actor": "human:timo",
+  "artifact": "story:dw-workflow-definition-executor",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "package gate on 01abb70 (merged in 9bd0fa6): fmt, cargo test and clippy -D warnings of b10x-loom-executor, b10x-loom-protocols and b10x-loom-sdk (853 passed 0 failed 3 ignored), drift, no-hand-model, ess-gate, conform, docs-check and the workflow_executor --list run exit 0"
+  }
+}

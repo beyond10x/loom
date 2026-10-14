@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-14T21:39:17Z",
+  "actor": "human:timo",
+  "artifact": "story:regression-evidence-integrity",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "merged in 3a8778f (6ce8984) and its security round in 174533d (de24b0d); package gate on 7c39745 (merged in 03b9cff): fmt, cargo test and clippy -D warnings of b10x-loom-executor, b10x-loom-protocols and b10x-loom-sdk (885 passed 0 failed 3 ignored), drift, no-hand-model, ess-gate, conform, docs-check and the workflow_executor --list run exit 0, whose tree contains it"
+  }
+}
