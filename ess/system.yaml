@@ -1,4 +1,4 @@
-format: ess/22
+format: ess/24
 system: loom
 version: v1
 
@@ -14,3 +14,4 @@ domains:
   - loom.datasource
   - loom.plugin
   - loom.slack
+  - loom.authority

@@ -95,7 +95,8 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | A blocked or merge-seeking pick is never proposed | `crates/loom-executor/tests/adversary_executor_admission.rs` |
 | A stale or unlisted request is refused at revalidation | `crates/loom-commission-testkit/tests/action_request.rs`, `crates/loom-executor/tests/adversary_run_revalidation.rs`, `crates/loom-executor/tests/selection_revalidation.rs` |
 | Unknown capabilities and panicking authority providers yield no grant | `crates/loom-commission-testkit/tests/adversary_authority_fail_closed.rs` |
-| Commission names no executor, Canon, `model-provider-deny.txt` or Connectors crate | `task commission:deps-guard` (`crates/loom-commission-testkit/tests/executor_port.rs`) |
+| Commission names no executor, Canon, `model-provider-deny.txt`, Connectors or Mandate crate | `task commission:deps-guard` (`crates/loom-commission-testkit/tests/executor_port.rs`) |
+| A Mandate authority provider grants only on Mandate's allow: a Mandate outage, an authority context that is no Mandate context and the empty case id grant nothing, every outcome answers as `loom.authority` declares, and each case id is its own Mandate resource, `case-<n>` included, so a grant on one case answers for no other | `crates/loom-mandate/tests/mandate_authority.rs` (`an_unavailable_mandate_grants_nothing`, `an_authority_context_that_is_no_mandate_context_grants_nothing`, `every_outcome_answers_as_the_specification_declares`, `a_governor_case_id_is_a_mandate_resource`, `distinct_case_ids_are_distinct_resources`), `crates/loom-mandate/tests/adversary_w10_u2.rs`, `crates/loom-mandate/tests/security_w10_u2.rs` |
 | An executor's report that the case moved is decided by the governor and judged on the case's current frontier, reloaded once | `crates/loom-commission-testkit/tests/moved_case_outcome.rs`, `crates/loom-executor/tests/adversary_w1_runtime_stale.rs`, `crates/loom-executor/tests/adversary_w1p2_runtime_windows.rs` |
 | An executor is never handed an unperformed action that needs no authority; an effect is invoked once, through its binding | `crates/loom-commission-testkit/tests/effect_invocation.rs` (`effect_invoked_only_through_its_binding`) |
 | A consequential action leaves Loom only as a proposal, and the executor links no Connectors crate | `crates/loom-executor/tests/connector_boundary.rs` (`consequential_actions_leave_loom_only_as_a_proposal`) |
@@ -335,6 +336,31 @@ outlives the read. A Connectors refusal is a
 connections revalidate --adapter <alias>`, which the client never runs.
 `crates/loom-connectors/tests/connectors_cli.rs` and `connectors_cli_adversary.rs` hold it against
 the fake `tests/fixtures/connectors/fake-connectors`, which logs its argv.
+
+## Mandate
+
+`b10x-loom-mandate` (`crates/loom-mandate`, library `loom_mandate`) is the one crate that links
+Mandate: `mandate-authz`, `mandate-types`, `mandate-model`, `mandate-graph` and `mandate-policy`
+at tag `v0.9.0`. Move them together. `MandateAuthority` implements Commission's
+`AuthorityProvider` over `mandate_authz::check`; its builder takes every Mandate port (graph,
+policy, role catalog, challenge issuer, delegation records, decision ids), the tenancy and
+topology, and the host's audience, relation, minimum revision, attributes and clock; it configures
+no policy. The subject is Mandate's verified context, which the host puts in the commission's
+authority context as a `loom.authority.HostContext` (`{"verified": …}`); the action is the
+capability; the resource is the case, of type `loom.case`. A case id is opaque (Loom's governor
+issues `case-<n>`), so its Mandate resource id is derived, never parsed: the UUID version 5 of
+the case id's exact UTF-8 bytes under the namespace `735b2acd-620b-43ec-b1ab-144c2aec7ba7`
+(`loom.authority.CaseResource`). Two distinct case ids, two spellings of one UUID included, are two
+resources. A host computes a case's resource id with `loom_mandate::case_resource_id(&CaseId)`,
+or any UUID version 5 implementation over that namespace, when it writes Mandate's graph or policy;
+`the_case_resource_is_derived_as_the_specification_declares` holds the namespace to the
+specification. The `loom.authority` domain (`ess/domains/authority.yaml`) declares each outcome
+and the answer it maps to, as the `answer` attribute of `loom.authority.Outcome`; ESS synthesis
+generates no accessor for it, so `loom_mandate::answer` writes it once and
+`every_outcome_answers_as_the_specification_declares` holds the two together. Mandate's
+`Unavailable`, an authority context that does not decode, the empty case id (which derives no
+resource id) and a contradictory answer are an `Err`, which Commission refuses. It is opt-in: no
+product crate links it, and `b10x-loom run`, `approve` and `resume` do not use it.
 
 ## Plugin host
 

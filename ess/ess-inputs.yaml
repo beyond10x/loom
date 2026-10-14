@@ -8,4 +8,5 @@ specification:
   - domains/datasource.yaml
   - domains/plugin.yaml
   - domains/slack.yaml
+  - domains/authority.yaml
 scenarios: []

@@ -1,7 +1,9 @@
 //! Acceptance for `story:agent-executor-port`: an `AgentExecutor` returns one generated
 //! `ExecutorOutcome` for a commission and its current frontier, and `b10x-loom-commission` depends on
 //! no model-provider crate and not on Loom or Canon. Since `story:effect-invocation` it depends on
-//! no Connectors crate either: its Connector invoker is a port the host fills.
+//! no Connectors crate either: its Connector invoker is a port the host fills. Since
+//! `story:mandate-authority` it depends on no Mandate crate: `b10x-loom-mandate` answers its
+//! authority port with Mandate, and is the one crate that links it.
 //!
 //! `task deps-guard` runs this file. Source paths are read when the test runs
 //! (`CARGO_MANIFEST_DIR`), never baked in at build time: a build directory shared between
@@ -74,6 +76,18 @@ fn connectors_violations(listing: &str) -> Vec<String> {
         .lines()
         .filter_map(|line| line.split_whitespace().next())
         .filter(|name| *name == "connectors" || name.starts_with("connectors-"))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The Mandate crates a `cargo tree --prefix none` listing names: every crate whose first word is
+/// `mandate` or starts with `mandate-`, in listing order. A family, as for Connectors, so a Mandate
+/// crate added later is refused too.
+fn mandate_violations(listing: &str) -> Vec<String> {
+    listing
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .filter(|name| *name == "mandate" || name.starts_with("mandate-"))
         .map(str::to_owned)
         .collect()
 }
@@ -334,6 +348,39 @@ fn commission_depends_on_no_connectors_crate() {
     );
     let lookalike = format!("{clean}connectorsx v0.1.0\nb10x-connectors-ish v0.1.0\n");
     assert!(connectors_violations(&lookalike).is_empty());
+}
+
+/// `b10x-loom-commission` depends on no Mandate crate (`story:mandate-authority`): the real
+/// listing names none, and the matcher is shown to fire on a canned listing naming one.
+#[test]
+fn commission_depends_on_no_mandate_crate() {
+    let listing = real_listing();
+    assert!(
+        listing
+            .lines()
+            .any(|line| line.split_whitespace().next() == Some("b10x-loom-commission")),
+        "`cargo tree` did not print b10x-loom-commission:\n{listing}"
+    );
+    let found = mandate_violations(&listing);
+    assert!(
+        found.is_empty(),
+        "b10x-loom-commission depends on Mandate crates {found:?}:\n{listing}"
+    );
+
+    let clean = "b10x-loom-commission v0.0.0 (/repo/crates/loom-commission)\ncommission v1.0.0 (/repo/generated/rust/commission)\n";
+    assert!(mandate_violations(clean).is_empty());
+    assert_eq!(
+        mandate_violations(&format!(
+            "{clean}mandate-authz v0.9.0\nmandate-types v0.9.0\nmandate v0.9.0\n"
+        )),
+        vec![
+            "mandate-authz".to_owned(),
+            "mandate-types".to_owned(),
+            "mandate".to_owned()
+        ]
+    );
+    let lookalike = format!("{clean}mandatex v0.1.0\nb10x-loom-mandate v0.20.0\n");
+    assert!(mandate_violations(&lookalike).is_empty());
 }
 
 /// The fake logs each call's commission id and frontier id, in call order, for the runtime loop
