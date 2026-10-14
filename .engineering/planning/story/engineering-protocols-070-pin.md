@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:engineering-protocols-070-pin
 kind: story
-status: active
+status: implemented
 title: Loom builds on engineering-protocols 0.7.0 and Canon 0.4.0, and every software change case gives its inputs
 relations:
 - decomposes: epic:vertical-slices
@@ -68,10 +68,11 @@ scope:
   path: generated
 - confidence: cited
   path: website/docs
-revision: 33
+revision: 34
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-13T18:27:47Z", actor: "human:timo", revision: 32}
 - {from: "proposed", to: "active", at: "2026-10-13T18:27:47Z", actor: "human:timo", revision: 33}
+- {from: "active", to: "implemented", at: "2026-10-14T01:53:11Z", actor: "human:timo", revision: 34, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 
