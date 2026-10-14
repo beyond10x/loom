@@ -97,7 +97,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | Unknown capabilities and panicking authority providers yield no grant | `crates/loom-commission-testkit/tests/adversary_authority_fail_closed.rs` |
 | Commission names no executor, Canon, `model-provider-deny.txt`, Connectors or Mandate crate | `task commission:deps-guard` (`crates/loom-commission-testkit/tests/executor_port.rs`) |
 | A Mandate authority provider grants only on Mandate's allow: a Mandate outage, an authority context that is no Mandate context and the empty case id grant nothing, every outcome answers as `loom.authority` declares, and each case id is its own Mandate resource, `case-<n>` included, so a grant on one case answers for no other | `crates/loom-mandate/tests/mandate_authority.rs` (`an_unavailable_mandate_grants_nothing`, `an_authority_context_that_is_no_mandate_context_grants_nothing`, `every_outcome_answers_as_the_specification_declares`, `a_governor_case_id_is_a_mandate_resource`, `distinct_case_ids_are_distinct_resources`), `crates/loom-mandate/tests/adversary_w10_u2.rs`, `crates/loom-mandate/tests/security_w10_u2.rs` |
-| With `--mandate`, a resume performs the held request only when Mandate's `check_with_approval` clears and consumes the approval the grant names, kept in the state directory's log before anything is performed: a second resume with it, an expired approval, one naming another subject, action or resource, and a grant naming none are refused and perform nothing; only `b10x-loom-cli` links `b10x-loom-mandate` | `crates/loom-cli/tests/resume_after_grant.rs` (`a_recorded_approval_clears_the_held_request_once`, `a_second_resume_with_the_same_approval_is_refused_and_performs_nothing`, `an_expired_approval_is_refused_and_performs_nothing`, `the_grant_names_its_mandate_approval`), `crates/loom-mandate/tests/mandate_approval.rs` (`an_approval_naming_another_subject_action_or_resource_is_refused`), `crates/loom-mandate/tests/security_w10_u2.rs` |
+| With `--mandate`, a resume performs the held request only when Mandate's `check_with_approval` clears and consumes the approval the grant names, kept in the state directory's log before anything is performed: a second resume with it, an expired approval, one naming another subject, action or resource, one recorded for another commission however its id is written, and a grant naming none are refused and perform nothing; without `--mandate`, a grant naming an approval is refused and performs nothing; the approver is neither the verified subject nor its actor; only `b10x-loom-cli` links `b10x-loom-mandate`, and only it and `loom-docs` reach Mandate over `Cargo.lock` | `crates/loom-cli/tests/resume_after_grant.rs` (`a_recorded_approval_clears_the_held_request_once`, `a_second_resume_with_the_same_approval_is_refused_and_performs_nothing`, `an_expired_approval_is_refused_and_performs_nothing`, `the_grant_names_its_mandate_approval`), `crates/loom-cli/tests/adversary_w10_u3.rs` (`adversary_a_resume_without_mandate_does_not_perform_a_grant_naming_a_mandate_approval`), `crates/loom-cli/tests/security_w10_u3.rs` (`security_an_approval_is_bound_to_its_commission_however_its_id_is_written`), `crates/loom-mandate/tests/mandate_approval.rs` (`an_approval_naming_another_subject_action_or_resource_is_refused`), `crates/loom-mandate/tests/adversary_w10_u3.rs` (`adversary_a_host_file_whose_approver_is_the_acting_actor_is_refused`), `crates/loom-mandate/tests/security_w10_u2.rs` |
 | An executor's report that the case moved is decided by the governor and judged on the case's current frontier, reloaded once | `crates/loom-commission-testkit/tests/moved_case_outcome.rs`, `crates/loom-executor/tests/adversary_w1_runtime_stale.rs`, `crates/loom-executor/tests/adversary_w1p2_runtime_windows.rs` |
 | An executor is never handed an unperformed action that needs no authority; an effect is invoked once, through its binding | `crates/loom-commission-testkit/tests/effect_invocation.rs` (`effect_invoked_only_through_its_binding`) |
 | A consequential action leaves Loom only as a proposal, and the executor links no Connectors crate | `crates/loom-executor/tests/connector_boundary.rs` (`consequential_actions_leave_loom_only_as_a_proposal`) |
@@ -366,8 +366,8 @@ and the answer it maps to, as the `answer` attribute of `loom.authority.Outcome`
 generates no accessor for it, so `loom_mandate::answer` writes it once and
 `every_outcome_answers_as_the_specification_declares` holds the two together. Mandate's
 `Unavailable`, an authority context that does not decode, the empty case id (which derives no
-resource id) and a contradictory answer are an `Err`, which Commission refuses. It is opt-in: no
-product crate links it, and `b10x-loom run`, `approve` and `resume` do not use it.
+resource id) and a contradictory answer are an `Err`, which Commission refuses. It is opt-in:
+`b10x-loom-cli` alone links it, behind `--mandate` (below); `b10x-loom run` does not use it.
 
 `loom_mandate::approval` (`story:mandate-approval-on-resume`) clears a resume's approval through
 Mandate v0.9.0's `check_with_approval`. Mandate records no approval itself, so Loom keeps one:
@@ -380,15 +380,20 @@ approver, expiring `approval_seconds` later) to the state directory's approval e
 `ApprovedDecisionRecorded` event, which is appended before anything is performed, under the
 directory's lock: a crash after it leaves the request unperformed, never performed twice, and the
 same approval is refused `wrong-state` afterwards. `FILE` is host-trusted
-(`loom.authority.MandateHost`): the verified context, the approver (never the subject), the
-approver policy, the relation, the capabilities and those needing an approval; Loom builds
-Mandate's own doubles from it for the case until Mandate ships a policy adapter. A grant naming no
-approval is refused under `--mandate`; without the flag `approve` and `resume` are as on 0.20.0.
+(`loom.authority.MandateHost`): the verified context, the approver (neither the verified subject
+nor its actor), the approver policy, the relation, the capabilities and those needing an approval;
+Loom builds Mandate's own doubles from it for the case until Mandate ships a policy adapter. The
+commission and request an approval is bound to are checked on the record Mandate reads: found by
+the approval's parsed UUID, never its text, and the last one recorded, as Mandate's lookup takes
+it. A grant naming no approval is refused under `--mandate`; only Mandate clears a grant naming
+one, so `resume` without the flag refuses it `NotGranted` and performs nothing. Otherwise, without
+the flag, `approve` and `resume` are as on 0.20.0.
 The flag and the log go when Mandate records approvals itself. `loom_mandate`'s source opens no
 file: the slice's `mandate_log` keeps the log, and the command line (`b10x_loom_cli::mandate`)
 joins the two. Since this story `b10x-loom-cli`
 links `b10x-loom-mandate`, the one crate that does (the SDK does not), and `approve` and `resume`
-use it only behind `--mandate`; `b10x-loom run` does not use it.
+use it only behind `--mandate`; `b10x-loom run` does not use it. Over the closure of `Cargo.lock`,
+only `b10x-loom-cli` and `loom-docs`, which links it for its help text, reach Mandate.
 
 ## Plugin host
 
@@ -582,7 +587,8 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   `crates/loom-cli/tests/resume_after_grant.rs` runs `run`, `approve` and `resume` as separate
   processes.
 - With `--mandate <FILE>`, `approve` and `resume` clear the approval through Mandate (§ Mandate);
-  a Mandate refusal is `NotGranted` (16) and performs nothing.
+  a Mandate refusal is `NotGranted` (16) and performs nothing. A `resume` without `--mandate`
+  refuses a grant naming a Mandate approval `NotGranted` (16) and performs nothing.
 
 The injected `TestRunner` defaults to Substrate 0.7.10, with host and wire pinned together.
 Tests get no network, a cleared environment, read-only source and Rust toolchain, writes only

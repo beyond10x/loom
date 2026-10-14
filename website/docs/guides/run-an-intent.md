@@ -103,7 +103,8 @@ performs nothing exits with the status of its refusal, `NotGranted` (16) without
 
 Both commands take `--mandate <FILE>` to clear the approval through Mandate instead of Loom's grant
 alone. `FILE` is a JSON file you trust as the host (`loom.authority.MandateHost`): Mandate's
-verified context the commission acts in, the approver's principal (never the subject), the policy
+verified context the commission acts in, the approver's principal (neither the subject nor its
+actor), the policy
 naming the approver, the relation, the capabilities, those that need an approval, and how many
 seconds an approval lasts. With it, `approve` also records a Mandate approval of the held request
 by that approver in the state directory's approval log, `mandate-approvals.jsonl`, and the grant
@@ -112,7 +113,8 @@ consumes that approval for the subject, the capability and the case, and it writ
 consumption to the log before anything is performed: a second resume with the same approval, an
 expired approval and a grant naming none are refused `NotGranted` (16) and perform nothing. Loom
 configures Mandate from the file over Mandate's own in-memory ports until Mandate ships a policy
-adapter. Without `--mandate`, both commands behave as before.
+adapter. Without `--mandate`, both commands behave as before, except that `resume` refuses a grant
+naming a Mandate approval `NotGranted` (16) and performs nothing: only Mandate clears it.
 
 `--confinement substrate` is the default. `--cgroup-root` selects an explicit delegated
 root. Tests retain their 300-second timeout, with 8 GiB memory and 2,048-process limits.

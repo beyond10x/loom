@@ -27,8 +27,8 @@ under **Unreleased** until the next release.
   namespace, when it writes Mandate's graph or policy. Mandate's allow is a grant, its approval
   requirement is Commission's `ApprovalRequired` naming the decision id, so a run through
   `run_with_suspension` holds a Suspension, and its refusals are denials. A Mandate outage, an
-  authority context that is no Mandate context and the empty case id grant nothing. No product
-  crate links it; `b10x-loom run`, `approve` and `resume` are unchanged.
+  authority context that is no Mandate context and the empty case id grant nothing.
+  `b10x-loom approve` and `resume` use it behind `--mandate` (below); `run` does not.
 - `b10x-loom approve --mandate <FILE>` and `resume --mandate <FILE>` clear a resume's approval
   through Mandate v0.9.0's `check_with_approval`. `FILE` is a host-trusted Mandate file
   (`loom.authority.MandateHost`: the verified context, the approver, the approver policy, the
@@ -40,8 +40,11 @@ under **Unreleased** until the next release.
   performs the request only when Mandate clears and consumes that approval, appending
   `ApprovedDecisionRecorded` to the log under the state directory's lock before anything is
   performed. A second resume with the same approval, an expired approval, one naming another
-  subject, action or resource, and a grant naming none are refused `NotGranted` (16) and perform
-  nothing. Without `--mandate` both commands are unchanged, and a grant written by 0.20.0 still
+  subject, action or resource, one recorded for another commission or request however its id is
+  written, and a grant naming none are refused `NotGranted` (16) and perform nothing. The file's
+  approver is neither its verified subject nor its verified actor. Only Mandate clears a grant
+  naming an approval: `resume` without `--mandate` refuses it `NotGranted` and performs nothing.
+  Without `--mandate` both commands are otherwise unchanged, and a grant written by 0.20.0 still
   reads. `b10x-loom-cli` now links `b10x-loom-mandate` (new `loom_mandate::approval`); the SDK
   does not. The flag and the log go when Mandate records approvals itself.
   Breaking: `b10x_loom_intake_slice::grant::approve` takes a `mandate` argument,
