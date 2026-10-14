@@ -1,0 +1,85 @@
+# A workflow definition a host runs with Commission's runtime (story dw-workflow-definition-executor).
+# Nouns are read from the story's design and crates/loom-executor/src/harness/governed.rs (the
+# governed loop a judgement step runs). A definition sequences the actions its protocol's frontier
+# admits; Canon still decides admission and completion. A definition is a value with no lifecycle:
+# the domain declares types only. Where the workflow stands in a run is kept in process.
+domain: loom.workflow
+
+summary: >-
+  A Loom-side definition of a workflow over one protocol: an ordered list of steps, each either
+  deterministic (one action with literal arguments, proposed without a model) or a judgement (the
+  actions a model may choose among, with instructions). A step may be conditional on a frontier
+  claim, never on a model.
+
+naming:
+  wire: workflow
+  display: Workflow
+
+types:
+  # A claim's three-valued truth, as a frontier reports it: Commission's
+  # commission.responsibility.Truth. A Loom type: ESS cannot name another system's type.
+  - name: loom.workflow.Truth
+    kind: enum
+    variants: ['True', 'False', Unknown]
+
+  # What a conditional step waits for: the frontier claim named `claim` has the truth `value`.
+  - name: loom.workflow.StepCondition
+    kind: struct
+    fields:
+      - name: claim
+        type: String
+      - name: value
+        type: loom.workflow.Truth
+
+  # A deterministic step: one action of the protocol, proposed with these literal arguments; no
+  # model is asked.
+  - name: loom.workflow.DeterministicStep
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: arguments
+        type: Json
+
+  # A judgement step: the one place a model is asked, offered only these actions of the protocol,
+  # with these instructions.
+  - name: loom.workflow.JudgementStep
+    kind: struct
+    fields:
+      - name: actions
+        type: List<String>
+      - name: instructions
+        type: String
+
+  # What a step does. On the wire the tag is `kind` and the step's fields sit beside it.
+  - name: loom.workflow.StepKind
+    kind: union
+    tag: kind
+    variants:
+      Deterministic: loom.workflow.DeterministicStep
+      Judgement: loom.workflow.JudgementStep
+
+  # One step, named uniquely within its definition, taken only while its condition holds on the
+  # frontier the run is handed.
+  - name: loom.workflow.WorkflowStep
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: when
+        type: Optional<loom.workflow.StepCondition>
+      - name: kind
+        type: loom.workflow.StepKind
+
+  # A workflow definition: its name, the protocol it runs over as the host's catalog names it
+  # (`software-change@1`), and its steps in order. The definition owns its steps; it does not own
+  # the protocol.
+  - name: loom.workflow.WorkflowDefinition
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: protocol
+        type: String
+      - name: steps
+        type: List<loom.workflow.WorkflowStep>
