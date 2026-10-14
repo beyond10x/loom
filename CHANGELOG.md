@@ -18,7 +18,10 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
   included, and `RunMeter::report` returns the generated `loom.metering.RunUsageReport`: the
   model calls, the input, output and cached input tokens the provider reported and the cost at the
   run's rate card, in total and per step. A step is one executor call, counted from 1; calls made
-  outside any executor call are step 0. A cost no rate card priced is absent, never zero. New ESS
+  outside any executor call are step 0. A cost no rate card priced is absent, never zero; a turn
+  that failed or unwound is a call whose cost is unknown, so its step's and the run's cost are
+  absent. Executor calls on one meter do not overlap, and an executor is wrapped by one
+  `MeteredExecutor`. New ESS
   domain `loom.metering` (`ess/domains/metering.yaml`). No break for callers: the types are new and
   nothing existing changes.
 
