@@ -10,7 +10,7 @@ relations:
 - depends_on: story:dw-read-fanout
 - depends_on: story:dw-typed-step-outputs
 - depends_on: story:dw-bugfix-baseline
-revision: 2
+revision: 3
 ---
 ## Outcome
 
@@ -96,14 +96,14 @@ Touches `ess/domains/` and `generated/rust/loom` (shared with another running un
 `generated/rust/intake`, `crates/loom-mandate`, `ess/domains/authority.yaml`, `Cargo.toml`,
 `Cargo.lock`.
 
-Not ready: blocked on the open question below, and after `story:dw-read-fanout`,
+Not ready: after `story:dw-read-fanout`,
 `story:dw-typed-step-outputs` and `story:dw-bugfix-baseline`.
 
-## Open
+## Decision
 
-- Which `incident.response/1` read action each source is read under, and so how many bindings the
-  commission holds (`decision-blocker:dw-incident-source-actions`). The design above (one effect
-  port reading by `{source, kind}`) is that blocker's option A, not a decision.
+Several sources are read under one read action: one binding per action is kept, the host
+effect port reads `{source, kind}` through `loom_connectors::cli`, and the source travels in the
+effect input; `ActionBindingKey` is unchanged.
 
 ## Not in scope
 

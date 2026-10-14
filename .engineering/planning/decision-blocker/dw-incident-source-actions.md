@@ -2,12 +2,14 @@
 format: aep.planning-md/3
 id: decision-blocker:dw-incident-source-actions
 kind: decision-blocker
-status: open
+status: cleared
 title: Nobody has decided which incident.response/1 read action each incident data source is read under
 relations:
 - blocks: epic:deterministic-workflows
 - blocks: story:dw-incident-workflow
-revision: 1
+revision: 3
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-14T02:57:52Z", actor: "human:timo", revision: 3}
 ---
 ## Question
 
@@ -36,3 +38,10 @@ source, or several sources under one action) and the binding that serves it, und
 ## Stops
 
 The incident troubleshooting workflow story; the concurrent fan-out story does not depend on it.
+
+## Decision (2026-10-14)
+
+A. Several sources are read under one read action: one binding per action is kept, a host effect
+port reads `{source, kind}` through `loom_connectors::cli` as the plugin's `DataSourceEffects`
+does, and the source travels in the effect input. `ActionBindingKey` is unchanged, so hosts see no
+break in the Commission contract; no second protocol.

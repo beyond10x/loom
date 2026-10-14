@@ -2,11 +2,13 @@
 format: aep.planning-md/3
 id: decision-blocker:dw-run-state-across-restart
 kind: decision-blocker
-status: open
+status: cleared
 title: Nobody has decided whether a run's usage report and step results survive a restart of the run
 relations:
 - blocks: epic:deterministic-workflows
-revision: 1
+revision: 3
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-14T02:57:52Z", actor: "human:timo", revision: 3}
 ---
 ## Question
 
@@ -35,3 +37,11 @@ lifecycle coupling across a restart undecided.
 
 The cross-restart part of the per-run report and of typed step outputs; the in-process stories are
 drafted without it.
+
+## Decision (2026-10-14)
+
+C. Model usage and typed step results cover one process segment (one `run_until_blocked` or
+`resume_after_grant` call), and the host sums the segments. No durable record yet: the first story
+whose workflow needs a step result across an approval adds it (option B, beside
+`FileSuspensionStore`, keyed by the Run id) with its restart test; story:dw-durable-run-state
+holds that need.
