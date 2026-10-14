@@ -1078,6 +1078,7 @@ mod tests {
         for n in 1..=TRANSCRIPT_LIMIT + 6 {
             let report = Report::Edited {
                 revision: format!("revision-{n}"),
+                change: None,
             };
             briefing.record(&proposal, &report);
         }

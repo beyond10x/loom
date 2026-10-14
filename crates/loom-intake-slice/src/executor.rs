@@ -12,7 +12,11 @@
 //!   case's `implementation` revision ([`Report::Edited`]). `tests.write` writes only test paths:
 //!   a path the host's test-path patterns ([`TestPaths`], [`LocalExecutor::with_test_paths`]) do
 //!   not match refuses it with [`ExecuteError::NotATestPath`], naming the first such path, for
-//!   every change kind. `implementation.edit` is not restricted by them.
+//!   every change kind. `implementation.edit` is not restricted by them. An `implementation.edit`
+//!   that committed also delivers an observation of the change ([`EDIT_SOURCE`]) and reports it
+//!   ([`Change`]); one that wrote what the files already held, and every `tests.write`, deliver
+//!   none. A performed `tests.write` is remembered: every later run is marked
+//!   [`TestRun::after_tests_write`].
 //! - `tests.run`, `{}`: runs the configured [`TestCommand`] in the workspace, without a shell, and
 //!   delivers what it observed to the governor as an observation ([`Report::TestsRun`]). The
 //!   command is killed at its timeout ([`TestCommand::DEFAULT_TIMEOUT`] unless
@@ -64,8 +68,12 @@
 //!
 //! The executor reports what it did; a report is never evidence. Only the test-result verifier
 //! ([`crate::verifier`]) submits evidence, and only from the exit status of the command this
-//! executor ran: a [`TestRun`] has no public constructor, and nothing a model says reaches it.
+//! executor ran or the edit it committed: neither a [`TestRun`] nor a [`Change`] has a public
+//! constructor, and nothing a model says reaches them. Every observation's `observed_at` is read
+//! from the host clock ([`LocalExecutor::with_clock`], [`SystemClock`] by default); a clock that
+//! gives no instant is [`ExecuteError::Clock`], and the observation is not delivered.
 
+use std::cell::Cell;
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
@@ -84,10 +92,11 @@ use b10x_loom_commission::model::responsibility::{
 };
 use b10x_loom_commission::ports::evidence::ObservationPort as _;
 use b10x_loom_commission::ports::governor::Governor as _;
-use loom_governor::{CanonGovernor, FallibleCaseStore};
+use loom_governor::{CanonGovernor, EvaluationTime, FallibleCaseStore, NoEvaluationTime};
 use sha2::{Digest, Sha256};
 
 use crate::case::{self, CaseError, REDIRECTING_GIT_VARIABLES};
+use crate::clock::{self, Clock, SystemClock};
 use crate::confinement::{ConfinementError, SubstrateRunner, TestExecution, TestRunner};
 use crate::git::{self, HostGitRefusal};
 pub use crate::test_paths::TestPaths;
@@ -107,6 +116,8 @@ pub const WRITES: [&str; 2] = [TESTS_WRITE, IMPLEMENTATION_EDIT];
 pub const TESTS_RUN: &str = "tests.run";
 /// The observation source of a test run.
 pub const TEST_RUN_SOURCE: &str = "intake-slice/tests.run";
+/// The observation source of an `implementation.edit` that committed.
+pub const EDIT_SOURCE: &str = "intake-slice/implementation.edit";
 
 /// The most output of a test run kept in its report: the tail, in bytes.
 const OUTPUT_TAIL: usize = 8 * 1024;
@@ -186,9 +197,22 @@ pub struct TestRun {
     timeout: Duration,
     output: String,
     applied: Box<AppliedConfinement>,
+    observed_at: Timestamp,
+    after_tests_write: bool,
 }
 
 impl TestRun {
+    /// The host clock's instant of the run's observation, UTC to the second.
+    pub fn observed_at(&self) -> &Timestamp {
+        &self.observed_at
+    }
+
+    /// Whether the executor had performed a `tests.write` before this run: from its own history,
+    /// never from a model.
+    pub fn after_tests_write(&self) -> bool {
+        self.after_tests_write
+    }
+
     /// The already captured, potentially lossy output tail; never the full process output.
     pub fn output_tail(&self) -> &str {
         &self.output
@@ -254,14 +278,56 @@ impl TestRun {
     }
 }
 
+/// An `implementation.edit` that committed, moving the workspace's `HEAD`, as the executor
+/// observed it. Only the executor makes one.
+#[derive(Debug, Clone)]
+pub struct Change {
+    case: CaseId,
+    observation: ObservationId,
+    revision: String,
+    case_revision: i64,
+    observed_at: Timestamp,
+}
+
+impl Change {
+    /// The case the edit belongs to.
+    pub fn case(&self) -> &CaseId {
+        &self.case
+    }
+
+    /// The observation the executor delivered for the edit.
+    pub fn observation(&self) -> &ObservationId {
+        &self.observation
+    }
+
+    /// The new `HEAD`, the implementation revision the edit committed.
+    pub fn revision(&self) -> &str {
+        &self.revision
+    }
+
+    /// The case revision once the new `HEAD` was reported.
+    pub fn case_revision(&self) -> i64 {
+        self.case_revision
+    }
+
+    /// The host clock's instant of the edit's observation, UTC to the second.
+    pub fn observed_at(&self) -> &Timestamp {
+        &self.observed_at
+    }
+}
+
 /// What the executor did. An observation, never evidence.
 #[derive(Debug, Clone)]
 pub enum Report {
     /// `repository.inspect`: the files, in the order named.
     Inspected(Vec<InspectedFile>),
     /// `tests.write` and `implementation.edit`: the workspace's `HEAD` afterwards, reported to the
-    /// governor. Unchanged when the edit wrote what the files already held.
-    Edited { revision: String },
+    /// governor. Unchanged when the edit wrote what the files already held. `change` is the
+    /// observed change of an `implementation.edit` that committed, and `None` for every other.
+    Edited {
+        revision: String,
+        change: Option<Change>,
+    },
     /// `tests.run`.
     TestsRun(TestRun),
 }
@@ -275,7 +341,7 @@ impl fmt::Display for Report {
                 }
                 Ok(())
             }
-            Self::Edited { revision } => write!(f, "committed; HEAD is {revision}"),
+            Self::Edited { revision, .. } => write!(f, "committed; HEAD is {revision}"),
             Self::TestsRun(run) => write!(f, "{}\n{}", run.summary(), run.output),
         }
     }
@@ -305,6 +371,8 @@ pub enum ExecuteError {
     /// Host git was refused before it ran: the workspace's git configuration changed since the
     /// case opened, or no case opened on the workspace in this process.
     HostGit(HostGitRefusal),
+    /// The host clock gave no instant for an observation, so none was delivered.
+    Clock(String),
 }
 
 impl fmt::Display for ExecuteError {
@@ -326,6 +394,7 @@ impl fmt::Display for ExecuteError {
             Self::Case(error) => error.fmt(f),
             Self::Governor(error) => write!(f, "the governor refused the observation: {error:?}"),
             Self::HostGit(refusal) => refusal.fmt(f),
+            Self::Clock(error) => write!(f, "the host clock gave no instant: {error}"),
         }
     }
 }
@@ -369,21 +438,24 @@ pub fn arguments_schema(action: &str) -> serde_json::Value {
 }
 
 /// Performs proposed actions in one workspace, for one case of `governor`.
-pub struct LocalExecutor<'g, S> {
-    governor: &'g CanonGovernor<S>,
+pub struct LocalExecutor<'g, S, T = NoEvaluationTime> {
+    governor: &'g CanonGovernor<S, T>,
     case: CaseId,
     workspace: PathBuf,
     test: TestCommand,
     runner: Arc<dyn TestRunner>,
     test_paths: TestPaths,
+    clock: &'g dyn Clock,
+    tests_written: Cell<bool>,
 }
 
-impl<'g, S: FallibleCaseStore> LocalExecutor<'g, S> {
+impl<'g, S: FallibleCaseStore, T: EvaluationTime> LocalExecutor<'g, S, T> {
     /// An executor for `case` in the git work tree at `workspace`, running `test` for `tests.run`,
     /// with `tests.write` held to [`TestPaths::DEFAULTS`] until
-    /// [`LocalExecutor::with_test_paths`] gives the host's own.
+    /// [`LocalExecutor::with_test_paths`] gives the host's own, and its observations' instants
+    /// read from [`SystemClock`] until [`LocalExecutor::with_clock`] gives another.
     pub fn new(
-        governor: &'g CanonGovernor<S>,
+        governor: &'g CanonGovernor<S, T>,
         case: CaseId,
         workspace: impl Into<PathBuf>,
         test: TestCommand,
@@ -395,7 +467,17 @@ impl<'g, S: FallibleCaseStore> LocalExecutor<'g, S> {
             test,
             runner: Arc::new(SubstrateRunner::new(None)),
             test_paths: TestPaths::default(),
+            clock: &SystemClock,
+            tests_written: Cell::new(false),
         }
+    }
+
+    /// Read every observation's `observed_at` from the host's `clock`: trusted context, never a
+    /// model's.
+    #[must_use]
+    pub fn with_clock(mut self, clock: &'g dyn Clock) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Hold `tests.write` to the host's `test_paths`: trusted context, never a model's.
@@ -517,13 +599,60 @@ impl<'g, S: FallibleCaseStore> LocalExecutor<'g, S> {
         let relatives: Vec<&OsStr> = files.iter().map(|(rel, _, _)| rel.as_os_str()).collect();
         refuse_ignored(root, &relatives)?;
         let mut undo = Undo::new(root)?;
-        if let Err(error) = write_and_commit(root, &files, &relatives, &message, &mut undo) {
-            undo.restore();
-            return Err(error);
+        let committed = match write_and_commit(root, &files, &relatives, &message, &mut undo) {
+            Ok(committed) => committed,
+            Err(error) => {
+                undo.restore();
+                return Err(error);
+            }
+        };
+        let case_revision =
+            case::report_head(self.governor, &self.case, root).map_err(ExecuteError::Case)?;
+        let revision = head(root)?;
+        if action == TESTS_WRITE {
+            self.tests_written.set(true);
         }
-        case::report_head(self.governor, &self.case, root).map_err(ExecuteError::Case)?;
-        Ok(Report::Edited {
-            revision: head(root)?,
+        let change = if action == IMPLEMENTATION_EDIT && committed {
+            Some(self.observe_change(&revision, case_revision)?)
+        } else {
+            None
+        };
+        Ok(Report::Edited { revision, change })
+    }
+
+    /// Delivers the observation of an `implementation.edit` that committed `revision`, at the host
+    /// clock's instant.
+    fn observe_change(&self, revision: &str, case_revision: i64) -> Result<Change, ExecuteError> {
+        let observed_at = clock::instant(self.clock).map_err(ExecuteError::Clock)?;
+        let observation = ObservationId(fresh_uuid("observation", &self.case.0));
+        self.governor
+            .observe(Observation::new(ObservationData {
+                observation_id: observation.clone(),
+                source: EDIT_SOURCE.to_owned(),
+                subject: case::IMPLEMENTATION.to_owned(),
+                observed_at: observed_at.clone(),
+                payload: Value::Object(vec![
+                    (
+                        "action".to_owned(),
+                        Value::Text(IMPLEMENTATION_EDIT.to_owned()),
+                    ),
+                    (
+                        "implementation".to_owned(),
+                        Value::Text(revision.to_owned()),
+                    ),
+                    (
+                        "case_revision".to_owned(),
+                        Value::Number(case_revision.to_string()),
+                    ),
+                ]),
+            }))
+            .map_err(ExecuteError::Governor)?;
+        Ok(Change {
+            case: self.case.clone(),
+            observation,
+            revision: revision.to_owned(),
+            case_revision,
+            observed_at,
         })
     }
 
@@ -562,12 +691,13 @@ impl<'g, S: FallibleCaseStore> LocalExecutor<'g, S> {
         ));
         payload.push(("timed_out".to_owned(), Value::Bool(finished.timed_out)));
         payload.push(("confinement".to_owned(), observation_confinement(&finished)));
+        let observed_at = clock::instant(self.clock).map_err(ExecuteError::Clock)?;
         self.governor
             .observe(Observation::new(ObservationData {
                 observation_id: observation.clone(),
                 source: TEST_RUN_SOURCE.to_owned(),
                 subject: case::IMPLEMENTATION.to_owned(),
-                observed_at: now(),
+                observed_at: observed_at.clone(),
                 payload: Value::Object(payload),
             }))
             .map_err(ExecuteError::Governor)?;
@@ -581,19 +711,22 @@ impl<'g, S: FallibleCaseStore> LocalExecutor<'g, S> {
             timeout: self.test.timeout,
             output: finished.output,
             applied: Box::new(finished.applied),
+            observed_at,
+            after_tests_write: self.tests_written.get(),
         }))
     }
 }
 
 /// Writes `files`, recording in `undo` what each path held, then stages and commits exactly those
-/// paths. An error leaves restoring to the caller.
+/// paths; `true` when it committed, `false` when the files already held what was written. An error
+/// leaves restoring to the caller.
 fn write_and_commit(
     root: &Path,
     files: &[(PathBuf, PathBuf, &str)],
     relatives: &[&OsStr],
     message: &str,
     undo: &mut Undo,
-) -> Result<(), ExecuteError> {
+) -> Result<bool, ExecuteError> {
     for (_, file, contents) in files {
         undo.remember(file)?;
         if let Some(parent) = file.parent() {
@@ -625,7 +758,7 @@ fn write_and_commit(
             ),
         )?;
     }
-    Ok(())
+    Ok(!unchanged)
 }
 
 /// What an edit changed, to put back when it fails: each path's previous bytes (or that it did not

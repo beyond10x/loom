@@ -128,8 +128,9 @@ fn every_line_is_one_object_carrying_the_schema_version() {
     );
 }
 
-/// The human output of a recorded run, byte for byte as before the stream existed. The one value
-/// that changes from run to run, the commit the edit makes, is replaced by `<commit>`.
+/// The human output of a recorded run, byte for byte as before the stream existed, except that
+/// the edit now prints the `implementation_change` it submits (story `change-evidence-order`). The
+/// one value that changes from run to run, the commit the edit makes, is replaced by `<commit>`.
 #[test]
 fn the_same_run_without_the_flag_prints_the_human_lines_byte_for_byte() {
     let fixture = Fixture::new();
@@ -213,7 +214,7 @@ step 1: tests.run {}
 frontier: implementation.edit (admissible), repository.inspect (admissible), repository.merge (blocked), tests.run (admissible), tests.write (admissible)
 step 2: implementation.edit {\"files\":[{\"contents\":\"fixed\\n\",\"path\":\"check.txt\"}],\"message\":\"update the check\"}
   effect: committed; HEAD is <commit>
-  evidence: none
+  evidence: implementation_change
 frontier: implementation.edit (admissible), repository.inspect (admissible), repository.merge (blocked), tests.run (admissible), tests.write (admissible)
 step 3: tests.run {}
   effect: the test command exited with 0

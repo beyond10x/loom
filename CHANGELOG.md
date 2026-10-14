@@ -54,10 +54,39 @@ under **Unreleased** until the next release.
   leaves Loom only as a proposal, and a wire's credential comes from an llm-credentials
   reference. `harness_map.rs` holds the section to the map, and `loom-sdk`'s `harness_paths.rs`
   compiles every path it names. No API changes.
+- The slice submits evidence that `software.change/1`'s order, independence and age rules can
+  decide (`intake.routing.SliceEvidence`): every `implementation.edit` that commits submits an
+  `implementation_change` about the new `HEAD`, and on a `bugfix` case every `tests.run` after
+  the run's first performed `tests.write` submits a `regression_test_result` beside its
+  `test_result`, with the same result and citing the same observation. Every record carries
+  `observed_at`, the host clock's instant of its observation, and the verifier's producer. A
+  bugfix that writes its regression test, runs it red and then edits now discharges
+  `red_first.required`; one that edits before any regression test leaves it open.
+- `b10x-loom run` and `resume` build their governor with `run::slice_governor`, which evaluates
+  at the host instant (`clock::HostTime`, `clock::ClockTime`, `clock::SystemClock`), so an
+  evidence kind's `max_age` (`operational_observation`, 30 minutes) expires an old observation.
+- `run::run_with_clock` and `LocalExecutor::with_clock` take the host clock an observation's
+  instant is read from; `run`, `run_with_options` and `LocalExecutor::new` read
+  `clock::SystemClock`, as do the `intent` functions (the clock they are given stays the time
+  query's) and a resume.
+- An edit's observation (`executor::EDIT_SOURCE`) is delivered to the governor beside a test
+  run's, and the step prints every record it submitted (`evidence: test_result fail,
+  regression_test_result fail`; `evidence: implementation_change`).
 
 ### Changed
 
 - `task commission:deps-guard` also refuses any Mandate crate in `b10x-loom-commission`'s graph.
+- The governor gives Canon the trusted producer `submit_evidence` attributed a record to
+  (`EvidenceData.producer`), never a producer the record's facts name; a trusted producer that is
+  not a Canon identifier is given as none. A record's `observed_at` is still read from its facts.
+- Breaking: the slice's public items that take a governor are generic over its evaluation time,
+  `T: EvaluationTime`, defaulting to `NoEvaluationTime`: `LocalExecutor`, `TestResultVerifier`
+  and `LocalEffects` gain a defaulted type parameter, and `run::run`, `run::run_with_options`,
+  `case::open`, `case::open_with_catalog`, `case::report_head` and the `intent` functions take a
+  `CanonGovernor<S, T>`. `loom-governor`'s public API is unchanged.
+- Breaking: `executor::Report::Edited` gains `change: Option<Change>`, so a pattern names it
+  `Edited { revision, .. }`; `TestRun` gains `observed_at()` and `after_tests_write()`;
+  `ExecuteError` gains `Clock`.
 
 ## [0.20.0] - 2026-10-14
 

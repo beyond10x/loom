@@ -32,6 +32,7 @@ use b10x_loom_intake_slice::intent::{
 use b10x_loom_intake_slice::resume::ResumeContextStore;
 use b10x_loom_intake_slice::run::{
     ApprovalGate, LOCAL_PROTOCOL, RunOptions, SliceError, SliceRun, StopReason, printable,
+    slice_governor,
 };
 use b10x_loom_plugin_slack::{SlackHandler, config as slack_config};
 use clap::Parser;
@@ -39,7 +40,8 @@ use intake_model::confinement::Backend;
 use llm_core::Model;
 use llm_models::Port;
 use loom_governor::{
-    CanonGovernor, FallibleCaseStore, FileCaseStore, FileSuspensionStore, MemoryCaseStore,
+    CanonGovernor, EvaluationTime, FallibleCaseStore, FileCaseStore, FileSuspensionStore,
+    MemoryCaseStore,
 };
 use loom_protocols::{InstallStore, ProtocolCatalog};
 use serde_json::{Value, json};
@@ -167,9 +169,11 @@ fn resume(arguments: &ResumeArgs, out: &mut dyn Write) -> Result<SliceRun, Slice
     let catalog = InstallStore::user()
         .and_then(|store| store.catalog())
         .map_err(SliceError::Context)?;
-    let governor = CanonGovernor::new(FileCaseStore::open(dir).map_err(|e| unusable(&e))?)
-        .with_catalog(&catalog)
-        .map_err(|e| SliceError::Context(e.to_string()))?;
+    let governor = slice_governor(
+        FileCaseStore::open(dir).map_err(|e| unusable(&e))?,
+        &catalog,
+    )
+    .map_err(|e| SliceError::Context(e.to_string()))?;
     let agent = match &context.catalog {
         Some(path) => Box::new(
             ModelCatalog::read(Path::new(path))
@@ -484,9 +488,8 @@ fn execute(
     let catalog = InstallStore::user()?.catalog()?;
     let models = (classifier_route.take(), agent_route.take());
     let Some(dir) = &arguments.state else {
-        let governor = CanonGovernor::new(MemoryCaseStore::default())
-            .with_catalog(&catalog)
-            .map_err(|e| e.to_string())?;
+        let governor =
+            slice_governor(MemoryCaseStore::default(), &catalog).map_err(|e| e.to_string())?;
         return execute_on(
             arguments, options, metrics, out, stream, &catalog, &governor, None, models,
         );
@@ -510,9 +513,11 @@ fn execute(
     // that cannot be created, locked or written, a read-only one an earlier run used included,
     // stops here.
     let unusable = |error: &dyn std::fmt::Display| format!("the state directory: {error}");
-    let governor = CanonGovernor::new(FileCaseStore::open(dir).map_err(|e| unusable(&e))?)
-        .with_catalog(&catalog)
-        .map_err(|e| e.to_string())?;
+    let governor = slice_governor(
+        FileCaseStore::open(dir).map_err(|e| unusable(&e))?,
+        &catalog,
+    )
+    .map_err(|e| e.to_string())?;
     let suspensions = FileSuspensionStore::open(dir).map_err(|e| unusable(&e))?;
     let contexts = ResumeContextStore::open(dir).map_err(|e| unusable(&e))?;
     let state = RunState {
@@ -552,14 +557,14 @@ fn intent_request(arguments: &RunArgs) -> Result<IntentRequest, String> {
 
 /// Runs `run` on `governor`, holding the commission in `state` when `--state` gave one.
 #[allow(clippy::too_many_arguments)]
-fn execute_on<S: FallibleCaseStore>(
+fn execute_on<S: FallibleCaseStore, T: EvaluationTime>(
     arguments: &RunArgs,
     options: &RunOptions,
     metrics: &mut ContextMetrics,
     out: &mut dyn Write,
     stream: Option<&EventStream>,
     catalog: &ProtocolCatalog,
-    governor: &CanonGovernor<S>,
+    governor: &CanonGovernor<S, T>,
     state: Option<&RunState<'_>>,
     (mut classifier_route, mut agent_route): (Option<Port>, Option<Port>),
 ) -> Result<Ending, String> {

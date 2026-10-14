@@ -53,7 +53,9 @@ A software change opens with three case inputs, which you give and no model does
 change owes (tests at every level, a review from `standard`, release provenance from `elevated`,
 a healthy deployment at `critical`); `--change-kind <feature|bugfix|refactor>` (default `feature`)
 makes a bugfix reproduce its regression first, so `implementation.edit` is admissible only once a
-test failed on the current revision; `--affects-security-boundary <true|false>` (default `false`)
+test failed on the current revision, and owes `red_first.required`: discharged only when the run
+writes its regression test with `tests.write`, runs it red, and only then edits the
+implementation; `--affects-security-boundary <true|false>` (default `false`)
 makes the implementation verified only after another principal approved a security review, which
 the slice never submits, so such a run never reaches the merge. With the defaults a run behaves
 as it did before the inputs existed. An obligation the inputs do not select is not open. A
@@ -120,6 +122,8 @@ slice writes tests with `tests.write` and edits the implementation with `impleme
 | `effect: committed; HEAD is f9fa1bc…` | What the local effect adapter did; further lines (`\|`) are command output or file contents |
 | `effect: refused: <reason>` | The adapter refused the action (a path outside the work tree, a `tests.write` path outside the test paths, an argument the action does not take); the step still counts |
 | `evidence: test_result pass` | Evidence the verifier submitted from the test command's exit status. A model's words are never evidence |
+| `evidence: test_result fail, regression_test_result fail` | On a `--change-kind bugfix` run, every test run after the first `tests.write` also submits a regression test result. One that fails before the first `implementation.edit`, in an earlier second (Canon orders whole seconds), discharges `red_first.required` |
+| `evidence: implementation_change` | An `implementation.edit` committed; the record is about the new `HEAD`. Every record carries the host clock's `observed_at` and the verifier as its producer |
 | `stopped: ApprovalRequired (repository.merge)` | Why the run ended |
 
 For a program rather than a person, `--output jsonl` writes one JSON record per line instead,

@@ -2,8 +2,8 @@
   "provenance": {
     "system": "intake",
     "specification_version": "v1",
-    "source_digest": "15e4505119390053fa8851b623b962daf68d5470099a63fc007c3c158d7c78e9",
-    "contract_digest": "1343dab00750680fd7c8f9677d3285807a17865acb4c07c8d227f83d330b8285"
+    "source_digest": "ae71eb0f88cab51a232b4394e603b767a9a14b86939368c466b1dd6fcfac4d3e",
+    "contract_digest": "e27d5e5e01cde62ceb5184fea37602c4a6745cf4920ca3b202548b3391221985"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -362,6 +362,27 @@
     },
     {
       "kind": "domain_type",
+      "source": "intake.routing.SliceEvidence.State",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.routing.SliceEvidenceKind",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.routing.SliceEvidenceResult",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "intake.routing.SliceRun.State",
       "disposition": {
         "disposition": "generated"
@@ -412,6 +433,13 @@
     {
       "kind": "entity_lifecycle",
       "source": "intake.routing.ResumeContext",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "entity_lifecycle",
+      "source": "intake.routing.SliceEvidence",
       "disposition": {
         "disposition": "generated"
       }

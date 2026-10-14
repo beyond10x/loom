@@ -143,10 +143,20 @@ fn software_intent_edits_tests_current_revision_and_stops_for_merge_approval_in_
         let case = CaseId("case-1".into());
         assert_eq!(governor.revisions(&case).unwrap()["implementation"], after);
         let evidence = governor.evidence(&case).unwrap();
-        assert_eq!(evidence.len(), 2);
+        // The red run, the edit's implementation_change about the new HEAD (story
+        // `change-evidence-order`), then the green run.
+        let kinds: Vec<&str> = evidence.iter().map(|record| record.kind.as_str()).collect();
+        assert_eq!(
+            kinds,
+            ["test_result", "implementation_change", "test_result"]
+        );
+        assert_eq!(
+            evidence[1].facts.member("subject_revision"),
+            Some(&cjson::Value::Text(after.clone()))
+        );
         for (record, revision, result) in [
             (&evidence[0], &before, "fail"),
-            (&evidence[1], &after, "pass"),
+            (&evidence[2], &after, "pass"),
         ] {
             assert_eq!(record.kind, "test_result");
             assert_eq!(
@@ -259,7 +269,14 @@ fn passing_software_test_becomes_stale_after_an_edit_through_the_general_entrypo
         ActionStatus::Blocked
     );
     let evidence = governor.evidence(&case).unwrap();
-    assert_eq!(evidence.len(), 1);
+    // The run's test result, then the edit's implementation_change (story
+    // `change-evidence-order`); no test ran after the edit.
+    let kinds: Vec<&str> = evidence.iter().map(|record| record.kind.as_str()).collect();
+    assert_eq!(kinds, ["test_result", "implementation_change"]);
+    assert_eq!(
+        evidence[1].facts.member("subject_revision"),
+        Some(&cjson::Value::Text(fixture.head()))
+    );
     assert_eq!(
         evidence[0].facts.member("subject_revision"),
         Some(&cjson::Value::Text(before))
