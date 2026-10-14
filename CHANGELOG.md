@@ -26,6 +26,19 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
   revalidates every proposal and Canon decides admission and completion. `ProtocolEntry::actions`
   lists a protocol's actions for that check. `b10x-loom-executor` now depends on `serde_yaml_ng`. No
   break.
+- Typed step outputs in workflow definitions: a step declares `outputs`, each a name, a JSON pointer
+  into its performed effect's report and a type (`loom.workflow.StepOutput`,
+  `loom.workflow.OutputType`: `String`, `Integer`, `Boolean`, `Json` or a list of one of them),
+  and a later deterministic step's arguments name one as `{"$step": <step>, "$output": <name>}`;
+  the executor fills it in when the step is proposed, with no model call, and Commission
+  revalidates the resolved arguments like any other. An output absent from the report or of
+  another type, or one its step did not produce in the run, ends the call `NeedsHumanJudgment`
+  naming the step and the output (a new `output` member), and nothing is proposed.
+  `workflow::load` refuses a reference to a later, unknown or undeclared output, a malformed
+  reference or pointer and an output declared twice. `WorkflowExecutor::outputs` lists what the
+  run produced; outputs are kept in process. Breaking for a caller that builds
+  `loom.workflow.WorkflowStep` itself: it has the new field `outputs`. A definition that already
+  used `$step` or `$output` as a member name in its arguments is now read as a reference.
 - A per-run model usage report, counted at the `ModelPort` boundary. `RunMeter`,
   `MeteredModelPort` and `MeteredExecutor` (`b10x_loom_executor::metering`, re-exported by
   `b10x-loom-sdk`) count every `turn` of a Commission run, whoever makes it (the loop, the

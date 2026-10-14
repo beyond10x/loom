@@ -289,6 +289,11 @@ YAML definition over a catalog protocol, checked against `ProtocolEntry::actions
 with its literal arguments and asks no model, a judgement step asks the model only among the
 actions it names, and the workflow advances past a step only once the effect port, wrapped in
 `loom_sdk::RecordingEffects`, performed it. Commission still revalidates every proposal.
+A step may declare typed `outputs` from its performed effect's report (a name, a JSON pointer and
+a type), and a later deterministic step's arguments name one as `{$step: <step>, $output:
+<name>}`: the runtime fills it in with no model call, and an output absent from the report or of
+another type ends the run `NeedsHumanJudgment` naming the step and the output, with nothing
+proposed.
 
 ```yaml
 name: change
