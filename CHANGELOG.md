@@ -6,6 +6,31 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Changed
+
+- A bugfix's `regression_test_result` is the result of running the regression test the run wrote,
+  never of the whole suite. `b10x-loom run --regression-test-command <CMD>` names the command,
+  split at white space with `{path}` in at least one word; on a bugfix, after every `tests.run`
+  that follows a committing `tests.write`, the slice runs it once per test path those writes
+  committed (a path written with what it already held is none), `{path}` filled, through the same
+  confined runner, each run its own observation (`executor::REGRESSION_RUN_SOURCE`), and submits a
+  `regression_test_result` from each. The suite's run is a `test_result` only. Without the flag
+  no run is a regression result, so `red_first.required` stays open. The resume context keeps the
+  command (`intake.routing.SliceRun.regression_test_command`,
+  `ResumeContext.regression_test_command`); a context kept by 0.21.0 reads as having none.
+  Library callers give it with `TestCommand::with_regression(RegressionTestCommand::new(..)?)`;
+  a suite run's regression runs are `TestRun::regressions`. Breaking: a bugfix run without the
+  flag no longer discharges `red_first.required`; `ResumeContextData` gains
+  `regression_test_command`.
+- The governor takes a record's `observed_at` only as the instant of the observation it cites:
+  a record whose facts carry an `observed_at` and that cites an observation the governor never
+  received, or whose `observed_at` is not the text of each cited observation's `observed_at`, is
+  refused (`GovernorUnavailable`, as Commission's evidence port names no record) and nothing of
+  it is kept. A record without an `observed_at` is not checked.
+  `CanonGovernor::check_evidence` names the record and the reason (`EvidenceRefusal`). Breaking:
+  a host that submits a record with `observed_at` before delivering its observation, or with
+  another instant, is refused.
+
 ## [0.21.0] - 2026-10-14
 
 Loom 0.21.0 lets a bugfix show its regression test failing first, and clears approvals through

@@ -531,15 +531,26 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   current revision (`a_bugfix_edits_the_implementation_only_after_a_failing_test`).
 - The slice's evidence is `intake.routing.SliceEvidence`, submitted only by the verifier
   (`verifier::TestResultVerifier`) from what the executor did: a `test_result` for every
-  `tests.run` on a committed revision; beside it, with the same result and citing the same
-  observation, a `regression_test_result` when the case's `change_kind` is `bugfix` and the
-  executor performed a `tests.write` that committed before the run (its own history, not
-  carried across a resume; one that wrote what the files already held wrote no test); and an
+  `tests.run` on a committed revision; a `regression_test_result` only from the host's
+  regression-test command (`run --regression-test-command <CMD>`, `{path}` in a word;
+  `executor::RegressionTestCommand`, `TestCommand::with_regression`, kept in the resume context
+  as `intake.routing.ResumeContext.regression_test_command`), which on a `bugfix` case, after a
+  `tests.run` that follows a `tests.write` that committed (the executor's own history, not
+  carried across a resume), the executor runs once per test path those writes committed, each
+  its own observation (`TestRun::regressions`, `executor::REGRESSION_RUN_SOURCE`), never from
+  the suite; without the command none, so `red_first.required` stays open
+  (`crates/loom-intake-slice/tests/regression_command.rs`); a path written with what it already
+  held is no committed test path; and an
   `implementation_change` about the new `HEAD` for every `implementation.edit` that committed.
   Each record carries `observed_at`, the host clock's instant of its observation
   (`LocalExecutor::with_clock`, `run::run_with_clock`; `clock::SystemClock` by default), and the
   verifier's producer; the governor gives Canon `EvidenceData.producer`, never a producer in the
-  facts (it removes a facts `producer` before Canon reads the record), and reads no clock. A
+  facts (it removes a facts `producer` before Canon reads the record), and reads no clock. It
+  takes a record's `observed_at` only as the instant of the observation the record cites and
+  that it received; otherwise it refuses the record and keeps nothing of it (a record without
+  `observed_at` is not checked), and
+  `CanonGovernor::check_evidence` names the record (`EvidenceRefusal`;
+  `crates/loom-governor/tests/evidence_instant.rs`). A
   bugfix that writes its test, runs it red and then edits discharges `red_first.required`, and one
   that edits before any regression test leaves it open. Canon orders records in whole seconds,
   so the executor keeps its observations' instants strictly increasing in whole seconds: it
