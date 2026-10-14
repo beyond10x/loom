@@ -33,7 +33,7 @@ scope:
   path: ess/intake/domains/routing.yaml
 - confidence: inferred
   path: generated/rust/intake
-revision: 16
+revision: 17
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-14T02:37:56Z", actor: "human:timo", revision: 15}
 - {from: "proposed", to: "active", at: "2026-10-14T02:37:56Z", actor: "human:timo", revision: 16}
@@ -58,14 +58,18 @@ these: the slice submits only `test_result`, with no `observed_at` and no `produ
 ## Decision
 
 - A `regression_test_result` comes from every test run on a `bugfix` case after the case's first
-  performed `tests.write`, beside that run's `test_result`; both rest on trusted inputs (the change
-  kind and the run's own history), never on a model argument. One observation may yield both kinds.
+  `tests.write` that committed (a `tests.write` that commits nothing writes no regression test),
+  beside that run's `test_result`; both rest on trusted inputs (the change kind and the run's own
+  history), never on a model argument. One observation may yield both kinds.
 - `producer` reaches Canon from the trusted `EvidenceData.producer` (`canon_record` sets it); a
-  producer in the payload is never read.
+  producer in the payload is removed before Canon reads the record, never read.
 - `observed_at` is the slice's host-clock instant of the observation, written into the record; the
   governor stays clock-free.
-- Canon orders at whole seconds; two records in one second order `unknown`. The executor's clock is
-  injectable so tests set the instants.
+- Canon orders at whole seconds; two records in one second order `unknown`. The executor keeps its
+  observations' instants strictly increasing in whole seconds: it waits, at most 2 seconds, for the
+  host clock to pass its previous observation's second, and a clock that has not passed it (one
+  that stepped back) fails the step with `ExecuteError::Clock` before anything is recorded. The
+  executor's clock is injectable so tests set the instants.
 - The instant reaches the slice's governor by making the slice generic over `T: EvaluationTime`;
   `loom-governor`'s public API is unchanged.
 
