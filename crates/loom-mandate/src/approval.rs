@@ -124,7 +124,8 @@ impl HostedMandate {
     /// [`Refused`] naming the member, for text that is not JSON, a missing or unknown member, a
     /// member of the wrong type, a `verified` that is no Mandate verified context, an id that is
     /// no UUID, no capability or an empty one, an approval-requiring capability that is not one of
-    /// the capabilities, a negative `approval_seconds`, and an approver who is the subject.
+    /// the capabilities, a negative `approval_seconds`, and an approver who is the verified
+    /// subject or the verified actor.
     pub fn parse(text: &str) -> Result<Self, Refused> {
         let value =
             loom_json::parse(text).map_err(|error| refused(format!("not JSON: {error}")))?;
@@ -167,6 +168,11 @@ impl HostedMandate {
         if approver == verified.subject {
             return Err(refused(
                 "`approver` is the verified subject: an approval is a second party's",
+            ));
+        }
+        if verified.actor == Some(approver) {
+            return Err(refused(
+                "`approver` is the verified actor: an approval is a second party's",
             ));
         }
         Ok(Self {
