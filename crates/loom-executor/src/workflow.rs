@@ -34,6 +34,20 @@
 //! is proposed again on the next call, bounded by Commission's idle rule. Where the workflow stands
 //! is kept in process (`decision-blocker:dw-run-state-across-restart`).
 //!
+//! A step may declare typed outputs (`story:dw-typed-step-outputs`): each a [`StepOutput`], a
+//! name, a JSON pointer (RFC 6901) into the report of the step's `Performed` effect and an
+//! [`OutputType`]. When [`RecordingEffects`] records the step's request `Performed`, every output
+//! is taken from that report and its type checked, so a run that ends right after the effect
+//! still has them; they are kept for the run, in process
+//! ([`WorkflowExecutor::outputs`]). A later deterministic step's arguments may hold, at any
+//! position, `{"$step": <step>, "$output": <name>}`; the reference is resolved when the step is
+//! proposed, and the resolved arguments are the proposal's, revalidated by Commission like any
+//! other. No model supplies an output. An output whose pointer is absent from the report, or whose
+//! value has another type, ends that call and every later one `NeedsHumanJudgment` naming the step
+//! and the output, and nothing more is proposed; a reference to an output its step did not produce
+//! in this run (the step was skipped) ends the call `NeedsHumanJudgment` naming the referring step
+//! and the output. The workflow fails toward less effect, never toward a guessed value.
+//!
 //! Metered ([`WorkflowExecutor::with_meter`], under a [`crate::metering::MeteredExecutor`] over the
 //! same [`RunMeter`]), each call labels its step of the meter's report with the name of the
 //! workflow step it took; a call that took no step leaves its step unlabelled.
@@ -41,18 +55,20 @@
 //! A definition is read from YAML into the generated types and checked before any run ([`load`]):
 //! every step action is an action of its protocol, every step name is unique and neither begins
 //! nor ends with whitespace, and a judgement step
-//! names at least one action; a refusal names the step. The protocol's actions come from the host
+//! names at least one action; every output a step declares has a unique name and a well-formed
+//! pointer, and every argument reference names a declared output of an earlier step; a refusal
+//! names the step. The protocol's actions come from the host
 //! (`loom_protocols::ProtocolEntry::actions`), so this crate does not depend on the catalog.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use b10x_loom_commission::model::json::Value as CommissionValue;
 use b10x_loom_commission::model::responsibility::{
-    ActionRequestData, ActionStatus, Commission, EffectOutcome, ExecutorOutcome,
-    ExecutorOutcomeNeedsHumanJudgment, ExecutorOutcomeProposedAction, Frontier,
+    ActionRequestData, ActionStatus, Commission, EffectOutcome, EffectOutcomePerformed,
+    ExecutorOutcome, ExecutorOutcomeNeedsHumanJudgment, ExecutorOutcomeProposedAction, Frontier,
     HumanDecisionRequest, ProposedActionArguments, Truth as FrontierTruth, Unit, commission_state,
     frontier_state,
 };
@@ -68,9 +84,15 @@ use crate::metering::RunMeter;
 use crate::model::json::Value as LoomValue;
 use crate::model::run::SessionData;
 use crate::model::workflow::{
-    DeterministicStep, JudgementStep, StepCondition, StepKind, Truth, WorkflowDefinition,
-    WorkflowStep,
+    DeterministicStep, JudgementStep, OutputType, StepCondition, StepKind, StepOutput, Truth,
+    WorkflowDefinition, WorkflowStep,
 };
+
+/// The member of an argument reference naming the step whose output it takes.
+pub const REFERENCE_STEP: &str = "$step";
+
+/// The member of an argument reference naming the output it takes.
+pub const REFERENCE_OUTPUT: &str = "$output";
 
 /// The largest definition [`load`] reads, in bytes.
 pub const MAX_DEFINITION_BYTES: usize = 1024 * 1024;
@@ -147,7 +169,10 @@ pub fn parse(text: &str) -> Result<WorkflowDefinition, DefinitionError> {
 
 /// Checks `definition` against `actions`, the actions its protocol declares: it names a step;
 /// every step name is non-empty, neither begins nor ends with whitespace, and is unique; every action a step names is one of `actions`; and a
-/// judgement step names at least one action, none twice.
+/// judgement step names at least one action, none twice; every output a step declares has a
+/// non-empty name without surrounding whitespace, unique within the step, and a well-formed JSON
+/// pointer; and every argument reference (`{"$step": …, "$output": …}`, exactly those two string
+/// members) names an output declared by an earlier step.
 ///
 /// # Errors
 ///
@@ -157,6 +182,8 @@ pub fn check(definition: &WorkflowDefinition, actions: &[String]) -> Result<(), 
         return Err(DefinitionError::NoSteps);
     }
     let mut names = BTreeSet::new();
+    // The outputs each earlier step declares, by step name.
+    let mut earlier: BTreeMap<&str, &[StepOutput]> = BTreeMap::new();
     for step in &definition.steps {
         let refused = |why: String| {
             Err(DefinitionError::Step {
@@ -194,8 +221,139 @@ pub fn check(definition: &WorkflowDefinition, actions: &[String]) -> Result<(), 
                 return refused(format!("`{action}` cannot be offered as a tool: {error}"));
             }
         }
+        if let Err(why) = check_outputs(&step.outputs) {
+            return refused(why);
+        }
+        if let StepKind::Deterministic(DeterministicStep { arguments, .. }) = &step.kind
+            && let Err(why) = check_references(arguments, definition, &earlier)
+        {
+            return refused(why);
+        }
+        earlier.insert(step.name.as_str(), &step.outputs);
     }
     Ok(())
+}
+
+/// Every output has a non-empty name without surrounding whitespace, unique among `outputs`, and a
+/// well-formed JSON pointer.
+fn check_outputs(outputs: &[StepOutput]) -> Result<(), String> {
+    let mut seen = BTreeSet::new();
+    for output in outputs {
+        let name = &output.name;
+        if name.trim().is_empty() {
+            return Err("an output has no name".to_owned());
+        }
+        if name.trim() != name {
+            return Err(format!(
+                "output `{name}`'s name begins or ends with whitespace"
+            ));
+        }
+        if !seen.insert(name.as_str()) {
+            return Err(format!("output `{name}` is declared twice"));
+        }
+        if pointer_tokens(&output.pointer).is_none() {
+            return Err(format!(
+                "output `{name}`'s pointer `{}` is not a JSON pointer (RFC 6901): it is empty or \
+                 begins with `/`, and `~` is followed by `0` or `1`",
+                output.pointer
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Every argument reference inside `arguments` is well formed and names an output `earlier`, the
+/// steps before this one, declares.
+fn check_references(
+    arguments: &LoomValue,
+    definition: &WorkflowDefinition,
+    earlier: &BTreeMap<&str, &[StepOutput]>,
+) -> Result<(), String> {
+    match arguments {
+        LoomValue::Array(items) => items
+            .iter()
+            .try_for_each(|item| check_references(item, definition, earlier)),
+        LoomValue::Object(members) => match reference(members)? {
+            Some((step, output)) => {
+                let Some(outputs) = earlier.get(step) else {
+                    return Err(if definition.steps.iter().any(|known| known.name == step) {
+                        format!(
+                            "an argument names an output of step `{step}`, which is not an \
+                                 earlier step"
+                        )
+                    } else {
+                        format!(
+                            "an argument names an output of step `{step}`, and no step has that name"
+                        )
+                    });
+                };
+                if outputs.iter().any(|declared| declared.name == output) {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "an argument names output `{output}` of step `{step}`, which declares no \
+                         such output"
+                    ))
+                }
+            }
+            None => members
+                .iter()
+                .try_for_each(|(_, item)| check_references(item, definition, earlier)),
+        },
+        _ => Ok(()),
+    }
+}
+
+/// Whether `members`, an object of a step's arguments, is an argument reference: `Ok(None)` when
+/// it has neither `$step` nor `$output`; the step and the output it names when it has exactly
+/// those two members, each a string; refused otherwise, so a malformed reference is never taken as
+/// a literal.
+fn reference(members: &[(String, LoomValue)]) -> Result<Option<(&str, &str)>, String> {
+    let marked = |key: &str| key == REFERENCE_STEP || key == REFERENCE_OUTPUT;
+    if !members.iter().any(|(key, _)| marked(key)) {
+        return Ok(None);
+    }
+    let named = |wanted: &str| {
+        let mut found = members.iter().filter(|(key, _)| key == wanted);
+        match (found.next(), found.next()) {
+            (Some((_, LoomValue::Text(name))), None) => Some(name.as_str()),
+            _ => None,
+        }
+    };
+    match (named(REFERENCE_STEP), named(REFERENCE_OUTPUT)) {
+        (Some(step), Some(output)) if members.len() == 2 => Ok(Some((step, output))),
+        _ => Err(format!(
+            "an argument reference has exactly the members `{REFERENCE_STEP}` and \
+             `{REFERENCE_OUTPUT}`, each once and a string"
+        )),
+    }
+}
+
+/// The reference tokens of `pointer`, a JSON pointer (RFC 6901), unescaped: none for the empty
+/// pointer, which names the whole document; `None` when it is not a JSON pointer.
+fn pointer_tokens(pointer: &str) -> Option<Vec<String>> {
+    if pointer.is_empty() {
+        return Some(Vec::new());
+    }
+    pointer
+        .strip_prefix('/')?
+        .split('/')
+        .map(|token| {
+            let mut unescaped = String::with_capacity(token.len());
+            let mut chars = token.chars();
+            while let Some(c) = chars.next() {
+                match c {
+                    '~' => match chars.next() {
+                        Some('0') => unescaped.push('~'),
+                        Some('1') => unescaped.push('/'),
+                        _ => return None,
+                    },
+                    other => unescaped.push(other),
+                }
+            }
+            Some(unescaped)
+        })
+        .collect()
 }
 
 /// The actions `step` names: its one action, or the actions a judgement may choose among.
@@ -218,29 +376,103 @@ pub struct RecordedEffect {
 /// The effects a [`RecordingEffects`] recorded, shared with the [`WorkflowExecutor`] that reads
 /// them. Clones share one record.
 #[derive(Debug, Clone, Default)]
-pub struct EffectLog(Arc<Mutex<Vec<RecordedEffect>>>);
+pub struct EffectLog(Arc<Mutex<Recorded>>);
+
+/// What a log holds: the effects recorded, and the step a workflow proposed last and expects
+/// performed, whose outputs are taken when it is.
+#[derive(Debug, Default)]
+struct Recorded {
+    records: Vec<RecordedEffect>,
+    expected: Option<Expected>,
+}
+
+/// A step a [`WorkflowExecutor`] proposed: the executor's position, the step and its index, and
+/// the proposal. When the log records that proposal's request `Performed`, the step's outputs are
+/// taken from the report into that position, so a run that ends right after the effect (the
+/// governor completed the case) still has them, type-checked.
+#[derive(Debug)]
+struct Expected {
+    position: Arc<Mutex<Position>>,
+    index: usize,
+    step: WorkflowStep,
+    proposal: ExecutorOutcomeProposedAction,
+}
 
 impl EffectLog {
     /// Every effect recorded so far, in the order recorded.
     pub fn records(&self) -> Vec<RecordedEffect> {
-        self.lock().clone()
+        self.lock().records.clone()
     }
 
-    fn lock(&self) -> MutexGuard<'_, Vec<RecordedEffect>> {
+    fn lock(&self) -> MutexGuard<'_, Recorded> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn len(&self) -> usize {
-        self.lock().len()
+        self.lock().records.len()
     }
 
-    /// Whether a record from position `from` on was `proposal`'s request, `Performed`.
-    fn performed_since(&self, from: usize, proposal: &ExecutorOutcomeProposedAction) -> bool {
-        self.lock().iter().skip(from).any(|recorded| {
-            matches!(recorded.outcome, EffectOutcome::Performed(_))
-                && recorded.request.action == proposal.action
-                && recorded.request.arguments == proposal.arguments
-        })
+    /// Expects `expected`'s proposal next, replacing any earlier expectation.
+    fn expect(&self, expected: Expected) {
+        self.lock().expected = Some(expected);
+    }
+
+    /// Records `request` and `outcome`; when it is the expected proposal, `Performed`, settles
+    /// that step in the executor's position. The log is not held while the position is.
+    fn record(&self, request: &ActionRequestData, outcome: &EffectOutcome) {
+        let expected = {
+            let mut log = self.lock();
+            log.records.push(RecordedEffect {
+                request: request.clone(),
+                outcome: outcome.clone(),
+            });
+            let matches = log.expected.as_ref().is_some_and(|expected| {
+                matches!(outcome, EffectOutcome::Performed(_))
+                    && expected.proposal.action == request.action
+                    && expected.proposal.arguments == request.arguments
+            });
+            if matches { log.expected.take() } else { None }
+        };
+        if let (Some(expected), EffectOutcome::Performed(performed)) = (expected, outcome) {
+            let mut position = expected
+                .position
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if position
+                .outstanding
+                .as_ref()
+                .is_some_and(|outstanding| outstanding.step == expected.index)
+            {
+                settle(
+                    &mut position,
+                    expected.index,
+                    &expected.step,
+                    &performed.report,
+                );
+            }
+        }
+    }
+
+    /// The report of the first record from position `from` on that was `proposal`'s request,
+    /// `Performed`; `None` when there is none.
+    fn performed_since(
+        &self,
+        from: usize,
+        proposal: &ExecutorOutcomeProposedAction,
+    ) -> Option<CommissionValue> {
+        self.lock()
+            .records
+            .iter()
+            .skip(from)
+            .find_map(|recorded| match &recorded.outcome {
+                EffectOutcome::Performed(EffectOutcomePerformed { report, .. })
+                    if recorded.request.action == proposal.action
+                        && recorded.request.arguments == proposal.arguments =>
+                {
+                    Some(report.clone())
+                }
+                _ => None,
+            })
     }
 }
 
@@ -283,21 +515,30 @@ impl<E: EffectPort> EffectPort for RecordingEffects<E> {
         request: &AdmittedRequest,
     ) -> Result<EffectOutcome, EffectError> {
         let outcome = self.inner.invoke(commission, request)?;
-        self.log.lock().push(RecordedEffect {
-            request: request.data().clone(),
-            outcome: outcome.clone(),
-        });
+        self.log.record(request.data(), &outcome);
         Ok(outcome)
     }
 }
 
-/// Where a workflow stands in its run: the last step performed, and the step proposed on the last
-/// call that has not been seen performed yet.
+/// Where a workflow stands in its run: the last step performed, the step proposed on the last
+/// call that has not been seen performed yet, the outputs the performed steps produced (step,
+/// output, value, in the order taken), and the output a performed step could not produce, which
+/// ends every later call.
 #[derive(Debug, Default)]
 struct Position {
     performed: Option<usize>,
     outstanding: Option<Outstanding>,
     attempted: Vec<String>,
+    outputs: Vec<(String, String, CommissionValue)>,
+    unproduced: Option<Unproduced>,
+}
+
+/// An output a performed step declared and its report did not hold as declared.
+#[derive(Debug, Clone)]
+struct Unproduced {
+    step: usize,
+    output: String,
+    why: String,
 }
 
 /// A step proposed and not yet seen performed: what was proposed, and how many effects were
@@ -319,7 +560,7 @@ pub struct WorkflowExecutor<'l, S, G, V, M> {
     session: SessionData,
     definition: WorkflowDefinition,
     effects: EffectLog,
-    position: Mutex<Position>,
+    position: Arc<Mutex<Position>>,
     meter: Option<RunMeter>,
 }
 
@@ -344,7 +585,7 @@ impl<'l, S, G, V, M> WorkflowExecutor<'l, S, G, V, M> {
             session,
             definition,
             effects,
-            position: Mutex::default(),
+            position: Arc::default(),
             meter: None,
         }
     }
@@ -367,6 +608,13 @@ impl<'l, S, G, V, M> WorkflowExecutor<'l, S, G, V, M> {
     /// that found none left adding nothing.
     pub fn attempted(&self) -> Vec<String> {
         self.position().attempted.clone()
+    }
+
+    /// Every output the run's performed steps produced, as `(step, output, value)`, in step order
+    /// and, within a step, in the order the step declares them. A step whose outputs could not all
+    /// be taken adds none.
+    pub fn outputs(&self) -> Vec<(String, String, CommissionValue)> {
+        self.position().outputs.clone()
     }
 
     /// The model, given back.
@@ -393,15 +641,25 @@ where
         frontier: &Frontier<frontier_state::Issued>,
     ) -> ExecutorOutcome {
         let mut position = self.position();
-        if let Some(outstanding) = position.outstanding.take()
-            && self
+        // The log settles the outstanding step when it records it performed; this settles one it
+        // recorded otherwise (an expectation another executor on the same log replaced).
+        if let Some(outstanding) = position.outstanding.as_ref()
+            && let Some(report) = self
                 .effects
                 .performed_since(outstanding.recorded, &outstanding.proposal)
         {
-            position.performed = Some(outstanding.step);
+            let index = outstanding.step;
+            settle(&mut position, index, &self.definition.steps[index], &report);
         }
+        position.outstanding = None;
         if frontier.data().case_id != commission.data().case_id {
             return ExecutorOutcome::NoUsefulAction(Unit(true));
+        }
+        if let Some(Unproduced { step, output, why }) = position.unproduced.clone() {
+            // The step was performed, so it is never proposed again; nothing after it can be
+            // taken without the value it did not produce.
+            let step = &self.definition.steps[step];
+            return self.needs_judgment(step, &step_actions(step), frontier, &why, Some(&output));
         }
         let from = position.performed.map_or(0, |at| at + 1);
         let Some((index, step)) = self
@@ -425,6 +683,7 @@ where
                 &step_actions(step),
                 frontier,
                 "the host's narrowing admits none of the step's actions",
+                None,
             );
         }
         if !named.iter().any(|action| listed(frontier, action)) {
@@ -433,15 +692,32 @@ where
                 &named,
                 frontier,
                 "the frontier does not list the step's action as admissible or approval-required",
+                None,
             );
         }
         let recorded = self.effects.len();
         let outcome = match &step.kind {
             StepKind::Deterministic(DeterministicStep { action, arguments }) => {
-                ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
-                    action: action.clone(),
-                    arguments: ProposedActionArguments(commission_value(arguments)),
-                })
+                match resolve(arguments, &position.outputs) {
+                    Ok(arguments) => {
+                        ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
+                            action: action.clone(),
+                            arguments: ProposedActionArguments(arguments),
+                        })
+                    }
+                    Err((from, output)) => {
+                        return self.needs_judgment(
+                            step,
+                            &named,
+                            frontier,
+                            &format!(
+                                "step `{from}` produced no output `{output}` in this run, and an \
+                                 argument names it"
+                            ),
+                            Some(&output),
+                        );
+                    }
+                }
             }
             StepKind::Judgement(judgement) => {
                 // The position is not held while the model works: nothing else reads it then.
@@ -462,6 +738,12 @@ where
                     step: index,
                     proposal: proposal.clone(),
                     recorded,
+                });
+                self.effects.expect(Expected {
+                    position: Arc::clone(&self.position),
+                    index,
+                    step: step.clone(),
+                    proposal: proposal.clone(),
                 });
                 ExecutorOutcome::ProposedAction(proposal)
             }
@@ -512,13 +794,15 @@ where
     }
 
     /// `NeedsHumanJudgment` for `step`, whose `actions` cannot be taken, and `why`: the workflow,
-    /// the step, its actions, why, and the frontier's reasons.
+    /// the step, its actions, why, and the frontier's reasons, with the output it concerns when an
+    /// output is why.
     fn needs_judgment(
         &self,
         step: &WorkflowStep,
         actions: &[String],
         frontier: &Frontier<frontier_state::Issued>,
         why: &str,
+        output: Option<&str>,
     ) -> ExecutorOutcome {
         let reasons: Vec<CommissionValue> = frontier
             .data()
@@ -528,17 +812,21 @@ where
             .flat_map(|listed| listed.reasons.iter().cloned().map(CommissionValue::Text))
             .collect();
         let text = |value: &str| CommissionValue::Text(value.to_owned());
+        let mut members = vec![
+            ("workflow".to_owned(), text(&self.definition.name)),
+            ("step".to_owned(), text(&step.name)),
+            (
+                "actions".to_owned(),
+                CommissionValue::Array(actions.iter().map(|action| text(action)).collect()),
+            ),
+            ("why".to_owned(), text(why)),
+            ("reasons".to_owned(), CommissionValue::Array(reasons)),
+        ];
+        if let Some(output) = output {
+            members.push(("output".to_owned(), text(output)));
+        }
         ExecutorOutcome::NeedsHumanJudgment(ExecutorOutcomeNeedsHumanJudgment {
-            request: HumanDecisionRequest(CommissionValue::Object(vec![
-                ("workflow".to_owned(), text(&self.definition.name)),
-                ("step".to_owned(), text(&step.name)),
-                (
-                    "actions".to_owned(),
-                    CommissionValue::Array(actions.iter().map(|action| text(action)).collect()),
-                ),
-                ("why".to_owned(), text(why)),
-                ("reasons".to_owned(), CommissionValue::Array(reasons)),
-            ])),
+            request: HumanDecisionRequest(CommissionValue::Object(members)),
         })
     }
 }
@@ -591,6 +879,154 @@ fn commission_value(value: &LoomValue) -> CommissionValue {
     }
 }
 
+/// `step`, at `index`, performed with `report`: the position advances past it, and its outputs
+/// are taken, or the first it could not produce is kept, ending every later call.
+fn settle(position: &mut Position, index: usize, step: &WorkflowStep, report: &CommissionValue) {
+    position.outstanding = None;
+    position.performed = Some(index);
+    match produce(step, report) {
+        Ok(outputs) => position.outputs.extend(outputs),
+        Err(unproduced) => {
+            position.unproduced = Some(Unproduced {
+                step: index,
+                ..unproduced
+            });
+        }
+    }
+}
+
+/// Every output `step` declares, taken from `report`, its performed effect's report, at its
+/// pointer and checked against its type: all of them, in declared order, or the first that is
+/// absent or of another type (its `step` is filled in by the caller).
+fn produce(
+    step: &WorkflowStep,
+    report: &CommissionValue,
+) -> Result<Vec<(String, String, CommissionValue)>, Unproduced> {
+    step.outputs
+        .iter()
+        .map(|output| {
+            let unproduced = |why: String| Unproduced {
+                step: 0,
+                output: output.name.clone(),
+                why,
+            };
+            // `check` refused a pointer that is not one.
+            let tokens = pointer_tokens(&output.pointer).ok_or_else(|| {
+                unproduced(format!(
+                    "output `{}`'s pointer is not a JSON pointer",
+                    output.name
+                ))
+            })?;
+            let value = at_pointer(report, &tokens).ok_or_else(|| {
+                unproduced(format!(
+                    "the report of step `{}` holds nothing at `{}` for output `{}`",
+                    step.name, output.pointer, output.name
+                ))
+            })?;
+            if !has_type(value, output.r#type) {
+                return Err(unproduced(format!(
+                    "the report of step `{}` holds {} at `{}`, and output `{}` is declared {:?}",
+                    step.name,
+                    value.describes(),
+                    output.pointer,
+                    output.name,
+                    output.r#type
+                )));
+            }
+            Ok((step.name.clone(), output.name.clone(), value.clone()))
+        })
+        .collect()
+}
+
+/// The value `tokens` reach in `value`: an object member by name, an array item by an index
+/// without leading zeros. A member named twice reaches nothing, so an ambiguous report is never
+/// read as either of its values.
+fn at_pointer<'v>(value: &'v CommissionValue, tokens: &[String]) -> Option<&'v CommissionValue> {
+    tokens.iter().try_fold(value, |value, token| match value {
+        CommissionValue::Object(members) => {
+            let mut found = members.iter().filter(|(key, _)| key == token);
+            match (found.next(), found.next()) {
+                (Some((_, item)), None) => Some(item),
+                _ => None,
+            }
+        }
+        CommissionValue::Array(items) => {
+            let canonical = token == "0"
+                || (!token.starts_with('0') && token.chars().all(|c| c.is_ascii_digit()));
+            if token.is_empty() || !canonical {
+                return None;
+            }
+            items.get(token.parse::<usize>().ok()?)
+        }
+        _ => None,
+    })
+}
+
+/// Whether `value` has the declared type: an `Integer` is a number written with digits only, an
+/// optional leading `-` and no leading zero, within 64 bits; a list is an array every item of
+/// which has the item type; `Json` is any value.
+fn has_type(value: &CommissionValue, declared: OutputType) -> bool {
+    let items = |item: OutputType| match value {
+        CommissionValue::Array(items) => items.iter().all(|value| has_type(value, item)),
+        _ => false,
+    };
+    match declared {
+        OutputType::String => matches!(value, CommissionValue::Text(_)),
+        OutputType::Integer => match value {
+            CommissionValue::Number(spelling) => {
+                let digits = spelling.strip_prefix('-').unwrap_or(spelling);
+                !digits.is_empty()
+                    && digits.chars().all(|c| c.is_ascii_digit())
+                    && (digits == "0" || !digits.starts_with('0'))
+                    && spelling.parse::<i64>().is_ok()
+            }
+            _ => false,
+        },
+        OutputType::Boolean => matches!(value, CommissionValue::Bool(_)),
+        OutputType::Json => true,
+        OutputType::StringList => items(OutputType::String),
+        OutputType::IntegerList => items(OutputType::Integer),
+        OutputType::BooleanList => items(OutputType::Boolean),
+        OutputType::JsonList => items(OutputType::Json),
+    }
+}
+
+/// A deterministic step's arguments as Commission's JSON, every argument reference replaced by the
+/// value of the output it names, taken from `outputs`. The first reference to an output the run
+/// has not produced is the error, as its step and output.
+fn resolve(
+    arguments: &LoomValue,
+    outputs: &[(String, String, CommissionValue)],
+) -> Result<CommissionValue, (String, String)> {
+    Ok(match arguments {
+        LoomValue::Array(items) => CommissionValue::Array(
+            items
+                .iter()
+                .map(|item| resolve(item, outputs))
+                .collect::<Result<_, _>>()?,
+        ),
+        LoomValue::Object(members) => match reference(members) {
+            // `check` refused a malformed reference, so `Err` does not happen; were it to, the
+            // object is not taken as a literal.
+            Err(_) => {
+                return Err((String::new(), "a malformed argument reference".to_owned()));
+            }
+            Ok(Some((step, output))) => outputs
+                .iter()
+                .find(|(from, name, _)| from == step && name == output)
+                .map(|(_, _, value)| value.clone())
+                .ok_or_else(|| (step.to_owned(), output.to_owned()))?,
+            Ok(None) => CommissionValue::Object(
+                members
+                    .iter()
+                    .map(|(key, item)| resolve(item, outputs).map(|value| (key.clone(), value)))
+                    .collect::<Result<_, _>>()?,
+            ),
+        },
+        literal => commission_value(literal),
+    })
+}
+
 /// The executor's model, lent to one judgement step's loop.
 struct Lent<'m, M>(&'m mut M);
 
@@ -614,8 +1050,8 @@ mod decode {
 
     use crate::model::json::Value as LoomValue;
     use crate::model::workflow::{
-        DeterministicStep, JudgementStep, StepCondition, StepKind, Truth, WorkflowDefinition,
-        WorkflowStep,
+        DeterministicStep, JudgementStep, OutputType, StepCondition, StepKind, StepOutput, Truth,
+        WorkflowDefinition, WorkflowStep,
     };
 
     pub(super) fn definition(value: &Value) -> Result<WorkflowDefinition, String> {
@@ -642,7 +1078,7 @@ mod decode {
                 only(
                     members,
                     &place,
-                    &["name", "when", "kind", "action", "arguments"],
+                    &["name", "when", "kind", "action", "arguments", "outputs"],
                 )?;
                 StepKind::Deterministic(DeterministicStep {
                     action: text(members, "action", &place)?,
@@ -656,7 +1092,7 @@ mod decode {
                 only(
                     members,
                     &place,
-                    &["name", "when", "kind", "actions", "instructions"],
+                    &["name", "when", "kind", "actions", "instructions", "outputs"],
                 )?;
                 let actions = list(members, "actions", &place)?
                     .iter()
@@ -683,10 +1119,46 @@ mod decode {
             None | Some(Value::Null) => None,
             Some(value) => Some(condition(value, &format!("{place}.when"))?),
         };
+        // A step that declares no outputs may leave `outputs` out.
+        let outputs = match members.get("outputs") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(_) => list(members, "outputs", &place)?
+                .iter()
+                .enumerate()
+                .map(|(index, value)| output(value, &format!("{place}.outputs[{index}]")))
+                .collect::<Result<_, _>>()?,
+        };
         Ok(WorkflowStep {
             name: text(members, "name", &place)?,
             when,
             kind,
+            outputs,
+        })
+    }
+
+    fn output(value: &Value, place: &str) -> Result<StepOutput, String> {
+        let members = object(value, place)?;
+        only(members, place, &["name", "pointer", "type"])?;
+        let declared = match text(members, "type", place)?.as_str() {
+            "String" => OutputType::String,
+            "Integer" => OutputType::Integer,
+            "Boolean" => OutputType::Boolean,
+            "Json" => OutputType::Json,
+            "StringList" => OutputType::StringList,
+            "IntegerList" => OutputType::IntegerList,
+            "BooleanList" => OutputType::BooleanList,
+            "JsonList" => OutputType::JsonList,
+            other => {
+                return Err(format!(
+                    "{place}.type is `{other}`; an output is `String`, `Integer`, `Boolean`, \
+                     `Json`, `StringList`, `IntegerList`, `BooleanList` or `JsonList`"
+                ));
+            }
+        };
+        Ok(StepOutput {
+            name: text(members, "name", place)?,
+            pointer: text(members, "pointer", place)?,
+            r#type: declared,
         })
     }
 

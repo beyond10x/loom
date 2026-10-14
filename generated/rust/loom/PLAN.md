@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest 1b4649239db036c3c54fd1c6256d3b9d645bd435c2ca60b02f06c78c3984d805
-  contract digest 1f9c399d657e6f3bf6b0a8cdbf769f9a23ce8204351cad8651327a3aec61a299
+  model digest ebfc92fb53805a9a16de554fd9d3e6c265d63244389bce4ae4d41cfc30d4b1a2
+  contract digest fc0dfef86e7a35fb5a515d27ee479e5ae5cf255204bd26277a1352735120b25c
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-169 capabilities: **168 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+171 capabilities: **170 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -106,8 +106,10 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.slack.SlackConfig` |
 | domain type | `loom.workflow.DeterministicStep` |
 | domain type | `loom.workflow.JudgementStep` |
+| domain type | `loom.workflow.OutputType` |
 | domain type | `loom.workflow.StepCondition` |
 | domain type | `loom.workflow.StepKind` |
+| domain type | `loom.workflow.StepOutput` |
 | domain type | `loom.workflow.Truth` |
 | domain type | `loom.workflow.WorkflowDefinition` |
 | domain type | `loom.workflow.WorkflowStep` |
