@@ -66,6 +66,17 @@ fn design_doc(name: &str) -> String {
     fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
 }
 
+/// Reads a page of the site under `website/docs/` of the tree this test is run from, as
+/// [`design_doc`] does.
+fn site_page(name: &str) -> String {
+    let manifest = std::env::var_os("CARGO_MANIFEST_DIR")
+        .expect("CARGO_MANIFEST_DIR is unset: run this test through cargo test");
+    let path = PathBuf::from(manifest)
+        .join("../../website/docs")
+        .join(name);
+    fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
+}
+
 /// The lines of the level-two section `heading`, up to the next level-two heading. The heading must
 /// appear exactly once, so no second section of the same name sits on the page unchecked.
 fn section<'a>(doc: &'a str, heading: &str) -> Vec<&'a str> {
@@ -107,19 +118,28 @@ fn cells(line: &str) -> Vec<String> {
 /// The rows of the map table, each keyed by lower-case column name. Every `|` line of § Map must
 /// belong to that one table, so no row can sit on the page unchecked.
 fn map_rows(doc: &str) -> Vec<BTreeMap<&'static str, String>> {
-    let lines = section(doc, "Map");
+    table_rows(&section(doc, "Map"), &COLUMNS, "§ Map")
+}
+
+/// The rows of the one table in `lines`, each keyed by lower-case column name, its header equal to
+/// `columns`. Every `|` line must belong to that table, so no row can sit on the page unchecked.
+fn table_rows(
+    lines: &[&str],
+    columns: &[&'static str],
+    what: &str,
+) -> Vec<BTreeMap<&'static str, String>> {
     let table: Vec<(usize, &str)> = lines
         .iter()
         .enumerate()
         .filter(|(_, line)| line.trim_start().starts_with('|'))
         .map(|(i, line)| (i, *line))
         .collect();
-    assert!(table.len() >= 2, "the Map section has no table");
+    assert!(table.len() >= 2, "{what} has no table");
     for pair in table.windows(2) {
         assert_eq!(
             pair[1].0,
             pair[0].0 + 1,
-            "§ Map has a table line outside the map table: {}",
+            "{what} has a table line outside its table: {}",
             pair[1].1
         );
     }
@@ -127,7 +147,7 @@ fn map_rows(doc: &str) -> Vec<BTreeMap<&'static str, String>> {
         .into_iter()
         .map(|cell| cell.to_lowercase())
         .collect();
-    assert_eq!(header, COLUMNS, "map table columns");
+    assert_eq!(header, columns, "{what}: table columns");
     let rule = table[1].1;
     assert!(
         rule.contains("---"),
@@ -137,8 +157,8 @@ fn map_rows(doc: &str) -> Vec<BTreeMap<&'static str, String>> {
         .iter()
         .map(|(_, line)| {
             let row = cells(line);
-            assert_eq!(row.len(), COLUMNS.len(), "row width: {line}");
-            COLUMNS.iter().copied().zip(row).collect()
+            assert_eq!(row.len(), columns.len(), "row width: {line}");
+            columns.iter().copied().zip(row).collect()
         })
         .collect()
 }
@@ -315,4 +335,117 @@ fn harness_map_covers_every_crate() {
         new_in_loom, unreached,
         "New in Loom lists exactly the § Owns responsibilities no port or depend row reaches"
     );
+}
+
+/// The section of the consumer guide that maps Harness crates onto Loom.
+const MOVE_FROM_HARNESS: &str = "Move from Harness";
+
+/// The columns of that section's table, lower-case and without backticks.
+const GUIDE_COLUMNS: [&str; 5] = [
+    "harness crate",
+    "disposition",
+    "loom_sdk path",
+    "owner instead",
+    "what changes",
+];
+
+/// The repository a `not carried` crate stays with, for a consumer of the guide.
+const HARNESS_REPOSITORY: &str = "beyond10x/harness";
+
+/// The Loom pages the section must cite for the behaviour that changes when a program moves.
+const CITED_PAGES: [&str; 2] = [
+    "](../concepts/action-selection.md)",
+    "](../concepts/where-loom-ends.md)",
+];
+
+#[test]
+fn the_migration_guide_names_every_harness_crate_with_its_map_disposition() {
+    let map: BTreeMap<String, BTreeMap<&'static str, String>> =
+        map_rows(&design_doc("harness-map.md"))
+            .into_iter()
+            .map(|row| (row["crate"].clone(), row))
+            .collect();
+    let guide = site_page("guides/move-to-loom.md");
+    let lines = section(&guide, MOVE_FROM_HARNESS);
+    let rows = table_rows(&lines, &GUIDE_COLUMNS, "§ Move from Harness");
+
+    // Exactly one guide row per crate of the map, and no other row.
+    let mut seen = BTreeMap::<String, usize>::new();
+    for row in &rows {
+        *seen.entry(row["harness crate"].clone()).or_default() += 1;
+    }
+    let expected: BTreeMap<String, usize> = HARNESS_CRATES
+        .iter()
+        .map(|c| ((*c).to_owned(), 1))
+        .collect();
+    assert_eq!(seen, expected, "the guide has one row per Harness crate");
+
+    for row in &rows {
+        let krate = &row["harness crate"];
+        let mapped = &map[krate];
+        let disposition = row["disposition"].as_str();
+        assert_eq!(
+            disposition, mapped["disposition"],
+            "{krate}: the guide's disposition differs from the map's"
+        );
+        let paths = row["loom_sdk path"].as_str();
+        let owner = row["owner instead"].as_str();
+        assert!(
+            !row["what changes"].is_empty() && row["what changes"] != EMPTY,
+            "{krate}: the guide says nothing of what changes"
+        );
+        match disposition {
+            "port" => {
+                let target = mapped["loom target"].as_str();
+                let module = loom_module(target)
+                    .unwrap_or_else(|| panic!("{krate}: map target `{target}` is not a module"));
+                let prefix: Vec<&str> = ["loom_sdk", "loom"]
+                    .into_iter()
+                    .chain(module.iter().map(String::as_str))
+                    .collect();
+                let named: Vec<&str> = paths.split(',').map(str::trim).collect();
+                assert!(
+                    !named.is_empty() && named.iter().all(|p| !p.is_empty()),
+                    "{krate}: a port row names no loom_sdk path"
+                );
+                for path in named {
+                    let segments: Vec<&str> = path.split("::").collect();
+                    assert!(
+                        segments.starts_with(&prefix),
+                        "{krate}: `{path}` is not a loom_sdk path under `{}`, where the map \
+                         ports the crate",
+                        prefix.join("::")
+                    );
+                }
+                assert_eq!(owner, EMPTY, "{krate}: a port row names an owner instead");
+            }
+            "not carried" => {
+                assert_eq!(paths, EMPTY, "{krate}: not carried, yet a loom_sdk path");
+                assert_eq!(
+                    owner, HARNESS_REPOSITORY,
+                    "{krate}: not carried, so its owner is {HARNESS_REPOSITORY}"
+                );
+                assert_eq!(
+                    owner, mapped["owner instead"],
+                    "{krate}: the guide's owner differs from the map's"
+                );
+            }
+            other => panic!("{krate}: the guide has no form for a `{other}` row"),
+        }
+    }
+
+    // The behaviour that changes is stated with the Loom page that holds it.
+    let text = lines.join("\n");
+    for page in CITED_PAGES {
+        assert!(
+            text.contains(page),
+            "§ Move from Harness does not cite `{page}`"
+        );
+    }
+    for phrase in ["harness-credential", "b10x-llm-credentials", "ToolPort"] {
+        assert!(
+            text.contains(phrase),
+            "§ Move from Harness does not mention `{phrase}`"
+        );
+    }
 }
