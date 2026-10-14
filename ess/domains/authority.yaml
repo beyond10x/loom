@@ -8,9 +8,8 @@
 #
 # What Mandate is asked: the subject is the verified context the host put in the commission's
 # authority context, never anything a model supplied; the action is the capability Commission
-# asks about; the resource is the case, resource type `loom.case` and the commission's case id as
-# the resource id (a Mandate resource id is a UUID, so a case id that is none is never asked
-# about).
+# asks about; the resource is the case, resource type `loom.case`, its resource id derived from the
+# commission's case id as `loom.authority.CaseResource` declares (never parsed from it).
 domain: loom.authority
 
 summary: >-
@@ -41,12 +40,35 @@ types:
       - name: verified
         type: Json
 
+  # The Mandate resource a case is. A case id is opaque (`commission.responsibility.CaseId`, a
+  # String the governor issues: Loom's own governor issues `case-<n>`), and a Mandate resource id
+  # is a UUID, so the resource id is derived, never parsed: it is the UUID version 5 (RFC 9562
+  # § 5.5, SHA-1) of the case id's exact UTF-8 bytes under the fixed `namespace` below. No case
+  # id is read as a UUID, even one that is spelled as one, so two distinct case ids (two spellings
+  # of one UUID included) are two resources, and one id is the same resource in every decision.
+  # A host computes the same id when it writes Mandate's graph or policy. The namespace never
+  # changes: changing it moves every case to another resource. The empty case id names no case
+  # and is derived to nothing: it is `NoMandateResource`.
+  - name: loom.authority.CaseResource
+    kind: enum
+    attributes:
+      - {name: resource_type, type: String}
+      - {name: derivation, type: String}
+      - {name: namespace, type: String}
+    variants:
+      - name: Case
+        attributes:
+          resource_type: loom.case
+          derivation: uuid-v5-of-case-id-bytes
+          namespace: 735b2acd-620b-43ec-b1ab-144c2aec7ba7
+
   # Every way one decision can end, and the answer each one is. The first eight are Mandate's: an
   # allowed decision and each `mandate.core.DenialReason` a refusal names. `Unavailable` is
   # Mandate's own failure to decide (a port that cannot answer, a challenge it cannot express), so
   # it decides nothing. The last three never reach Mandate: the authority context is no Mandate
-  # context, the case id is no Mandate resource id, or a Mandate answer contradicts itself (an
-  # allow whose decision is not allowed, an approval requirement with no challenge).
+  # context, the case id is empty and so derives no Mandate resource id (`CaseResource`), or a
+  # Mandate answer contradicts itself (an allow whose decision is not allowed, an approval
+  # requirement with no challenge).
   - name: loom.authority.Outcome
     kind: enum
     attributes:
