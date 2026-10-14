@@ -6,6 +6,20 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-14
+
+Loom 0.20.0 builds on engineering-protocols 0.7.0 and Canon 0.4.0, and every software change
+case opens with the case inputs its protocol declares: `risk`, `change_kind` and
+`affects_security_boundary`, given by the host and never by a model (`b10x-loom run --risk`,
+`--change-kind`, `--affects-security-boundary`; `CaseInputs` for an embedding), checked at open
+and on every read, and stored with the case. The slice performs `tests.write`, on the host's
+test paths only (`--test-path`), and `implementation.edit` where it performed `repository.edit`,
+so a bugfix edits its implementation only after a test failed; it never offers
+`release.rollback`, which it cannot perform. An obligation the inputs do not select is not open.
+Breaking: `CanonGovernor::open` and `open_case` take the inputs, `OpenError` gains four
+variants, `CaseInputs` is built with `try_from_pairs`, `StoredCase` gains `inputs`, the action
+`repository.edit` is gone, and a state directory 0.19.0 wrote is not resumed.
+
 ### Added
 
 - Case inputs: a case opens with the value of every case input its protocol declares, given by
