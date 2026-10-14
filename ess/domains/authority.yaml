@@ -62,6 +62,41 @@ types:
           derivation: uuid-v5-of-case-id-bytes
           namespace: 735b2acd-620b-43ec-b1ab-144c2aec7ba7
 
+  # The host-trusted file `b10x-loom approve --mandate <FILE>` and `resume --mandate <FILE>`
+  # configure Mandate from (story mandate-approval-on-resume), until Mandate ships a policy
+  # adapter. Loom builds Mandate's own doubles from it for the commission's case: a tenancy in
+  # which `verified`'s subject is a member of its organization, a graph in which that subject holds
+  # `relation` on the case (`CaseResource`) for every one of `capabilities`, a role catalog in which
+  # `relation` carries them, and a policy that allows each of them on the case, except those of
+  # `approval_required`, which it allows only after an approval. No model and no command line
+  # argument supplies any of it.
+  #
+  # `verified` is the Mandate verified context the commission acts in (`mandate.core.VerifiedContext`
+  # as Mandate writes it); a resume puts it in the commission's authority context as a `HostContext`.
+  # `approver` is the operator's Mandate principal, who approves with `approve --mandate`; it is never
+  # `verified`'s subject, as an approval is a second party's. `approver_policy` is the Mandate policy
+  # naming the approver, the policy an approval-required decision's challenge names. An approval
+  # `approve --mandate` records expires `approval_seconds` after it was recorded; an approval is
+  # cleared only before it expires, so `0` makes every approval expired when it is first presented.
+  # Every capability of `approval_required` is one of `capabilities`.
+  - name: loom.authority.MandateHost
+    kind: struct
+    fields:
+      - name: verified
+        type: Json
+      - name: approver
+        type: Uuid
+      - name: approver_policy
+        type: Uuid
+      - name: relation
+        type: String
+      - name: capabilities
+        type: List<String>
+      - name: approval_required
+        type: List<String>
+      - name: approval_seconds
+        type: Integer
+
   # Every way one decision can end, and the answer each one is. The first eight are Mandate's: an
   # allowed decision and each `mandate.core.DenialReason` a refusal names. `Unavailable` is
   # Mandate's own failure to decide (a port that cannot answer, a challenge it cannot express), so
