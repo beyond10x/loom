@@ -237,7 +237,8 @@ new work, a new HEAD, is approved again.
 With --mandate FILE (loom.authority.MandateHost, a host-trusted JSON file), approval also records a
 Mandate approval of the request in the state directory's approval log (mandate-approvals.jsonl): the
 file's approver approves the capability on the case for the file's verified subject, expiring
-approval_seconds later. The grant names it (mandate_approval), and only `resume --mandate` clears it.
+approval_seconds later; the approver is neither the verified subject nor its actor. The grant names
+it (mandate_approval), and only `resume --mandate` clears it: `resume` without --mandate refuses it.
 
 Exit status:
   0   the grant is written
@@ -279,7 +280,9 @@ With --mandate FILE (loom.authority.MandateHost), the request is performed only 
 check_with_approval clears the approval the grant names (`approve --mandate`), for the file's verified
 subject, the capability and the case; its consumption is appended to the state directory's approval
 log before anything is performed. A grant naming no approval, an expired, consumed or foreign
-approval, or any other Mandate refusal is NotGranted, and nothing is performed.
+approval, or any other Mandate refusal is NotGranted, and nothing is performed. Without --mandate, a
+grant naming a Mandate approval (`approve --mandate`) is NotGranted and nothing is performed: only
+Mandate clears it.
 
 When the resumed run reaches its human gate again, its last line says what is left to approve:
   stopped: ApprovalRequired (<action>)                    a Suspension `approve` can approve
@@ -297,7 +300,8 @@ Exit status:
   13  OtherCommission: the Suspension or its run names another commission, case or run revision
   14  CaseMoved: the case is no longer at the revision the request was suspended at
   15  NotAdmitted: the current frontier refuses the request's action
-  16  NotGranted: no grant allows the request, or with --mandate Mandate did not clear its approval
+  16  NotGranted: no grant allows the request, the grant names a Mandate approval and --mandate is
+      not given, or with --mandate Mandate did not clear its approval
   17  NotPerformed: nothing performs the request's action
   18  RunNotSuspended: the run store does not hold the run suspended
   20  the suspension store could not be read; nothing was resumed
