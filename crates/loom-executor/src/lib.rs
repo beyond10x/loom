@@ -43,6 +43,7 @@ pub mod recovery;
 pub mod revalidation;
 pub mod selection;
 pub mod session;
+pub mod workflow;
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
