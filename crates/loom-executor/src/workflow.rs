@@ -34,6 +34,10 @@
 //! is proposed again on the next call, bounded by Commission's idle rule. Where the workflow stands
 //! is kept in process (`decision-blocker:dw-run-state-across-restart`).
 //!
+//! Metered ([`WorkflowExecutor::with_meter`], under a [`crate::metering::MeteredExecutor`] over the
+//! same [`RunMeter`]), each call labels its step of the meter's report with the name of the
+//! workflow step it took; a call that took no step leaves its step unlabelled.
+//!
 //! A definition is read from YAML into the generated types and checked before any run ([`load`]):
 //! every step action is an action of its protocol, every step name is unique and neither begins
 //! nor ends with whitespace, and a judgement step
@@ -60,6 +64,7 @@ use crate::Loom;
 use crate::harness::governed::{LoopExecutor, tool_name};
 use crate::harness::turn_loop::LoopConfig;
 use crate::harness::wire::{ModelPort, StreamSink, TurnOutcome, TurnRequest, WireError, WireId};
+use crate::metering::RunMeter;
 use crate::model::json::Value as LoomValue;
 use crate::model::run::SessionData;
 use crate::model::workflow::{
@@ -315,6 +320,7 @@ pub struct WorkflowExecutor<'l, S, G, V, M> {
     definition: WorkflowDefinition,
     effects: EffectLog,
     position: Mutex<Position>,
+    meter: Option<RunMeter>,
 }
 
 impl<'l, S, G, V, M> WorkflowExecutor<'l, S, G, V, M> {
@@ -339,7 +345,17 @@ impl<'l, S, G, V, M> WorkflowExecutor<'l, S, G, V, M> {
             definition,
             effects,
             position: Mutex::default(),
+            meter: None,
         }
+    }
+
+    /// Labels each call's step of `meter` with the name of the workflow step the call took
+    /// ([`RunMeter::label_step`]). The step is the one the run's [`crate::metering::MeteredExecutor`],
+    /// wrapping this executor over the same meter, opened for the call.
+    #[must_use]
+    pub fn with_meter(mut self, meter: &RunMeter) -> Self {
+        self.meter = Some(meter.clone());
+        self
     }
 
     /// The definition this executor runs.
@@ -399,6 +415,9 @@ where
             return ExecutorOutcome::CompletedLocalReasoning(Unit(true));
         };
         position.attempted.push(step.name.clone());
+        if let Some(meter) = &self.meter {
+            meter.label_step(&step.name);
+        }
         let named = self.offered(step);
         if named.is_empty() {
             return self.needs_judgment(

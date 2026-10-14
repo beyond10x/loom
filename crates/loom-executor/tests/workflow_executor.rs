@@ -5,8 +5,9 @@
 //!
 //! The case is scripted: a governor whose frontier lists the `software-change@1` actions this
 //! workflow names, moving one revision per performed effect, and listing `repository.merge`
-//! (approval required) once `tests.run` was performed. The model is scripted and counts its calls;
-//! nothing reaches a network.
+//! (approval required) once `tests.run` was performed. The model is scripted, records each call,
+//! and is metered (`MeteredModelPort`) under a `MeteredExecutor` sharing one `RunMeter`; nothing
+//! reaches a network.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
@@ -35,6 +36,8 @@ use b10x_loom_executor::harness::wire::{
     CallId, Item, ModelPort, StopReason, StreamSink, ToolCall, ToolName, TurnOutcome, TurnRequest,
     WireError, WireId,
 };
+use b10x_loom_executor::metering::{MeteredExecutor, MeteredModelPort, RunMeter};
+use b10x_loom_executor::model::metering::RunUsageReport;
 use b10x_loom_executor::model::primitives::Uuid;
 use b10x_loom_executor::model::run::{CommissionRunId, SessionData, SessionId};
 use b10x_loom_executor::model::workflow::WorkflowDefinition;
@@ -352,6 +355,7 @@ struct Ran {
     asked: Vec<Asked>,
     performed: Vec<String>,
     attempted: Vec<String>,
+    report: RunUsageReport,
 }
 
 impl Ran {
@@ -387,14 +391,19 @@ fn run(
     )
     .with_instance("workflow-test")
     .with_governor(&case);
-    let executor = WorkflowExecutor::new(
-        &loom,
-        CountingModel::new(&case, turns),
-        LoopConfig::new("scripted-model", "INSTRUCTIONS")
-            .with_retry_backoff(Duration::from_millis(1)),
-        session(),
-        definition(text),
-        effects.log(),
+    let meter = RunMeter::new(None);
+    let executor = MeteredExecutor::new(
+        WorkflowExecutor::new(
+            &loom,
+            MeteredModelPort::new(CountingModel::new(&case, turns), &meter),
+            LoopConfig::new("scripted-model", "INSTRUCTIONS")
+                .with_retry_backoff(Duration::from_millis(1)),
+            session(),
+            definition(text),
+            effects.log(),
+        )
+        .with_meter(&meter),
+        &meter,
     );
     let ids = AtomicU64::new(0x500);
     let mut runs = Generated::new(RunStore::new(move || {
@@ -416,13 +425,16 @@ fn run(
         &mut Context::default(),
     )
     .unwrap_or_else(|error| panic!("the loop failed: {error:?}"));
+    let report = meter.report(&end.run_id);
+    let executor = executor.into_inner();
     let attempted = executor.attempted();
-    let asked = executor.into_model().asked;
+    let asked = executor.into_model().into_inner().asked;
     Ran {
         end,
         asked,
         performed: case.performed(),
         attempted,
+        report,
     }
 }
 
@@ -452,6 +464,29 @@ fn deterministic_steps_call_no_model() {
         ran.end.outcome
     );
     assert_eq!(ran.performed, [INSPECT, EDIT, RUN]);
+    assert_eq!(
+        ran.report.model_calls, 1,
+        "the metered port counted one model call: {:?}",
+        ran.report
+    );
+    let steps: Vec<(Option<&str>, i64)> = ran
+        .report
+        .steps
+        .iter()
+        .map(|step| (step.label.as_deref(), step.model_calls))
+        .collect();
+    assert_eq!(
+        steps,
+        [
+            (Some("inspect"), 0),
+            (Some("edit"), 1),
+            (Some("test"), 0),
+            (Some("merge"), 0)
+        ],
+        "each metered step carries the workflow step's name, and only the judgement step calls the \
+         model: {:?}",
+        ran.report
+    );
     assert_eq!(
         ran.asked.len(),
         1,
@@ -486,6 +521,35 @@ fn deterministic_steps_call_no_model() {
         ]
     );
     assert_eq!(ran.attempted, ["inspect", "edit", "test", "merge"]);
+}
+
+/// A call that takes no step (here, the one step waits on a claim the frontier never reports)
+/// leaves its metered step unlabelled: a label names a workflow step the call took, never a guess.
+#[test]
+fn a_metered_call_that_took_no_step_carries_no_label() {
+    let waits = r#"
+name: change
+protocol: software-change@1
+steps:
+  - name: inspect
+    when: {claim: never.reported, value: 'True'}
+    kind: Deterministic
+    action: repository.inspect
+    arguments: {}
+"#;
+    let ran = run(waits, Vec::new(), Vec::new(), Vec::new());
+    assert!(ran.attempted.is_empty(), "{:?}", ran.attempted);
+    assert!(
+        !ran.report.steps.is_empty(),
+        "the executor was called: {:?}",
+        ran.report
+    );
+    assert!(
+        ran.report.steps.iter().all(|step| step.label.is_none()),
+        "{:?}",
+        ran.report
+    );
+    assert_eq!(ran.report.model_calls, 0);
 }
 
 /// Two runs with the same inputs and the same judgement answers propose the same deterministic

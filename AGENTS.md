@@ -499,8 +499,10 @@ proposed again, bounded by Commission's idle rule. Commission revalidates every 
 deterministic one included. `workflow::load` reads YAML into the generated types and checks it
 against the protocol's actions, which the host supplies (`loom_protocols::ProtocolEntry::actions`,
 so the executor does not depend on `loom-protocols`): every action is its protocol's, step names
-are unique, with no surrounding whitespace, and a judgement step names an action; a refusal names the step. The position is kept
-in process (`decision-blocker:dw-run-state-across-restart`).
+are unique, with no surrounding whitespace, and a judgement step names an action; a refusal names
+the step. Built `.with_meter(&meter)` under a `MeteredExecutor` on the same `RunMeter`, it labels
+each metered step (`loom.metering.StepUsage.label`) with the workflow step the call took. The
+position is kept in process (`decision-blocker:dw-run-state-across-restart`).
 
 ## Intake and the command line
 
