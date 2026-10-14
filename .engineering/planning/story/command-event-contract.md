@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:command-event-contract
 kind: story
-status: active
+status: implemented
 title: The run --output jsonl records are a checked V1 contract that cannot break silently
 relations:
 - decomposes: epic:loom-foundation-for-consumers
@@ -20,10 +20,11 @@ scope:
   path: docs/contracts/run-events-v1.json
 - confidence: inferred
   path: website/docs/reference/run-events.md
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-14T02:54:28Z", actor: "human:timo", revision: 8}
 - {from: "proposed", to: "active", at: "2026-10-14T02:54:28Z", actor: "human:timo", revision: 9}
+- {from: "active", to: "implemented", at: "2026-10-14T07:29:12Z", actor: "human:timo", revision: 10, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 

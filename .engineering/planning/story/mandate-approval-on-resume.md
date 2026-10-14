@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:mandate-approval-on-resume
 kind: story
-status: active
+status: implemented
 title: A resume clears and consumes the approval through Mandate
 relations:
 - decomposes: epic:effect-bindings
@@ -25,10 +25,11 @@ scope:
   path: ess/intake/domains/routing.yaml
 - confidence: inferred
   path: generated/rust/intake
-revision: 12
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-14T05:59:39Z", actor: "human:timo", revision: 11}
 - {from: "proposed", to: "active", at: "2026-10-14T05:59:40Z", actor: "human:timo", revision: 12}
+- {from: "active", to: "implemented", at: "2026-10-14T07:29:12Z", actor: "human:timo", revision: 13, decided_on: {"recorded":{"test_result":1,"review_outcome":2}}}
 ---
 ## Outcome
 

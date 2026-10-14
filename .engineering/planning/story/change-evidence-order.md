@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:change-evidence-order
 kind: story
-status: active
+status: implemented
 title: The slice submits evidence that order, independence and age rules can decide
 relations:
 - decomposes: epic:vertical-slices
@@ -33,10 +33,11 @@ scope:
   path: ess/intake/domains/routing.yaml
 - confidence: inferred
   path: generated/rust/intake
-revision: 17
+revision: 18
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-14T02:37:56Z", actor: "human:timo", revision: 15}
 - {from: "proposed", to: "active", at: "2026-10-14T02:37:56Z", actor: "human:timo", revision: 16}
+- {from: "active", to: "implemented", at: "2026-10-14T07:29:11Z", actor: "human:timo", revision: 18, decided_on: {"recorded":{"test_result":1,"review_outcome":2}}}
 ---
 ## Outcome
 

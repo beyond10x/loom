@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:sdk-host-port-stability
 kind: story
-status: active
+status: implemented
 title: One page names the stable loom_sdk surface and the ports a host implements, held by a compile witness
 relations:
 - decomposes: epic:loom-foundation-for-consumers
@@ -24,10 +24,11 @@ scope:
   path: website/docs/guides/embed-the-runtime.md
 - confidence: inferred
   path: website/docs/reference/sdk-stability.md
-revision: 11
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-14T02:54:28Z", actor: "human:timo", revision: 10}
 - {from: "proposed", to: "active", at: "2026-10-14T02:54:28Z", actor: "human:timo", revision: 11}
+- {from: "active", to: "implemented", at: "2026-10-14T07:29:12Z", actor: "human:timo", revision: 12, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 

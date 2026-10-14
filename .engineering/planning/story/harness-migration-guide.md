@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:harness-migration-guide
 kind: story
-status: active
+status: implemented
 title: A Harness program finds what each Harness crate becomes in Loom on one guide page
 relations:
 - decomposes: epic:loom-foundation-for-consumers
@@ -18,10 +18,11 @@ scope:
   path: website/docs/concepts/commission-and-harness.md
 - confidence: inferred
   path: website/docs/guides/move-to-loom.md
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-14T02:54:28Z", actor: "human:timo", revision: 7}
 - {from: "proposed", to: "active", at: "2026-10-14T02:54:28Z", actor: "human:timo", revision: 8}
+- {from: "active", to: "implemented", at: "2026-10-14T07:29:12Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 

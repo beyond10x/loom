@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:mandate-authority
 kind: story
-status: active
+status: implemented
 title: A host answers the authority port with Mandate
 relations:
 - decomposes: epic:effect-bindings
@@ -28,10 +28,11 @@ scope:
   path: generated/rust/loom
 - confidence: inferred
   path: website/docs/reference/crates.md
-revision: 14
+revision: 15
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-14T02:37:56Z", actor: "human:timo", revision: 13}
 - {from: "proposed", to: "active", at: "2026-10-14T02:37:56Z", actor: "human:timo", revision: 14}
+- {from: "active", to: "implemented", at: "2026-10-14T07:29:11Z", actor: "human:timo", revision: 15, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 

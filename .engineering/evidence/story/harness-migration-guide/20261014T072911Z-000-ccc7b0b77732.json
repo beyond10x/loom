@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-14T07:29:11Z",
+  "actor": "human:timo",
+  "artifact": "story:harness-migration-guide",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "full gate on 74e7333: task check steps (spec x3, both ESS gates, three drifts, both no-hand-model, conform, commission:conform, deps-guard, fmt, clippy -D warnings, cargo test --workspace --no-fail-fast 1769 passed 0 failed 8 ignored, consumer-check, docs-check, commission:docs-drift), task plan, release-check 0.21.0, task website and cargo test --workspace -- --list exit 0"
+  }
+}
