@@ -122,7 +122,7 @@ slice writes tests with `tests.write` and edits the implementation with `impleme
 | `effect: committed; HEAD is f9fa1bc…` | What the local effect adapter did; further lines (`\|`) are command output or file contents |
 | `effect: refused: <reason>` | The adapter refused the action (a path outside the work tree, a `tests.write` path outside the test paths, an argument the action does not take); the step still counts |
 | `evidence: test_result pass` | Evidence the verifier submitted from the test command's exit status. A model's words are never evidence |
-| `evidence: test_result fail, regression_test_result fail` | On a `--change-kind bugfix` run, every test run after the first `tests.write` also submits a regression test result. One that fails before the first `implementation.edit`, in an earlier second (Canon orders whole seconds), discharges `red_first.required` |
+| `evidence: test_result fail, regression_test_result fail` | On a `--change-kind bugfix` run, every test run after the first `tests.write` that committed also submits a regression test result. One that fails before the first `implementation.edit`, in an earlier second (Canon orders whole seconds), discharges `red_first.required` |
 | `evidence: implementation_change` | An `implementation.edit` committed; the record is about the new `HEAD`. Every record carries the host clock's `observed_at` and the verifier as its producer |
 | `stopped: ApprovalRequired (repository.merge)` | Why the run ended |
 

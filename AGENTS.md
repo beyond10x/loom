@@ -473,8 +473,8 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   (`verifier::TestResultVerifier`) from what the executor did: a `test_result` for every
   `tests.run` on a committed revision; beside it, with the same result and citing the same
   observation, a `regression_test_result` when the case's `change_kind` is `bugfix` and the
-  executor performed a `tests.write` before the run (its own history, not carried across a
-  resume); and an `implementation_change` about the new `HEAD` for every `implementation.edit`
+  executor performed a `tests.write` that committed before the run (its own history, not
+  carried across a resume; one that wrote what the files already held wrote no test); and an `implementation_change` about the new `HEAD` for every `implementation.edit`
   that committed. Each record carries `observed_at`, the host clock's instant of its observation
   (`LocalExecutor::with_clock`, `run::run_with_clock`; `clock::SystemClock` by default), and the
   verifier's producer; the governor gives Canon `EvidenceData.producer`, never a producer in the

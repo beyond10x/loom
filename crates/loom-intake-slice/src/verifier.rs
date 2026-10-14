@@ -14,7 +14,8 @@
 //!   revision the record is about;
 //! - the case revision, the observation the executor delivered and the host clock's instant of
 //!   that observation (`observed_at`);
-//! - whether the executor had performed a `tests.write` before the run ([`TestRun::after_tests_write`]);
+//! - whether the executor had performed a `tests.write` that committed before the run
+//!   ([`TestRun::after_tests_write`]);
 //!
 //! and, from the governor, the case's `change_kind` input, which the host gave when the case
 //! opened. Nothing a model says, in text or in arguments, reaches it.
@@ -22,8 +23,10 @@
 //! # What it submits
 //!
 //! - For a test run: one `test_result`, and, on a case whose `change_kind` is `bugfix` and when
-//!   the executor had performed a `tests.write` before the run, one `regression_test_result`
-//!   beside it with the same `result`. Both cite the run's one observation.
+//!   the executor had performed a `tests.write` that committed before the run, one
+//!   `regression_test_result` beside it with the same `result`. Both cite the run's one
+//!   observation. A `tests.write` that wrote what the files already held wrote no regression
+//!   test, and no run after it is one.
 //! - For an `implementation.edit` that committed: one `implementation_change` about the new
 //!   `HEAD`, with no `result`, citing the edit's observation.
 //!
@@ -59,7 +62,7 @@ use crate::executor::{Change, EDIT_SOURCE, Report, TEST_RUN_SOURCE, TestRun, fre
 
 /// The evidence kind of a test run.
 pub const TEST_RESULT: &str = "test_result";
-/// The evidence kind of a bugfix's test run after its first `tests.write`.
+/// The evidence kind of a bugfix's test run after its first `tests.write` that committed.
 pub const REGRESSION_TEST_RESULT: &str = "regression_test_result";
 /// The evidence kind of an `implementation.edit` that committed.
 pub const IMPLEMENTATION_CHANGE: &str = "implementation_change";

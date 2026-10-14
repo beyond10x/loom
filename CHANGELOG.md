@@ -11,8 +11,9 @@ under **Unreleased** until the next release.
 - The slice submits evidence that `software.change/1`'s order, independence and age rules can
   decide (`intake.routing.SliceEvidence`): every `implementation.edit` that commits submits an
   `implementation_change` about the new `HEAD`, and on a `bugfix` case every `tests.run` after
-  the run's first performed `tests.write` submits a `regression_test_result` beside its
-  `test_result`, with the same result and citing the same observation. Every record carries
+  the run's first `tests.write` that committed submits a `regression_test_result` beside its
+  `test_result`, with the same result and citing the same observation; a `tests.write` that
+  wrote what the files already held wrote no regression test and does not count. Every record carries
   `observed_at`, the host clock's instant of its observation, and the verifier's producer. A
   bugfix that writes its regression test, runs it red and then edits now discharges
   `red_first.required`; one that edits before any regression test leaves it open.

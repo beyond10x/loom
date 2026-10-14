@@ -15,8 +15,9 @@
 //!   every change kind. `implementation.edit` is not restricted by them. An `implementation.edit`
 //!   that committed also delivers an observation of the change ([`EDIT_SOURCE`]) and reports it
 //!   ([`Change`]); one that wrote what the files already held, and every `tests.write`, deliver
-//!   none. A performed `tests.write` is remembered: every later run is marked
-//!   [`TestRun::after_tests_write`].
+//!   none. A `tests.write` that committed is remembered: every later run is marked
+//!   [`TestRun::after_tests_write`]. One that wrote what the files already held wrote no test
+//!   and is not.
 //! - `tests.run`, `{}`: runs the configured [`TestCommand`] in the workspace, without a shell, and
 //!   delivers what it observed to the governor as an observation ([`Report::TestsRun`]). The
 //!   command is killed at its timeout ([`TestCommand::DEFAULT_TIMEOUT`] unless
@@ -207,8 +208,9 @@ impl TestRun {
         &self.observed_at
     }
 
-    /// Whether the executor had performed a `tests.write` before this run: from its own history,
-    /// never from a model.
+    /// Whether the executor had performed a `tests.write` that committed before this run: from
+    /// its own history, never from a model. One that wrote what the files already held, or a
+    /// refused one, wrote no test and does not count.
     pub fn after_tests_write(&self) -> bool {
         self.after_tests_write
     }
@@ -609,7 +611,9 @@ impl<'g, S: FallibleCaseStore, T: EvaluationTime> LocalExecutor<'g, S, T> {
         let case_revision =
             case::report_head(self.governor, &self.case, root).map_err(ExecuteError::Case)?;
         let revision = head(root)?;
-        if action == TESTS_WRITE {
+        // Only a `tests.write` that committed wrote a test: one that wrote what the files already
+        // held changed nothing, so no later run follows a regression test it wrote.
+        if action == TESTS_WRITE && committed {
             self.tests_written.set(true);
         }
         let change = if action == IMPLEMENTATION_EDIT && committed {
