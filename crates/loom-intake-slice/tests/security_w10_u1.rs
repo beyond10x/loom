@@ -441,8 +441,10 @@ impl Fixture {
             .duration_since(UNIX_EPOCH)
             .map(|elapsed| elapsed.as_nanos())
             .unwrap_or_default();
-        let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-            .join(format!("security-w10-u1-{label}-{}-{nanos}", std::process::id()));
+        let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+            "security-w10-u1-{label}-{}-{nanos}",
+            std::process::id()
+        ));
         let workspace = root.join("workspace");
         std::fs::create_dir_all(workspace.join("tests")).expect("create the workspace");
         let fixture = Self { root, workspace };
@@ -451,10 +453,18 @@ impl Fixture {
         fixture.git(&["config", "user.email", "fixture@example.invalid"]);
         fixture.git(&["config", "commit.gpgsign", "false"]);
         std::fs::write(fixture.workspace.join("check.txt"), "broken\n").expect("write check.txt");
-        std::fs::write(fixture.workspace.join(EXISTING_TEST), EXISTING_TEST_CONTENTS)
-            .expect("write the existing test");
+        std::fs::write(
+            fixture.workspace.join(EXISTING_TEST),
+            EXISTING_TEST_CONTENTS,
+        )
+        .expect("write the existing test");
         fixture.git(&["add", "--all"]);
-        fixture.git(&["commit", "--quiet", "--message", "a failing check and its test"]);
+        fixture.git(&[
+            "commit",
+            "--quiet",
+            "--message",
+            "a failing check and its test",
+        ]);
         fixture
     }
 
