@@ -23,7 +23,8 @@ types:
   # the tokens the provider reported for the calls that answered, and their cost in micro-US-
   # dollars, each turn priced and rounded once (crates/loom-executor/src/harness/turn_loop/price.rs).
   # The cost is absent when the run has no rate card, when the card does not price the model a
-  # turn reported, or when a turn that answered reported no usage.
+  # turn reported, when a turn that answered reported no usage, or when a turn failed (its tokens,
+  # and so its cost, are unknown).
   - name: loom.metering.StepUsage
     kind: struct
     fields:
