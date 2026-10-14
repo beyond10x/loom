@@ -743,9 +743,11 @@ fn locked_packages() -> BTreeMap<String, BTreeSet<String>> {
     packages
 }
 
-/// Mandate is linked by `b10x-loom-mandate` alone: no other package of the lock depends on it or
-/// on a Mandate crate, Commission included; and what it links is closed over Mandate's pure crates
-/// and serde, so no token, network or identity crate (which would hold or fetch a credential) comes
+/// Mandate is linked by `b10x-loom-mandate` alone: no other package of the lock depends on a
+/// Mandate crate, Commission included, and only `b10x-loom-cli` depends on `b10x-loom-mandate`
+/// (`approve --mandate` and `resume --mandate`, `story:mandate-approval-on-resume`), so the SDK and
+/// every other crate stay without it; and what it links is closed over Mandate's pure crates and
+/// serde, so no token, network or identity crate (which would hold or fetch a credential) comes
 /// with it. The provider's own source opens no file, environment variable, process or socket.
 #[test]
 fn security_mandate_is_linked_by_one_crate_and_reads_no_credential() {
@@ -755,9 +757,12 @@ fn security_mandate_is_linked_by_one_crate_and_reads_no_credential() {
         if package == "b10x-loom-mandate" || is_mandate(package) {
             continue;
         }
+        let consumer = package == "b10x-loom-cli";
         let linked: Vec<&String> = dependencies
             .iter()
-            .filter(|dependency| is_mandate(dependency) || *dependency == "b10x-loom-mandate")
+            .filter(|dependency| {
+                is_mandate(dependency) || (*dependency == "b10x-loom-mandate" && !consumer)
+            })
             .collect();
         assert!(linked.is_empty(), "{package} links {linked:?}");
     }
@@ -807,21 +812,35 @@ fn security_mandate_is_linked_by_one_crate_and_reads_no_credential() {
         );
     }
 
-    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs");
-    let text = std::fs::read_to_string(&source)
-        .unwrap_or_else(|error| panic!("{}: {error}", source.display()));
-    for reach in [
-        "std::env",
-        "std::fs",
-        "std::process",
-        "std::net",
-        "env!(",
-        "option_env!(",
-    ] {
-        assert!(
-            !text.contains(reach),
-            "{} reaches {reach}",
-            source.display()
-        );
+    // Every source file of the crate, `src/approval.rs` included: the approval log is the command
+    // line's to keep, and this crate opens nothing.
+    let sources = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&sources)
+        .unwrap_or_else(|error| panic!("{}: {error}", sources.display()))
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "rs"))
+        .collect();
+    files.sort();
+    assert!(
+        files.iter().any(|path| path.ends_with("lib.rs")),
+        "{files:?}"
+    );
+    for source in files {
+        let text = std::fs::read_to_string(&source)
+            .unwrap_or_else(|error| panic!("{}: {error}", source.display()));
+        for reach in [
+            "std::env",
+            "std::fs",
+            "std::process",
+            "std::net",
+            "env!(",
+            "option_env!(",
+        ] {
+            assert!(
+                !text.contains(reach),
+                "{} reaches {reach}",
+                source.display()
+            );
+        }
     }
 }

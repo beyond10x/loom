@@ -1,6 +1,6 @@
 // generated from intake v1
-// model digest ae71eb0f88cab51a232b4394e603b767a9a14b86939368c466b1dd6fcfac4d3e
-// contract digest e27d5e5e01cde62ceb5184fea37602c4a6745cf4920ca3b202548b3391221985
+// model digest e60812f8d93986883e7eb9eaead5a33f69aa8ec4ba4ad5dac90558b5ae4a3fe1
+// contract digest eb6c2ebb4e7c6d4291d5129ac0f5125413961abd75b1d64c349d43673e1a433b
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Routing — `intake.routing`.
@@ -104,6 +104,65 @@ pub enum IntentState {
 /// IntentId — `intake.routing.IntentId`: a distinct wrapper around `Uuid`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IntentId(pub crate::primitives::Uuid);
+
+/// MandateApprovalEntry — `intake.routing.MandateApprovalEntry`: one of a fixed set of shapes, tagged on the wire by `kind`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MandateApprovalEntry {
+    /// Tagged `ApprovalRecorded` — `intake.routing.MandateApprovalRecorded`.
+    ApprovalRecorded(MandateApprovalRecorded),
+    /// Tagged `ApprovedDecisionRecorded` — `intake.routing.MandateApprovedDecision`.
+    ApprovedDecisionRecorded(MandateApprovedDecision),
+}
+
+/// MandateApprovalId — `intake.routing.MandateApprovalId`: a distinct wrapper around `Uuid`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MandateApprovalId(pub crate::primitives::Uuid);
+
+/// MandateApprovalRecorded — `intake.routing.MandateApprovalRecorded`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MandateApprovalRecorded {
+    /// `approval` — `intake.routing.MandateApprovalId`.
+    pub approval: MandateApprovalId,
+    /// `commission_id` — `intake.routing.CommissionId`.
+    pub commission_id: CommissionId,
+    /// `action_request_id` — `intake.routing.ActionRequestId`.
+    pub action_request_id: ActionRequestId,
+    /// `organization` — `Uuid`.
+    pub organization: crate::primitives::Uuid,
+    /// `subject` — `Uuid`.
+    pub subject: crate::primitives::Uuid,
+    /// `actor` — `Optional<Uuid>`.
+    pub actor: Option<crate::primitives::Uuid>,
+    /// `action` — `String`.
+    pub action: String,
+    /// `resource_type` — `String`.
+    pub resource_type: String,
+    /// `resource_id` — `Uuid`.
+    pub resource_id: crate::primitives::Uuid,
+    /// `approver` — `Uuid`.
+    pub approver: crate::primitives::Uuid,
+    /// `recorded_at` — `Timestamp`.
+    pub recorded_at: crate::primitives::Timestamp,
+    /// `expires_at` — `Timestamp`.
+    pub expires_at: crate::primitives::Timestamp,
+}
+
+/// MandateApprovedDecision — `intake.routing.MandateApprovedDecision`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MandateApprovedDecision {
+    /// `approval` — `intake.routing.MandateApprovalId`.
+    pub approval: MandateApprovalId,
+    /// `commission_id` — `intake.routing.CommissionId`.
+    pub commission_id: CommissionId,
+    /// `action_request_id` — `intake.routing.ActionRequestId`.
+    pub action_request_id: ActionRequestId,
+    /// `context` — `Json`.
+    pub context: crate::json::Value,
+    /// `decision` — `Json`.
+    pub decision: crate::json::Value,
+    /// `recorded_at` — `Timestamp`.
+    pub recorded_at: crate::primitives::Timestamp,
+}
 
 /// The states of `intake.routing.MergeHandoff`, as runtime values.
 ///
@@ -378,6 +437,8 @@ pub struct GrantData {
     pub action_request_id: ActionRequestId,
     /// `granted_at` — `Timestamp`.
     pub granted_at: crate::primitives::Timestamp,
+    /// `mandate_approval` — `Optional<intake.routing.MandateApprovalId>`.
+    pub mandate_approval: Option<MandateApprovalId>,
 }
 
 /// The states of `intake.routing.Grant`, at the type level.

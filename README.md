@@ -204,6 +204,13 @@ resume context, so there is nothing to approve. Each refusal of a
 resume has its own exit status (10 to 22, listed by `b10x-loom resume --help`). Only a last line
 `stopped: ApprovalRequired (<action>)` leaves something to approve: `..., nothing suspended`
 (exit 4) and `stopped: MergeHandedOff (<request>, HEAD <sha>)` leave nothing.
+With `--mandate <FILE>`, a host-trusted Mandate file (`loom.authority.MandateHost`: the verified
+context, the approver, the approver policy, the relation, the capabilities and those needing an
+approval), `approve` also records a Mandate approval of the request in the state directory's
+approval log (`mandate-approvals.jsonl`), which the grant names, and `resume` performs the request
+only when Mandate's `check_with_approval` clears and consumes that approval, keeping the
+consumption in the log before anything is performed. A second resume with the same approval, an
+expired one and a grant naming none are refused `NotGranted` (16) and perform nothing.
 
 Since `0.2.0` tests run confined. A software-change run needs a Codex
 login and Linux with bubblewrap and delegated cgroup v2 controllers. Tests default to Substrate:

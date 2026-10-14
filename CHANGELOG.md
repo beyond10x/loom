@@ -29,6 +29,24 @@ under **Unreleased** until the next release.
   `run_with_suspension` holds a Suspension, and its refusals are denials. A Mandate outage, an
   authority context that is no Mandate context and the empty case id grant nothing. No product
   crate links it; `b10x-loom run`, `approve` and `resume` are unchanged.
+- `b10x-loom approve --mandate <FILE>` and `resume --mandate <FILE>` clear a resume's approval
+  through Mandate v0.9.0's `check_with_approval`. `FILE` is a host-trusted Mandate file
+  (`loom.authority.MandateHost`: the verified context, the approver, the approver policy, the
+  relation, the capabilities and those needing an approval, and `approval_seconds`), from which
+  Loom builds Mandate's own doubles for the case until Mandate ships a policy adapter. `approve`
+  records a Mandate approval of the held request in the state directory's approval event log
+  (`mandate-approvals.jsonl`, `intake.routing.MandateApprovalEntry`) and the grant names it
+  (`intake.routing.Grant.mandate_approval`, a member only a grant carrying one has); `resume`
+  performs the request only when Mandate clears and consumes that approval, appending
+  `ApprovedDecisionRecorded` to the log under the state directory's lock before anything is
+  performed. A second resume with the same approval, an expired approval, one naming another
+  subject, action or resource, and a grant naming none are refused `NotGranted` (16) and perform
+  nothing. Without `--mandate` both commands are unchanged, and a grant written by 0.20.0 still
+  reads. `b10x-loom-cli` now links `b10x-loom-mandate` (new `loom_mandate::approval`); the SDK
+  does not. The flag and the log go when Mandate records approvals itself.
+  Breaking: `b10x_loom_intake_slice::grant::approve` takes a `mandate` argument,
+  `intent::ResumeState` gains a `mandate` field, `grant::GrantData` gains `mandate_approval` and
+  `grant::ApproveRefusal` gains `Mandate`.
 - The `loom.authority` domain (`ess/domains/authority.yaml`) declares that context, the case
   resource and its derivation (`loom.authority.CaseResource`), and the answer each outcome maps
   to. The `loom` specification moves to format `ess/24`; the generated `loom` model gains the

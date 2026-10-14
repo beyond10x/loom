@@ -30,7 +30,7 @@ use crate::clock::Clock;
 use crate::confinement::TestRunner;
 use crate::context_metrics::{ContextMetrics, MeasuredModel};
 use crate::executor::{TestCommand, TestPaths, backend_name};
-use crate::grant::{GrantAuthority, GrantStore};
+use crate::grant::{GrantAuthority, GrantStore, MandateApprovals};
 use crate::handoff::MergeHandoffStore;
 use crate::resume::{
     self, AcceptedRoute, CatalogDigest, DropResumeContext, DropResumeContextOutcome,
@@ -483,6 +483,10 @@ pub struct ResumeState<'s> {
     pub grants: &'s GrantStore,
     /// Where a granted `repository.merge` is handed off.
     pub handoffs: &'s MergeHandoffStore,
+    /// Mandate, when `resume --mandate` configured it: the held request is then allowed only once
+    /// Mandate cleared and consumed the approval the grant names
+    /// ([`GrantAuthority::with_mandate`]). `None` resumes as without Mandate.
+    pub mandate: Option<&'s dyn MandateApprovals>,
 }
 
 /// The resume context of `commission`, read only when the commission holds a Suspension: a
@@ -562,7 +566,8 @@ pub fn resumed_request<S: FallibleCaseStore, T: EvaluationTime>(
 /// workspace is validated again (`case::validate_workspace`) and its `HEAD` reported to the
 /// governor as the case's implementation revision (`case::report_head`), so a commit made since
 /// the Suspension is refused `CaseMoved`; the grant `approve` wrote is read through
-/// [`GrantAuthority`], and a granted `repository.merge` is handed off into `state.handoffs`, at
+/// [`GrantAuthority`] (with `state.mandate`, only once Mandate cleared and consumed the approval the
+/// grant names), and a granted `repository.merge` is handed off into `state.handoffs`, at
 /// the implementation revision the case holds only, moving no Git ref. The suspended request is performed once, the Suspension is
 /// released, and the run goes on until it stops, as a run does. When it ends, however it ends,
 /// without the commission's Suspension held, the context is removed
@@ -645,12 +650,22 @@ fn resume_prepared<S: FallibleCaseStore, T: EvaluationTime>(
     let case_id = CaseId(context.case_id.0.clone());
     case::report_head(governor, &case_id, workspace).map_err(SliceError::Case)?;
     let authority = GrantAuthority::new(grant, state.suspensions);
+    let authority = match state.mandate {
+        Some(mandate) => authority.with_mandate(mandate),
+        None => authority,
+    };
+    let mut commission = operator_commission(
+        CommissionId(CommissionUuid(context.commission_id.0.0.clone())),
+        AgentRevisionId(CommissionUuid(context.agent_revision_id.0.0.clone())),
+        case_id.clone(),
+    );
+    // With Mandate, the commission acts in the host's Mandate verified context, which Mandate
+    // reads from its authority context.
+    if let Some(mandate) = state.mandate {
+        commission.authority_context = mandate.authority_context();
+    }
     let resuming = Resuming {
-        commission: operator_commission(
-            CommissionId(CommissionUuid(context.commission_id.0.0.clone())),
-            AgentRevisionId(CommissionUuid(context.agent_revision_id.0.0.clone())),
-            case_id.clone(),
-        ),
+        commission,
         suspensions: state.suspensions,
         authority: &authority,
         handoffs: state.handoffs,

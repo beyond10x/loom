@@ -20,19 +20,28 @@
 //! released by then), is not allowed by it. Everything else needs approval, as the slice's own
 //! provider answers. A suspension store that cannot be read is a failure to decide, which never
 //! allows.
+//!
+//! With Mandate (`approve --mandate`, `resume --mandate`, `story:mandate-approval-on-resume`), a
+//! [`MandateApprovals`] the host built from its Mandate file takes part: [`approve`] records a
+//! Mandate approval for the held request and the grant names it (`mandate_approval`), and
+//! [`GrantAuthority`] allows the held request only when Mandate clears and consumes the approval
+//! the grant names; a grant naming none is refused. Without it both behave as before, and a grant
+//! names no approval: its document has no `mandate_approval` member, as a grant written before the
+//! member was declared has none.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 use b10x_loom_commission::model::json;
 use b10x_loom_commission::model::responsibility::{
-    AuthorityVerdict, AuthorityVerdictApprovalRequired, CaseId, CommissionData,
-    CommissionId as HeldCommissionId, SuspensionReason, SuspensionState, Unit,
+    AuthorityContext, AuthorityVerdict, AuthorityVerdictApprovalRequired, AuthorityVerdictDeny,
+    CaseId, CommissionData, CommissionId as HeldCommissionId, SuspensionReason, SuspensionState,
+    Unit,
 };
 use b10x_loom_commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
 use b10x_loom_commission::ports::suspension::SuspensionPort;
 use intake_model::primitives::{Timestamp, Uuid};
-pub use intake_model::routing::{ActionRequestId, CommissionId, GrantData};
+pub use intake_model::routing::{ActionRequestId, CommissionId, GrantData, MandateApprovalId};
 use serde_json::{Map, Value, json};
 
 use crate::handoff::{HeadAlreadyHandedOff, MERGE, MergeHandoffStore};
@@ -42,7 +51,8 @@ use crate::state_dir::{StateDir, failed, read_text};
 /// The prefix of a grant's file name.
 const PREFIX: &str = "grant-";
 
-/// The members a grant has, in the order written.
+/// The members a grant has, in the order written; [`MANDATE_APPROVAL`] follows them when the grant
+/// names a Mandate approval.
 const MEMBERS: [&str; 6] = [
     "commission_id",
     "action",
@@ -51,6 +61,52 @@ const MEMBERS: [&str; 6] = [
     "action_request_id",
     "granted_at",
 ];
+
+/// The member naming the grant's Mandate approval, present only when it names one.
+const MANDATE_APPROVAL: &str = "mandate_approval";
+
+/// The request a commission's Suspension holds, as `approve --mandate` approves it.
+#[derive(Debug, Clone, Copy)]
+pub struct HeldApproval<'a> {
+    /// The commission holding the Suspension.
+    pub commission_id: &'a CommissionId,
+    /// The request the Suspension holds.
+    pub action_request_id: &'a ActionRequestId,
+    /// The case the request is on.
+    pub case_id: &'a CaseId,
+    /// The capability the request needs, as the operator approved it.
+    pub capability: &'a str,
+    /// When it is approved.
+    pub at: &'a Timestamp,
+}
+
+/// Mandate, as the host configured it for `approve --mandate` and `resume --mandate`
+/// (`story:mandate-approval-on-resume`). The command line implements it over `loom_mandate` and the
+/// state directory's approval event log ([`crate::mandate_log`]).
+pub trait MandateApprovals {
+    /// Records a Mandate approval of `held`, and answers its identity, which the grant names.
+    ///
+    /// # Errors
+    /// Why no approval was recorded.
+    fn record(&self, held: &HeldApproval<'_>) -> Result<MandateApprovalId, String>;
+
+    /// The authority context a resumed commission carries: the host's Mandate verified context.
+    fn authority_context(&self) -> AuthorityContext;
+
+    /// Clears `capability` for the held request `grant` names, of `commission`, through Mandate's
+    /// `check_with_approval` with the approval the grant names, and keeps the consumption before
+    /// it answers.
+    ///
+    /// # Errors
+    /// Why Mandate did not clear it; nothing is consumed then.
+    fn clear(
+        &self,
+        commission: &CommissionData,
+        capability: &str,
+        grant: &GrantData,
+        approval: &MandateApprovalId,
+    ) -> Result<(), String>;
+}
 
 /// The grants kept in one directory, one file per commission.
 #[derive(Debug)]
@@ -135,6 +191,8 @@ pub enum ApproveRefusal {
     /// The suspension store, the grant store, the case or the hand-offs could not be read or
     /// written.
     Store(String),
+    /// Mandate recorded no approval for the request (`approve --mandate`).
+    Mandate(String),
 }
 
 impl fmt::Display for ApproveRefusal {
@@ -163,6 +221,7 @@ impl fmt::Display for ApproveRefusal {
                 error.commission_id.0.0, error.head
             ),
             Self::Store(why) => write!(f, "the state directory cannot be used: {why}"),
+            Self::Mandate(why) => write!(f, "Mandate recorded no approval: {why}"),
         }
     }
 }
@@ -174,15 +233,42 @@ pub fn now() -> Timestamp {
     Timestamp(crate::executor::now().0)
 }
 
+/// A fresh identity of the kind `kind` names (a Mandate approval, a Mandate decision), never
+/// issued before by this process or, by its clock, by another.
+pub fn fresh_id(kind: &str, seed: &str) -> Uuid {
+    Uuid(crate::executor::fresh_uuid(kind, seed).0)
+}
+
+/// The instant `seconds` after `at`, in UTC to the second, as a Mandate approval's expiry is
+/// written.
+///
+/// # Errors
+/// Why not: `at` is no RFC 3339 instant, or the instant cannot be represented.
+pub fn after(at: &Timestamp, seconds: i64) -> Result<Timestamp, String> {
+    let start = chrono::DateTime::parse_from_rfc3339(&at.0)
+        .map_err(|error| format!("`{}` is no RFC 3339 instant: {error}", at.0))?;
+    let end = chrono::TimeDelta::try_seconds(seconds)
+        .and_then(|delta| start.checked_add_signed(delta))
+        .ok_or_else(|| format!("{seconds} seconds after {} cannot be represented", at.0))?;
+    Ok(Timestamp(
+        end.with_timezone(&chrono::Utc)
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string(),
+    ))
+}
+
 /// Approves `capability` for the request `commission`'s Suspension holds, at `at`: writes the
 /// grant and performs nothing. A suspended `repository.merge` hands off the case's
 /// implementation revision, which `head_of` reads from the governor for the Suspension's case;
-/// when the commission already handed that `HEAD` off (`handoffs`), nothing is approved.
+/// when the commission already handed that `HEAD` off (`handoffs`), nothing is approved. With
+/// `mandate`, a Mandate approval of the request is recorded first and the grant names it.
 ///
 /// # Errors
 /// [`ApproveRefusal`] when nothing is suspended for the commission, its Suspension is
 /// `Resuming`, its request needs another capability, it would hand off a `HEAD` the commission
-/// already handed off, or a store cannot be used; no grant is written then.
+/// already handed off, Mandate recorded no approval, or a store cannot be used; no grant is
+/// written then.
+#[allow(clippy::too_many_arguments)]
 pub fn approve(
     suspensions: &dyn SuspensionPort,
     grants: &GrantStore,
@@ -191,6 +277,7 @@ pub fn approve(
     commission: &str,
     capability: &str,
     at: Timestamp,
+    mandate: Option<&dyn MandateApprovals>,
 ) -> Result<GrantData, ApproveRefusal> {
     let held = suspensions
         .get(&HeldCommissionId(
@@ -221,13 +308,30 @@ pub fn approve(
             }));
         }
     }
+    let commission_id = CommissionId(Uuid(commission.to_owned()));
+    let action_request_id = ActionRequestId(Uuid(held.data.action_request_id.0.0));
+    let mandate_approval = match mandate {
+        Some(mandate) => Some(
+            mandate
+                .record(&HeldApproval {
+                    commission_id: &commission_id,
+                    action_request_id: &action_request_id,
+                    case_id: &held.data.case_id,
+                    capability,
+                    at: &at,
+                })
+                .map_err(ApproveRefusal::Mandate)?,
+        ),
+        None => None,
+    };
     let grant = GrantData {
-        commission_id: CommissionId(Uuid(commission.to_owned())),
+        commission_id,
         action: held.data.action,
         capability: capability.to_owned(),
         granted: true,
-        action_request_id: ActionRequestId(Uuid(held.data.action_request_id.0.0)),
+        action_request_id,
         granted_at: at,
+        mandate_approval,
     };
     grants
         .put(&grant)
@@ -251,13 +355,26 @@ pub fn needed_capability(reason: &SuspensionReason) -> Option<String> {
 pub struct GrantAuthority<'a> {
     grant: Option<GrantData>,
     suspensions: &'a dyn SuspensionPort,
+    mandate: Option<&'a dyn MandateApprovals>,
 }
 
 impl<'a> GrantAuthority<'a> {
     /// A provider over `grant`, the one kept for the commission if any, that checks it against
     /// the commission's Suspension in `suspensions` at every call.
     pub fn new(grant: Option<GrantData>, suspensions: &'a dyn SuspensionPort) -> Self {
-        Self { grant, suspensions }
+        Self {
+            grant,
+            suspensions,
+            mandate: None,
+        }
+    }
+
+    /// The same provider, which allows the held request only once `mandate` cleared and consumed
+    /// the Mandate approval the grant names; a grant naming none allows nothing and is denied.
+    #[must_use]
+    pub fn with_mandate(mut self, mandate: &'a dyn MandateApprovals) -> Self {
+        self.mandate = Some(mandate);
+        self
     }
 
     fn allows(&self, commission: &CommissionData, capability: &str) -> Result<bool, String> {
@@ -294,7 +411,24 @@ impl AuthorityProvider for GrantAuthority<'_> {
             .allows(commission, capability)
             .map_err(AuthorityProviderError::new)?
         {
-            return Ok(AuthorityVerdict::Allow(Unit(true)));
+            let (Some(mandate), Some(grant)) = (self.mandate, &self.grant) else {
+                return Ok(AuthorityVerdict::Allow(Unit(true)));
+            };
+            // The held request, granted: with Mandate it is allowed only once Mandate cleared and
+            // consumed the approval the grant names.
+            let Some(approval) = &grant.mandate_approval else {
+                return Ok(AuthorityVerdict::Deny(AuthorityVerdictDeny {
+                    reason: format!(
+                        "the grant for `{capability}` names no Mandate approval; approve it with --mandate"
+                    ),
+                }));
+            };
+            return Ok(
+                match mandate.clear(commission, capability, grant, approval) {
+                    Ok(()) => AuthorityVerdict::Allow(Unit(true)),
+                    Err(reason) => AuthorityVerdict::Deny(AuthorityVerdictDeny { reason }),
+                },
+            );
         }
         Ok(AuthorityVerdict::ApprovalRequired(
             AuthorityVerdictApprovalRequired {
@@ -306,7 +440,7 @@ impl AuthorityProvider for GrantAuthority<'_> {
 
 /// `grant` as the JSON document the store writes.
 fn encode(grant: &GrantData) -> String {
-    let value = json!({
+    let mut value = json!({
         "commission_id": grant.commission_id.0.0,
         "action": grant.action,
         "capability": grant.capability,
@@ -314,6 +448,9 @@ fn encode(grant: &GrantData) -> String {
         "action_request_id": grant.action_request_id.0.0,
         "granted_at": grant.granted_at.0,
     });
+    if let Some(approval) = &grant.mandate_approval {
+        value[MANDATE_APPROVAL] = json!(approval.0.0);
+    }
     let mut text = serde_json::to_string_pretty(&value).unwrap_or_default();
     text.push('\n');
     text
@@ -322,7 +459,13 @@ fn encode(grant: &GrantData) -> String {
 /// The grant `text` holds, refused unless it is `commission`'s and names exactly its members.
 fn decode(text: &str, commission: &CommissionId) -> Result<GrantData, String> {
     let value: Value = serde_json::from_str(text).map_err(|error| error.to_string())?;
-    let object = exactly(&value, &MEMBERS)?;
+    let object = if value.get(MANDATE_APPROVAL).is_some() {
+        let mut members = MEMBERS.to_vec();
+        members.push(MANDATE_APPROVAL);
+        exactly(&value, &members)?
+    } else {
+        exactly(&value, &MEMBERS)?
+    };
     let grant = GrantData {
         commission_id: CommissionId(Uuid(text_of(object, "commission_id")?)),
         action: text_of(object, "action")?,
@@ -332,6 +475,10 @@ fn decode(text: &str, commission: &CommissionId) -> Result<GrantData, String> {
             .ok_or("`granted` is not a boolean")?,
         action_request_id: ActionRequestId(Uuid(text_of(object, "action_request_id")?)),
         granted_at: Timestamp(text_of(object, "granted_at")?),
+        mandate_approval: match object.get(MANDATE_APPROVAL) {
+            Some(_) => Some(MandateApprovalId(Uuid(text_of(object, MANDATE_APPROVAL)?))),
+            None => None,
+        },
     };
     if &grant.commission_id != commission {
         return Err(format!(
@@ -380,6 +527,7 @@ mod tests {
                 "00000000-0000-4000-8000-000000000009".to_owned(),
             )),
             granted_at: Timestamp("2026-10-13T08:00:00Z".to_owned()),
+            mandate_approval: None,
         }
     }
 
@@ -416,6 +564,37 @@ mod tests {
         )
         .unwrap();
         assert!(store.get(&first.commission_id).is_err());
+    }
+
+    /// A grant naming its Mandate approval keeps it as the member `mandate_approval`; a grant naming
+    /// none has no such member, as a grant written before it was declared, and reads back so.
+    #[test]
+    fn a_grant_names_its_mandate_approval_only_when_it_carries_one() {
+        let dir = tempfile::Builder::new()
+            .prefix("grant-mandate-")
+            .tempdir()
+            .unwrap();
+        let store = GrantStore::open(dir.path()).unwrap();
+        let plain = grant("00000000-0000-4000-8000-000000000001");
+        let text: Value = serde_json::from_str(&encode(&plain)).unwrap();
+        assert_eq!(text.get(MANDATE_APPROVAL), None, "{text}");
+        store.put(&plain).unwrap();
+        assert_eq!(
+            store.get(&plain.commission_id).unwrap(),
+            Some(plain.clone())
+        );
+
+        let mut carried = plain.clone();
+        carried.mandate_approval = Some(MandateApprovalId(Uuid(
+            "00000000-0000-4000-8000-0000000000ab".to_owned(),
+        )));
+        let text: Value = serde_json::from_str(&encode(&carried)).unwrap();
+        assert_eq!(
+            text[MANDATE_APPROVAL],
+            json!("00000000-0000-4000-8000-0000000000ab")
+        );
+        store.put(&carried).unwrap();
+        assert_eq!(store.get(&carried.commission_id).unwrap(), Some(carried));
     }
 
     /// The provider allows only while the commission's Suspension is `Pending` for the request the
@@ -594,6 +773,7 @@ mod tests {
             id,
             MERGE,
             at.clone(),
+            None,
         );
         assert_eq!(
             refused,
@@ -616,6 +796,7 @@ mod tests {
             id,
             MERGE,
             at,
+            None,
         );
         assert!(approved.is_ok(), "{approved:?}");
     }
