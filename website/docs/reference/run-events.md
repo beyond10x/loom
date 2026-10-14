@@ -3,7 +3,7 @@ title: Run events
 sidebar_label: Run events
 sidebar_position: 3
 description: The JSON Lines record b10x-loom run writes with --output jsonl, its schema version, every record kind and the terminal record.
-source: ess/intake/domains/events.yaml, crates/loom-cli/src/events.rs, crates/loom-cli/src/main.rs, crates/loom-cli/tests/run_events.rs
+source: ess/intake/domains/events.yaml, docs/contracts/run-events-v1.json, crates/loom-docs/src/run_events.rs, crates/loom-cli/src/events.rs, crates/loom-cli/src/main.rs, crates/loom-cli/tests/run_events.rs
 ---
 
 # Run events
@@ -111,6 +111,26 @@ for every other stop reason, and `1` for a run that failed (the exit statuses ar
 [CLI reference](cli.md)). A command line that is not valid exits `2` before any record is written.
 A run that restarts itself in a delegated cgroup returns the delegated process's status, and that
 process writes the terminal record.
+
+## Stability
+
+The records and the exit statuses are a contract at `schema_version` 1. Within it:
+
+- a record kind or a field is never removed, renamed or retyped, a field's optionality never
+  changes, and a value is never added to or removed from a field's listed values;
+- an exit status never changes meaning;
+- a new optional field of an existing record kind is not a break: a reader that reads members by
+  name ignores it;
+- anything else, a new record kind included, is a break. It changes the schema version and is
+  named in that release's CHANGELOG entry under `Breaking:`.
+
+The contract is committed as
+[`docs/contracts/run-events-v1.json`](https://github.com/beyond10x/loom/blob/main/docs/contracts/run-events-v1.json):
+the record kinds, their fields with type and optionality, the schema versions and the exit
+statuses, written by `loom-docs generate` from the declaration. `loom-docs generate --check`
+(`task docs-check`) compares the declaration with it, names each difference by kind and field, and
+fails on a break, so the stream cannot change under a reader unless the contract file moves with
+it.
 
 ## A recorded run
 

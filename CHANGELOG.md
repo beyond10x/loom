@@ -6,6 +6,14 @@ under **Unreleased** until the next release.
 
 ## [Unreleased]
 
+### Added
+
+- The `run --output jsonl` records and the exit statuses are a stated contract at `schema_version` 1,
+  committed as `docs/contracts/run-events-v1.json` and checked by `task docs-check`: within the
+  version only a new optional field of an existing record kind is allowed, and any other change is
+  a break named here under `Breaking:` with a new schema version (reference: Run events,
+  Stability).
+
 ## [0.20.0] - 2026-10-14
 
 Loom 0.20.0 builds on engineering-protocols 0.7.0 and Canon 0.4.0, and every software change
