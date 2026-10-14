@@ -2,14 +2,35 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "7dee72f34c381236c680e35cdb45af40bf2db94a72cb4522d2a152d83bc8c88e",
-    "contract_digest": "f8b677a3f783a96b6bdc38dd5c82bd4daa181f4d17fdbb94ab55827348c3f45f"
+    "source_digest": "7bd35da34adec64dcc53bfc491e89e8c5b0bce8290af63cbd1ed7a79b0521a60",
+    "contract_digest": "808c695ab0db97c3e7a51bff1e79a6bb28a1c6884c34dba9b4d4f9ccec9734bf"
   },
   "scope": {
     "profile": "component-skeletons",
     "layout": "crate"
   },
   "capabilities": [
+    {
+      "kind": "domain_type",
+      "source": "loom.authority.Answer",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.authority.HostContext",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.authority.Outcome",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
     {
       "kind": "domain_type",
       "source": "loom.datasource.AdapterAlias",
