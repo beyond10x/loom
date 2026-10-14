@@ -98,7 +98,7 @@ fn clear(
     hosted: &HostedMandate,
     log: &[MandateApprovalEntry],
     at: &str,
-) -> Result<loom_mandate::approval::Refused, MandateApprovalEntry> {
+) -> Result<MandateApprovalEntry, loom_mandate::approval::Refused> {
     match hosted.clear(
         &commission(hosted),
         CAPABILITY,
@@ -108,8 +108,8 @@ fn clear(
         &Timestamp(at.to_owned()),
         "00000000-0000-4000-8000-0000000000d1",
     ) {
-        Ok(decided) => Err(MandateApprovalEntry::ApprovedDecisionRecorded(decided)),
-        Err(refused) => Ok(refused),
+        Ok(decided) => Ok(MandateApprovalEntry::ApprovedDecisionRecorded(decided)),
+        Err(refused) => Err(refused),
     }
 }
 
@@ -147,8 +147,8 @@ fn a_recorded_approval_clears_once_and_its_event_consumes_it() {
     let hosted = hosted();
     let log = vec![MandateApprovalEntry::ApprovalRecorded(recorded(&hosted))];
     let event = match clear(&hosted, &log, BEFORE_EXPIRY) {
-        Err(event) => event,
-        Ok(refused) => panic!("Mandate clears the approval: {refused}"),
+        Ok(event) => event,
+        Err(refused) => panic!("Mandate clears the approval: {refused}"),
     };
     let MandateApprovalEntry::ApprovedDecisionRecorded(decided) = &event else {
         panic!("an ApprovedDecisionRecorded: {event:?}");
@@ -169,8 +169,8 @@ fn a_recorded_approval_clears_once_and_its_event_consumes_it() {
         .unwrap()
         .expect("the approval is recorded");
     assert_eq!(approval.state, ApprovalState::Consumed);
-    let again =
-        clear(&hosted, &consumed, BEFORE_EXPIRY).expect("a consumed approval does not clear again");
+    let again = clear(&hosted, &consumed, BEFORE_EXPIRY)
+        .expect_err("a consumed approval does not clear again");
     assert!(again.0.contains("wrong-state"), "{again}");
 }
 
@@ -209,15 +209,14 @@ fn an_approval_naming_another_subject_action_or_resource_is_refused() {
     ];
     for (name, foreign) in cases {
         let log = vec![MandateApprovalEntry::ApprovalRecorded(foreign)];
-        let refused = clear(&hosted, &log, BEFORE_EXPIRY)
-            .unwrap_or_else(|event| panic!("{name} is refused, not cleared: {event:?}"));
+        let refused = clear(&hosted, &log, BEFORE_EXPIRY).expect_err(name);
         assert!(refused.0.contains("Mandate refused"), "{name}: {refused}");
         assert!(refused.0.contains("(denied)"), "{name}: {refused}");
     }
 
     let log = vec![MandateApprovalEntry::ApprovalRecorded(approval)];
     let expired =
-        clear(&hosted, &log, EXPIRES_AT).expect("an approval at its expiry does not clear");
+        clear(&hosted, &log, EXPIRES_AT).expect_err("an approval at its expiry does not clear");
     assert!(expired.0.contains("(denied)"), "{expired}");
 }
 
@@ -231,9 +230,9 @@ fn an_approval_recorded_for_another_request_or_not_recorded_is_refused() {
         ..recorded(&hosted)
     };
     let log = vec![MandateApprovalEntry::ApprovalRecorded(other)];
-    let refused = clear(&hosted, &log, BEFORE_EXPIRY).expect("another request's approval");
+    let refused = clear(&hosted, &log, BEFORE_EXPIRY).expect_err("another request's approval");
     assert!(refused.0.contains("not this one"), "{refused}");
-    let unrecorded = clear(&hosted, &[], BEFORE_EXPIRY).expect("an unrecorded approval");
+    let unrecorded = clear(&hosted, &[], BEFORE_EXPIRY).expect_err("an unrecorded approval");
     assert!(unrecorded.0.contains("(denied)"), "{unrecorded}");
 }
 
