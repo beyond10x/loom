@@ -9,6 +9,23 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-14
+
+Loom 0.22.0 starts deterministic workflows. A run's model usage report (`RunMeter`,
+`MeteredModelPort`, `MeteredExecutor`, the `loom.metering` domain) counts every model call of a
+Commission run at the `ModelPort` boundary, with the tokens and the cost per step, each step
+labelled with the workflow step it took. A workflow definition (`loom.workflow`,
+`WorkflowExecutor`) proposes its deterministic steps without a model and asks one only in a
+judgement step, among the actions that step and the host both admit, and a step's typed outputs
+fill a later step's arguments without a model. `loom-xtask release-check` refuses an entry without
+a `Breaking:` sentence, and `Breaking: none.` when a stable surface changed since the previous tag.
+A bugfix's `regression_test_result` runs the test the run wrote (`--regression-test-command`), and
+the governor takes a record's `observed_at` only as the instant of an observation it received.
+rustls moves to 0.23.46 for RUSTSEC-2026-0346, RUSTSEC-2026-0347, RUSTSEC-2026-0348 and
+RUSTSEC-2026-0349. Breaking: a bugfix run without `--regression-test-command` no longer discharges
+`red_first.required`, `ResumeContextData` gains `regression_test_command`, and the governor
+refuses a record that cites an observation it never received or gives it another instant.
+
 ### Added
 
 - Workflow definitions (`b10x_loom_executor::workflow`, re-exported by the SDK): a host defines a
