@@ -2,9 +2,11 @@
 format: aep.planning-md/3
 id: architecture-decision-record:read-fan-out
 kind: architecture-decision-record
-status: proposed
+status: accepted
 title: Commission's runtime performs admitted reads of one proposal concurrently
-revision: 1
+revision: 2
+transitions:
+- {from: "proposed", to: "accepted", at: "2026-10-14T12:20:50Z", actor: "human:timo", revision: 2}
 ---
 ## Decision
 

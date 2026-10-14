@@ -2,11 +2,13 @@
 format: aep.planning-md/3
 id: decision-blocker:dw-read-fan-out-decision
 kind: decision-blocker
-status: open
+status: cleared
 title: Nobody has decided whether Commission's runtime may perform admitted reads concurrently
 relations:
 - blocks: story:dw-read-fanout
-revision: 1
+revision: 3
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-14T12:20:51Z", actor: "human:timo", revision: 3}
 ---
 ## Question
 
@@ -37,3 +39,7 @@ Recommendation: A.
 ## Stops
 
 story:dw-read-fanout, and through it story:dw-incident-workflow.
+
+## Decision (2026-10-14)
+
+A. The operator accepted architecture-decision-record:read-fan-out. story:dw-read-fanout is built in the next wave, as its Design says.

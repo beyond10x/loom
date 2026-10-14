@@ -2,11 +2,13 @@
 format: aep.planning-md/3
 id: decision-blocker:dw-baseline-live-run
 kind: decision-blocker
-status: open
+status: cleared
 title: Nobody has approved the paid live model run that records the bug-fix baseline
 relations:
 - blocks: story:dw-bugfix-baseline
-revision: 1
+revision: 3
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-14T12:20:51Z", actor: "human:timo", revision: 3}
 ---
 ## Question
 
@@ -31,3 +33,7 @@ Recommendation: A.
 ## Stops
 
 story:dw-bugfix-baseline, and through it story:dw-bugfix-workflow and story:dw-incident-workflow.
+
+## Decision (2026-10-14)
+
+A. One paid live run records the bug-fix baseline: through llm, with the operator's Codex login and the default Codex model `b10x-loom run` uses. One run only; any re-recording is asked for again.
