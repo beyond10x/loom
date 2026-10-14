@@ -9,5 +9,6 @@ specification:
   - domains/plugin.yaml
   - domains/slack.yaml
   - domains/authority.yaml
+  - domains/workflow.yaml
   - domains/metering.yaml
 scenarios: []

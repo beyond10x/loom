@@ -15,4 +15,5 @@ domains:
   - loom.plugin
   - loom.slack
   - loom.authority
+  - loom.workflow
   - loom.metering

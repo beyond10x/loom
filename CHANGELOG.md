@@ -11,6 +11,21 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ### Added
 
+- Workflow definitions (`b10x_loom_executor::workflow`, re-exported by the SDK): a host defines a
+  workflow over one protocol as an ordered list of steps, the new `loom.workflow` domain
+  (`ess/domains/workflow.yaml`). A deterministic step names one action and literal arguments and is
+  proposed without a model; a judgement step names the actions a model may choose among and
+  instructions, and runs the governed loop narrowed to those of them the host's own narrowing admits
+  (a step never widens it); a step may wait on a frontier claim (`when`). `WorkflowExecutor`
+  implements Commission's `AgentExecutor`: it takes the first step after the last performed one
+  whose `when` holds, ends the call `NeedsHumanJudgment` naming the step when the frontier does not
+  list its action, and never skips ahead on its own. `RecordingEffects` wraps the host's effect port
+  so the workflow advances past a step only once its request was `Performed`. `workflow::load` reads
+  a YAML definition and refuses, naming the step, an action outside its protocol, a repeated step
+  name, a step name with surrounding whitespace or a judgement step with no action. Commission still
+  revalidates every proposal and Canon decides admission and completion. `ProtocolEntry::actions`
+  lists a protocol's actions for that check. `b10x-loom-executor` now depends on `serde_yaml_ng`. No
+  break.
 - A per-run model usage report, counted at the `ModelPort` boundary. `RunMeter`,
   `MeteredModelPort` and `MeteredExecutor` (`b10x_loom_executor::metering`, re-exported by
   `b10x-loom-sdk`) count every `turn` of a Commission run, whoever makes it (the loop, the
@@ -18,12 +33,13 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
   included, and `RunMeter::report` returns the generated `loom.metering.RunUsageReport`: the
   model calls, the input, output and cached input tokens the provider reported and the cost at the
   run's rate card, in total and per step. A step is one executor call, counted from 1; calls made
-  outside any executor call are step 0. A cost no rate card priced is absent, never zero; a turn
-  that failed or unwound is a call whose cost is unknown, so its step's and the run's cost are
-  absent. Executor calls on one meter do not overlap, and an executor is wrapped by one
-  `MeteredExecutor`. New ESS
-  domain `loom.metering` (`ess/domains/metering.yaml`). No break for callers: the types are new and
-  nothing existing changes.
+  outside any executor call are step 0. A step's `label` names the workflow step the call took when
+  a `WorkflowExecutor` is built `.with_meter(&meter)`, and is absent otherwise. A cost no rate
+  card priced is absent, never zero; a turn that failed or unwound is a call whose cost is unknown,
+  so its step's and the run's cost are absent. Executor calls on one meter do not overlap, and an
+  executor is wrapped by one `MeteredExecutor`. New ESS domain `loom.metering`
+  (`ess/domains/metering.yaml`). No break for callers: the types are new and nothing existing
+  changes.
 
 ### Changed
 

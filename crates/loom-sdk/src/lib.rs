@@ -62,6 +62,10 @@ pub mod intake {
 
 pub use b10x_loom_commission::ports::effect::EffectPort;
 pub use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked};
+/// A Loom workflow definition run as Commission's executor, and the effect port wrapper it reads
+/// (`loom_sdk::loom::workflow`); a host checks a definition with `workflow::load` against
+/// `ProtocolEntry::actions` of the protocol it names.
+pub use b10x_loom_executor::workflow::{RecordingEffects, WorkflowExecutor};
 pub use b10x_loom_executor::{ActionSelector, ArgumentGenerator, Loom};
 pub use b10x_loom_executor::{MeteredExecutor, MeteredModelPort, RunMeter};
 pub use b10x_loom_intake_slice::confinement::{

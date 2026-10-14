@@ -93,6 +93,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | Every selection gets one `SelectionRecord` equal to it, with `fell_back_to` on the overruled fast selection naming the replacement's strategy; a selection refused at the execution boundary raises its session's `boundary_refusals` by one and adds no record; neither is evidence | `crates/loom-executor/tests/selection_telemetry.rs` (`selection_telemetry_is_recorded`) |
 | Laya selects behind the confidence fallback; arguments are generated once, only for the finally selected action, and an action outside the frontier never reaches argument generation or revalidation | `crates/loom-selector-laya/tests/laya_arguments_slice.rs` (`a_choice_outside_the_frontier_is_rejected_and_never_reaches_arguments_or_revalidation`) |
 | A blocked or merge-seeking pick is never proposed | `crates/loom-executor/tests/adversary_executor_admission.rs` |
+| A workflow asks a model only in a judgement step, offering it only that step's actions; a step whose action the frontier does not list ends `NeedsHumanJudgment` naming it and nothing is proposed; a step advances only once its request was `Performed`; a definition naming an action outside its protocol is refused at load, naming the step | `crates/loom-executor/tests/workflow_executor.rs` (`deterministic_steps_call_no_model`, `a_judgement_step_offers_the_model_only_its_actions`, `a_step_the_frontier_does_not_list_ends_needing_human_judgment`, `a_step_advances_only_after_its_effect_was_performed`, `a_definition_naming_an_action_outside_its_protocol_is_refused`) |
 | A stale or unlisted request is refused at revalidation | `crates/loom-commission-testkit/tests/action_request.rs`, `crates/loom-executor/tests/adversary_run_revalidation.rs`, `crates/loom-executor/tests/selection_revalidation.rs` |
 | Unknown capabilities and panicking authority providers yield no grant | `crates/loom-commission-testkit/tests/adversary_authority_fail_closed.rs` |
 | Commission names no executor, Canon, `model-provider-deny.txt`, Connectors or Mandate crate | `task commission:deps-guard` (`crates/loom-commission-testkit/tests/executor_port.rs`) |
@@ -479,6 +480,29 @@ wire stays in this crate until Laya becomes a default selector, when it moves to
 crate (`b10x-loom-cli`, `b10x-loom-sdk`) depends on it, so Loom builds and runs with no Laya code;
 `crates/loom-selector-laya/tests/laya_selector.rs` holds both, the dependency rule over the
 resolved graph `cargo metadata` reports.
+
+## Workflow definitions
+
+`b10x_loom_executor::workflow` (`story:dw-workflow-definition-executor`) runs a Loom workflow
+definition, the `loom.workflow` domain (`ess/domains/workflow.yaml`), as Commission's
+`AgentExecutor`. A definition names its protocol by catalog reference and orders its steps: a
+deterministic step (one `action`, literal `arguments`) is proposed without a model; a judgement
+step runs the governed loop (`LoopExecutor`) narrowed to its `actions` that the host's own
+narrowing (`LoopConfig::admits`) admits, never widening it, with its `instructions` as the run's
+instructions; `when` makes a step wait on a frontier claim, never on a model.
+`WorkflowExecutor` takes the first step after the last performed one whose `when` holds; a step
+whose actions the frontier does not list as `Admissible` or `ApprovalRequired` ends the call
+`NeedsHumanJudgment`, naming the step and the frontier's reasons, and nothing later is taken
+instead. `RecordingEffects` wraps the host's effect port into an `EffectLog` the executor reads: a
+step advances only once the request it proposed was `Performed`, and a refused or stale one is
+proposed again, bounded by Commission's idle rule. Commission revalidates every proposal, a
+deterministic one included. `workflow::load` reads YAML into the generated types and checks it
+against the protocol's actions, which the host supplies (`loom_protocols::ProtocolEntry::actions`,
+so the executor does not depend on `loom-protocols`): every action is its protocol's, step names
+are unique, with no surrounding whitespace, and a judgement step names an action; a refusal names
+the step. Built `.with_meter(&meter)` under a `MeteredExecutor` on the same `RunMeter`, it labels
+each metered step (`loom.metering.StepUsage.label`) with the workflow step the call took. The
+position is kept in process (`decision-blocker:dw-run-state-across-restart`).
 
 ## Intake and the command line
 

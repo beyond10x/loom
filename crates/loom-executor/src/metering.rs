@@ -12,7 +12,10 @@
 //! The [`MeteredExecutor`] opens one step per [`AgentExecutor::run`] call, counted from 1, and every
 //! call made while that executor call runs is counted in its step. A call made while no executor
 //! call runs is counted in step 0, which the report lists only when there was one, so the steps
-//! always sum to the totals.
+//! always sum to the totals. A step carries the label its executor gave the call
+//! ([`RunMeter::label_step`]): a [`crate::workflow::WorkflowExecutor`] metered with
+//! [`crate::workflow::WorkflowExecutor::with_meter`] labels each call with the workflow step it
+//! took. Step 0 and a call that took no named step carry none.
 //!
 //! Each turn is priced once, with the run's [`RateCard`], and rounded once; a cost is the sum of its
 //! rounded turns, as [`RateCard::price`] holds. No price is reported as absent, never zero:
@@ -61,8 +64,10 @@ struct Ledger {
 }
 
 /// One step's figures as the meter counts them.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 struct Tally {
+    /// The name the executor gave its call, when it gave one.
+    label: Option<String>,
     calls: u64,
     input_tokens: u64,
     output_tokens: u64,
@@ -82,6 +87,7 @@ impl Tally {
     fn usage(&self, step: usize) -> StepUsage {
         StepUsage {
             step: figure(u64::try_from(step).unwrap_or(u64::MAX)),
+            label: self.label.clone(),
             model_calls: figure(self.calls),
             input_tokens: figure(self.input_tokens),
             output_tokens: figure(self.output_tokens),
@@ -145,6 +151,17 @@ impl RunMeter {
             cached_input_tokens: total.cached_input_tokens,
             cost_micro_usd: total.cost_micro_usd,
             steps,
+        }
+    }
+
+    /// Labels the step now open with `label`, the name its executor gave the call (a workflow
+    /// step's name); a later label of the same step replaces it. Nothing is labelled while no
+    /// executor call runs: step 0 carries no label.
+    pub fn label_step(&self, label: &str) {
+        let mut guard = self.ledger();
+        let ledger = &mut *guard;
+        if ledger.open > 0 {
+            ledger.tallies[ledger.open].label = Some(label.to_owned());
         }
     }
 

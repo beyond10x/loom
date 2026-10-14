@@ -126,6 +126,9 @@ and per step.
 - A step is one executor call, counted from 1. Calls made while no executor call runs are step 0,
   listed only when there were any, so the steps always sum to the totals. Executor calls on one
   meter must not overlap, and an executor is wrapped by one `MeteredExecutor`.
+- A step's `label` names what its executor call did: a `WorkflowExecutor` built
+  `.with_meter(&meter)` labels each call with the workflow step it took, so a judgement step's
+  model calls read under its name. Step 0 and a call that took no step carry no label.
 - Each turn is priced once at the rate card. Without a card, for a model the card does not list,
   after a turn that reported no usage, or after a turn that failed or unwound, the cost is absent,
   never zero.

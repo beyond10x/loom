@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "47ee2e732f06c5c48e29f632cf2bbcae0c5b6ae5fb056f25ab3fa3aa80618b7d",
-    "contract_digest": "ebda3a653d1aac83a8c0a66081d3878fa4dfe2da527b9d567406f6923d8bd6df"
+    "source_digest": "1b4649239db036c3c54fd1c6256d3b9d645bd435c2ca60b02f06c78c3984d805",
+    "contract_digest": "1f9c399d657e6f3bf6b0a8cdbf769f9a23ce8204351cad8651327a3aec61a299"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -636,6 +636,55 @@
     {
       "kind": "domain_type",
       "source": "loom.slack.SlackConfig",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.workflow.DeterministicStep",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.workflow.JudgementStep",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.workflow.StepCondition",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.workflow.StepKind",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.workflow.Truth",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.workflow.WorkflowDefinition",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.workflow.WorkflowStep",
       "disposition": {
         "disposition": "generated"
       }

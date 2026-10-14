@@ -283,6 +283,25 @@ step 2: tests.run {}
 stopped: ApprovalRequired (repository.merge)
 ```
 
+A workflow whose steps are known needs no model for them. `loom_sdk::loom::workflow::load` reads a
+YAML definition over a catalog protocol, checked against `ProtocolEntry::actions`, and
+`loom_sdk::WorkflowExecutor` runs it as the executor: a deterministic step proposes its action
+with its literal arguments and asks no model, a judgement step asks the model only among the
+actions it names, and the workflow advances past a step only once the effect port, wrapped in
+`loom_sdk::RecordingEffects`, performed it. Commission still revalidates every proposal.
+
+```yaml
+name: change
+protocol: software-change@1
+steps:
+  - {name: inspect, kind: Deterministic, action: repository.inspect, arguments: {}}
+  - name: edit
+    kind: Judgement
+    actions: [implementation.edit]
+    instructions: Edit the implementation so the failing test passes.
+  - {name: test, kind: Deterministic, action: tests.run, arguments: {}}
+```
+
 [Embed the runtime](https://beyond10x.github.io/loom/docs/guides/embed-the-runtime) walks through
 its code. [SDK stability](https://beyond10x.github.io/loom/docs/reference/sdk-stability) names the
 surface kept stable within a release line, every port a host implements among it.
