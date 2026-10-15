@@ -9,6 +9,19 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+### Changed
+
+- A `RunMeter` counts overlapping and nested executor calls in their own steps. The step is
+  carried by the executor call, on the thread it runs on and in every fork of a metered port made
+  in it, rather than held as one open step per meter: two `MeteredExecutor` calls running at once
+  on one meter, on two threads, each count their own model calls, and a `MeteredExecutor` over
+  another `MeteredExecutor` of the same meter opens one step for the executor call, not two.
+  Delegates side by side still count in their executor call's step, and calls outside any executor
+  call in step 0. The contract that executor calls on one meter do not overlap and that an
+  executor is wrapped by one `MeteredExecutor` is lifted. A plain metered port (not a fork) turned
+  on a thread the executor call spawned now counts in step 0; a fork made in the call counts in
+  its step. The report's shape and the `loom.metering` domain are unchanged.
+
 ## [0.22.0] - 2026-10-14
 
 Loom 0.22.0 starts deterministic workflows. A run's model usage report (`RunMeter`,
