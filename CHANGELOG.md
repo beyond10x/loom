@@ -9,6 +9,19 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+### Added
+
+- A workflow's judgement step lists the earlier outputs it is given (`inputs`, a list of the new
+  `loom.workflow.OutputReference`: a step and an output). When the step is proposed, the runtime
+  appends exactly those values to its instructions as one `<workflow-inputs>` data block, a JSON
+  list naming each value's step, output and declared type, introduced as data and never as
+  instructions, with `<`, `>` and `&` escaped so no value can close it; the model no longer has to
+  read an earlier result out of the transcript. A listed output the run did not produce, or of
+  another type, ends the call `NeedsHumanJudgment` naming the step and the output and asks the
+  model nothing. `workflow::load` refuses an input naming no output of an earlier step, and one
+  listed twice. Breaking: `loom.workflow.JudgementStep` gains the field `inputs`, so code that
+  builds one with a struct literal adds `inputs: Vec::new()`.
+
 ## [0.22.0] - 2026-10-14
 
 Loom 0.22.0 starts deterministic workflows. A run's model usage report (`RunMeter`,

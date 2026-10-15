@@ -293,7 +293,9 @@ A step may declare typed `outputs` from its performed effect's report (a name, a
 a type), and a later deterministic step's arguments name one as `{$step: <step>, $output:
 <name>}`: the runtime fills it in with no model call, and an output absent from the report or of
 another type ends the run `NeedsHumanJudgment` naming the step and the output, with nothing
-proposed.
+proposed. A judgement step lists the earlier outputs it is given as `inputs` (`{step: <step>,
+output: <name>}`): their values go into its instructions as one data block, typed, never as
+instructions, and a listed output the run did not produce asks the model nothing.
 
 ```yaml
 name: change
