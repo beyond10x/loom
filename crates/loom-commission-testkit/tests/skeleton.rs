@@ -294,12 +294,18 @@ fn skeleton_lands_port_vocabulary_and_modules() {
         "ExecutorOutcome",
         &[
             ("ProposedAction", "ExecutorOutcomeProposedAction"),
+            ("ProposedReads", "ExecutorOutcomeProposedReads"),
             ("NeedsHumanJudgment", "ExecutorOutcomeNeedsHumanJudgment"),
             ("Suspended", "ExecutorOutcomeSuspended"),
             ("NoUsefulAction", "Unit"),
             ("CompletedLocalReasoning", "Unit"),
             ("CaseMoved", "ExecutorOutcomeCaseMoved"),
         ],
+    );
+    assert_struct(
+        &model,
+        "ExecutorOutcomeProposedReads",
+        &[("reads", "List<ExecutorOutcomeProposedAction>")],
     );
     assert_struct(
         &model,
@@ -442,6 +448,7 @@ fn skeleton_lands_port_vocabulary_and_modules() {
         std::any::type_name::<model::SuspensionReason>(),
         std::any::type_name::<model::ExecutorOutcome>(),
         std::any::type_name::<model::ExecutorOutcomeProposedAction>(),
+        std::any::type_name::<model::ExecutorOutcomeProposedReads>(),
         std::any::type_name::<model::ExecutorOutcomeNeedsHumanJudgment>(),
         std::any::type_name::<model::ExecutorOutcomeSuspended>(),
         std::any::type_name::<model::ExecutorOutcomeCaseMoved>(),
