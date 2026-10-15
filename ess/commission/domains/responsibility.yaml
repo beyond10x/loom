@@ -130,6 +130,7 @@ types:
     tag: kind
     variants:
       ProposedAction: commission.responsibility.ExecutorOutcomeProposedAction
+      ProposedReads: commission.responsibility.ExecutorOutcomeProposedReads
       NeedsHumanJudgment: commission.responsibility.ExecutorOutcomeNeedsHumanJudgment
       Suspended: commission.responsibility.ExecutorOutcomeSuspended
       NoUsefulAction: commission.responsibility.Unit
@@ -145,6 +146,22 @@ types:
         type: String
       - name: arguments
         type: commission.responsibility.ProposedActionArguments
+
+  # story:dw-read-fanout (architecture-decision-record:read-fan-out): several reads proposed
+  # together, non-empty and at most 16, each an action and its arguments as in a single proposal.
+  # A read is an action the effect port reports it reads (for a Connector-backed port, one whose
+  # binding's `effect` is `Read`). The runtime admits the fan-out only when every listed action is
+  # a read and the frontier the executor was handed lists it admissible, needing no authority;
+  # otherwise the whole proposal is refused and nothing is invoked. Each admitted read becomes its
+  # own ActionRequest of the Run at the frontier's revision and is revalidated before any is
+  # invoked; one that fails revalidation is refused and not invoked, and the others are invoked
+  # concurrently, each once, through its binding, and recorded in the order proposed. Writes, and
+  # any action that needs authority, are proposed one at a time.
+  - name: commission.responsibility.ExecutorOutcomeProposedReads
+    kind: struct
+    fields:
+      - name: reads
+        type: List<commission.responsibility.ExecutorOutcomeProposedAction>
 
   - name: commission.responsibility.ExecutorOutcomeNeedsHumanJudgment
     kind: struct
