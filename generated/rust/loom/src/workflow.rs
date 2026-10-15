@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest ebfc92fb53805a9a16de554fd9d3e6c265d63244389bce4ae4d41cfc30d4b1a2
-// contract digest fc0dfef86e7a35fb5a515d27ee479e5ae5cf255204bd26277a1352735120b25c
+// model digest 7e01de49f6648bd42c3487572f5bf305ca3e9c2e76adeb528dd2ffcdffa645c9
+// contract digest 339d7d1174a6fc6f5384f70ff5342398aa19ad068e03cd1146e66a670161b962
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Workflow — `loom.workflow`.
@@ -25,6 +25,17 @@ pub struct JudgementStep {
     pub actions: Vec<String>,
     /// `instructions` — `String`.
     pub instructions: String,
+    /// `inputs` — `List<loom.workflow.OutputReference>`.
+    pub inputs: Vec<OutputReference>,
+}
+
+/// OutputReference — `loom.workflow.OutputReference`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputReference {
+    /// `step` — `String`.
+    pub step: String,
+    /// `output` — `String`.
+    pub output: String,
 }
 
 /// OutputType — `loom.workflow.OutputType`: one of a closed set of names.

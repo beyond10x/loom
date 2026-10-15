@@ -1107,6 +1107,7 @@ mod decode {
                 StepKind::Judgement(JudgementStep {
                     actions,
                     instructions: text(members, "instructions", &place)?,
+                    inputs: Vec::new(),
                 })
             }
             other => {
