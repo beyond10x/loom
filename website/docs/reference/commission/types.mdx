@@ -66,6 +66,7 @@ Tagged by `kind`.
 | `NeedsHumanJudgment` | [`ExecutorOutcomeNeedsHumanJudgment`](#executoroutcomeneedshumanjudgment) |
 | `NoUsefulAction` | none |
 | `ProposedAction` | [`ExecutorOutcomeProposedAction`](#executoroutcomeproposedaction) |
+| `ProposedReads` | [`ExecutorOutcomeProposedReads`](#executoroutcomeproposedreads) |
 | `Suspended` | [`ExecutorOutcomeSuspended`](#executoroutcomesuspended) |
 
 ### RunOutcome
@@ -170,6 +171,12 @@ Tagged by `kind`.
 |---|---|
 | `action` | `string` |
 | `arguments` | [`ProposedActionArguments`](#proposedactionarguments) |
+
+### ExecutorOutcomeProposedReads
+
+| Field | Type |
+|---|---|
+| `reads` | list of [`ExecutorOutcomeProposedAction`](#executoroutcomeproposedaction) |
 
 ### ExecutorOutcomeSuspended
 

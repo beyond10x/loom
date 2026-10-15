@@ -35,6 +35,11 @@
 //! runtime and runs each invocation on it, so it can be called from any thread, including one
 //! inside another runtime.
 //!
+//! The invoker can be shared across threads ([`ConnectorInvoker::concurrent`]), so Commission's
+//! `ConnectorEffects` over it reads every action whose binding's effect is `Read`, and the runtime
+//! invokes the reads an executor proposes together concurrently, each once, through its binding
+//! (`story:dw-read-fanout`). A write is never part of a fan-out.
+//!
 //! [`cli`] is a separate read client over the operator's `connectors` command line, for reads
 //! outside a run and inside one: it needs no admitted request and no binding, reads no
 //! credential and refuses every operation Connectors describes as a write.
@@ -282,6 +287,13 @@ impl ConnectorInvoker for ConnectorsInvoker {
             },
             Answered::Failed(failure) => refused(binding.effect, instance, &operation, &failure),
         }
+    }
+
+    /// The invoker itself: it can be shared, so `ConnectorEffects` over it reads exactly the
+    /// actions whose binding's effect is `Read`, and invokes the reads of one fan-out concurrently,
+    /// each on its own call to [`ConnectorInvoker::invoke`].
+    fn concurrent(&self) -> Option<&(dyn ConnectorInvoker + Sync)> {
+        Some(self)
     }
 }
 
