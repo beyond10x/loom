@@ -151,12 +151,17 @@ types:
   # together, non-empty and at most 16, each an action and its arguments as in a single proposal.
   # A read is an action the effect port reports it reads (for a Connector-backed port, one whose
   # binding's `effect` is `Read`). The runtime admits the fan-out only when every listed action is
-  # a read and the frontier the executor was handed lists it admissible, needing no authority;
-  # otherwise the whole proposal is refused and nothing is invoked. Each admitted read becomes its
+  # a read, the frontier the executor was handed lists it admissible, needing no authority, and no
+  # two reads list the same action and arguments; otherwise the whole proposal is refused and
+  # nothing is invoked. A Connector-backed port invokes a fan-out only through bindings whose
+  # `effect` is `Read`, and one holding any other invokes nothing. Each admitted read becomes its
   # own ActionRequest of the Run at the frontier's revision and is revalidated before any is
   # invoked; one that fails revalidation is refused and not invoked, and the others are invoked
-  # concurrently, each once, through its binding, and recorded in the order proposed. Writes, and
-  # any action that needs authority, are proposed one at a time.
+  # concurrently, each once, through its binding, and recorded in the order proposed. A read whose
+  # revalidation answers stale shows that somebody else moved the case: after the others are
+  # recorded the move is judged as after a stale single proposal (CaseMovedOn when the moved case
+  # still admits an action), never adopted as one the Run's own effect made. Writes, and any action
+  # that needs authority, are proposed one at a time.
   - name: commission.responsibility.ExecutorOutcomeProposedReads
     kind: struct
     fields:
