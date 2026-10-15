@@ -51,6 +51,11 @@ exhaustively no longer compiles until it handles the variant.
   executor is wrapped by one `MeteredExecutor` is lifted. A plain metered port (not a fork) turned
   on a thread the executor call spawned now counts in step 0; a fork made in the call counts in
   its step. The report's shape and the `loom.metering` domain are unchanged.
+- Loom requires ESS 0.60.0: the Loom, Commission and intake specifications require it, the
+  conformance targets build on the 0.60.0 `ess-conformance` and `ess-primitives`, and CI installs
+  the 0.60.0 `ess`. Every specification validates unchanged, and synthesis still writes its
+  suites with no refusal. `not-in-frontier` stays an `external:` outcome: 0.60.0 has no predicate
+  for membership in a list input.
 
 ## [0.22.0] - 2026-10-14
 
