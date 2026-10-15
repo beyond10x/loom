@@ -17,6 +17,11 @@
 //! a failure to answer. Nothing here retries, since a retry is a new action request, rechecked.
 //! Read and consequential actions take this one path (`decision-blocker:read-action-effect-path`,
 //! A). Commission depends on no Connectors crate: the invoker is a port the host fills.
+//!
+//! Through an invoker that can be shared across threads ([`ConnectorInvoker::concurrent`]),
+//! [`ConnectorEffects`] reads exactly the actions whose binding declares the effect `Read`, and
+//! invokes the reads of one fan-out concurrently, each once, through its own binding
+//! (`story:dw-read-fanout`). Through any other invoker it reads nothing.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -26,7 +31,7 @@ use crate::model::responsibility::{
     ActionBinding, ActionBindingData, CommissionId, ConnectorOperationEffect, EffectOutcome,
     EffectOutcomeRefused, action_binding_state, commission_state,
 };
-use crate::ports::effect::{AdmittedRequest, EffectError, EffectPort};
+use crate::ports::effect::{AdmittedRequest, EffectError, EffectPort, invoke_concurrently};
 
 /// Invokes one Connector operation.
 pub trait ConnectorInvoker {
@@ -39,6 +44,13 @@ pub trait ConnectorInvoker {
         binding: &ActionBindingData,
         request: &AdmittedRequest,
     ) -> Result<EffectOutcome, EffectError>;
+
+    /// The invoker as several threads may share it, so [`ConnectorEffects`] may invoke the reads
+    /// of one fan-out concurrently (`story:dw-read-fanout`). `None` by default: through an invoker
+    /// that does not opt in, [`ConnectorEffects`] reads nothing and never fans out.
+    fn concurrent(&self) -> Option<&(dyn ConnectorInvoker + Sync)> {
+        None
+    }
 }
 
 impl<T: ConnectorInvoker + ?Sized> ConnectorInvoker for &T {
@@ -48,6 +60,10 @@ impl<T: ConnectorInvoker + ?Sized> ConnectorInvoker for &T {
         request: &AdmittedRequest,
     ) -> Result<EffectOutcome, EffectError> {
         (**self).invoke(binding, request)
+    }
+
+    fn concurrent(&self) -> Option<&(dyn ConnectorInvoker + Sync)> {
+        (**self).concurrent()
     }
 }
 
@@ -124,6 +140,32 @@ impl<I: ConnectorInvoker> EffectPort for ConnectorEffects<I> {
         self.bindings.contains_key(action)
     }
 
+    /// Whether `action`'s binding declares the effect `Read` and the invoker can be shared for a
+    /// fan-out ([`ConnectorInvoker::concurrent`]).
+    fn reads(&self, action: &str) -> bool {
+        self.invoker.concurrent().is_some()
+            && self
+                .bindings
+                .get(action)
+                .is_some_and(|binding| binding.effect == ConnectorOperationEffect::Read)
+    }
+
+    /// Invokes each of `requests` as [`EffectPort::invoke`] does, concurrently, through the
+    /// invoker shared ([`ConnectorInvoker::concurrent`]); `None`, invoking nothing, when the
+    /// invoker cannot be shared.
+    fn invoke_reads(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        requests: &[AdmittedRequest],
+    ) -> Option<Vec<Result<EffectOutcome, EffectError>>> {
+        let shared = Shared {
+            commission_id: &self.commission_id,
+            bindings: &self.bindings,
+            invoker: self.invoker.concurrent()?,
+        };
+        Some(invoke_concurrently(&shared, commission, requests))
+    }
+
     /// Hands `request` to the invoker once, with its action's binding. An unbound action is
     /// refused and nothing is invoked; a commission other than the one the bindings belong to, and
     /// an invoker's `Performed` that does not name exactly what its binding's effect requires (an
@@ -133,42 +175,87 @@ impl<I: ConnectorInvoker> EffectPort for ConnectorEffects<I> {
         commission: &Commission<commission_state::Assigned>,
         request: &AdmittedRequest,
     ) -> Result<EffectOutcome, EffectError> {
-        if commission.data().commission_id != self.commission_id {
-            return Err(EffectError::new(format!(
-                "the bindings are commission {}'s, not commission {}'s",
-                self.commission_id.0.0,
-                commission.data().commission_id.0.0
-            )));
-        }
-        let action = &request.data().action;
-        let Some(binding) = self.bindings.get(action) else {
-            return Ok(EffectOutcome::Refused(EffectOutcomeRefused {
-                reason: format!("`{action}` has no binding"),
-            }));
-        };
-        match self.invoker.invoke(binding, request)? {
-            EffectOutcome::Performed(performed) => {
-                let named = match (binding.effect, &performed.attempt, &performed.audit) {
-                    (ConnectorOperationEffect::Write, Some(_), None)
-                    | (ConnectorOperationEffect::Read, None, Some(_)) => None,
-                    (ConnectorOperationEffect::Write, None, _) => Some("named no attempt"),
-                    (ConnectorOperationEffect::Write, Some(_), Some(_)) => {
-                        Some("named an audit record beside its attempt")
-                    }
-                    (ConnectorOperationEffect::Read, None, None) => Some("named no audit record"),
-                    (ConnectorOperationEffect::Read, Some(_), _) => {
-                        Some("is a read and named an attempt")
-                    }
-                };
-                match named {
-                    None => Ok(EffectOutcome::Performed(performed)),
-                    Some(named) => Err(EffectError::new(format!(
-                        "the Connector operation `{}` of `{}` performed `{action}` and {named}",
-                        binding.operation_id.0, binding.instance_id.0
-                    ))),
+        perform(
+            &self.commission_id,
+            &self.bindings,
+            &self.invoker,
+            commission,
+            request,
+        )
+    }
+}
+
+/// The bindings of a [`ConnectorEffects`] over its invoker shared, for a fan-out's threads.
+struct Shared<'a> {
+    commission_id: &'a CommissionId,
+    bindings: &'a BTreeMap<String, ActionBindingData>,
+    invoker: &'a (dyn ConnectorInvoker + Sync),
+}
+
+impl EffectPort for Shared<'_> {
+    fn performs(&self, action: &str) -> bool {
+        self.bindings.contains_key(action)
+    }
+
+    fn invoke(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        request: &AdmittedRequest,
+    ) -> Result<EffectOutcome, EffectError> {
+        perform(
+            self.commission_id,
+            self.bindings,
+            self.invoker,
+            commission,
+            request,
+        )
+    }
+}
+
+/// [`ConnectorEffects`]'s invocation of `request` through `invoker`, as its
+/// [`EffectPort::invoke`] documents.
+fn perform<I: ConnectorInvoker + ?Sized>(
+    commission_id: &CommissionId,
+    bindings: &BTreeMap<String, ActionBindingData>,
+    invoker: &I,
+    commission: &Commission<commission_state::Assigned>,
+    request: &AdmittedRequest,
+) -> Result<EffectOutcome, EffectError> {
+    if commission.data().commission_id != *commission_id {
+        return Err(EffectError::new(format!(
+            "the bindings are commission {}'s, not commission {}'s",
+            commission_id.0.0,
+            commission.data().commission_id.0.0
+        )));
+    }
+    let action = &request.data().action;
+    let Some(binding) = bindings.get(action) else {
+        return Ok(EffectOutcome::Refused(EffectOutcomeRefused {
+            reason: format!("`{action}` has no binding"),
+        }));
+    };
+    match invoker.invoke(binding, request)? {
+        EffectOutcome::Performed(performed) => {
+            let named = match (binding.effect, &performed.attempt, &performed.audit) {
+                (ConnectorOperationEffect::Write, Some(_), None)
+                | (ConnectorOperationEffect::Read, None, Some(_)) => None,
+                (ConnectorOperationEffect::Write, None, _) => Some("named no attempt"),
+                (ConnectorOperationEffect::Write, Some(_), Some(_)) => {
+                    Some("named an audit record beside its attempt")
                 }
+                (ConnectorOperationEffect::Read, None, None) => Some("named no audit record"),
+                (ConnectorOperationEffect::Read, Some(_), _) => {
+                    Some("is a read and named an attempt")
+                }
+            };
+            match named {
+                None => Ok(EffectOutcome::Performed(performed)),
+                Some(named) => Err(EffectError::new(format!(
+                    "the Connector operation `{}` of `{}` performed `{action}` and {named}",
+                    binding.operation_id.0, binding.instance_id.0
+                ))),
             }
-            refused => Ok(refused),
         }
+        refused => Ok(refused),
     }
 }

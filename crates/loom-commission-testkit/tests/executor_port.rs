@@ -14,9 +14,9 @@ use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::{
     AgentRevisionId, AuthorityContext, CaseId, Commission, CommissionData, CommissionId,
     ExecutorOutcome, ExecutorOutcomeCaseMoved, ExecutorOutcomeNeedsHumanJudgment,
-    ExecutorOutcomeProposedAction, ExecutorOutcomeSuspended, Frontier, FrontierData, FrontierId,
-    HumanDecisionRequest, PrincipalId, ProposedActionArguments, SuspensionReason, Unit,
-    commission_state, frontier_state,
+    ExecutorOutcomeProposedAction, ExecutorOutcomeProposedReads, ExecutorOutcomeSuspended,
+    Frontier, FrontierData, FrontierId, HumanDecisionRequest, PrincipalId, ProposedActionArguments,
+    SuspensionReason, Unit, commission_state, frontier_state,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission_testkit::fake_executor::{ExecutorCall, ScriptedExecutor};
@@ -169,11 +169,12 @@ fn human_request() -> HumanDecisionRequest {
     )]))
 }
 
-/// The variant's name. Exhaustive with no wildcard: a seventh variant does not compile until this
+/// The variant's name. Exhaustive with no wildcard: an eighth variant does not compile until this
 /// test says what it is.
 fn variant(outcome: &ExecutorOutcome) -> &'static str {
     match outcome {
         ExecutorOutcome::ProposedAction(_) => "ProposedAction",
+        ExecutorOutcome::ProposedReads(_) => "ProposedReads",
         ExecutorOutcome::NeedsHumanJudgment(_) => "NeedsHumanJudgment",
         ExecutorOutcome::Suspended(_) => "Suspended",
         ExecutorOutcome::NoUsefulAction(_) => "NoUsefulAction",
@@ -189,15 +190,28 @@ fn call<E: AgentExecutor>(executor: &E) -> ExecutorOutcome {
 
 #[test]
 fn executor_port_contract() {
-    // 1. Each of the six generated variants comes back through `AgentExecutor`, payload unchanged.
+    // 1. Each of the seven generated variants comes back through `AgentExecutor`, payload
+    //    unchanged.
     let arguments = ProposedActionArguments(Value::Object(vec![
         ("amount".to_owned(), Value::Number("10.50".to_owned())),
         ("currency".to_owned(), text("EUR")),
     ]));
-    let six = vec![
+    let every = vec![
         ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
             action: "refund".to_owned(),
             arguments: arguments.clone(),
+        }),
+        ExecutorOutcome::ProposedReads(ExecutorOutcomeProposedReads {
+            reads: vec![
+                ExecutorOutcomeProposedAction {
+                    action: "ledger.read".to_owned(),
+                    arguments: arguments.clone(),
+                },
+                ExecutorOutcomeProposedAction {
+                    action: "orders.read".to_owned(),
+                    arguments: arguments.clone(),
+                },
+            ],
         }),
         ExecutorOutcome::NeedsHumanJudgment(ExecutorOutcomeNeedsHumanJudgment {
             request: human_request(),
@@ -211,13 +225,13 @@ fn executor_port_contract() {
             expected_case_revision: 7,
         }),
     ];
-    let mut names: Vec<&str> = six.iter().map(variant).collect();
+    let mut names: Vec<&str> = every.iter().map(variant).collect();
     names.sort_unstable();
     names.dedup();
-    assert_eq!(names.len(), 6, "the script must cover all six variants");
+    assert_eq!(names.len(), 7, "the script must cover all seven variants");
 
-    let executor = ScriptedExecutor::new(six.clone());
-    for expected in &six {
+    let executor = ScriptedExecutor::new(every.clone());
+    for expected in &every {
         let returned = call(&executor);
         assert_eq!(
             &returned,
@@ -229,7 +243,7 @@ fn executor_port_contract() {
 
     // 2. `ProposedAction` carries generated `ProposedActionArguments`; `Suspended` carries a
     //    generated `SuspensionReason`, every one of its seven variants intact.
-    let proposed = call(&ScriptedExecutor::new([six[0].clone()]));
+    let proposed = call(&ScriptedExecutor::new([every[0].clone()]));
     let ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
         action,
         arguments: carried,

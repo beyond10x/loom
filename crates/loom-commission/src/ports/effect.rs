@@ -16,8 +16,16 @@
 //! confines the operation is Connectors' (`decision-blocker:connector-substrate-containment`).
 //! [`EffectPort::performs`] also decides what an executor sees: the runtime hands it the frontier
 //! less every action the port does not perform and that needs no authority.
+//!
+//! A port may also opt into read fan-out (`story:dw-read-fanout`): [`EffectPort::reads`] says which
+//! actions it only reads, and [`EffectPort::invoke_reads`] invokes several admitted reads
+//! concurrently, each once, answering in the order given. Both default to no: a port that keeps
+//! them is handed one request at a time. Invoking concurrently needs a port several threads can
+//! share, so a `Sync` port opts in through [`invoke_concurrently`], which invokes each request on
+//! its own scoped thread and joins them all.
 
 use std::fmt;
+use std::thread;
 
 use crate::model::responsibility::{
     ActionRequestData, Commission, EffectOutcome, commission_state,
@@ -30,6 +38,28 @@ pub trait EffectPort {
     /// action the port does not perform unless the action needs authority.
     fn performs(&self, action: &str) -> bool;
 
+    /// Whether `action` only reads, so the runtime may invoke it concurrently with other reads
+    /// proposed with it (`ExecutorOutcome::ProposedReads`). `false` by default: a port that does
+    /// not opt in never has a fan-out admitted. A port that answers `true` for an action performs
+    /// it and answers [`EffectPort::invoke_reads`].
+    fn reads(&self, action: &str) -> bool {
+        let _ = action;
+        false
+    }
+
+    /// Invokes each of `requests`, every one an admitted read, once, concurrently, and answers
+    /// what each returned in the order given. `None` by default: the port cannot invoke
+    /// concurrently and nothing was invoked. A `Sync` port answers
+    /// `Some(invoke_concurrently(self, commission, requests))`.
+    fn invoke_reads(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        requests: &[AdmittedRequest],
+    ) -> Option<Vec<Result<EffectOutcome, EffectError>>> {
+        let _ = (commission, requests);
+        None
+    }
+
     /// Performs `request` for `commission`, or refuses it. An `Err` is a failure to answer, never a
     /// refusal.
     fn invoke(
@@ -37,6 +67,34 @@ pub trait EffectPort {
         commission: &Commission<commission_state::Assigned>,
         request: &AdmittedRequest,
     ) -> Result<EffectOutcome, EffectError>;
+}
+
+/// Invokes each of `requests` through `port` once, each on its own scoped thread, and joins them
+/// all before it answers, in the order given, what each returned. A read that panics answers an
+/// [`EffectError`] once every read has joined; no read is retried.
+pub fn invoke_concurrently<P: EffectPort + Sync + ?Sized>(
+    port: &P,
+    commission: &Commission<commission_state::Assigned>,
+    requests: &[AdmittedRequest],
+) -> Vec<Result<EffectOutcome, EffectError>> {
+    thread::scope(|scope| {
+        let running: Vec<_> = requests
+            .iter()
+            .map(|request| scope.spawn(move || port.invoke(commission, request)))
+            .collect();
+        running
+            .into_iter()
+            .zip(requests)
+            .map(|(read, request)| {
+                read.join().unwrap_or_else(|_| {
+                    Err(EffectError::new(format!(
+                        "the read of `{}` panicked",
+                        request.data().action
+                    )))
+                })
+            })
+            .collect()
+    })
 }
 
 /// An action request the runtime revalidated and admitted. Only the runtime makes one.

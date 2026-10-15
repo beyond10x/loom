@@ -9,6 +9,24 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+Breaking: `ExecutorOutcome` gains the variant `ProposedReads`, so a host that matches it
+exhaustively no longer compiles until it handles the variant.
+
+### Added
+
+- Read fan-out in Commission's runtime: an executor proposes several reads at once as
+  `ExecutorOutcome::ProposedReads` (at most `MAX_FAN_OUT`, 16). The runtime admits the fan-out only
+  when the effect port reads every listed action (`EffectPort::reads`, `false` by default) and the
+  frontier the executor was handed lists each `Admissible`, needing no authority; otherwise nothing
+  is invoked. Each read is its own action request, revalidated before any is invoked; the admitted
+  reads are invoked concurrently through `EffectPort::invoke_reads` (a `Sync` port answers with
+  `invoke_concurrently`), each once, joined, and recorded and observed in the order proposed. A
+  stale read is not invoked and the others go on; an effect error fails the loop after every read
+  answered, with nothing retried. A fan-out is one step. `ConnectorEffects` reads exactly the
+  actions whose binding's effect is `Read`, through an invoker that opts in with
+  `ConnectorInvoker::concurrent`, as `ConnectorsInvoker` does. Writes, and every action that needs
+  authority, stay one per iteration.
+
 ## [0.22.0] - 2026-10-14
 
 Loom 0.22.0 starts deterministic workflows. A run's model usage report (`RunMeter`,
