@@ -2,11 +2,13 @@
 format: aep.planning-md/3
 id: architecture-decision-record:workflow-run-store
 kind: architecture-decision-record
-status: proposed
+status: accepted
 title: A workflow run's progress is written after every performed step and resumed after a restart
 relations:
 - decides: story:dw-durable-run-state
-revision: 1
+revision: 2
+transitions:
+- {from: "proposed", to: "accepted", at: "2026-10-15T20:32:20Z", actor: "human:timo", revision: 2}
 ---
 ## Decision (proposed)
 

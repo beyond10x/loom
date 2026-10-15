@@ -2,11 +2,13 @@
 format: aep.planning-md/3
 id: architecture-decision-record:cli-command-bindings
 kind: architecture-decision-record
-status: proposed
+status: accepted
 title: b10x-loom run may bind a custom protocol's actions to operator-declared commands, conferring no authority
 relations:
 - decides: story:cli-custom-protocol-commands
-revision: 1
+revision: 2
+transitions:
+- {from: "proposed", to: "accepted", at: "2026-10-15T20:32:19Z", actor: "human:timo", revision: 2}
 ---
 ## Decision (proposed)
 

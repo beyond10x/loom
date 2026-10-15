@@ -2,11 +2,13 @@
 format: aep.planning-md/3
 id: architecture-decision-record:model-ports-in-sdk
 kind: architecture-decision-record
-status: proposed
+status: accepted
 title: The llm model port moves into the SDK, and a Claude Code login is used only through the claude command or llm
 relations:
 - decides: story:sdk-model-ports
-revision: 1
+revision: 2
+transitions:
+- {from: "proposed", to: "accepted", at: "2026-10-15T20:32:19Z", actor: "human:timo", revision: 2}
 ---
 ## Decision (proposed)
 
