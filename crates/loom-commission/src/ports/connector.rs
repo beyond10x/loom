@@ -21,7 +21,8 @@
 //! Through an invoker that can be shared across threads ([`ConnectorInvoker::concurrent`]),
 //! [`ConnectorEffects`] reads exactly the actions whose binding declares the effect `Read`, and
 //! invokes the reads of one fan-out concurrently, each once, through its own binding
-//! (`story:dw-read-fanout`). Through any other invoker it reads nothing.
+//! (`story:dw-read-fanout`); a fan-out holding any other request invokes nothing. Through any
+//! other invoker it reads nothing.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -152,12 +153,25 @@ impl<I: ConnectorInvoker> EffectPort for ConnectorEffects<I> {
 
     /// Invokes each of `requests` as [`EffectPort::invoke`] does, concurrently, through the
     /// invoker shared ([`ConnectorInvoker::concurrent`]); `None`, invoking nothing, when the
-    /// invoker cannot be shared.
+    /// invoker cannot be shared. The concurrent path is for `Read` bindings only, whoever answered
+    /// [`EffectPort::reads`]: when any request's action has no binding or a binding whose effect is
+    /// not `Read`, nothing is invoked and every request answers an [`EffectError`] naming it.
     fn invoke_reads(
         &self,
         commission: &Commission<commission_state::Assigned>,
         requests: &[AdmittedRequest],
     ) -> Option<Vec<Result<EffectOutcome, EffectError>>> {
+        if let Some(request) = requests.iter().find(|request| {
+            self.bindings
+                .get(&request.data().action)
+                .is_none_or(|binding| binding.effect != ConnectorOperationEffect::Read)
+        }) {
+            let error = EffectError::new(format!(
+                "`{}` is not bound to a Read operation, so the fan-out invoked nothing",
+                request.data().action
+            ));
+            return Some(requests.iter().map(|_| Err(error.clone())).collect());
+        }
         let shared = Shared {
             commission_id: &self.commission_id,
             bindings: &self.bindings,

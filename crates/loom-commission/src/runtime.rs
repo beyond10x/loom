@@ -20,7 +20,8 @@
 //!    run as item 2 says; only a case still at the revision held is suspended for its budget;
 //! 1. [`Governor::current_revision`]: the case is loaded. After an iteration whose effect the port
 //!    reported `Performed`, the loaded revision is the one the loop holds the case at from then on;
-//!    after a `Refused` one, as after no effect, a move is somebody else's;
+//!    after a `Refused` one, as after no effect or a fan-out with a stale read (8a), a move is
+//!    somebody else's;
 //! 2. [`Governor::completion`]: a case the governor holds complete ends the run completed, carrying
 //!    the governor's outcome, and the iteration makes no further call. Otherwise, when the loaded
 //!    revision is not the one the loop holds the case at, the runtime has found a move itself (as
@@ -84,9 +85,10 @@
 //!    not loaded again;
 //!
 //!    8a. on `ProposedReads` (`architecture-decision-record:read-fan-out`), the fan-out is admitted
-//!    only when it lists at least one and at most [`MAX_FAN_OUT`] reads and each names an action
-//!    the effect port performs and reads ([`EffectPort::reads`]) that the handed frontier lists,
-//!    every entry of it `Admissible` and naming no capability. Otherwise the whole proposal is
+//!    only when it lists at least one and at most [`MAX_FAN_OUT`] reads, no two with the same
+//!    action and arguments (each read is invoked once), and each names an action the effect port
+//!    performs and reads ([`EffectPort::reads`]) that the handed frontier lists, every entry of it
+//!    `Admissible` and naming no capability. Otherwise the whole proposal is
 //!    refused: no request is made, no authority is asked, nothing is invoked, and the run outcome
 //!    is derived as for a refused proposal. An admitted fan-out makes one request per read, in the
 //!    order proposed, each with its own id from the context and bound to the frontier's revision,
@@ -97,11 +99,13 @@
 //!    them; a port that answers `None` fails the loop as an effect failure. Their effects are
 //!    recorded and observed as in 8, in the order proposed, not the order they finished. A
 //!    `Refused` read cancels nothing; an `Err` from any read fails the loop once every read has
-//!    answered and each that answered was recorded and observed, and nothing is retried. When no
-//!    read was admitted, the iteration is as a stale proposal when one was stale, and otherwise
-//!    as a refused proposal. A fan-out is one step, for the step budget and the idle bound alike;
-//!    it is progress when one of its admitted reads is new, and it never passes the approval gate
-//!    (5);
+//!    answered and each that answered was recorded and observed, and nothing is retried. When a
+//!    read was stale, somebody else moved the case: once the admitted reads were recorded, the
+//!    iteration is as a stale proposal, so the next one loads the case and judges the move (2), and
+//!    no read of the fan-out makes the loaded revision the Run's (1). When no read was admitted and
+//!    none was stale, the iteration is as a refused proposal. A fan-out is one step, for the step
+//!    budget and the idle bound alike; it is progress when one of its admitted reads is new, and it
+//!    never passes the approval gate (5);
 //! 9. on `CaseMoved`, by which the executor reports that the case moved while it worked, naming
 //!    the revision of the frontier it was handed (`story:moved-case-outcome`), the governor decides
 //!    whether it moved: the case is loaded once more ([`Governor::current_revision`]). At the
@@ -1055,10 +1059,11 @@ where
             if fanned.admitted {
                 decided = true;
                 progressed = fanned.progressed;
-                effected = fanned.performed;
-            } else {
-                stale = fanned.stale;
+                // A stale read shows that somebody else moved the case: no read of this fan-out
+                // makes the revision the next iteration loads the Run's own (1, 8a).
+                effected = fanned.performed && !fanned.stale;
             }
+            stale = fanned.stale;
         }
 
         if !decided && !stale {
@@ -1394,9 +1399,9 @@ fn performs_none<F: EffectPort + ?Sized>(
 }
 
 /// Whether a fan-out of `reads` is admitted (item 8a): it lists at least one and at most
-/// [`MAX_FAN_OUT`] reads, and each names an action the effect port performs and reads
-/// ([`EffectPort::reads`]) that the `handed` frontier lists, every entry of it `Admissible` and
-/// naming no capability.
+/// [`MAX_FAN_OUT`] reads, no two with the same action and arguments, and each names an action the
+/// effect port performs and reads ([`EffectPort::reads`]) that the `handed` frontier lists, every
+/// entry of it `Admissible` and naming no capability.
 fn fans_out<F: EffectPort + ?Sized>(
     reads: &[ExecutorOutcomeProposedAction],
     handed: &Frontier<frontier_state::Issued>,
@@ -1415,7 +1420,14 @@ fn fans_out<F: EffectPort + ?Sized>(
                     && entry.capability.as_deref().is_none_or(str::is_empty)
             })
     };
+    // Two reads with the same action and arguments would invoke one read twice in one step.
+    let distinct = reads.iter().enumerate().all(|(at, read)| {
+        reads[..at]
+            .iter()
+            .all(|earlier| earlier.action != read.action || earlier.arguments != read.arguments)
+    });
     (1..=MAX_FAN_OUT).contains(&reads.len())
+        && distinct
         && reads.iter().all(|read| {
             effects.performs(&read.action)
                 && effects.reads(&read.action)
@@ -1431,7 +1443,7 @@ struct FannedOut {
     progressed: bool,
     /// Whether any effect was `Performed`.
     performed: bool,
-    /// Whether no read was admitted and some revalidation answered stale.
+    /// Whether some revalidation answered stale: the case moved under somebody else.
     stale: bool,
 }
 
@@ -1536,7 +1548,7 @@ where
         admitted: true,
         progressed,
         performed,
-        stale: false,
+        stale,
     })
 }
 

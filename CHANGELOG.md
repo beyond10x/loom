@@ -17,15 +17,17 @@ exhaustively no longer compiles until it handles the variant.
 - Read fan-out in Commission's runtime: an executor proposes several reads at once as
   `ExecutorOutcome::ProposedReads` (at most `MAX_FAN_OUT`, 16). The runtime admits the fan-out only
   when the effect port reads every listed action (`EffectPort::reads`, `false` by default) and the
-  frontier the executor was handed lists each `Admissible`, needing no authority; otherwise nothing
-  is invoked. Each read is its own action request, revalidated before any is invoked; the admitted
-  reads are invoked concurrently through `EffectPort::invoke_reads` (a `Sync` port answers with
-  `invoke_concurrently`), each once, joined, and recorded and observed in the order proposed. A
-  stale read is not invoked and the others go on; an effect error fails the loop after every read
-  answered, with nothing retried. A fan-out is one step. `ConnectorEffects` reads exactly the
-  actions whose binding's effect is `Read`, through an invoker that opts in with
-  `ConnectorInvoker::concurrent`, as `ConnectorsInvoker` does. Writes, and every action that needs
-  authority, stay one per iteration.
+  frontier the executor was handed lists each `Admissible`, needing no authority, and no two reads
+  list the same action and arguments; otherwise nothing is invoked. Each read is its own action
+  request, revalidated before any is invoked; the admitted reads are invoked concurrently through
+  `EffectPort::invoke_reads` (a `Sync` port answers with `invoke_concurrently`), each once, joined,
+  and recorded and observed in the order proposed. A stale read is not invoked and the others go
+  on; the move it reveals is then judged as after a stale proposal, never adopted as the Run's
+  own, so the run ends `CaseMovedOn`. An effect error fails the loop after every read answered,
+  with nothing retried. A fan-out is one step. `ConnectorEffects` reads exactly the actions whose
+  binding's effect is `Read`, through an invoker that opts in with `ConnectorInvoker::concurrent`,
+  as `ConnectorsInvoker` does, and its `invoke_reads` invokes nothing when any request's binding is
+  not a `Read`. Writes, and every action that needs authority, stay one per iteration.
 
 ## [0.22.0] - 2026-10-14
 

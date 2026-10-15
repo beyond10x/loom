@@ -65,13 +65,17 @@ one and at most 16 (`MAX_FAN_OUT`), each an action and its arguments as in a sin
 (`architecture-decision-record:read-fan-out`). The runtime admits the fan-out only when the effect
 port reads every listed action (`EffectPort::reads`, `false` by default; a Connector-backed port
 reads exactly the actions whose binding's effect is `Read`) and the frontier the executor was handed
-lists each `Admissible`, needing no authority. Otherwise the whole proposal is refused and nothing
-is invoked. Each read becomes its own action request at the frontier's revision and is revalidated
-before any is invoked; one that fails revalidation is recorded refused and not invoked, and the
-others go on. The admitted reads are invoked concurrently (`EffectPort::invoke_reads`, which a
-`Sync` port answers through `invoke_concurrently`), each once, and joined; their effects are
-recorded and observed in the order proposed. A `Refused` read cancels nothing; an error from any
-read fails the loop after every read has answered, and nothing is retried. A fan-out is one step.
+lists each `Admissible`, needing no authority, and no two reads list the same action and
+arguments. Otherwise the whole proposal is refused and nothing is invoked. Each read becomes its own
+action request at the frontier's revision and is revalidated before any is invoked; one that fails
+revalidation is recorded refused and not invoked, and the others go on. A read that is stale shows
+that somebody else moved the case: once the others are recorded, the runtime judges the move as
+after a stale proposal and does not run the executor again on the moved case. The admitted reads
+are invoked concurrently (`EffectPort::invoke_reads`, which a `Sync` port answers through
+`invoke_concurrently`), each once, and joined; their effects are recorded and observed in the order
+proposed. A Connector-backed port invokes nothing in a fan-out holding a request whose binding is
+not a `Read`. A `Refused` read cancels nothing; an error from any read fails the loop after every
+read has answered, and nothing is retried. A fan-out is one step.
 Writes, and every action that needs authority, are proposed one at a time.
 
 An executor that finds the case has moved to another revision since the frontier it was handed
