@@ -9,7 +9,7 @@ relations:
 - serves: vision:governed-autonomy
 - depends_on: story:dw-typed-step-outputs
 - depends_on: story:dw-run-model-meter
-revision: 1
+revision: 2
 ---
 ## Outcome
 
@@ -35,6 +35,23 @@ and not before.
   (`the_usage_report_covers_every_segment_of_a_resumed_run`).
 - A record whose Run id does not match the held Suspension is refused, never read
   (`a_step_result_of_another_run_is_refused`).
+- A workflow run whose process is killed after its second performed step, with no suspension, is
+  resumed by `resume(run_id)` in a new process at its third step, with the first two steps' outputs
+  bound and neither re-invoked (`a_workflow_resumes_after_a_crash_between_steps`).
+
+## A host's request (2026-10-15)
+
+A host runs a loop that takes hours (model sessions per candidate) on `WorkflowExecutor` and loses
+its place on any process restart, not only at an approval: workflow state is held in process
+(`crates/loom-executor/src/workflow.rs:35`, `:41`, at Loom 0.22.0). It asks that a run's state (step
+reached, outputs, evidence submitted) survive a restart and be resumable.
+
+- Sketch: `WorkflowExecutor::with_store(RunStore)`; `resume(run_id)`; the record written after
+  every performed step, with a file store beside `FileSuspensionStore`. Proposed in
+  `architecture-decision-record:workflow-run-store`, which widens the cleared option C of
+  `decision-blocker:dw-run-state-across-restart` from "across an approval" to "after every step".
+- Workaround it removes: the host writes its own run record after each step and starts a new
+  iteration on restart.
 
 ## ESS first
 
@@ -49,8 +66,9 @@ and `ess/domains/metering.yaml` before code; on it `task drift` fails.
 
 ## Ready
 
-Not ready: waits on the first workflow story that needs a step result across an approval, and on
-`story:dw-typed-step-outputs` and `story:dw-run-model-meter`.
+Not ready: waits on `architecture-decision-record:workflow-run-store` being accepted
+(`story:dw-typed-step-outputs` and `story:dw-run-model-meter` are implemented). The need it waited for now exists:
+a host's long-running workflow (above).
 
 ## Not in scope
 
