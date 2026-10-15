@@ -41,8 +41,21 @@ types:
       - name: arguments
         type: Json
 
+  # An earlier step's output, named by its step and its name (story dw-judgement-step-inputs). A
+  # judgement step lists the outputs it is given; the definition is refused at load unless `step`
+  # is an earlier step and `output` one of its declared outputs.
+  - name: loom.workflow.OutputReference
+    kind: struct
+    fields:
+      - name: step
+        type: String
+      - name: output
+        type: String
+
   # A judgement step: the one place a model is asked, offered only these actions of the protocol,
-  # with these instructions.
+  # with these instructions. The values of the outputs `inputs` lists are put into the
+  # instructions as a data block, typed as their steps declare them, never as instructions; a
+  # listed output the run did not produce asks the model nothing. No model supplies an output.
   - name: loom.workflow.JudgementStep
     kind: struct
     fields:
@@ -50,6 +63,8 @@ types:
         type: List<String>
       - name: instructions
         type: String
+      - name: inputs
+        type: List<loom.workflow.OutputReference>
 
   # What a step does. On the wire the tag is `kind` and the step's fields sit beside it.
   - name: loom.workflow.StepKind

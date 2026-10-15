@@ -95,6 +95,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | A blocked or merge-seeking pick is never proposed | `crates/loom-executor/tests/adversary_executor_admission.rs` |
 | A workflow asks a model only in a judgement step, offering it only that step's actions; a step whose action the frontier does not list ends `NeedsHumanJudgment` naming it and nothing is proposed; a step advances only once its request was `Performed`; a definition naming an action outside its protocol is refused at load, naming the step | `crates/loom-executor/tests/workflow_executor.rs` (`deterministic_steps_call_no_model`, `a_judgement_step_offers_the_model_only_its_actions`, `a_step_the_frontier_does_not_list_ends_needing_human_judgment`, `a_step_advances_only_after_its_effect_was_performed`, `a_definition_naming_an_action_outside_its_protocol_is_refused`) |
 | A later step's arguments carry an earlier step's typed output with no model call, and a missing or mistyped output, or one its step did not produce, proposes nothing and ends `NeedsHumanJudgment` naming the step and the output; a reference to a later, unknown or undeclared output is refused at load | `crates/loom-executor/tests/workflow_step_outputs.rs` (`a_later_step_reads_an_earlier_output_without_a_model`, `a_mistyped_output_ends_needing_human_judgment`, `an_absent_output_ends_needing_human_judgment`, `a_reference_to_a_later_or_unknown_step_is_refused_at_load`, `outputs_are_identical_on_a_rerun_with_the_same_reports`) |
+| A judgement step sees exactly the earlier outputs it lists, typed, in one data block of its instructions that no value can close, never as instructions; a listed output the run did not produce asks the model nothing and ends `NeedsHumanJudgment` naming the step and the output; an input naming no earlier declared output, or listed twice, is refused at load | `crates/loom-executor/tests/workflow_step_outputs.rs` (`a_judgement_step_reads_a_listed_output_as_data`, `a_judgement_step_listing_an_absent_output_asks_no_model`, `a_judgement_step_input_naming_no_earlier_output_is_refused_at_load`) |
 | A stale or unlisted request is refused at revalidation | `crates/loom-commission-testkit/tests/action_request.rs`, `crates/loom-executor/tests/adversary_run_revalidation.rs`, `crates/loom-executor/tests/selection_revalidation.rs` |
 | Unknown capabilities and panicking authority providers yield no grant | `crates/loom-commission-testkit/tests/adversary_authority_fail_closed.rs` |
 | Commission names no executor, Canon, `model-provider-deny.txt`, Connectors or Mandate crate | `task commission:deps-guard` (`crates/loom-commission-testkit/tests/executor_port.rs`) |
@@ -520,6 +521,17 @@ in the run (the step was skipped) does the same naming the referring step. `load
 naming the referring step, a reference to a later step, to itself, to an unknown step or to an
 undeclared output, and a malformed reference; and, naming the declaring step, an output declared
 twice or a malformed pointer.
+
+A judgement step lists the earlier outputs it is given (`story:dw-judgement-step-inputs`;
+`inputs`, a list of `loom.workflow.OutputReference`: a `step` and an `output`). When the step is
+proposed, the runtime appends exactly those values to the step's instructions as one data block,
+`<workflow-inputs>` around a JSON list of `{step, output, type, value}` with the type its step
+declares, introduced as data and never as instructions; `<`, `>` and `&` inside it are written as
+`\u` escapes, so no value can close the block. The model never reads them from the transcript, and
+no model supplies an output. A listed output the run did not produce (its step was skipped) or one
+not of its declared type ends the call `NeedsHumanJudgment` naming the judgement step and the
+output, and asks the model nothing. `load` refuses, naming the judgement step, an input naming a
+later step, the step itself, an unknown step or an undeclared output, and an input listed twice.
 
 ## Intake and the command line
 
