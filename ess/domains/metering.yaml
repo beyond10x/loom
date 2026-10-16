@@ -50,6 +50,8 @@ types:
   # Commission's `commission.responsibility.RunId`; ESS cannot name another system's entity), the
   # totals over every step, and the steps in order. The totals are the sums of the steps; the
   # cost is absent when any step's cost is absent. It covers one process segment of the run.
+  # story:run-and-action-budgets: `effects` is what the run's performed effects reported they spent
+  # on their own model calls, beside the model-port usage above and never summed into it.
   - name: loom.metering.RunUsageReport
     kind: struct
     fields:
@@ -67,3 +69,45 @@ types:
         type: Optional<Integer>
       - name: steps
         type: List<loom.metering.StepUsage>
+      - name: effects
+        type: loom.metering.EffectsUsage
+
+  # story:run-and-action-budgets: what one action's performed effects reported they spent, as the
+  # Commission runtime charged it (`commission.responsibility.ActionCharge`): the requests handed
+  # to the effect port for it, the input and output tokens, the wall time in milliseconds and the
+  # cost in micro-US-dollars, absent once an effect reported usage without a cost.
+  - name: loom.metering.ActionUsage
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: trials
+        type: Integer
+      - name: input_tokens
+        type: Integer
+      - name: output_tokens
+        type: Integer
+      - name: duration_ms
+        type: Integer
+      - name: cost_micro_usd
+        type: Optional<Integer>
+
+  # story:run-and-action-budgets: the effect usage charged to the run
+  # (`commission.responsibility.RunCharges`): the totals over every action, and each action in the
+  # order a request for it was first handed to the effect port. All zero, with no actions, when the
+  # meter was charged nothing.
+  - name: loom.metering.EffectsUsage
+    kind: struct
+    fields:
+      - name: trials
+        type: Integer
+      - name: input_tokens
+        type: Integer
+      - name: output_tokens
+        type: Integer
+      - name: duration_ms
+        type: Integer
+      - name: cost_micro_usd
+        type: Optional<Integer>
+      - name: actions
+        type: List<loom.metering.ActionUsage>
