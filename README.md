@@ -301,6 +301,14 @@ another type ends the run `NeedsHumanJudgment` naming the step and the output, w
 proposed. A judgement step lists the earlier outputs it is given as `inputs` (`{step: <step>,
 output: <name>}`): their values go into its instructions as one data block, typed, never as
 instructions, and a listed output the run did not produce asks the model nothing.
+Given a run store (`.with_store(store)`, the governor's `FileWorkflowRunStore` beside its
+`FileSuspensionStore`, or the host's own `WorkflowRunStore`) and bound to a Run with
+`begin(&run_id)`, the executor writes the run's record after every performed step and every call:
+the steps performed and proposed, the outputs and the usage so far. `resume(&run_id)` in another
+process continues it, after an approval (`resume_after_grant`) or a crash, at the step after the
+last performed one with every output bound, and the meter's report covers every segment; a record
+of another Run or another definition is refused. A request proposed and not recorded performed is
+proposed again after a restart, so an effect must tolerate one repeat.
 
 ```yaml
 name: change

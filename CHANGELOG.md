@@ -9,6 +9,22 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+A workflow run survives a restart (`story:dw-durable-run-state`). `WorkflowExecutor::with_store`
+takes a `b10x_loom_executor::workflow::WorkflowRunStore`; bound to a Run with `begin(&run_id)`, the executor writes
+the run's `loom.workflow.WorkflowRunRecord` after every performed step and every call: the steps
+performed and the one proposed, the outputs taken, and the usage so far
+(`loom.metering.CarriedUsage`). `resume(&run_id)` in another process continues the run at the step
+after the last performed one, every output bound and no performed step proposed again, after an
+approval (`resume_after_grant`) or a crash between steps, and `RunMeter::carry` makes the meter's
+report cover every segment. `loom_governor::FileWorkflowRunStore` keeps one file per Run, under the
+lock and atomic write `FileCaseStore` and `FileSuspensionStore` use, so the three may share one
+directory; a record of another Run or of another definition is refused and nothing of it is read. A
+request proposed and not recorded performed is proposed again after a restart: an effect must
+tolerate one repeat. `b10x-loom-governor` now depends on `b10x-loom-executor` (it was a
+dev-dependency), and the SDK stability page lists the new port,
+`loom_sdk::loom::workflow::WorkflowRunStore`. A host that gives the executor no store sees no
+change.
+
 Loom links Canon 0.6.0 and engineering-protocols 0.8.0. `b10x-canon` moves from 0.4.0 to 0.6.0 and
 `b10x-canon-engineering` from 0.7.0 to 0.8.0 in `loom-protocols`, `loom-governor`,
 `loom-intake-slice` and `loom-intake-router`, and `Cargo.lock` holds one `b10x-canon`. A new

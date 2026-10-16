@@ -1,11 +1,11 @@
 // generated from loom v1
-// model digest 05d393620cd2a355cd71298e7eeaec60df6e4cf2cdae323bc2b5833b034be465
-// contract digest e8322fbfadca91b1026be75fb89ed2f8e6ced6284aa3b2fdc2c5bd1d83f9830d
+// model digest 08aaad3d648d503c874a006c3741c4fc037129ea3e56464b9d052c782600e763
+// contract digest 6dfdf4bff25c8bd3098b5577c415d0338d6bd99de5cda7767d3103908d655aea
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Workflow — `loom.workflow`.
 //!
-//! A Loom-side definition of a workflow over one protocol: an ordered list of steps, each either deterministic (one action with literal arguments, proposed without a model) or a judgement (the actions a model may choose among, with instructions). A step may be conditional on a frontier claim, never on a model.
+//! A Loom-side definition of a workflow over one protocol: an ordered list of steps, each either deterministic (one action with literal arguments, proposed without a model) or a judgement (the actions a model may choose among, with instructions). A step may be conditional on a frontier claim, never on a model. A run's progress over a definition may be kept as a record a store writes after every performed step and a later process resumes from.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
 
@@ -59,6 +59,17 @@ pub enum OutputType {
     JsonList,
 }
 
+/// RecordedOutput — `loom.workflow.RecordedOutput`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordedOutput {
+    /// `step` — `String`.
+    pub step: String,
+    /// `output` — `String`.
+    pub output: String,
+    /// `value` — `Json`.
+    pub value: crate::json::Value,
+}
+
 /// StepCondition — `loom.workflow.StepCondition`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StepCondition {
@@ -88,6 +99,17 @@ pub struct StepOutput {
     pub r#type: OutputType,
 }
 
+/// StepRequest — `loom.workflow.StepRequest`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StepRequest {
+    /// `step` — `String`.
+    pub step: String,
+    /// `action` — `String`.
+    pub action: String,
+    /// `arguments` — `Json`.
+    pub arguments: crate::json::Value,
+}
+
 /// Truth — `loom.workflow.Truth`: one of a closed set of names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Truth {
@@ -99,6 +121,17 @@ pub enum Truth {
     Unknown,
 }
 
+/// UnproducedOutput — `loom.workflow.UnproducedOutput`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnproducedOutput {
+    /// `step` — `String`.
+    pub step: String,
+    /// `output` — `String`.
+    pub output: String,
+    /// `why` — `String`.
+    pub why: String,
+}
+
 /// WorkflowDefinition — `loom.workflow.WorkflowDefinition`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkflowDefinition {
@@ -108,6 +141,29 @@ pub struct WorkflowDefinition {
     pub protocol: String,
     /// `steps` — `List<loom.workflow.WorkflowStep>`.
     pub steps: Vec<WorkflowStep>,
+}
+
+/// WorkflowRunRecord — `loom.workflow.WorkflowRunRecord`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowRunRecord {
+    /// `run` — `loom.run.CommissionRunId`.
+    pub run: crate::run::CommissionRunId,
+    /// `workflow` — `String`.
+    pub workflow: String,
+    /// `definition_digest` — `String`.
+    pub definition_digest: String,
+    /// `performed` — `List<loom.workflow.StepRequest>`.
+    pub performed: Vec<StepRequest>,
+    /// `proposed` — `Optional<loom.workflow.StepRequest>`.
+    pub proposed: Option<StepRequest>,
+    /// `outputs` — `List<loom.workflow.RecordedOutput>`.
+    pub outputs: Vec<RecordedOutput>,
+    /// `unproduced` — `Optional<loom.workflow.UnproducedOutput>`.
+    pub unproduced: Option<UnproducedOutput>,
+    /// `attempted` — `List<String>`.
+    pub attempted: Vec<String>,
+    /// `usage` — `loom.metering.CarriedUsage`.
+    pub usage: crate::metering::CarriedUsage,
 }
 
 /// WorkflowStep — `loom.workflow.WorkflowStep`.

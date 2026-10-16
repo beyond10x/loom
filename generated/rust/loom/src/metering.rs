@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 05d393620cd2a355cd71298e7eeaec60df6e4cf2cdae323bc2b5833b034be465
-// contract digest e8322fbfadca91b1026be75fb89ed2f8e6ced6284aa3b2fdc2c5bd1d83f9830d
+// model digest 08aaad3d648d503c874a006c3741c4fc037129ea3e56464b9d052c782600e763
+// contract digest 6dfdf4bff25c8bd3098b5577c415d0338d6bd99de5cda7767d3103908d655aea
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Metering — `loom.metering`.
@@ -24,6 +24,15 @@ pub struct ActionUsage {
     pub duration_ms: i64,
     /// `cost_micro_usd` — `Optional<Integer>`.
     pub cost_micro_usd: Option<i64>,
+}
+
+/// CarriedUsage — `loom.metering.CarriedUsage`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CarriedUsage {
+    /// `steps` — `List<loom.metering.StepUsage>`.
+    pub steps: Vec<StepUsage>,
+    /// `effects` — `loom.metering.EffectsUsage`.
+    pub effects: EffectsUsage,
 }
 
 /// EffectsUsage — `loom.metering.EffectsUsage`.
