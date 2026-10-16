@@ -2,16 +2,17 @@
 format: aep.planning-md/3
 id: story:dw-read-fanout
 kind: story
-status: active
+status: implemented
 title: Admitted reads proposed together run concurrently, each invoked once through its binding
 relations:
 - decomposes: epic:deterministic-workflows
 - serves: vision:governed-autonomy
 - informed_by: architecture-decision-record:read-fan-out
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-14T23:50:18Z", actor: "human:timo", revision: 2, correlation: "wave-2026-10-15-w1"}
 - {from: "proposed", to: "active", at: "2026-10-14T23:50:18Z", actor: "human:timo", revision: 3, correlation: "wave-2026-10-15-w1"}
+- {from: "active", to: "implemented", at: "2026-10-16T01:33:09Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 
