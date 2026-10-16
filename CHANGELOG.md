@@ -9,6 +9,22 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+Breaking: `b10x_loom_intake_slice::intent::IntentRequest` gains the public field `bindings`,
+so code that builds one with a struct literal must add `bindings: None`.
+
+### Added
+
+- `b10x-loom run --action-bindings <FILE>` runs an installed custom protocol through commands the
+  operator binds to its actions (`intake.bindings.ActionBindings`). Each admitted action starts
+  its `argv` without a shell. The arguments go to standard input as JSON, the environment keeps
+  only `PATH`, and the program is killed after `timeout_seconds` (60 by default). Exit 0 is
+  `Performed`, with standard output (one JSON object) as the report. Any other end is `Refused`.
+  The report may list evidence, and each kind must be one the action declares in `may_produce`.
+  An action left unbound stops the run `NoLocalExecutor` naming it. A file that binds an action
+  the protocol does not declare is refused before any model call. A binding confers no authority,
+  and bound programs are not confined by Substrate. `resume` still continues only
+  `software-change@1`.
+
 ## [0.23.0] - 2026-10-16
 
 Loom 0.23.0 runs a workflow's data collection concurrently and hands a judgement step its inputs

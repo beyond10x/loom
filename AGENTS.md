@@ -662,6 +662,21 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   its own exit status (`resume_exit_status`, `RESUME_HELP`).
   `crates/loom-cli/tests/resume_after_grant.rs` runs `run`, `approve` and `resume` as separate
   processes.
+- `run --action-bindings <FILE>` reads a run configuration (`intake.bindings.ActionBindings`,
+  `ess/intake/domains/bindings.yaml`; `b10x_loom_intake_slice::bindings`): one installed
+  protocol, declaring the `intent` artifact alone and no case input, and one argv per action.
+  `bindings::check` refuses, before any model call, a bundled protocol, an action the protocol
+  does not declare, one bound twice and an empty argv. A pick of that protocol with an action left
+  unbound stops `NoLocalExecutor` naming it, before a case opens; otherwise
+  `bindings::CommandEffects` performs each admitted action by starting its program directly (no
+  shell) with the arguments as JSON on stdin, only `PATH` in its environment and a timeout past
+  which it is killed and reaped: exit 0 is `Performed` with its stdout (one JSON object) as the
+  report, anything else `Refused`. Evidence comes only from the report's `evidence` list
+  (`intake.bindings.CommandEvidence`), each of a kind the action declares it may produce, about
+  `intent`; another kind fails the run. A binding confers no authority: the slice's
+  authority provider still answers every capability with approval required, and `resume`
+  continues `software-change@1` runs only. `crates/loom-cli/tests/custom_protocol_commands.rs`
+  (`a_custom_protocol_runs_through_declared_commands`) runs the binary against scripts.
 - With `--mandate <FILE>`, `approve` and `resume` clear the approval through Mandate (§ Mandate);
   a Mandate refusal is `NotGranted` (16) and performs nothing. A `resume` without `--mandate`
   refuses a grant naming a Mandate approval `NotGranted` (16) and performs nothing.

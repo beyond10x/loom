@@ -463,6 +463,17 @@ pub struct RunArgs {
     /// resume continues from. Without it nothing outlives the run.
     #[arg(long, value_name = "DIR")]
     pub state: Option<PathBuf>,
+    /// A run configuration file (JSON, a regular file) binding an installed protocol's actions to
+    /// commands: {"protocol": "<name>@<major>", "timeout_seconds": <n>, "bindings": [{"action":
+    /// "<action>", "argv": ["<program>", "<argument>", ...]}]}. A run of that protocol starts an
+    /// admitted action's program without a shell, with the action's arguments as JSON on standard
+    /// input, a cleared environment but PATH, and a timeout (60 s when absent); exit 0 is
+    /// performed, with standard output, one JSON object, as the report; any other end is refused.
+    /// A binding confers no authority. A file that names an action the protocol does not declare
+    /// is refused before any model call; an action it binds no command to stops the run
+    /// NoLocalExecutor, naming it.
+    #[arg(long, value_name = "FILE")]
+    pub action_bindings: Option<PathBuf>,
     /// What to do, as given.
     pub intent: String,
 }
