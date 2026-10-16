@@ -3,7 +3,9 @@
 //! actions (`intake.bindings` in `ess/intake/domains/bindings.yaml`). Each admitted action starts
 //! its command with the arguments as JSON on standard input; the command's report on standard
 //! output is the action's performed report, and the evidence it states is submitted. An action the
-//! file binds no command to ends the run `NoLocalExecutor`, naming the action.
+//! file binds no command to ends the run `NoLocalExecutor`, naming the action. Substrate does not
+//! confine the bound commands, so a run is refused `ConfinementUnavailable (CommandUnconfined)`
+//! before any model call unless `--unconfined-bindings` opts in; the other cases opt in.
 //!
 //! Every case runs the binary. The models are the fixture catalog of `catalog_route.rs`
 //! (`fixtures/catalog-route/catalog.toml`) at a loopback socket this file opens, replaying
@@ -23,6 +25,9 @@ use serde_json::{Value, json};
 
 const CATALOG: &str = include_str!("fixtures/catalog-route/catalog.toml");
 const INTENT: &str = "record a note that the deploy finished and publish the summary";
+
+/// `run`'s explicit opt-in to bound commands that Substrate does not confine.
+const OPT_IN: &[&str] = &["--unconfined-bindings"];
 
 /// Two actions: `note.record`, then `summary.publish` once the note is recorded. The case is done
 /// when both have evidence.
@@ -101,7 +106,7 @@ fn a_custom_protocol_runs_through_declared_commands() {
         select("summary.publish"),
         arguments(&json!({"channel": "ops"})),
     ]);
-    let output = scratch.run(&base_url, &bindings);
+    let output = scratch.run(&base_url, &bindings, OPT_IN);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(0), "{stdout}\n{stderr}");
@@ -137,7 +142,7 @@ fn an_action_with_no_binding_ends_no_local_executor_naming_it() {
         "bindings": [{"action": "note.record", "argv": [record]}],
     }));
     let (base_url, server) = serve(vec![classify()]);
-    let output = scratch.run(&base_url, &bindings);
+    let output = scratch.run(&base_url, &bindings, OPT_IN);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(3), "{stdout}\n{stderr}");
@@ -158,7 +163,7 @@ fn a_binding_for_an_undeclared_action_is_refused_before_any_model_call() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
-    let output = scratch.run(&base_url, &bindings);
+    let output = scratch.run(&base_url, &bindings, OPT_IN);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(1), "{stderr}");
     assert!(stderr.contains("note.erase"), "{stderr}");
@@ -166,6 +171,79 @@ fn a_binding_for_an_undeclared_action_is_refused_before_any_model_call() {
         listener.accept().is_err(),
         "the model endpoint was contacted"
     );
+}
+
+#[test]
+fn bindings_without_unconfined_bindings_are_refused_before_any_model_call() {
+    let scratch = Scratch::new("confined");
+    scratch.install();
+    let record = scratch.script("record-note", r#"{"note":"n-1"}"#);
+    let publish = scratch.script("publish-summary", r#"{"published":true}"#);
+    let bindings = scratch.bindings(&json!({
+        "protocol": "team-ops@1",
+        "bindings": [
+            {"action": "note.record", "argv": [record]},
+            {"action": "summary.publish", "argv": [publish]},
+        ],
+    }));
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let output = scratch.run(&base_url, &bindings, &[]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(3), "{stdout}\n{stderr}");
+    assert!(
+        stderr.contains("stopped: ConfinementUnavailable (CommandUnconfined: "),
+        "{stderr}"
+    );
+    assert!(stderr.contains("--unconfined-bindings"), "{stderr}");
+    assert!(
+        listener.accept().is_err(),
+        "the model endpoint was contacted"
+    );
+    assert!(scratch.calls("record-note").is_empty());
+    assert!(scratch.calls("publish-summary").is_empty());
+}
+
+#[test]
+fn unconfined_bindings_runs_the_bound_commands_and_says_they_are_unconfined() {
+    let scratch = Scratch::new("opted-in");
+    scratch.install();
+    let record = scratch.script(
+        "record-note",
+        r#"{"note":"n-1","evidence":[{"kind":"note_recorded","result":"recorded"}]}"#,
+    );
+    let publish = scratch.script(
+        "publish-summary",
+        r#"{"published":true,"evidence":[{"kind":"summary_published","result":"published"}]}"#,
+    );
+    let bindings = scratch.bindings(&json!({
+        "protocol": "team-ops@1",
+        "bindings": [
+            {"action": "note.record", "argv": [record]},
+            {"action": "summary.publish", "argv": [publish]},
+        ],
+    }));
+    let (base_url, server) = serve(vec![
+        classify(),
+        select("note.record"),
+        arguments(&json!({"text": "deploy finished"})),
+        select("summary.publish"),
+        arguments(&json!({"channel": "ops"})),
+    ]);
+    let output = scratch.run(&base_url, &bindings, OPT_IN);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "{stdout}\n{stderr}");
+    assert!(stdout.contains("stopped: Completed (done)"), "{stdout}");
+    assert!(
+        stderr.contains("bound commands: unconfined (--unconfined-bindings)"),
+        "{stderr}"
+    );
+    assert_eq!(scratch.calls("record-note").len(), 1);
+    assert_eq!(scratch.calls("publish-summary").len(), 1);
+    assert_eq!(server.join().expect("the server finished").len(), 5);
 }
 
 /// A scratch directory under the build's temporary directory, removed on drop.
@@ -244,7 +322,8 @@ impl Scratch {
         command
     }
 
-    fn run(&self, base_url: &str, bindings: &Path) -> Output {
+    /// `run --confinement none` with the catalog at `base_url`, `bindings` and `flags`.
+    fn run(&self, base_url: &str, bindings: &Path, flags: &[&str]) -> Output {
         let catalog = self.root.join("catalog.toml");
         std::fs::write(&catalog, CATALOG.replace("http://127.0.0.1:1/v1", base_url)).unwrap();
         self.command()
@@ -256,6 +335,7 @@ impl Scratch {
                 "--model",
                 "lab-agent",
             ])
+            .args(flags)
             .arg("--action-bindings")
             .arg(bindings)
             .arg(INTENT)

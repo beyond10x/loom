@@ -1,11 +1,11 @@
 // generated from intake v1
-// model digest 54c6a9627ca03f982d5758d9494bbcc744bd1efc06b1190d9a9817b2640c8409
-// contract digest acbc0d3ed46cac8a6b4995ffcdd86ffc5bb0303caaa09197e0e655bd4534207e
+// model digest d8c32bcb041f8a56eb453f084d0015a73ed14ab9d01ec38dae4f55e65396160a
+// contract digest d0764514a3e03d525650b901f3321835fba82b74a89ce72eb11c673bf3b3eb4e
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! confinement — `intake.confinement`.
 //!
-//! Requested and observed confinement of local test commands. No automatic fallback.
+//! Requested and observed confinement of local test commands. No automatic fallback. A command bound to a protocol's action runs outside Substrate, so a run that would start one is refused CommandUnconfined unless the operator opts out of confinement for those commands explicitly.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
 
@@ -77,6 +77,8 @@ pub enum ConfinementRefusal {
     WorkspaceNameInvalid,
     /// `CapabilityUnserved`.
     CapabilityUnserved,
+    /// `CommandUnconfined`.
+    CommandUnconfined,
 }
 
 /// EnvironmentEntry — `intake.confinement.EnvironmentEntry`.

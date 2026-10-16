@@ -471,9 +471,16 @@ pub struct RunArgs {
     /// performed, with standard output, one JSON object, as the report; any other end is refused.
     /// A binding confers no authority. A file that names an action the protocol does not declare
     /// is refused before any model call; an action it binds no command to stops the run
-    /// NoLocalExecutor, naming it.
+    /// NoLocalExecutor, naming it. Substrate does not confine these commands, so the run is
+    /// refused ConfinementUnavailable (CommandUnconfined), exit 3, before any model call unless
+    /// --unconfined-bindings is given.
     #[arg(long, value_name = "FILE")]
     pub action_bindings: Option<PathBuf>,
+    /// Run the commands --action-bindings binds with the operator's rights, outside Substrate.
+    /// Without it a run given --action-bindings is refused ConfinementUnavailable
+    /// (CommandUnconfined). The opt-in is reported on standard error.
+    #[arg(long)]
+    pub unconfined_bindings: bool,
     /// What to do, as given.
     pub intent: String,
 }

@@ -20,7 +20,7 @@ use b10x_loom_intake_slice::bindings::ActionBindings;
 use b10x_loom_intake_slice::case;
 use b10x_loom_intake_slice::clock::HostClock;
 use b10x_loom_intake_slice::confinement::{
-    ConfinementRefusal, SubstrateRunner, TestRunner, prepare_delegated_cgroup,
+    ConfinementError, ConfinementRefusal, SubstrateRunner, TestRunner, prepare_delegated_cgroup,
 };
 use b10x_loom_intake_slice::context_metrics::ContextMetrics;
 use b10x_loom_intake_slice::executor::{TestCommand, UnconfinedRunner};
@@ -541,6 +541,12 @@ fn execute(
     ) {
         b10x_loom_intake_slice::bindings::check(bindings, &catalog)
             .map_err(|why| format!("--action-bindings {}: {}", path.display(), printable(&why)))?;
+        // Substrate does not confine a bound command, and the run never falls back to an
+        // unconfined one on its own: only the operator's explicit opt-in starts them.
+        if !arguments.unconfined_bindings {
+            return Ok(bindings_refused(&bindings.protocol));
+        }
+        eprintln!("bound commands: unconfined (--unconfined-bindings)");
     }
     let models = (classifier_route.take(), agent_route.take());
     let Some(dir) = &arguments.state else {
@@ -758,6 +764,29 @@ fn confinement_refused(prepared: &PreparedIntent, reason: &str) -> Ending {
     eprintln!("stopped: ConfinementUnavailable ({})", printable(reason));
     Ending::Stopped(SliceRun {
         protocol: prepared.protocol().to_owned(),
+        steps: 0,
+        stop_reason: StopReason::ConfinementUnavailable,
+        approvals: Vec::new(),
+        gate: ApprovalGate::Approvable,
+    })
+}
+
+/// The stop of a run given `--action-bindings` without `--unconfined-bindings`, before any model
+/// call: `ConfinementUnavailable (CommandUnconfined: ...)`, exit status 3.
+fn bindings_refused(protocol: &str) -> Ending {
+    let refusal = ConfinementError {
+        reason: ConfinementRefusal::CommandUnconfined,
+        detail: "Substrate does not confine the commands --action-bindings binds; pass \
+                 --unconfined-bindings to run them with the operator's rights"
+            .to_owned(),
+    };
+    eprintln!("confinement: bound commands");
+    eprintln!(
+        "stopped: ConfinementUnavailable ({})",
+        printable(&refusal.to_string())
+    );
+    Ending::Stopped(SliceRun {
+        protocol: protocol.to_owned(),
         steps: 0,
         stop_reason: StopReason::ConfinementUnavailable,
         approvals: Vec::new(),

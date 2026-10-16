@@ -21,9 +21,12 @@ so code that builds one with a struct literal must add `bindings: None`.
   `Performed`, with standard output (one JSON object) as the report. Any other end is `Refused`.
   The report may list evidence, and each kind must be one the action declares in `may_produce`.
   An action left unbound stops the run `NoLocalExecutor` naming it. A file that binds an action
-  the protocol does not declare is refused before any model call. A binding confers no authority,
-  and bound programs are not confined by Substrate. `resume` still continues only
-  `software-change@1`.
+  the protocol does not declare is refused before any model call. A binding confers no authority.
+  Bound programs are not confined by Substrate, so `run` starts them only with
+  `--unconfined-bindings` and reports that opt-in on standard error. Without the flag the run is
+  refused before any model call with `stopped: ConfinementUnavailable (CommandUnconfined: ...)`,
+  exit status 3 (`intake.confinement.ConfinementRefusal` gains `CommandUnconfined`). `resume`
+  still continues only `software-change@1`.
 
 ## [0.23.0] - 2026-10-16
 
