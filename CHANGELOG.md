@@ -53,6 +53,21 @@ so code that builds one with a struct literal must add `bindings: None`.
   so code that builds either with a struct literal adds `decisions: Vec::new()`; and
   `EvaluationInput` gains the variant `Decisions`, so a host that matches it exhaustively handles
   the variant.
+- A host declares, when it opens a case on `CanonGovernor`, the independence dimensions on which
+  each evidence producer is independent of the case's work (`CaseIndependence`,
+  `CanonGovernor::open_with_independence`, `open_case_with_independence`, also
+  `loom_sdk::CaseIndependence`), and the governor puts them in the case's `canon-case/1` snapshot.
+  A claim whose evidence match demands independence (`independent_on`) is then decided on a
+  declared producer's records instead of staying unknown, so an action it guards can become
+  admissible. A producer that is not an identifier, or a dimension the protocol does not declare,
+  is refused naming it before anything is stored; one listed twice is refused, never replaced.
+  `CanonGovernor::independence` reports them. They are held with the case: `FileCaseStore` keeps
+  them in `StoredCase.independence` and reads a case stored without them, as 0.23.0 wrote every
+  case, as declaring none. `open` and `open_case` declare none, as before. Breaking:
+  `CaseState` gains the field `independence`, so a store or test that builds one with a struct
+  literal adds `independence: CaseIndependence::none()`; `OpenError` gains `InvalidProducer`,
+  `UndeclaredDimension`, `RepeatedProducer` and `RepeatedDimension`, so a host that matches it
+  exhaustively handles them.
 
 ## [0.23.0] - 2026-10-16
 

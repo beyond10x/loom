@@ -28,6 +28,23 @@
 //! answers `GovernorUnavailable` for it, as for any store failure, and [`FileCaseStore`] refuses
 //! to read such a case of a built-in protocol, naming the case and the input.
 //!
+//! # Independence
+//!
+//! A protocol may declare independence dimensions (`independence_dimensions`) and an evidence
+//! match may demand that its records' producer be independent of the case's work on some of them
+//! (`independent_on`). Who is independent is the host's to say, as trusted context, never an
+//! evidence record's or a model's: [`CanonGovernor::open_with_independence`] takes, for each
+//! producer, the dimensions it is independent on ([`CaseIndependence`]), and the governor puts
+//! them in the case's `canon-case/1` snapshot. A producer that is not an identifier
+//! ([`OpenError::InvalidProducer`]) or a dimension the protocol does not declare
+//! ([`OpenError::UndeclaredDimension`]) is refused naming it, before anything is stored. A case
+//! opened with [`CanonGovernor::open`] declares no producer independent, so a claim whose every
+//! match demands independence is never decided by a record. The declarations are held with the
+//! case and never change; [`FileCaseStore`] keeps them in `StoredCase.independence`, and reads a
+//! case stored without them (as Loom 0.23.0 and earlier wrote every case) as declaring none,
+//! which is how those versions evaluated it. Every read of a held case checks them again, as at
+//! opening.
+//!
 //! # Evaluation
 //!
 //! Every `frontier` and `completion` call evaluates afresh: the protocol is taken from the built-in
@@ -127,8 +144,9 @@ use b10x_canon::eval::{
 };
 use b10x_canon::ir::{Ir, compile};
 use b10x_canon::model::{
-    ArtifactId, CASE_FORMAT, Case, CaseArtifact, Decision, Declarations, EvidenceRecord, InputId,
-    InputValue, Principal, Revision, Truth as CanonTruth, is_identifier,
+    ArtifactId, CASE_FORMAT, Case, CaseArtifact, Decision, Declarations, EvidenceRecord,
+    IndependenceDimensionId, InputId, InputValue, Principal, Revision, Truth as CanonTruth,
+    is_identifier,
 };
 use b10x_loom_commission::model::json;
 use b10x_loom_commission::model::primitives::Uuid;
@@ -161,6 +179,9 @@ pub struct CaseState {
     pub artifacts: BTreeMap<String, String>,
     /// The value of every case input the protocol declares, as the case opened with them.
     pub inputs: CaseInputs,
+    /// The independence dimensions the host declared for each evidence producer when the case
+    /// opened (see the crate documentation, "Independence").
+    pub independence: CaseIndependence,
     /// Every evidence record received for the case, in the order received.
     pub evidence: Vec<HeldEvidence>,
     /// Every explicit decision recorded for the case ([`CanonGovernor::decide`]), in the order
@@ -235,6 +256,78 @@ impl CaseInputs {
     /// How many inputs are given.
     pub fn len(&self) -> usize {
         self.values.len()
+    }
+}
+
+/// The independence dimensions on which each evidence producer is independent of a case's work,
+/// keyed by producer (`reviewer-run-2` → `different_agent_run`): the host's trusted context, never
+/// an evidence record's or a model's. [`CanonGovernor::open_with_independence`] checks them
+/// against the dimensions the protocol declares; a case opened with [`CaseIndependence::none`]
+/// declares no producer independent. Declaring a producer twice, or one dimension twice for it, is
+/// refused ([`OpenError::RepeatedProducer`], [`OpenError::RepeatedDimension`]), never a
+/// replacement.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CaseIndependence {
+    producers: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl CaseIndependence {
+    /// No producer declared independent.
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// These declarations and `producer` independent on each of `dimensions`.
+    ///
+    /// # Errors
+    /// [`OpenError::RepeatedProducer`] when these declarations already list `producer`, and
+    /// [`OpenError::RepeatedDimension`] when `dimensions` names one dimension twice.
+    pub fn with<D: Into<String>>(
+        mut self,
+        producer: impl Into<String>,
+        dimensions: impl IntoIterator<Item = D>,
+    ) -> Result<Self, OpenError> {
+        let producer = producer.into();
+        if self.producers.contains_key(&producer) {
+            return Err(OpenError::RepeatedProducer { producer });
+        }
+        let mut listed = BTreeSet::new();
+        for dimension in dimensions {
+            let dimension = dimension.into();
+            if listed.contains(&dimension) {
+                return Err(OpenError::RepeatedDimension {
+                    producer,
+                    dimension,
+                });
+            }
+            listed.insert(dimension);
+        }
+        self.producers.insert(producer, listed);
+        Ok(self)
+    }
+
+    /// The dimensions declared for `producer`, in dimension order; `None` when it is not listed.
+    pub fn get(&self, producer: &str) -> Option<impl Iterator<Item = &str>> {
+        self.producers
+            .get(producer)
+            .map(|dimensions| dimensions.iter().map(String::as_str))
+    }
+
+    /// Every producer listed, in producer order, with its dimensions in dimension order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, impl Iterator<Item = &str>)> {
+        self.producers.iter().map(|(producer, dimensions)| {
+            (producer.as_str(), dimensions.iter().map(String::as_str))
+        })
+    }
+
+    /// Whether no producer is listed.
+    pub fn is_empty(&self) -> bool {
+        self.producers.is_empty()
+    }
+
+    /// How many producers are listed.
+    pub fn len(&self) -> usize {
+        self.producers.len()
     }
 }
 
@@ -401,6 +494,15 @@ pub enum OpenError {
     MissingInput { input: String },
     /// The inputs give `input` a second value.
     RepeatedInput { input: String },
+    /// The independence declarations name `producer`, which is not an identifier.
+    InvalidProducer { producer: String },
+    /// The independence declarations list `producer` on `dimension`, which the protocol does not
+    /// declare.
+    UndeclaredDimension { producer: String, dimension: String },
+    /// The independence declarations list `producer` a second time.
+    RepeatedProducer { producer: String },
+    /// The independence declarations list `producer` on `dimension` a second time.
+    RepeatedDimension { producer: String, dimension: String },
     /// The case id is not an identifier.
     InvalidCaseId { case: String },
     /// A case with this id is already held.
@@ -442,6 +544,29 @@ impl fmt::Display for OpenError {
             Self::RepeatedInput { input } => {
                 write!(f, "case input `{input}` is given more than one value")
             }
+            Self::InvalidProducer { producer } => {
+                write!(f, "producer `{producer}` is not an identifier")
+            }
+            Self::UndeclaredDimension {
+                producer,
+                dimension,
+            } => write!(
+                f,
+                "producer `{producer}` is declared independent on dimension `{dimension}`, which the protocol does not declare"
+            ),
+            Self::RepeatedProducer { producer } => {
+                write!(
+                    f,
+                    "producer `{producer}` is declared independent more than once"
+                )
+            }
+            Self::RepeatedDimension {
+                producer,
+                dimension,
+            } => write!(
+                f,
+                "producer `{producer}` is declared independent on dimension `{dimension}` more than once"
+            ),
             Self::InvalidCaseId { case } => write!(f, "case id `{case}` is not an identifier"),
             Self::CaseExists { case } => write!(f, "case `{case}` is already held"),
         }
@@ -713,20 +838,35 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
     /// Opens a case on registered `protocol` (`<name>@<major>`) with `revisions`, the
     /// revision of every artifact the protocol declares, and `inputs`, the value of every case
     /// input it declares, under the first free id `case-<n>`. Nothing is stored when either is
-    /// refused (see the crate documentation, "Case inputs").
+    /// refused (see the crate documentation, "Case inputs"). No producer is declared
+    /// independent; [`CanonGovernor::open_with_independence`] declares some.
     pub fn open(
         &self,
         protocol: &str,
         revisions: BTreeMap<String, String>,
         inputs: CaseInputs,
     ) -> Result<CaseId, OpenError> {
-        checked(self.protocol_ir(protocol)?, &revisions, &inputs)?;
+        self.open_with_independence(protocol, revisions, inputs, CaseIndependence::none())
+    }
+
+    /// Opens a case as [`CanonGovernor::open`] does, with `independence`, the dimensions on which
+    /// the host declares each evidence producer independent of the case's work. Nothing is
+    /// stored when they are refused (see the crate documentation, "Independence").
+    pub fn open_with_independence(
+        &self,
+        protocol: &str,
+        revisions: BTreeMap<String, String>,
+        inputs: CaseInputs,
+        independence: CaseIndependence,
+    ) -> Result<CaseId, OpenError> {
+        let ir = checked(self.protocol_ir(protocol)?, &revisions, &inputs)?;
+        checked_independence(&ir, &independence)?;
         let mut n = 1u64;
         loop {
             let case = CaseId(format!("case-{n}"));
             if self
                 .store
-                .insert(opened(&case, protocol, &revisions, &inputs))
+                .insert(opened(&case, protocol, &revisions, &inputs, &independence))
                 .map_err(|e| OpenError::StoreUnavailable {
                     problem: e.to_string(),
                 })?
@@ -745,13 +885,32 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
         revisions: BTreeMap<String, String>,
         inputs: CaseInputs,
     ) -> Result<(), OpenError> {
+        self.open_case_with_independence(
+            case,
+            protocol,
+            revisions,
+            inputs,
+            CaseIndependence::none(),
+        )
+    }
+
+    /// Opens a case as [`CanonGovernor::open_with_independence`] does, under the id `case`.
+    pub fn open_case_with_independence(
+        &self,
+        case: CaseId,
+        protocol: &str,
+        revisions: BTreeMap<String, String>,
+        inputs: CaseInputs,
+        independence: CaseIndependence,
+    ) -> Result<(), OpenError> {
         if !is_identifier(&case.0) {
             return Err(OpenError::InvalidCaseId { case: case.0 });
         }
-        checked(self.protocol_ir(protocol)?, &revisions, &inputs)?;
+        let ir = checked(self.protocol_ir(protocol)?, &revisions, &inputs)?;
+        checked_independence(&ir, &independence)?;
         if self
             .store
-            .insert(opened(&case, protocol, &revisions, &inputs))
+            .insert(opened(&case, protocol, &revisions, &inputs, &independence))
             .map_err(|e| OpenError::StoreUnavailable {
                 problem: e.to_string(),
             })?
@@ -853,6 +1012,13 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
         Ok(self.held(case)?.inputs)
     }
 
+    /// The independence the host declared for each evidence producer when the case opened;
+    /// `GovernorUnavailable` when the held declarations do not satisfy the case's protocol (see
+    /// the crate documentation, "Independence").
+    pub fn independence(&self, case: &CaseId) -> Result<CaseIndependence, GovernorError> {
+        Ok(self.held(case)?.independence)
+    }
+
     /// The registered protocol, `<name>@<major>`, the case is held under.
     pub fn protocol(&self, case: &CaseId) -> Result<String, GovernorError> {
         Ok(self.held(case)?.protocol)
@@ -892,6 +1058,8 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             .protocol_ir(&state.protocol)
             .map_err(|_| GovernorError::GovernorUnavailable)?;
         checked_inputs(&ir, &state.inputs).map_err(|_| GovernorError::GovernorUnavailable)?;
+        checked_independence(&ir, &state.independence)
+            .map_err(|_| GovernorError::GovernorUnavailable)?;
         Ok((state, ir))
     }
 
@@ -1126,11 +1294,47 @@ fn checked_inputs(ir: &Ir, inputs: &CaseInputs) -> Result<(), OpenError> {
     Ok(())
 }
 
+/// Checks `independence` against the dimensions `ir` declares, as Canon checks a case's: each
+/// producer, in producer order, is an identifier, and each dimension listed for it, in dimension
+/// order, is one the protocol declares.
+fn checked_independence(ir: &Ir, independence: &CaseIndependence) -> Result<(), OpenError> {
+    for (producer, mut dimensions) in independence.iter() {
+        if !is_identifier(producer) {
+            return Err(OpenError::InvalidProducer {
+                producer: producer.to_owned(),
+            });
+        }
+        if let Some(dimension) = dimensions.find(|dimension| {
+            !ir.independence_dimensions
+                .contains_key(&IndependenceDimensionId::new(*dimension))
+        }) {
+            return Err(OpenError::UndeclaredDimension {
+                producer: producer.to_owned(),
+                dimension: dimension.to_owned(),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Checks `inputs` against the case inputs the ELS built-in `protocol` declares, when it names
 /// one; a protocol that is not built in is the registering governor's to check.
 pub(crate) fn checked_builtin_inputs(protocol: &str, inputs: &CaseInputs) -> Result<(), OpenError> {
     match protocol_ir(protocol) {
         Ok(ir) => checked_inputs(&ir, inputs),
+        Err(OpenError::UnknownProtocol { .. }) => Ok(()),
+        Err(other) => Err(other),
+    }
+}
+
+/// Checks `independence` against the dimensions the ELS built-in `protocol` declares, when it
+/// names one; a protocol that is not built in is the registering governor's to check.
+pub(crate) fn checked_builtin_independence(
+    protocol: &str,
+    independence: &CaseIndependence,
+) -> Result<(), OpenError> {
+    match protocol_ir(protocol) {
+        Ok(ir) => checked_independence(&ir, independence),
         Err(OpenError::UnknownProtocol { .. }) => Ok(()),
         Err(other) => Err(other),
     }
@@ -1181,6 +1385,7 @@ fn opened(
     protocol: &str,
     revisions: &BTreeMap<String, String>,
     inputs: &CaseInputs,
+    independence: &CaseIndependence,
 ) -> CaseState {
     CaseState {
         id: case.clone(),
@@ -1188,6 +1393,7 @@ fn opened(
         revision: 1,
         artifacts: revisions.clone(),
         inputs: inputs.clone(),
+        independence: independence.clone(),
         evidence: Vec::new(),
         decisions: Vec::new(),
     }
@@ -1251,9 +1457,20 @@ fn snapshot(ir: &Ir, state: &CaseState) -> Case {
                 .map(|(input, value)| (InputId::new(input), InputValue::new(value)))
                 .collect(),
         ),
-        // Who is independent of the case's work is not resolved here: no producer is listed, so
-        // a claim that demands an independent producer stays unknown.
-        independence: Declarations::default(),
+        // Who is independent of the case's work is the host's declaration, made when the case
+        // opened; a producer it does not list satisfies no demand for independence.
+        independence: Declarations::new(
+            state
+                .independence
+                .iter()
+                .map(|(producer, dimensions)| {
+                    (
+                        Principal::new(producer),
+                        dimensions.map(IndependenceDimensionId::new).collect(),
+                    )
+                })
+                .collect(),
+        ),
     }
 }
 

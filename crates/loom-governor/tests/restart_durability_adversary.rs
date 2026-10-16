@@ -287,6 +287,15 @@ fn an_awkward_case_and_its_observations_round_trip_exactly() {
                     ("risk", ""),
                 ])
                 .expect("distinct inputs"),
+                // A case declares independence or not; both must come back as written.
+                independence: if index % 2 == 0 {
+                    loom_governor::CaseIndependence::none()
+                } else {
+                    loom_governor::CaseIndependence::none()
+                        .with("\u{0}\"", ["\u{10ffff}", ""])
+                        .and_then(|declared| declared.with("b", Vec::<String>::new()))
+                        .expect("distinct declarations")
+                },
                 evidence: (0..3)
                     .map(|n| HeldEvidence {
                         data: EvidenceData {
@@ -436,6 +445,7 @@ fn plain_state(case: &CaseId) -> CaseState {
         revision: 1,
         artifacts: BTreeMap::from([("intent".to_owned(), "i1".to_owned())]),
         inputs: fixture_inputs(),
+        independence: loom_governor::CaseIndependence::none(),
         evidence: Vec::new(),
         decisions: Vec::new(),
     }

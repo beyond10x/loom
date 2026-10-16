@@ -16,10 +16,15 @@
 //! (`software-change@1`) whose inputs that protocol refuses as an opening would (a declared input
 //! missing, an empty list included, an undeclared one, an unlisted value), naming the case and
 //! the input. A case's explicit decisions are its `decisions` member, left out when none was
-//! recorded, so a case stored before decisions were held reads as one with none. A protocol that
-//! is not built in is checked by the governor that registered it, on every read
-//! ([`crate::CanonGovernor`]); a host catalog that binds a built-in's name to another definition
-//! has its cases checked against the built-in here.
+//! recorded, so a case stored before decisions were held reads as one with none. A case stored
+//! without `independence` (as Loom 0.23.0 and earlier wrote every case) is read as declaring no
+//! producer independent, which is how those versions evaluated it, and the store writes
+//! `independence` only when the host declared a producer. A case whose declarations list a
+//! producer, or one dimension for it, twice is refused, and so is one of a built-in protocol that
+//! lists a dimension the protocol does not declare, naming the case. A protocol that is not built
+//! in is checked by the governor that registered it, on every read ([`crate::CanonGovernor`]); a
+//! host catalog that binds a built-in's name to another definition has its cases checked against
+//! the built-in here.
 //!
 //! Every operation holds an exclusive lock on `<dir>/.lock` for its duration, so two stores over
 //! one directory, in one process or in two, never interleave a read and a write of the same file.
@@ -53,8 +58,8 @@ use b10x_loom_commission::model::responsibility::{
 };
 use loom::evaluation::ExplicitDecision;
 use loom::governor::{
-    StoredArtifact, StoredCase, StoredCaseId, StoredEvidence, StoredEvidenceData, StoredInput,
-    StoredObservation,
+    StoredArtifact, StoredCase, StoredCaseId, StoredEvidence, StoredEvidenceData,
+    StoredIndependence, StoredInput, StoredObservation,
 };
 use loom::json::{
     self, DecodeError, Value, bool_at, integer_at, items_at, member, member_at, nested, push_bool,
@@ -65,7 +70,10 @@ use loom::primitives::{Timestamp, Uuid};
 use sha2::{Digest as _, Sha256};
 
 use crate::locked_dir::{LockedDir, failed, read_if_present};
-use crate::{CaseInputs, CaseState, FallibleCaseStore, HeldEvidence, checked_builtin_inputs};
+use crate::{
+    CaseIndependence, CaseInputs, CaseState, FallibleCaseStore, HeldEvidence,
+    checked_builtin_independence, checked_builtin_inputs,
+};
 
 const OBSERVATIONS: &str = "observations.json";
 
@@ -320,6 +328,16 @@ fn stored_case(state: &CaseState) -> StoredCase {
                 value: value.to_owned(),
             })
             .collect(),
+        independence: (!state.independence.is_empty()).then(|| {
+            state
+                .independence
+                .iter()
+                .map(|(producer, dimensions)| StoredIndependence {
+                    producer: producer.to_owned(),
+                    dimensions: dimensions.map(str::to_owned).collect(),
+                })
+                .collect()
+        }),
         evidence: state
             .evidence
             .iter()
@@ -346,7 +364,8 @@ fn stored_case(state: &CaseState) -> StoredCase {
     }
 }
 
-/// The held case a stored one describes; an error when it names one artifact or one input twice.
+/// The held case a stored one describes; an error when it names one artifact, one input or one
+/// independent producer twice, or one dimension twice for a producer.
 fn held_case(stored: StoredCase) -> Result<CaseState, String> {
     let mut artifacts = std::collections::BTreeMap::new();
     for StoredArtifact { artifact, revision } in stored.artifacts {
@@ -368,12 +387,32 @@ fn held_case(stored: StoredCase) -> Result<CaseState, String> {
             stored.id.0, stored.protocol
         )
     })?;
+    let independence = stored
+        .independence
+        .unwrap_or_default()
+        .into_iter()
+        .try_fold(
+            CaseIndependence::none(),
+            |independence,
+             StoredIndependence {
+                 producer,
+                 dimensions,
+             }| { independence.with(producer, dimensions) },
+        )
+        .map_err(|error| format!("case `{}`: {error}", stored.id.0))?;
+    checked_builtin_independence(&stored.protocol, &independence).map_err(|error| {
+        format!(
+            "case `{}` holds independence declarations its protocol `{}` refuses: {error}",
+            stored.id.0, stored.protocol
+        )
+    })?;
     Ok(CaseState {
         id: CaseId(stored.id.0),
         protocol: stored.protocol,
         revision: stored.revision,
         artifacts,
         inputs,
+        independence,
         evidence: stored
             .evidence
             .into_iter()
@@ -497,6 +536,29 @@ fn encode_case(out: &mut String, case: &StoredCase) {
         out.push('}');
     }
     out.push(']');
+    if let Some(independence) = &case.independence {
+        member(out, "independence");
+        out.push('[');
+        for (index, declared) in independence.iter().enumerate() {
+            if index > 0 {
+                out.push(',');
+            }
+            out.push('{');
+            member(out, "producer");
+            push_text(out, &declared.producer);
+            member(out, "dimensions");
+            out.push('[');
+            for (index, dimension) in declared.dimensions.iter().enumerate() {
+                if index > 0 {
+                    out.push(',');
+                }
+                push_text(out, dimension);
+            }
+            out.push(']');
+            out.push('}');
+        }
+        out.push(']');
+    }
     member(out, "evidence");
     out.push('[');
     for (index, held) in case.evidence.iter().enumerate() {
@@ -585,7 +647,7 @@ fn text_member(value: &Value, at: &str, name: &str) -> Result<String, DecodeErro
 /// Refuses an object of the codec's own shapes that names a member `declared` does not, or one
 /// member twice: such a document was not written by this store, and reading the first of two
 /// members, or past an unknown one, would read a different case than the file says. Absence of a
-/// declared member is refused by [`member_at`] where it is read. `facts`, `provenance` and
+/// declared member is refused by [`member_at`] where it is read, save `independence`. `facts`, `provenance` and
 /// `payload` are `Json` and are kept as they arrived, duplicates included; this is never applied
 /// inside them.
 fn exactly(value: &Value, at: &str, declared: &[&str]) -> Result<(), DecodeError> {
@@ -620,10 +682,42 @@ fn decode_case(value: &Value) -> Result<StoredCase, DecodeError> {
             "revision",
             "artifacts",
             "inputs",
+            "independence",
             "evidence",
             "decisions",
         ],
     )?;
+    // Absent when the host declared no producer independent, and in every case Loom 0.23.0 and
+    // earlier wrote; present, it is an array.
+    let independence = value
+        .member("independence")
+        .map(|declared| {
+            items_at(declared, "independence", "an array")?
+                .iter()
+                .enumerate()
+                .map(|(index, item)| {
+                    let at = format!("independence[{index}]");
+                    exactly(item, &at, &["producer", "dimensions"])?;
+                    let dimensions_at = nested(&at, "dimensions");
+                    Ok(StoredIndependence {
+                        producer: text_member(item, &at, "producer")?,
+                        dimensions: items_at(
+                            member_at(item, &at, "dimensions")?,
+                            &dimensions_at,
+                            "an array",
+                        )?
+                        .iter()
+                        .enumerate()
+                        .map(|(index, dimension)| {
+                            text_at(dimension, &format!("{dimensions_at}[{index}]"), "a string")
+                                .map(str::to_owned)
+                        })
+                        .collect::<Result<_, DecodeError>>()?,
+                    })
+                })
+                .collect::<Result<Vec<_>, DecodeError>>()
+        })
+        .transpose()?;
     let inputs = items_at(member_at(value, at, "inputs")?, "inputs", "an array")?
         .iter()
         .enumerate()
@@ -693,6 +787,7 @@ fn decode_case(value: &Value) -> Result<StoredCase, DecodeError> {
         revision: integer_at(member_at(value, at, "revision")?, "revision", "an integer")?,
         artifacts,
         inputs,
+        independence,
         evidence,
         decisions,
     })

@@ -76,7 +76,7 @@ pub use b10x_loom_intake_slice::confinement::{
     ConfinementError, SubstrateRunner, TestExecution, TestRunner,
 };
 pub use b10x_loom_intake_slice::executor::UnconfinedRunner;
-pub use loom_governor::{CanonGovernor, CaseInputs, CaseStore, MemoryCaseStore};
+pub use loom_governor::{CanonGovernor, CaseIndependence, CaseInputs, CaseStore, MemoryCaseStore};
 
 /// The protocol catalog shared by routing, case initialization and governor admission.
 pub use loom_protocols::ProtocolCatalog;

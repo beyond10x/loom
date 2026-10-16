@@ -1,11 +1,11 @@
 // generated from loom v1
-// model digest a65dab2694d1cdbccd607702230c3f6a26885faafa677d6540c707f47cdc6ca5
-// contract digest 67c6dc56318a7d27e68eae6db9a2c43def02ba46ca2087b85d0a94c81e0236f9
+// model digest 32bb3ee2f5e3e81bb319692af1ada66976ed1ef0532014bbf05305f3b02106e8
+// contract digest 11b0ceec2c0bc0eed485772f5464ee0b03f7c2d0bce19f2dbb053b9730248f12
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Governor — `loom.governor`.
 //!
-//! The governor's held case as a store writes it: the case id, the protocol that governs it, the case revision, the current revision of every declared artifact, the value of every case input the protocol declares, every evidence record received with whether it applies, and every explicit decision recorded for it; and the observations kept beside the cases.
+//! The governor's held case as a store writes it: the case id, the protocol that governs it, the case revision, the current revision of every declared artifact, the value of every case input the protocol declares, the independence dimensions the host declared for each evidence producer, every evidence record received with whether it applies, and every explicit decision recorded for it; and the observations kept beside the cases.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
 
@@ -31,6 +31,8 @@ pub struct StoredCase {
     pub artifacts: Vec<StoredArtifact>,
     /// `inputs` — `List<loom.governor.StoredInput>`.
     pub inputs: Vec<StoredInput>,
+    /// `independence` — `Optional<List<loom.governor.StoredIndependence>>`.
+    pub independence: Option<Vec<StoredIndependence>>,
     /// `evidence` — `List<loom.governor.StoredEvidence>`.
     pub evidence: Vec<StoredEvidence>,
     /// `decisions` — `Optional<List<loom.evaluation.ExplicitDecision>>`.
@@ -69,6 +71,15 @@ pub struct StoredEvidenceData {
     pub facts: crate::json::Value,
     /// `provenance` — `Json`.
     pub provenance: crate::json::Value,
+}
+
+/// StoredIndependence — `loom.governor.StoredIndependence`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredIndependence {
+    /// `producer` — `String`.
+    pub producer: String,
+    /// `dimensions` — `List<String>`.
+    pub dimensions: Vec<String>,
 }
 
 /// StoredInput — `loom.governor.StoredInput`.

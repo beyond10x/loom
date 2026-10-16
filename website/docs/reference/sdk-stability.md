@@ -77,6 +77,7 @@ implements it through.
 | `loom_sdk::CanonGovernor` | The governor over a case store |
 | `loom_sdk::MemoryCaseStore` | An in-memory `CaseStore` |
 | `loom_sdk::CaseInputs` | The case inputs a host gives when it opens a case |
+| `loom_sdk::CaseIndependence` | The independence dimensions a host declares for each evidence producer when it opens a case |
 | `loom_sdk::ProtocolCatalog` | The protocol catalog shared by routing, case opening and admission |
 | `loom_sdk::llm::LlmModelPort` | A `ModelPort` over an llm `Model`: one `Model::turn` per turn, the port `b10x-loom` runs a plugin turn on |
 | `loom_sdk::loom::wire::ClaudeCodePort` | A `ModelPort` on an operator's Claude Code login: one `claude -p --output-format json` invocation per turn, the command reading its own login |
