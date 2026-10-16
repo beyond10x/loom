@@ -355,6 +355,7 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> CommandEffects<'a, 'o, S, 
             report,
             attempt: None,
             audit: None,
+            usage: None,
         }))
     }
 

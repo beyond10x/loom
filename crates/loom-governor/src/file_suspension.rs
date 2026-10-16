@@ -35,10 +35,10 @@ use b10x_loom_commission::model::json::{
 };
 use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::{
-    ActionRequestId, CaseId, CommissionId, HoldSuspension, HoldSuspensionOutcome,
+    ActionRequestId, BudgetLimit, CaseId, CommissionId, HoldSuspension, HoldSuspensionOutcome,
     HumanDecisionRequest, ProposedActionArguments, ReleaseSuspension, ReleaseSuspensionOutcome,
-    RunId, SuspensionData, SuspensionKey, SuspensionReason, SuspensionSnapshot, SuspensionState,
-    SuspensionStorageFailed, TakeSuspension, TakeSuspensionOutcome,
+    RunBudgetBreach, RunId, SuspensionData, SuspensionKey, SuspensionReason, SuspensionSnapshot,
+    SuspensionState, SuspensionStorageFailed, TakeSuspension, TakeSuspensionOutcome,
 };
 use b10x_loom_commission::ports::suspension::{
     SuspensionPort, SuspensionStoreError, SuspensionWrite, decide_hold, decide_release, decide_take,
@@ -296,11 +296,78 @@ fn encode_reason(out: &mut String, reason: &SuspensionReason) {
         SuspensionReason::Budget(value) => ("Budget", value.clone()),
         SuspensionReason::LoopBudget(value) => ("LoopBudget", value.clone()),
         SuspensionReason::ExternalAvailability(value) => ("ExternalAvailability", value.clone()),
+        SuspensionReason::RunBudget(breach) => ("RunBudget", breach_payload(breach)),
     };
     push_text(out, kind);
     member(out, "payload");
     push_value(out, &payload);
     out.push('}');
+}
+
+/// The names of `BudgetLimit`, as `ess/commission/` declares them.
+const LIMITS: [(BudgetLimit, &str); 6] = [
+    (BudgetLimit::MaxSteps, "MaxSteps"),
+    (BudgetLimit::MaxTrials, "MaxTrials"),
+    (BudgetLimit::MaxTokensIn, "MaxTokensIn"),
+    (BudgetLimit::MaxTokensOut, "MaxTokensOut"),
+    (BudgetLimit::MaxDurationMs, "MaxDurationMs"),
+    (BudgetLimit::MaxCostMicroUsd, "MaxCostMicroUsd"),
+];
+
+/// A `RunBudgetBreach` as an object of its fields, an absent optional field left out.
+fn breach_payload(breach: &RunBudgetBreach) -> Value {
+    let mut members = Vec::new();
+    if let Some(action) = &breach.action {
+        members.push(("action".to_owned(), Value::Text(action.clone())));
+    }
+    let limit = LIMITS
+        .iter()
+        .find(|(limit, _)| *limit == breach.limit)
+        .map_or("", |(_, name)| name);
+    members.push(("limit".to_owned(), Value::Text(limit.to_owned())));
+    members.push(("max".to_owned(), Value::Number(breach.max.to_string())));
+    if let Some(charged) = breach.charged {
+        members.push(("charged".to_owned(), Value::Number(charged.to_string())));
+    }
+    Value::Object(members)
+}
+
+/// The `RunBudgetBreach` [`breach_payload`] wrote.
+fn decode_breach(payload: &Value) -> Result<RunBudgetBreach, DecodeError> {
+    let at = "reason.payload";
+    exactly(payload, at, &["action", "limit", "max", "charged"])?;
+    let optional = |name: &str| {
+        members_at(payload, at, "an object").map(|members| {
+            members
+                .iter()
+                .find(|(member, _)| member == name)
+                .map(|(_, value)| value)
+        })
+    };
+    let action = optional("action")?
+        .map(|value| text_at(value, &nested(at, "action"), "a string").map(str::to_owned))
+        .transpose()?;
+    let limit_value = member_at(payload, at, "limit")?;
+    let name = text_at(limit_value, &nested(at, "limit"), "a BudgetLimit name")?;
+    let limit = LIMITS
+        .iter()
+        .find(|(_, known)| *known == name)
+        .map(|(limit, _)| *limit)
+        .ok_or_else(|| DecodeError::of(&nested(at, "limit"), "a BudgetLimit name", limit_value))?;
+    let max = integer_at(
+        member_at(payload, at, "max")?,
+        &nested(at, "max"),
+        "an integer",
+    )?;
+    let charged = optional("charged")?
+        .map(|value| integer_at(value, &nested(at, "charged"), "an integer"))
+        .transpose()?;
+    Ok(RunBudgetBreach {
+        action,
+        limit,
+        max,
+        charged,
+    })
 }
 
 /// Refuses an object with a member `declared` does not name, or one member twice.
@@ -398,6 +465,7 @@ fn decode_reason(value: &Value) -> Result<SuspensionReason, DecodeError> {
         "Budget" => SuspensionReason::Budget(payload),
         "LoopBudget" => SuspensionReason::LoopBudget(payload),
         "ExternalAvailability" => SuspensionReason::ExternalAvailability(payload),
+        "RunBudget" => SuspensionReason::RunBudget(decode_breach(&payload)?),
         _ => {
             return Err(DecodeError::of(
                 &nested(at, "kind"),

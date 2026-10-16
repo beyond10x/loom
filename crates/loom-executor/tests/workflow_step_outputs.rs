@@ -197,6 +197,7 @@ impl EffectPort for ReportingEffects<'_> {
                 .unwrap_or(CommissionValue::Null),
             attempt: None,
             audit: None,
+            usage: None,
         }))
     }
 }

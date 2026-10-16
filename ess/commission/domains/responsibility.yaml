@@ -119,6 +119,9 @@ types:
   # {"kind": "max-input-tokens", "limit": 100, "reported": 150}); Commission's own specification
   # cannot name another system's type, so it is Json. Distinct from Budget, which a run's own
   # budgets suspend for.
+  #
+  # story:run-and-action-budgets adds RunBudget: a run or action budget the host set was reached
+  # (`Budget` stays the step budget's and a model-loop budget's).
   - name: commission.responsibility.SuspensionReason
     kind: union
     tag: kind
@@ -131,6 +134,7 @@ types:
       Budget: Json
       LoopBudget: Json
       ExternalAvailability: Json
+      RunBudget: commission.responsibility.RunBudgetBreach
 
   # docs/commission/contracts/commission-executor.md: what an executor may hand back. It proposes; it never
   # completes a case.
@@ -314,6 +318,8 @@ types:
   # invocation of a binding whose effect is Read names, instead of an attempt, the execution audit
   # record Connectors completed for it; `audit` is present exactly then. A Performed of a Connector
   # binding names exactly one of the two, the one its binding's effect requires.
+  # story:run-and-action-budgets: `usage` is what the effect reports it spent on its own model
+  # calls, charged to the run and to the request's action; absent when it spent nothing it meters.
   - name: commission.responsibility.EffectOutcomePerformed
     kind: struct
     fields:
@@ -323,6 +329,124 @@ types:
         type: Optional<commission.responsibility.ConnectorAttemptId>
       - name: audit
         type: Optional<commission.responsibility.ConnectorAuditRef>
+      - name: usage
+        type: Optional<commission.responsibility.EffectUsage>
+
+  # story:run-and-action-budgets: what one performed effect reports it spent on its own model
+  # calls, which the runtime charges to the run and to the effect's action: the input and output
+  # tokens, the wall time in milliseconds, and the cost in millionths of a US dollar. A cost the
+  # effect could not price is absent, never zero. An effect that spent nothing it meters reports
+  # no usage at all.
+  - name: commission.responsibility.EffectUsage
+    kind: struct
+    fields:
+      - name: input_tokens
+        type: Integer
+      - name: output_tokens
+        type: Integer
+      - name: duration_ms
+        type: Integer
+      - name: cost_micro_usd
+        type: Optional<Integer>
+
+  # story:run-and-action-budgets: the limits of one action of a run, every one optional (absent is
+  # no limit). `max_trials` bounds how often a request for the action is handed to the effect
+  # port; the others bound what the action's performed effects reported they spent.
+  - name: commission.responsibility.ActionBudget
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: max_trials
+        type: Optional<Integer>
+      - name: max_tokens_in
+        type: Optional<Integer>
+      - name: max_tokens_out
+        type: Optional<Integer>
+      - name: max_duration_ms
+        type: Optional<Integer>
+      - name: max_cost_micro_usd
+        type: Optional<Integer>
+
+  # story:run-and-action-budgets: the limits of one run, every one optional (absent is no limit),
+  # and the limits of each action it lists, at most one entry per action. `max_steps` bounds the
+  # executor calls as the step budget does; the others bound what every performed effect of the
+  # run reported it spent. The host supplies it; the model never does.
+  - name: commission.responsibility.RunBudget
+    kind: struct
+    fields:
+      - name: max_steps
+        type: Optional<Integer>
+      - name: max_tokens_in
+        type: Optional<Integer>
+      - name: max_tokens_out
+        type: Optional<Integer>
+      - name: max_duration_ms
+        type: Optional<Integer>
+      - name: max_cost_micro_usd
+        type: Optional<Integer>
+      - name: per_action
+        type: List<commission.responsibility.ActionBudget>
+
+  # story:run-and-action-budgets: which limit of a run budget or an action budget was reached.
+  - name: commission.responsibility.BudgetLimit
+    kind: enum
+    variants: [MaxSteps, MaxTrials, MaxTokensIn, MaxTokensOut, MaxDurationMs, MaxCostMicroUsd]
+
+  # story:run-and-action-budgets: what one run, or one action of it, was charged: the requests
+  # handed to the effect port (`trials`), and the sums of the usage its performed effects reported.
+  # The cost is absent once a charged usage reported none. A run's steps are counted by the loop.
+  - name: commission.responsibility.ChargedUsage
+    kind: struct
+    fields:
+      - name: trials
+        type: Integer
+      - name: input_tokens
+        type: Integer
+      - name: output_tokens
+        type: Integer
+      - name: duration_ms
+        type: Integer
+      - name: cost_micro_usd
+        type: Optional<Integer>
+
+  # story:run-and-action-budgets: what one action of a run was charged.
+  - name: commission.responsibility.ActionCharge
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: charged
+        type: commission.responsibility.ChargedUsage
+
+  # story:run-and-action-budgets: what one run was charged against its budget, in total and for
+  # each action a request was handed to the effect port for, in the order each was first handed.
+  # It covers one process segment of the run.
+  - name: commission.responsibility.RunCharges
+    kind: struct
+    fields:
+      - name: run
+        type: commission.responsibility.ChargedUsage
+      - name: actions
+        type: List<commission.responsibility.ActionCharge>
+
+  # story:run-and-action-budgets: why a run was suspended for its run or action budget, distinct
+  # from a model-loop budget stop: the action whose budget was reached (absent for the run's), the
+  # limit, its value and what was charged against it (absent for a cost limit whose charge is
+  # unknown, since an effect reported usage without a cost). A count limit (steps, trials) stops
+  # the run before the step or request that would pass it; a spending limit stops it once an
+  # effect's reported usage took the charge past it, after that effect was recorded and observed.
+  - name: commission.responsibility.RunBudgetBreach
+    kind: struct
+    fields:
+      - name: action
+        type: Optional<String>
+      - name: limit
+        type: commission.responsibility.BudgetLimit
+      - name: max
+        type: Integer
+      - name: charged
+        type: Optional<Integer>
 
   # The effect port did not perform the request, and changed nothing; why.
   - name: commission.responsibility.EffectOutcomeRefused

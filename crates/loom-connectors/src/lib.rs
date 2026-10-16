@@ -330,6 +330,7 @@ fn read(instance: &str, operation: &str, invoked: Invoked) -> Result<EffectOutco
         report: from_serde(&invoked.result),
         attempt: None,
         audit: Some(ConnectorAuditRef(audit)),
+        usage: None,
     }))
 }
 
@@ -359,6 +360,7 @@ fn performed(
         report: from_serde(&invoked.result),
         attempt: Some(ConnectorAttemptId(attempt.id.as_str().to_owned())),
         audit: None,
+        usage: None,
     }))
 }
 

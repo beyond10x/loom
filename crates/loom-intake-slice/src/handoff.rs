@@ -332,6 +332,7 @@ impl<'a, 'o> HandoffEffects<'a, 'o> {
                     report: json::Value::Text(report),
                     attempt: None,
                     audit: None,
+                    usage: None,
                 }))
             }
             RecordMergeHandoffOutcome::AlreadyRecorded { error } => {

@@ -29,12 +29,18 @@
 //!
 //! The report is the generated [`RunUsageReport`] ([`RunMeter::report`]). It covers what the meter
 //! saw: one process segment of the run.
+//!
+//! Beside the model-port usage, the report carries what the run's performed effects reported they
+//! spent on their own model calls, as Commission's runtime charged it to the run and to each
+//! action ([`b10x_loom_commission::runtime::LoopEnd::charges`]), once the host hands it to the
+//! meter ([`RunMeter::charge_effects`]). It is never summed into the model-port figures.
 
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use b10x_loom_commission::model::responsibility::{
-    Commission, ExecutorOutcome, Frontier, RunId, commission_state, frontier_state,
+    ChargedUsage, Commission, ExecutorOutcome, Frontier, RunCharges, RunId, commission_state,
+    frontier_state,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
 
@@ -42,7 +48,7 @@ use crate::harness::turn_loop::RateCard;
 use crate::harness::wire::{
     ModelPort, StreamSink, TurnOutcome, TurnRequest, Usage, WireError, WireId,
 };
-use crate::model::metering::{RunUsageReport, StepUsage};
+use crate::model::metering::{ActionUsage, EffectsUsage, RunUsageReport, StepUsage};
 use crate::model::primitives::Uuid;
 use crate::model::run::CommissionRunId;
 
@@ -60,6 +66,8 @@ struct Ledger {
     prices: Option<RateCard>,
     /// Step 0 first, then one tally per executor call, in order.
     tallies: Vec<Tally>,
+    /// What the run's effects were charged, as last handed to [`RunMeter::charge_effects`].
+    effects: Option<RunCharges>,
 }
 
 thread_local! {
@@ -108,6 +116,41 @@ fn figure(count: u64) -> i64 {
     i64::try_from(count).unwrap_or(i64::MAX)
 }
 
+/// The report's effect usage for `charges`: all zero, with no actions, when nothing was charged.
+fn effects_usage(charges: Option<&RunCharges>) -> EffectsUsage {
+    let line = |action: &str, charged: &ChargedUsage| ActionUsage {
+        action: action.to_owned(),
+        trials: charged.trials,
+        input_tokens: charged.input_tokens,
+        output_tokens: charged.output_tokens,
+        duration_ms: charged.duration_ms,
+        cost_micro_usd: charged.cost_micro_usd,
+    };
+    let Some(charges) = charges else {
+        return EffectsUsage {
+            trials: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            duration_ms: 0,
+            cost_micro_usd: Some(0),
+            actions: Vec::new(),
+        };
+    };
+    let run = line("", &charges.run);
+    EffectsUsage {
+        trials: run.trials,
+        input_tokens: run.input_tokens,
+        output_tokens: run.output_tokens,
+        duration_ms: run.duration_ms,
+        cost_micro_usd: run.cost_micro_usd,
+        actions: charges
+            .actions
+            .iter()
+            .map(|charge| line(&charge.action, &charge.charged))
+            .collect(),
+    }
+}
+
 impl RunMeter {
     /// A meter for one run, pricing each turn with `prices` when there is a card.
     #[must_use]
@@ -117,6 +160,7 @@ impl RunMeter {
             shared: Arc::new(Mutex::new(Ledger {
                 prices,
                 tallies: vec![Tally::new(priced)],
+                effects: None,
             })),
         }
     }
@@ -156,7 +200,15 @@ impl RunMeter {
             cached_input_tokens: total.cached_input_tokens,
             cost_micro_usd: total.cost_micro_usd,
             steps,
+            effects: effects_usage(ledger.effects.as_ref()),
         }
+    }
+
+    /// Records `charges`, what Commission's runtime charged the run's effects
+    /// ([`b10x_loom_commission::runtime::LoopEnd::charges`]), for the report's `effects`. A later
+    /// call replaces it.
+    pub fn charge_effects(&self, charges: &RunCharges) {
+        self.ledger().effects = Some(charges.clone());
     }
 
     /// Labels the step of the executor call running on this thread with `label`, the name its

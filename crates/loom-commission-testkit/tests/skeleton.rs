@@ -288,6 +288,7 @@ fn skeleton_lands_port_vocabulary_and_modules() {
             ("Budget", "Json"),
             ("LoopBudget", "Json"),
             ("ExternalAvailability", "Json"),
+            ("RunBudget", "RunBudgetBreach"),
         ],
     );
     assert_union(

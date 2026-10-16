@@ -143,6 +143,29 @@
 //! keeps making progress is ended by [`UNBUDGETED_STEP_LIMIT`]. With a step budget, the budget
 //! alone bounds the loop.
 //!
+//! # Run and action budgets
+//!
+//! A [`LoopContext::run_budget`] bounds the run and each action it lists
+//! (`ess/commission/domains/responsibility.yaml`, `RunBudget`). Every effect answer the loop
+//! records (8, 8a, and a resumed request) is charged to the run and to its request's action
+//! ([`LoopEnd::charges`]): one trial, and the usage a `Performed` effect reported (input and output
+//! tokens, wall time, cost; a negative figure charges nothing, and a usage with no cost leaves the
+//! cost unknown). A reported usage is delivered in the effect's observation as `usage`. A breach
+//! suspends the Run through `SuspendRun` with `SuspensionReason::RunBudget`, naming the action
+//! (none for the run's own limits), the limit, its value and the charge, and the run ends
+//! suspended with that reason:
+//!
+//! * `max_steps` acts as the step budget (0), the lower of the two holding; when it is the one
+//!   reached, the reason is `RunBudget`, else `Budget`;
+//! * an action's `max_trials` is checked before a request is handed to the effect port: a request
+//!   that would pass it is recorded with its revalidation and not admitted, and a fan-out that
+//!   would take any action past it invokes none of its reads. A resumed request is not checked;
+//! * the spending limits (`max_tokens_in`, `max_tokens_out`, `max_duration_ms`,
+//!   `max_cost_micro_usd`), the action's in the order the budget lists them and then the run's,
+//!   are checked once an effect, or a whole fan-out, was recorded and observed: a charge above a
+//!   limit, or an unknown cost under a cost limit, ends the run there, before the case is loaded
+//!   again, so no further request is made.
+//!
 //! A failure that leaves no run outcome is a [`LoopError`]. Once the Run is started, the error
 //! names it. When the governor, its observation port or the effect port fails after the Run
 //! started, the loop first suspends the Run (`SuspendRun`, `ExternalAvailability`) unless it
@@ -220,6 +243,9 @@ use crate::model::responsibility::obligations::{
     ResumeRunBehavior, StartRunBehavior, SuspendRunBehavior,
 };
 use crate::model::responsibility::{
+    ActionCharge, BudgetLimit, ChargedUsage, RunBudget, RunBudgetBreach, RunCharges,
+};
+use crate::model::responsibility::{
     ActionRequest, ActionRequestData, ActionRequestId, ActionStatus, AnyRun, AuthorityVerdict,
     CaseId, Commission, CompletionDetermination, EffectOutcome, ExecutorOutcome,
     ExecutorOutcomeProposedAction, Frontier, FrontierAction, FrontierData, GovernorError,
@@ -258,6 +284,12 @@ pub trait LoopContext {
     /// budget: the idle bound then ends a loop that makes no progress, and [`UNBUDGETED_STEP_LIMIT`]
     /// ends any other, so the loop always ends.
     fn step_budget(&self) -> Option<usize>;
+    /// The run's budget and its actions' budgets, as the module documents
+    /// (`ess/commission/domains/responsibility.yaml`, `RunBudget`). `None`, the default, sets
+    /// none: only the step budget bounds the run.
+    fn run_budget(&self) -> Option<RunBudget> {
+        None
+    }
 }
 
 /// The steps a loop with no step budget takes at most before it suspends the Run for `Budget`.
@@ -294,6 +326,9 @@ pub struct LoopEnd {
     /// The frontier the last iteration that got so far read before its executor step; `None` when
     /// no iteration read one.
     pub last_frontier: Option<FrontierData>,
+    /// What the run, and each action a request was handed to the effect port for, was charged:
+    /// the requests handed over and the usage their `Performed` effects reported.
+    pub charges: RunCharges,
 }
 
 /// One failure that stopped a loop, or the suspension after it.
@@ -503,8 +538,9 @@ fn unstarted(failure: impl Into<LoopFailure>) -> LoopError {
 /// What stopped the iterations without a run outcome, and the suspension the loop already made.
 struct Stopped {
     failure: LoopFailure,
-    /// The reason the loop suspended the Run for, or tried to, and the suspension's failure.
-    suspended: Option<(SuspensionReason, Option<LoopFailure>)>,
+    /// The reason the loop suspended the Run for, or tried to, and the suspension's failure. The
+    /// reason is boxed, as [`LoopError`] holds it, so a stop stays small.
+    suspended: Option<(Box<SuspensionReason>, Option<LoopFailure>)>,
 }
 
 impl From<LoopFailure> for Stopped {
@@ -677,12 +713,12 @@ fn finish<R: SuspendRunBehavior + ?Sized>(
         Some(text) => {
             let reason = SuspensionReason::ExternalAvailability(Value::Text(text));
             let suspension = suspend(runs, &run_id, reason.clone()).err();
-            Some((reason, suspension))
+            Some((Box::new(reason), suspension))
         }
         None => suspended,
     };
     let (suspension_reason, suspension) = match suspended {
-        Some((reason, suspension)) => (Some(Box::new(reason)), suspension.map(Box::new)),
+        Some((reason, suspension)) => (Some(reason), suspension.map(Box::new)),
         None => (None, None),
     };
     Err(LoopError {
@@ -753,13 +789,29 @@ struct Resumed {
 }
 
 /// What one loop has made so far.
-#[derive(Default)]
 struct Track {
     requests: Vec<Revalidated>,
     admitted: Vec<ActionRequestData>,
     effects: Vec<EffectOutcome>,
     steps: usize,
     last_frontier: Option<FrontierData>,
+    charges: RunCharges,
+}
+
+impl Default for Track {
+    fn default() -> Self {
+        Self {
+            requests: Vec::new(),
+            admitted: Vec::new(),
+            effects: Vec::new(),
+            steps: 0,
+            last_frontier: None,
+            charges: RunCharges {
+                run: uncharged(),
+                actions: Vec::new(),
+            },
+        }
+    }
 }
 
 impl Track {
@@ -772,7 +824,14 @@ impl Track {
             effects: self.effects,
             steps: self.steps,
             last_frontier: self.last_frontier,
+            charges: self.charges,
         }
+    }
+
+    /// Records `effect`, which the port answered for `request`, and charges it ([`charge`]).
+    fn record(&mut self, request: &ActionRequestData, effect: &EffectOutcome) {
+        self.effects.push(effect.clone());
+        charge(&mut self.charges, &request.action, effect);
     }
 }
 
@@ -806,7 +865,16 @@ where
     } = *ports;
     let case = &commission.data().case_id;
     let run_id = &run.run_id;
-    let budget = context.step_budget();
+    let run_budget = context.run_budget();
+    // The run budget's step limit bounds the loop as the step budget does; the lower one holds.
+    let run_steps = run_budget
+        .as_ref()
+        .and_then(|limits| limits.max_steps)
+        .map(|max| usize::try_from(max).unwrap_or(0));
+    let budget = match (context.step_budget(), run_steps) {
+        (Some(steps), Some(run_steps)) => Some(steps.min(run_steps)),
+        (steps, run_steps) => steps.or(run_steps),
+    };
     let mut track = Track::default();
     // The revision the loop holds the case at: the Run's, or one its own effect moved the case to.
     let mut held = held;
@@ -825,6 +893,18 @@ where
     let mut after_stale = false;
 
     let limit = budget.unwrap_or(UNBUDGETED_STEP_LIMIT);
+    // Why the Run is suspended when its steps reach `limit`: the run budget's step limit when it
+    // is the one reached, else the step budget.
+    let exhausted_for = if run_steps == Some(limit) {
+        SuspensionReason::RunBudget(RunBudgetBreach {
+            action: None,
+            limit: BudgetLimit::MaxSteps,
+            max: i64::try_from(limit).unwrap_or(i64::MAX),
+            charged: Some(i64::try_from(limit).unwrap_or(i64::MAX)),
+        })
+    } else {
+        step_budget_reason(limit)
+    };
 
     // A resumed Run's suspended request is performed once, as an admitted request is (8). The loop
     // holds no frontier an executor was handed for that step, so no gate is pending after it (5).
@@ -846,7 +926,7 @@ where
         let effect = effects
             .invoke(commission, &AdmittedRequest::new(data.clone()))
             .map_err(|error| Stopped::from(LoopFailure::Effect(error)))?;
-        track.effects.push(effect.clone());
+        track.record(&data, &effect);
         governor.observe(effect_observation(context, &data, &effect))?;
         if let Some(Suspensions { port, .. }) = suspensions {
             match port.release(ReleaseSuspension {
@@ -867,6 +947,12 @@ where
         }
         effected = matches!(effect, EffectOutcome::Performed(_));
         track.steps += 1;
+        if let Some(breach) = run_budget
+            .as_ref()
+            .and_then(|limits| spent_past(limits, &track))
+        {
+            return suspend_ended(runs, run_id, SuspensionReason::RunBudget(breach), track);
+        }
     }
 
     loop {
@@ -875,7 +961,7 @@ where
         // loaded first, so a case the last step completed ends the run completed.
         let exhausted = track.steps >= limit;
         if exhausted && gate.is_none() && !after_stale && !effected {
-            return out_of_budget(runs, run_id, limit, track);
+            return suspend_ended(runs, run_id, exhausted_for, track);
         }
 
         let loaded = if first {
@@ -910,7 +996,7 @@ where
         // After a performed effect that left no gate pending, a case still open is suspended for
         // its budget (0).
         if exhausted && gate.is_none() && !after_stale {
-            return out_of_budget(runs, run_id, limit, track);
+            return suspend_ended(runs, run_id, exhausted_for, track);
         }
 
         let frontier = governor.frontier(case)?;
@@ -933,7 +1019,7 @@ where
             }
         }
         if exhausted {
-            return out_of_budget(runs, run_id, limit, track);
+            return suspend_ended(runs, run_id, exhausted_for, track);
         }
 
         let outcome = executor.run(commission, &handed);
@@ -948,11 +1034,11 @@ where
                 )),
                 (Ok(()), Some(failure)) => Err(Stopped {
                     failure,
-                    suspended: Some((reason, None)),
+                    suspended: Some((Box::new(reason), None)),
                 }),
                 (Err(error), suspension) => Err(Stopped {
                     failure: LoopFailure::Governor(error),
-                    suspended: Some((reason, suspension)),
+                    suspended: Some((Box::new(reason), suspension)),
                 }),
             };
         }
@@ -1026,14 +1112,29 @@ where
                 if !effects.performs(&data.action) {
                     return Ok(track.end(run_id, RunOutcome::NoPerformableAction(Unit(true))));
                 }
+                // An action at its trial limit is not handed to the port again.
+                if let Some(breach) = run_budget
+                    .as_ref()
+                    .and_then(|limits| trials_past(limits, &track, &[data.action.as_str()]))
+                {
+                    return suspend_ended(runs, run_id, SuspensionReason::RunBudget(breach), track);
+                }
                 track.admitted.push(data.clone());
                 progressed = new;
                 decided = true;
                 let effect = effects
                     .invoke(commission, &AdmittedRequest::new(data.clone()))
                     .map_err(|error| Stopped::from(LoopFailure::Effect(error)))?;
-                track.effects.push(effect.clone());
+                track.record(&data, &effect);
                 governor.observe(effect_observation(context, &data, &effect))?;
+                // Usage past a spending limit stops the run once the effect is recorded and
+                // observed.
+                if let Some(breach) = run_budget
+                    .as_ref()
+                    .and_then(|limits| spent_past(limits, &track))
+                {
+                    return suspend_ended(runs, run_id, SuspensionReason::RunBudget(breach), track);
+                }
                 // Only an effect that took place may have moved the case; after a refusal, a move
                 // is somebody else's.
                 effected = matches!(effect, EffectOutcome::Performed(_));
@@ -1054,8 +1155,16 @@ where
                 run_id,
                 &frontier,
                 &proposed.reads,
+                run_budget.as_ref(),
                 &mut track,
             )?;
+            if let Some(breach) = fanned.over_budget.or_else(|| {
+                run_budget
+                    .as_ref()
+                    .and_then(|limits| spent_past(limits, &track))
+            }) {
+                return suspend_ended(runs, run_id, SuspensionReason::RunBudget(breach), track);
+            }
             if fanned.admitted {
                 decided = true;
                 progressed = fanned.progressed;
@@ -1117,21 +1226,25 @@ where
     }
 }
 
-/// Suspends the Run for `Budget` with `limit` steps, and ends the loop suspended.
-fn out_of_budget<R: SuspendRunBehavior + ?Sized>(
-    runs: &mut R,
-    run_id: &RunId,
-    limit: usize,
-    track: Track,
-) -> Result<LoopEnd, Stopped> {
-    let reason = SuspensionReason::Budget(Value::Object(vec![(
+/// The reason a Run is suspended for at a step budget of `limit` steps.
+fn step_budget_reason(limit: usize) -> SuspensionReason {
+    SuspensionReason::Budget(Value::Object(vec![(
         "max_steps".to_owned(),
         Value::Number(limit.to_string()),
-    )]));
+    )]))
+}
+
+/// Suspends the Run for `reason`, a budget it reached, and ends the loop suspended.
+fn suspend_ended<R: SuspendRunBehavior + ?Sized>(
+    runs: &mut R,
+    run_id: &RunId,
+    reason: SuspensionReason,
+    track: Track,
+) -> Result<LoopEnd, Stopped> {
     if let Err(failure) = suspend(runs, run_id, reason.clone()) {
         return Err(Stopped {
             failure,
-            suspended: Some((reason, None)),
+            suspended: Some((Box::new(reason), None)),
         });
     }
     let outcome = RunOutcome::Suspended(RunOutcomeSuspended { reason });
@@ -1152,7 +1265,7 @@ fn suspend_for_approval<R: SuspendRunBehavior + ?Sized>(
     if let Err(failure) = suspend(runs, &run.run_id, reason.clone()) {
         return Err(Stopped {
             failure,
-            suspended: Some((reason, None)),
+            suspended: Some((Box::new(reason), None)),
         });
     }
     let failure = match suspending.port.hold(HoldSuspension {
@@ -1184,7 +1297,7 @@ fn suspend_for_approval<R: SuspendRunBehavior + ?Sized>(
     };
     Err(Stopped {
         failure,
-        suspended: Some((reason, None)),
+        suspended: Some((Box::new(reason), None)),
     })
 }
 
@@ -1445,6 +1558,8 @@ struct FannedOut {
     performed: bool,
     /// Whether some revalidation answered stale: the case moved under somebody else.
     stale: bool,
+    /// The trial limit the fan-out would have passed, so none of its reads was invoked.
+    over_budget: Option<RunBudgetBreach>,
 }
 
 /// Performs the fan-out `reads`, which [`fans_out`] admitted, as item 8a documents: each read
@@ -1463,6 +1578,7 @@ fn fan_out<G, F, C>(
     run_id: &RunId,
     frontier: &Frontier<frontier_state::Issued>,
     reads: &[ExecutorOutcomeProposedAction],
+    budget: Option<&RunBudget>,
     track: &mut Track,
 ) -> Result<FannedOut, Stopped>
 where
@@ -1499,6 +1615,18 @@ where
             progressed: false,
             performed: false,
             stale,
+            over_budget: None,
+        });
+    }
+    // A fan-out that would take an action past its trial limit invokes none of its reads.
+    let actions: Vec<&str> = admitted.iter().map(|data| data.action.as_str()).collect();
+    if let Some(breach) = budget.and_then(|limits| trials_past(limits, track, &actions)) {
+        return Ok(FannedOut {
+            admitted: false,
+            progressed: false,
+            performed: false,
+            stale,
+            over_budget: Some(breach),
         });
     }
     let progressed = admitted.iter().any(|data| {
@@ -1533,7 +1661,7 @@ where
         match answer {
             Ok(effect) => {
                 performed |= matches!(effect, EffectOutcome::Performed(_));
-                track.effects.push(effect.clone());
+                track.record(data, &effect);
                 governor.observe(effect_observation(context, data, &effect))?;
             }
             Err(error) => {
@@ -1549,6 +1677,7 @@ where
         progressed,
         performed,
         stale,
+        over_budget: None,
     })
 }
 
@@ -1804,6 +1933,18 @@ fn effect_observation<C: LoopContext + ?Sized>(
             if let Some(audit) = &performed.audit {
                 payload.push(("audit".to_owned(), text(&audit.0)));
             }
+            if let Some(usage) = &performed.usage {
+                let figure = |figure: i64| Value::Number(figure.to_string());
+                let mut spent = vec![
+                    ("input_tokens".to_owned(), figure(usage.input_tokens)),
+                    ("output_tokens".to_owned(), figure(usage.output_tokens)),
+                    ("duration_ms".to_owned(), figure(usage.duration_ms)),
+                ];
+                if let Some(cost) = usage.cost_micro_usd {
+                    spent.push(("cost_micro_usd".to_owned(), figure(cost)));
+                }
+                payload.push(("usage".to_owned(), Value::Object(spent)));
+            }
         }
         EffectOutcome::Refused(refused) => {
             payload.push(("reason".to_owned(), text(&refused.reason)));
@@ -1815,5 +1956,166 @@ fn effect_observation<C: LoopContext + ?Sized>(
         subject: format!("{}@{}", request.case_id.0, request.expected_case_revision),
         observed_at: context.now(),
         payload: Value::Object(payload),
+    })
+}
+
+/// Nothing charged: no trial, no usage, and a known cost of zero.
+fn uncharged() -> ChargedUsage {
+    ChargedUsage {
+        trials: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        duration_ms: 0,
+        cost_micro_usd: Some(0),
+    }
+}
+
+/// Charges `effect`, the port's answer for a request for `action`, to the run and to `action`:
+/// one trial, and the usage a `Performed` effect reported. A negative figure charges nothing, and
+/// a usage that reports no cost leaves the cost unknown from then on.
+fn charge(charges: &mut RunCharges, action: &str, effect: &EffectOutcome) {
+    let usage = match effect {
+        EffectOutcome::Performed(performed) => performed.usage.as_ref(),
+        EffectOutcome::Refused(_) => None,
+    };
+    let index = if let Some(index) = charges.actions.iter().position(|c| c.action == action) {
+        index
+    } else {
+        charges.actions.push(ActionCharge {
+            action: action.to_owned(),
+            charged: uncharged(),
+        });
+        charges.actions.len() - 1
+    };
+    for charged in [&mut charges.run, &mut charges.actions[index].charged] {
+        charged.trials = charged.trials.saturating_add(1);
+        if let Some(usage) = usage {
+            charged.input_tokens = charged
+                .input_tokens
+                .saturating_add(usage.input_tokens.max(0));
+            charged.output_tokens = charged
+                .output_tokens
+                .saturating_add(usage.output_tokens.max(0));
+            charged.duration_ms = charged.duration_ms.saturating_add(usage.duration_ms.max(0));
+            charged.cost_micro_usd = match (charged.cost_micro_usd, usage.cost_micro_usd) {
+                (Some(sum), Some(cost)) => Some(sum.saturating_add(cost.max(0))),
+                _ => None,
+            };
+        }
+    }
+}
+
+/// The first spending limit of `limits` that `charged` passed, for `action` (`None` for the run's):
+/// a charge above its limit, or an unknown cost under a cost limit.
+fn spending(
+    action: Option<&str>,
+    limits: [(BudgetLimit, Option<i64>, Option<i64>); 4],
+) -> Option<RunBudgetBreach> {
+    limits.into_iter().find_map(|(limit, max, charged)| {
+        let max = max?;
+        match charged {
+            Some(charged) if charged <= max => None,
+            charged => Some(RunBudgetBreach {
+                action: action.map(str::to_owned),
+                limit,
+                max,
+                charged,
+            }),
+        }
+    })
+}
+
+/// The spending limits of `charged` under the four limits given.
+fn spent(
+    tokens_in: Option<i64>,
+    tokens_out: Option<i64>,
+    duration_ms: Option<i64>,
+    cost: Option<i64>,
+    charged: &ChargedUsage,
+) -> [(BudgetLimit, Option<i64>, Option<i64>); 4] {
+    [
+        (
+            BudgetLimit::MaxTokensIn,
+            tokens_in,
+            Some(charged.input_tokens),
+        ),
+        (
+            BudgetLimit::MaxTokensOut,
+            tokens_out,
+            Some(charged.output_tokens),
+        ),
+        (
+            BudgetLimit::MaxDurationMs,
+            duration_ms,
+            Some(charged.duration_ms),
+        ),
+        (BudgetLimit::MaxCostMicroUsd, cost, charged.cost_micro_usd),
+    ]
+}
+
+/// The first spending limit of `budget` the charges of `track` passed: an action's, in the order
+/// the budget lists them, then the run's.
+fn spent_past(budget: &RunBudget, track: &Track) -> Option<RunBudgetBreach> {
+    let charges = &track.charges;
+    budget
+        .per_action
+        .iter()
+        .find_map(|limits| {
+            let charged = &charges
+                .actions
+                .iter()
+                .find(|charge| charge.action == limits.action)?
+                .charged;
+            spending(
+                Some(&limits.action),
+                spent(
+                    limits.max_tokens_in,
+                    limits.max_tokens_out,
+                    limits.max_duration_ms,
+                    limits.max_cost_micro_usd,
+                    charged,
+                ),
+            )
+        })
+        .or_else(|| {
+            spending(
+                None,
+                spent(
+                    budget.max_tokens_in,
+                    budget.max_tokens_out,
+                    budget.max_duration_ms,
+                    budget.max_cost_micro_usd,
+                    &charges.run,
+                ),
+            )
+        })
+}
+
+/// The trial limit of `budget` that handing requests for `actions` to the effect port would pass,
+/// naming the trials already charged to its action.
+fn trials_past(budget: &RunBudget, track: &Track, actions: &[&str]) -> Option<RunBudgetBreach> {
+    budget.per_action.iter().find_map(|limits| {
+        let max = limits.max_trials?;
+        let more = actions
+            .iter()
+            .filter(|action| **action == limits.action)
+            .count();
+        if more == 0 {
+            return None;
+        }
+        let charged = track
+            .charges
+            .actions
+            .iter()
+            .find(|charge| charge.action == limits.action)
+            .map_or(0, |charge| charge.charged.trials);
+        (charged.saturating_add(i64::try_from(more).unwrap_or(i64::MAX)) > max).then(|| {
+            RunBudgetBreach {
+                action: Some(limits.action.clone()),
+                limit: BudgetLimit::MaxTrials,
+                max,
+                charged: Some(charged),
+            }
+        })
     })
 }

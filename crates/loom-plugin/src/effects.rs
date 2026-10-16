@@ -239,6 +239,7 @@ impl<'a, S: FallibleCaseStore> DataSourceEffects<'a, S> {
             report,
             attempt: None,
             audit: result.audit_ref.map(ConnectorAuditRef),
+            usage: None,
         }))
     }
 
@@ -263,6 +264,7 @@ impl<'a, S: FallibleCaseStore> DataSourceEffects<'a, S> {
             report,
             attempt: None,
             audit: None,
+            usage: None,
         }))
     }
 
@@ -282,6 +284,7 @@ impl<'a, S: FallibleCaseStore> DataSourceEffects<'a, S> {
             report,
             attempt: None,
             audit: None,
+            usage: None,
         }))
     }
 

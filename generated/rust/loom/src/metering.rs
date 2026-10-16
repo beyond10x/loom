@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 32bb3ee2f5e3e81bb319692af1ada66976ed1ef0532014bbf05305f3b02106e8
-// contract digest 11b0ceec2c0bc0eed485772f5464ee0b03f7c2d0bce19f2dbb053b9730248f12
+// model digest 05d393620cd2a355cd71298e7eeaec60df6e4cf2cdae323bc2b5833b034be465
+// contract digest e8322fbfadca91b1026be75fb89ed2f8e6ced6284aa3b2fdc2c5bd1d83f9830d
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Metering — `loom.metering`.
@@ -8,6 +8,40 @@
 //! One run's usage report: how many model calls it made, the input, output and cached input tokens the provider reported for them and their cost in millionths of a US dollar at the run's rate card, in total and for each executor call of the run. A cost no rate card priced is absent, never zero.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
+
+/// ActionUsage — `loom.metering.ActionUsage`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionUsage {
+    /// `action` — `String`.
+    pub action: String,
+    /// `trials` — `Integer`.
+    pub trials: i64,
+    /// `input_tokens` — `Integer`.
+    pub input_tokens: i64,
+    /// `output_tokens` — `Integer`.
+    pub output_tokens: i64,
+    /// `duration_ms` — `Integer`.
+    pub duration_ms: i64,
+    /// `cost_micro_usd` — `Optional<Integer>`.
+    pub cost_micro_usd: Option<i64>,
+}
+
+/// EffectsUsage — `loom.metering.EffectsUsage`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectsUsage {
+    /// `trials` — `Integer`.
+    pub trials: i64,
+    /// `input_tokens` — `Integer`.
+    pub input_tokens: i64,
+    /// `output_tokens` — `Integer`.
+    pub output_tokens: i64,
+    /// `duration_ms` — `Integer`.
+    pub duration_ms: i64,
+    /// `cost_micro_usd` — `Optional<Integer>`.
+    pub cost_micro_usd: Option<i64>,
+    /// `actions` — `List<loom.metering.ActionUsage>`.
+    pub actions: Vec<ActionUsage>,
+}
 
 /// RunUsageReport — `loom.metering.RunUsageReport`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +60,8 @@ pub struct RunUsageReport {
     pub cost_micro_usd: Option<i64>,
     /// `steps` — `List<loom.metering.StepUsage>`.
     pub steps: Vec<StepUsage>,
+    /// `effects` — `loom.metering.EffectsUsage`.
+    pub effects: EffectsUsage,
 }
 
 /// StepUsage — `loom.metering.StepUsage`.

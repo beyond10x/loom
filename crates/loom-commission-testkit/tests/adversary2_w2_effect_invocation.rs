@@ -164,6 +164,7 @@ impl EffectPort for Performs {
                 b10x_loom_commission::model::responsibility::ConnectorAttemptId(attempt.to_owned())
             }),
             audit: None,
+            usage: None,
         }))
     }
 }

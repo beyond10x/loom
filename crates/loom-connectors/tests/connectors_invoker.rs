@@ -765,6 +765,7 @@ fn an_admitted_read_is_performed_with_its_result_and_names_its_audit_record() {
                 ]),
                 attempt: None,
                 audit: Some(ConnectorAuditRef("aud-7".to_owned())),
+                usage: None,
             }
         )],
         "the operation's result, its audit record and no attempt"

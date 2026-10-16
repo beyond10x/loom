@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest b6387a0b750073bc54cb8205a6b8cb4c833d48c61a710fd27db91718f784a766
-// contract digest 9effdb4356289f49fa1b5d82323e73726f125fb79ff43d87f6800a41a8dcf03d
+// model digest f53571e132b2f71840edfe761bc401e64fb69f09c02e5231f9f99c89c76020a5
+// contract digest d8e6b1ede68b8946fc3b58215b93b34033de96d39a3f84cf8669f4b6e8966278
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Responsibility — `commission.responsibility`.
@@ -26,6 +26,32 @@ pub struct ActionBindingKey {
     pub commission_id: CommissionId,
     /// `action` — `String`.
     pub action: String,
+}
+
+/// ActionBudget — `commission.responsibility.ActionBudget`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionBudget {
+    /// `action` — `String`.
+    pub action: String,
+    /// `max_trials` — `Optional<Integer>`.
+    pub max_trials: Option<i64>,
+    /// `max_tokens_in` — `Optional<Integer>`.
+    pub max_tokens_in: Option<i64>,
+    /// `max_tokens_out` — `Optional<Integer>`.
+    pub max_tokens_out: Option<i64>,
+    /// `max_duration_ms` — `Optional<Integer>`.
+    pub max_duration_ms: Option<i64>,
+    /// `max_cost_micro_usd` — `Optional<Integer>`.
+    pub max_cost_micro_usd: Option<i64>,
+}
+
+/// ActionCharge — `commission.responsibility.ActionCharge`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionCharge {
+    /// `action` — `String`.
+    pub action: String,
+    /// `charged` — `commission.responsibility.ChargedUsage`.
+    pub charged: ChargedUsage,
 }
 
 /// The states of `commission.responsibility.ActionRequest`, as runtime values.
@@ -151,6 +177,23 @@ pub struct AuthorityVerdictDeny {
     pub reason: String,
 }
 
+/// BudgetLimit — `commission.responsibility.BudgetLimit`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BudgetLimit {
+    /// `MaxSteps`.
+    MaxSteps,
+    /// `MaxTrials`.
+    MaxTrials,
+    /// `MaxTokensIn`.
+    MaxTokensIn,
+    /// `MaxTokensOut`.
+    MaxTokensOut,
+    /// `MaxDurationMs`.
+    MaxDurationMs,
+    /// `MaxCostMicroUsd`.
+    MaxCostMicroUsd,
+}
+
 /// The states of `commission.responsibility.Case`, as runtime values.
 ///
 /// Synthesised from the lifecycle, so the two cannot disagree. Which *moves* are legal is not
@@ -164,6 +207,21 @@ pub enum CaseState {
 /// CaseId — `commission.responsibility.CaseId`: a distinct wrapper around `String`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CaseId(pub String);
+
+/// ChargedUsage — `commission.responsibility.ChargedUsage`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChargedUsage {
+    /// `trials` — `Integer`.
+    pub trials: i64,
+    /// `input_tokens` — `Integer`.
+    pub input_tokens: i64,
+    /// `output_tokens` — `Integer`.
+    pub output_tokens: i64,
+    /// `duration_ms` — `Integer`.
+    pub duration_ms: i64,
+    /// `cost_micro_usd` — `Optional<Integer>`.
+    pub cost_micro_usd: Option<i64>,
+}
 
 /// The states of `commission.responsibility.Commission`, as runtime values.
 ///
@@ -256,6 +314,8 @@ pub struct EffectOutcomePerformed {
     pub attempt: Option<ConnectorAttemptId>,
     /// `audit` — `Optional<commission.responsibility.ConnectorAuditRef>`.
     pub audit: Option<ConnectorAuditRef>,
+    /// `usage` — `Optional<commission.responsibility.EffectUsage>`.
+    pub usage: Option<EffectUsage>,
 }
 
 /// EffectOutcomeRefused — `commission.responsibility.EffectOutcomeRefused`.
@@ -263,6 +323,19 @@ pub struct EffectOutcomePerformed {
 pub struct EffectOutcomeRefused {
     /// `reason` — `String`.
     pub reason: String,
+}
+
+/// EffectUsage — `commission.responsibility.EffectUsage`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectUsage {
+    /// `input_tokens` — `Integer`.
+    pub input_tokens: i64,
+    /// `output_tokens` — `Integer`.
+    pub output_tokens: i64,
+    /// `duration_ms` — `Integer`.
+    pub duration_ms: i64,
+    /// `cost_micro_usd` — `Optional<Integer>`.
+    pub cost_micro_usd: Option<i64>,
 }
 
 /// The states of `commission.responsibility.Evidence`, as runtime values.
@@ -427,6 +500,45 @@ pub enum RunState {
     Suspended,
 }
 
+/// RunBudget — `commission.responsibility.RunBudget`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunBudget {
+    /// `max_steps` — `Optional<Integer>`.
+    pub max_steps: Option<i64>,
+    /// `max_tokens_in` — `Optional<Integer>`.
+    pub max_tokens_in: Option<i64>,
+    /// `max_tokens_out` — `Optional<Integer>`.
+    pub max_tokens_out: Option<i64>,
+    /// `max_duration_ms` — `Optional<Integer>`.
+    pub max_duration_ms: Option<i64>,
+    /// `max_cost_micro_usd` — `Optional<Integer>`.
+    pub max_cost_micro_usd: Option<i64>,
+    /// `per_action` — `List<commission.responsibility.ActionBudget>`.
+    pub per_action: Vec<ActionBudget>,
+}
+
+/// RunBudgetBreach — `commission.responsibility.RunBudgetBreach`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunBudgetBreach {
+    /// `action` — `Optional<String>`.
+    pub action: Option<String>,
+    /// `limit` — `commission.responsibility.BudgetLimit`.
+    pub limit: BudgetLimit,
+    /// `max` — `Integer`.
+    pub max: i64,
+    /// `charged` — `Optional<Integer>`.
+    pub charged: Option<i64>,
+}
+
+/// RunCharges — `commission.responsibility.RunCharges`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunCharges {
+    /// `run` — `commission.responsibility.ChargedUsage`.
+    pub run: ChargedUsage,
+    /// `actions` — `List<commission.responsibility.ActionCharge>`.
+    pub actions: Vec<ActionCharge>,
+}
+
 /// RunId — `commission.responsibility.RunId`: a distinct wrapper around `Uuid`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunId(pub crate::primitives::Uuid);
@@ -541,6 +653,8 @@ pub enum SuspensionReason {
     Human(HumanDecisionRequest),
     /// Tagged `LoopBudget` — `Json`.
     LoopBudget(crate::json::Value),
+    /// Tagged `RunBudget` — `commission.responsibility.RunBudgetBreach`.
+    RunBudget(RunBudgetBreach),
     /// Tagged `Time` — `Json`.
     Time(crate::json::Value),
 }

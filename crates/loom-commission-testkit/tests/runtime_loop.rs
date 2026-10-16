@@ -268,6 +268,7 @@ impl EffectPort for Effects {
             report: Value::Null,
             attempt: None,
             audit: None,
+            usage: None,
         }))
     }
 }
@@ -416,6 +417,7 @@ fn order_refusal_admission_completion(runs: &mut Generated<RunStore>) {
             report: Value::Null,
             attempt: None,
             audit: None,
+            usage: None,
         })],
         "{name}: 4. the one effect"
     );

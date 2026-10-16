@@ -115,6 +115,7 @@ impl EffectPort for CountingEffects {
             report: Value::Null,
             attempt: None,
             audit: None,
+            usage: None,
         }))
     }
 }

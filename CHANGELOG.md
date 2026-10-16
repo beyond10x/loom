@@ -20,6 +20,11 @@ exhaustively no longer compiles until it handles the variant; and a governed run
 `LoopExecutor` run or a workflow judgement step stopped by a budget of its model loop now ends
 `Suspended` with it instead of `NoUsefulAction`.
 
+Breaking: `EffectOutcomePerformed` gains the field `usage`, so a host that builds one with a struct
+literal adds `usage: None`; `SuspensionReason` gains the variant `RunBudget`, so an exhaustive match
+handles it; `LoopEnd` gains `charges` and `loom.metering.RunUsageReport` gains `effects`, so code
+that builds either with a struct literal sets them.
+
 ### Added
 
 - Two model ports in the SDK, so a host embedding it needs to write neither:
@@ -76,6 +81,18 @@ exhaustively no longer compiles until it handles the variant; and a governed run
   literal adds `independence: CaseIndependence::none()`; `OpenError` gains `InvalidProducer`,
   `UndeclaredDimension`, `RepeatedProducer` and `RepeatedDimension`, so a host that matches it
   exhaustively handles them.
+
+- Run and action budgets in Commission's runtime. A host's `LoopContext::run_budget` (default
+  none) returns a `RunBudget`: steps, input and output tokens, wall time and cost for the whole
+  run, and per action (`ActionBudget`) a trial count and the same spending limits. An effect
+  reports what it spent on its own model calls with `EffectOutcomePerformed.usage`
+  (`EffectUsage`); the runtime charges every effect answer to the run and to its action
+  (`LoopEnd::charges`, a `RunCharges`) and observes the usage. A trial limit stops the run before
+  the request that would pass it is handed to the effect port; a spending limit stops it once an
+  effect's usage took the charge past it, or left the cost unknown under a cost limit. The Run is
+  suspended for `SuspensionReason::RunBudget`, naming the action, the limit, its value and the
+  charge, distinct from a model-loop `Budget` stop. `RunMeter::charge_effects` puts the charges
+  in the run's usage report as `RunUsageReport.effects`, beside the model-port usage.
 
 ### Changed
 
