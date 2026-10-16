@@ -1,11 +1,11 @@
 // generated from loom v1
-// model digest 7e01de49f6648bd42c3487572f5bf305ca3e9c2e76adeb528dd2ffcdffa645c9
-// contract digest 339d7d1174a6fc6f5384f70ff5342398aa19ad068e03cd1146e66a670161b962
+// model digest a65dab2694d1cdbccd607702230c3f6a26885faafa677d6540c707f47cdc6ca5
+// contract digest 67c6dc56318a7d27e68eae6db9a2c43def02ba46ca2087b85d0a94c81e0236f9
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Governor — `loom.governor`.
 //!
-//! The governor's held case as a store writes it: the case id, the protocol that governs it, the case revision, the current revision of every declared artifact, the value of every case input the protocol declares, and every evidence record received with whether it applies; and the observations kept beside the cases.
+//! The governor's held case as a store writes it: the case id, the protocol that governs it, the case revision, the current revision of every declared artifact, the value of every case input the protocol declares, every evidence record received with whether it applies, and every explicit decision recorded for it; and the observations kept beside the cases.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
 
@@ -33,6 +33,8 @@ pub struct StoredCase {
     pub inputs: Vec<StoredInput>,
     /// `evidence` — `List<loom.governor.StoredEvidence>`.
     pub evidence: Vec<StoredEvidence>,
+    /// `decisions` — `Optional<List<loom.evaluation.ExplicitDecision>>`.
+    pub decisions: Option<Vec<crate::evaluation::ExplicitDecision>>,
 }
 
 /// StoredCaseId — `loom.governor.StoredCaseId`: a distinct wrapper around `String`.

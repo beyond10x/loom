@@ -15,9 +15,11 @@
 //! So is a case whose inputs name one input twice, and a case of an ELS built-in protocol
 //! (`software-change@1`) whose inputs that protocol refuses as an opening would (a declared input
 //! missing, an empty list included, an undeclared one, an unlisted value), naming the case and
-//! the input. A protocol that is not built in is checked by the governor that registered it, on
-//! every read ([`crate::CanonGovernor`]); a host catalog that binds a built-in's name to another
-//! definition has its cases checked against the built-in here.
+//! the input. A case's explicit decisions are its `decisions` member, left out when none was
+//! recorded, so a case stored before decisions were held reads as one with none. A protocol that
+//! is not built in is checked by the governor that registered it, on every read
+//! ([`crate::CanonGovernor`]); a host catalog that binds a built-in's name to another definition
+//! has its cases checked against the built-in here.
 //!
 //! Every operation holds an exclusive lock on `<dir>/.lock` for its duration, so two stores over
 //! one directory, in one process or in two, never interleave a read and a write of the same file.
@@ -49,6 +51,7 @@ use b10x_loom_commission::model::primitives::{
 use b10x_loom_commission::model::responsibility::{
     CaseId, EvidenceData, EvidenceId, ObservationData, ObservationId,
 };
+use loom::evaluation::ExplicitDecision;
 use loom::governor::{
     StoredArtifact, StoredCase, StoredCaseId, StoredEvidence, StoredEvidenceData, StoredInput,
     StoredObservation,
@@ -339,6 +342,7 @@ fn stored_case(state: &CaseState) -> StoredCase {
                 applies: held.applies,
             })
             .collect(),
+        decisions: (!state.decisions.is_empty()).then(|| state.decisions.clone()),
     }
 }
 
@@ -392,6 +396,7 @@ fn held_case(stored: StoredCase) -> Result<CaseState, String> {
                 applies: held.applies,
             })
             .collect(),
+        decisions: stored.decisions.unwrap_or_default(),
     })
 }
 
@@ -506,6 +511,26 @@ fn encode_case(out: &mut String, case: &StoredCase) {
         out.push('}');
     }
     out.push(']');
+    if let Some(decisions) = &case.decisions {
+        member(out, "decisions");
+        out.push('[');
+        for (index, decision) in decisions.iter().enumerate() {
+            if index > 0 {
+                out.push(',');
+            }
+            out.push('{');
+            member(out, "decision");
+            push_text(out, &decision.decision);
+            member(out, "outcome");
+            push_text(out, &decision.outcome);
+            member(out, "principal");
+            push_text(out, &decision.principal);
+            member(out, "case_revision");
+            push_text(out, &decision.case_revision);
+            out.push('}');
+        }
+        out.push(']');
+    }
     out.push('}');
 }
 
@@ -596,6 +621,7 @@ fn decode_case(value: &Value) -> Result<StoredCase, DecodeError> {
             "artifacts",
             "inputs",
             "evidence",
+            "decisions",
         ],
     )?;
     let inputs = items_at(member_at(value, at, "inputs")?, "inputs", "an array")?
@@ -638,6 +664,29 @@ fn decode_case(value: &Value) -> Result<StoredCase, DecodeError> {
             })
         })
         .collect::<Result<_, DecodeError>>()?;
+    let decisions = value
+        .member("decisions")
+        .map(|decisions| {
+            items_at(decisions, "decisions", "an array")?
+                .iter()
+                .enumerate()
+                .map(|(index, item)| {
+                    let at = format!("decisions[{index}]");
+                    exactly(
+                        item,
+                        &at,
+                        &["decision", "outcome", "principal", "case_revision"],
+                    )?;
+                    Ok(ExplicitDecision {
+                        decision: text_member(item, &at, "decision")?,
+                        outcome: text_member(item, &at, "outcome")?,
+                        principal: text_member(item, &at, "principal")?,
+                        case_revision: text_member(item, &at, "case_revision")?,
+                    })
+                })
+                .collect::<Result<_, DecodeError>>()
+        })
+        .transpose()?;
     Ok(StoredCase {
         id: StoredCaseId(text_member(value, at, "id")?),
         protocol: text_member(value, at, "protocol")?,
@@ -645,6 +694,7 @@ fn decode_case(value: &Value) -> Result<StoredCase, DecodeError> {
         artifacts,
         inputs,
         evidence,
+        decisions,
     })
 }
 

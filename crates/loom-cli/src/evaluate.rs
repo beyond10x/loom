@@ -1,21 +1,25 @@
 //! The JSON of `b10x-loom evaluate`: the request it reads and the decision or refusal it writes,
 //! each the generated `loom.evaluation` type (`ess/domains/evaluation.yaml`) on the wire its JSON
 //! Schema projection gives: members by field name, an absent `Optional` left out, an enum by its
-//! variant name, and no member the type does not declare.
+//! variant name, and no member the type does not declare. A request may leave `decisions` out,
+//! which is a request with none.
 
 use loom_governor::model::evaluation::{
     ActionStatus, CaseSnapshot, ClaimValue, EvaluationDecision, EvaluationInput, EvaluationRefusal,
-    EvaluationRequest, EvidenceRecord, ProtocolName,
+    EvaluationRequest, EvidenceRecord, ExplicitDecision, ProtocolName,
 };
 use loom_governor::model::json::{self, Value};
 use loom_governor::model::primitives::Timestamp;
 
 /// The members an evaluation request declares.
-const MEMBERS: [&str; 4] = ["protocol", "snapshot", "evidence", "at"];
+const MEMBERS: [&str; 5] = ["protocol", "snapshot", "evidence", "at", "decisions"];
+
+/// The members an explicit decision declares.
+const DECISION_MEMBERS: [&str; 4] = ["decision", "outcome", "principal", "case_revision"];
 
 /// The request in `text`, a `loom.evaluation.EvaluationRequest` document; refused naming the
-/// member it is about: the protocol, the snapshot or the time when that member is missing or not
-/// the type it declares, and the request as a whole otherwise.
+/// member it is about: the protocol, the snapshot, the time or the decisions when that member is
+/// missing or not the type it declares, and the request as a whole otherwise.
 pub fn request_from_json(text: &str) -> Result<EvaluationRequest, EvaluationRefusal> {
     let document = json::parse(text).map_err(|error| {
         refused(
@@ -58,12 +62,59 @@ pub fn request_from_json(text: &str) -> Result<EvaluationRequest, EvaluationRefu
                 .map_err(|error| refused(EvaluationInput::Time, error.to_string()))?,
         ),
     };
+    let decisions = match document.member("decisions") {
+        None => Vec::new(),
+        Some(value) => {
+            decisions_from(value).map_err(|message| refused(EvaluationInput::Decisions, message))?
+        }
+    };
     Ok(EvaluationRequest {
         protocol: ProtocolName(protocol.to_owned()),
         snapshot: CaseSnapshot(snapshot.clone()),
         evidence: evidence.iter().cloned().map(EvidenceRecord).collect(),
         at: at.map(|at| Timestamp(at.to_owned())),
+        decisions,
     })
+}
+
+/// The explicit decisions `value` holds: an array of objects with exactly the four text members
+/// of `loom.evaluation.ExplicitDecision`.
+fn decisions_from(value: &Value) -> Result<Vec<ExplicitDecision>, String> {
+    let items = json::items_at(value, "decisions", "an array of explicit decisions")
+        .map_err(|error| error.to_string())?;
+    items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            let at = format!("decisions[{index}]");
+            let Value::Object(members) = item else {
+                return Err(format!("`{at}` is {}, not an object", item.describes()));
+            };
+            for (position, (name, _)) in members.iter().enumerate() {
+                if !DECISION_MEMBERS.contains(&name.as_str()) {
+                    return Err(format!("`{at}` declares no member `{name}`"));
+                }
+                if members[..position]
+                    .iter()
+                    .any(|(earlier, _)| earlier == name)
+                {
+                    return Err(format!("`{at}` names `{name}` twice"));
+                }
+            }
+            let text = |name: &str| {
+                json::member_at(item, &at, name)
+                    .and_then(|value| json::text_at(value, &json::nested(&at, name), "a string"))
+                    .map(str::to_owned)
+                    .map_err(|error| error.to_string())
+            };
+            Ok(ExplicitDecision {
+                decision: text("decision")?,
+                outcome: text("outcome")?,
+                principal: text("principal")?,
+                case_revision: text("case_revision")?,
+            })
+        })
+        .collect()
 }
 
 /// `decision` as one `loom.evaluation.EvaluationDecision` JSON document, ending with a newline.
@@ -147,8 +198,8 @@ pub fn refusal_json(refusal: &EvaluationRefusal) -> String {
     out
 }
 
-/// The input `refusal` is about, in words: `protocol`, `snapshot`, `evidence record <n>`, `time`
-/// or `request`.
+/// The input `refusal` is about, in words: `protocol`, `snapshot`, `evidence record <n>`, `time`,
+/// `decisions` or `request`.
 pub fn refused_input(refusal: &EvaluationRefusal) -> String {
     match (refusal.input, refusal.evidence_index) {
         (EvaluationInput::Evidence, Some(index)) => format!("evidence record {index}"),
@@ -163,6 +214,7 @@ fn input_name(input: EvaluationInput) -> &'static str {
         EvaluationInput::Snapshot => "Snapshot",
         EvaluationInput::Evidence => "Evidence",
         EvaluationInput::Time => "Time",
+        EvaluationInput::Decisions => "Decisions",
     }
 }
 

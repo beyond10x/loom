@@ -10,8 +10,8 @@ domain: loom.governor
 summary: >-
   The governor's held case as a store writes it: the case id, the protocol that governs it, the
   case revision, the current revision of every declared artifact, the value of every case input
-  the protocol declares, and every evidence record received with whether it applies; and the
-  observations kept beside the cases.
+  the protocol declares, every evidence record received with whether it applies, and every
+  explicit decision recorded for it; and the observations kept beside the cases.
 
 naming:
   wire: governor
@@ -78,7 +78,9 @@ types:
   # opened and one more with each artifact revision recorded; `artifacts` are in artifact order;
   # `inputs` are the value of every case input the protocol declares, in input order, and empty
   # for a protocol that declares none; `evidence` is every record received, in the order
-  # received. A case stored without `inputs` is not read: the store reports it as a failure
+  # received; `decisions` is every explicit decision recorded for the case, in the order recorded,
+  # each at the case revision it was taken at, and absent when none was. A case stored without
+  # `inputs` is not read: the store reports it as a failure
   # naming the case, and never fills the inputs in. Nor is one whose `inputs` do not satisfy its
   # protocol, checked as at opening: a declared input missing (an empty list for a protocol that
   # declares inputs included), an input given twice, one the protocol does not declare, or a
@@ -99,6 +101,8 @@ types:
         type: List<loom.governor.StoredInput>
       - name: evidence
         type: List<loom.governor.StoredEvidence>
+      - name: decisions
+        type: Optional<List<loom.evaluation.ExplicitDecision>>
 
   # One observation kept: Commission's commission.responsibility.Observation data, field for field.
   # Never evidence (Atlas ADR 0074).

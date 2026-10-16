@@ -76,6 +76,7 @@ fn request(
         snapshot: CaseSnapshot(value(snapshot)),
         evidence: records.iter().map(|r| EvidenceRecord(value(r))).collect(),
         at: at.map(|at| Timestamp(at.into())),
+        decisions: Vec::new(),
     }
 }
 

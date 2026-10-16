@@ -471,6 +471,7 @@ fn request(snapshot: &Value) -> EvaluationRequest {
         snapshot: CaseSnapshot(loom_governor::model::json::parse(&snapshot.to_string()).unwrap()),
         evidence: Vec::new(),
         at: None,
+        decisions: Vec::new(),
     }
 }
 

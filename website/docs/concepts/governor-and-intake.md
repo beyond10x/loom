@@ -52,6 +52,14 @@ wrote it, and the governor reads no clock. The governor `b10x-loom` builds for t
 (`run::slice_governor`) evaluates at the host instant, so an evidence kind's `max_age` (30 minutes
 for `operational_observation` in `software.change/1`) expires an old observation.
 
+An outcome that requires an explicit decision (`requires: decision: explicitly_inconclusive`, say)
+becomes legitimate only with that decision. The host records it on the held case with
+`CanonGovernor::decide(&case, outcome, decision, principal)`; the governor stamps it with the
+case's current revision and hands it to Canon as a `canon-decisions/1` entry on every later
+evaluation, so the outcome is legitimate until the case moves and blocked again after. Canon
+refuses a decision for an outcome the protocol does not declare or one that does not require it,
+and nothing is recorded. Who may take a decision is the host's to judge, not Loom's.
+
 Durable hosts implement `FallibleCaseStore`. Reads and writes return errors; an insert error
 stops opening the case rather than retrying another identifier. Updates are atomic, so a failed
 write preserves previous state. `try_observations` reports read failures. Existing infallible
@@ -62,8 +70,9 @@ database backend: hosts restore their cases and the same admitted protocol defin
 
 A supervisor that keeps its own case record does not need Commission's types or a case store to get
 a decision. `loom_governor::evaluate(&catalog, &request)` takes a protocol named from the host's
-`ProtocolCatalog`, a `canon-case/1` case snapshot, the `canon-evidence/1` records and an optional
-trusted time, and returns Canon's decision as the frontier and completion report it: each action's
+`ProtocolCatalog`, a `canon-case/1` case snapshot, the `canon-evidence/1` records, an optional
+trusted time and the `canon-decisions/1` explicit decisions taken for the case (`decisions`, empty
+when none; a decision applies only at the snapshot's revision), and returns Canon's decision as the frontier and completion report it: each action's
 status, the capabilities it requires and Canon's reasons, every claim and obligation, the one
 legitimate outcome when the case is complete, and Canon's whole `canon-decision/1` document. It
 uses the same evaluation as `CanonGovernor`, holds nothing, and reads no clock. The request and the
@@ -82,7 +91,7 @@ b10x-loom evaluate --input request.json | jq -c '{outcome, actions}'
 
 An input it cannot use is refused with exit status 3, naming the input: the protocol (the catalog
 has no such name), the snapshot (including a termination the records do not make legitimate), an
-evidence record by its position, or the time. A record is refused when it is not a readable
+evidence record by its position, the time, or the decisions (one Canon refuses). A record is refused when it is not a readable
 `canon-evidence/1` record or repeats an earlier record's id. A readable record that does not apply
 to the case, such as one of a kind the protocol does not declare, is set aside as `CanonGovernor`
 sets it aside, and the decision is made from the rest; the decision does not list it. The two

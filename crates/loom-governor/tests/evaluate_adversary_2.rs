@@ -134,6 +134,7 @@ fn request(protocol: &str, snapshot: &Value, records: &[Value]) -> EvaluationReq
         snapshot: CaseSnapshot(value(snapshot)),
         evidence: records.iter().map(|r| EvidenceRecord(value(r))).collect(),
         at: None,
+        decisions: Vec::new(),
     }
 }
 

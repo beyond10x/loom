@@ -475,6 +475,7 @@ fn sample_state(case: &CaseId) -> loom_governor::CaseState {
         ])
         .expect("distinct inputs"),
         evidence: Vec::new(),
+        decisions: Vec::new(),
     }
 }
 

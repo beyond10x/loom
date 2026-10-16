@@ -306,6 +306,16 @@ fn an_awkward_case_and_its_observations_round_trip_exactly() {
                         applies: n % 2 == 0,
                     })
                     .collect(),
+                decisions: if index % 2 == 0 {
+                    Vec::new()
+                } else {
+                    vec![loom_governor::model::evaluation::ExplicitDecision {
+                        decision: "\u{0}\"".to_owned(),
+                        outcome: "\u{10ffff}".to_owned(),
+                        principal: String::new(),
+                        case_revision: "r\\1".to_owned(),
+                    }]
+                },
             };
             assert_eq!(
                 store.insert(state.clone()).map_err(|e| e.to_string()),
@@ -427,6 +437,7 @@ fn plain_state(case: &CaseId) -> CaseState {
         artifacts: BTreeMap::from([("intent".to_owned(), "i1".to_owned())]),
         inputs: fixture_inputs(),
         evidence: Vec::new(),
+        decisions: Vec::new(),
     }
 }
 
