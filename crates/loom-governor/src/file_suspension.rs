@@ -294,6 +294,7 @@ fn encode_reason(out: &mut String, reason: &SuspensionReason) {
             ),
         ),
         SuspensionReason::Budget(value) => ("Budget", value.clone()),
+        SuspensionReason::LoopBudget(value) => ("LoopBudget", value.clone()),
         SuspensionReason::ExternalAvailability(value) => ("ExternalAvailability", value.clone()),
     };
     push_text(out, kind);
@@ -395,6 +396,7 @@ fn decode_reason(value: &Value) -> Result<SuspensionReason, DecodeError> {
             SuspensionReason::Dependency(strings(&payload)?.into_iter().map(CaseId).collect())
         }
         "Budget" => SuspensionReason::Budget(payload),
+        "LoopBudget" => SuspensionReason::LoopBudget(payload),
         "ExternalAvailability" => SuspensionReason::ExternalAvailability(payload),
         _ => {
             return Err(DecodeError::of(
