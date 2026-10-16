@@ -104,6 +104,7 @@ impl ConnectorInvoker for RecordingInvoker {
                 attempt: (binding.effect == ConnectorOperationEffect::Write)
                     .then(|| Self::attempt(n)),
                 audit: (binding.effect == ConnectorOperationEffect::Read).then(|| Self::audit(n)),
+                usage: None,
             }))
         })
     }

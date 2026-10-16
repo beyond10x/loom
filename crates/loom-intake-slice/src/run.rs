@@ -1431,7 +1431,9 @@ fn push_json(out: &mut String, value: &json::Value) {
 #[cfg(test)]
 mod tests {
     use b10x_loom_commission::model::primitives::Uuid;
-    use b10x_loom_commission::model::responsibility::{RunId, RunOutcome, RunOutcomeCaseMovedOn};
+    use b10x_loom_commission::model::responsibility::{
+        ChargedUsage, RunCharges, RunId, RunOutcome, RunOutcomeCaseMovedOn,
+    };
     use b10x_loom_commission::runtime::LoopEnd;
 
     use super::{ApprovalGate, SliceRun, StopReason, finish};
@@ -1452,6 +1454,16 @@ mod tests {
             effects: Vec::new(),
             steps: 2,
             last_frontier: None,
+            charges: RunCharges {
+                run: ChargedUsage {
+                    trials: 0,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    duration_ms: 0,
+                    cost_micro_usd: Some(0),
+                },
+                actions: Vec::new(),
+            },
         };
         let mut out = Vec::new();
 

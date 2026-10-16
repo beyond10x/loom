@@ -264,6 +264,7 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> ClockEffects<'a, 'o, S, T>
             report: as_json(&report.value)?,
             attempt: None,
             audit: None,
+            usage: None,
         }))
     }
 }

@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest cc8aef18a520a265ae0c53dfb2099a037674b0fa3af8d054c4ca994b8475d420
-// contract digest 3ed64500d8a1d7004d987ca7f9d5029dd82f5329965d3acff8acb69b0b8b801b
+// model digest 8bfa6595449e66e450968160d8521c9b4b107fea79516dfcbb5a5f9664d99428
+// contract digest 4a84767f54913fa79e404656aa5d542795f44b0fb5aba7b49b46db5f59cc5863
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! JSON at this system's boundary: a reader, a writer, and the base64 codec `Bytes` needs.

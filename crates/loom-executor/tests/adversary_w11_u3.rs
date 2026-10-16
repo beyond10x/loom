@@ -236,6 +236,7 @@ impl EffectPort for ScriptedEffects<'_> {
                     report,
                     attempt: None,
                     audit: None,
+                    usage: None,
                 }))
             }
         }

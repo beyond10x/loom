@@ -84,11 +84,13 @@ impl ConnectorInvoker for Recorder {
                 report: Value::Text("written".to_owned()),
                 attempt: Some(ConnectorAttemptId("attempt-1".to_owned())),
                 audit: None,
+                usage: None,
             },
             ConnectorOperationEffect::Read => EffectOutcomePerformed {
                 report: Value::Text("read".to_owned()),
                 attempt: None,
                 audit: Some(ConnectorAuditRef("audit-1".to_owned())),
+                usage: None,
             },
         }))
     }

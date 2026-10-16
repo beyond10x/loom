@@ -116,6 +116,7 @@ fn performed(action: &str) -> EffectOutcome {
         report: Value::Text(format!("read {action}")),
         attempt: None,
         audit: Some(audit(action)),
+        usage: None,
     })
 }
 
