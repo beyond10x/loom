@@ -15,6 +15,11 @@ Breaking: `b10x_loom_cli::model_port` is gone; its `LlmModelPort` is `loom_sdk::
 Breaking: `b10x_loom_intake_slice::intent::IntentRequest` gains the public field `bindings`,
 so code that builds one with a struct literal must add `bindings: None`.
 
+Breaking: `SuspensionReason` gains the variant `LoopBudget`, so a host that matches it
+exhaustively no longer compiles until it handles the variant; and a governed run, a
+`LoopExecutor` run or a workflow judgement step stopped by a budget of its model loop now ends
+`Suspended` with it instead of `NoUsefulAction`.
+
 ### Added
 
 - Two model ports in the SDK, so a host embedding it needs to write neither:
@@ -68,6 +73,19 @@ so code that builds one with a struct literal must add `bindings: None`.
   literal adds `independence: CaseIndependence::none()`; `OpenError` gains `InvalidProducer`,
   `UndeclaredDimension`, `RepeatedProducer` and `RepeatedDimension`, so a host that matches it
   exhaustively handles them.
+
+### Changed
+
+- A governed run stopped by one of its model loop's budgets (turns, input or output tokens, cost,
+  wall time, or a ceiling the loop could no longer observe) reports that budget: `Loom::run_loop`,
+  `LoopExecutor` and `WorkflowExecutor`'s judgement steps return
+  `ExecutorOutcome::Suspended` with `SuspensionReason::LoopBudget`, carrying the loop's stop as
+  `loom.run.LoopStop`'s wire writes it (for example
+  `{"kind": "max-input-tokens", "limit": 100, "reported": 150}`), and the runtime suspends the Run
+  for it; a `LoopExecutor` run whose case moved while it ran is still `CaseMoved`. A host no
+  longer runs its budgeted loop outside Commission to read `LoopOutcome.stop`.
+  A cancelled, unstructured or provider-incomplete stop, and one above the compaction trigger,
+  still end `NoUsefulAction`.
 
 ## [0.23.0] - 2026-10-16
 

@@ -75,7 +75,7 @@ mod memory;
 mod parallel;
 mod price;
 mod skill;
-mod stop_codec;
+pub(crate) mod stop_codec;
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};

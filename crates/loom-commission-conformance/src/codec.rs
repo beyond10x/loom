@@ -168,6 +168,7 @@ pub fn suspension_reason(node: &Node) -> Option<SuspensionReason> {
     Some(match members.get("kind")?.as_text()? {
         "Authority" => SuspensionReason::Authority(to_json(value)?),
         "Budget" => SuspensionReason::Budget(to_json(value)?),
+        "LoopBudget" => SuspensionReason::LoopBudget(to_json(value)?),
         "Dependency" => {
             SuspensionReason::Dependency(strings(value)?.into_iter().map(CaseId).collect())
         }
@@ -185,6 +186,7 @@ pub(crate) fn from_suspension_reason(reason: &SuspensionReason) -> Option<Node> 
     let (kind, value) = match reason {
         SuspensionReason::Authority(value) => ("Authority", read_json(value)?),
         SuspensionReason::Budget(value) => ("Budget", read_json(value)?),
+        SuspensionReason::LoopBudget(value) => ("LoopBudget", read_json(value)?),
         SuspensionReason::Dependency(cases) => (
             "Dependency",
             Node::Seq(
