@@ -12,7 +12,8 @@ summary: >-
   retain workspace, confinement and merge authority requirements. Installed custom clock protocols
   may reuse the same host binding when they declare only the intent artifact and the read-only
   system.time.read action with the system_time evidence contract. Other definitions remain
-  available to embedders but have an explicit missing-executor result in this CLI. Both context
+  available to embedders and run in this CLI only through commands the operator binds to their
+  actions (intake.bindings); without one they have an explicit missing-executor result. Both context
   policies and measurements apply. Legacy remains default. Only local date/time queries are
   supported initially; an unrelated system question must not complete using a clock observation.
 types:
