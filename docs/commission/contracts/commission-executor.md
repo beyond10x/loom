@@ -24,6 +24,9 @@ pub trait AgentExecutor {
 
 `run` is synchronous and has no error channel: an executor that fails returns
 `Suspended(ExecutorOutcomeSuspended { reason: SuspensionReason::ExternalAvailability(..) })`.
+An executor whose own model loop stopped on one of its budgets returns
+`Suspended(ExecutorOutcomeSuspended { reason: SuspensionReason::LoopBudget(..) })`, carrying the
+loop's stop (for Loom, `loom.run.LoopStop` as its wire writes it); `Budget` is the run's own.
 
 The outcome it returns, generated from `ess/` into `generated/rust/commission/src/responsibility.rs`:
 

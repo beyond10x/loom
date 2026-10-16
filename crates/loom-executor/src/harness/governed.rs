@@ -41,8 +41,8 @@
 //!   compaction is offered the catalogue of the frontier current then, like any other.
 //!
 //! A run of [`Loom::run_loop`] starts a conversation of its own and drops any checkpoint held for
-//! its session; only [`Loom::resume_loop`] continues one. Not wired yet: budgets as a Commission
-//! suspension (a budget that binds is `NoUsefulAction`).
+//! its session; only [`Loom::resume_loop`] continues one. A budget of the loop that binds suspends
+//! the run for it (`LoopBudget`, carrying the loop's stop).
 
 use std::cell::{Cell, OnceCell};
 use std::ops::Deref;
@@ -53,8 +53,8 @@ use std::time::Instant;
 use b10x_loom_commission::admission::admit;
 use b10x_loom_commission::model::json;
 use b10x_loom_commission::model::responsibility::{
-    Admission, CaseId, Commission, ExecutorOutcome, Frontier, Unit, commission_state,
-    frontier_state,
+    Admission, CaseId, Commission, ExecutorOutcome, ExecutorOutcomeSuspended, Frontier,
+    SuspensionReason, Unit, commission_state, frontier_state,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
@@ -65,7 +65,7 @@ use crate::compaction::CompactionRecorder;
 use crate::harness::turn_loop::{
     AgentLoop, ApprovalDecision, ApprovalPort, ContextPackage, EnvironmentError, LoopCancel,
     LoopConfig, LoopError, LoopOutcome, LoopSink, LoopStop, LoopStopAwaitingApproval, NullLoopSink,
-    TurnEnvironment, TurnEnvironmentProvider, TurnEnvironmentRequest,
+    TurnEnvironment, TurnEnvironmentProvider, TurnEnvironmentRequest, stop_codec,
 };
 use crate::harness::wire::{
     Approval, Effect, Envelope, Idempotency, InvalidId, Item, ModelPort, Risk, StreamSink,
@@ -173,6 +173,9 @@ where
     ///   loop failed (a wire that could not answer, a governor that could not, a run that could not
     ///   be described), or when the session is recorded on another wire or held with other data
     ///   (no request is sent);
+    /// - `Suspended` with `LoopBudget`, carrying the loop's stop as `loom.run.LoopStop`'s wire
+    ///   writes it, when one of the loop's budgets bound: turns, input or output tokens, cost, wall
+    ///   time, or a ceiling the loop could no longer observe;
     /// - `CompletedLocalReasoning`, when the model answered without a call that was proposed;
     /// - `NoUsefulAction`, for a frontier of another case or one that admits nothing, and for a
     ///   session another run holds `Active` (no model is asked); when the model's arguments cannot
@@ -575,8 +578,34 @@ fn stopped(
             (ended.outcome, held)
         }
         (LoopStop::Completed, _) => (ExecutorOutcome::CompletedLocalReasoning(Unit(true)), None),
-        _ => (no_useful_action(), None),
+        (stop, _) => (loop_budget(stop).unwrap_or_else(no_useful_action), None),
     }
+}
+
+/// A stop on one of the loop's own budgets (turns, input or output tokens, cost, wall time, or a
+/// ceiling the loop could no longer observe) as Commission's `LoopBudget` suspension, carrying the
+/// stop as `loom.run.LoopStop`'s wire writes it. [`None`] for any other stop.
+fn loop_budget(stop: &LoopStop) -> Option<ExecutorOutcome> {
+    match stop {
+        LoopStop::MaxTurns(_)
+        | LoopStop::MaxInputTokens(_)
+        | LoopStop::MaxOutputTokens(_)
+        | LoopStop::MaxCost(_)
+        | LoopStop::BudgetUnobservable(_)
+        | LoopStop::Deadline(_) => {}
+        LoopStop::Completed
+        | LoopStop::Cancelled(_)
+        | LoopStop::AwaitingApproval(_)
+        | LoopStop::ProviderIncomplete(_)
+        | LoopStop::Unstructured(_)
+        | LoopStop::ContextAboveTrigger(_) => return None,
+    }
+    // The codec writes every stop, and Commission's reader takes every JSON it writes.
+    let written = stop_codec::to_value(stop).expect("a loop stop always encodes as JSON");
+    let carried = json::parse(&written.to_string()).expect("Commission reads the JSON it is given");
+    Some(ExecutorOutcome::Suspended(ExecutorOutcomeSuspended {
+        reason: SuspensionReason::LoopBudget(carried),
+    }))
 }
 
 /// One turn's catalogue, as the loop was offered it.
@@ -1232,10 +1261,12 @@ where
     /// turn's catalogue, projected from the governor's frontier current then, was at another case
     /// revision than `frontier`'s, or the pipeline refused one of the run's selections
     /// `stale-revision` (the model was told and chose again). A run that then ends with a
-    /// proposal, `CompletedLocalReasoning` or `NoUsefulAction` is `CaseMoved`, naming `frontier`'s
-    /// revision, so Commission judges it on the case as it is now (`story:moved-case-outcome`): no
-    /// proposal leaves that was not selected and admitted at the revision of the frontier the run
-    /// was handed. A suspension is returned as it is. Runs take the model one at a time.
+    /// proposal, `CompletedLocalReasoning`, `NoUsefulAction` or a `LoopBudget` suspension is
+    /// `CaseMoved`, naming `frontier`'s revision, so Commission judges it on the case as it is now
+    /// (`story:moved-case-outcome`): no proposal leaves that was not selected and admitted at the
+    /// revision of the frontier the run was handed, and a run a budget ended on a case that moved
+    /// is judged on the case as it is now. Any other suspension is returned as it is. Runs take
+    /// the model one at a time.
     fn run(
         &self,
         commission: &Commission<commission_state::Assigned>,
@@ -1261,6 +1292,9 @@ where
             {
                 case_moved(frontier.data().case_revision)
             }
+            ExecutorOutcome::Suspended(ExecutorOutcomeSuspended {
+                reason: SuspensionReason::LoopBudget(_),
+            }) if moved => case_moved(frontier.data().case_revision),
             outcome => outcome,
         }
     }
