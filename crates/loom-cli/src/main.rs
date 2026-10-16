@@ -1,6 +1,6 @@
 //! Run a routed intent, initializing resources only for the selected protocol.
 
-use std::io::Write;
+use std::io::{Read as _, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as Process, ExitCode};
 use std::sync::Arc;
@@ -16,6 +16,7 @@ use b10x_loom_cli::{
     ApproveArgs, Cli, Command, Confinement, EvaluateArgs, Output, PluginCommand, PluginName,
     ProtocolCommand, ResumeArgs, RunArgs, approve_exit_status, resume_exit_status, run_exit_status,
 };
+use b10x_loom_intake_slice::bindings::ActionBindings;
 use b10x_loom_intake_slice::case;
 use b10x_loom_intake_slice::clock::HostClock;
 use b10x_loom_intake_slice::confinement::{
@@ -533,6 +534,14 @@ fn execute(
         None => (None, None),
     };
     let catalog = InstallStore::user()?.catalog()?;
+    // The action bindings are held to the catalog before any model call.
+    if let (Some(path), Some(bindings)) = (
+        &arguments.action_bindings,
+        &intent_request(arguments)?.bindings,
+    ) {
+        b10x_loom_intake_slice::bindings::check(bindings, &catalog)
+            .map_err(|why| format!("--action-bindings {}: {}", path.display(), printable(&why)))?;
+    }
     let models = (classifier_route.take(), agent_route.take());
     let Some(dir) = &arguments.state else {
         let governor =
@@ -603,7 +612,23 @@ fn intent_request(arguments: &RunArgs) -> Result<IntentRequest, String> {
         threshold: arguments.threshold,
         inputs: arguments.inputs(),
         test_paths: arguments.test_paths().map_err(|e| e.to_string())?,
+        bindings: arguments
+            .action_bindings
+            .as_deref()
+            .map(read_bindings)
+            .transpose()?,
     })
+}
+
+/// The action bindings the run configuration file at `path` declares.
+fn read_bindings(path: &Path) -> Result<ActionBindings, String> {
+    let named = |why: &str| format!("--action-bindings {}: {}", path.display(), printable(why));
+    let mut text = String::new();
+    regular_file::open(path)
+        .map_err(|why| named(&why))?
+        .read_to_string(&mut text)
+        .map_err(|error| named(&format!("cannot be read: {error}")))?;
+    b10x_loom_intake_slice::bindings::decode(&text).map_err(|why| named(&why))
 }
 
 /// Runs `run` on `governor`, holding the commission in `state` when `--state` gave one.

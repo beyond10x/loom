@@ -10,3 +10,4 @@ domains:
   - intake.protocols
   - intake.query
   - intake.events
+  - intake.bindings
