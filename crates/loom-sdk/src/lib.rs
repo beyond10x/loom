@@ -2,8 +2,9 @@
 
 //! The Loom SDK: one crate an application depends on to embed a governed agent.
 //!
-//! It re-exports the crates an embedder needs, under stable module names, and adds no behaviour of
-//! its own.
+//! It re-exports the crates an embedder needs, under stable module names. Its one module of its
+//! own is [`llm`], the model port over an llm `Model`, kept here because the executor does not
+//! depend on llm's model crates.
 //!
 //! | Module | Crate | What it is for |
 //! | --- | --- | --- |
@@ -11,6 +12,7 @@
 //! | [`connectors`] | `b10x-loom-connectors` | Commission's `ConnectorInvoker` over a Connectors service: [`connectors::ConnectorsInvoker`] invokes the operation an action is bound to once, on the host's endpoint for its instance, and reports the attempt Connectors recorded. |
 //! | [`loom`] | `b10x-loom-executor` | The executor: [`Loom`] proposes one action per frontier through an [`ActionSelector`] and an [`ArgumentGenerator`] the embedder supplies. |
 //! | [`governor`] | `b10x-loom-governor` | The governor: [`CanonGovernor`] evaluates a case's protocol with Canon over a [`CaseStore`] and issues its frontier. |
+//! | [`llm`] | `b10x-llm-core` | [`llm::LlmModelPort`], a harness `ModelPort` over an llm `Model`: one `Model::turn` per turn, the port `b10x-loom` runs a plugin turn on. |
 //! | [`intake`] | `b10x-loom-intake-router`, `b10x-loom-intake-slice` | Intake: the router that proposes a protocol for an intent ([`intake::router`]), and the slice's case opening, local executor, test-result verifier and local effect adapter ([`intake::slice`]). |
 //!
 //! The items an embedding always touches are also re-exported at the top: [`run_until_blocked`],
@@ -43,6 +45,8 @@ pub use b10x_loom_connectors as connectors;
 
 /// The Loom executor (`b10x-loom-executor`).
 pub use b10x_loom_executor as loom;
+
+pub mod llm;
 
 /// The governor (`b10x-loom-governor`).
 pub use loom_governor as governor;

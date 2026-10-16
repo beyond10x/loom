@@ -3,7 +3,7 @@ title: SDK stability
 sidebar_label: SDK stability
 sidebar_position: 4
 description: The stable surface of b10x-loom-sdk, the ports a host implements and the loom_sdk paths control-plane imports, with the promise Loom makes for them.
-source: crates/loom-sdk/src/lib.rs, crates/loom-sdk/tests/host_ports.rs, control-plane's crates/control-plane-runtime (its loom_sdk imports), CHANGELOG.md
+source: crates/loom-sdk/src/lib.rs, crates/loom-sdk/src/llm.rs, crates/loom-executor/src/wire/claude_code.rs, crates/loom-sdk/tests/host_ports.rs, control-plane's crates/control-plane-runtime (its loom_sdk imports), CHANGELOG.md
 ---
 
 # SDK stability
@@ -78,6 +78,8 @@ implements it through.
 | `loom_sdk::MemoryCaseStore` | An in-memory `CaseStore` |
 | `loom_sdk::CaseInputs` | The case inputs a host gives when it opens a case |
 | `loom_sdk::ProtocolCatalog` | The protocol catalog shared by routing, case opening and admission |
+| `loom_sdk::llm::LlmModelPort` | A `ModelPort` over an llm `Model`: one `Model::turn` per turn, the port `b10x-loom` runs a plugin turn on |
+| `loom_sdk::loom::wire::ClaudeCodePort` | A `ModelPort` on an operator's Claude Code login: one `claude -p --output-format json` invocation per turn, the command reading its own login |
 | `loom_sdk::TestRunner`, `loom_sdk::SubstrateRunner`, `loom_sdk::UnconfinedRunner`, `loom_sdk::TestExecution`, `loom_sdk::ConfinementError` | The slice's test runners |
 | `loom_sdk::commission`, `loom_sdk::connectors`, `loom_sdk::loom`, `loom_sdk::governor`, `loom_sdk::protocols`, `loom_sdk::intake::router`, `loom_sdk::intake::slice` | The re-exported crates, under these module names |
 
