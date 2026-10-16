@@ -2,13 +2,25 @@
 format: aep.planning-md/3
 id: story:cli-custom-protocol-commands
 kind: story
-status: draft
+status: active
 title: b10x-loom run drives an installed custom protocol through commands the operator binds to its actions
 relations:
 - decomposes: epic:loom-foundation-for-consumers
 - serves: vision:governed-autonomy
 - informed_by: story:command-invocation-contract
-revision: 1
+scope:
+- confidence: inferred
+  path: CHANGELOG.md
+- confidence: inferred
+  path: crates/loom-cli
+- confidence: inferred
+  path: crates/loom-intake-slice/src/run.rs
+- confidence: inferred
+  path: website/docs/guides/system-queries.md
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-16T16:34:55Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-10-16T16:34:56Z", actor: "human:timo", revision: 4}
 ---
 ## Outcome
 

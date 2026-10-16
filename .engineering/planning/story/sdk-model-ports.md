@@ -2,12 +2,28 @@
 format: aep.planning-md/3
 id: story:sdk-model-ports
 kind: story
-status: draft
+status: active
 title: The SDK ships the llm-backed model port and a model port on a Claude Code login through the claude command
 relations:
 - decomposes: epic:loom-foundation-for-consumers
 - serves: vision:governed-autonomy
-revision: 1
+scope:
+- confidence: inferred
+  path: AGENTS.md
+- confidence: inferred
+  path: CHANGELOG.md
+- confidence: inferred
+  path: crates/loom-cli/src/model_port.rs
+- confidence: inferred
+  path: crates/loom-executor/src/harness/wire
+- confidence: inferred
+  path: crates/loom-sdk
+- confidence: inferred
+  path: website/docs/reference
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-16T16:35:01Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-10-16T16:35:02Z", actor: "human:timo", revision: 4}
 ---
 ## Outcome
 

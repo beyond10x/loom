@@ -2,13 +2,29 @@
 format: aep.planning-md/3
 id: story:run-and-action-budgets
 kind: story
-status: draft
+status: active
 title: A run enforces run-wide and per-action budgets, charging what each effect reports it spent
 relations:
 - decomposes: epic:deterministic-workflows
 - serves: vision:governed-autonomy
 - informed_by: story:meter-overlapping-calls
-revision: 1
+scope:
+- confidence: inferred
+  path: CHANGELOG.md
+- confidence: inferred
+  path: crates/loom-commission/src/runtime.rs
+- confidence: inferred
+  path: crates/loom-executor/src/metering.rs
+- confidence: inferred
+  path: ess/commission/domains/responsibility.yaml
+- confidence: inferred
+  path: ess/domains/metering.yaml
+- confidence: inferred
+  path: generated/rust/loom
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-16T16:35:00Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-10-16T16:35:01Z", actor: "human:timo", revision: 4}
 ---
 ## Outcome
 

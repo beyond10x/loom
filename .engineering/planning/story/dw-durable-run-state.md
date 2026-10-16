@@ -2,14 +2,32 @@
 format: aep.planning-md/3
 id: story:dw-durable-run-state
 kind: story
-status: draft
+status: active
 title: A workflow step result and the usage report survive a restart of the run
 relations:
 - decomposes: epic:deterministic-workflows
 - serves: vision:governed-autonomy
 - depends_on: story:dw-typed-step-outputs
 - depends_on: story:dw-run-model-meter
-revision: 2
+scope:
+- confidence: inferred
+  path: CHANGELOG.md
+- confidence: inferred
+  path: crates/loom-executor/src/metering.rs
+- confidence: inferred
+  path: crates/loom-executor/src/workflow.rs
+- confidence: inferred
+  path: crates/loom-governor/src
+- confidence: inferred
+  path: ess/domains/metering.yaml
+- confidence: inferred
+  path: ess/domains/workflow.yaml
+- confidence: inferred
+  path: generated/rust/loom
+revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-16T16:34:57Z", actor: "human:timo", revision: 4}
+- {from: "proposed", to: "active", at: "2026-10-16T16:34:57Z", actor: "human:timo", revision: 5}
 ---
 ## Outcome
 

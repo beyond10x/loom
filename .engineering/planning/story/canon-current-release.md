@@ -2,13 +2,29 @@
 format: aep.planning-md/3
 id: story:canon-current-release
 kind: story
-status: draft
+status: active
 title: Loom links the current Canon release and a test holds the governor's decision bytes equal to Canon's
 relations:
 - decomposes: epic:loom-foundation-for-consumers
 - serves: vision:governed-autonomy
 - informed_by: story:co-pinned-consumer-check
-revision: 1
+scope:
+- confidence: inferred
+  path: CHANGELOG.md
+- confidence: inferred
+  path: Cargo.lock
+- confidence: inferred
+  path: Cargo.toml
+- confidence: inferred
+  path: crates/loom-governor/Cargo.toml
+- confidence: inferred
+  path: crates/loom-governor/tests
+- confidence: inferred
+  path: website/docs/reference
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-16T16:34:54Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-10-16T16:34:54Z", actor: "human:timo", revision: 4}
 ---
 ## Outcome
 

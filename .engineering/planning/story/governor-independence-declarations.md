@@ -2,12 +2,24 @@
 format: aep.planning-md/3
 id: story:governor-independence-declarations
 kind: story
-status: draft
+status: active
 title: A host declares each producer's independence dimensions and the governor's case snapshot carries them
 relations:
 - decomposes: epic:loom-foundation-for-consumers
 - serves: vision:governed-autonomy
-revision: 1
+scope:
+- confidence: inferred
+  path: CHANGELOG.md
+- confidence: inferred
+  path: crates/loom-governor/src/lib.rs
+- confidence: inferred
+  path: crates/loom-governor/tests
+- confidence: inferred
+  path: crates/loom-sdk
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-16T16:34:59Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-10-16T16:34:59Z", actor: "human:timo", revision: 4}
 ---
 ## Outcome
 
