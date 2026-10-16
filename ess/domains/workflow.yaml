@@ -2,14 +2,17 @@
 # Nouns are read from the story's design and crates/loom-executor/src/harness/governed.rs (the
 # governed loop a judgement step runs). A definition sequences the actions its protocol's frontier
 # admits; Canon still decides admission and completion. A definition is a value with no lifecycle:
-# the domain declares types only. Where the workflow stands in a run is kept in process.
+# the domain declares types only. Where the workflow stands in a run is kept in process and, when
+# the host gives the executor a run store (story dw-durable-run-state), written after every
+# performed step as a WorkflowRunRecord keyed by the Run id, so a run continues after a restart.
 domain: loom.workflow
 
 summary: >-
   A Loom-side definition of a workflow over one protocol: an ordered list of steps, each either
   deterministic (one action with literal arguments, proposed without a model) or a judgement (the
   actions a model may choose among, with instructions). A step may be conditional on a frontier
-  claim, never on a model.
+  claim, never on a model. A run's progress over a definition may be kept as a record a store
+  writes after every performed step and a later process resumes from.
 
 naming:
   wire: workflow
@@ -121,3 +124,75 @@ types:
         type: String
       - name: steps
         type: List<loom.workflow.WorkflowStep>
+
+  # One request a workflow step made, as a run record keeps it (story dw-durable-run-state): the
+  # step's name, and the action and arguments of its proposal, the arguments as resolved when the
+  # step was proposed.
+  - name: loom.workflow.StepRequest
+    kind: struct
+    fields:
+      - name: step
+        type: String
+      - name: action
+        type: String
+      - name: arguments
+        type: Json
+
+  # One output a performed step produced, as a run record keeps it: its step, its name and its
+  # value, taken from the step's report and held to its declared type when the step was performed.
+  - name: loom.workflow.RecordedOutput
+    kind: struct
+    fields:
+      - name: step
+        type: String
+      - name: output
+        type: String
+      - name: value
+        type: Json
+
+  # An output a performed step declared and its report did not hold as declared: the step, the
+  # output and why. A run that records one proposes nothing more.
+  - name: loom.workflow.UnproducedOutput
+    kind: struct
+    fields:
+      - name: step
+        type: String
+      - name: output
+        type: String
+      - name: why
+        type: String
+
+  # Where one workflow run stands, as a run store keeps it (story dw-durable-run-state,
+  # architecture-decision-record workflow-run-store), written after every performed step and every
+  # executor call. `run` is the Commission run the workflow run began under, as a typed id
+  # (`loom.run.CommissionRunId`), and keys the record: a record read for another run is refused,
+  # never read. `workflow` is the definition's name and `definition_digest` the SHA-256, in
+  # lowercase hex, of the definition's canonical JSON; a record whose definition does not match the
+  # executor's is refused. `performed` is every step seen performed, in order, the last one being
+  # the step reached; `proposed` is the step proposed and not yet seen performed, so a request
+  # performed after a restart (a resume after a grant) settles it; `outputs` are the outputs the
+  # performed steps produced, in the order taken; `unproduced` is the output a performed step could
+  # not produce; `attempted` names the step each executor call took, in call order; `usage` is what
+  # the run spent so far, carried into the meter of the process that resumes it. A request proposed
+  # and not recorded performed is proposed again after a restart: an effect tolerates one repeat.
+  - name: loom.workflow.WorkflowRunRecord
+    kind: struct
+    fields:
+      - name: run
+        type: loom.run.CommissionRunId
+      - name: workflow
+        type: String
+      - name: definition_digest
+        type: String
+      - name: performed
+        type: List<loom.workflow.StepRequest>
+      - name: proposed
+        type: Optional<loom.workflow.StepRequest>
+      - name: outputs
+        type: List<loom.workflow.RecordedOutput>
+      - name: unproduced
+        type: Optional<loom.workflow.UnproducedOutput>
+      - name: attempted
+        type: List<String>
+      - name: usage
+        type: loom.metering.CarriedUsage
