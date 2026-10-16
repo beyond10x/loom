@@ -1,11 +1,11 @@
 // generated from loom v1
-// model digest 7e01de49f6648bd42c3487572f5bf305ca3e9c2e76adeb528dd2ffcdffa645c9
-// contract digest 339d7d1174a6fc6f5384f70ff5342398aa19ad068e03cd1146e66a670161b962
+// model digest 8b69e34d818efeff9b8c191e20dd7da546367dddb68a9e9d229718f4ee9d63a8
+// contract digest 5c17cc07d29b18f5ce35493e7c21acefdd5c9e0b9ba3c75c21914feb0d28b21d
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Governor — `loom.governor`.
 //!
-//! The governor's held case as a store writes it: the case id, the protocol that governs it, the case revision, the current revision of every declared artifact, the value of every case input the protocol declares, and every evidence record received with whether it applies; and the observations kept beside the cases.
+//! The governor's held case as a store writes it: the case id, the protocol that governs it, the case revision, the current revision of every declared artifact, the value of every case input the protocol declares, the independence dimensions the host declared for each evidence producer, and every evidence record received with whether it applies; and the observations kept beside the cases.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
 
@@ -31,6 +31,8 @@ pub struct StoredCase {
     pub artifacts: Vec<StoredArtifact>,
     /// `inputs` — `List<loom.governor.StoredInput>`.
     pub inputs: Vec<StoredInput>,
+    /// `independence` — `Optional<List<loom.governor.StoredIndependence>>`.
+    pub independence: Option<Vec<StoredIndependence>>,
     /// `evidence` — `List<loom.governor.StoredEvidence>`.
     pub evidence: Vec<StoredEvidence>,
 }
@@ -67,6 +69,15 @@ pub struct StoredEvidenceData {
     pub facts: crate::json::Value,
     /// `provenance` — `Json`.
     pub provenance: crate::json::Value,
+}
+
+/// StoredIndependence — `loom.governor.StoredIndependence`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredIndependence {
+    /// `producer` — `String`.
+    pub producer: String,
+    /// `dimensions` — `List<String>`.
+    pub dimensions: Vec<String>,
 }
 
 /// StoredInput — `loom.governor.StoredInput`.

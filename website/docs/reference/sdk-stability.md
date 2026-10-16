@@ -77,6 +77,7 @@ implements it through.
 | `loom_sdk::CanonGovernor` | The governor over a case store |
 | `loom_sdk::MemoryCaseStore` | An in-memory `CaseStore` |
 | `loom_sdk::CaseInputs` | The case inputs a host gives when it opens a case |
+| `loom_sdk::CaseIndependence` | The independence dimensions a host declares for each evidence producer when it opens a case |
 | `loom_sdk::ProtocolCatalog` | The protocol catalog shared by routing, case opening and admission |
 | `loom_sdk::TestRunner`, `loom_sdk::SubstrateRunner`, `loom_sdk::UnconfinedRunner`, `loom_sdk::TestExecution`, `loom_sdk::ConfinementError` | The slice's test runners |
 | `loom_sdk::commission`, `loom_sdk::connectors`, `loom_sdk::loom`, `loom_sdk::governor`, `loom_sdk::protocols`, `loom_sdk::intake::router`, `loom_sdk::intake::slice` | The re-exported crates, under these module names |
