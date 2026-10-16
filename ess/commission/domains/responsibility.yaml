@@ -111,6 +111,14 @@ types:
   # docs/history/beyond10x-agent-sdk-design-pre-commission-name.md:1477-1485: why a run is
   # suspended. A payload Commission's sources declare nowhere is carried as Json, and no entity is
   # invented for it.
+  #
+  # story:budget-stop-cause adds LoopBudget: an executor's model loop stopped on one of its own
+  # budgets (turns, input or output tokens, cost, wall time, or a ceiling it could no longer
+  # observe). Its payload is the loop's stop as the executor's specification writes it, tagged
+  # `kind` with that cause's figures beside it (for Loom, loom.run.LoopStop, for example
+  # {"kind": "max-input-tokens", "limit": 100, "reported": 150}); Commission's own specification
+  # cannot name another system's type, so it is Json. Distinct from Budget, which a run's own
+  # budgets suspend for.
   - name: commission.responsibility.SuspensionReason
     kind: union
     tag: kind
@@ -121,6 +129,7 @@ types:
       Time: Json
       Dependency: List<commission.responsibility.CaseId>
       Budget: Json
+      LoopBudget: Json
       ExternalAvailability: Json
 
   # docs/commission/contracts/commission-executor.md: what an executor may hand back. It proposes; it never
