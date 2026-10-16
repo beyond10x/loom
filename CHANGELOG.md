@@ -9,6 +9,16 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+Loom links Canon 0.6.0 and engineering-protocols 0.8.0. `b10x-canon` moves from 0.4.0 to 0.6.0 and
+`b10x-canon-engineering` from 0.7.0 to 0.8.0 in `loom-protocols`, `loom-governor`,
+`loom-intake-slice` and `loom-intake-router`, and `Cargo.lock` holds one `b10x-canon`. A new
+conformance test, `the_governor_decision_equals_the_pinned_canon_decision_bytes`, holds the
+`canon-decision/1` document the governor returns equal to the one the pinned Canon release's
+`evaluate_with` renders, for the software-change fixtures `chg-1842` and
+`security-boundary-independent`. Breaking: a host that links Canon itself moves to Canon 0.6.0 so it
+resolves one `b10x-canon`; the catalog's engineering protocols record revision `0.8.0` as their
+source.
+
 ## [0.23.0] - 2026-10-16
 
 Loom 0.23.0 runs a workflow's data collection concurrently and hands a judgement step its inputs
