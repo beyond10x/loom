@@ -9,8 +9,20 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
-Breaking: `ExecutorOutcome` gains the variant `ProposedReads`, so a host that matches it
-exhaustively no longer compiles until it handles the variant.
+## [0.23.0] - 2026-10-16
+
+Loom 0.23.0 runs a workflow's data collection concurrently and hands a judgement step its inputs
+as data. An executor proposes several reads at once (`ExecutorOutcome::ProposedReads`); the
+runtime admits them only when each is a read the frontier lists admissible without authority and
+none is listed twice, invokes them concurrently through their `Read` bindings, each once, and
+ends the run `CaseMovedOn` when a stale read shows the case moved. A judgement step lists the
+earlier outputs it is given (`inputs`), and the runtime appends exactly those values to its
+instructions as one escaped data block, so the model no longer reads them out of the transcript.
+A `RunMeter` counts overlapping and nested executor calls in their own steps. Loom requires ESS
+0.60.0. Breaking: `ExecutorOutcome` gains the variant `ProposedReads`, so a host that matches it
+exhaustively no longer compiles until it handles the variant; `loom.workflow.JudgementStep` gains
+the field `inputs`, so code that builds one with a struct literal adds `inputs: Vec::new()`; and
+specifications built with Loom's tasks need ESS 0.60.0.
 
 ### Added
 
