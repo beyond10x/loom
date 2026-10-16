@@ -254,8 +254,9 @@ Since `0.2.0`, `CanonGovernor::with_protocol` admits host-reviewed Canon protoco
 admission, durable storage and authenticated evidence remain the embedding application's duties.
 A supervisor that keeps its own case record calls `loom_governor::evaluate` (or runs
 `b10x-loom evaluate`, JSON in and out) with a catalog protocol, a `canon-case/1` snapshot and its
-`canon-evidence/1` records, and gets Canon's decision without Commission's types
-([the governor](https://beyond10x.github.io/loom/docs/concepts/governor-and-intake)).
+`canon-evidence/1` records (and any `canon-decisions/1` explicit decisions taken for the case), and
+gets Canon's decision without Commission's types; `CanonGovernor::decide` records such a decision
+on a held case ([the governor](https://beyond10x.github.io/loom/docs/concepts/governor-and-intake)).
 
 ```toml
 [dependencies]

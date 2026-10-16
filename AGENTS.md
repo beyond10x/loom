@@ -277,7 +277,11 @@ may share one directory; the testkit's `FileSuspensionStore` re-exports it, and
 `crates/loom-commission-testkit/tests/approval_suspend_resume.rs` holds both in one directory
 across a restart. The host
 restores the same admitted protocol definitions on recovery and authenticates evidence before
-`submit_evidence`. The governor supplies no authority decision.
+`submit_evidence`. The governor supplies no authority decision. The explicit decisions
+(`canon-decisions/1`) it supplies are the ones the host recorded with `CanonGovernor::decide`, each
+at the case revision current when recorded; `evaluate` takes them in the request's `decisions`.
+Canon judges them, and Loom decides nothing about who may take one
+(`crates/loom-governor/tests/explicit_decisions.rs`).
 
 `evaluate` (`loom_governor::evaluate`, `b10x-loom evaluate`) decides a caller's `canon-case/1`
 snapshot and `canon-evidence/1` records under a protocol of the host catalog, never raw YAML from

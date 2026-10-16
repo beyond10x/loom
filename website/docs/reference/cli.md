@@ -132,8 +132,10 @@ Usage: b10x-loom evaluate [OPTIONS]
 
 ```text
 The request is one JSON object (loom.evaluation.EvaluationRequest):
-  {"protocol": "<name>@<major>", "snapshot": {canon-case/1}, "evidence": [{canon-evidence/1}, ...], "at": "<RFC 3339>"}
-`at` is optional. The protocol comes from this host's catalog (`protocols list`), never from the request.
+  {"protocol": "<name>@<major>", "snapshot": {canon-case/1}, "evidence": [{canon-evidence/1}, ...], "at": "<RFC 3339>",
+   "decisions": [{"decision": "<name>", "outcome": "<outcome>", "principal": "<who>", "case_revision": "<revision>"}, ...]}
+`at` and `decisions` are optional. The protocol comes from this host's catalog (`protocols list`), never from the request.
+`decisions` are the canon-decisions/1 explicit decisions taken for the case; one applies only at the snapshot's revision.
 A record that is not a readable canon-evidence/1 record, or repeats an earlier record's id, is refused.
 A readable record that does not apply to the case (an undeclared kind or subject, for instance) is set
 aside, as the governor sets it aside, and the decision is made from the rest without listing it.

@@ -9,6 +9,26 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+### Added
+
+- Explicit decisions through the governor: an outcome that requires a decision
+  (`requires: decision: <name>`, for example `inconclusive` once a budget is spent) can now become
+  legitimate through Loom. `loom.evaluation.EvaluationRequest` gains `decisions`, a list of
+  `canon-decisions/1` entries (`ExplicitDecision`: the decision, the outcome, the principal who
+  took it and the case revision it was taken at), which `loom_governor::evaluate` and
+  `b10x-loom evaluate` hand to Canon; a decision taken at another revision than the snapshot's is
+  superseded, and Canon refuses a termination only it would make legitimate. Decisions Canon
+  refuses are reported with the new refusal input `Decisions`. `CanonGovernor::decide(case,
+  outcome, decision, principal)` records a decision on the held case at its current revision, so
+  later `frontier` and `completion` calls evaluate with it until the case moves; Canon refuses one
+  for an undeclared outcome or an outcome that does not require it (`DecisionError::Refused`), and
+  `FileCaseStore` keeps the decisions in `StoredCase.decisions`, left out when there are none, so
+  cases stored earlier read as cases with none. Loom decides nothing about who may take a decision.
+  Breaking: `EvaluationRequest` gains the field `decisions` and `CaseState` the field `decisions`,
+  so code that builds either with a struct literal adds `decisions: Vec::new()`; and
+  `EvaluationInput` gains the variant `Decisions`, so a host that matches it exhaustively handles
+  the variant.
+
 ## [0.23.0] - 2026-10-16
 
 Loom 0.23.0 runs a workflow's data collection concurrently and hands a judgement step its inputs

@@ -34,9 +34,18 @@
 //! registry or registered by [`CanonGovernor::with_protocol`], compiled with Canon and evaluated with
 //! `b10x_canon::eval::evaluate_with` over the case's `canon-case/1` snapshot and the evidence that
 //! applies. A trusted host may supply [`EvaluationTime`] for freshness; the governor reads no clock
-//! itself and supplies no explicit decision or authority decision. It never invents authority, so an action
+//! itself and supplies no authority decision. It never invents authority, so an action
 //! that requires a capability is at best `approval-required`; Commission asks its authority
 //! provider for it.
+//!
+//! The explicit decisions it supplies (`canon-decisions/1`) are the ones the host recorded on the
+//! case with [`CanonGovernor::decide`], each taken at the case revision current when it was
+//! recorded, so an outcome that requires a decision (`requires: decision: <name>`) is legitimate
+//! while the case is at that revision and blocked again once it moves. Canon judges each decision
+//! before it is recorded, and one it refuses (an outcome the protocol does not declare, or one that
+//! does not require a decision of that name) is refused ([`DecisionError::Refused`]) and nothing
+//! is kept. Who may take a decision is not the governor's to judge: it grants no authority with
+//! one.
 //!
 //! The frontier lists every action the protocol declares, with Canon's status, the capability the
 //! action requires (when it requires one) and, unless it is admissible, Canon's reasons, each
@@ -84,7 +93,8 @@
 //! `canon-evidence/1` records and an optional trusted time, and returns Canon's decision, projected
 //! as the frontier and completion are, with the whole `canon-decision/1` document beside it. It
 //! holds nothing, names no Commission type, and refuses an input it cannot use naming that input:
-//! the protocol, the snapshot, the evidence record by its position, or the time. A readable record
+//! the protocol, the snapshot, the evidence record by its position, the time, or the explicit
+//! decisions the request carries (`canon-decisions/1`, judged by Canon as for the governor). A readable record
 //! that does not apply to the case is set aside, as the governor sets it aside. Unlike the
 //! governor, which sets aside an unreadable record and the later of two records with one id and
 //! still decides, `evaluate` refuses both. The protocol comes only from the catalog, never from
@@ -109,7 +119,7 @@ pub use loom as model;
 
 use loom::evaluation::{
     ActionStatus as DecidedStatus, ClaimValue, DecidedAction, DecidedClaim, DecidedObligation,
-    EvaluationDecision, EvaluationInput, EvaluationRefusal, EvaluationRequest,
+    EvaluationDecision, EvaluationInput, EvaluationRefusal, EvaluationRequest, ExplicitDecision,
 };
 
 use b10x_canon::eval::{
@@ -153,6 +163,9 @@ pub struct CaseState {
     pub inputs: CaseInputs,
     /// Every evidence record received for the case, in the order received.
     pub evidence: Vec<HeldEvidence>,
+    /// Every explicit decision recorded for the case ([`CanonGovernor::decide`]), in the order
+    /// recorded, each at the Canon case revision (`r<revision>`) it was taken at.
+    pub decisions: Vec<ExplicitDecision>,
 }
 
 /// The value of each case input a case opens with, keyed by input id (`risk` → `standard`): the
@@ -470,6 +483,30 @@ impl fmt::Display for UpdateError {
 
 impl std::error::Error for UpdateError {}
 
+/// Why an explicit decision was not recorded ([`CanonGovernor::decide`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecisionError {
+    /// The store could not record the decision.
+    StoreUnavailable { problem: String },
+    /// The governor does not hold the case.
+    UnknownCase,
+    /// Canon refuses the decision for the case: `code` is Canon's refusal code
+    /// (`undeclared-outcome`, `undeclared-decision`, `invalid-identifier`, ...).
+    Refused { code: String, message: String },
+}
+
+impl fmt::Display for DecisionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::StoreUnavailable { problem } => write!(f, "case store unavailable: {problem}"),
+            Self::UnknownCase => f.write_str("the governor does not hold the case"),
+            Self::Refused { code, message } => write!(f, "{code}: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for DecisionError {}
+
 /// Why the governor refuses an evidence record's `observed_at` ([`CanonGovernor::check_evidence`]),
 /// naming the record by its evidence id. A refused record is not kept.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -759,6 +796,51 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             .unwrap_or(Err(UpdateError::UnknownCase))
     }
 
+    /// Records the explicit decision `decision`, taken for `outcome` by `principal`, on the case at
+    /// its current revision, so later `frontier` and `completion` calls evaluate with it until the
+    /// case moves. Recording a decision already held at that revision changes nothing. Canon judges
+    /// it first: one it refuses for the case is [`DecisionError::Refused`] and nothing is kept.
+    pub fn decide(
+        &self,
+        case: &CaseId,
+        outcome: &str,
+        decision: &str,
+        principal: &str,
+    ) -> Result<(), DecisionError> {
+        let (_, ir) = self.held_with_ir(case).map_err(|error| match error {
+            GovernorError::UnknownCase => DecisionError::UnknownCase,
+            _ => DecisionError::StoreUnavailable {
+                problem: "the held case cannot be read under its protocol".into(),
+            },
+        })?;
+        self.store
+            .update(case, |state| {
+                let taken = ExplicitDecision {
+                    decision: decision.to_owned(),
+                    outcome: outcome.to_owned(),
+                    principal: principal.to_owned(),
+                    case_revision: format!("r{}", state.revision),
+                };
+                if state.decisions.contains(&taken) {
+                    return Ok(());
+                }
+                let mut decisions = state.decisions.clone();
+                decisions.push(taken);
+                decide_case(&ir, &snapshot(&ir, state), &[], None, &decisions).map_err(
+                    |refusal| DecisionError::Refused {
+                        code: refusal.code().to_owned(),
+                        message: refusal.to_string(),
+                    },
+                )?;
+                state.decisions = decisions;
+                Ok(())
+            })
+            .map_err(|e| DecisionError::StoreUnavailable {
+                problem: e.to_string(),
+            })?
+            .unwrap_or(Err(DecisionError::UnknownCase))
+    }
+
     /// The current revision of every artifact of the case.
     pub fn revisions(&self, case: &CaseId) -> Result<BTreeMap<String, String>, GovernorError> {
         Ok(self.held(case)?.artifacts)
@@ -814,7 +896,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
     }
 
     /// Canon's decision for the case as held now, and the compiled protocol it was made under.
-    fn decide(&self, case: &CaseId) -> Result<(CaseState, Ir, Decision), GovernorError> {
+    fn decided(&self, case: &CaseId) -> Result<(CaseState, Ir, Decision), GovernorError> {
         let (state, ir) = self.held_with_ir(case)?;
         let records: Vec<EvidenceRecord> = state
             .evidence
@@ -826,8 +908,14 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             .time
             .at(case)
             .map_err(|_| GovernorError::GovernorUnavailable)?;
-        let decision = decide_case(&ir, &snapshot(&ir, &state), &records, at.as_deref())
-            .map_err(|_| GovernorError::GovernorUnavailable)?;
+        let decision = decide_case(
+            &ir,
+            &snapshot(&ir, &state),
+            &records,
+            at.as_deref(),
+            &state.decisions,
+        )
+        .map_err(|_| GovernorError::GovernorUnavailable)?;
         Ok((state, ir, decision))
     }
 }
@@ -845,7 +933,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> Governor for CanonGovernor<S, T> {
     }
 
     fn frontier(&self, case: &CaseId) -> Result<Frontier<frontier_state::Issued>, GovernorError> {
-        let (state, ir, decision) = self.decide(case)?;
+        let (state, ir, decision) = self.decided(case)?;
         let projection = project(&ir, &decision).ok_or(GovernorError::GovernorUnavailable)?;
         let claims = projection
             .claims
@@ -890,7 +978,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> Governor for CanonGovernor<S, T> {
     }
 
     fn completion(&self, case: &CaseId) -> Result<CompletionDetermination, GovernorError> {
-        let (_, _, decision) = self.decide(case)?;
+        let (_, _, decision) = self.decided(case)?;
         Ok(match completed(&decision) {
             Some(outcome) => {
                 CompletionDetermination::Complete(CompletionDeterminationComplete { outcome })
@@ -1101,6 +1189,7 @@ fn opened(
         artifacts: revisions.clone(),
         inputs: inputs.clone(),
         evidence: Vec::new(),
+        decisions: Vec::new(),
     }
 }
 
@@ -1262,28 +1351,61 @@ fn applies(ir: &Ir, state: &CaseState, data: &EvidenceData, at: Option<&str>) ->
         .filter_map(|held| canon_record(&held.data))
         .collect();
     records.push(record);
-    decide_case(ir, &snapshot(ir, state), &records, at).is_ok()
+    decide_case(ir, &snapshot(ir, state), &records, at, &state.decisions).is_ok()
 }
 
 /// Canon's decision for `case` under `ir` from `records`, at the trusted instant `at` when one is
-/// given, with no authority decision and no explicit decision supplied. Every evaluation the
-/// governor makes goes through here: the held case's ([`CanonGovernor`]'s `decide`), an arriving
-/// record's ([`applies`]) and a caller's snapshot ([`evaluate`]).
+/// given, with the explicit `decisions` (none supplied when empty) and no authority decision. Every
+/// evaluation the governor makes goes through here: the held case's ([`CanonGovernor`]'s
+/// `decided`), an arriving record's ([`applies`]), a decision being recorded
+/// ([`CanonGovernor::decide`]) and a caller's snapshot ([`evaluate`]).
 fn decide_case(
     ir: &Ir,
     case: &Case,
     records: &[EvidenceRecord],
     at: Option<&str>,
+    decisions: &[ExplicitDecision],
 ) -> Result<Decision, Refusal> {
+    let decisions = (!decisions.is_empty()).then(|| canon_decisions(decisions));
     evaluate_with(
         ir,
         case,
         records,
         Supplied {
             at,
+            decisions: decisions.as_deref(),
             ..Supplied::default()
         },
     )
+}
+
+/// `decisions` as a `canon-decisions/1` document: a JSON list, which Canon's YAML reader reads as
+/// the values it holds, every name a string whatever it spells.
+fn canon_decisions(decisions: &[ExplicitDecision]) -> String {
+    let mut out = String::from("[");
+    for (index, entry) in decisions.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        let members = [
+            ("decision", &entry.decision),
+            ("outcome", &entry.outcome),
+            ("principal", &entry.principal),
+            ("case_revision", &entry.case_revision),
+        ];
+        out.push('{');
+        for (position, (name, value)) in members.into_iter().enumerate() {
+            if position > 0 {
+                out.push(',');
+            }
+            loom::json::push_text(&mut out, name);
+            out.push(':');
+            loom::json::push_text(&mut out, value);
+        }
+        out.push('}');
+    }
+    out.push(']');
+    out
 }
 
 /// Canon's status of one action.
@@ -1386,8 +1508,11 @@ fn completed(decision: &Decision) -> Option<String> {
 
 /// Canon's decision for a case the caller keeps: `request` names a protocol of the host's
 /// `catalog` (`<name>@<major>`), a `canon-case/1` snapshot, the `canon-evidence/1` records and an
-/// optional trusted instant. Nothing is held, no clock is read and no authority decision is
-/// supplied; the decision is reported as [`CanonGovernor`] reports its frontier and completion.
+/// optional trusted instant, and the explicit `canon-decisions/1` decisions taken for the case.
+/// Nothing is held, no clock is read and no authority decision is supplied; the decision is
+/// reported as [`CanonGovernor`] reports its frontier and completion. A decision applies only at
+/// the snapshot's revision: one taken at another revision is superseded, and a termination only
+/// it would make legitimate is refused, as Canon refuses it.
 ///
 /// A record that reads as a `canon-evidence/1` record but that Canon refuses for this case (a kind
 /// or subject the protocol does not declare, for instance) is set aside, as `CanonGovernor` sets it
@@ -1401,8 +1526,10 @@ fn completed(decision: &Decision) -> Option<String> {
 /// A refusal names the input it is about: an unknown or uncompilable protocol; a snapshot that is
 /// not a `canon-case/1` document, that Canon refuses for the protocol, or whose termination the
 /// records do not make legitimate; a record that is not a readable `canon-evidence/1` record, or
-/// that repeats an earlier record's id (by its position in `evidence`, the later one); or a time
-/// Canon cannot read. The time and the records are judged before the decision is made, once each.
+/// that repeats an earlier record's id (by its position in `evidence`, the later one); a time
+/// Canon cannot read; or decisions Canon refuses (an entry that is not an identifier, one given
+/// twice, one for an undeclared outcome or for an outcome that does not require it). The time,
+/// the decisions and the records are judged before the decision is made, once each.
 pub fn evaluate(
     catalog: &ProtocolCatalog,
     request: &EvaluationRequest,
@@ -1469,21 +1596,26 @@ pub fn evaluate(
         termination: None,
         ..case.clone()
     };
-    decide_case(&ir, &open, &[], None)
+    let decisions = request.decisions.as_slice();
+    decide_case(&ir, &open, &[], None, &[])
         .map_err(|refusal| canon_refused(EvaluationInput::Snapshot, None, &refusal))?;
-    decide_case(&ir, &open, &[], at)
+    decide_case(&ir, &open, &[], at, &[])
         .map_err(|refusal| canon_refused(EvaluationInput::Time, None, &refusal))?;
-    let decision = match decide_case(&ir, &case, &records, at) {
+    decide_case(&ir, &open, &[], at, decisions)
+        .map_err(|refusal| canon_refused(EvaluationInput::Decisions, None, &refusal))?;
+    let decision = match decide_case(&ir, &case, &records, at, decisions) {
         Ok(decision) => decision,
         Err(_) => {
             // As `CanonGovernor` does on arrival, a record Canon refuses for this case is set
             // aside; what Canon still refuses with the rest is the snapshot's termination.
             let applying: Vec<EvidenceRecord> = records
                 .iter()
-                .filter(|record| decide_case(&ir, &open, std::slice::from_ref(record), at).is_ok())
+                .filter(|record| {
+                    decide_case(&ir, &open, std::slice::from_ref(record), at, decisions).is_ok()
+                })
                 .cloned()
                 .collect();
-            decide_case(&ir, &case, &applying, at)
+            decide_case(&ir, &case, &applying, at, decisions)
                 .map_err(|refusal| canon_refused(EvaluationInput::Snapshot, None, &refusal))?
         }
     };
