@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-16T01:33:09Z",
+  "actor": "human:timo",
+  "artifact": "story:dw-judgement-step-inputs",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "merged in 39a233e; package gate on df8082f: fmt, clippy -D warnings and cargo test of b10x-loom-executor (workflow_step_outputs 11 passed) and loom, drift, docs-check and ess-gate exit 0; gate on 933faa0 (wave head, ess 0.60.0): fmt, cargo check and clippy -D warnings of the workspace, cargo test of b10x-loom-commission, b10x-loom-commission-testkit, b10x-loom-connectors, commission, b10x-loom-executor, b10x-loom-sdk, b10x-loom-intake-slice and loom-xtask, drift, commission:drift, docs-check, commission:docs-drift, ess-gate, commission:ess-gate, commission:conform, commission:no-hand-model, intake-spec and intake-drift exit 0"
+  }
+}

@@ -310,7 +310,6 @@ fn gated(
 /// twice and returns, B turns once and returns, then the host turns three times outside any
 /// executor call. Each executor call's turns belong to its own step, and the host's to step 0.
 #[test]
-#[ignore = "RunMeter's contract: executor calls on one meter do not overlap; story:meter-overlapping-calls would lift it"]
 fn two_executors_sharing_a_meter_each_count_their_own_calls() {
     let port = Port::new([]);
     let meter = RunMeter::new(None);
@@ -344,7 +343,6 @@ fn two_executors_sharing_a_meter_each_count_their_own_calls() {
 /// One executor call is one step, even when the executor the run holds is a metered executor
 /// over another metered executor of the same meter.
 #[test]
-#[ignore = "MeteredExecutor's contract: an executor is wrapped by one MeteredExecutor; story:meter-overlapping-calls would lift it"]
 fn nested_metered_executors_on_one_meter_open_one_step_per_executor_call() {
     let port = Port::new([]);
     let meter = RunMeter::new(None);

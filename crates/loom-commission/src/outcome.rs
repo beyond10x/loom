@@ -63,8 +63,9 @@ pub struct CapabilityVerdict<'a> {
 /// 5. the executor proposed an action the frontier marks as needing a capability, and `authority`
 ///    is a verdict for exactly that capability: on `ApprovalRequired`, needs authority, carrying
 ///    its request; on `Allow`, continue. A verdict for any other capability counts as none;
-/// 6. otherwise — no useful action, `CompletedLocalReasoning`, `CaseMoved`, or a proposal that is
-///    refused, denied or not decided — the frontier decides: continue if it admits some action,
+/// 6. otherwise — no useful action, `CompletedLocalReasoning`, `CaseMoved`, a proposal that is
+///    refused, denied or not decided, or a fan-out of reads (`ProposedReads`), which the runtime
+///    derives an outcome for only when it admitted none of them — the frontier decides: continue if it admits some action,
 ///    needs external evidence carrying its open obligations if it has any, else no admissible
 ///    action. For `CaseMoved` the runtime passes the frontier the case was reloaded at, not the
 ///    one the executor was handed.
@@ -113,7 +114,8 @@ pub fn derive<S: frontier_state::Marker>(
         },
         ExecutorOutcome::NoUsefulAction(_)
         | ExecutorOutcome::CompletedLocalReasoning(_)
-        | ExecutorOutcome::CaseMoved(_) => {}
+        | ExecutorOutcome::CaseMoved(_)
+        | ExecutorOutcome::ProposedReads(_) => {}
     }
     from_frontier(frontier)
 }

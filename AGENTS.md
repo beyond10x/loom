@@ -95,6 +95,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | A blocked or merge-seeking pick is never proposed | `crates/loom-executor/tests/adversary_executor_admission.rs` |
 | A workflow asks a model only in a judgement step, offering it only that step's actions; a step whose action the frontier does not list ends `NeedsHumanJudgment` naming it and nothing is proposed; a step advances only once its request was `Performed`; a definition naming an action outside its protocol is refused at load, naming the step | `crates/loom-executor/tests/workflow_executor.rs` (`deterministic_steps_call_no_model`, `a_judgement_step_offers_the_model_only_its_actions`, `a_step_the_frontier_does_not_list_ends_needing_human_judgment`, `a_step_advances_only_after_its_effect_was_performed`, `a_definition_naming_an_action_outside_its_protocol_is_refused`) |
 | A later step's arguments carry an earlier step's typed output with no model call, and a missing or mistyped output, or one its step did not produce, proposes nothing and ends `NeedsHumanJudgment` naming the step and the output; a reference to a later, unknown or undeclared output is refused at load | `crates/loom-executor/tests/workflow_step_outputs.rs` (`a_later_step_reads_an_earlier_output_without_a_model`, `a_mistyped_output_ends_needing_human_judgment`, `an_absent_output_ends_needing_human_judgment`, `a_reference_to_a_later_or_unknown_step_is_refused_at_load`, `outputs_are_identical_on_a_rerun_with_the_same_reports`) |
+| A judgement step sees exactly the earlier outputs it lists, typed, in one data block of its instructions that no value can close, never as instructions; a listed output the run did not produce asks the model nothing and ends `NeedsHumanJudgment` naming the step and the output; an input naming no earlier declared output, or listed twice, is refused at load | `crates/loom-executor/tests/workflow_step_outputs.rs` (`a_judgement_step_reads_a_listed_output_as_data`, `a_judgement_step_listing_an_absent_output_asks_no_model`, `a_judgement_step_input_naming_no_earlier_output_is_refused_at_load`) |
 | A stale or unlisted request is refused at revalidation | `crates/loom-commission-testkit/tests/action_request.rs`, `crates/loom-executor/tests/adversary_run_revalidation.rs`, `crates/loom-executor/tests/selection_revalidation.rs` |
 | Unknown capabilities and panicking authority providers yield no grant | `crates/loom-commission-testkit/tests/adversary_authority_fail_closed.rs` |
 | Commission names no executor, Canon, `model-provider-deny.txt`, Connectors or Mandate crate | `task commission:deps-guard` (`crates/loom-commission-testkit/tests/executor_port.rs`) |
@@ -102,6 +103,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | With `--mandate`, a resume performs the held request only when Mandate's `check_with_approval` clears and consumes the approval the grant names, kept in the state directory's log before anything is performed: a second resume with it, an expired approval, one naming another subject, action or resource, one recorded for another commission however its id is written, and a grant naming none are refused and perform nothing; without `--mandate`, a grant naming an approval is refused and performs nothing; the approver is neither the verified subject nor its actor; only `b10x-loom-cli` links `b10x-loom-mandate`, and only it and `loom-docs` reach Mandate over `Cargo.lock` | `crates/loom-cli/tests/resume_after_grant.rs` (`a_recorded_approval_clears_the_held_request_once`, `a_second_resume_with_the_same_approval_is_refused_and_performs_nothing`, `an_expired_approval_is_refused_and_performs_nothing`, `the_grant_names_its_mandate_approval`), `crates/loom-cli/tests/adversary_w10_u3.rs` (`adversary_a_resume_without_mandate_does_not_perform_a_grant_naming_a_mandate_approval`), `crates/loom-cli/tests/security_w10_u3.rs` (`security_an_approval_is_bound_to_its_commission_however_its_id_is_written`), `crates/loom-mandate/tests/mandate_approval.rs` (`an_approval_naming_another_subject_action_or_resource_is_refused`), `crates/loom-mandate/tests/adversary_w10_u3.rs` (`adversary_a_host_file_whose_approver_is_the_acting_actor_is_refused`), `crates/loom-mandate/tests/security_w10_u2.rs` |
 | An executor's report that the case moved is decided by the governor and judged on the case's current frontier, reloaded once | `crates/loom-commission-testkit/tests/moved_case_outcome.rs`, `crates/loom-executor/tests/adversary_w1_runtime_stale.rs`, `crates/loom-executor/tests/adversary_w1p2_runtime_windows.rs` |
 | An executor is never handed an unperformed action that needs no authority; an effect is invoked once, through its binding | `crates/loom-commission-testkit/tests/effect_invocation.rs` (`effect_invoked_only_through_its_binding`) |
+| Reads proposed together (`ProposedReads`) are admitted only when the effect port reads every one and the handed frontier lists each `Admissible` with no authority, else nothing is invoked; admitted reads are revalidated each, invoked concurrently, each once through its binding, joined, and recorded in proposal order; a stale read alone is not invoked; an effect error fails the loop after every read joined; a fan-out is one step | `crates/loom-commission-testkit/tests/read_fan_out.rs` (`admitted_reads_run_concurrently_and_join`, `effects_are_recorded_in_proposal_order`, `a_fan_out_with_a_write_or_an_approval_required_read_invokes_nothing`, `a_stale_read_is_refused_and_the_others_are_performed`, `an_effect_error_fails_the_loop_after_every_read_joined`), `crates/loom-connectors/tests/read_fan_out.rs` (`each_read_is_invoked_once_through_its_binding`) |
 | A consequential action leaves Loom only as a proposal, and the executor links no Connectors crate | `crates/loom-executor/tests/connector_boundary.rs` (`consequential_actions_leave_loom_only_as_a_proposal`) |
 | A Connector invocation is made once, and only Connectors' own "nothing changed" is a refusal | `crates/loom-connectors/tests/connectors_invoker.rs` |
 | A plugin turn reads only the sources and kinds of its projection, and a proposal is recorded, never sent | `crates/loom-plugin/tests/effects.rs` (`effects_refuse_an_undeclared_read`, `propose_writes_the_record_only`) |
@@ -160,7 +162,7 @@ changing `ess/`. Every story names that change and that test in its `## ESS firs
 change with no behaviour change is exempt, and its story says so.
 
 `ess_gate.rs` (both copies) reads this section and fails when a phrase it checks is gone; reword
-with the tests open. CI installs `ess` 0.59.0 (`.github/workflows/check.yml`); move that pin when a
+with the tests open. CI installs `ess` 0.60.0 (`.github/workflows/check.yml`); move that pin when a
 newer ESS ships.
 
 ## Gate
@@ -520,6 +522,17 @@ in the run (the step was skipped) does the same naming the referring step. `load
 naming the referring step, a reference to a later step, to itself, to an unknown step or to an
 undeclared output, and a malformed reference; and, naming the declaring step, an output declared
 twice or a malformed pointer.
+
+A judgement step lists the earlier outputs it is given (`story:dw-judgement-step-inputs`;
+`inputs`, a list of `loom.workflow.OutputReference`: a `step` and an `output`). When the step is
+proposed, the runtime appends exactly those values to the step's instructions as one data block,
+`<workflow-inputs>` around a JSON list of `{step, output, type, value}` with the type its step
+declares, introduced as data and never as instructions; `<`, `>` and `&` inside it are written as
+`\u` escapes, so no value can close the block. The model never reads them from the transcript, and
+no model supplies an output. A listed output the run did not produce (its step was skipped) or one
+not of its declared type ends the call `NeedsHumanJudgment` naming the judgement step and the
+output, and asks the model nothing. `load` refuses, naming the judgement step, an input naming a
+later step, the step itself, an unknown step or an undeclared output, and an input listed twice.
 
 ## Intake and the command line
 

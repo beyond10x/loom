@@ -20,7 +20,8 @@
 //!    run as item 2 says; only a case still at the revision held is suspended for its budget;
 //! 1. [`Governor::current_revision`]: the case is loaded. After an iteration whose effect the port
 //!    reported `Performed`, the loaded revision is the one the loop holds the case at from then on;
-//!    after a `Refused` one, as after no effect, a move is somebody else's;
+//!    after a `Refused` one, as after no effect or a fan-out with a stale read (8a), a move is
+//!    somebody else's;
 //! 2. [`Governor::completion`]: a case the governor holds complete ends the run completed, carrying
 //!    the governor's outcome, and the iteration makes no further call. Otherwise, when the loaded
 //!    revision is not the one the loop holds the case at, the runtime has found a move itself (as
@@ -59,8 +60,8 @@
 //!    reported to the [`ObservationPort`] as one observation: its id and time come from the
 //!    [`LoopContext`], its source is `executor`, its subject is `<case>@<frontier revision>`, and
 //!    its payload names the outcome (`outcome`) and carries a proposal's `action` and `arguments`,
-//!    a human request's `request`, or a reported move's `expected_case_revision`. It is never
-//!    evidence;
+//!    a fan-out's `reads` (each an `action` and its `arguments`, in the order proposed), a human
+//!    request's `request`, or a reported move's `expected_case_revision`. It is never evidence;
 //! 7. on `Suspended`, the Run is suspended through `SuspendRun` with the executor's reason and the
 //!    run ends suspended, carrying it. The Run is suspended with that reason even when delivering
 //!    the step's observation failed; the loop then returns that failure as a [`LoopError`] that
@@ -82,6 +83,29 @@
 //!    `CaseMovedOn` or with no admissible action (2). Otherwise, and after an authority answer other than an allow, the run
 //!    outcome is derived ([`derive`]) from the frontier the executor was handed, and the case is
 //!    not loaded again;
+//!
+//!    8a. on `ProposedReads` (`architecture-decision-record:read-fan-out`), the fan-out is admitted
+//!    only when it lists at least one and at most [`MAX_FAN_OUT`] reads, no two with the same
+//!    action and arguments (each read is invoked once), and each names an action the effect port
+//!    performs and reads ([`EffectPort::reads`]) that the handed frontier lists, every entry of it
+//!    `Admissible` and naming no capability. Otherwise the whole proposal is
+//!    refused: no request is made, no authority is asked, nothing is invoked, and the run outcome
+//!    is derived as for a refused proposal. An admitted fan-out makes one request per read, in the
+//!    order proposed, each with its own id from the context and bound to the frontier's revision,
+//!    and revalidates every one before any is invoked. A read whose revalidation does not answer
+//!    `Admitted` (a stale one, or one that needs authority by then) is recorded with its answer
+//!    and not invoked; the others go on. The admitted reads are recorded as admitted and handed
+//!    together to [`EffectPort::invoke_reads`], which invokes each once, concurrently, and joins
+//!    them; a port that answers `None` fails the loop as an effect failure. Their effects are
+//!    recorded and observed as in 8, in the order proposed, not the order they finished. A
+//!    `Refused` read cancels nothing; an `Err` from any read fails the loop once every read has
+//!    answered and each that answered was recorded and observed, and nothing is retried. When a
+//!    read was stale, somebody else moved the case: once the admitted reads were recorded, the
+//!    iteration is as a stale proposal, so the next one loads the case and judges the move (2), and
+//!    no read of the fan-out makes the loaded revision the Run's (1). When no read was admitted and
+//!    none was stale, the iteration is as a refused proposal. A fan-out is one step, for the step
+//!    budget and the idle bound alike; it is progress when one of its admitted reads is new, and it
+//!    never passes the approval gate (5);
 //! 9. on `CaseMoved`, by which the executor reports that the case moved while it worked, naming
 //!    the revision of the frontier it was handed (`story:moved-case-outcome`), the governor decides
 //!    whether it moved: the case is loaded once more ([`Governor::current_revision`]). At the
@@ -108,8 +132,8 @@
 //!
 //! Without a step budget the loop is bounded where the frontier does not change: two iterations in
 //! a row that are idle end the run with no admissible action. An iteration is idle when it admits
-//! no request, or admits only a request with the action and arguments of one already admitted in
-//! this Run, at whatever revision: an effect that moved the case does not make the same proposal
+//! no request, or admits only requests with the action and arguments of ones already admitted in
+//! this Run, at whatever revision (a refused fan-out admits none): an effect that moved the case does not make the same proposal
 //! new. A newly admitted request starts the count again. Idle covers `NoUsefulAction`,
 //! `CompletedLocalReasoning`, a refused proposal, an authority answer other than an allow and a
 //! repeated admission alike, and a `CaseMoved` the governor does not bear out counts as
@@ -197,14 +221,15 @@ use crate::model::responsibility::obligations::{
 };
 use crate::model::responsibility::{
     ActionRequest, ActionRequestData, ActionRequestId, ActionStatus, AnyRun, AuthorityVerdict,
-    CaseId, Commission, CompletionDetermination, EffectOutcome, ExecutorOutcome, Frontier,
-    FrontierAction, FrontierData, GovernorError, HoldSuspension, HoldSuspensionOutcome,
-    Observation, ObservationData, ObservationId, ReleaseSuspension, ReleaseSuspensionOutcome,
-    ResumeRun, ResumeRunOutcome, RevalidateActionRequestOutcome, Run, RunData, RunId, RunOutcome,
-    RunOutcomeAwaitingApproval, RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeSuspended,
-    RunStarted, RunStorageFailed, StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome,
-    SuspensionKey, SuspensionReason, SuspensionState, SuspensionStateConflict, TakeSuspension,
-    TakeSuspensionOutcome, Unit, commission_state, frontier_state, observation_state,
+    CaseId, Commission, CompletionDetermination, EffectOutcome, ExecutorOutcome,
+    ExecutorOutcomeProposedAction, Frontier, FrontierAction, FrontierData, GovernorError,
+    HoldSuspension, HoldSuspensionOutcome, Observation, ObservationData, ObservationId,
+    ReleaseSuspension, ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome,
+    RevalidateActionRequestOutcome, Run, RunData, RunId, RunOutcome, RunOutcomeAwaitingApproval,
+    RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeSuspended, RunStarted, RunStorageFailed,
+    StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionKey, SuspensionReason,
+    SuspensionState, SuspensionStateConflict, TakeSuspension, TakeSuspensionOutcome, Unit,
+    commission_state, frontier_state, observation_state,
 };
 use crate::outcome::{CapabilityVerdict, Derived, derive};
 use crate::ports::authority::{AuthorityCheck, AuthorityProvider, check_authority};
@@ -237,6 +262,10 @@ pub trait LoopContext {
 
 /// The steps a loop with no step budget takes at most before it suspends the Run for `Budget`.
 pub const UNBUDGETED_STEP_LIMIT: usize = 64;
+
+/// The most reads one `ExecutorOutcome::ProposedReads` may list; a longer fan-out is refused whole
+/// (`architecture-decision-record:read-fan-out`).
+pub const MAX_FAN_OUT: usize = 16;
 
 /// One action request the loop made and how its revalidation answered.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1011,6 +1040,31 @@ where
                 granted = effected && matches!(verdict, Some((_, AuthorityVerdict::Allow(_))));
             }
         }
+        // A fan-out of reads (8a): refused whole unless every read is admissible on the handed
+        // frontier and one the port reads; otherwise each read is revalidated, and the admitted
+        // ones are invoked together. It is one step.
+        if let ExecutorOutcome::ProposedReads(proposed) = &outcome
+            && fans_out(&proposed.reads, &handed, effects)
+        {
+            let fanned = fan_out(
+                governor,
+                effects,
+                commission,
+                context,
+                run_id,
+                &frontier,
+                &proposed.reads,
+                &mut track,
+            )?;
+            if fanned.admitted {
+                decided = true;
+                progressed = fanned.progressed;
+                // A stale read shows that somebody else moved the case: no read of this fan-out
+                // makes the revision the next iteration loads the Run's own (1, 8a).
+                effected = fanned.performed && !fanned.stale;
+            }
+            stale = fanned.stale;
+        }
 
         if !decided && !stale {
             let counted = verdict
@@ -1344,6 +1398,160 @@ fn performs_none<F: EffectPort + ?Sized>(
             .any(|listed| effects.performs(&listed.action))
 }
 
+/// Whether a fan-out of `reads` is admitted (item 8a): it lists at least one and at most
+/// [`MAX_FAN_OUT`] reads, no two with the same action and arguments, and each names an action the
+/// effect port performs and reads ([`EffectPort::reads`]) that the `handed` frontier lists, every
+/// entry of it `Admissible` and naming no capability.
+fn fans_out<F: EffectPort + ?Sized>(
+    reads: &[ExecutorOutcomeProposedAction],
+    handed: &Frontier<frontier_state::Issued>,
+    effects: &F,
+) -> bool {
+    let admissible = |action: &str| {
+        let mut listed = handed
+            .data()
+            .actions
+            .iter()
+            .filter(|entry| entry.action == action)
+            .peekable();
+        listed.peek().is_some()
+            && listed.all(|entry| {
+                entry.status == ActionStatus::Admissible
+                    && entry.capability.as_deref().is_none_or(str::is_empty)
+            })
+    };
+    // Two reads with the same action and arguments would invoke one read twice in one step.
+    let distinct = reads.iter().enumerate().all(|(at, read)| {
+        reads[..at]
+            .iter()
+            .all(|earlier| earlier.action != read.action || earlier.arguments != read.arguments)
+    });
+    (1..=MAX_FAN_OUT).contains(&reads.len())
+        && distinct
+        && reads.iter().all(|read| {
+            effects.performs(&read.action)
+                && effects.reads(&read.action)
+                && admissible(&read.action)
+        })
+}
+
+/// What one admitted fan-out did.
+struct FannedOut {
+    /// Whether any read was admitted, and so invoked.
+    admitted: bool,
+    /// Whether any admitted read has the action and arguments of no request admitted before it.
+    progressed: bool,
+    /// Whether any effect was `Performed`.
+    performed: bool,
+    /// Whether some revalidation answered stale: the case moved under somebody else.
+    stale: bool,
+}
+
+/// Performs the fan-out `reads`, which [`fans_out`] admitted, as item 8a documents: each read
+/// becomes its own request at `frontier`'s revision and is revalidated, all before any is invoked;
+/// the admitted ones are handed to [`EffectPort::invoke_reads`] together, and their effects are
+/// recorded and observed in the order proposed. An `Err` from a read fails the loop once every
+/// read has answered and each that answered was recorded and observed; the first `Err` in proposal
+/// order is the failure. Nothing is retried, and no authority is asked.
+// The ports, the loop's state and the proposal.
+#[allow(clippy::too_many_arguments)]
+fn fan_out<G, F, C>(
+    governor: &G,
+    effects: &F,
+    commission: &Commission<commission_state::Assigned>,
+    context: &mut C,
+    run_id: &RunId,
+    frontier: &Frontier<frontier_state::Issued>,
+    reads: &[ExecutorOutcomeProposedAction],
+    track: &mut Track,
+) -> Result<FannedOut, Stopped>
+where
+    G: Governor + ObservationPort + ?Sized,
+    F: EffectPort + ?Sized,
+    C: LoopContext + ?Sized,
+{
+    let mut admitted: Vec<ActionRequestData> = Vec::new();
+    let mut stale = false;
+    for read in reads {
+        let made = request(
+            context.action_request_id(),
+            run_id.clone(),
+            frontier,
+            read.clone(),
+        );
+        let answer = revalidate(governor, &made)?;
+        let data = made.into_data();
+        track.requests.push(Revalidated {
+            request: data.clone(),
+            outcome: answer.clone(),
+        });
+        match answer {
+            RevalidateActionRequestOutcome::Admitted => admitted.push(data),
+            RevalidateActionRequestOutcome::Stale { .. } => stale = true,
+            // A read that needs authority is never performed in a fan-out.
+            RevalidateActionRequestOutcome::NeedsAuthority { .. }
+            | RevalidateActionRequestOutcome::NotAdmitted { .. } => {}
+        }
+    }
+    if admitted.is_empty() {
+        return Ok(FannedOut {
+            admitted: false,
+            progressed: false,
+            performed: false,
+            stale,
+        });
+    }
+    let progressed = admitted.iter().any(|data| {
+        !track
+            .admitted
+            .iter()
+            .any(|earlier| earlier.action == data.action && earlier.arguments == data.arguments)
+    });
+    track.admitted.extend(admitted.iter().cloned());
+    let requests: Vec<AdmittedRequest> =
+        admitted.iter().cloned().map(AdmittedRequest::new).collect();
+    let answers = match effects.invoke_reads(commission, &requests) {
+        Some(answers) if answers.len() == requests.len() => answers,
+        Some(answers) => {
+            return Err(LoopFailure::Effect(EffectError::new(format!(
+                "the effect port answered {} of {} reads",
+                answers.len(),
+                requests.len()
+            )))
+            .into());
+        }
+        None => {
+            return Err(LoopFailure::Effect(EffectError::new(
+                "the effect port reads the actions proposed but invokes no fan-out",
+            ))
+            .into());
+        }
+    };
+    let mut performed = false;
+    let mut failed: Option<EffectError> = None;
+    for (data, answer) in admitted.iter().zip(answers) {
+        match answer {
+            Ok(effect) => {
+                performed |= matches!(effect, EffectOutcome::Performed(_));
+                track.effects.push(effect.clone());
+                governor.observe(effect_observation(context, data, &effect))?;
+            }
+            Err(error) => {
+                failed.get_or_insert(error);
+            }
+        }
+    }
+    if let Some(error) = failed {
+        return Err(LoopFailure::Effect(error).into());
+    }
+    Ok(FannedOut {
+        admitted: true,
+        progressed,
+        performed,
+        stale,
+    })
+}
+
 /// How a run ends after its executor reported `CaseMoved` (item 9), or proposed nothing on a
 /// frontier that would end the run (item 10), or `None` when the governor does not bear a move
 /// out: it holds `case` at `held`, the revision the loop holds it at. Otherwise the case is judged
@@ -1520,6 +1728,24 @@ fn observation<C: LoopContext + ?Sized>(
             ("outcome".to_owned(), text("ProposedAction")),
             ("action".to_owned(), text(&proposed.action)),
             ("arguments".to_owned(), proposed.arguments.0.clone()),
+        ],
+        ExecutorOutcome::ProposedReads(proposed) => vec![
+            ("outcome".to_owned(), text("ProposedReads")),
+            (
+                "reads".to_owned(),
+                Value::Array(
+                    proposed
+                        .reads
+                        .iter()
+                        .map(|read| {
+                            Value::Object(vec![
+                                ("action".to_owned(), text(&read.action)),
+                                ("arguments".to_owned(), read.arguments.0.clone()),
+                            ])
+                        })
+                        .collect(),
+                ),
+            ),
         ],
         ExecutorOutcome::NeedsHumanJudgment(needs) => vec![
             ("outcome".to_owned(), text("NeedsHumanJudgment")),

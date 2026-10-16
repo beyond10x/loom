@@ -337,7 +337,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-cli"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -365,14 +365,14 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-commission"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "commission",
 ]
 
 [[package]]
 name = "b10x-loom-commission-conformance"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "b10x-loom-commission",
  "ess-conformance",
@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-commission-testkit"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-executor",
@@ -394,7 +394,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-conformance"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "b10x-loom-executor",
  "ess-conformance",
@@ -404,7 +404,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-connectors"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
@@ -417,7 +417,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-executor"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "b10x-llm-credentials",
  "b10x-loom-commission",
@@ -437,7 +437,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-governor"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "b10x-canon",
  "b10x-canon-engineering",
@@ -453,14 +453,14 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-intake-references"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "regex",
 ]
 
 [[package]]
 name = "b10x-loom-intake-router"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "b10x-canon-engineering",
  "b10x-llm-core",
@@ -472,7 +472,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-intake-slice"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "b10x-canon-engineering",
  "b10x-llm-core",
@@ -498,7 +498,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-mandate"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
@@ -516,7 +516,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-plugin"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-tool-call",
@@ -529,7 +529,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-plugin-slack"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-loom-plugin",
@@ -540,7 +540,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-protocols"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "b10x-canon",
  "b10x-canon-engineering",
@@ -553,7 +553,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-sdk"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-connectors",
@@ -566,7 +566,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-selector-laya"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-http",
@@ -1145,8 +1145,8 @@ dependencies = [
 
 [[package]]
 name = "ess-compiler"
-version = "0.59.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.59.0#56bd965b4a54e4f57afdcf1c1868317bcd0237b4"
+version = "0.60.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.60.0#19d601013b867f0e6f5061f097fa81d55a734bb1"
 dependencies = [
  "ess-domain",
  "ess-primitives",
@@ -1157,70 +1157,93 @@ dependencies = [
 
 [[package]]
 name = "ess-conformance"
-version = "0.59.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.59.0#56bd965b4a54e4f57afdcf1c1868317bcd0237b4"
+version = "0.60.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.60.0#19d601013b867f0e6f5061f097fa81d55a734bb1"
 dependencies = [
  "ess-compiler",
  "ess-domain",
  "ess-gen",
  "ess-primitives",
+ "ess-yaml",
  "serde",
  "serde_json",
- "serde_yaml",
  "sha2 0.11.0",
 ]
 
 [[package]]
 name = "ess-domain"
-version = "0.59.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.59.0#56bd965b4a54e4f57afdcf1c1868317bcd0237b4"
+version = "0.60.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.60.0#19d601013b867f0e6f5061f097fa81d55a734bb1"
 dependencies = [
  "ess-primitives",
+ "ess-yaml",
  "schemars",
  "serde",
  "serde_json",
- "serde_yaml",
  "thiserror",
 ]
 
 [[package]]
 name = "ess-gen"
-version = "0.59.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.59.0#56bd965b4a54e4f57afdcf1c1868317bcd0237b4"
+version = "0.60.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.60.0#19d601013b867f0e6f5061f097fa81d55a734bb1"
+dependencies = [
+ "ess-compiler",
+ "ess-domain",
+ "ess-http",
+ "ess-primitives",
+ "ess-transport",
+ "ess-yaml",
+ "pulldown-cmark",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+]
+
+[[package]]
+name = "ess-http"
+version = "0.60.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.60.0#19d601013b867f0e6f5061f097fa81d55a734bb1"
 dependencies = [
  "ess-compiler",
  "ess-domain",
  "ess-primitives",
- "ess-transport",
- "pulldown-cmark",
+ "ess-yaml",
  "serde",
  "serde_json",
- "serde_yaml",
  "sha2 0.11.0",
 ]
 
 [[package]]
 name = "ess-primitives"
-version = "0.59.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.59.0#56bd965b4a54e4f57afdcf1c1868317bcd0237b4"
+version = "0.60.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.60.0#19d601013b867f0e6f5061f097fa81d55a734bb1"
 dependencies = [
+ "ess-yaml",
  "schemars",
  "serde",
  "serde_json",
- "serde_yaml",
  "thiserror",
 ]
 
 [[package]]
 name = "ess-transport"
-version = "0.59.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.59.0#56bd965b4a54e4f57afdcf1c1868317bcd0237b4"
+version = "0.60.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.60.0#19d601013b867f0e6f5061f097fa81d55a734bb1"
 dependencies = [
  "ess-compiler",
  "ess-domain",
+ "ess-yaml",
  "serde",
  "serde_json",
- "serde_yaml",
+]
+
+[[package]]
+name = "ess-yaml"
+version = "0.60.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.60.0#19d601013b867f0e6f5061f097fa81d55a734bb1"
+dependencies = [
+ "serde_norway",
 ]
 
 [[package]]
@@ -2909,7 +2932,7 @@ version = "1.0.0"
 
 [[package]]
 name = "loom-commission-docs"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "clap",
  "serde_json",
@@ -2917,7 +2940,7 @@ dependencies = [
 
 [[package]]
 name = "loom-commission-xtask"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "clap",
  "proc-macro2",
@@ -2927,7 +2950,7 @@ dependencies = [
 
 [[package]]
 name = "loom-docs"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "anyhow",
  "b10x-loom-cli",
@@ -2937,7 +2960,7 @@ dependencies = [
 
 [[package]]
 name = "loom-xtask"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "clap",
  "proc-macro2",
@@ -3811,6 +3834,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_norway"
+version = "0.9.42"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e408f29489b5fd500fab51ff1484fc859bb655f32c671f307dcd733b72e8168c"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml-norway",
+]
+
+[[package]]
 name = "serde_spanned"
 version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3838,19 +3874,6 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
-]
-
-[[package]]
-name = "serde_yaml"
-version = "0.9.34+deprecated"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
-dependencies = [
- "indexmap",
- "itoa",
- "ryu",
- "serde",
- "unsafe-libyaml",
 ]
 
 [[package]]
@@ -4359,6 +4382,12 @@ name = "unsafe-libyaml"
 version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
+
+[[package]]
+name = "unsafe-libyaml-norway"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b39abd59bf32521c7f2301b52d05a6a2c975b6003521cbd0c6dc1582f0a22104"
 
 [[package]]
 name = "untrusted"

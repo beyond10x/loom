@@ -9,6 +9,66 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-16
+
+Loom 0.23.0 runs a workflow's data collection concurrently and hands a judgement step its inputs
+as data. An executor proposes several reads at once (`ExecutorOutcome::ProposedReads`); the
+runtime admits them only when each is a read the frontier lists admissible without authority and
+none is listed twice, invokes them concurrently through their `Read` bindings, each once, and
+ends the run `CaseMovedOn` when a stale read shows the case moved. A judgement step lists the
+earlier outputs it is given (`inputs`), and the runtime appends exactly those values to its
+instructions as one escaped data block, so the model no longer reads them out of the transcript.
+A `RunMeter` counts overlapping and nested executor calls in their own steps. Loom requires ESS
+0.60.0. Breaking: `ExecutorOutcome` gains the variant `ProposedReads`, so a host that matches it
+exhaustively no longer compiles until it handles the variant; `loom.workflow.JudgementStep` gains
+the field `inputs`, so code that builds one with a struct literal adds `inputs: Vec::new()`; and
+specifications built with Loom's tasks need ESS 0.60.0.
+
+### Added
+
+- Read fan-out in Commission's runtime: an executor proposes several reads at once as
+  `ExecutorOutcome::ProposedReads` (at most `MAX_FAN_OUT`, 16). The runtime admits the fan-out only
+  when the effect port reads every listed action (`EffectPort::reads`, `false` by default) and the
+  frontier the executor was handed lists each `Admissible`, needing no authority, and no two reads
+  list the same action and arguments; otherwise nothing is invoked. Each read is its own action
+  request, revalidated before any is invoked; the admitted reads are invoked concurrently through
+  `EffectPort::invoke_reads` (a `Sync` port answers with `invoke_concurrently`), each once, joined,
+  and recorded and observed in the order proposed. A stale read is not invoked and the others go
+  on; the move it reveals is then judged as after a stale proposal, never adopted as the Run's
+  own, so the run ends `CaseMovedOn`. An effect error fails the loop after every read answered,
+  with nothing retried. A fan-out is one step. `ConnectorEffects` reads exactly the actions whose
+  binding's effect is `Read`, through an invoker that opts in with `ConnectorInvoker::concurrent`,
+  as `ConnectorsInvoker` does, and its `invoke_reads` invokes nothing when any request's binding is
+  not a `Read`. Writes, and every action that needs authority, stay one per iteration.
+- A workflow's judgement step lists the earlier outputs it is given (`inputs`, a list of the new
+  `loom.workflow.OutputReference`: a step and an output). When the step is proposed, the runtime
+  appends exactly those values to its instructions as one `<workflow-inputs>` data block, a JSON
+  list naming each value's step, output and declared type, introduced as data and never as
+  instructions, with `<`, `>` and `&` escaped so no value can close it; the model no longer has to
+  read an earlier result out of the transcript. A listed output the run did not produce, or of
+  another type, ends the call `NeedsHumanJudgment` naming the step and the output and asks the
+  model nothing. `workflow::load` refuses an input naming no output of an earlier step, and one
+  listed twice. Breaking: `loom.workflow.JudgementStep` gains the field `inputs`, so code that
+  builds one with a struct literal adds `inputs: Vec::new()`.
+
+### Changed
+
+- A `RunMeter` counts overlapping and nested executor calls in their own steps. The step is
+  carried by the executor call, on the thread it runs on and in every fork of a metered port made
+  in it, rather than held as one open step per meter: two `MeteredExecutor` calls running at once
+  on one meter, on two threads, each count their own model calls, and a `MeteredExecutor` over
+  another `MeteredExecutor` of the same meter opens one step for the executor call, not two.
+  Delegates side by side still count in their executor call's step, and calls outside any executor
+  call in step 0. The contract that executor calls on one meter do not overlap and that an
+  executor is wrapped by one `MeteredExecutor` is lifted. A plain metered port (not a fork) turned
+  on a thread the executor call spawned now counts in step 0; a fork made in the call counts in
+  its step. The report's shape and the `loom.metering` domain are unchanged.
+- Loom requires ESS 0.60.0: the Loom, Commission and intake specifications require it, the
+  conformance targets build on the 0.60.0 `ess-conformance` and `ess-primitives`, and CI installs
+  the 0.60.0 `ess`. Every specification validates unchanged, and synthesis still writes its
+  suites with no refusal. `not-in-frontier` stays an `external:` outcome: 0.60.0 has no predicate
+  for membership in a list input.
+
 ## [0.22.0] - 2026-10-14
 
 Loom 0.22.0 starts deterministic workflows. A run's model usage report (`RunMeter`,
