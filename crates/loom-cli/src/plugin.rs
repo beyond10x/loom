@@ -18,7 +18,7 @@ use b10x_loom_plugin::{
 use b10x_loom_plugin_slack::TurnModels;
 use llm_core::Model;
 
-use crate::model_port::LlmModelPort;
+use loom_sdk::llm::LlmModelPort;
 
 /// Whether `line` is a proposal: a proposed reply or a proposed case.
 pub fn is_proposal(line: &RecordLine) -> bool {

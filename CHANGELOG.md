@@ -9,6 +9,21 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+Breaking: `b10x_loom_cli::model_port` is gone; its `LlmModelPort` is `loom_sdk::llm::LlmModelPort`
+(the CLI's module was no stable surface).
+
+### Added
+
+- Two model ports in the SDK, so a host embedding it needs to write neither:
+  `loom_sdk::llm::LlmModelPort`, the llm-backed port `b10x-loom` runs a plugin turn on, moved from
+  the command line into the SDK; and `loom_sdk::loom::wire::ClaudeCodePort`, a port on an
+  operator's existing Claude Code login. One turn of it is one `claude -p --output-format json`
+  invocation in the port's directory with the port's model, the command's own tools switched off;
+  the turn's tools and conversation go to its standard input, a call comes back as a JSON object
+  the loop executes, and the turn's usage is the usage the command reports. It is single-attempt,
+  bounded in output and time, and a missing or failing command is a typed refusal naming it. Loom
+  code reads no credential for either: the `claude` command reads its own login.
+
 ## [0.23.0] - 2026-10-16
 
 Loom 0.23.0 runs a workflow's data collection concurrently and hands a judgement step its inputs

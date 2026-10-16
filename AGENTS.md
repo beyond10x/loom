@@ -462,9 +462,10 @@ reuse `crates/loom-plugin/tests/support/mod.rs` by path and answer Slack-shaped 
 
 `b10x-loom plugin run` settles both models before any read: with `--catalog` from route aliases
 (`model_catalog`), otherwise Codex models, as `run` does. A turn runs on
-`model_port::LlmModelPort`, the bridge from an llm `Model` to the harness `ModelPort`: one
-`Model::turn` per port turn, no retry and no other target, an opaque item carried back under the
-wire id `llm-model` only. Without `--once`, the first SIGTERM or SIGINT sets the host's stop, so
+`loom_sdk::llm::LlmModelPort` (`crates/loom-sdk/src/llm.rs`), the bridge from an llm `Model` to
+the harness `ModelPort`: one `Model::turn` per port turn, no retry and no other target, an opaque
+item carried back under the wire id `llm-model` only. The CLI defines no model port of its own
+(`crates/loom-sdk/tests/llm_model_port.rs`). Without `--once`, the first SIGTERM or SIGINT sets the host's stop, so
 a systemd stop ends it after the item being handled; a second one exits at once with 130
 (`plugin_run_stops_on_sigterm`). `plugin report` reads `record.jsonl` without the lock and drops a torn
 last line. `crates/loom-cli/tests/plugin.rs` runs the binary against the fake `connectors` and the
@@ -699,6 +700,17 @@ credential resolver, so a credentialed account is refused before any model call.
 credential is the operator's Codex login (`~/.codex/auth.json`), read and renewed by llm, never by
 Loom code. The ported wires take theirs from a `loom.run.WireCredential` reference through
 `credentials::ResolvedBearer`, which asks a `SecretResolver` the embedder injects at each call.
+
+The SDK ships two model ports. `loom_sdk::llm::LlmModelPort` is the llm-backed one above.
+`loom_sdk::loom::wire::ClaudeCodePort` (`crates/loom-executor/src/wire/claude_code.rs`) runs on an
+operator's Claude Code login only through the `claude` command, which reads that login itself:
+one turn is one `claude -p --output-format json` invocation, the command's own tools off, the
+turn's tools and conversation on its standard input as escaped JSON blocks, and a call answered
+as a JSON object the loop executes. It is single-attempt, bounded in output and time; a missing
+or failing command is a `WireError` naming it. A port that reads a Claude Code login directly is
+llm's to build, never Loom's. `crates/loom-sdk/tests/sdk_model_ports.rs` runs a governed loop turn
+on it over a stand-in `claude` on `PATH`. The ported `harness::wire` stays free of I/O; Loom's own
+ports that run something are under `wire`.
 
 ## Planning and waves
 

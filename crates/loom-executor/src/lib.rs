@@ -30,6 +30,9 @@
 //! A governed run is interrupted by [`Loom::interrupt`] and its session resumed by id with
 //! [`Loom::resume_loop`], which continues from the approval checkpoint the run stopped at and
 //! revalidates against the frontier current at resume before it proposes anything ([`recovery`]).
+//!
+//! [`wire`] holds Loom's own model ports that run something: [`wire::ClaudeCodePort`] runs a turn
+//! through the `claude` command on an operator's Claude Code login.
 
 /// The run model, synthesized from the ESS specification.
 pub use loom as model;
@@ -44,6 +47,7 @@ pub mod recovery;
 pub mod revalidation;
 pub mod selection;
 pub mod session;
+pub mod wire;
 pub mod workflow;
 
 use std::collections::hash_map::RandomState;

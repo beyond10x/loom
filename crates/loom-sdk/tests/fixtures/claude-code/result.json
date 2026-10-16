@@ -1,0 +1,33 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "duration_ms": 2817,
+  "duration_api_ms": 2690,
+  "num_turns": 1,
+  "result": "{\"tool_calls\":[{\"name\":\"repository_edit\",\"arguments\":{}}]}",
+  "session_id": "00000000-0000-4000-8000-00000000c1a0",
+  "total_cost_usd": 0.0071,
+  "usage": {
+    "input_tokens": 3,
+    "cache_creation_input_tokens": 1200,
+    "cache_read_input_tokens": 4800,
+    "output_tokens": 25,
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard"
+  },
+  "modelUsage": {
+    "claude-sonnet-4-5": {
+      "inputTokens": 3,
+      "outputTokens": 25,
+      "cacheReadInputTokens": 4800,
+      "cacheCreationInputTokens": 1200,
+      "costUSD": 0.0071
+    }
+  },
+  "permission_denials": [],
+  "uuid": "00000000-0000-4000-8000-00000000c1a1"
+}

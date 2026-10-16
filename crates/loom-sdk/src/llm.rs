@@ -1,7 +1,7 @@
-//! The model a plugin turn runs on: an llm [`Model`] behind Loom's harness [`ModelPort`].
+//! The llm-backed model port: an llm [`Model`] behind Loom's harness [`ModelPort`].
 //!
-//! The command line builds `llm_core` models ([`crate::model_catalog`], or a Codex model), while
-//! a plugin turn runs Loom's governed model loop, which talks to a harness [`ModelPort`].
+//! A host builds `llm_core` models (`b10x-loom` builds them from a route catalog or a Codex login),
+//! while a governed turn runs Loom's model loop, which talks to a harness [`ModelPort`].
 //! [`LlmModelPort`] is the bridge: each [`ModelPort::turn`] is exactly one [`Model::turn`] on a
 //! runtime the port owns, never retried here (the loop owns retries) and never moved to another
 //! target.
@@ -16,10 +16,10 @@
 
 use std::sync::Arc;
 
-use llm_core::{Cancel, Model, VecSink};
-use loom_sdk::loom::harness::wire::{
+use b10x_loom_executor::harness::wire::{
     self, ModelPort, StreamSink, TurnOutcome, TurnRequest, WireError, WireErrorCode, WireId,
 };
+use llm_core::{Cancel, Model, VecSink};
 
 /// The wire id of every [`LlmModelPort`].
 pub const WIRE: &str = "llm-model";

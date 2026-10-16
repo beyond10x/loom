@@ -4,8 +4,7 @@
 //! of its command line, so `loom-docs` can generate the CLI reference from it, the exit status a
 //! stop reason maps to, the run event stream `run --output jsonl` writes ([`events`]), the
 //! JSON `evaluate` reads and writes ([`evaluate`]), the llm catalog `run --catalog` reads
-//! ([`model_catalog`]), the bridge that runs a plugin turn on an llm model ([`model_port`]), and
-//! the lines `plugin run --once` and `plugin report` print ([`plugin`]).
+//! ([`model_catalog`]), and the lines `plugin run --once` and `plugin report` print ([`plugin`]).
 
 use std::path::PathBuf;
 
@@ -183,7 +182,6 @@ pub mod evaluate;
 pub mod events;
 pub mod mandate;
 pub mod model_catalog;
-pub mod model_port;
 pub mod plugin;
 pub mod regular_file;
 

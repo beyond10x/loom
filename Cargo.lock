@@ -555,6 +555,7 @@ dependencies = [
 name = "b10x-loom-sdk"
 version = "0.23.0"
 dependencies = [
+ "b10x-llm-core",
  "b10x-loom-commission",
  "b10x-loom-connectors",
  "b10x-loom-executor",
@@ -562,6 +563,8 @@ dependencies = [
  "b10x-loom-intake-router",
  "b10x-loom-intake-slice",
  "b10x-loom-protocols",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
