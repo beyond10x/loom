@@ -36,6 +36,19 @@ control-plane path, and fails when either table here and the code disagree.
 
 There is no 1.0 promise, deprecation window or version rule beyond the two lines above.
 
+## The Canon release a Loom release links
+
+A Loom release links exactly one Canon release, `b10x-canon` (`Cargo.lock` holds one), and the
+engineering protocols built on it, `b10x-canon-engineering`. The governor's decision for a case is
+the same JSON document that Canon release renders for the same case
+(`crates/loom-governor/tests/canon_decision_bytes.rs`).
+
+| Loom | `b10x-canon` | `b10x-canon-engineering` |
+|---|---|---|
+| 0.24.0 | 0.6.0 | 0.8.0 |
+
+A release that moves either pin names it in its `CHANGELOG.md` entry.
+
 ## Ports a host implements
 
 Each port is a trait the host implements and hands to the runtime. The path is the one the test
