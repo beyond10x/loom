@@ -130,8 +130,9 @@ answers. With your Codex login, leave out `--confinement`, `--catalog`, `--class
 $ b10x-loom protocols add team-ops@1 --file team-ops.yaml
 installed team-ops@1
 $ b10x-loom run --confinement none --catalog lab-catalog.toml --classifier-model lab-classifier \
-    --model lab-agent --action-bindings team-ops.bindings.json \
+    --model lab-agent --action-bindings team-ops.bindings.json --unconfined-bindings \
     "record a note that the deploy finished and publish the summary"
+bound commands: unconfined (--unconfined-bindings)
 picked team-ops@1 (confidence 0.99)
   reason: a team note
 frontier: note.record (admissible), summary.publish (blocked)
@@ -162,7 +163,15 @@ b10x-loom: --action-bindings wrong.json: team-ops@1 declares no action note.eras
 A binding confers no authority. The governor still admits each action first, and an action that
 needs a capability still needs its grant. `resume` continues `software-change@1` runs only.
 Bound programs are not confined by Substrate, because `--confinement` applies only to a software
-change's tests. A bound program runs with the permissions of the user who runs `b10x-loom`.
+change's tests. A bound program runs with the permissions of the user who runs `b10x-loom`, so
+`run` starts one only when you pass `--unconfined-bindings`, and then says so on standard error.
+Without the flag the run is refused with exit status 3 before any model call:
+
+```console
+$ b10x-loom run --action-bindings team-ops.bindings.json "record a note"
+confinement: bound commands
+stopped: ConfinementUnavailable (CommandUnconfined: Substrate does not confine the commands --action-bindings binds; pass --unconfined-bindings to run them with the operator's rights)
+```
 
 Embedders can construct `loom_protocols::ProtocolCatalog`, add in-memory YAML with `add_yaml`, and
 pass the same catalog to `classify_with_catalog`, `CanonGovernor::with_catalog` and

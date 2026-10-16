@@ -12,8 +12,10 @@ summary: >-
   only those are submitted, about the intent. A binding confers no authority: an action that
   needs a capability still needs its grant, and the governor still decides admission. Commands
   start with a cleared environment that keeps only PATH, never Loom's own credentials, and are
-  killed past the configuration's timeout. A routed protocol that declares an action the file
-  binds no command to ends with no local executor, naming the action. Configuration is trusted
+  killed past the configuration's timeout. Substrate does not confine them, so a run given a run
+  configuration is refused, before any model call, with the confinement refusal CommandUnconfined
+  unless the operator opts in to running the commands unconfined. A routed protocol that declares
+  an action the file binds no command to ends with no local executor, naming the action. Configuration is trusted
   host context, never model output, and a protocol document never names a command.
 
 naming:

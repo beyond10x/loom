@@ -1,12 +1,15 @@
 domain: intake.confinement
-summary: Requested and observed confinement of local test commands. No automatic fallback.
+summary: >-
+  Requested and observed confinement of local test commands. No automatic fallback. A command bound
+  to a protocol's action runs outside Substrate, so a run that would start one is refused
+  CommandUnconfined unless the operator opts out of confinement for those commands explicitly.
 types:
   - name: intake.confinement.Backend
     kind: enum
     variants: [Substrate, None]
   - name: intake.confinement.ConfinementRefusal
     kind: enum
-    variants: [BackendMissing, CgroupUndelegated, ScopeInvalid, WorkspaceNameInvalid, CapabilityUnserved]
+    variants: [BackendMissing, CgroupUndelegated, ScopeInvalid, WorkspaceNameInvalid, CapabilityUnserved, CommandUnconfined]
   - name: intake.confinement.EnvironmentEntry
     kind: struct
     fields:

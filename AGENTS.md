@@ -681,7 +681,9 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   (`intake.bindings.CommandEvidence`), each of a kind the action declares it may produce, about
   `intent`; another kind fails the run. A binding confers no authority: the slice's
   authority provider still answers every capability with approval required, and `resume`
-  continues `software-change@1` runs only. `crates/loom-cli/tests/custom_protocol_commands.rs`
+  continues `software-change@1` runs only. Substrate does not confine a bound command, so
+  without `--unconfined-bindings` `run` stops `ConfinementUnavailable (CommandUnconfined: ...)`,
+  exit 3, before any model call (`bindings_refused`); with it, standard error says so. `crates/loom-cli/tests/custom_protocol_commands.rs`
   (`a_custom_protocol_runs_through_declared_commands`) runs the binary against scripts.
 - With `--mandate <FILE>`, `approve` and `resume` clear the approval through Mandate (§ Mandate);
   a Mandate refusal is `NotGranted` (16) and performs nothing. A `resume` without `--mandate`

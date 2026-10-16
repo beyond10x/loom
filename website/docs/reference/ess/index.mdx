@@ -106,7 +106,7 @@ A Loom-side definition of a workflow over one protocol: an ordered list of steps
 
 ## Action bindings
 
-The commands an operator binds to the actions of one installed protocol, so that `b10x-loom run` drives a protocol whose actions no built-in binding performs. The operator declares them in a run configuration file (`run --action-bindings <FILE>`): the protocol, by its registration name, and for each action one argv, run without a shell. A run of that protocol performs an admitted action by starting its command with the action's arguments as JSON on standard input; the command's exit status decides the outcome, 0 performed and any other refused, and its standard output, one JSON object, is the action's performed report. The command is the verifier of its own action: its report may state evidence of the kinds the action declares it may produce, and only those are submitted, about the intent. A binding confers no authority: an action that needs a capability still needs its grant, and the governor still decides admission. Commands start with a cleared environment that keeps only PATH, never Loom's own credentials, and are killed past the configuration's timeout. A routed protocol that declares an action the file binds no command to ends with no local executor, naming the action. Configuration is trusted host context, never model output, and a protocol document never names a command.
+The commands an operator binds to the actions of one installed protocol, so that `b10x-loom run` drives a protocol whose actions no built-in binding performs. The operator declares them in a run configuration file (`run --action-bindings <FILE>`): the protocol, by its registration name, and for each action one argv, run without a shell. A run of that protocol performs an admitted action by starting its command with the action's arguments as JSON on standard input; the command's exit status decides the outcome, 0 performed and any other refused, and its standard output, one JSON object, is the action's performed report. The command is the verifier of its own action: its report may state evidence of the kinds the action declares it may produce, and only those are submitted, about the intent. A binding confers no authority: an action that needs a capability still needs its grant, and the governor still decides admission. Commands start with a cleared environment that keeps only PATH, never Loom's own credentials, and are killed past the configuration's timeout. Substrate does not confine them, so a run given a run configuration is refused, before any model call, with the confinement refusal CommandUnconfined unless the operator opts in to running the commands unconfined. A routed protocol that declares an action the file binds no command to ends with no local executor, naming the action. Configuration is trusted host context, never model output, and a protocol document never names a command.
 
 <DomainGraph data={domainGraph9} title="Action bindings" />
 
@@ -114,7 +114,7 @@ The commands an operator binds to the actions of one installed protocol, so that
 
 ## confinement
 
-Requested and observed confinement of local test commands. No automatic fallback.
+Requested and observed confinement of local test commands. No automatic fallback. A command bound to a protocol's action runs outside Substrate, so a run that would start one is refused CommandUnconfined unless the operator opts out of confinement for those commands explicitly.
 
 <DomainGraph data={domainGraph10} title="confinement" />
 
