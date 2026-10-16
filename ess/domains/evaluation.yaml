@@ -1,12 +1,14 @@
 # One evaluation of a protocol over a case the caller keeps itself (story governor-evaluate). Nouns
 # are read from crates/loom-governor/src/lib.rs (CanonGovernor::decide, the frontier and completion
-# it reports) and Canon's canon-case/1, canon-evidence/1 and canon-decision/1 documents. Nothing is
+# it reports) and Canon's canon-case/1, canon-evidence/1, canon-decisions/1 and canon-decision/1
+# documents. Nothing is
 # held between two evaluations, so the domain declares types only: no entity, no lifecycle.
 domain: loom.evaluation
 
 summary: >-
   One stateless evaluation: a protocol named from the host's catalog, a canon-case/1 case snapshot,
-  the canon-evidence/1 records that go with it and an optional trusted evaluation time go in;
+  the canon-evidence/1 records that go with it, the canon-decisions/1 explicit decisions taken
+  for it and an optional trusted evaluation time go in;
   Canon's decision comes out, or a refusal naming the input it could not use. It decides and never
   acts, reads no clock and calls no network or model.
 
@@ -33,8 +35,25 @@ types:
     kind: newtype
     of: Json
 
-  # What one evaluation reads. The records belong to the request and none outlives it. The time is
-  # the host's trusted instant, RFC 3339, never a model's; absent, freshness has no instant.
+  # One canon-decisions/1 entry: the decision `decision` was taken for the outcome `outcome` by
+  # `principal` at the case revision `case_revision`. Who may take it is not Loom's to judge: the
+  # host passes in the decisions that were taken, and Canon evaluates them. A decision applies only
+  # at the case snapshot's revision; one taken at another revision has been superseded.
+  - name: loom.evaluation.ExplicitDecision
+    kind: struct
+    fields:
+      - name: decision
+        type: String
+      - name: outcome
+        type: String
+      - name: principal
+        type: String
+      - name: case_revision
+        type: String
+
+  # What one evaluation reads. The records and decisions belong to the request and none outlives
+  # it. The time is the host's trusted instant, RFC 3339, never a model's; absent, freshness has no
+  # instant. `decisions` are the explicit decisions taken for the case, empty when none were.
   - name: loom.evaluation.EvaluationRequest
     kind: struct
     fields:
@@ -46,6 +65,8 @@ types:
         type: List<loom.evaluation.EvidenceRecord>
       - name: at
         type: Optional<Timestamp>
+      - name: decisions
+        type: List<loom.evaluation.ExplicitDecision>
 
   # Canon's status of one declared action. An action that requires a capability is at best
   # ApprovalRequired: the evaluation supplies no authority decision.
@@ -112,10 +133,10 @@ types:
         type: Json
 
   # The input a refusal is about: the request document as a whole, the protocol name, the case
-  # snapshot, one evidence record, or the evaluation time.
+  # snapshot, one evidence record, the evaluation time, or the explicit decisions.
   - name: loom.evaluation.EvaluationInput
     kind: enum
-    variants: [Request, Protocol, Snapshot, Evidence, Time]
+    variants: [Request, Protocol, Snapshot, Evidence, Time, Decisions]
 
   # Why no decision was made. `evidence_index` is the zero-based position of the refused record in
   # the request's `evidence`, present exactly when `input` is Evidence. `code` is Canon's refusal
