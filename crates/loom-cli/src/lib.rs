@@ -413,8 +413,9 @@ pub struct RunArgs {
     /// `--classifier-model` have no default: given, each overrides its role with a name of the
     /// same document. A configuration that cannot be loaded, a role neither configured nor given,
     /// or a model that cannot take a forced tool call stops the run before any model call. Not
-    /// with `--catalog`, nor with `--state`: a resume context keeps no configuration.
-    #[arg(long, value_name = "PATH", conflicts_with_all = ["catalog", "state"])]
+    /// with `--catalog`. With `--state`, the resume context keeps the configuration's absolute
+    /// path, and `resume` continues on the model it serves the role `agent`.
+    #[arg(long, value_name = "PATH", conflicts_with = "catalog")]
     pub config: Option<PathBuf>,
     /// The model that selects actions and writes their arguments: a Codex model name, with
     /// `--catalog` a route alias of that catalog, or with `--config` a name of its routes

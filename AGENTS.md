@@ -675,7 +675,12 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   Suspension held removes its context (`intake.routing.DropResumeContext`); a process that dies
   first leaves one, so a reader pairs each context with its commission's Suspension. Before any
   model call, `ResumeHost::check` refuses a path the context cannot keep as text, and each store's
-  open proves the directory takes a write. Without it `run` keeps the memory
+  open proves the directory takes a write. With `--config`, the context keeps the
+  configuration's absolute path (`ResumeContext.config`) and, in `model`, the name serving the
+  role `agent`; `resume` loads it again (`loom_sdk::models::from_config`), resolves that name and
+  checks its credential before any model call, refusing exit 1 with the file and the role. A
+  context naming both `config` and `catalog` is refused when it is kept and when it is read.
+  Without it `run` keeps the memory
   store and `run_until_blocked`. `crates/loom-cli/tests/run_state.rs` runs the binary to a held
   Suspension and reads `<DIR>` back through the stores.
 - `approve <COMMISSION> <CAPABILITY> --state <DIR>` writes a grant (`intake.routing.Grant`,

@@ -223,6 +223,10 @@
         {
           "name": "catalog",
           "type": "Optional<string>"
+        },
+        {
+          "name": "config",
+          "type": "Optional<string>"
         }
       ],
       "id": "intake.routing.ResumeContext",

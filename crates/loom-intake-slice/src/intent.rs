@@ -333,16 +333,21 @@ pub struct ResumeHost {
     pub confinement: Backend,
     /// The delegated cgroup root the operator gave, if any.
     pub cgroup_root: Option<PathBuf>,
-    /// The agent model: a Codex model name, or with `catalog` a route alias of that llm catalog.
+    /// The agent model: a Codex model name, with `catalog` a route alias of that llm catalog, or
+    /// with `config` the name its routes document serves the role `agent` by.
     pub model: String,
     /// The llm catalog the agent model's alias names a route of, if any.
     pub catalog: Option<PathBuf>,
+    /// The models configuration whose routes document serves the agent model, if any; kept as
+    /// an absolute path. Never with `catalog`.
+    pub config: Option<PathBuf>,
 }
 
 impl ResumeHost {
     /// Checks that a resume context of `request` run on this host can be kept: every path and
-    /// word it keeps as text (the workspace, made absolute, the test command, the cgroup root and
-    /// the catalog path) is UTF-8, and `max_steps` fits its integer. A host calls it before it
+    /// word it keeps as text (the workspace, made absolute, the test command, the cgroup root,
+    /// the catalog path and the configuration path) is UTF-8, and `max_steps` fits its integer;
+    /// and that it names at most one of a catalog and a configuration. A host calls it before it
     /// calls any model or opens any store, so a run that could not keep its context starts
     /// nothing.
     ///
@@ -361,10 +366,17 @@ struct HostText {
     max_steps: i64,
     cgroup_root: Option<String>,
     catalog: Option<String>,
+    config: Option<String>,
 }
 
 impl HostText {
     fn of(request: &IntentRequest, host: &ResumeHost) -> Result<Self, SliceError> {
+        if host.catalog.is_some() && host.config.is_some() {
+            return Err(SliceError::State(
+                "a resume context names at most one of an llm catalog and a models configuration"
+                    .into(),
+            ));
+        }
         let test_command = std::iter::once(request.test.program())
             .chain(request.test.args().iter().map(OsString::as_os_str))
             .map(|word| {
@@ -391,6 +403,11 @@ impl HostText {
                 .catalog
                 .as_deref()
                 .map(|path| absolute_text("the catalog", path))
+                .transpose()?,
+            config: host
+                .config
+                .as_deref()
+                .map(|path| absolute_text("the models configuration", path))
                 .transpose()?,
         })
     }
@@ -758,6 +775,7 @@ fn resume_context(
         cgroup_root: text.cgroup_root,
         model: host.model.clone(),
         catalog: text.catalog,
+        config: text.config,
     })
 }
 
@@ -1024,6 +1042,7 @@ mod tests {
             cgroup_root: None,
             model: "lab-agent".to_owned(),
             catalog: None,
+            config: None,
         };
 
         let request = resumed_request(&context(&case, &["spec/**"]), &governor, None)

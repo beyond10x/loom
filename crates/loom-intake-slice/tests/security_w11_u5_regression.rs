@@ -304,6 +304,7 @@ fn context(case: &CaseId, regression: Option<String>) -> ResumeContextData {
         cgroup_root: None,
         model: "lab-agent".into(),
         catalog: None,
+        config: None,
     }
 }
 
