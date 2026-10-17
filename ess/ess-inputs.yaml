@@ -11,4 +11,5 @@ specification:
   - domains/authority.yaml
   - domains/workflow.yaml
   - domains/metering.yaml
+  - domains/models.yaml
 scenarios: []

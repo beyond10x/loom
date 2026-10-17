@@ -1,0 +1,43 @@
+# The configuration that names a host's models (story llm-routes-pin). A host reads one
+# `llm.routes/1` document, the routes of the llm library (endpoints, models and named routes), and
+# says which model serves each role Loom asks a model for: the agent that runs the loop and the
+# classifier that routes an inbound item. A role names its model by a route name or by an
+# `<endpoint>/<model-id>` name of that document. The configuration is a value read when a host
+# starts: it has no lifecycle, so the domain declares types only.
+domain: loom.models
+
+summary: >-
+  The models configuration of a host: the path of an `llm.routes/1` document and, for each role
+  Loom asks a model for (the agent and the classifier), the model that serves it, named by a route
+  or by an endpoint and model id of that document.
+
+naming:
+  wire: models
+  display: Models
+
+types:
+  # A role Loom asks a model for: the `agent` that runs the model/tool loop, and the `classifier`
+  # that classifies an inbound item.
+  - name: loom.models.ModelRole
+    kind: enum
+    variants: [agent, classifier]
+
+  # The model that serves one role: a route name, or an `<endpoint>/<model-id>` name, of the routes
+  # document the configuration names.
+  - name: loom.models.RoleModel
+    kind: struct
+    fields:
+      - name: role
+        type: loom.models.ModelRole
+      - name: model
+        type: String
+
+  # A host's models configuration: the path of an `llm.routes/1` document, relative to the
+  # directory of the configuration file that holds this value, and the model of each role.
+  - name: loom.models.ModelsConfig
+    kind: struct
+    fields:
+      - name: routes
+        type: String
+      - name: roles
+        type: List<loom.models.RoleModel>
