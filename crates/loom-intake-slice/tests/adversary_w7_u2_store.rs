@@ -49,6 +49,7 @@ fn context(n: usize, intent: &str) -> ResumeContextData {
         cgroup_root: None,
         model: "lab-agent".into(),
         catalog: Some("/catalog.toml".into()),
+        config: None,
     }
 }
 

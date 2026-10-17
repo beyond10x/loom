@@ -9,6 +9,8 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+A case kept with `b10x-loom run --config` resumes on its configured models (`story:cli-run-config-resume`). `run --config <PATH> --state <DIR>` is no longer refused: the resume context (`intake.routing.ResumeContext`) gains `config`, the configuration's absolute path, and keeps in `model` the name that serves the role `agent` (`--model`, when given); the classifier is not kept, since a resume classifies nothing. `resume` loads the configuration again through `loom_sdk::models::from_config`, resolves that name and checks its credential; a configuration that is gone, a name its routes document no longer serves, or a secret that does not resolve stops the resume, exit status 1, naming the file and the role `agent`, before any model call. A context kept before this change reads as having no configuration; one naming both `config` and `catalog` is refused when it is kept and when it is read. `ResumeHost` and `ResumeContextData` gain the field `config`. Breaking: a Rust caller that builds `b10x_loom_intake_slice::intent::ResumeHost` or the generated `ResumeContextData` by its fields adds `config`.
+
 ## [0.25.0] - 2026-10-17
 
 Loom 0.25.0 lets a host perform a governed write and choose its models from a routes document. A
