@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use llm_models::routes::Routes;
-use loom_sdk::models::{parse_config, ModelRole};
+use loom_sdk::models::{ModelRole, parse_config};
 
 const PAGE: &str = "website/docs/guides/model-routes.md";
 
