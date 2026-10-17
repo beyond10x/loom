@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:run-and-action-budgets
 kind: story
-status: active
+status: implemented
 title: A run enforces run-wide and per-action budgets, charging what each effect reports it spent
 relations:
 - decomposes: epic:deterministic-workflows
@@ -21,10 +21,11 @@ scope:
   path: ess/domains/metering.yaml
 - confidence: inferred
   path: generated/rust/loom
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-16T16:35:00Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-16T16:35:01Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-17T00:12:47Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 

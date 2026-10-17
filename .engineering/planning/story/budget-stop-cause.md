@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:budget-stop-cause
 kind: story
-status: active
+status: implemented
 title: A governed or workflow run stopped by a model-loop budget reports that budget as its stop reason
 relations:
 - decomposes: epic:deterministic-workflows
@@ -22,10 +22,11 @@ scope:
   path: generated/rust/loom
 - confidence: inferred
   path: website/data/status.json
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-16T16:34:54Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-16T16:34:54Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-17T00:12:46Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 

@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-17T00:12:38Z",
+  "actor": "human:timo",
+  "artifact": "story:evaluation-explicit-decisions",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "unit 4b3fbf5 merged in bb4440f; package gate: governor, cli, intake-slice 0 failed; wave head 3253a27 gate: clippy -D warnings and cargo test of 12 packages (commission, commission-testkit, commission-conformance, executor, governor, protocols, intake-slice, intake-router, plugin, connectors, cli, sdk) 1678 passed 0 failed; fmt, drift, intake-drift, commission docs-drift, docs-check, consumer-check exit 0"
+  }
+}

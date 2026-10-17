@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:dw-durable-run-state
 kind: story
-status: active
+status: implemented
 title: A workflow step result and the usage report survive a restart of the run
 relations:
 - decomposes: epic:deterministic-workflows
@@ -24,10 +24,11 @@ scope:
   path: ess/domains/workflow.yaml
 - confidence: inferred
   path: generated/rust/loom
-revision: 5
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-16T16:34:57Z", actor: "human:timo", revision: 4}
 - {from: "proposed", to: "active", at: "2026-10-16T16:34:57Z", actor: "human:timo", revision: 5}
+- {from: "active", to: "implemented", at: "2026-10-17T00:12:47Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 
