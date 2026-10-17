@@ -15,7 +15,7 @@ pub use b10x_loom_intake_slice::executor::{RegressionTestCommand, RegressionTest
 use b10x_loom_intake_slice::grant::ApproveRefusal;
 use b10x_loom_intake_slice::run::{ApprovalGate, SliceRun, StopReason};
 pub use b10x_loom_intake_slice::test_paths::{TestPaths, TestPathsError};
-use clap::builder::TypedValueParser;
+use clap::builder::{ArgPredicate, TypedValueParser};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 /// The Codex model both the agent and the classifier use unless told otherwise.
@@ -217,7 +217,7 @@ pub struct Cli {
 pub enum Command {
     /// Run the slice on an intent until it is blocked, and say why it stopped.
     #[command(after_help = EXIT_STATUS)]
-    Run(RunArgs),
+    Run(Box<RunArgs>),
     /// Install, inspect, or remove protocol definitions available to this host.
     Protocols(ProtocolsArgs),
     /// Decide a case snapshot and its evidence under a catalog protocol, and write the decision as
@@ -406,14 +406,26 @@ pub struct RunArgs {
     /// declare, or a catalog that cannot be read, stops the run before any model call.
     #[arg(long, value_name = "PATH")]
     pub catalog: Option<PathBuf>,
-    /// The model that selects actions and writes their arguments: a Codex model name, or with
-    /// `--catalog` a route alias of that catalog.
-    #[arg(long, value_name = "ID", default_value = DEFAULT_MODEL)]
-    pub model: String,
-    /// The model that classifies the intent: a Codex model name, or with `--catalog` a route
-    /// alias of that catalog.
-    #[arg(long, value_name = "ID", default_value = DEFAULT_MODEL)]
-    pub classifier_model: String,
+    /// A models configuration (YAML, a regular file): `routes`, the path of an `llm.routes/1`
+    /// document relative to the configuration's directory, and `roles`, a list of `{role, model}`
+    /// giving the roles `agent` and `classifier` each a route or `<endpoint>/<model-id>` name of
+    /// that document, whose credentials are its `secret:` references. With it, `--model` and
+    /// `--classifier-model` have no default: given, each overrides its role with a name of the
+    /// same document. A configuration that cannot be loaded, a role neither configured nor given,
+    /// or a model that cannot take a forced tool call stops the run before any model call. Not
+    /// with `--catalog`, nor with `--state`: a resume context keeps no configuration.
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["catalog", "state"])]
+    pub config: Option<PathBuf>,
+    /// The model that selects actions and writes their arguments: a Codex model name, with
+    /// `--catalog` a route alias of that catalog, or with `--config` a name of its routes
+    /// document, overriding the role `agent`.
+    #[arg(long, value_name = "ID", default_value = DEFAULT_MODEL, default_value_if("config", ArgPredicate::IsPresent, None::<&str>))]
+    pub model: Option<String>,
+    /// The model that classifies the intent: a Codex model name, with `--catalog` a route alias
+    /// of that catalog, or with `--config` a name of its routes document, overriding the role
+    /// `classifier`.
+    #[arg(long, value_name = "ID", default_value = DEFAULT_MODEL, default_value_if("config", ArgPredicate::IsPresent, None::<&str>))]
+    pub classifier_model: Option<String>,
     /// The confidence, from 0 to 1, below which the router refuses its pick.
     #[arg(long, value_name = "X", default_value_t = 0.5)]
     pub threshold: f64,

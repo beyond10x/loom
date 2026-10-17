@@ -13,8 +13,9 @@ use b10x_loom_cli::model_catalog::ModelCatalog;
 use b10x_loom_cli::plugin::{is_proposal, recorded, report_line, turn_models};
 use b10x_loom_cli::regular_file;
 use b10x_loom_cli::{
-    ApproveArgs, Cli, Command, Confinement, EvaluateArgs, Output, PluginCommand, PluginName,
-    ProtocolCommand, ResumeArgs, RunArgs, approve_exit_status, resume_exit_status, run_exit_status,
+    ApproveArgs, Cli, Command, Confinement, DEFAULT_MODEL, EvaluateArgs, Output, PluginCommand,
+    PluginName, ProtocolCommand, ResumeArgs, RunArgs, approve_exit_status, resume_exit_status,
+    run_exit_status,
 };
 use b10x_loom_intake_slice::bindings::ActionBindings;
 use b10x_loom_intake_slice::case;
@@ -47,6 +48,7 @@ use loom_governor::{
     MemoryCaseStore,
 };
 use loom_protocols::{InstallStore, ProtocolCatalog};
+use loom_sdk::models::{ModelRole, Models};
 use serde_json::{Value, json};
 use std::sync::atomic::AtomicBool;
 
@@ -56,7 +58,7 @@ const REEXEC_HANDOFF: &str = "B10X_LOOM_CONFINEMENT_HANDOFF";
 
 fn main() -> ExitCode {
     match Cli::parse().command {
-        Command::Run(arguments) => run_command(arguments),
+        Command::Run(arguments) => run_command(*arguments),
         Command::Protocols(arguments) => match protocols(arguments.command) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => failed(&error),
@@ -521,18 +523,9 @@ fn execute(
             arguments.threshold
         ));
     }
-    // Both models are settled here, before any model call: an alias the catalog does not name
-    // or a catalog that cannot be read stops the run now.
-    let (mut classifier_route, mut agent_route) = match &arguments.catalog {
-        Some(path) => {
-            let models = ModelCatalog::read(path)?;
-            (
-                Some(models.model("--classifier-model", &arguments.classifier_model)?),
-                Some(models.model("--model", &arguments.model)?),
-            )
-        }
-        None => (None, None),
-    };
+    // Both models are settled here, before any model call: an alias the catalog does not name,
+    // a catalog or configuration that cannot be read, or a role without a model stops the run now.
+    let (mut classifier_route, mut agent_route) = settled_models(arguments)?;
     let catalog = InstallStore::user()?.catalog()?;
     // The action bindings are held to the catalog before any model call.
     if let (Some(path), Some(bindings)) = (
@@ -565,7 +558,7 @@ fn execute(
             Confinement::None => Backend::None,
         },
         cgroup_root: arguments.cgroup_root.clone(),
-        model: arguments.model.clone(),
+        model: model_name(arguments.model.as_deref()).to_owned(),
         catalog: arguments.catalog.clone(),
     };
     host.check(&intent_request(arguments)?)
@@ -648,7 +641,7 @@ fn execute_on<S: FallibleCaseStore, T: EvaluationTime>(
     catalog: &ProtocolCatalog,
     governor: &CanonGovernor<S, T>,
     state: Option<&RunState<'_>>,
-    (mut classifier_route, mut agent_route): (Option<Port>, Option<Port>),
+    (mut classifier_route, mut agent_route): SettledModels,
 ) -> Result<Ending, String> {
     let program = arguments.test_cmd.split_whitespace().next().unwrap_or("");
     let mut request = intent_request(arguments)?;
@@ -658,7 +651,10 @@ fn execute_on<S: FallibleCaseStore, T: EvaluationTime>(
         PreparedIntent::restore(&handoff["route"], &request, catalog, options)
             .map_err(|e| e.to_string())?
     } else {
-        let classifier = chosen_model(classifier_route.take(), &arguments.classifier_model)?;
+        let classifier = run_model(
+            classifier_route.take(),
+            arguments.classifier_model.as_deref(),
+        )?;
         let observed = stream.map(|stream| stream.observe(&*classifier));
         let classifier: &dyn Model = match &observed {
             Some(observed) => observed,
@@ -729,7 +725,7 @@ fn execute_on<S: FallibleCaseStore, T: EvaluationTime>(
             .open(ready)
             .map_err(|e| format!("delegation handshake failed: {e}"))?;
     }
-    let agent = chosen_model(agent_route.take(), &arguments.model)?;
+    let agent = run_model(agent_route.take(), arguments.model.as_deref())?;
     let observed = stream.map(|stream| stream.observe(&*agent));
     let agent: &dyn Model = match &observed {
         Some(observed) => observed,
@@ -747,6 +743,100 @@ fn execute_on<S: FallibleCaseStore, T: EvaluationTime>(
     }
     .map_err(|e| e.to_string())?;
     Ok(Ending::Stopped(run))
+}
+
+/// The models `run` settles before any model call, the classifier's and the agent's: with
+/// `--catalog` the route of each alias, with `--config` the model of each role, or neither, when
+/// both flags name Codex models.
+type SettledModels = (Option<Arc<dyn Model>>, Option<Arc<dyn Model>>);
+
+/// The models `--catalog` or `--config` names, settled before any model call.
+fn settled_models(arguments: &RunArgs) -> Result<SettledModels, String> {
+    if let Some(path) = &arguments.catalog {
+        let models = ModelCatalog::read(path)?;
+        let classifier = models.model(
+            "--classifier-model",
+            model_name(arguments.classifier_model.as_deref()),
+        )?;
+        let agent = models.model("--model", model_name(arguments.model.as_deref()))?;
+        return Ok((
+            Some(Arc::new(classifier) as Arc<dyn Model>),
+            Some(Arc::new(agent) as Arc<dyn Model>),
+        ));
+    }
+    let Some(path) = &arguments.config else {
+        return Ok((None, None));
+    };
+    let models =
+        loom_sdk::models::from_config(path).map_err(|error| format!("--config {error}"))?;
+    let classifier = role_model(
+        &models,
+        path,
+        (ModelRole::Classifier, "classifier", "--classifier-model"),
+        arguments.classifier_model.as_deref(),
+    )?;
+    let agent = role_model(
+        &models,
+        path,
+        (ModelRole::Agent, "agent", "--model"),
+        arguments.model.as_deref(),
+    )?;
+    Ok((Some(classifier), Some(agent)))
+}
+
+/// The model of `role` under `--config <config>`: the name its flag gave, of the configuration's
+/// routes document, else the role's configured model. A role neither configured nor given, a
+/// name the document does not serve, and a model that cannot take a forced tool call are
+/// refused, naming the role and the flag.
+fn role_model(
+    models: &Models,
+    config: &Path,
+    (role, name, flag): (ModelRole, &str, &str),
+    given: Option<&str>,
+) -> Result<Arc<dyn Model>, String> {
+    let (model, source) = match given {
+        Some(given) => (
+            models
+                .model(given)
+                .map_err(|error| format!("{flag} {given}: {error}"))?,
+            format!("{flag} {given}"),
+        ),
+        None => (
+            models.get(role).ok_or_else(|| {
+                format!(
+                    "--config {}: declares no model for the role `{name}`; declare one under \
+                     `roles` or give {flag}",
+                    config.display()
+                )
+            })?,
+            format!("--config {}", config.display()),
+        ),
+    };
+    let capabilities = model.capabilities();
+    if !capabilities.tools || !capabilities.tool_choice {
+        return Err(format!(
+            "{source}: the role `{name}` is served by `{}`, a model that cannot take a forced \
+             tool call",
+            model.provenance().model.as_str()
+        ));
+    }
+    Ok(model)
+}
+
+/// A model flag's name, [`DEFAULT_MODEL`] when it has none (only `--config` leaves it unset).
+fn model_name(given: Option<&str>) -> &str {
+    given.unwrap_or(DEFAULT_MODEL)
+}
+
+/// The settled model of a run, otherwise the Codex model the flag names.
+fn run_model(
+    settled: Option<Arc<dyn Model>>,
+    name: Option<&str>,
+) -> Result<Arc<dyn Model>, String> {
+    match settled {
+        Some(model) => Ok(model),
+        None => chosen_model(None, model_name(name)).map(Arc::from),
+    }
 }
 
 /// The catalog route's model when `--catalog` named one, otherwise the Codex model `name`.
