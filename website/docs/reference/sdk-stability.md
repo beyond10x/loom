@@ -24,7 +24,7 @@ control-plane path, and fails when either table here and the code disagree.
 
   ```toml
   [dependencies]
-  b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.24.0" }
+  b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.25.0" }
   ```
 
 - Outside the promise:
@@ -45,7 +45,7 @@ the same JSON document that Canon release renders for the same case
 
 | Loom | `b10x-canon` | `b10x-canon-engineering` |
 |---|---|---|
-| 0.24.0 | 0.6.0 | 0.8.0 |
+| 0.25.0 | 0.6.0 | 0.8.0 |
 
 A release that moves either pin names it in its `CHANGELOG.md` entry.
 
@@ -102,6 +102,11 @@ implements it through.
 | `loom_sdk::models::ModelsConfig`, `loom_sdk::models::ModelRole`, `loom_sdk::models::RoleModel` | The models configuration, generated from `loom.models` under `ess/`; it changes with that declaration |
 | `loom_sdk::loom::wire::ClaudeCodePort` | A `ModelPort` on an operator's Claude Code login: one `claude -p --output-format json` invocation per turn, the command reading its own login |
 | `loom_sdk::TestRunner`, `loom_sdk::SubstrateRunner`, `loom_sdk::UnconfinedRunner`, `loom_sdk::TestExecution`, `loom_sdk::ConfinementError` | The slice's test runners |
+| `loom_sdk::connectors::cli::ConnectorsCli` | The client over the operator's `connectors` command line: reads (`invoke_read`, `read`) and, for a request the runtime admitted, one governed write (`invoke_write`) with the path of the person's approval proof, invoked once and never retried |
+| `loom_sdk::connectors::cli::idempotency_key` | The `--idempotency-key` a write of an admitted request carries, derived from its request id: the same request, the same key |
+| `loom_sdk::connectors::cli::WriteError` | Why a governed write was not invoked: refused (no absolute proof path, an operation not described as a write, a describe Connectors refused) or failed |
+| `loom_sdk::connectors::cli::datasource::WriteOperation`, `loom_sdk::connectors::cli::datasource::WriteApproval`, `loom_sdk::connectors::cli::datasource::WriteResult`, `loom_sdk::connectors::cli::datasource::MutationClassification`, `loom_sdk::connectors::cli::datasource::WriteRefusal` | The governed write's operation, approval proof path, result (Connectors' classification, `request_id` and audit record) and refusal, generated from `loom.datasource` under `ess/`; they change with that declaration |
+| `loom_sdk::connectors::evidence::WriteEvidenceAdapter`, `loom_sdk::connectors::evidence::WriteEvidenceError` | The host evidence adapter: an applied write of its action becomes the protocol's evidence for the step (for `support-triage@1`, a `routing_record` for `ticket.route`) through `submit_evidence`; a write not applied records none |
 | `loom_sdk::commission`, `loom_sdk::connectors`, `loom_sdk::loom`, `loom_sdk::governor`, `loom_sdk::protocols`, `loom_sdk::intake::router`, `loom_sdk::intake::slice` | The re-exported crates, under these module names |
 
 ## Used by control-plane

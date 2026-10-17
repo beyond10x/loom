@@ -9,7 +9,7 @@
 //! | Module | Crate | What it is for |
 //! | --- | --- | --- |
 //! | [`commission`] | `b10x-loom-commission` | The contracts and the runtime: the generated responsibility model ([`commission::model`]), the ports an embedder implements or calls ([`commission::ports`]), and the loop that drives a commission until it is blocked ([`commission::runtime`]). |
-//! | [`connectors`] | `b10x-loom-connectors` | Commission's `ConnectorInvoker` over a Connectors service: [`connectors::ConnectorsInvoker`] invokes the operation an action is bound to once, on the host's endpoint for its instance, and reports the attempt Connectors recorded. |
+//! | [`connectors`] | `b10x-loom-connectors` | Commission's `ConnectorInvoker` over a Connectors service: [`connectors::ConnectorsInvoker`] invokes the operation an action is bound to once, on the host's endpoint for its instance, and reports the attempt Connectors recorded; [`connectors::cli::ConnectorsCli`] reads through the operator's `connectors` command line and performs one governed write for an admitted request, and [`connectors::evidence::WriteEvidenceAdapter`] records an applied write as the protocol's evidence. |
 //! | [`loom`] | `b10x-loom-executor` | The executor: [`Loom`] proposes one action per frontier through an [`ActionSelector`] and an [`ArgumentGenerator`] the embedder supplies. |
 //! | [`governor`] | `b10x-loom-governor` | The governor: [`CanonGovernor`] evaluates a case's protocol with Canon over a [`CaseStore`] and issues its frontier. |
 //! | [`llm`] | `b10x-llm-core` | [`llm::LlmModelPort`], a harness `ModelPort` over an llm `Model`: one `Model::turn` per turn, the port `b10x-loom` runs a plugin turn on. |

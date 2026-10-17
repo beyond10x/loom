@@ -4,14 +4,23 @@
 # with its `profile` and `input_schema`; `operations invoke` answers `result` and, where the
 # owner recorded one, `source_audit.audit_ref`. A source is configuration the host reads: it has no
 # lifecycle, so the domain declares types only.
+#
+# A governed write (story connectors-governed-write) is the other use of the command line: one
+# `operations invoke` of an operation `describe` reports with the `mutation` profile, for a request
+# the runtime admitted, with `--approval-file` naming the proof the person's confirmation wrote
+# (`connectors approvals issue --proof-output`) and `--idempotency-key` derived from the admitted
+# request id. Connectors classifies the write `not_attempted`, `refused`, `applied` or `unknown`
+# (`mutation.classification`), beside its `request_id` and `source_audit`.
 domain: loom.datasource
 
 summary: >-
   A data source read through the Connectors command line: the configured source (a Connectors
   adapter alias, a connection and the read operation it declares for each kind of read), how the
   command line is run, what `operations describe` reports for an operation and what one read
-  answers. A read never carries a credential and never runs an operation Connectors describes
-  as a mutation.
+  answers; and a governed write: the operation written, the person's approval proof it passes and
+  what Connectors answers for it. A read never carries a credential and never runs an operation
+  Connectors describes as a mutation. A write carries no credential either; it runs only for a
+  request the runtime admitted, with the path of the approval proof, and is never retried.
 
 naming:
   wire: datasource
@@ -111,6 +120,88 @@ types:
     fields:
       - name: source
         type: Optional<loom.datasource.SourceName>
+      - name: adapter
+        type: loom.datasource.AdapterAlias
+      - name: operation
+        type: Optional<loom.datasource.OperationId>
+      - name: code
+        type: String
+      - name: message
+        type: String
+
+  # The operation a governed write performs: the protocol action it performs, the adapter and
+  # connection it is written through and the operation, as `--adapter`, `--connection` and
+  # `--operation` name them. `describe` must report the operation with the `mutation` profile, or
+  # nothing is invoked.
+  #
+  # The write is bound to what the runtime admitted: `action` is the protocol action id, the
+  # `action` of Commission's admitted request (`commission.responsibility.ActionRequestData`, a
+  # plain string there, so a String here). A write whose `action` differs from the admitted
+  # request's is refused `action-not-admitted`, and one whose input differs from the admitted
+  # arguments `input-not-admitted`, both before any process starts.
+  - name: loom.datasource.WriteOperation
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: adapter
+        type: loom.datasource.AdapterAlias
+      - name: connection
+        type: loom.datasource.ConnectionId
+      - name: operation
+        type: loom.datasource.OperationId
+
+  # The person's confirmation of one write: the absolute path of the proof
+  # `connectors approvals issue --proof-output` wrote, passed as `--approval-file`. Loom never
+  # reads, writes or stores the proof. An empty path is refused `approval-missing`, a path that
+  # is not absolute `approval-not-absolute` and one holding a control character
+  # `approval-not-a-path`, before any process starts.
+  - name: loom.datasource.WriteApproval
+    kind: struct
+    fields:
+      - name: proof_file
+        type: String
+
+  # How Connectors classifies a write's effect (`mutation.classification`): `not_attempted` and
+  # `refused` changed nothing, `applied` changed the target, and `unknown` may have. An answer
+  # Loom cannot read once the invoke started (no JSON, a lost answer, a timeout, no
+  # classification) is Unknown too.
+  - name: loom.datasource.MutationClassification
+    kind: enum
+    variants: [NotAttempted, Refused, Applied, Unknown]
+
+  # What one governed write answers once its invoke started: the classification, the idempotency
+  # key it was invoked with (derived from the admitted request id, so the same admitted request
+  # always has the same key), Connectors' `request_id` and execution audit record
+  # (`source_audit`, and its `audit_ref`) when it names them, the provider's answer for an applied
+  # write (`body`), and Connectors' failure code (`code`) when the invoke failed. A write is invoked
+  # once and an Unknown one is never invoked again.
+  - name: loom.datasource.WriteResult
+    kind: struct
+    fields:
+      - name: classification
+        type: loom.datasource.MutationClassification
+      - name: idempotency_key
+        type: String
+      - name: request_id
+        type: Optional<String>
+      - name: body
+        type: Optional<Json>
+      - name: source_audit
+        type: Optional<Json>
+      - name: audit_ref
+        type: Optional<String>
+      - name: code
+        type: Optional<String>
+
+  # A governed write that was never invoked. `code` is `action-not-admitted`,
+  # `input-not-admitted`, `approval-missing`, `approval-not-absolute` or `approval-not-a-path`
+  # (no process started), `not-a-write` (`describe` reports the
+  # operation with another profile than `mutation`; not invoked), or the code Connectors refused
+  # the describe with.
+  - name: loom.datasource.WriteRefusal
+    kind: struct
+    fields:
       - name: adapter
         type: loom.datasource.AdapterAlias
       - name: operation

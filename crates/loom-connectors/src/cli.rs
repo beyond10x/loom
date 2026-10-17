@@ -1,4 +1,7 @@
-//! Reads through the `connectors` command line (`story:connectors-cli-reads`).
+//! Reads through the `connectors` command line (`story:connectors-cli-reads`), and governed
+//! writes through it (`story:connectors-governed-write`, [`ConnectorsCli::invoke_write`], in the
+//! `write` submodule: a write runs only for a request the runtime admitted, with the person's
+//! approval proof; see [`WriteError`]).
 //!
 //! [`ConnectorsCli`] reads a [`DataSource`] the host configured, outside a run (a poll) or inside
 //! one (a turn's `source.read`). It needs no `AdmittedRequest` and no binding: it is a plain read
@@ -15,10 +18,10 @@
 //! 2. `operations invoke --adapter A --connection C --operation O --schema S --revision R
 //!    --input-stdin`, run once, with the input document on stdin, never in argv.
 //!
-//! An operation `describe` reports with the `mutation` profile ([`WRITE_PROFILES`]) is refused
-//! after the describe and before any invoke; Connectors itself refuses any write without
-//! `--approval-file`, which this client never passes, and that holds a write an adapter publishes
-//! under another profile. A program that forks is bounded only as the process it started: a
+//! A read of an operation `describe` reports with the `mutation` profile ([`WRITE_PROFILES`]) is
+//! refused after the describe and before any invoke; Connectors itself refuses any write without
+//! `--approval-file`, which no read passes (only [`ConnectorsCli::invoke_write`] does, from the
+//! `write` submodule), and that holds a write an adapter publishes under another profile. A program that forks is bounded only as the process it started: a
 //! timeout kills and reaps that process, not its children. The command line's argv
 //! holds only the flags above and the ids they take; an id, or a schema or revision `describe`
 //! answered, that is empty, starts with `-`, or holds whitespace or a control character starts no
@@ -46,6 +49,10 @@ use loom::datasource::{
 };
 use loom::json::Value;
 
+mod write;
+
+pub use write::{WriteError, idempotency_key};
+
 /// The only environment variables the program is started with, taken from the environment the
 /// client was given: where the operator's configuration, state, keyring session and programs are.
 /// None of them is a credential, and every other variable (a token included) is dropped.
@@ -65,7 +72,7 @@ pub const INHERITED: &[&str] = &[
     "DBUS_SESSION_BUS_ADDRESS",
 ];
 
-/// The `profile`s an operation is refused under, as `operations describe` prints them in
+/// The `profile`s a read refuses and a write requires, as `operations describe` prints them in
 /// `result.operation.profile`: `mutation`, the catalog adapter's profile for a write (connectors
 /// `v0.38.0`, `adapters/catalog/src/lib.rs:1233`, `Effect::Write => "mutation"`; reads are
 /// `generic-http`), and the profile `contracts/service/compatibility.md` § 1 names.
@@ -74,7 +81,7 @@ pub const INHERITED: &[&str] = &[
 /// (`resource` among them) for reads and writes alike, so those are read. What holds a write an
 /// adapter publishes under another profile is Connectors' own check: it refuses any write without
 /// `--approval-file` (`v0.38.0`, `crates/connectors-host/src/local/owner/mutation/execution.rs:161`,
-/// `proof.ok_or(ApprovalCode::ApprovalRequired)`), and this client never builds that flag.
+/// `proof.ok_or(ApprovalCode::ApprovalRequired)`), and no read builds that flag.
 pub const WRITE_PROFILES: &[&str] = &["mutation"];
 
 /// The bound on one command when the configuration names none.
@@ -233,6 +240,29 @@ impl ConnectorsCli {
         adapter: &AdapterAlias,
         operation: &OperationId,
     ) -> Result<SourceEntity, CliError> {
+        let (entity, profile) = self.described(source, adapter, operation)?;
+        if WRITE_PROFILES.contains(&profile.as_str()) {
+            return Err(CliError::Refused(ReadRefusal {
+                source: source.cloned(),
+                adapter: adapter.clone(),
+                operation: Some(operation.clone()),
+                code: "write-operation".to_owned(),
+                message: format!(
+                    "{} is described with the `{profile}` profile, a write, and is never invoked",
+                    subject(source, adapter, Some(operation))
+                ),
+            }));
+        }
+        Ok(entity)
+    }
+
+    /// What `operations describe` reports for `operation` of `adapter`, and its `profile`.
+    fn described(
+        &self,
+        source: Option<&SourceName>,
+        adapter: &AdapterAlias,
+        operation: &OperationId,
+    ) -> Result<(SourceEntity, String), CliError> {
         argument("adapter", &adapter.0)?;
         argument("operation", &operation.0)?;
         let described = self.run(
@@ -270,18 +300,6 @@ impl ConnectorsCli {
         // `apps/connectors/src/local/operations.rs` `summary`; see [`WRITE_PROFILES`]); an
         // operation without one is not read either.
         let profile = text(selected, "profile").ok_or_else(|| missing("describe", "profile"))?;
-        if WRITE_PROFILES.contains(&profile) {
-            return Err(CliError::Refused(ReadRefusal {
-                source: source.cloned(),
-                adapter: adapter.clone(),
-                operation: Some(operation.clone()),
-                code: "write-operation".to_owned(),
-                message: format!(
-                    "{} is described with the `{profile}` profile, a write, and is never invoked",
-                    subject(source, adapter, Some(operation))
-                ),
-            }));
-        }
         let input_schema = match selected.member("input_schema") {
             // Printed as the JSON Schema's text (`operation`: `input_schema.to_string()`).
             Some(Value::Text(schema)) => json::parse(schema).map_err(|error| {
@@ -292,7 +310,7 @@ impl ConnectorsCli {
             Some(schema @ Value::Object(_)) => schema.clone(),
             _ => return Err(missing("describe", "input_schema")),
         };
-        Ok(SourceEntity {
+        let entity = SourceEntity {
             operation: operation.clone(),
             schema: text(&described, "schema")
                 .ok_or_else(|| missing("describe", "schema"))?
@@ -301,7 +319,8 @@ impl ConnectorsCli {
             revision: text(&described, "revision")
                 .ok_or_else(|| missing("describe", "revision"))?
                 .to_owned(),
-        })
+        };
+        Ok((entity, profile.to_owned()))
     }
 
     fn read_through(
@@ -376,6 +395,31 @@ impl ConnectorsCli {
         arguments: &[&str],
         stdin: Option<&str>,
     ) -> Result<Value, CliError> {
+        let (mut command, timeout, seconds) = self.command(arguments, stdin.is_some())?;
+        let output =
+            Self::bounded(&mut command, stdin, timeout).map_err(|failure| match failure {
+                Bounded::TimedOut => CliError::Failed(format!(
+                    "`{}` timed out after {seconds} s and was stopped, for {}",
+                    self.config.program,
+                    subject(source, adapter, Some(operation))
+                )),
+                Bounded::NotStarted(error) => {
+                    CliError::Failed(format!("`{}` did not start: {error}", self.config.program))
+                }
+                Bounded::Io(what, error) => {
+                    CliError::Failed(format!("`{}` {what}: {error}", self.config.program))
+                }
+            })?;
+        self.answer(source, adapter, operation, &output)
+    }
+
+    /// The command `connectors --output json [--config F] [--state-dir D] <arguments>`, started
+    /// with the narrowed environment and stdin piped when `piped`, and its bound in seconds.
+    fn command(
+        &self,
+        arguments: &[&str],
+        piped: bool,
+    ) -> Result<(Command, Duration, i64), CliError> {
         let mut command = Command::new(&self.config.program);
         command
             .env_clear()
@@ -408,24 +452,20 @@ impl ConnectorsCli {
             })?;
         command
             .args(arguments)
-            .stdin(if stdin.is_some() {
-                Stdio::piped()
-            } else {
-                Stdio::null()
-            })
+            .stdin(if piped { Stdio::piped() } else { Stdio::null() })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let output =
-            Self::bounded(&mut command, stdin, timeout).map_err(|failure| match failure {
-                Bounded::TimedOut => CliError::Failed(format!(
-                    "`{}` timed out after {seconds} s and was stopped, for {}",
-                    self.config.program,
-                    subject(source, adapter, Some(operation))
-                )),
-                Bounded::Io(what, error) => {
-                    CliError::Failed(format!("`{}` {what}: {error}", self.config.program))
-                }
-            })?;
+        Ok((command, timeout, seconds))
+    }
+
+    /// The `result` of the JSON answer `output` printed, or the refusal it states.
+    fn answer(
+        &self,
+        source: Option<&SourceName>,
+        adapter: &AdapterAlias,
+        operation: &OperationId,
+        output: &Output,
+    ) -> Result<Value, CliError> {
         // A refusal is printed on stderr, with stdout empty.
         let printed = if output.stdout.trim_ascii().is_empty() {
             &output.stderr
@@ -493,9 +533,7 @@ impl ConnectorsCli {
         timeout: Duration,
     ) -> Result<Output, Bounded> {
         let deadline = Instant::now() + timeout;
-        let mut child = command
-            .spawn()
-            .map_err(|error| Bounded::Io("did not start", error))?;
+        let mut child = command.spawn().map_err(Bounded::NotStarted)?;
         if let (Some(document), Some(mut pipe)) = (stdin, child.stdin.take()) {
             let document = document.to_owned();
             // Dropping the pipe at the end of the write closes stdin; a write the program never
@@ -541,6 +579,8 @@ const POLL: Duration = Duration::from_millis(10);
 enum Bounded {
     /// Still running, or its pipes still open, at the bound.
     TimedOut,
+    /// The program did not start.
+    NotStarted(std::io::Error),
     /// What failed, and the error.
     Io(&'static str, std::io::Error),
 }

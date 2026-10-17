@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "748fceb21cf7ee6d4e3507a439a01eec6e7e9190c5bee46f896cc1ad49fa1326",
-    "contract_digest": "46c4d4d570ca4756a9a8caf1cdfa2d49a60fe40d986d3e54b1dd2ba9a7b18d06"
+    "source_digest": "d963e91e2eff0bd7be27b613dc6014a58f63a3404143010ceaa390d8c1120a90",
+    "contract_digest": "7065673dfdf28e8b98b7e5d5d5e1933bea6c5ee58b6f0579685582e353e9b84f"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -75,6 +75,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.datasource.MutationClassification",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.datasource.OperationId",
       "disposition": {
         "disposition": "generated"
@@ -111,6 +118,34 @@
     {
       "kind": "domain_type",
       "source": "loom.datasource.SourceName",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.datasource.WriteApproval",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.datasource.WriteOperation",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.datasource.WriteRefusal",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.datasource.WriteResult",
       "disposition": {
         "disposition": "generated"
       }

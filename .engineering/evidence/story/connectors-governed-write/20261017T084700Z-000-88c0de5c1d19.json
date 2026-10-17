@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-17T08:47:00Z",
+  "actor": "human:timo",
+  "artifact": "story:connectors-governed-write",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "package gates on 3c78304 (impl/connectors-governed-write): b10x-loom-connectors 69 passed 0 failed incl. connectors_cli_write, support_triage_route, adversary_w172_governed_write 12/12; fmt, clippy -D warnings, ess-gate, drift, no-hand-model, docs-check, consumer-check exit 0"
+  }
+}

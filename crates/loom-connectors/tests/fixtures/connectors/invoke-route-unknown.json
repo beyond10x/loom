@@ -1,0 +1,1 @@
+{"ok":false,"error":{"code":"failure","data":{"kind":"operational","code":"outcome_unknown","stage":"response","next_action":"observe","mutation":{"classification":"unknown","attempt":null,"original_request_id":null,"replayed":false,"cause":{"code":"unavailable","stage":"response"}},"source_audit":{"instance":"desk-fixture","audit_ref":null,"audit_status":"unavailable"}}}}
