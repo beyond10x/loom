@@ -7,6 +7,6 @@
   "change": {
     "change": "evidence",
     "kind": "test_result",
-    "source": "unit 42fb00c merged in a7e35b7; package gate: executor and governor 933 passed 0 failed, clippy, fmt, commission docs and docs-drift; wave head 3253a27 gate: clippy -D warnings and cargo test of 12 packages (commission, commission-testkit, commission-conformance, executor, governor, protocols, intake-slice, intake-router, plugin, connectors, cli, sdk) 1678 passed 0 failed; fmt, drift, intake-drift, commission docs-drift, docs-check, consumer-check exit 0"
+    "source": "unit 42fb00c merged in a7e35b7; package gate: executor and governor 933 passed 0 failed, clippy, fmt, commission docs and docs-drift; wave head fe73cec gate: clippy -D warnings and cargo test of 12 packages (commission, commission-testkit, commission-conformance, executor, governor, protocols, intake-slice, intake-router, plugin, connectors, cli, sdk) 1678 passed 0 failed; fmt, drift, intake-drift, commission docs-drift, docs-check, consumer-check exit 0"
   }
 }

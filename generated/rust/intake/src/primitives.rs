@@ -1,6 +1,6 @@
 // generated from intake v1
-// model digest d8c32bcb041f8a56eb453f084d0015a73ed14ab9d01ec38dae4f55e65396160a
-// contract digest d0764514a3e03d525650b901f3321835fba82b74a89ce72eb11c673bf3b3eb4e
+// model digest fab3928935b8823efb8872c5b8678c44f1491ce37ca3d561382065b7a59f4562
+// contract digest be43418e652d22e43e025169a0b5af364bc4e874fa2d1ba672e4f0d22842e25f
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! How the specification's primitives are spelled in this workspace.

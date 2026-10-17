@@ -476,8 +476,9 @@ pub struct RunArgs {
     #[arg(long, value_name = "DIR")]
     pub state: Option<PathBuf>,
     /// A run configuration file (JSON, a regular file) binding an installed protocol's actions to
-    /// commands: {"protocol": "<name>@<major>", "timeout_seconds": <n>, "bindings": [{"action":
-    /// "<action>", "argv": ["<program>", "<argument>", ...]}]}. A run of that protocol starts an
+    /// commands: {"protocol": "<name>@<major>", "timeout_seconds": <n>, "unconfined_bindings":
+    /// <true|false>, "bindings": [{"action": "<action>", "argv": ["<program>", "<argument>",
+    /// ...]}]}. A run of that protocol starts an
     /// admitted action's program without a shell, with the action's arguments as JSON on standard
     /// input, a cleared environment but PATH, and a timeout (60 s when absent); exit 0 is
     /// performed, with standard output, one JSON object, as the report; any other end is refused.
@@ -485,12 +486,13 @@ pub struct RunArgs {
     /// is refused before any model call; an action it binds no command to stops the run
     /// NoLocalExecutor, naming it. Substrate does not confine these commands, so the run is
     /// refused ConfinementUnavailable (CommandUnconfined), exit 3, before any model call unless
-    /// --unconfined-bindings is given.
+    /// --unconfined-bindings is given or the file sets "unconfined_bindings": true.
     #[arg(long, value_name = "FILE")]
     pub action_bindings: Option<PathBuf>,
     /// Run the commands --action-bindings binds with the operator's rights, outside Substrate.
-    /// Without it a run given --action-bindings is refused ConfinementUnavailable
-    /// (CommandUnconfined). The opt-in is reported on standard error.
+    /// Without it, and without "unconfined_bindings": true in that file, a run given
+    /// --action-bindings is refused ConfinementUnavailable (CommandUnconfined). The flag wins over
+    /// the file; standard error reports which one opted in.
     #[arg(long)]
     pub unconfined_bindings: bool,
     /// What to do, as given.

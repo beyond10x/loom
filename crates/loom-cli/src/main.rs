@@ -535,11 +535,18 @@ fn execute(
         b10x_loom_intake_slice::bindings::check(bindings, &catalog)
             .map_err(|why| format!("--action-bindings {}: {}", path.display(), printable(&why)))?;
         // Substrate does not confine a bound command, and the run never falls back to an
-        // unconfined one on its own: only the operator's explicit opt-in starts them.
-        if !arguments.unconfined_bindings {
+        // unconfined one on its own: only the operator's explicit opt-in starts them, given as
+        // the flag or as the file's own `unconfined_bindings: true`. The flag wins.
+        if arguments.unconfined_bindings {
+            eprintln!("bound commands: unconfined (--unconfined-bindings)");
+        } else if bindings.unconfined_bindings == Some(true) {
+            eprintln!(
+                "bound commands: unconfined (unconfined_bindings in {})",
+                printable(&path.display().to_string())
+            );
+        } else {
             return Ok(bindings_refused(&bindings.protocol));
         }
-        eprintln!("bound commands: unconfined (--unconfined-bindings)");
     }
     let models = (classifier_route.take(), agent_route.take());
     let Some(dir) = &arguments.state else {
@@ -867,13 +874,15 @@ fn confinement_refused(prepared: &PreparedIntent, reason: &str) -> Ending {
     })
 }
 
-/// The stop of a run given `--action-bindings` without `--unconfined-bindings`, before any model
-/// call: `ConfinementUnavailable (CommandUnconfined: ...)`, exit status 3.
+/// The stop of a run given `--action-bindings` without an opt-in (`--unconfined-bindings`, or
+/// `unconfined_bindings: true` in the file), before any model call:
+/// `ConfinementUnavailable (CommandUnconfined: ...)`, exit status 3.
 fn bindings_refused(protocol: &str) -> Ending {
     let refusal = ConfinementError {
         reason: ConfinementRefusal::CommandUnconfined,
         detail: "Substrate does not confine the commands --action-bindings binds; pass \
-                 --unconfined-bindings to run them with the operator's rights"
+                 --unconfined-bindings, or set unconfined_bindings: true in the file, to run \
+                 them with the operator's rights"
             .to_owned(),
     };
     eprintln!("confinement: bound commands");

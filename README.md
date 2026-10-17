@@ -13,7 +13,8 @@ describes the clock tool, pinned installation and offline loading. `run --action
 drives an installed protocol through commands the operator binds to its actions: each admitted
 action starts its program without a shell, with its arguments as JSON on standard input, and the
 program's JSON report becomes the action's result; a binding confers no authority, and the
-commands run unconfined only with `--unconfined-bindings`. Transient model failures get
+commands run unconfined only with `--unconfined-bindings` or the file's own
+`"unconfined_bindings": true`. Transient model failures get
 at most three attempts on the same binding; reports count every attempt. Persistent overload
 is reported as unavailable, and tool effects are never retried by this policy.
 
@@ -37,9 +38,9 @@ the whole boundary.
 
 ## Status
 
-Version `0.23.0`, released from source at the tag `0.23.0`
-([release](https://github.com/beyond10x/loom/releases/tag/0.23.0)). Nothing is on a registry: you
-install from the tag or depend on it with `tag = "0.23.0"`. `b10x-loom run` completed a live run
+Version `0.24.0`, released from source at the tag `0.24.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.24.0)). Nothing is on a registry: you
+install from the tag or depend on it with `tag = "0.24.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -157,14 +158,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.23.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.24.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.23.0
+b10x-loom 0.24.0
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -266,7 +267,7 @@ on a held case ([the governor](https://beyond10x.github.io/loom/docs/concepts/go
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.23.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.24.0" }
 ```
 
 The example below

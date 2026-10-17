@@ -15,6 +15,25 @@ A host loads its models from a configuration or a routes document through the SD
 
 `b10x-loom run` takes its models from a configuration file (`story:cli-run-config`). `run --config <PATH>` loads a `loom.models.ModelsConfig` through `loom_sdk::models::from_config`: the classifier and the agent run on the models of the roles `classifier` and `agent`, routes of the `llm.routes/1` document it names, with the credentials its `env:` and `file:` references name, so a route whose endpoint needs a credential runs, where `--catalog` refuses it. `--model` and `--classifier-model`, when given, override one role each with a route or `<endpoint>/<model-id>` name of the same document; with `--config` they have no default. Before any model call the run stops, exit status 1, on a configuration that cannot be loaded, a role neither configured nor given (naming the role and its flag), a name the document does not serve, a model that cannot take a forced tool call, and a model whose endpoint's `env:` or `file:` secret does not resolve (each naming the role; the last also the endpoint and the reference kind, never the value). `--config` conflicts with `--catalog`, and with `--state`, because a resume context records a Codex model or a catalog route and no configuration. Without `--config` nothing changes. Breaking: none.
 
+## [0.24.0] - 2026-10-17
+
+Loom 0.24.0 puts a model and custom protocols within reach of an embedding host. The SDK carries
+an llm-backed model port and a Claude Code model port (`ClaudeCodePort`), so a host writes
+neither. `b10x-loom run --action-bindings` runs an installed custom protocol through commands the
+operator binds to its actions, and refuses to start unconfined programs unless the operator opts
+in with `--unconfined-bindings` or `"unconfined_bindings": true` in that file
+(`ConfinementUnavailable`). A host can pass explicit decisions on an
+evaluation request and declare, when it opens a case, the independence dimensions of each evidence
+producer. A model loop's budget now stops a run as `LoopBudget`, and Commission's runtime enforces
+run and action budgets (`RunBudget`) over effects that report their usage. A workflow run survives
+a restart through a durable run record. Loom links Canon 0.6.0 and engineering-protocols 0.8.0.
+Breaking: `b10x_loom_cli::model_port` is gone (use `loom_sdk::llm::LlmModelPort`);
+`SuspensionReason` gains `LoopBudget` and `RunBudget` and `EvaluationInput` gains `Decisions`, so
+exhaustive matches handle them, as `OpenError` handles its four new variants; code that builds
+`IntentRequest`, `EffectOutcomePerformed`, `LoopEnd`, `RunUsageReport`, `EvaluationRequest` or
+`CaseState` with a struct literal sets the new fields (`bindings`, `usage`, `charges`, `effects`,
+`decisions`, `independence`); and a host that links Canon itself moves to Canon 0.6.0.
+
 A workflow run survives a restart (`story:dw-durable-run-state`). `WorkflowExecutor::with_store`
 takes a `b10x_loom_executor::workflow::WorkflowRunStore`; bound to a Run with `begin(&run_id)`, the executor writes
 the run's `loom.workflow.WorkflowRunRecord` after every performed step and every call: the steps
@@ -76,9 +95,11 @@ that builds either with a struct literal sets them.
   The report may list evidence, and each kind must be one the action declares in `may_produce`.
   An action left unbound stops the run `NoLocalExecutor` naming it. A file that binds an action
   the protocol does not declare is refused before any model call. A binding confers no authority.
-  Bound programs are not confined by Substrate, so `run` starts them only with
-  `--unconfined-bindings` and reports that opt-in on standard error. Without the flag the run is
-  refused before any model call with `stopped: ConfinementUnavailable (CommandUnconfined: ...)`,
+  Bound programs are not confined by Substrate, so `run` starts them only when the operator opts
+  in, with `--unconfined-bindings` or with the file's own `"unconfined_bindings": true`
+  (`intake.bindings.ActionBindings` gains the optional `unconfined_bindings`), and reports on
+  standard error which one opted in; the flag wins when both are given. Without an opt-in the
+  run is refused before any model call with `stopped: ConfinementUnavailable (CommandUnconfined: ...)`,
   exit status 3 (`intake.confinement.ConfinementRefusal` gains `CommandUnconfined`). `resume`
   still continues only `software-change@1`.
 - Explicit decisions through the governor: an outcome that requires a decision

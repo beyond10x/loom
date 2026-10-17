@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-17T06:32:59Z",
+  "actor": "human:timo",
+  "artifact": "story:cli-custom-protocol-commands",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "unit 1b8fbe3 merged in the wave; config opt-in c572dc72 merged in b54934d3: red 3 then green, b10x-loom-cli 127 passed 0 failed, intake-slice 186 passed, loom-xtask 39 passed; fmt, clippy -D warnings, intake-drift, docs-check, consumer-check and release-check --tag 0.24.0 exit 0"
+  }
+}
