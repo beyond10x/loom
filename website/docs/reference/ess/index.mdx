@@ -98,7 +98,7 @@ The slack-handler plugin's configuration: the host's plugin configuration, the S
 
 ## Workflow
 
-A Loom-side definition of a workflow over one protocol: an ordered list of steps, each either deterministic (one action with literal arguments, proposed without a model) or a judgement (the actions a model may choose among, with instructions). A step may be conditional on a frontier claim, never on a model.
+A Loom-side definition of a workflow over one protocol: an ordered list of steps, each either deterministic (one action with literal arguments, proposed without a model) or a judgement (the actions a model may choose among, with instructions). A step may be conditional on a frontier claim, never on a model. A run's progress over a definition may be kept as a record a store writes after every performed step and a later process resumes from.
 
 <DomainGraph data={domainGraph8} title="Workflow" />
 

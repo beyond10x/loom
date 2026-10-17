@@ -158,10 +158,12 @@ use b10x_loom_commission::model::responsibility::{
 use b10x_loom_commission::ports::evidence::{AttributedEvidence, EvidencePort, ObservationPort};
 use b10x_loom_commission::ports::governor::Governor;
 
+mod file_run_store;
 mod file_store;
 mod file_suspension;
 mod locked_dir;
 
+pub use file_run_store::{FileWorkflowRunStore, LONGEST_RUN_ID};
 pub use file_store::{FileCaseStore, FileStoreError};
 pub use file_suspension::{FileSuspensionStore, LONGEST_COMMISSION_ID};
 

@@ -66,6 +66,7 @@ implements it through.
 | `ObservationPort` | `loom_sdk::commission::ports::evidence::ObservationPort` | Receiving the observations a run reports |
 | `EvidencePort` | `loom_sdk::commission::ports::evidence::EvidencePort` | Receiving evidence attributed to its producer |
 | `ActionSelector` | `loom_sdk::loom::selection::ActionSelector` | Picking one action from the catalogue |
+| `WorkflowRunStore` | `loom_sdk::loom::workflow::WorkflowRunStore` | Durable storage of a workflow run's record, so the run resumes after a restart |
 | `ArgumentGenerator` | `loom_sdk::loom::arguments::ArgumentGenerator` | Arguments for the selected action only |
 | `ModelPort` | `loom_sdk::loom::harness::wire::ModelPort` | One model turn over a wire |
 | `ToolPort` | `loom_sdk::loom::harness::wire::ToolPort` | The tools a turn may call, and their calls |
