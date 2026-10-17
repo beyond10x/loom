@@ -12,7 +12,8 @@
 //! [`ObservationPort`] and then the evidence through Commission's [`submit_evidence`], citing that
 //! observation and attributed to the trusted producer the host names. A write Connectors
 //! classifies `not_attempted`, `refused` or `unknown` records nothing: no observation, no
-//! evidence.
+//! evidence. Neither does a write of another admitted request: the write's idempotency key must be
+//! [`idempotency_key`] of the request it is recorded for.
 //!
 //! The evidence's facts are the `canon-evidence/1` record the governor reads (`format`, `id`,
 //! `kind`, `subject`, `subject_revision`, `observed_at`); its provenance names the step (`action`,
@@ -31,6 +32,8 @@ use b10x_loom_commission::ports::evidence::{
     EvidenceError, EvidencePort, ObservationPort, submit_evidence,
 };
 use loom::datasource::{MutationClassification, WriteResult};
+
+use crate::cli::idempotency_key;
 
 /// The observation source the adapter names: what Connectors reported.
 pub const SOURCE: &str = "connectors";
@@ -53,6 +56,14 @@ pub enum WriteEvidenceError {
         /// The action the request admitted.
         admitted: String,
     },
+    /// The write is not the one Connectors reported for this admitted request: its idempotency
+    /// key is not [`idempotency_key`] of the request.
+    OtherRequest {
+        /// The key of the admitted request.
+        expected: String,
+        /// The key the write was invoked with.
+        written: String,
+    },
     /// Connectors' answer could not be carried into the evidence.
     Unreadable(String),
     /// The governor did not take the observation.
@@ -67,6 +78,11 @@ impl fmt::Display for WriteEvidenceError {
             Self::OtherAction { expected, admitted } => write!(
                 f,
                 "the admitted request is for `{admitted}`, the adapter records `{expected}`"
+            ),
+            Self::OtherRequest { expected, written } => write!(
+                f,
+                "the write was invoked with idempotency key `{written}`, the admitted request's \
+                 is `{expected}`"
             ),
             Self::Unreadable(message) => f.write_str(message),
             Self::Observation(error) => {
@@ -117,8 +133,10 @@ impl WriteEvidenceAdapter {
     /// delivers nothing.
     ///
     /// # Errors
-    /// [`WriteEvidenceError::OtherAction`] for a request of another action, before anything is
-    /// delivered; [`WriteEvidenceError::Observation`] and [`WriteEvidenceError::Evidence`] when the
+    /// [`WriteEvidenceError::OtherAction`] for a request of another action, and
+    /// [`WriteEvidenceError::OtherRequest`] for a write whose idempotency key is not
+    /// [`idempotency_key`] of `request` (the write of another admitted request), each before
+    /// anything is delivered; [`WriteEvidenceError::Observation`] and [`WriteEvidenceError::Evidence`] when the
     /// governor or `submit_evidence` refused.
     #[allow(clippy::too_many_arguments)]
     pub fn record<P>(
@@ -140,6 +158,13 @@ impl WriteEvidenceAdapter {
             return Err(WriteEvidenceError::OtherAction {
                 expected: self.action.clone(),
                 admitted: admitted.action.clone(),
+            });
+        }
+        let expected = idempotency_key(request);
+        if written.idempotency_key != expected {
+            return Err(WriteEvidenceError::OtherRequest {
+                expected,
+                written: written.idempotency_key.clone(),
             });
         }
         if written.classification != MutationClassification::Applied {

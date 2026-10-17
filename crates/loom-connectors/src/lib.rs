@@ -44,8 +44,9 @@
 //! a run and inside one, need no admitted request and no binding, read no credential and refuse
 //! every operation Connectors describes as a write. Its governed write,
 //! [`cli::ConnectorsCli::invoke_write`], is the local transport for a write the runtime admitted:
-//! it takes the [`AdmittedRequest`], passes the person's approval proof by path and an
-//! idempotency key derived from the request id, and returns Connectors' classification; this
+//! it takes the [`AdmittedRequest`], writes only its admitted action with its admitted arguments
+//! (any other is refused before a process starts), passes the person's approval proof by path and
+//! an idempotency key derived from the request id, and returns Connectors' classification; this
 //! invoker, the service transport, is unchanged. [`evidence::WriteEvidenceAdapter`] is the host
 //! evidence adapter that turns an applied write into the protocol's evidence for its step.
 

@@ -153,6 +153,7 @@ fn fixtures() -> PathBuf {
 
 fn route() -> WriteOperation {
     WriteOperation {
+        action: ROUTE.to_owned(),
         adapter: AdapterAlias(ADAPTER.to_owned()),
         connection: ConnectionId(CONNECTION.to_owned()),
         operation: OperationId(ROUTE.to_owned()),

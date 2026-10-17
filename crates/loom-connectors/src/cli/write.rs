@@ -2,10 +2,14 @@
 //!
 //! [`ConnectorsCli::invoke_write`] performs one write the runtime admitted: the
 //! [`AdmittedRequest`] is the proof the step was revalidated and its authority checked, and only
-//! the runtime makes one. The person's confirmation is the proof `connectors approvals issue
-//! --proof-output <path>` wrote; the [`WriteApproval`] names its path, which is passed as
-//! `--approval-file` and never read, written or stored here. An empty path, or one that is not
-//! absolute, is refused before any process starts.
+//! the runtime makes one. The write is bound to what it admitted: the [`WriteOperation`]'s
+//! `action` must be the admitted request's `action`, else it is refused `action-not-admitted`, and
+//! the input must be the admitted `arguments` (compared as JSON values), else it is refused
+//! `input-not-admitted`, both before any process starts. The person's confirmation is the proof
+//! `connectors approvals issue --proof-output <path>` wrote; the [`WriteApproval`] names its path,
+//! which is passed as `--approval-file` and never read, written or stored here. An empty path, one
+//! holding a control character, or one that is not absolute, is refused before any process
+//! starts.
 //!
 //! One write is two commands, each `connectors --output json [--config F] [--state-dir D]` and
 //! then:
@@ -73,10 +77,14 @@ pub fn idempotency_key(request: &AdmittedRequest) -> String {
 
 impl ConnectorsCli {
     /// Writes `operation` for the admitted `request` with `input` on stdin and the proof
-    /// `approval` names: one describe, then exactly one `operations invoke`.
+    /// `approval` names: one describe, then exactly one `operations invoke`. The write is bound to
+    /// the admitted request: `operation.action` must be its `action` and `input` its `arguments`.
     ///
     /// # Errors
-    /// [`WriteError::Refused`] with code `approval-missing` or `approval-not-absolute` before
+    /// [`WriteError::Refused`] with code `action-not-admitted` when `operation.action` is not the
+    /// admitted request's action, `input-not-admitted` when `input` is not its admitted arguments
+    /// as a JSON value, `approval-missing` for an empty proof path, `approval-not-a-path` for one
+    /// holding a control character or `approval-not-absolute` for a relative one, each before
     /// any process starts; with `not-a-write` when `describe` reports another profile than a
     /// write's, before the invoke; with Connectors' code when it refused the describe.
     /// [`WriteError::Failed`] when the describe failed, or an argument would read as a flag.
@@ -88,10 +96,35 @@ impl ConnectorsCli {
         approval: &WriteApproval,
     ) -> Result<WriteResult, WriteError> {
         let WriteOperation {
+            action,
             adapter,
             connection,
             operation,
         } = operation;
+        let admitted = request.data();
+        if *action != admitted.action {
+            return Err(refused(
+                adapter,
+                operation,
+                "action-not-admitted",
+                format!(
+                    "a write of action `{action}` was asked for a request admitted for `{}`",
+                    admitted.action
+                ),
+            ));
+        }
+        if !admits(&admitted.arguments.0, input) {
+            return Err(refused(
+                adapter,
+                operation,
+                "input-not-admitted",
+                format!(
+                    "the input of a write of adapter `{}` operation `{}` is not the arguments the \
+                     runtime admitted for `{action}`",
+                    adapter.0, operation.0
+                ),
+            ));
+        }
         let proof = approval.proof_file.as_str();
         if proof.is_empty() {
             return Err(refused(
@@ -102,6 +135,14 @@ impl ConnectorsCli {
                     "a write of adapter `{}` operation `{}` names no approval proof",
                     adapter.0, operation.0
                 ),
+            ));
+        }
+        if proof.chars().any(char::is_control) {
+            return Err(refused(
+                adapter,
+                operation,
+                "approval-not-a-path",
+                format!("the approval proof path {proof:?} holds a control character"),
             ));
         }
         if !Path::new(proof).is_absolute() {
@@ -209,6 +250,40 @@ fn refused(
         code: code.to_owned(),
         message,
     })
+}
+
+/// Whether `input` is the JSON value of the `admitted` arguments: objects compared by their
+/// members whatever their order, numbers by their spelling, everything else by equality. A
+/// member named twice on either side is never the same value.
+fn admits(admitted: &b10x_loom_commission::model::json::Value, input: &Value) -> bool {
+    let mut document = String::new();
+    b10x_loom_commission::model::json::push_value(&mut document, admitted);
+    json::parse(&document).is_ok_and(|admitted| same(&admitted, input))
+}
+
+fn same(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Array(left), Value::Array(right)) => {
+            left.len() == right.len() && left.iter().zip(right).all(|(l, r)| same(l, r))
+        }
+        (Value::Object(left), Value::Object(right)) => {
+            let (left, right) = (sorted(left), sorted(right));
+            left.len() == right.len()
+                && left.windows(2).all(|pair| pair[0].0 != pair[1].0)
+                && right.windows(2).all(|pair| pair[0].0 != pair[1].0)
+                && left
+                    .iter()
+                    .zip(&right)
+                    .all(|(l, r)| l.0 == r.0 && same(&l.1, &r.1))
+        }
+        _ => left == right,
+    }
+}
+
+fn sorted(members: &[(String, Value)]) -> Vec<&(String, Value)> {
+    let mut members: Vec<&(String, Value)> = members.iter().collect();
+    members.sort_by(|a, b| a.0.cmp(&b.0));
+    members
 }
 
 fn unknown(idempotency_key: String, code: Option<String>) -> WriteResult {

@@ -163,6 +163,7 @@ impl EffectPort for Desk<'_> {
             .invoke_write(
                 request,
                 &WriteOperation {
+                    action: ROUTE.to_owned(),
                     adapter: AdapterAlias(ADAPTER.to_owned()),
                     connection: ConnectionId(CONNECTION.to_owned()),
                     operation: OperationId(ROUTE.to_owned()),
