@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "7e01de49f6648bd42c3487572f5bf305ca3e9c2e76adeb528dd2ffcdffa645c9",
-    "contract_digest": "339d7d1174a6fc6f5384f70ff5342398aa19ad068e03cd1146e66a670161b962"
+    "source_digest": "08aaad3d648d503c874a006c3741c4fc037129ea3e56464b9d052c782600e763",
+    "contract_digest": "6dfdf4bff25c8bd3098b5577c415d0338d6bd99de5cda7767d3103908d655aea"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -194,6 +194,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.evaluation.ExplicitDecision",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.evaluation.ProtocolName",
       "disposition": {
         "disposition": "generated"
@@ -236,6 +243,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.governor.StoredIndependence",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.governor.StoredInput",
       "disposition": {
         "disposition": "generated"
@@ -244,6 +258,27 @@
     {
       "kind": "domain_type",
       "source": "loom.governor.StoredObservation",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.metering.ActionUsage",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.metering.CarriedUsage",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.metering.EffectsUsage",
       "disposition": {
         "disposition": "generated"
       }
@@ -670,6 +705,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.workflow.RecordedOutput",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.workflow.StepCondition",
       "disposition": {
         "disposition": "generated"
@@ -691,6 +733,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.workflow.StepRequest",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.workflow.Truth",
       "disposition": {
         "disposition": "generated"
@@ -698,7 +747,21 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.workflow.UnproducedOutput",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.workflow.WorkflowDefinition",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.workflow.WorkflowRunRecord",
       "disposition": {
         "disposition": "generated"
       }

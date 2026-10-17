@@ -4,6 +4,8 @@
 # `turn`, whether the turn answered or failed; a step is one `AgentExecutor::run` call of the run
 # (crates/loom-commission/src/runtime.rs, module docs item 6), counted from 1. The report is a
 # value a host reads when the run ends: it has no lifecycle, so the domain declares types only.
+# A workflow run record (`loom.workflow.WorkflowRunRecord`) carries the usage so far as
+# CarriedUsage, so a run resumed in another process reports every segment.
 domain: loom.metering
 
 summary: >-
@@ -49,7 +51,12 @@ types:
   # One run's report: the commission run it covers, as a typed id (`loom.run.CommissionRunId`,
   # Commission's `commission.responsibility.RunId`; ESS cannot name another system's entity), the
   # totals over every step, and the steps in order. The totals are the sums of the steps; the
-  # cost is absent when any step's cost is absent. It covers one process segment of the run.
+  # cost is absent when any step's cost is absent. It covers one process segment of the run and,
+  # when its meter was resumed from a run record (story dw-durable-run-state), every earlier
+  # segment the record carried: their steps first, numbered as they were, and their effects summed
+  # with this segment's.
+  # story:run-and-action-budgets: `effects` is what the run's performed effects reported they spent
+  # on their own model calls, beside the model-port usage above and never summed into it.
   - name: loom.metering.RunUsageReport
     kind: struct
     fields:
@@ -67,3 +74,57 @@ types:
         type: Optional<Integer>
       - name: steps
         type: List<loom.metering.StepUsage>
+      - name: effects
+        type: loom.metering.EffectsUsage
+
+  # story:run-and-action-budgets: what one action's performed effects reported they spent, as the
+  # Commission runtime charged it (`commission.responsibility.ActionCharge`): the requests handed
+  # to the effect port for it, the input and output tokens, the wall time in milliseconds and the
+  # cost in micro-US-dollars, absent once an effect reported usage without a cost.
+  - name: loom.metering.ActionUsage
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: trials
+        type: Integer
+      - name: input_tokens
+        type: Integer
+      - name: output_tokens
+        type: Integer
+      - name: duration_ms
+        type: Integer
+      - name: cost_micro_usd
+        type: Optional<Integer>
+
+  # story:run-and-action-budgets: the effect usage charged to the run
+  # (`commission.responsibility.RunCharges`): the totals over every action, and each action in the
+  # order a request for it was first handed to the effect port. All zero, with no actions, when the
+  # meter was charged nothing.
+  - name: loom.metering.EffectsUsage
+    kind: struct
+    fields:
+      - name: trials
+        type: Integer
+      - name: input_tokens
+        type: Integer
+      - name: output_tokens
+        type: Integer
+      - name: duration_ms
+        type: Integer
+      - name: cost_micro_usd
+        type: Optional<Integer>
+      - name: actions
+        type: List<loom.metering.ActionUsage>
+
+  # story:dw-durable-run-state: what the earlier process segments of one run spent, as a run record
+  # carries it into the meter of the process that resumes the run: every step they counted, step 0
+  # included when it holds a call, numbered as the run numbers them, and the effect usage charged
+  # to them. A resumed meter numbers its own steps after the last one carried.
+  - name: loom.metering.CarriedUsage
+    kind: struct
+    fields:
+      - name: steps
+        type: List<loom.metering.StepUsage>
+      - name: effects
+        type: loom.metering.EffectsUsage

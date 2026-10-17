@@ -10,8 +10,9 @@ domain: loom.governor
 summary: >-
   The governor's held case as a store writes it: the case id, the protocol that governs it, the
   case revision, the current revision of every declared artifact, the value of every case input
-  the protocol declares, and every evidence record received with whether it applies; and the
-  observations kept beside the cases.
+  the protocol declares, the independence dimensions the host declared for each evidence producer,
+  every evidence record received with whether it applies, and every explicit decision recorded for
+  it; and the observations kept beside the cases.
 
 naming:
   wire: governor
@@ -74,16 +75,35 @@ types:
       - name: value
         type: String
 
+  # One evidence producer the host declared, when the case opened, independent of the case's work
+  # on `dimensions`, each an independence dimension the case's protocol declares, in dimension
+  # order and each once (story governor-independence-declarations). Trusted context, never read
+  # from an evidence record or a model; fixed for the life of the case.
+  - name: loom.governor.StoredIndependence
+    kind: struct
+    fields:
+      - name: producer
+        type: String
+      - name: dimensions
+        type: List<String>
+
   # One held case. `protocol` is the registered name, `<name>@<major>`; `revision` is 1 when
   # opened and one more with each artifact revision recorded; `artifacts` are in artifact order;
   # `inputs` are the value of every case input the protocol declares, in input order, and empty
   # for a protocol that declares none; `evidence` is every record received, in the order
-  # received. A case stored without `inputs` is not read: the store reports it as a failure
+  # received; `decisions` is every explicit decision recorded for the case, in the order recorded,
+  # each at the case revision it was taken at, and absent when none was. A case stored without
+  # `inputs` is not read: the store reports it as a failure
   # naming the case, and never fills the inputs in. Nor is one whose `inputs` do not satisfy its
   # protocol, checked as at opening: a declared input missing (an empty list for a protocol that
   # declares inputs included), an input given twice, one the protocol does not declare, or a
   # value its input does not list. Such a case is a store failure naming the case and the input;
-  # it is never decided and its inputs are never reported.
+  # it is never decided and its inputs are never reported. `independence` lists, in producer
+  # order and each producer once, the producers the host declared independent and on which
+  # dimensions; it is absent when the host declared none, as in every case Loom 0.23.0 and
+  # earlier stored, which those versions evaluated with no producer declared. A case whose
+  # declarations name a producer or a dimension twice, or a dimension its protocol does not
+  # declare, is never decided.
   - name: loom.governor.StoredCase
     kind: struct
     fields:
@@ -97,8 +117,12 @@ types:
         type: List<loom.governor.StoredArtifact>
       - name: inputs
         type: List<loom.governor.StoredInput>
+      - name: independence
+        type: Optional<List<loom.governor.StoredIndependence>>
       - name: evidence
         type: List<loom.governor.StoredEvidence>
+      - name: decisions
+        type: Optional<List<loom.evaluation.ExplicitDecision>>
 
   # One observation kept: Commission's commission.responsibility.Observation data, field for field.
   # Never evidence (Atlas ADR 0074).

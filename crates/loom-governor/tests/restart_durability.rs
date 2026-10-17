@@ -474,7 +474,9 @@ fn sample_state(case: &CaseId) -> loom_governor::CaseState {
             ("affects_security_boundary", "false"),
         ])
         .expect("distinct inputs"),
+        independence: loom_governor::CaseIndependence::none(),
         evidence: Vec::new(),
+        decisions: Vec::new(),
     }
 }
 

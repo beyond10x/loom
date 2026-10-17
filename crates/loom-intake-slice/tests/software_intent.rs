@@ -61,6 +61,7 @@ fn request(workspace: Option<PathBuf>, runner: Arc<Runner>) -> IntentRequest {
         threshold: 0.5,
         inputs: b10x_loom_intake_slice::case::RUN_DEFAULTS,
         test_paths: b10x_loom_intake_slice::test_paths::TestPaths::default(),
+        bindings: None,
     }
 }
 fn classifier() -> Recorded {

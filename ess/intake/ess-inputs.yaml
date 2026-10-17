@@ -9,4 +9,5 @@ specification:
   - domains/protocols.yaml
   - domains/query.yaml
   - domains/events.yaml
+  - domains/bindings.yaml
 scenarios: []

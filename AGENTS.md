@@ -96,6 +96,8 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | A workflow asks a model only in a judgement step, offering it only that step's actions; a step whose action the frontier does not list ends `NeedsHumanJudgment` naming it and nothing is proposed; a step advances only once its request was `Performed`; a definition naming an action outside its protocol is refused at load, naming the step | `crates/loom-executor/tests/workflow_executor.rs` (`deterministic_steps_call_no_model`, `a_judgement_step_offers_the_model_only_its_actions`, `a_step_the_frontier_does_not_list_ends_needing_human_judgment`, `a_step_advances_only_after_its_effect_was_performed`, `a_definition_naming_an_action_outside_its_protocol_is_refused`) |
 | A later step's arguments carry an earlier step's typed output with no model call, and a missing or mistyped output, or one its step did not produce, proposes nothing and ends `NeedsHumanJudgment` naming the step and the output; a reference to a later, unknown or undeclared output is refused at load | `crates/loom-executor/tests/workflow_step_outputs.rs` (`a_later_step_reads_an_earlier_output_without_a_model`, `a_mistyped_output_ends_needing_human_judgment`, `an_absent_output_ends_needing_human_judgment`, `a_reference_to_a_later_or_unknown_step_is_refused_at_load`, `outputs_are_identical_on_a_rerun_with_the_same_reports`) |
 | A judgement step sees exactly the earlier outputs it lists, typed, in one data block of its instructions that no value can close, never as instructions; a listed output the run did not produce asks the model nothing and ends `NeedsHumanJudgment` naming the step and the output; an input naming no earlier declared output, or listed twice, is refused at load | `crates/loom-executor/tests/workflow_step_outputs.rs` (`a_judgement_step_reads_a_listed_output_as_data`, `a_judgement_step_listing_an_absent_output_asks_no_model`, `a_judgement_step_input_naming_no_earlier_output_is_refused_at_load`) |
+| A workflow run's record, written after every performed step to the governor's `FileWorkflowRunStore` keyed by the Run id, lets `resume(run_id)` in another process continue the run after an approval or a crash between steps, every output bound, no performed step invoked again, and the usage report covering every segment; a record of another Run is refused, never read | `crates/loom-commission-testkit/tests/workflow_run_store.rs` (`a_step_result_survives_a_restart_across_an_approval`, `the_usage_report_covers_every_segment_of_a_resumed_run`, `a_step_result_of_another_run_is_refused`, `a_workflow_resumes_after_a_crash_between_steps`) |
+| A governed run stopped by a budget of its model loop is `Suspended` with `LoopBudget` carrying the loop's stop, through `Loom::run_loop`, `LoopExecutor` and a workflow's judgement step, never `NoUsefulAction` | `crates/loom-executor/tests/budget_stop_cause.rs` (`a_governed_run_stopped_by_its_input_token_budget_reports_the_budget`), `crates/loom-executor/tests/workflow_executor.rs` (`a_judgement_step_stopped_by_its_input_token_budget_suspends_the_run_for_it`) |
 | A stale or unlisted request is refused at revalidation | `crates/loom-commission-testkit/tests/action_request.rs`, `crates/loom-executor/tests/adversary_run_revalidation.rs`, `crates/loom-executor/tests/selection_revalidation.rs` |
 | Unknown capabilities and panicking authority providers yield no grant | `crates/loom-commission-testkit/tests/adversary_authority_fail_closed.rs` |
 | Commission names no executor, Canon, `model-provider-deny.txt`, Connectors or Mandate crate | `task commission:deps-guard` (`crates/loom-commission-testkit/tests/executor_port.rs`) |
@@ -275,9 +277,18 @@ holds a case across a real process restart. `FileSuspensionStore` is Commission'
 over the same lock and write (the private `locked_dir` module), a file per commission, so the two
 may share one directory; the testkit's `FileSuspensionStore` re-exports it, and
 `crates/loom-commission-testkit/tests/approval_suspend_resume.rs` holds both in one directory
-across a restart. The host
+across a restart. `FileWorkflowRunStore` is the governor's `WorkflowRunStore`, the port a
+`WorkflowExecutor` keeps its run's `loom.workflow.WorkflowRunRecord` through, over the same lock and
+write, a file per Run (`workflow-run-…`); a file holding another Run's record is refused, and
+`crates/loom-commission-testkit/tests/workflow_run_store.rs` holds a workflow run across real process
+restarts. The port and its `RunStoreError` are `b10x-loom-executor`'s (`workflow`, beside
+`WorkflowExecutor`), so the governor depends on the executor and never the reverse. The host
 restores the same admitted protocol definitions on recovery and authenticates evidence before
-`submit_evidence`. The governor supplies no authority decision.
+`submit_evidence`. The governor supplies no authority decision. The explicit decisions
+(`canon-decisions/1`) it supplies are the ones the host recorded with `CanonGovernor::decide`, each
+at the case revision current when recorded; `evaluate` takes them in the request's `decisions`.
+Canon judges them, and Loom decides nothing about who may take one
+(`crates/loom-governor/tests/explicit_decisions.rs`).
 
 `evaluate` (`loom_governor::evaluate`, `b10x-loom evaluate`) decides a caller's `canon-case/1`
 snapshot and `canon-evidence/1` records under a protocol of the host catalog, never raw YAML from
@@ -306,10 +317,10 @@ refuses such a case of a built-in protocol naming the case and the input
 `a_stored_case_with_unusable_inputs_is_never_decided`). An obligation is `open` only when Canon
 reports it `open`: one Canon reports `not_applicable` (the case's inputs do not select it) or `discharged` is not.
 
-Canon is named by the reference `b10x-canon-engineering` uses (`tag = "0.4.0"`), pinned by
+Canon is named by the reference `b10x-canon-engineering` uses (`tag = "0.6.0"`), pinned by
 `Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon with
 `cargo update -p b10x-canon -p b10x-canon-engineering` together with the `b10x-canon-engineering`
-tag (now `0.7.0`); any other crate that adds Canon uses the same reference.
+tag (now `0.8.0`); any other crate that adds Canon uses the same reference.
 
 ## Connectors
 
@@ -462,9 +473,10 @@ reuse `crates/loom-plugin/tests/support/mod.rs` by path and answer Slack-shaped 
 
 `b10x-loom plugin run` settles both models before any read: with `--catalog` from route aliases
 (`model_catalog`), otherwise Codex models, as `run` does. A turn runs on
-`model_port::LlmModelPort`, the bridge from an llm `Model` to the harness `ModelPort`: one
-`Model::turn` per port turn, no retry and no other target, an opaque item carried back under the
-wire id `llm-model` only. Without `--once`, the first SIGTERM or SIGINT sets the host's stop, so
+`loom_sdk::llm::LlmModelPort` (`crates/loom-sdk/src/llm.rs`), the bridge from an llm `Model` to
+the harness `ModelPort`: one `Model::turn` per port turn, no retry and no other target, an opaque
+item carried back under the wire id `llm-model` only. The CLI defines no model port of its own
+(`crates/loom-sdk/tests/llm_model_port.rs`). Without `--once`, the first SIGTERM or SIGINT sets the host's stop, so
 a systemd stop ends it after the item being handled; a second one exits at once with 130
 (`plugin_run_stops_on_sigterm`). `plugin report` reads `record.jsonl` without the lock and drops a torn
 last line. `crates/loom-cli/tests/plugin.rs` runs the binary against the fake `connectors` and the
@@ -662,6 +674,23 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   its own exit status (`resume_exit_status`, `RESUME_HELP`).
   `crates/loom-cli/tests/resume_after_grant.rs` runs `run`, `approve` and `resume` as separate
   processes.
+- `run --action-bindings <FILE>` reads a run configuration (`intake.bindings.ActionBindings`,
+  `ess/intake/domains/bindings.yaml`; `b10x_loom_intake_slice::bindings`): one installed
+  protocol, declaring the `intent` artifact alone and no case input, and one argv per action.
+  `bindings::check` refuses, before any model call, a bundled protocol, an action the protocol
+  does not declare, one bound twice and an empty argv. A pick of that protocol with an action left
+  unbound stops `NoLocalExecutor` naming it, before a case opens; otherwise
+  `bindings::CommandEffects` performs each admitted action by starting its program directly (no
+  shell) with the arguments as JSON on stdin, only `PATH` in its environment and a timeout past
+  which it is killed and reaped: exit 0 is `Performed` with its stdout (one JSON object) as the
+  report, anything else `Refused`. Evidence comes only from the report's `evidence` list
+  (`intake.bindings.CommandEvidence`), each of a kind the action declares it may produce, about
+  `intent`; another kind fails the run. A binding confers no authority: the slice's
+  authority provider still answers every capability with approval required, and `resume`
+  continues `software-change@1` runs only. Substrate does not confine a bound command, so
+  without `--unconfined-bindings` `run` stops `ConfinementUnavailable (CommandUnconfined: ...)`,
+  exit 3, before any model call (`bindings_refused`); with it, standard error says so. `crates/loom-cli/tests/custom_protocol_commands.rs`
+  (`a_custom_protocol_runs_through_declared_commands`) runs the binary against scripts.
 - With `--mandate <FILE>`, `approve` and `resume` clear the approval through Mandate (§ Mandate);
   a Mandate refusal is `NotGranted` (16) and performs nothing. A `resume` without `--mandate`
   refuses a grant naming a Mandate approval `NotGranted` (16) and performs nothing.
@@ -699,6 +728,17 @@ credential resolver, so a credentialed account is refused before any model call.
 credential is the operator's Codex login (`~/.codex/auth.json`), read and renewed by llm, never by
 Loom code. The ported wires take theirs from a `loom.run.WireCredential` reference through
 `credentials::ResolvedBearer`, which asks a `SecretResolver` the embedder injects at each call.
+
+The SDK ships two model ports. `loom_sdk::llm::LlmModelPort` is the llm-backed one above.
+`loom_sdk::loom::wire::ClaudeCodePort` (`crates/loom-executor/src/wire/claude_code.rs`) runs on an
+operator's Claude Code login only through the `claude` command, which reads that login itself:
+one turn is one `claude -p --output-format json` invocation, the command's own tools off, the
+turn's tools and conversation on its standard input as escaped JSON blocks, and a call answered
+as a JSON object the loop executes. It is single-attempt, bounded in output and time; a missing
+or failing command is a `WireError` naming it. A port that reads a Claude Code login directly is
+llm's to build, never Loom's. `crates/loom-sdk/tests/sdk_model_ports.rs` runs a governed loop turn
+on it over a stand-in `claude` on `PATH`. The ported `harness::wire` stays free of I/O; Loom's own
+ports that run something are under `wire`.
 
 ## Planning and waves
 

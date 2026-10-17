@@ -3,7 +3,7 @@ title: SDK stability
 sidebar_label: SDK stability
 sidebar_position: 4
 description: The stable surface of b10x-loom-sdk, the ports a host implements and the loom_sdk paths control-plane imports, with the promise Loom makes for them.
-source: crates/loom-sdk/src/lib.rs, crates/loom-sdk/tests/host_ports.rs, control-plane's crates/control-plane-runtime (its loom_sdk imports), CHANGELOG.md
+source: crates/loom-sdk/src/lib.rs, crates/loom-sdk/src/llm.rs, crates/loom-executor/src/wire/claude_code.rs, crates/loom-sdk/tests/host_ports.rs, control-plane's crates/control-plane-runtime (its loom_sdk imports), CHANGELOG.md
 ---
 
 # SDK stability
@@ -24,7 +24,7 @@ control-plane path, and fails when either table here and the code disagree.
 
   ```toml
   [dependencies]
-  b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.23.0" }
+  b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.24.0" }
   ```
 
 - Outside the promise:
@@ -35,6 +35,19 @@ control-plane path, and fails when either table here and the code disagree.
     release names such a change as a break when it makes one.
 
 There is no 1.0 promise, deprecation window or version rule beyond the two lines above.
+
+## The Canon release a Loom release links
+
+A Loom release links exactly one Canon release, `b10x-canon` (`Cargo.lock` holds one), and the
+engineering protocols built on it, `b10x-canon-engineering`. The governor's decision for a case is
+the same JSON document that Canon release renders for the same case
+(`crates/loom-governor/tests/canon_decision_bytes.rs`).
+
+| Loom | `b10x-canon` | `b10x-canon-engineering` |
+|---|---|---|
+| 0.24.0 | 0.6.0 | 0.8.0 |
+
+A release that moves either pin names it in its `CHANGELOG.md` entry.
 
 ## Ports a host implements
 
@@ -53,6 +66,7 @@ implements it through.
 | `ObservationPort` | `loom_sdk::commission::ports::evidence::ObservationPort` | Receiving the observations a run reports |
 | `EvidencePort` | `loom_sdk::commission::ports::evidence::EvidencePort` | Receiving evidence attributed to its producer |
 | `ActionSelector` | `loom_sdk::loom::selection::ActionSelector` | Picking one action from the catalogue |
+| `WorkflowRunStore` | `loom_sdk::loom::workflow::WorkflowRunStore` | Durable storage of a workflow run's record, so the run resumes after a restart |
 | `ArgumentGenerator` | `loom_sdk::loom::arguments::ArgumentGenerator` | Arguments for the selected action only |
 | `ModelPort` | `loom_sdk::loom::harness::wire::ModelPort` | One model turn over a wire |
 | `ToolPort` | `loom_sdk::loom::harness::wire::ToolPort` | The tools a turn may call, and their calls |
@@ -77,7 +91,10 @@ implements it through.
 | `loom_sdk::CanonGovernor` | The governor over a case store |
 | `loom_sdk::MemoryCaseStore` | An in-memory `CaseStore` |
 | `loom_sdk::CaseInputs` | The case inputs a host gives when it opens a case |
+| `loom_sdk::CaseIndependence` | The independence dimensions a host declares for each evidence producer when it opens a case |
 | `loom_sdk::ProtocolCatalog` | The protocol catalog shared by routing, case opening and admission |
+| `loom_sdk::llm::LlmModelPort` | A `ModelPort` over an llm `Model`: one `Model::turn` per turn, the port `b10x-loom` runs a plugin turn on |
+| `loom_sdk::loom::wire::ClaudeCodePort` | A `ModelPort` on an operator's Claude Code login: one `claude -p --output-format json` invocation per turn, the command reading its own login |
 | `loom_sdk::TestRunner`, `loom_sdk::SubstrateRunner`, `loom_sdk::UnconfinedRunner`, `loom_sdk::TestExecution`, `loom_sdk::ConfinementError` | The slice's test runners |
 | `loom_sdk::commission`, `loom_sdk::connectors`, `loom_sdk::loom`, `loom_sdk::governor`, `loom_sdk::protocols`, `loom_sdk::intake::router`, `loom_sdk::intake::slice` | The re-exported crates, under these module names |
 

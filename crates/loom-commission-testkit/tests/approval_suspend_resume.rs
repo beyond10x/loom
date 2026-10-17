@@ -1083,6 +1083,7 @@ impl EffectPort for Adapter<'_> {
             report: json::Value::Text(format!("performed {}", request.action)),
             attempt: None,
             audit: None,
+            usage: None,
         }))
     }
 }

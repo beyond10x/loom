@@ -97,6 +97,8 @@ Tagged by `kind`.
 | `Evidence` | list of `string` |
 | `ExternalAvailability` | `json` |
 | `Human` | [`HumanDecisionRequest`](#humandecisionrequest) |
+| `LoopBudget` | `json` |
+| `RunBudget` | [`RunBudgetBreach`](#runbudgetbreach) |
 | `Time` | `json` |
 
 ## Structs
@@ -107,6 +109,24 @@ Tagged by `kind`.
 |---|---|
 | `commission_id` | [`CommissionId`](#commissionid) |
 | `action` | `string` |
+
+### ActionBudget
+
+| Field | Type |
+|---|---|
+| `action` | `string` |
+| `max_trials` | optional `integer` |
+| `max_tokens_in` | optional `integer` |
+| `max_tokens_out` | optional `integer` |
+| `max_duration_ms` | optional `integer` |
+| `max_cost_micro_usd` | optional `integer` |
+
+### ActionCharge
+
+| Field | Type |
+|---|---|
+| `action` | `string` |
+| `charged` | [`ChargedUsage`](#chargedusage) |
 
 ### AdmissionNeedsAuthority
 
@@ -133,6 +153,16 @@ Tagged by `kind`.
 |---|---|
 | `reason` | `string` |
 
+### ChargedUsage
+
+| Field | Type |
+|---|---|
+| `trials` | `integer` |
+| `input_tokens` | `integer` |
+| `output_tokens` | `integer` |
+| `duration_ms` | `integer` |
+| `cost_micro_usd` | optional `integer` |
+
 ### CompletionDeterminationComplete
 
 | Field | Type |
@@ -146,12 +176,22 @@ Tagged by `kind`.
 | `report` | `json` |
 | `attempt` | optional [`ConnectorAttemptId`](#connectorattemptid) |
 | `audit` | optional [`ConnectorAuditRef`](#connectorauditref) |
+| `usage` | optional [`EffectUsage`](#effectusage) |
 
 ### EffectOutcomeRefused
 
 | Field | Type |
 |---|---|
 | `reason` | `string` |
+
+### EffectUsage
+
+| Field | Type |
+|---|---|
+| `input_tokens` | `integer` |
+| `output_tokens` | `integer` |
+| `duration_ms` | `integer` |
+| `cost_micro_usd` | optional `integer` |
 
 ### ExecutorOutcomeCaseMoved
 
@@ -207,6 +247,33 @@ Tagged by `kind`.
 | `obligation` | `string` |
 | `open` | `boolean` |
 
+### RunBudget
+
+| Field | Type |
+|---|---|
+| `max_steps` | optional `integer` |
+| `max_tokens_in` | optional `integer` |
+| `max_tokens_out` | optional `integer` |
+| `max_duration_ms` | optional `integer` |
+| `max_cost_micro_usd` | optional `integer` |
+| `per_action` | list of [`ActionBudget`](#actionbudget) |
+
+### RunBudgetBreach
+
+| Field | Type |
+|---|---|
+| `action` | optional `string` |
+| `limit` | [`BudgetLimit`](#budgetlimit) |
+| `max` | `integer` |
+| `charged` | optional `integer` |
+
+### RunCharges
+
+| Field | Type |
+|---|---|
+| `run` | [`ChargedUsage`](#chargedusage) |
+| `actions` | list of [`ActionCharge`](#actioncharge) |
+
 ### RunOutcomeAwaitingApproval
 
 | Field | Type |
@@ -261,6 +328,10 @@ Tagged by `kind`.
 ### ActionStatus
 
 Variants: `Admissible`, `ApprovalRequired`, `Blocked`.
+
+### BudgetLimit
+
+Variants: `MaxSteps`, `MaxTrials`, `MaxTokensIn`, `MaxTokensOut`, `MaxDurationMs`, `MaxCostMicroUsd`.
 
 ### ConnectorOperationEffect
 

@@ -25,6 +25,7 @@ use loom_governor::{CanonGovernor, EvaluationTime, FallibleCaseStore};
 use loom_protocols::ProtocolCatalog;
 use serde_json::{Value, json};
 
+use crate::bindings::{self, ActionBindings};
 use crate::case;
 use crate::clock::Clock;
 use crate::confinement::TestRunner;
@@ -57,6 +58,10 @@ pub struct IntentRequest {
     /// The host's test-path patterns, never a model's: `tests.write` changes only paths they
     /// match ([`crate::test_paths`]).
     pub test_paths: TestPaths,
+    /// The commands the operator binds to an installed protocol's actions, checked against the
+    /// run's catalog ([`crate::bindings::check`]): a run of that protocol performs its admitted
+    /// actions through them. Trusted host context, never a model's; it confers no authority.
+    pub bindings: Option<ActionBindings>,
 }
 
 /// A route accepted for this exact intent, catalog and context policy; never authority.
@@ -247,7 +252,13 @@ pub fn prepare_intent(
     let entry = catalog
         .get(&pick.protocol)
         .expect("router validates catalog membership");
-    if pick.protocol != LOCAL_PROTOCOL
+    if let Some(bound) = bound(request, &pick.protocol) {
+        if let Some(action) = bindings::unbound(bound, entry) {
+            let reason = format!("no command is bound to {action}");
+            return stop(out, pick.protocol, StopReason::NoLocalExecutor, &reason)
+                .map(Preparation::Stopped);
+        }
+    } else if pick.protocol != LOCAL_PROTOCOL
         && let Err(reason) = entry.clock_compatible()
     {
         return stop(out, pick.protocol, StopReason::NoLocalExecutor, &reason)
@@ -257,6 +268,14 @@ pub fn prepare_intent(
         protocol: pick.protocol,
         binding: binding(request, catalog, options),
     }))
+}
+
+/// The request's action bindings when they bind `protocol`'s actions.
+fn bound<'r>(request: &'r IntentRequest, protocol: &str) -> Option<&'r ActionBindings> {
+    request
+        .bindings
+        .as_ref()
+        .filter(|bindings| bindings.protocol == protocol)
 }
 
 fn stop(
@@ -566,6 +585,8 @@ pub fn resumed_request<S: FallibleCaseStore, T: EvaluationTime>(
             .ok_or_else(|| invalid("a case whose inputs are not a software change's"))?,
         test_paths: TestPaths::new(context.test_paths.iter().cloned())
             .map_err(|error| invalid(&format!("test-path patterns refused: {error}")))?,
+        // A resume continues software-change@1 runs only, which bind no commands.
+        bindings: None,
     })
 }
 
@@ -826,6 +847,37 @@ fn run_prepared<S: FallibleCaseStore, T: EvaluationTime>(
             },
             mode,
         )
+    } else if let Some(bound) = bound(request, &prepared.protocol) {
+        if let Some(action) = bindings::unbound(bound, entry) {
+            return Err(SliceError::Context(format!(
+                "no command is bound to {action}"
+            )));
+        }
+        let revision = case::intent_revision(&request.intent);
+        let case = governor
+            .open(
+                &prepared.protocol,
+                BTreeMap::from([(case::INTENT.into(), revision.clone())]),
+                loom_governor::CaseInputs::none(),
+            )
+            .map_err(|e| SliceError::Case(case::CaseError::Open(e)))?;
+        drive(
+            &request.intent,
+            &prepared.protocol,
+            case,
+            request.max_steps,
+            governor,
+            frontiers,
+            &agent,
+            out,
+            briefing,
+            Execution::Commands {
+                bindings: bound,
+                productions: bindings::productions(entry),
+                intent_revision: &revision,
+            },
+            mode,
+        )
     } else {
         entry.clock_compatible().map_err(SliceError::Context)?;
         let revision = case::intent_revision(&request.intent);
@@ -1016,6 +1068,7 @@ mod tests {
             threshold: 0.5,
             inputs: crate::case::RUN_DEFAULTS,
             test_paths: TestPaths::default(),
+            bindings: None,
         };
         let mut options = RunOptions::default();
         let prepared = PreparedIntent {
@@ -1063,6 +1116,7 @@ mod tests {
             threshold: 0.35,
             inputs: crate::case::RUN_DEFAULTS,
             test_paths: TestPaths::default(),
+            bindings: None,
         };
         let options = RunOptions {
             context_policy: ContextPolicy::Bounded,

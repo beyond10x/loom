@@ -26,7 +26,7 @@ Nothing is on a registry. Depend on the release tag:
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.23.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.24.0" }
 ```
 
 Rust code uses it as `loom_sdk`. It re-exports, under stable module names:
@@ -132,7 +132,12 @@ and per step.
 - Each turn is priced once at the rate card. Without a card, for a model the card does not list,
   after a turn that reported no usage, or after a turn that failed or unwound, the cost is absent,
   never zero.
-- The report covers what the meter saw: one process segment of the run.
+- The report covers what the meter saw: one process segment of the run. A `WorkflowExecutor` with a
+  run store (`.with_store(store)`, then `begin(&run_id)`) carries the usage in its run record, and
+  `resume(&run_id)` in the next process, called after `.with_meter(&meter)`, carries it into that
+  meter: the report lists the earlier segments' steps first, numbered as they were, and sums their
+  effect usage with this segment's. Call `executor.save()` after `meter.charge_effects(…)` so the
+  record holds the segment's effects.
 
 `crates/loom-executor/tests/run_metering.rs` drives these over scripted ports.
 

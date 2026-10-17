@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-17T00:12:38Z",
+  "actor": "human:timo",
+  "artifact": "story:canon-current-release",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "unit 4111eee merged in 3880529; package gate: clippy, tests of protocols, governor, intake-slice, intake-router 303 passed 0 failed (the_governor_decision_equals_the_pinned_canon_decision_bytes), fmt, drift; wave head fe73cec gate: clippy -D warnings and cargo test of 12 packages (commission, commission-testkit, commission-conformance, executor, governor, protocols, intake-slice, intake-router, plugin, connectors, cli, sdk) 1678 passed 0 failed; fmt, drift, intake-drift, commission docs-drift, docs-check, consumer-check exit 0"
+  }
+}

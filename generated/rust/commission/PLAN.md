@@ -1,14 +1,14 @@
 <!--
   generated from commission v1
-  model digest cc8aef18a520a265ae0c53dfb2099a037674b0fa3af8d054c4ca994b8475d420
-  contract digest 3ed64500d8a1d7004d987ca7f9d5029dd82f5329965d3acff8acb69b0b8b801b
+  model digest f53571e132b2f71840edfe761bc401e64fb69f09c02e5231f9f99c89c76020a5
+  contract digest d8e6b1ede68b8946fc3b58215b93b34033de96d39a3f84cf8669f4b6e8966278
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — commission v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-117 capabilities: **110 generated**, **7 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+125 capabilities: **118 generated**, **7 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -16,6 +16,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | --- | --- |
 | domain type | `commission.responsibility.ActionBinding.State` |
 | domain type | `commission.responsibility.ActionBindingKey` |
+| domain type | `commission.responsibility.ActionBudget` |
+| domain type | `commission.responsibility.ActionCharge` |
 | domain type | `commission.responsibility.ActionRequest.State` |
 | domain type | `commission.responsibility.ActionRequestId` |
 | domain type | `commission.responsibility.ActionStatus` |
@@ -32,8 +34,10 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `commission.responsibility.AuthorityVerdict` |
 | domain type | `commission.responsibility.AuthorityVerdictApprovalRequired` |
 | domain type | `commission.responsibility.AuthorityVerdictDeny` |
+| domain type | `commission.responsibility.BudgetLimit` |
 | domain type | `commission.responsibility.Case.State` |
 | domain type | `commission.responsibility.CaseId` |
+| domain type | `commission.responsibility.ChargedUsage` |
 | domain type | `commission.responsibility.Commission.State` |
 | domain type | `commission.responsibility.CommissionId` |
 | domain type | `commission.responsibility.CompletionDetermination` |
@@ -49,6 +53,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `commission.responsibility.EffectOutcome` |
 | domain type | `commission.responsibility.EffectOutcomePerformed` |
 | domain type | `commission.responsibility.EffectOutcomeRefused` |
+| domain type | `commission.responsibility.EffectUsage` |
 | domain type | `commission.responsibility.Evidence.State` |
 | domain type | `commission.responsibility.EvidenceId` |
 | domain type | `commission.responsibility.ExecutorOutcome` |
@@ -69,6 +74,9 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `commission.responsibility.PrincipalId` |
 | domain type | `commission.responsibility.ProposedActionArguments` |
 | domain type | `commission.responsibility.Run.State` |
+| domain type | `commission.responsibility.RunBudget` |
+| domain type | `commission.responsibility.RunBudgetBreach` |
+| domain type | `commission.responsibility.RunCharges` |
 | domain type | `commission.responsibility.RunId` |
 | domain type | `commission.responsibility.RunOutcome` |
 | domain type | `commission.responsibility.RunOutcomeAwaitingApproval` |

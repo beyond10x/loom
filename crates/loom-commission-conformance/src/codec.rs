@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::{
-    CaseId, CommissionId, HumanDecisionRequest, RunState, SuspensionKey, SuspensionReason,
-    SuspensionState,
+    BudgetLimit, CaseId, CommissionId, HumanDecisionRequest, RunBudgetBreach, RunState,
+    SuspensionKey, SuspensionReason, SuspensionState,
 };
 use ess_primitives::facts::{Number, is_canonical_uuid};
 use ess_primitives::node::Node;
@@ -168,6 +168,7 @@ pub fn suspension_reason(node: &Node) -> Option<SuspensionReason> {
     Some(match members.get("kind")?.as_text()? {
         "Authority" => SuspensionReason::Authority(to_json(value)?),
         "Budget" => SuspensionReason::Budget(to_json(value)?),
+        "LoopBudget" => SuspensionReason::LoopBudget(to_json(value)?),
         "Dependency" => {
             SuspensionReason::Dependency(strings(value)?.into_iter().map(CaseId).collect())
         }
@@ -175,6 +176,7 @@ pub fn suspension_reason(node: &Node) -> Option<SuspensionReason> {
         "ExternalAvailability" => SuspensionReason::ExternalAvailability(to_json(value)?),
         "Human" => SuspensionReason::Human(HumanDecisionRequest(to_json(value)?)),
         "Time" => SuspensionReason::Time(to_json(value)?),
+        "RunBudget" => SuspensionReason::RunBudget(run_budget_breach(value)?),
         _ => return None,
     })
 }
@@ -185,6 +187,7 @@ pub(crate) fn from_suspension_reason(reason: &SuspensionReason) -> Option<Node> 
     let (kind, value) = match reason {
         SuspensionReason::Authority(value) => ("Authority", read_json(value)?),
         SuspensionReason::Budget(value) => ("Budget", read_json(value)?),
+        SuspensionReason::LoopBudget(value) => ("LoopBudget", read_json(value)?),
         SuspensionReason::Dependency(cases) => (
             "Dependency",
             Node::Seq(
@@ -200,9 +203,65 @@ pub(crate) fn from_suspension_reason(reason: &SuspensionReason) -> Option<Node> 
         }
         SuspensionReason::Human(request) => ("Human", read_json(&request.0)?),
         SuspensionReason::Time(value) => ("Time", read_json(value)?),
+        SuspensionReason::RunBudget(breach) => ("RunBudget", from_run_budget_breach(breach)),
     };
     Some(Node::Map(BTreeMap::from([
         ("kind".to_owned(), Node::Text(kind.to_owned())),
         ("value".to_owned(), value),
     ])))
+}
+
+/// The names of `BudgetLimit`, as `ess/commission/` declares them.
+const LIMITS: [(BudgetLimit, &str); 6] = [
+    (BudgetLimit::MaxSteps, "MaxSteps"),
+    (BudgetLimit::MaxTrials, "MaxTrials"),
+    (BudgetLimit::MaxTokensIn, "MaxTokensIn"),
+    (BudgetLimit::MaxTokensOut, "MaxTokensOut"),
+    (BudgetLimit::MaxDurationMs, "MaxDurationMs"),
+    (BudgetLimit::MaxCostMicroUsd, "MaxCostMicroUsd"),
+];
+
+/// A `RunBudgetBreach`: its fields by name, an optional one absent or null when it holds nothing.
+fn run_budget_breach(node: &Node) -> Option<RunBudgetBreach> {
+    let members = node.as_map()?;
+    let present = |name: &str| {
+        members
+            .get(name)
+            .filter(|value| !matches!(value, Node::Null))
+    };
+    let integer = |node: &Node| match node {
+        Node::Number(number) => number.as_i64(),
+        _ => None,
+    };
+    let name = members.get("limit")?.as_text()?;
+    Some(RunBudgetBreach {
+        action: match present("action") {
+            Some(action) => Some(action.as_text()?.to_owned()),
+            None => None,
+        },
+        limit: LIMITS.iter().find(|(_, known)| *known == name)?.0,
+        max: integer(members.get("max")?)?,
+        charged: match present("charged") {
+            Some(charged) => Some(integer(charged)?),
+            None => None,
+        },
+    })
+}
+
+/// A `RunBudgetBreach` as a suite value, an absent optional field left out.
+fn from_run_budget_breach(breach: &RunBudgetBreach) -> Node {
+    let mut members = BTreeMap::new();
+    if let Some(action) = &breach.action {
+        members.insert("action".to_owned(), Node::Text(action.clone()));
+    }
+    let limit = LIMITS
+        .iter()
+        .find(|(limit, _)| *limit == breach.limit)
+        .map_or("", |(_, name)| name);
+    members.insert("limit".to_owned(), Node::Text(limit.to_owned()));
+    members.insert("max".to_owned(), number(breach.max));
+    if let Some(charged) = breach.charged {
+        members.insert("charged".to_owned(), number(charged));
+    }
+    Node::Map(members)
 }

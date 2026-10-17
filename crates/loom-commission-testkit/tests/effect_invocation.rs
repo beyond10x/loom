@@ -389,6 +389,7 @@ fn performed(n: usize, instance: &str, operation: &str) -> EffectOutcome {
         ),
         attempt: Some(RecordingInvoker::attempt(n)),
         audit: None,
+        usage: None,
     })
 }
 
@@ -402,6 +403,7 @@ fn read(n: usize, instance: &str, operation: &str) -> EffectOutcome {
         ),
         attempt: None,
         audit: Some(RecordingInvoker::audit(n)),
+        usage: None,
     })
 }
 
@@ -967,6 +969,7 @@ fn a_performed_operation_that_names_no_attempt_is_not_answered() {
             report: Value::Null,
             attempt: None,
             audit: None,
+            usage: None,
         },
     );
     not_answered("no attempt", &ran);
@@ -990,6 +993,7 @@ fn a_read_that_names_its_audit_record_is_performed() {
             report: report.clone(),
             attempt: None,
             audit: Some(ConnectorAuditRef("audit-7".to_owned())),
+            usage: None,
         },
     );
     let end = ran
@@ -1002,6 +1006,7 @@ fn a_read_that_names_its_audit_record_is_performed() {
             report: report.clone(),
             attempt: None,
             audit: Some(ConnectorAuditRef("audit-7".to_owned())),
+            usage: None,
         })],
         "{name}: performed with the operation's result"
     );
@@ -1041,6 +1046,7 @@ fn a_performed_that_names_another_record_than_its_binding_requires_is_not_answer
                 report: Value::Null,
                 attempt,
                 audit,
+                usage: None,
             },
         );
         not_answered(name, &ran);

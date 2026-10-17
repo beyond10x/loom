@@ -28,15 +28,41 @@
 //! answers `GovernorUnavailable` for it, as for any store failure, and [`FileCaseStore`] refuses
 //! to read such a case of a built-in protocol, naming the case and the input.
 //!
+//! # Independence
+//!
+//! A protocol may declare independence dimensions (`independence_dimensions`) and an evidence
+//! match may demand that its records' producer be independent of the case's work on some of them
+//! (`independent_on`). Who is independent is the host's to say, as trusted context, never an
+//! evidence record's or a model's: [`CanonGovernor::open_with_independence`] takes, for each
+//! producer, the dimensions it is independent on ([`CaseIndependence`]), and the governor puts
+//! them in the case's `canon-case/1` snapshot. A producer that is not an identifier
+//! ([`OpenError::InvalidProducer`]) or a dimension the protocol does not declare
+//! ([`OpenError::UndeclaredDimension`]) is refused naming it, before anything is stored. A case
+//! opened with [`CanonGovernor::open`] declares no producer independent, so a claim whose every
+//! match demands independence is never decided by a record. The declarations are held with the
+//! case and never change; [`FileCaseStore`] keeps them in `StoredCase.independence`, and reads a
+//! case stored without them (as Loom 0.23.0 and earlier wrote every case) as declaring none,
+//! which is how those versions evaluated it. Every read of a held case checks them again, as at
+//! opening.
+//!
 //! # Evaluation
 //!
 //! Every `frontier` and `completion` call evaluates afresh: the protocol is taken from the built-in
 //! registry or registered by [`CanonGovernor::with_protocol`], compiled with Canon and evaluated with
 //! `b10x_canon::eval::evaluate_with` over the case's `canon-case/1` snapshot and the evidence that
 //! applies. A trusted host may supply [`EvaluationTime`] for freshness; the governor reads no clock
-//! itself and supplies no explicit decision or authority decision. It never invents authority, so an action
+//! itself and supplies no authority decision. It never invents authority, so an action
 //! that requires a capability is at best `approval-required`; Commission asks its authority
 //! provider for it.
+//!
+//! The explicit decisions it supplies (`canon-decisions/1`) are the ones the host recorded on the
+//! case with [`CanonGovernor::decide`], each taken at the case revision current when it was
+//! recorded, so an outcome that requires a decision (`requires: decision: <name>`) is legitimate
+//! while the case is at that revision and blocked again once it moves. Canon judges each decision
+//! before it is recorded, and one it refuses (an outcome the protocol does not declare, or one that
+//! does not require a decision of that name) is refused ([`DecisionError::Refused`]) and nothing
+//! is kept. Who may take a decision is not the governor's to judge: it grants no authority with
+//! one.
 //!
 //! The frontier lists every action the protocol declares, with Canon's status, the capability the
 //! action requires (when it requires one) and, unless it is admissible, Canon's reasons, each
@@ -84,7 +110,8 @@
 //! `canon-evidence/1` records and an optional trusted time, and returns Canon's decision, projected
 //! as the frontier and completion are, with the whole `canon-decision/1` document beside it. It
 //! holds nothing, names no Commission type, and refuses an input it cannot use naming that input:
-//! the protocol, the snapshot, the evidence record by its position, or the time. A readable record
+//! the protocol, the snapshot, the evidence record by its position, the time, or the explicit
+//! decisions the request carries (`canon-decisions/1`, judged by Canon as for the governor). A readable record
 //! that does not apply to the case is set aside, as the governor sets it aside. Unlike the
 //! governor, which sets aside an unreadable record and the later of two records with one id and
 //! still decides, `evaluate` refuses both. The protocol comes only from the catalog, never from
@@ -92,10 +119,10 @@
 //!
 //! # Dependencies
 //!
-//! Canon is the library `b10x-canon-engineering` uses, tag `0.4.0`, pinned by `Cargo.lock` to
-//! commit `7c2cec1`, so the protocol model the ELS registry returns is the one this crate
+//! Canon is the library `b10x-canon-engineering` uses, tag `0.6.0`, pinned by `Cargo.lock` to
+//! commit `efcfd04`, so the protocol model the ELS registry returns is the one this crate
 //! compiles. Commission is the path dependency `b10x-loom-commission`, built from this
-//! repository's own tree, and `b10x-canon-engineering` is pinned to tag `0.7.0` of
+//! repository's own tree, and `b10x-canon-engineering` is pinned to tag `0.8.0` of
 //! beyond10x/engineering-protocols.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -109,7 +136,7 @@ pub use loom as model;
 
 use loom::evaluation::{
     ActionStatus as DecidedStatus, ClaimValue, DecidedAction, DecidedClaim, DecidedObligation,
-    EvaluationDecision, EvaluationInput, EvaluationRefusal, EvaluationRequest,
+    EvaluationDecision, EvaluationInput, EvaluationRefusal, EvaluationRequest, ExplicitDecision,
 };
 
 use b10x_canon::eval::{
@@ -117,8 +144,9 @@ use b10x_canon::eval::{
 };
 use b10x_canon::ir::{Ir, compile};
 use b10x_canon::model::{
-    ArtifactId, CASE_FORMAT, Case, CaseArtifact, Decision, Declarations, EvidenceRecord, InputId,
-    InputValue, Principal, Revision, Truth as CanonTruth, is_identifier,
+    ArtifactId, CASE_FORMAT, Case, CaseArtifact, Decision, Declarations, EvidenceRecord,
+    IndependenceDimensionId, InputId, InputValue, Principal, Revision, Truth as CanonTruth,
+    is_identifier,
 };
 use b10x_loom_commission::model::json;
 use b10x_loom_commission::model::primitives::Uuid;
@@ -130,10 +158,12 @@ use b10x_loom_commission::model::responsibility::{
 use b10x_loom_commission::ports::evidence::{AttributedEvidence, EvidencePort, ObservationPort};
 use b10x_loom_commission::ports::governor::Governor;
 
+mod file_run_store;
 mod file_store;
 mod file_suspension;
 mod locked_dir;
 
+pub use file_run_store::{FileWorkflowRunStore, LONGEST_RUN_ID};
 pub use file_store::{FileCaseStore, FileStoreError};
 pub use file_suspension::{FileSuspensionStore, LONGEST_COMMISSION_ID};
 
@@ -151,8 +181,14 @@ pub struct CaseState {
     pub artifacts: BTreeMap<String, String>,
     /// The value of every case input the protocol declares, as the case opened with them.
     pub inputs: CaseInputs,
+    /// The independence dimensions the host declared for each evidence producer when the case
+    /// opened (see the crate documentation, "Independence").
+    pub independence: CaseIndependence,
     /// Every evidence record received for the case, in the order received.
     pub evidence: Vec<HeldEvidence>,
+    /// Every explicit decision recorded for the case ([`CanonGovernor::decide`]), in the order
+    /// recorded, each at the Canon case revision (`r<revision>`) it was taken at.
+    pub decisions: Vec<ExplicitDecision>,
 }
 
 /// The value of each case input a case opens with, keyed by input id (`risk` → `standard`): the
@@ -222,6 +258,78 @@ impl CaseInputs {
     /// How many inputs are given.
     pub fn len(&self) -> usize {
         self.values.len()
+    }
+}
+
+/// The independence dimensions on which each evidence producer is independent of a case's work,
+/// keyed by producer (`reviewer-run-2` → `different_agent_run`): the host's trusted context, never
+/// an evidence record's or a model's. [`CanonGovernor::open_with_independence`] checks them
+/// against the dimensions the protocol declares; a case opened with [`CaseIndependence::none`]
+/// declares no producer independent. Declaring a producer twice, or one dimension twice for it, is
+/// refused ([`OpenError::RepeatedProducer`], [`OpenError::RepeatedDimension`]), never a
+/// replacement.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CaseIndependence {
+    producers: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl CaseIndependence {
+    /// No producer declared independent.
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// These declarations and `producer` independent on each of `dimensions`.
+    ///
+    /// # Errors
+    /// [`OpenError::RepeatedProducer`] when these declarations already list `producer`, and
+    /// [`OpenError::RepeatedDimension`] when `dimensions` names one dimension twice.
+    pub fn with<D: Into<String>>(
+        mut self,
+        producer: impl Into<String>,
+        dimensions: impl IntoIterator<Item = D>,
+    ) -> Result<Self, OpenError> {
+        let producer = producer.into();
+        if self.producers.contains_key(&producer) {
+            return Err(OpenError::RepeatedProducer { producer });
+        }
+        let mut listed = BTreeSet::new();
+        for dimension in dimensions {
+            let dimension = dimension.into();
+            if listed.contains(&dimension) {
+                return Err(OpenError::RepeatedDimension {
+                    producer,
+                    dimension,
+                });
+            }
+            listed.insert(dimension);
+        }
+        self.producers.insert(producer, listed);
+        Ok(self)
+    }
+
+    /// The dimensions declared for `producer`, in dimension order; `None` when it is not listed.
+    pub fn get(&self, producer: &str) -> Option<impl Iterator<Item = &str>> {
+        self.producers
+            .get(producer)
+            .map(|dimensions| dimensions.iter().map(String::as_str))
+    }
+
+    /// Every producer listed, in producer order, with its dimensions in dimension order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, impl Iterator<Item = &str>)> {
+        self.producers.iter().map(|(producer, dimensions)| {
+            (producer.as_str(), dimensions.iter().map(String::as_str))
+        })
+    }
+
+    /// Whether no producer is listed.
+    pub fn is_empty(&self) -> bool {
+        self.producers.is_empty()
+    }
+
+    /// How many producers are listed.
+    pub fn len(&self) -> usize {
+        self.producers.len()
     }
 }
 
@@ -388,6 +496,15 @@ pub enum OpenError {
     MissingInput { input: String },
     /// The inputs give `input` a second value.
     RepeatedInput { input: String },
+    /// The independence declarations name `producer`, which is not an identifier.
+    InvalidProducer { producer: String },
+    /// The independence declarations list `producer` on `dimension`, which the protocol does not
+    /// declare.
+    UndeclaredDimension { producer: String, dimension: String },
+    /// The independence declarations list `producer` a second time.
+    RepeatedProducer { producer: String },
+    /// The independence declarations list `producer` on `dimension` a second time.
+    RepeatedDimension { producer: String, dimension: String },
     /// The case id is not an identifier.
     InvalidCaseId { case: String },
     /// A case with this id is already held.
@@ -429,6 +546,29 @@ impl fmt::Display for OpenError {
             Self::RepeatedInput { input } => {
                 write!(f, "case input `{input}` is given more than one value")
             }
+            Self::InvalidProducer { producer } => {
+                write!(f, "producer `{producer}` is not an identifier")
+            }
+            Self::UndeclaredDimension {
+                producer,
+                dimension,
+            } => write!(
+                f,
+                "producer `{producer}` is declared independent on dimension `{dimension}`, which the protocol does not declare"
+            ),
+            Self::RepeatedProducer { producer } => {
+                write!(
+                    f,
+                    "producer `{producer}` is declared independent more than once"
+                )
+            }
+            Self::RepeatedDimension {
+                producer,
+                dimension,
+            } => write!(
+                f,
+                "producer `{producer}` is declared independent on dimension `{dimension}` more than once"
+            ),
             Self::InvalidCaseId { case } => write!(f, "case id `{case}` is not an identifier"),
             Self::CaseExists { case } => write!(f, "case `{case}` is already held"),
         }
@@ -469,6 +609,30 @@ impl fmt::Display for UpdateError {
 }
 
 impl std::error::Error for UpdateError {}
+
+/// Why an explicit decision was not recorded ([`CanonGovernor::decide`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecisionError {
+    /// The store could not record the decision.
+    StoreUnavailable { problem: String },
+    /// The governor does not hold the case.
+    UnknownCase,
+    /// Canon refuses the decision for the case: `code` is Canon's refusal code
+    /// (`undeclared-outcome`, `undeclared-decision`, `invalid-identifier`, ...).
+    Refused { code: String, message: String },
+}
+
+impl fmt::Display for DecisionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::StoreUnavailable { problem } => write!(f, "case store unavailable: {problem}"),
+            Self::UnknownCase => f.write_str("the governor does not hold the case"),
+            Self::Refused { code, message } => write!(f, "{code}: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for DecisionError {}
 
 /// Why the governor refuses an evidence record's `observed_at` ([`CanonGovernor::check_evidence`]),
 /// naming the record by its evidence id. A refused record is not kept.
@@ -676,20 +840,35 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
     /// Opens a case on registered `protocol` (`<name>@<major>`) with `revisions`, the
     /// revision of every artifact the protocol declares, and `inputs`, the value of every case
     /// input it declares, under the first free id `case-<n>`. Nothing is stored when either is
-    /// refused (see the crate documentation, "Case inputs").
+    /// refused (see the crate documentation, "Case inputs"). No producer is declared
+    /// independent; [`CanonGovernor::open_with_independence`] declares some.
     pub fn open(
         &self,
         protocol: &str,
         revisions: BTreeMap<String, String>,
         inputs: CaseInputs,
     ) -> Result<CaseId, OpenError> {
-        checked(self.protocol_ir(protocol)?, &revisions, &inputs)?;
+        self.open_with_independence(protocol, revisions, inputs, CaseIndependence::none())
+    }
+
+    /// Opens a case as [`CanonGovernor::open`] does, with `independence`, the dimensions on which
+    /// the host declares each evidence producer independent of the case's work. Nothing is
+    /// stored when they are refused (see the crate documentation, "Independence").
+    pub fn open_with_independence(
+        &self,
+        protocol: &str,
+        revisions: BTreeMap<String, String>,
+        inputs: CaseInputs,
+        independence: CaseIndependence,
+    ) -> Result<CaseId, OpenError> {
+        let ir = checked(self.protocol_ir(protocol)?, &revisions, &inputs)?;
+        checked_independence(&ir, &independence)?;
         let mut n = 1u64;
         loop {
             let case = CaseId(format!("case-{n}"));
             if self
                 .store
-                .insert(opened(&case, protocol, &revisions, &inputs))
+                .insert(opened(&case, protocol, &revisions, &inputs, &independence))
                 .map_err(|e| OpenError::StoreUnavailable {
                     problem: e.to_string(),
                 })?
@@ -708,13 +887,32 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
         revisions: BTreeMap<String, String>,
         inputs: CaseInputs,
     ) -> Result<(), OpenError> {
+        self.open_case_with_independence(
+            case,
+            protocol,
+            revisions,
+            inputs,
+            CaseIndependence::none(),
+        )
+    }
+
+    /// Opens a case as [`CanonGovernor::open_with_independence`] does, under the id `case`.
+    pub fn open_case_with_independence(
+        &self,
+        case: CaseId,
+        protocol: &str,
+        revisions: BTreeMap<String, String>,
+        inputs: CaseInputs,
+        independence: CaseIndependence,
+    ) -> Result<(), OpenError> {
         if !is_identifier(&case.0) {
             return Err(OpenError::InvalidCaseId { case: case.0 });
         }
-        checked(self.protocol_ir(protocol)?, &revisions, &inputs)?;
+        let ir = checked(self.protocol_ir(protocol)?, &revisions, &inputs)?;
+        checked_independence(&ir, &independence)?;
         if self
             .store
-            .insert(opened(&case, protocol, &revisions, &inputs))
+            .insert(opened(&case, protocol, &revisions, &inputs, &independence))
             .map_err(|e| OpenError::StoreUnavailable {
                 problem: e.to_string(),
             })?
@@ -759,6 +957,51 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             .unwrap_or(Err(UpdateError::UnknownCase))
     }
 
+    /// Records the explicit decision `decision`, taken for `outcome` by `principal`, on the case at
+    /// its current revision, so later `frontier` and `completion` calls evaluate with it until the
+    /// case moves. Recording a decision already held at that revision changes nothing. Canon judges
+    /// it first: one it refuses for the case is [`DecisionError::Refused`] and nothing is kept.
+    pub fn decide(
+        &self,
+        case: &CaseId,
+        outcome: &str,
+        decision: &str,
+        principal: &str,
+    ) -> Result<(), DecisionError> {
+        let (_, ir) = self.held_with_ir(case).map_err(|error| match error {
+            GovernorError::UnknownCase => DecisionError::UnknownCase,
+            _ => DecisionError::StoreUnavailable {
+                problem: "the held case cannot be read under its protocol".into(),
+            },
+        })?;
+        self.store
+            .update(case, |state| {
+                let taken = ExplicitDecision {
+                    decision: decision.to_owned(),
+                    outcome: outcome.to_owned(),
+                    principal: principal.to_owned(),
+                    case_revision: format!("r{}", state.revision),
+                };
+                if state.decisions.contains(&taken) {
+                    return Ok(());
+                }
+                let mut decisions = state.decisions.clone();
+                decisions.push(taken);
+                decide_case(&ir, &snapshot(&ir, state), &[], None, &decisions).map_err(
+                    |refusal| DecisionError::Refused {
+                        code: refusal.code().to_owned(),
+                        message: refusal.to_string(),
+                    },
+                )?;
+                state.decisions = decisions;
+                Ok(())
+            })
+            .map_err(|e| DecisionError::StoreUnavailable {
+                problem: e.to_string(),
+            })?
+            .unwrap_or(Err(DecisionError::UnknownCase))
+    }
+
     /// The current revision of every artifact of the case.
     pub fn revisions(&self, case: &CaseId) -> Result<BTreeMap<String, String>, GovernorError> {
         Ok(self.held(case)?.artifacts)
@@ -769,6 +1012,13 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
     /// inputs").
     pub fn inputs(&self, case: &CaseId) -> Result<CaseInputs, GovernorError> {
         Ok(self.held(case)?.inputs)
+    }
+
+    /// The independence the host declared for each evidence producer when the case opened;
+    /// `GovernorUnavailable` when the held declarations do not satisfy the case's protocol (see
+    /// the crate documentation, "Independence").
+    pub fn independence(&self, case: &CaseId) -> Result<CaseIndependence, GovernorError> {
+        Ok(self.held(case)?.independence)
     }
 
     /// The registered protocol, `<name>@<major>`, the case is held under.
@@ -810,11 +1060,13 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             .protocol_ir(&state.protocol)
             .map_err(|_| GovernorError::GovernorUnavailable)?;
         checked_inputs(&ir, &state.inputs).map_err(|_| GovernorError::GovernorUnavailable)?;
+        checked_independence(&ir, &state.independence)
+            .map_err(|_| GovernorError::GovernorUnavailable)?;
         Ok((state, ir))
     }
 
     /// Canon's decision for the case as held now, and the compiled protocol it was made under.
-    fn decide(&self, case: &CaseId) -> Result<(CaseState, Ir, Decision), GovernorError> {
+    fn decided(&self, case: &CaseId) -> Result<(CaseState, Ir, Decision), GovernorError> {
         let (state, ir) = self.held_with_ir(case)?;
         let records: Vec<EvidenceRecord> = state
             .evidence
@@ -826,8 +1078,14 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             .time
             .at(case)
             .map_err(|_| GovernorError::GovernorUnavailable)?;
-        let decision = decide_case(&ir, &snapshot(&ir, &state), &records, at.as_deref())
-            .map_err(|_| GovernorError::GovernorUnavailable)?;
+        let decision = decide_case(
+            &ir,
+            &snapshot(&ir, &state),
+            &records,
+            at.as_deref(),
+            &state.decisions,
+        )
+        .map_err(|_| GovernorError::GovernorUnavailable)?;
         Ok((state, ir, decision))
     }
 }
@@ -845,7 +1103,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> Governor for CanonGovernor<S, T> {
     }
 
     fn frontier(&self, case: &CaseId) -> Result<Frontier<frontier_state::Issued>, GovernorError> {
-        let (state, ir, decision) = self.decide(case)?;
+        let (state, ir, decision) = self.decided(case)?;
         let projection = project(&ir, &decision).ok_or(GovernorError::GovernorUnavailable)?;
         let claims = projection
             .claims
@@ -890,7 +1148,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> Governor for CanonGovernor<S, T> {
     }
 
     fn completion(&self, case: &CaseId) -> Result<CompletionDetermination, GovernorError> {
-        let (_, _, decision) = self.decide(case)?;
+        let (_, _, decision) = self.decided(case)?;
         Ok(match completed(&decision) {
             Some(outcome) => {
                 CompletionDetermination::Complete(CompletionDeterminationComplete { outcome })
@@ -1038,11 +1296,47 @@ fn checked_inputs(ir: &Ir, inputs: &CaseInputs) -> Result<(), OpenError> {
     Ok(())
 }
 
+/// Checks `independence` against the dimensions `ir` declares, as Canon checks a case's: each
+/// producer, in producer order, is an identifier, and each dimension listed for it, in dimension
+/// order, is one the protocol declares.
+fn checked_independence(ir: &Ir, independence: &CaseIndependence) -> Result<(), OpenError> {
+    for (producer, mut dimensions) in independence.iter() {
+        if !is_identifier(producer) {
+            return Err(OpenError::InvalidProducer {
+                producer: producer.to_owned(),
+            });
+        }
+        if let Some(dimension) = dimensions.find(|dimension| {
+            !ir.independence_dimensions
+                .contains_key(&IndependenceDimensionId::new(*dimension))
+        }) {
+            return Err(OpenError::UndeclaredDimension {
+                producer: producer.to_owned(),
+                dimension: dimension.to_owned(),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Checks `inputs` against the case inputs the ELS built-in `protocol` declares, when it names
 /// one; a protocol that is not built in is the registering governor's to check.
 pub(crate) fn checked_builtin_inputs(protocol: &str, inputs: &CaseInputs) -> Result<(), OpenError> {
     match protocol_ir(protocol) {
         Ok(ir) => checked_inputs(&ir, inputs),
+        Err(OpenError::UnknownProtocol { .. }) => Ok(()),
+        Err(other) => Err(other),
+    }
+}
+
+/// Checks `independence` against the dimensions the ELS built-in `protocol` declares, when it
+/// names one; a protocol that is not built in is the registering governor's to check.
+pub(crate) fn checked_builtin_independence(
+    protocol: &str,
+    independence: &CaseIndependence,
+) -> Result<(), OpenError> {
+    match protocol_ir(protocol) {
+        Ok(ir) => checked_independence(&ir, independence),
         Err(OpenError::UnknownProtocol { .. }) => Ok(()),
         Err(other) => Err(other),
     }
@@ -1093,6 +1387,7 @@ fn opened(
     protocol: &str,
     revisions: &BTreeMap<String, String>,
     inputs: &CaseInputs,
+    independence: &CaseIndependence,
 ) -> CaseState {
     CaseState {
         id: case.clone(),
@@ -1100,7 +1395,9 @@ fn opened(
         revision: 1,
         artifacts: revisions.clone(),
         inputs: inputs.clone(),
+        independence: independence.clone(),
         evidence: Vec::new(),
+        decisions: Vec::new(),
     }
 }
 
@@ -1162,9 +1459,20 @@ fn snapshot(ir: &Ir, state: &CaseState) -> Case {
                 .map(|(input, value)| (InputId::new(input), InputValue::new(value)))
                 .collect(),
         ),
-        // Who is independent of the case's work is not resolved here: no producer is listed, so
-        // a claim that demands an independent producer stays unknown.
-        independence: Declarations::default(),
+        // Who is independent of the case's work is the host's declaration, made when the case
+        // opened; a producer it does not list satisfies no demand for independence.
+        independence: Declarations::new(
+            state
+                .independence
+                .iter()
+                .map(|(producer, dimensions)| {
+                    (
+                        Principal::new(producer),
+                        dimensions.map(IndependenceDimensionId::new).collect(),
+                    )
+                })
+                .collect(),
+        ),
     }
 }
 
@@ -1262,28 +1570,61 @@ fn applies(ir: &Ir, state: &CaseState, data: &EvidenceData, at: Option<&str>) ->
         .filter_map(|held| canon_record(&held.data))
         .collect();
     records.push(record);
-    decide_case(ir, &snapshot(ir, state), &records, at).is_ok()
+    decide_case(ir, &snapshot(ir, state), &records, at, &state.decisions).is_ok()
 }
 
 /// Canon's decision for `case` under `ir` from `records`, at the trusted instant `at` when one is
-/// given, with no authority decision and no explicit decision supplied. Every evaluation the
-/// governor makes goes through here: the held case's ([`CanonGovernor`]'s `decide`), an arriving
-/// record's ([`applies`]) and a caller's snapshot ([`evaluate`]).
+/// given, with the explicit `decisions` (none supplied when empty) and no authority decision. Every
+/// evaluation the governor makes goes through here: the held case's ([`CanonGovernor`]'s
+/// `decided`), an arriving record's ([`applies`]), a decision being recorded
+/// ([`CanonGovernor::decide`]) and a caller's snapshot ([`evaluate`]).
 fn decide_case(
     ir: &Ir,
     case: &Case,
     records: &[EvidenceRecord],
     at: Option<&str>,
+    decisions: &[ExplicitDecision],
 ) -> Result<Decision, Refusal> {
+    let decisions = (!decisions.is_empty()).then(|| canon_decisions(decisions));
     evaluate_with(
         ir,
         case,
         records,
         Supplied {
             at,
+            decisions: decisions.as_deref(),
             ..Supplied::default()
         },
     )
+}
+
+/// `decisions` as a `canon-decisions/1` document: a JSON list, which Canon's YAML reader reads as
+/// the values it holds, every name a string whatever it spells.
+fn canon_decisions(decisions: &[ExplicitDecision]) -> String {
+    let mut out = String::from("[");
+    for (index, entry) in decisions.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        let members = [
+            ("decision", &entry.decision),
+            ("outcome", &entry.outcome),
+            ("principal", &entry.principal),
+            ("case_revision", &entry.case_revision),
+        ];
+        out.push('{');
+        for (position, (name, value)) in members.into_iter().enumerate() {
+            if position > 0 {
+                out.push(',');
+            }
+            loom::json::push_text(&mut out, name);
+            out.push(':');
+            loom::json::push_text(&mut out, value);
+        }
+        out.push('}');
+    }
+    out.push(']');
+    out
 }
 
 /// Canon's status of one action.
@@ -1386,8 +1727,11 @@ fn completed(decision: &Decision) -> Option<String> {
 
 /// Canon's decision for a case the caller keeps: `request` names a protocol of the host's
 /// `catalog` (`<name>@<major>`), a `canon-case/1` snapshot, the `canon-evidence/1` records and an
-/// optional trusted instant. Nothing is held, no clock is read and no authority decision is
-/// supplied; the decision is reported as [`CanonGovernor`] reports its frontier and completion.
+/// optional trusted instant, and the explicit `canon-decisions/1` decisions taken for the case.
+/// Nothing is held, no clock is read and no authority decision is supplied; the decision is
+/// reported as [`CanonGovernor`] reports its frontier and completion. A decision applies only at
+/// the snapshot's revision: one taken at another revision is superseded, and a termination only
+/// it would make legitimate is refused, as Canon refuses it.
 ///
 /// A record that reads as a `canon-evidence/1` record but that Canon refuses for this case (a kind
 /// or subject the protocol does not declare, for instance) is set aside, as `CanonGovernor` sets it
@@ -1401,8 +1745,10 @@ fn completed(decision: &Decision) -> Option<String> {
 /// A refusal names the input it is about: an unknown or uncompilable protocol; a snapshot that is
 /// not a `canon-case/1` document, that Canon refuses for the protocol, or whose termination the
 /// records do not make legitimate; a record that is not a readable `canon-evidence/1` record, or
-/// that repeats an earlier record's id (by its position in `evidence`, the later one); or a time
-/// Canon cannot read. The time and the records are judged before the decision is made, once each.
+/// that repeats an earlier record's id (by its position in `evidence`, the later one); a time
+/// Canon cannot read; or decisions Canon refuses (an entry that is not an identifier, one given
+/// twice, one for an undeclared outcome or for an outcome that does not require it). The time,
+/// the decisions and the records are judged before the decision is made, once each.
 pub fn evaluate(
     catalog: &ProtocolCatalog,
     request: &EvaluationRequest,
@@ -1469,21 +1815,26 @@ pub fn evaluate(
         termination: None,
         ..case.clone()
     };
-    decide_case(&ir, &open, &[], None)
+    let decisions = request.decisions.as_slice();
+    decide_case(&ir, &open, &[], None, &[])
         .map_err(|refusal| canon_refused(EvaluationInput::Snapshot, None, &refusal))?;
-    decide_case(&ir, &open, &[], at)
+    decide_case(&ir, &open, &[], at, &[])
         .map_err(|refusal| canon_refused(EvaluationInput::Time, None, &refusal))?;
-    let decision = match decide_case(&ir, &case, &records, at) {
+    decide_case(&ir, &open, &[], at, decisions)
+        .map_err(|refusal| canon_refused(EvaluationInput::Decisions, None, &refusal))?;
+    let decision = match decide_case(&ir, &case, &records, at, decisions) {
         Ok(decision) => decision,
         Err(_) => {
             // As `CanonGovernor` does on arrival, a record Canon refuses for this case is set
             // aside; what Canon still refuses with the rest is the snapshot's termination.
             let applying: Vec<EvidenceRecord> = records
                 .iter()
-                .filter(|record| decide_case(&ir, &open, std::slice::from_ref(record), at).is_ok())
+                .filter(|record| {
+                    decide_case(&ir, &open, std::slice::from_ref(record), at, decisions).is_ok()
+                })
                 .cloned()
                 .collect();
-            decide_case(&ir, &case, &applying, at)
+            decide_case(&ir, &case, &applying, at, decisions)
                 .map_err(|refusal| canon_refused(EvaluationInput::Snapshot, None, &refusal))?
         }
     };

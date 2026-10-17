@@ -148,6 +148,7 @@ impl EffectPort for Effects {
                 report: Value::Null,
                 attempt: None,
                 audit: None,
+                usage: None,
             })))
     }
 }
@@ -311,6 +312,7 @@ impl EffectPort for Bumps<'_> {
             report: Value::Null,
             attempt: None,
             audit: None,
+            usage: None,
         }))
     }
 }

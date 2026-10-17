@@ -6,7 +6,7 @@ status: accepted
 title: b10x-loom run may bind a custom protocol's actions to operator-declared commands, conferring no authority
 relations:
 - decides: story:cli-custom-protocol-commands
-revision: 2
+revision: 5
 transitions:
 - {from: "proposed", to: "accepted", at: "2026-10-15T20:32:19Z", actor: "human:timo", revision: 2}
 ---
@@ -40,3 +40,8 @@ The CLI runs only the built-in bindings (software change, clock).
 ## Source
 
 story:cli-custom-protocol-commands.
+
+## Amendment: confinement of bound commands
+
+Substrate confines a software change's tests, not the commands a run configuration binds to a protocol's actions, so "the CLI's existing confinement" cannot be applied to them, and `b10x-loom run` never falls back to running them unconfined on its own. A run given `--action-bindings <FILE>` without `--unconfined-bindings` is refused after the file is checked and before any model call, with the typed confinement refusal `intake.confinement.ConfinementRefusal::CommandUnconfined`: standard error ends `stopped: ConfinementUnavailable (CommandUnconfined: ...)` and the exit status is 3, the status of every other `ConfinementUnavailable` stop. `--unconfined-bindings` is the operator's explicit opt-in: with it the bound commands run with the operator's rights under the limits this record already states (no shell, only `PATH`, the timeout), and standard error reports `bound commands: unconfined (--unconfined-bindings)`. Test fixtures pass the flag explicitly.
+

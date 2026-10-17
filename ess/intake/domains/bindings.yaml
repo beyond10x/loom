@@ -1,0 +1,65 @@
+domain: intake.bindings
+
+summary: >-
+  The commands an operator binds to the actions of one installed protocol, so that `b10x-loom run`
+  drives a protocol whose actions no built-in binding performs. The operator declares them in a
+  run configuration file (`run --action-bindings <FILE>`): the protocol, by its registration name,
+  and for each action one argv, run without a shell. A run of that protocol performs an admitted
+  action by starting its command with the action's arguments as JSON on standard input; the
+  command's exit status decides the outcome, 0 performed and any other refused, and its standard
+  output, one JSON object, is the action's performed report. The command is the verifier of its
+  own action: its report may state evidence of the kinds the action declares it may produce, and
+  only those are submitted, about the intent. A binding confers no authority: an action that
+  needs a capability still needs its grant, and the governor still decides admission. Commands
+  start with a cleared environment that keeps only PATH, never Loom's own credentials, and are
+  killed past the configuration's timeout. Substrate does not confine them, so a run given a run
+  configuration is refused, before any model call, with the confinement refusal CommandUnconfined
+  unless the operator opts in to running the commands unconfined: with the run's
+  `--unconfined-bindings` flag, or with the file's own `unconfined_bindings: true`; the flag wins,
+  and the run reports which one opted in. A routed protocol that declares an action the file binds
+  no command to ends with no local executor, naming the action. Configuration is trusted host
+  context, never model output, and a protocol document never names a command.
+
+naming:
+  wire: bindings
+  display: Action bindings
+
+types:
+  # One action and the command that performs it: `argv`'s first word is the program, started
+  # directly, never through a shell; the rest are its arguments, passed as written.
+  - name: intake.bindings.ActionBinding
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: argv
+        type: List<String>
+
+  # A run configuration file: the protocol whose actions it binds, as `name@major`, the seconds a
+  # command may run before it is killed (60 when absent), whether the operator opts in to running
+  # its commands unconfined (false when absent; the run's `--unconfined-bindings` flag opts in
+  # too, and wins), and one binding per action. An action
+  # bound twice, an action the protocol does not declare, an empty argv and a bundled protocol are
+  # refused when the file is read, before any model call.
+  - name: intake.bindings.ActionBindings
+    kind: struct
+    fields:
+      - name: protocol
+        type: String
+      - name: timeout_seconds
+        type: Optional<Integer>
+      - name: unconfined_bindings
+        type: Optional<Boolean>
+      - name: bindings
+        type: List<intake.bindings.ActionBinding>
+
+  # Evidence a command's report states, in its `evidence` member: a kind the performed action
+  # declares it may produce, and the result the command observed. A kind the action does not
+  # declare fails the run and nothing of the report is submitted.
+  - name: intake.bindings.CommandEvidence
+    kind: struct
+    fields:
+      - name: kind
+        type: String
+      - name: result
+        type: String

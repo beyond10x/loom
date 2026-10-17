@@ -4,8 +4,7 @@
 //! of its command line, so `loom-docs` can generate the CLI reference from it, the exit status a
 //! stop reason maps to, the run event stream `run --output jsonl` writes ([`events`]), the
 //! JSON `evaluate` reads and writes ([`evaluate`]), the llm catalog `run --catalog` reads
-//! ([`model_catalog`]), the bridge that runs a plugin turn on an llm model ([`model_port`]), and
-//! the lines `plugin run --once` and `plugin report` print ([`plugin`]).
+//! ([`model_catalog`]), and the lines `plugin run --once` and `plugin report` print ([`plugin`]).
 
 use std::path::PathBuf;
 
@@ -40,8 +39,10 @@ pub const NOTHING_SUSPENDED_AT_GATE: u8 = 4;
 
 /// What `evaluate --help` says about its input, its output and its exit status.
 pub const EVALUATE_HELP: &str = "The request is one JSON object (loom.evaluation.EvaluationRequest):
-  {\"protocol\": \"<name>@<major>\", \"snapshot\": {canon-case/1}, \"evidence\": [{canon-evidence/1}, ...], \"at\": \"<RFC 3339>\"}
-`at` is optional. The protocol comes from this host's catalog (`protocols list`), never from the request.
+  {\"protocol\": \"<name>@<major>\", \"snapshot\": {canon-case/1}, \"evidence\": [{canon-evidence/1}, ...], \"at\": \"<RFC 3339>\",
+   \"decisions\": [{\"decision\": \"<name>\", \"outcome\": \"<outcome>\", \"principal\": \"<who>\", \"case_revision\": \"<revision>\"}, ...]}
+`at` and `decisions` are optional. The protocol comes from this host's catalog (`protocols list`), never from the request.
+`decisions` are the canon-decisions/1 explicit decisions taken for the case; one applies only at the snapshot's revision.
 A record that is not a readable canon-evidence/1 record, or repeats an earlier record's id, is refused.
 A readable record that does not apply to the case (an undeclared kind or subject, for instance) is set
 aside, as the governor sets it aside, and the decision is made from the rest without listing it.
@@ -183,7 +184,6 @@ pub mod evaluate;
 pub mod events;
 pub mod mandate;
 pub mod model_catalog;
-pub mod model_port;
 pub mod plugin;
 pub mod regular_file;
 
@@ -463,6 +463,26 @@ pub struct RunArgs {
     /// resume continues from. Without it nothing outlives the run.
     #[arg(long, value_name = "DIR")]
     pub state: Option<PathBuf>,
+    /// A run configuration file (JSON, a regular file) binding an installed protocol's actions to
+    /// commands: {"protocol": "<name>@<major>", "timeout_seconds": <n>, "unconfined_bindings":
+    /// <true|false>, "bindings": [{"action": "<action>", "argv": ["<program>", "<argument>",
+    /// ...]}]}. A run of that protocol starts an
+    /// admitted action's program without a shell, with the action's arguments as JSON on standard
+    /// input, a cleared environment but PATH, and a timeout (60 s when absent); exit 0 is
+    /// performed, with standard output, one JSON object, as the report; any other end is refused.
+    /// A binding confers no authority. A file that names an action the protocol does not declare
+    /// is refused before any model call; an action it binds no command to stops the run
+    /// NoLocalExecutor, naming it. Substrate does not confine these commands, so the run is
+    /// refused ConfinementUnavailable (CommandUnconfined), exit 3, before any model call unless
+    /// --unconfined-bindings is given or the file sets "unconfined_bindings": true.
+    #[arg(long, value_name = "FILE")]
+    pub action_bindings: Option<PathBuf>,
+    /// Run the commands --action-bindings binds with the operator's rights, outside Substrate.
+    /// Without it, and without "unconfined_bindings": true in that file, a run given
+    /// --action-bindings is refused ConfinementUnavailable (CommandUnconfined). The flag wins over
+    /// the file; standard error reports which one opted in.
+    #[arg(long)]
+    pub unconfined_bindings: bool,
     /// What to do, as given.
     pub intent: String,
 }

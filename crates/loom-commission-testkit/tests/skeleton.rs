@@ -286,7 +286,9 @@ fn skeleton_lands_port_vocabulary_and_modules() {
             ("Time", "Json"),
             ("Dependency", "List<CaseId>"),
             ("Budget", "Json"),
+            ("LoopBudget", "Json"),
             ("ExternalAvailability", "Json"),
+            ("RunBudget", "RunBudgetBreach"),
         ],
     );
     assert_union(

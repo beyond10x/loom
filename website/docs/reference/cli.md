@@ -59,6 +59,8 @@ Usage: b10x-loom run [OPTIONS] <INTENT>
 | `--regression-test-command <CMD>` | no | none | The regression-test command, run in the workspace without a shell and split at white space, with {path} in at least one word. On a bugfix, after each tests.run that follows a tests.write that committed, it runs once per test path those writes committed, {path} filled, and only its result is a regression_test_result. Without it no run is one, so a bugfix's red_first.required stays open |
 | `--output <FORMAT>` | no | `human` | What standard output carries: lines for a person, or one JSON record per line, the last one the terminal record with the stop reason and the exit status |
 | `--state <DIR>` | no | none | Keep the run's case, its commission's Suspension and the commission's resume context in this directory, created when missing, so a run stopped for an approval leaves what a later resume continues from. Without it nothing outlives the run |
+| `--action-bindings <FILE>` | no | none | A run configuration file (JSON, a regular file) binding an installed protocol's actions to commands: {"protocol": "<name>@<major>", "timeout_seconds": <n>, "unconfined_bindings": <true\|false>, "bindings": [{"action": "<action>", "argv": ["<program>", "<argument>", ...]}]}. A run of that protocol starts an admitted action's program without a shell, with the action's arguments as JSON on standard input, a cleared environment but PATH, and a timeout (60 s when absent); exit 0 is performed, with standard output, one JSON object, as the report; any other end is refused. A binding confers no authority. A file that names an action the protocol does not declare is refused before any model call; an action it binds no command to stops the run NoLocalExecutor, naming it. Substrate does not confine these commands, so the run is refused ConfinementUnavailable (CommandUnconfined), exit 3, before any model call unless --unconfined-bindings is given or the file sets "unconfined_bindings": true |
+| `--unconfined-bindings` | no | `false` | Run the commands --action-bindings binds with the operator's rights, outside Substrate. Without it, and without "unconfined_bindings": true in that file, a run given --action-bindings is refused ConfinementUnavailable (CommandUnconfined). The flag wins over the file; standard error reports which one opted in |
 | `<INTENT>` | yes | none | What to do, as given |
 
 ```text
@@ -132,8 +134,10 @@ Usage: b10x-loom evaluate [OPTIONS]
 
 ```text
 The request is one JSON object (loom.evaluation.EvaluationRequest):
-  {"protocol": "<name>@<major>", "snapshot": {canon-case/1}, "evidence": [{canon-evidence/1}, ...], "at": "<RFC 3339>"}
-`at` is optional. The protocol comes from this host's catalog (`protocols list`), never from the request.
+  {"protocol": "<name>@<major>", "snapshot": {canon-case/1}, "evidence": [{canon-evidence/1}, ...], "at": "<RFC 3339>",
+   "decisions": [{"decision": "<name>", "outcome": "<outcome>", "principal": "<who>", "case_revision": "<revision>"}, ...]}
+`at` and `decisions` are optional. The protocol comes from this host's catalog (`protocols list`), never from the request.
+`decisions` are the canon-decisions/1 explicit decisions taken for the case; one applies only at the snapshot's revision.
 A record that is not a readable canon-evidence/1 record, or repeats an earlier record's id, is refused.
 A readable record that does not apply to the case (an undeclared kind or subject, for instance) is set
 aside, as the governor sets it aside, and the decision is made from the rest without listing it.

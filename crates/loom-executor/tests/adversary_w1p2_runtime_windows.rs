@@ -252,6 +252,7 @@ impl EffectPort for Effects<'_> {
             report: Value::Null,
             attempt: None,
             audit: None,
+            usage: None,
         }))
     }
 }

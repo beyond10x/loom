@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-17T00:12:38Z",
+  "actor": "human:timo",
+  "artifact": "story:cli-custom-protocol-commands",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "units dec949b and d9db3bc merged in a39628f and 1ce948a; package gate: cli and intake-slice 309 passed 0 failed, clippy, fmt, intake-drift, docs check; wave head fe73cec gate: clippy -D warnings and cargo test of 12 packages (commission, commission-testkit, commission-conformance, executor, governor, protocols, intake-slice, intake-router, plugin, connectors, cli, sdk) 1678 passed 0 failed; fmt, drift, intake-drift, commission docs-drift, docs-check, consumer-check exit 0"
+  }
+}

@@ -22,7 +22,8 @@ use b10x_loom_commission::model::responsibility::{
     AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData, CommissionId,
     CompletionDetermination, EffectOutcome, EffectOutcomePerformed, EffectOutcomeRefused, Frontier,
     FrontierAction, FrontierData, FrontierId, GovernorError, Observation, ObservationId,
-    PrincipalId, RunId, RunOutcome, Unit, commission_state, frontier_state, observation_state,
+    PrincipalId, RunId, RunOutcome, RunOutcomeSuspended, SuspensionReason, Unit, commission_state,
+    frontier_state, observation_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -31,10 +32,10 @@ use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked};
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
 use b10x_loom_executor::harness::responses;
-use b10x_loom_executor::harness::turn_loop::LoopConfig;
+use b10x_loom_executor::harness::turn_loop::{Budget, LoopConfig};
 use b10x_loom_executor::harness::wire::{
     CallId, Item, ModelPort, StopReason, StreamSink, ToolCall, ToolName, TurnOutcome, TurnRequest,
-    WireError, WireId,
+    Usage, WireError, WireId,
 };
 use b10x_loom_executor::metering::{MeteredExecutor, MeteredModelPort, RunMeter};
 use b10x_loom_executor::model::metering::RunUsageReport;
@@ -237,6 +238,7 @@ impl EffectPort for CaseEffects<'_> {
             report: CommissionValue::Null,
             attempt: None,
             audit: None,
+            usage: None,
         }))
     }
 }
@@ -382,6 +384,23 @@ fn run(
     refuse_once: Vec<&'static str>,
     turns: Vec<TurnOutcome>,
 ) -> Ran {
+    run_configured(
+        text,
+        blocked,
+        refuse_once,
+        turns,
+        LoopConfig::new("scripted-model", "INSTRUCTIONS"),
+    )
+}
+
+/// [`run`], with the model loop of a judgement step under `config`.
+fn run_configured(
+    text: &str,
+    blocked: Vec<&'static str>,
+    refuse_once: Vec<&'static str>,
+    turns: Vec<TurnOutcome>,
+    config: LoopConfig,
+) -> Ran {
     let case = Case::new(blocked);
     let effects = RecordingEffects::new(CaseEffects::new(&case, refuse_once));
     let loom = Loom::new(
@@ -396,8 +415,7 @@ fn run(
         WorkflowExecutor::new(
             &loom,
             MeteredModelPort::new(CountingModel::new(&case, turns), &meter),
-            LoopConfig::new("scripted-model", "INSTRUCTIONS")
-                .with_retry_backoff(Duration::from_millis(1)),
+            config.with_retry_backoff(Duration::from_millis(1)),
             session(),
             definition(text),
             effects.log(),
@@ -666,6 +684,60 @@ fn a_definition_naming_an_action_outside_its_protocol_is_refused() {
         workflow::load(&misspelt, &protocol),
         Err(DefinitionError::Shape(_))
     ));
+}
+
+/// A judgement step whose model loop stops on its input-token budget (100, against a turn reporting
+/// 150) suspends the run for that budget, carrying the loop's stop, not `NoUsefulAction`; the
+/// call of the over-budget turn is never proposed.
+#[test]
+fn a_judgement_step_stopped_by_its_input_token_budget_suspends_the_run_for_it() {
+    let mut over = calls(
+        "call_edit",
+        "implementation_edit",
+        json!({"path": "src/lib.rs"}),
+    );
+    over.usage = Some(Usage {
+        model: "scripted-model".to_owned(),
+        input_tokens: 150,
+        output_tokens: 10,
+        cached_input_tokens: 0,
+        cache_creation_input_tokens: None,
+    });
+    let ran = run_configured(
+        DEFINITION,
+        Vec::new(),
+        Vec::new(),
+        vec![over],
+        LoopConfig::new("scripted-model", "INSTRUCTIONS").with_budget(Budget {
+            max_input_tokens: Some(100),
+            ..Budget::default()
+        }),
+    );
+
+    assert_eq!(
+        ran.end.outcome,
+        RunOutcome::Suspended(RunOutcomeSuspended {
+            reason: SuspensionReason::LoopBudget(object(&[
+                ("kind", text("max-input-tokens")),
+                ("limit", CommissionValue::Number("100".to_owned())),
+                ("reported", CommissionValue::Number("150".to_owned())),
+            ])),
+        }),
+        "the run is suspended for the loop's budget stop"
+    );
+    assert_eq!(ran.asked.len(), 1, "{:?}", ran.asked);
+    assert_eq!(
+        ran.performed,
+        [INSPECT],
+        "the over-budget call is never performed"
+    );
+    assert_eq!(
+        ran.proposed()
+            .into_iter()
+            .map(|(action, _)| action)
+            .collect::<Vec<_>>(),
+        [INSPECT]
+    );
 }
 
 /// A step advances only once its request was `Performed`: a refused `repository.inspect` is

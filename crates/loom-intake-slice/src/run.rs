@@ -44,6 +44,7 @@
 //! | [`StopReason::NothingAdmissible`] | `CaseMovedOn` | the case moved to another revision while the run worked, and its frontier there still admits an action; the run, bound to the revision it left, stops, and the detail names both revisions (`case moved on from revision <bound> to <current>`) |
 //! | [`StopReason::StepBudget`] | `Suspended` for `Budget` | the steps taken reach the request's `max_steps` |
 //! | [`StopReason::NoLocalExecutor`] | `NoPerformableAction` | the pick is not `software-change@1`; the case opens and one frontier is read |
+//! | [`StopReason::NoLocalExecutor`] | none: no case is opened | the pick is a protocol the request's action bindings bind ([`crate::bindings`]) and one of its actions has no command; the detail names it |
 //! | [`StopReason::Refused`] | none: no case is opened | the router refuses the pick: outside the registry, or unsure |
 //!
 //! Any other end is a [`SliceError`]: a model that gives no usable pick, a workspace the case
@@ -563,6 +564,14 @@ pub(crate) enum Execution<'a> {
         clock: &'a dyn crate::clock::Clock,
         intent_revision: &'a str,
     },
+    /// An installed protocol's actions, performed through the commands the operator bound to
+    /// them ([`crate::bindings`]).
+    Commands {
+        bindings: &'a crate::bindings::ActionBindings,
+        /// The evidence kinds each action declares it may produce.
+        productions: std::collections::BTreeMap<String, Vec<String>>,
+        intent_revision: &'a str,
+    },
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -606,10 +615,11 @@ pub(crate) fn drive<S: FallibleCaseStore, T: EvaluationTime>(
         briefing: briefing.clone(),
         console: &console,
     };
-    let query = matches!(&execution, Execution::Clock { .. });
+    // A run without a workspace ends `Completed` when the governor holds its case complete.
+    let query = !matches!(&execution, Execution::Software { .. });
     let workspace = match &execution {
         Execution::Software { workspace, .. } => Some(workspace.to_path_buf()),
-        Execution::Clock { .. } => None,
+        Execution::Clock { .. } | Execution::Commands { .. } => None,
     };
     let local: Box<dyn EffectPort + '_> = match execution {
         Execution::Software {
@@ -643,6 +653,19 @@ pub(crate) fn drive<S: FallibleCaseStore, T: EvaluationTime>(
             case.clone(),
             intent_revision,
             clock,
+            briefing.clone(),
+            &console,
+        )),
+        Execution::Commands {
+            bindings,
+            productions,
+            intent_revision,
+        } => Box::new(crate::bindings::CommandEffects::new(
+            governor,
+            case.clone(),
+            intent_revision,
+            bindings,
+            productions,
             briefing.clone(),
             &console,
         )),
@@ -1431,7 +1454,9 @@ fn push_json(out: &mut String, value: &json::Value) {
 #[cfg(test)]
 mod tests {
     use b10x_loom_commission::model::primitives::Uuid;
-    use b10x_loom_commission::model::responsibility::{RunId, RunOutcome, RunOutcomeCaseMovedOn};
+    use b10x_loom_commission::model::responsibility::{
+        ChargedUsage, RunCharges, RunId, RunOutcome, RunOutcomeCaseMovedOn,
+    };
     use b10x_loom_commission::runtime::LoopEnd;
 
     use super::{ApprovalGate, SliceRun, StopReason, finish};
@@ -1452,6 +1477,16 @@ mod tests {
             effects: Vec::new(),
             steps: 2,
             last_frontier: None,
+            charges: RunCharges {
+                run: ChargedUsage {
+                    trials: 0,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    duration_ms: 0,
+                    cost_micro_usd: Some(0),
+                },
+                actions: Vec::new(),
+            },
         };
         let mut out = Vec::new();
 

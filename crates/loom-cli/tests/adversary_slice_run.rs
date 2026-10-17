@@ -617,6 +617,7 @@ fn a_routed_query_completes_without_software_test_configuration() {
         threshold: 0.5,
         inputs: b10x_loom_intake_slice::case::RUN_DEFAULTS,
         test_paths: b10x_loom_intake_slice::test_paths::TestPaths::default(),
+        bindings: None,
     };
     let mut output = Vec::new();
     let run = run_intent_with_options(

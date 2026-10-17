@@ -132,6 +132,7 @@ impl EffectPort for Performs {
             report: Value::Null,
             attempt: None,
             audit: None,
+            usage: None,
         }))
     }
 }

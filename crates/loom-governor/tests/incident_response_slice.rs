@@ -20,7 +20,7 @@
 //!
 //! `tests/fixtures/inc-492.fixture.yaml` is a byte-for-byte copy of
 //! `fixtures/incident-response/inc-492.fixture.yaml` in beyond10x/engineering-protocols at tag
-//! `0.7.0`, the release this crate depends on; `b10x-canon-engineering` does not expose its
+//! `0.8.0`, the release this crate depends on; `b10x-canon-engineering` does not expose its
 //! fixtures.
 
 use std::collections::BTreeMap;
@@ -428,6 +428,7 @@ impl EffectPort for Rollback<'_> {
             report: json::Value::Null,
             attempt: None,
             audit: None,
+            usage: None,
         }))
     }
 }

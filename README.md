@@ -9,7 +9,12 @@ only through the actions a governed frontier admits at that moment.
 Since `0.4.0`, Loom includes workspace-free system queries and an extensible protocol
 catalog. Loom owns `system-query@1`; engineering definitions and installed custom definitions
 remain separate sources. [System queries and custom protocols](https://beyond10x.github.io/loom/docs/guides/system-queries)
-describes the clock tool, pinned installation and offline loading. Transient model failures get
+describes the clock tool, pinned installation and offline loading. `run --action-bindings <FILE>`
+drives an installed protocol through commands the operator binds to its actions: each admitted
+action starts its program without a shell, with its arguments as JSON on standard input, and the
+program's JSON report becomes the action's result; a binding confers no authority, and the
+commands run unconfined only with `--unconfined-bindings` or the file's own
+`"unconfined_bindings": true`. Transient model failures get
 at most three attempts on the same binding; reports count every attempt. Persistent overload
 is reported as unavailable, and tool effects are never retried by this policy.
 
@@ -33,9 +38,9 @@ the whole boundary.
 
 ## Status
 
-Version `0.23.0`, released from source at the tag `0.23.0`
-([release](https://github.com/beyond10x/loom/releases/tag/0.23.0)). Nothing is on a registry: you
-install from the tag or depend on it with `tag = "0.23.0"`. `b10x-loom run` completed a live run
+Version `0.24.0`, released from source at the tag `0.24.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.24.0)). Nothing is on a registry: you
+install from the tag or depend on it with `tag = "0.24.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -153,14 +158,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.23.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.24.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.23.0
+b10x-loom 0.24.0
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -254,12 +259,13 @@ Since `0.2.0`, `CanonGovernor::with_protocol` admits host-reviewed Canon protoco
 admission, durable storage and authenticated evidence remain the embedding application's duties.
 A supervisor that keeps its own case record calls `loom_governor::evaluate` (or runs
 `b10x-loom evaluate`, JSON in and out) with a catalog protocol, a `canon-case/1` snapshot and its
-`canon-evidence/1` records, and gets Canon's decision without Commission's types
-([the governor](https://beyond10x.github.io/loom/docs/concepts/governor-and-intake)).
+`canon-evidence/1` records (and any `canon-decisions/1` explicit decisions taken for the case), and
+gets Canon's decision without Commission's types; `CanonGovernor::decide` records such a decision
+on a held case ([the governor](https://beyond10x.github.io/loom/docs/concepts/governor-and-intake)).
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.23.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.24.0" }
 ```
 
 The example below
@@ -296,6 +302,14 @@ another type ends the run `NeedsHumanJudgment` naming the step and the output, w
 proposed. A judgement step lists the earlier outputs it is given as `inputs` (`{step: <step>,
 output: <name>}`): their values go into its instructions as one data block, typed, never as
 instructions, and a listed output the run did not produce asks the model nothing.
+Given a run store (`.with_store(store)`, the governor's `FileWorkflowRunStore` beside its
+`FileSuspensionStore`, or the host's own `WorkflowRunStore`) and bound to a Run with
+`begin(&run_id)`, the executor writes the run's record after every performed step and every call:
+the steps performed and proposed, the outputs and the usage so far. `resume(&run_id)` in another
+process continues it, after an approval (`resume_after_grant`) or a crash, at the step after the
+last performed one with every output bound, and the meter's report covers every segment; a record
+of another Run or another definition is refused. A request proposed and not recorded performed is
+proposed again after a restart, so an effect must tolerate one repeat.
 
 ```yaml
 name: change

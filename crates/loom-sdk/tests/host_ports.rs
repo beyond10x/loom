@@ -51,6 +51,7 @@ host_ports! {
     loom_sdk::commission::ports::evidence::ObservationPort => hosts::Observations;
     loom_sdk::commission::ports::evidence::EvidencePort => hosts::Evidence;
     loom_sdk::loom::selection::ActionSelector => hosts::Selector;
+    loom_sdk::loom::workflow::WorkflowRunStore => hosts::RunRecords;
     loom_sdk::loom::arguments::ArgumentGenerator => hosts::Arguments;
     loom_sdk::loom::harness::wire::ModelPort => hosts::Model;
     loom_sdk::loom::harness::wire::ToolPort => hosts::Tools;
@@ -92,8 +93,10 @@ mod hosts {
         Bearer, BearerSource, ModelPort, StreamEvent, StreamSink, ToolCall, ToolOutcome, ToolPort,
         ToolSpec, TurnOutcome, TurnRequest, WireError, WireId,
     };
-    use loom_sdk::loom::model::run::{CatalogueEntry, SelectionStrategy};
+    use loom_sdk::loom::model::run::{CatalogueEntry, CommissionRunId, SelectionStrategy};
+    use loom_sdk::loom::model::workflow::WorkflowRunRecord;
     use loom_sdk::loom::selection::{ActionSelector, Choice, SelectionContext, SelectorError};
+    use loom_sdk::loom::workflow::{RunStoreError, WorkflowRunStore};
 
     /// The body every port method has here: the witness compiles them and never calls them.
     const NEVER_CALLED: &str = "a compile witness: no port body is called";
@@ -195,6 +198,18 @@ mod hosts {
 
     impl EvaluationTime for Time {
         fn at(&self, _case: &CaseId) -> Result<Option<String>, GovernorError> {
+            unreachable!("{NEVER_CALLED}")
+        }
+    }
+
+    pub struct RunRecords;
+
+    impl WorkflowRunStore for RunRecords {
+        fn load(&self, _run: &CommissionRunId) -> Result<Option<WorkflowRunRecord>, RunStoreError> {
+            unreachable!("{NEVER_CALLED}")
+        }
+
+        fn save(&self, _record: &WorkflowRunRecord) -> Result<(), RunStoreError> {
             unreachable!("{NEVER_CALLED}")
         }
     }
@@ -512,6 +527,7 @@ fn a_host_implements_every_port_through_loom_sdk_alone() {
         "ObservationPort",
         "EvidencePort",
         "ActionSelector",
+        "WorkflowRunStore",
         "ArgumentGenerator",
         "ModelPort",
         "ToolPort",

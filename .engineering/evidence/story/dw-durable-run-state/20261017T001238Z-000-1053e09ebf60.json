@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-17T00:12:38Z",
+  "actor": "human:timo",
+  "artifact": "story:dw-durable-run-state",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "unit e80169e merged in fe73cec; four acceptance tests red with the record writes disabled, then workflow_run_store 5 passed; governor 92, executor 854, commission-testkit 232, sdk 9 passed 0 failed; clippy, fmt, drift, no-hand-model, docs-check; wave head fe73cec gate: clippy -D warnings and cargo test of 12 packages (commission, commission-testkit, commission-conformance, executor, governor, protocols, intake-slice, intake-router, plugin, connectors, cli, sdk) 1678 passed 0 failed; fmt, drift, intake-drift, commission docs-drift, docs-check, consumer-check exit 0"
+  }
+}

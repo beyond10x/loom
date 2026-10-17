@@ -1,6 +1,6 @@
 //! Run a routed intent, initializing resources only for the selected protocol.
 
-use std::io::Write;
+use std::io::{Read as _, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as Process, ExitCode};
 use std::sync::Arc;
@@ -16,10 +16,11 @@ use b10x_loom_cli::{
     ApproveArgs, Cli, Command, Confinement, EvaluateArgs, Output, PluginCommand, PluginName,
     ProtocolCommand, ResumeArgs, RunArgs, approve_exit_status, resume_exit_status, run_exit_status,
 };
+use b10x_loom_intake_slice::bindings::ActionBindings;
 use b10x_loom_intake_slice::case;
 use b10x_loom_intake_slice::clock::HostClock;
 use b10x_loom_intake_slice::confinement::{
-    ConfinementRefusal, SubstrateRunner, TestRunner, prepare_delegated_cgroup,
+    ConfinementError, ConfinementRefusal, SubstrateRunner, TestRunner, prepare_delegated_cgroup,
 };
 use b10x_loom_intake_slice::context_metrics::ContextMetrics;
 use b10x_loom_intake_slice::executor::{TestCommand, UnconfinedRunner};
@@ -533,6 +534,27 @@ fn execute(
         None => (None, None),
     };
     let catalog = InstallStore::user()?.catalog()?;
+    // The action bindings are held to the catalog before any model call.
+    if let (Some(path), Some(bindings)) = (
+        &arguments.action_bindings,
+        &intent_request(arguments)?.bindings,
+    ) {
+        b10x_loom_intake_slice::bindings::check(bindings, &catalog)
+            .map_err(|why| format!("--action-bindings {}: {}", path.display(), printable(&why)))?;
+        // Substrate does not confine a bound command, and the run never falls back to an
+        // unconfined one on its own: only the operator's explicit opt-in starts them, given as
+        // the flag or as the file's own `unconfined_bindings: true`. The flag wins.
+        if arguments.unconfined_bindings {
+            eprintln!("bound commands: unconfined (--unconfined-bindings)");
+        } else if bindings.unconfined_bindings == Some(true) {
+            eprintln!(
+                "bound commands: unconfined (unconfined_bindings in {})",
+                printable(&path.display().to_string())
+            );
+        } else {
+            return Ok(bindings_refused(&bindings.protocol));
+        }
+    }
     let models = (classifier_route.take(), agent_route.take());
     let Some(dir) = &arguments.state else {
         let governor =
@@ -603,7 +625,23 @@ fn intent_request(arguments: &RunArgs) -> Result<IntentRequest, String> {
         threshold: arguments.threshold,
         inputs: arguments.inputs(),
         test_paths: arguments.test_paths().map_err(|e| e.to_string())?,
+        bindings: arguments
+            .action_bindings
+            .as_deref()
+            .map(read_bindings)
+            .transpose()?,
     })
+}
+
+/// The action bindings the run configuration file at `path` declares.
+fn read_bindings(path: &Path) -> Result<ActionBindings, String> {
+    let named = |why: &str| format!("--action-bindings {}: {}", path.display(), printable(why));
+    let mut text = String::new();
+    regular_file::open(path)
+        .map_err(|why| named(&why))?
+        .read_to_string(&mut text)
+        .map_err(|error| named(&format!("cannot be read: {error}")))?;
+    b10x_loom_intake_slice::bindings::decode(&text).map_err(|why| named(&why))
 }
 
 /// Runs `run` on `governor`, holding the commission in `state` when `--state` gave one.
@@ -733,6 +771,31 @@ fn confinement_refused(prepared: &PreparedIntent, reason: &str) -> Ending {
     eprintln!("stopped: ConfinementUnavailable ({})", printable(reason));
     Ending::Stopped(SliceRun {
         protocol: prepared.protocol().to_owned(),
+        steps: 0,
+        stop_reason: StopReason::ConfinementUnavailable,
+        approvals: Vec::new(),
+        gate: ApprovalGate::Approvable,
+    })
+}
+
+/// The stop of a run given `--action-bindings` without an opt-in (`--unconfined-bindings`, or
+/// `unconfined_bindings: true` in the file), before any model call:
+/// `ConfinementUnavailable (CommandUnconfined: ...)`, exit status 3.
+fn bindings_refused(protocol: &str) -> Ending {
+    let refusal = ConfinementError {
+        reason: ConfinementRefusal::CommandUnconfined,
+        detail: "Substrate does not confine the commands --action-bindings binds; pass \
+                 --unconfined-bindings, or set unconfined_bindings: true in the file, to run \
+                 them with the operator's rights"
+            .to_owned(),
+    };
+    eprintln!("confinement: bound commands");
+    eprintln!(
+        "stopped: ConfinementUnavailable ({})",
+        printable(&refusal.to_string())
+    );
+    Ending::Stopped(SliceRun {
+        protocol: protocol.to_owned(),
         steps: 0,
         stop_reason: StopReason::ConfinementUnavailable,
         approvals: Vec::new(),

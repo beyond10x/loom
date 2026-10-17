@@ -152,6 +152,7 @@ impl EffectPort for Effects {
                     report: Value::Text(format!("done {}", data.action)),
                     attempt: None,
                     audit: None,
+                    usage: None,
                 })
             });
         self.invoked

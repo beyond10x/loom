@@ -28,13 +28,23 @@
 //! unknown), the step's cost is absent, and so is the run's.
 //!
 //! The report is the generated [`RunUsageReport`] ([`RunMeter::report`]). It covers what the meter
-//! saw: one process segment of the run.
+//! saw: one process segment of the run, and the earlier segments it was resumed from. A meter
+//! gives what it counted as a [`CarriedUsage`] ([`RunMeter::carried`]), which a workflow run
+//! record keeps (`story:dw-durable-run-state`); a meter in the process that resumes the run takes
+//! it back ([`RunMeter::carry`]), so its report lists the carried steps first, numbered as they
+//! were, numbers its own after them, and sums the carried effect usage with its own.
+//!
+//! Beside the model-port usage, the report carries what the run's performed effects reported they
+//! spent on their own model calls, as Commission's runtime charged it to the run and to each
+//! action ([`b10x_loom_commission::runtime::LoopEnd::charges`]), once the host hands it to the
+//! meter ([`RunMeter::charge_effects`]). It is never summed into the model-port figures.
 
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use b10x_loom_commission::model::responsibility::{
-    Commission, ExecutorOutcome, Frontier, RunId, commission_state, frontier_state,
+    ChargedUsage, Commission, ExecutorOutcome, Frontier, RunCharges, RunId, commission_state,
+    frontier_state,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
 
@@ -42,7 +52,7 @@ use crate::harness::turn_loop::RateCard;
 use crate::harness::wire::{
     ModelPort, StreamSink, TurnOutcome, TurnRequest, Usage, WireError, WireId,
 };
-use crate::model::metering::{RunUsageReport, StepUsage};
+use crate::model::metering::{ActionUsage, CarriedUsage, EffectsUsage, RunUsageReport, StepUsage};
 use crate::model::primitives::Uuid;
 use crate::model::run::CommissionRunId;
 
@@ -60,6 +70,10 @@ struct Ledger {
     prices: Option<RateCard>,
     /// Step 0 first, then one tally per executor call, in order.
     tallies: Vec<Tally>,
+    /// What the run's effects were charged, as last handed to [`RunMeter::charge_effects`].
+    effects: Option<RunCharges>,
+    /// What earlier segments' effects were charged, as [`RunMeter::carry`] took it.
+    carried_effects: Option<EffectsUsage>,
 }
 
 thread_local! {
@@ -83,6 +97,21 @@ struct Tally {
 }
 
 impl Tally {
+    /// The tally a carried step's usage stands for. A negative figure counts nothing.
+    fn carried(usage: &StepUsage) -> Self {
+        let count = |figure: i64| u64::try_from(figure).unwrap_or(0);
+        Self {
+            label: usage.label.clone(),
+            calls: count(usage.model_calls),
+            input_tokens: count(usage.input_tokens),
+            output_tokens: count(usage.output_tokens),
+            cached_input_tokens: count(usage.cached_input_tokens),
+            cost_micro_usd: usage
+                .cost_micro_usd
+                .and_then(|cost| u64::try_from(cost).ok()),
+        }
+    }
+
     fn new(priced: bool) -> Self {
         Self {
             cost_micro_usd: priced.then_some(0),
@@ -108,6 +137,72 @@ fn figure(count: u64) -> i64 {
     i64::try_from(count).unwrap_or(i64::MAX)
 }
 
+/// The report's effect usage for `charges`: all zero, with no actions, when nothing was charged.
+fn effects_usage(charges: Option<&RunCharges>) -> EffectsUsage {
+    let line = |action: &str, charged: &ChargedUsage| ActionUsage {
+        action: action.to_owned(),
+        trials: charged.trials,
+        input_tokens: charged.input_tokens,
+        output_tokens: charged.output_tokens,
+        duration_ms: charged.duration_ms,
+        cost_micro_usd: charged.cost_micro_usd,
+    };
+    let Some(charges) = charges else {
+        return EffectsUsage {
+            trials: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            duration_ms: 0,
+            cost_micro_usd: Some(0),
+            actions: Vec::new(),
+        };
+    };
+    let run = line("", &charges.run);
+    EffectsUsage {
+        trials: run.trials,
+        input_tokens: run.input_tokens,
+        output_tokens: run.output_tokens,
+        duration_ms: run.duration_ms,
+        cost_micro_usd: run.cost_micro_usd,
+        actions: charges
+            .actions
+            .iter()
+            .map(|charge| line(&charge.action, &charge.charged))
+            .collect(),
+    }
+}
+
+/// `carried` and `current` summed: every figure added, the cost absent when either is, and the
+/// actions of `carried` first, each with `current`'s figures for the same action added, then the
+/// actions only `current` charged, in its order.
+fn sum_effects(carried: &EffectsUsage, current: EffectsUsage) -> EffectsUsage {
+    let cost = |a: Option<i64>, b: Option<i64>| a.zip(b).map(|(a, b)| a.saturating_add(b));
+    let mut actions = carried.actions.clone();
+    for action in current.actions {
+        match actions
+            .iter_mut()
+            .find(|known| known.action == action.action)
+        {
+            Some(known) => {
+                known.trials = known.trials.saturating_add(action.trials);
+                known.input_tokens = known.input_tokens.saturating_add(action.input_tokens);
+                known.output_tokens = known.output_tokens.saturating_add(action.output_tokens);
+                known.duration_ms = known.duration_ms.saturating_add(action.duration_ms);
+                known.cost_micro_usd = cost(known.cost_micro_usd, action.cost_micro_usd);
+            }
+            None => actions.push(action),
+        }
+    }
+    EffectsUsage {
+        trials: carried.trials.saturating_add(current.trials),
+        input_tokens: carried.input_tokens.saturating_add(current.input_tokens),
+        output_tokens: carried.output_tokens.saturating_add(current.output_tokens),
+        duration_ms: carried.duration_ms.saturating_add(current.duration_ms),
+        cost_micro_usd: cost(carried.cost_micro_usd, current.cost_micro_usd),
+        actions,
+    }
+}
+
 impl RunMeter {
     /// A meter for one run, pricing each turn with `prices` when there is a card.
     #[must_use]
@@ -117,6 +212,8 @@ impl RunMeter {
             shared: Arc::new(Mutex::new(Ledger {
                 prices,
                 tallies: vec![Tally::new(priced)],
+                effects: None,
+                carried_effects: None,
             })),
         }
     }
@@ -156,7 +253,52 @@ impl RunMeter {
             cached_input_tokens: total.cached_input_tokens,
             cost_micro_usd: total.cost_micro_usd,
             steps,
+            effects: match &ledger.carried_effects {
+                Some(carried) => sum_effects(carried, effects_usage(ledger.effects.as_ref())),
+                None => effects_usage(ledger.effects.as_ref()),
+            },
         }
+    }
+
+    /// What the meter counted, as a run record carries it to the process that resumes the run:
+    /// the steps and the effect usage of [`Self::report`].
+    #[must_use]
+    pub fn carried(&self) -> CarriedUsage {
+        let RunUsageReport { steps, effects, .. } = self.report(&RunId(
+            b10x_loom_commission::model::primitives::Uuid(String::new()),
+        ));
+        CarriedUsage { steps, effects }
+    }
+
+    /// Takes `carried`, what earlier segments of the run counted ([`Self::carried`]), as the start
+    /// of this meter's run, for a meter that has counted nothing yet: its steps become this
+    /// meter's, numbered as they were, the next executor call opening the step after the last of
+    /// them, and its effect usage is summed with what this meter's run is charged. What the meter
+    /// counted before is replaced.
+    pub fn carry(&self, carried: &CarriedUsage) {
+        let mut ledger = self.ledger();
+        let priced = ledger.prices.is_some();
+        let last = carried
+            .steps
+            .iter()
+            .filter_map(|step| usize::try_from(step.step).ok())
+            .max()
+            .unwrap_or(0);
+        let mut tallies = vec![Tally::new(priced); last + 1];
+        for step in &carried.steps {
+            if let Ok(at) = usize::try_from(step.step) {
+                tallies[at] = Tally::carried(step);
+            }
+        }
+        ledger.tallies = tallies;
+        ledger.carried_effects = Some(carried.effects.clone());
+    }
+
+    /// Records `charges`, what Commission's runtime charged the run's effects
+    /// ([`b10x_loom_commission::runtime::LoopEnd::charges`]), for the report's `effects`. A later
+    /// call replaces it.
+    pub fn charge_effects(&self, charges: &RunCharges) {
+        self.ledger().effects = Some(charges.clone());
     }
 
     /// Labels the step of the executor call running on this thread with `label`, the name its

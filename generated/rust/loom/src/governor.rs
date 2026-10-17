@@ -1,11 +1,11 @@
 // generated from loom v1
-// model digest 7e01de49f6648bd42c3487572f5bf305ca3e9c2e76adeb528dd2ffcdffa645c9
-// contract digest 339d7d1174a6fc6f5384f70ff5342398aa19ad068e03cd1146e66a670161b962
+// model digest 08aaad3d648d503c874a006c3741c4fc037129ea3e56464b9d052c782600e763
+// contract digest 6dfdf4bff25c8bd3098b5577c415d0338d6bd99de5cda7767d3103908d655aea
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Governor — `loom.governor`.
 //!
-//! The governor's held case as a store writes it: the case id, the protocol that governs it, the case revision, the current revision of every declared artifact, the value of every case input the protocol declares, and every evidence record received with whether it applies; and the observations kept beside the cases.
+//! The governor's held case as a store writes it: the case id, the protocol that governs it, the case revision, the current revision of every declared artifact, the value of every case input the protocol declares, the independence dimensions the host declared for each evidence producer, every evidence record received with whether it applies, and every explicit decision recorded for it; and the observations kept beside the cases.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
 
@@ -31,8 +31,12 @@ pub struct StoredCase {
     pub artifacts: Vec<StoredArtifact>,
     /// `inputs` — `List<loom.governor.StoredInput>`.
     pub inputs: Vec<StoredInput>,
+    /// `independence` — `Optional<List<loom.governor.StoredIndependence>>`.
+    pub independence: Option<Vec<StoredIndependence>>,
     /// `evidence` — `List<loom.governor.StoredEvidence>`.
     pub evidence: Vec<StoredEvidence>,
+    /// `decisions` — `Optional<List<loom.evaluation.ExplicitDecision>>`.
+    pub decisions: Option<Vec<crate::evaluation::ExplicitDecision>>,
 }
 
 /// StoredCaseId — `loom.governor.StoredCaseId`: a distinct wrapper around `String`.
@@ -67,6 +71,15 @@ pub struct StoredEvidenceData {
     pub facts: crate::json::Value,
     /// `provenance` — `Json`.
     pub provenance: crate::json::Value,
+}
+
+/// StoredIndependence — `loom.governor.StoredIndependence`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredIndependence {
+    /// `producer` — `String`.
+    pub producer: String,
+    /// `dimensions` — `List<String>`.
+    pub dimensions: Vec<String>,
 }
 
 /// StoredInput — `loom.governor.StoredInput`.

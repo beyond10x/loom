@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest 7e01de49f6648bd42c3487572f5bf305ca3e9c2e76adeb528dd2ffcdffa645c9
-  contract digest 339d7d1174a6fc6f5384f70ff5342398aa19ad068e03cd1146e66a670161b962
+  model digest 08aaad3d648d503c874a006c3741c4fc037129ea3e56464b9d052c782600e763
+  contract digest 6dfdf4bff25c8bd3098b5577c415d0338d6bd99de5cda7767d3103908d655aea
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-172 capabilities: **171 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+181 capabilities: **180 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -40,14 +40,19 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.evaluation.EvaluationRefusal` |
 | domain type | `loom.evaluation.EvaluationRequest` |
 | domain type | `loom.evaluation.EvidenceRecord` |
+| domain type | `loom.evaluation.ExplicitDecision` |
 | domain type | `loom.evaluation.ProtocolName` |
 | domain type | `loom.governor.StoredArtifact` |
 | domain type | `loom.governor.StoredCase` |
 | domain type | `loom.governor.StoredCaseId` |
 | domain type | `loom.governor.StoredEvidence` |
 | domain type | `loom.governor.StoredEvidenceData` |
+| domain type | `loom.governor.StoredIndependence` |
 | domain type | `loom.governor.StoredInput` |
 | domain type | `loom.governor.StoredObservation` |
+| domain type | `loom.metering.ActionUsage` |
+| domain type | `loom.metering.CarriedUsage` |
+| domain type | `loom.metering.EffectsUsage` |
 | domain type | `loom.metering.RunUsageReport` |
 | domain type | `loom.metering.StepUsage` |
 | domain type | `loom.plugin.Classification` |
@@ -108,11 +113,15 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.workflow.JudgementStep` |
 | domain type | `loom.workflow.OutputReference` |
 | domain type | `loom.workflow.OutputType` |
+| domain type | `loom.workflow.RecordedOutput` |
 | domain type | `loom.workflow.StepCondition` |
 | domain type | `loom.workflow.StepKind` |
 | domain type | `loom.workflow.StepOutput` |
+| domain type | `loom.workflow.StepRequest` |
 | domain type | `loom.workflow.Truth` |
+| domain type | `loom.workflow.UnproducedOutput` |
 | domain type | `loom.workflow.WorkflowDefinition` |
+| domain type | `loom.workflow.WorkflowRunRecord` |
 | domain type | `loom.workflow.WorkflowStep` |
 | entity lifecycle | `loom.run.ActionCatalogue` |
 | entity lifecycle | `loom.run.ArgumentRequest` |

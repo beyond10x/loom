@@ -225,6 +225,7 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> LocalEffects<'a, 'o, S, T>
             report: json::Value::Text(report.to_string()),
             attempt: None,
             audit: None,
+            usage: None,
         }))
     }
 

@@ -23,7 +23,11 @@
 //! - [`grant`] keeps the grant `approve` writes there, and reads it as a resume's authority
 //!   provider; [`handoff`] records the merge hand-off a resumed `repository.merge` performs, which
 //!   moves no Git ref.
+//! - [`bindings`] performs an installed protocol's admitted actions through the commands the
+//!   operator binds to them (`run --action-bindings`), and submits only the evidence a command's
+//!   report states of a kind its action declares; a binding confers no authority.
 
+pub mod bindings;
 pub mod case;
 pub mod confinement;
 pub mod context;

@@ -135,6 +135,7 @@ impl EffectPort for Effects {
             report: CommissionValue::Null,
             attempt: None,
             audit: None,
+            usage: None,
         }))
     }
 }

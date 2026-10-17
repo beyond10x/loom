@@ -190,6 +190,7 @@ impl EffectPort for CaseEffects<'_> {
             report: CommissionValue::Null,
             attempt: None,
             audit: None,
+            usage: None,
         }))
     }
 }

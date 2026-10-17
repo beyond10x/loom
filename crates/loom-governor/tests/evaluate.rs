@@ -576,6 +576,7 @@ fn request(
             .map(|record| EvidenceRecord(value(record)))
             .collect(),
         at: at.map(|at| Timestamp(at.into())),
+        decisions: Vec::new(),
     }
 }
 

@@ -32,7 +32,26 @@
 //! handed with its [`EffectOutcome`] in an [`EffectLog`] the executor reads: the workflow advances
 //! past a step only once the request that step proposed was `Performed`. A refused or stale step
 //! is proposed again on the next call, bounded by Commission's idle rule. Where the workflow stands
-//! is kept in process (`decision-blocker:dw-run-state-across-restart`).
+//! is kept in process and, given a run store, durably (below).
+//!
+//! Given a [`WorkflowRunStore`] ([`WorkflowExecutor::with_store`], the governor's
+//! `FileWorkflowRunStore` or the host's own) and bound to a Run ([`WorkflowExecutor::begin`] for a
+//! new one, [`WorkflowExecutor::resume`] for one a record holds), the executor writes the run's
+//! `loom.workflow.WorkflowRunRecord` after every performed step and at the end of every call: the
+//! steps performed, the step proposed and not yet seen performed, the outputs taken, the output a
+//! step could not produce, the steps attempted and, metered, the usage so far
+//! ([`RunMeter::carried`]). [`WorkflowExecutor::resume`] in another process reads it back, so the
+//! run continues at the step after the last performed one with every output bound and no performed
+//! step proposed again, and its meter reports every segment ([`RunMeter::carry`]). The step
+//! proposed before the restart is expected again: a request performed after the restart (the held
+//! request `resume_after_grant` performs) settles it and takes its outputs. A record the store
+//! holds for another Run, or for another definition (its name, or the SHA-256 of its canonical
+//! JSON, [`definition_digest`]), is refused and nothing of it is read. A request proposed and not
+//! recorded performed is proposed again after a restart, so an effect must tolerate one repeat. An
+//! executor with a store and no Run bound proposes nothing (`NoUsefulAction`); a record that could
+//! not be written ends that call and every later one `NeedsHumanJudgment` naming why, and nothing
+//! more is proposed. The executor is bound to the Run it began under, which keys the record; a run
+//! resumed after a crash continues under it whatever Run Commission starts for the new process.
 //!
 //! A step may declare typed outputs (`story:dw-typed-step-outputs`): each a [`StepOutput`], a
 //! name, a JSON pointer (RFC 6901) into the report of the step's `Performed` effect and an
@@ -79,23 +98,27 @@ use b10x_loom_commission::model::json::Value as CommissionValue;
 use b10x_loom_commission::model::responsibility::{
     ActionRequestData, ActionStatus, Commission, EffectOutcome, EffectOutcomePerformed,
     ExecutorOutcome, ExecutorOutcomeNeedsHumanJudgment, ExecutorOutcomeProposedAction, Frontier,
-    HumanDecisionRequest, ProposedActionArguments, Truth as FrontierTruth, Unit, commission_state,
-    frontier_state,
+    HumanDecisionRequest, ProposedActionArguments, RunId, Truth as FrontierTruth, Unit,
+    commission_state, frontier_state,
 };
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
+use sha2::{Digest as _, Sha256};
 
 use crate::Loom;
 use crate::harness::governed::{LoopExecutor, tool_name};
 use crate::harness::turn_loop::LoopConfig;
 use crate::harness::wire::{ModelPort, StreamSink, TurnOutcome, TurnRequest, WireError, WireId};
 use crate::metering::RunMeter;
-use crate::model::json::Value as LoomValue;
-use crate::model::run::SessionData;
+use crate::model::json::{self as loom_json, Value as LoomValue};
+use crate::model::metering::{CarriedUsage, EffectsUsage};
+use crate::model::primitives::Uuid;
+use crate::model::run::{CommissionRunId, SessionData};
 use crate::model::workflow::{
-    DeterministicStep, JudgementStep, OutputReference, OutputType, StepCondition, StepKind,
-    StepOutput, Truth, WorkflowDefinition, WorkflowStep,
+    DeterministicStep, JudgementStep, OutputReference, OutputType, RecordedOutput, StepCondition,
+    StepKind, StepOutput, StepRequest, Truth, UnproducedOutput, WorkflowDefinition,
+    WorkflowRunRecord, WorkflowStep,
 };
 
 /// The tag that opens a judgement step's data block in its instructions.
@@ -451,6 +474,8 @@ struct Expected {
     index: usize,
     step: WorkflowStep,
     proposal: ExecutorOutcomeProposedAction,
+    /// Where the run's record is written once the step is settled, when it has a store.
+    save: Option<Save>,
 }
 
 impl EffectLog {
@@ -502,8 +527,12 @@ impl EffectLog {
                     &mut position,
                     expected.index,
                     &expected.step,
+                    &expected.proposal,
                     &performed.report,
                 );
+                if let Some(save) = &expected.save {
+                    save.write(&mut position);
+                }
             }
         }
     }
@@ -586,6 +615,79 @@ struct Position {
     attempted: Vec<String>,
     outputs: Vec<(String, String, CommissionValue)>,
     unproduced: Option<Unproduced>,
+    /// Every step seen performed, with its request, in order: the record's `performed`.
+    requests: Vec<StepRequest>,
+    /// Why the run's record could not be written, which ends every later call.
+    unsaved: Option<String>,
+}
+
+/// Where a bound run's record is written: the store, the Run that keys it, the definition's name
+/// and digest, and the meter whose usage it carries.
+#[derive(Clone)]
+struct Save {
+    store: Arc<dyn WorkflowRunStore + Send + Sync>,
+    run: CommissionRunId,
+    workflow: String,
+    digest: String,
+    /// The definition's step names, in order: a position names its steps by index.
+    names: Arc<[String]>,
+    meter: Option<RunMeter>,
+}
+
+impl fmt::Debug for Save {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Save")
+            .field("run", &self.run)
+            .field("workflow", &self.workflow)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Save {
+    /// The record of `position` under this Run.
+    fn record(&self, position: &Position) -> WorkflowRunRecord {
+        let name = |index: usize| self.names.get(index).cloned().unwrap_or_default();
+        WorkflowRunRecord {
+            run: self.run.clone(),
+            workflow: self.workflow.clone(),
+            definition_digest: self.digest.clone(),
+            performed: position.requests.clone(),
+            proposed: position
+                .outstanding
+                .as_ref()
+                .map(|outstanding| request_of(&name(outstanding.step), &outstanding.proposal)),
+            outputs: position
+                .outputs
+                .iter()
+                .map(|(step, output, value)| RecordedOutput {
+                    step: step.clone(),
+                    output: output.clone(),
+                    value: loom_value(value),
+                })
+                .collect(),
+            unproduced: position
+                .unproduced
+                .as_ref()
+                .map(|unproduced| UnproducedOutput {
+                    step: name(unproduced.step),
+                    output: unproduced.output.clone(),
+                    why: unproduced.why.clone(),
+                }),
+            attempted: position.attempted.clone(),
+            usage: self.meter.as_ref().map_or_else(no_usage, RunMeter::carried),
+        }
+    }
+
+    /// Writes the record of `position`; a write that fails is kept as why every later call ends.
+    fn write(&self, position: &mut Position) {
+        let record = self.record(position);
+        if let Err(error) = self.store.save(&record) {
+            position.unsaved = Some(format!(
+                "the record of run `{}` could not be written: {error}",
+                self.run.0.0
+            ));
+        }
+    }
 }
 
 /// An output a performed step declared and its report did not hold as declared.
@@ -617,7 +719,113 @@ pub struct WorkflowExecutor<'l, S, G, V, M> {
     effects: EffectLog,
     position: Arc<Mutex<Position>>,
     meter: Option<RunMeter>,
+    store: Option<Arc<dyn WorkflowRunStore + Send + Sync>>,
+    /// The Run the executor is bound to ([`Self::begin`], [`Self::resume`]).
+    run: Mutex<Option<CommissionRunId>>,
 }
+
+/// Why a [`WorkflowRunStore`] could not read or write a record: what went wrong, naming the file
+/// or the Run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunStoreError(pub String);
+
+impl RunStoreError {
+    /// An error saying `problem`.
+    pub fn new(problem: impl Into<String>) -> Self {
+        Self(problem.into())
+    }
+}
+
+impl fmt::Display for RunStoreError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for RunStoreError {}
+
+/// Where a workflow run's record (the generated `loom.workflow.WorkflowRunRecord`) is kept, keyed
+/// by its Run: the port a [`WorkflowExecutor`] given one ([`WorkflowExecutor::with_store`]) writes
+/// its run through and resumes it from. The governor's `FileWorkflowRunStore` keeps it in a
+/// directory; a host may supply its own. Each call is atomic: a `load` sees a record a `save`
+/// wrote whole, or none.
+pub trait WorkflowRunStore {
+    /// The record stored for `run`, or `None` when none is. A store refuses, as an error, a
+    /// record it holds under `run` that names another Run; it never returns one.
+    ///
+    /// # Errors
+    ///
+    /// [`RunStoreError`] when the store cannot be read, or holds under `run` what is no record of
+    /// `run`.
+    fn load(&self, run: &CommissionRunId) -> Result<Option<WorkflowRunRecord>, RunStoreError>;
+
+    /// Stores `record` under its Run (`record.run`), replacing what was stored for it.
+    ///
+    /// # Errors
+    ///
+    /// [`RunStoreError`] when the record cannot be written; what was stored before is kept.
+    fn save(&self, record: &WorkflowRunRecord) -> Result<(), RunStoreError>;
+}
+
+/// Why a [`WorkflowExecutor`] could not begin, resume or record its run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunRecordError {
+    /// The executor was given no store ([`WorkflowExecutor::with_store`]).
+    NoStore,
+    /// The executor is already bound to a Run, named.
+    AlreadyBound(String),
+    /// [`WorkflowExecutor::begin`]: the store already holds a record for the Run, named.
+    AlreadyRecorded(String),
+    /// [`WorkflowExecutor::resume`]: the store holds no record for the Run, named.
+    NotRecorded(String),
+    /// The record read for one Run names another: neither is read.
+    OtherRun {
+        /// The Run asked for.
+        asked: String,
+        /// The Run the record names.
+        held: String,
+    },
+    /// The record is of another definition than the executor's: its name and digest, then the
+    /// executor's.
+    OtherDefinition {
+        /// The definition the record names, and its digest.
+        held: (String, String),
+        /// The executor's definition, and its digest.
+        running: (String, String),
+    },
+    /// The record names a step the definition does not have, named, or is otherwise not one the
+    /// executor can resume from.
+    Unreadable(String),
+    /// The store failed.
+    Store(RunStoreError),
+}
+
+impl fmt::Display for RunRecordError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoStore => write!(f, "the workflow executor was given no run store"),
+            Self::AlreadyBound(run) => write!(f, "the workflow executor is bound to run `{run}`"),
+            Self::AlreadyRecorded(run) => {
+                write!(f, "the store already holds a record of run `{run}`")
+            }
+            Self::NotRecorded(run) => write!(f, "the store holds no record of run `{run}`"),
+            Self::OtherRun { asked, held } => write!(
+                f,
+                "the record read for run `{asked}` is the record of run `{held}`; it is not read"
+            ),
+            Self::OtherDefinition { held, running } => write!(
+                f,
+                "the record is of workflow `{}` (definition {}), not `{}` (definition {}); it is \
+                 not read",
+                held.0, held.1, running.0, running.1
+            ),
+            Self::Unreadable(why) => write!(f, "the record cannot be resumed from: {why}"),
+            Self::Store(error) => write!(f, "the run store failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for RunRecordError {}
 
 impl<'l, S, G, V, M> WorkflowExecutor<'l, S, G, V, M> {
     /// An executor running `definition`, a definition [`load`] checked, whose judgement steps run
@@ -642,6 +850,217 @@ impl<'l, S, G, V, M> WorkflowExecutor<'l, S, G, V, M> {
             effects,
             position: Arc::default(),
             meter: None,
+            store: None,
+            run: Mutex::new(None),
+        }
+    }
+
+    /// Keeps the run's record in `store` (see the module docs): once the executor is bound to a
+    /// Run ([`Self::begin`], [`Self::resume`]), the record is written after every performed step
+    /// and at the end of every call. Until it is bound, every call proposes nothing.
+    #[must_use]
+    pub fn with_store(mut self, store: Arc<dyn WorkflowRunStore + Send + Sync>) -> Self {
+        self.store = Some(store);
+        self
+    }
+
+    /// Binds the executor to `run`, a new Run, and writes its first record, before the run's
+    /// first call.
+    ///
+    /// # Errors
+    ///
+    /// [`RunRecordError::NoStore`] without a store; [`RunRecordError::AlreadyBound`] when the
+    /// executor is bound; [`RunRecordError::AlreadyRecorded`] when the store holds a record of
+    /// `run`, which is left as it is; [`RunRecordError::Store`] when the store fails.
+    pub fn begin(&self, run: &RunId) -> Result<(), RunRecordError> {
+        let store = self.store.as_ref().ok_or(RunRecordError::NoStore)?;
+        let mut bound = self.bound();
+        if let Some(bound) = bound.as_ref() {
+            return Err(RunRecordError::AlreadyBound(bound.0.0.clone()));
+        }
+        let id = run_id(run);
+        if store.load(&id).map_err(RunRecordError::Store)?.is_some() {
+            return Err(RunRecordError::AlreadyRecorded(id.0.0));
+        }
+        let save = self.save_for(store, id.clone());
+        store
+            .save(&save.record(&self.position()))
+            .map_err(RunRecordError::Store)?;
+        *bound = Some(id);
+        Ok(())
+    }
+
+    /// Binds the executor to `run` and takes up where its record left it, before the run's first
+    /// call in this process: the step after the last performed one, every output bound, the step
+    /// proposed before expected again, and, metered ([`Self::with_meter`], given first), the usage
+    /// carried into the meter. A record of another Run or another definition is refused, and
+    /// nothing of it is read.
+    ///
+    /// # Errors
+    ///
+    /// [`RunRecordError::NoStore`], [`RunRecordError::AlreadyBound`],
+    /// [`RunRecordError::NotRecorded`], [`RunRecordError::OtherRun`],
+    /// [`RunRecordError::OtherDefinition`], [`RunRecordError::Unreadable`] when the record names a
+    /// step the definition does not have, and [`RunRecordError::Store`] when the store fails or
+    /// refuses what it holds.
+    pub fn resume(&self, run: &RunId) -> Result<(), RunRecordError> {
+        let store = self.store.as_ref().ok_or(RunRecordError::NoStore)?;
+        let mut bound = self.bound();
+        if let Some(bound) = bound.as_ref() {
+            return Err(RunRecordError::AlreadyBound(bound.0.0.clone()));
+        }
+        let id = run_id(run);
+        let record = store
+            .load(&id)
+            .map_err(RunRecordError::Store)?
+            .ok_or_else(|| RunRecordError::NotRecorded(id.0.0.clone()))?;
+        if record.run != id {
+            return Err(RunRecordError::OtherRun {
+                asked: id.0.0,
+                held: record.run.0.0,
+            });
+        }
+        let digest = definition_digest(&self.definition);
+        if record.workflow != self.definition.name || record.definition_digest != digest {
+            return Err(RunRecordError::OtherDefinition {
+                held: (record.workflow, record.definition_digest),
+                running: (self.definition.name.clone(), digest),
+            });
+        }
+        let index = |step: &str| {
+            self.definition
+                .steps
+                .iter()
+                .position(|known| known.name == step)
+                .ok_or_else(|| {
+                    RunRecordError::Unreadable(format!("the definition has no step `{step}`"))
+                })
+        };
+        let performed = record
+            .performed
+            .last()
+            .map(|request| index(&request.step))
+            .transpose()?;
+        for request in &record.performed {
+            index(&request.step)?;
+        }
+        for output in &record.outputs {
+            index(&output.step)?;
+        }
+        let proposed = record
+            .proposed
+            .as_ref()
+            .map(|request| index(&request.step).map(|at| (at, proposal_of(request))))
+            .transpose()?;
+        let unproduced = record
+            .unproduced
+            .as_ref()
+            .map(|unproduced| {
+                index(&unproduced.step).map(|step| Unproduced {
+                    step,
+                    output: unproduced.output.clone(),
+                    why: unproduced.why.clone(),
+                })
+            })
+            .transpose()?;
+        let mut position = self.position();
+        *position = Position {
+            performed,
+            outstanding: None,
+            attempted: record.attempted,
+            outputs: record
+                .outputs
+                .iter()
+                .map(|output| {
+                    (
+                        output.step.clone(),
+                        output.output.clone(),
+                        commission_value(&output.value),
+                    )
+                })
+                .collect(),
+            unproduced,
+            requests: record.performed,
+            unsaved: None,
+        };
+        if let Some(meter) = &self.meter {
+            meter.carry(&record.usage);
+        }
+        let save = self.save_for(store, id.clone());
+        if let Some((step, proposal)) = proposed {
+            position.outstanding = Some(Outstanding {
+                step,
+                proposal: proposal.clone(),
+                recorded: self.effects.len(),
+            });
+            self.effects.expect(Expected {
+                position: Arc::clone(&self.position),
+                index: step,
+                step: self.definition.steps[step].clone(),
+                proposal,
+                save: Some(save),
+            });
+        }
+        *bound = Some(id);
+        Ok(())
+    }
+
+    /// Writes the run's record now, as it stands: for a host that charged the meter the run's
+    /// effects ([`RunMeter::charge_effects`]) after the run's last call, so the record carries
+    /// them.
+    ///
+    /// # Errors
+    ///
+    /// [`RunRecordError::NoStore`] without a store, [`RunRecordError::NotRecorded`] when no Run is
+    /// bound, and [`RunRecordError::Store`] when the store fails.
+    pub fn save(&self) -> Result<(), RunRecordError> {
+        let save = self.save_handle()?;
+        save.store
+            .save(&save.record(&self.position()))
+            .map_err(RunRecordError::Store)
+    }
+
+    /// The Run the executor is bound to, when it is.
+    pub fn bound_run(&self) -> Option<RunId> {
+        self.bound().as_ref().map(|run| {
+            RunId(b10x_loom_commission::model::primitives::Uuid(
+                run.0.0.clone(),
+            ))
+        })
+    }
+
+    fn bound(&self) -> MutexGuard<'_, Option<CommissionRunId>> {
+        self.run.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Where the bound run's record is written.
+    fn save_handle(&self) -> Result<Save, RunRecordError> {
+        let store = self.store.as_ref().ok_or(RunRecordError::NoStore)?;
+        let run = self
+            .bound()
+            .clone()
+            .ok_or_else(|| RunRecordError::NotRecorded(String::new()))?;
+        Ok(self.save_for(store, run))
+    }
+
+    /// Where `run`'s record is written in `store`.
+    fn save_for(
+        &self,
+        store: &Arc<dyn WorkflowRunStore + Send + Sync>,
+        run: CommissionRunId,
+    ) -> Save {
+        Save {
+            store: Arc::clone(store),
+            run,
+            workflow: self.definition.name.clone(),
+            digest: definition_digest(&self.definition),
+            names: self
+                .definition
+                .steps
+                .iter()
+                .map(|step| step.name.clone())
+                .collect(),
+            meter: self.meter.clone(),
         }
     }
 
@@ -695,6 +1114,41 @@ where
         commission: &Commission<commission_state::Assigned>,
         frontier: &Frontier<frontier_state::Issued>,
     ) -> ExecutorOutcome {
+        let save = match self.save_handle() {
+            Ok(save) => Some(save),
+            Err(RunRecordError::NoStore) => None,
+            // A store and no Run bound: nothing proposed could be recorded.
+            Err(_) => return ExecutorOutcome::NoUsefulAction(Unit(true)),
+        };
+        if let Some(why) = self.position().unsaved.clone() {
+            return self.unrecorded(&why);
+        }
+        let outcome = self.take_step(commission, frontier, save.as_ref());
+        if let Some(save) = &save {
+            let mut position = self.position();
+            save.write(&mut position);
+            if let Some(why) = position.unsaved.clone() {
+                // What the call proposed would not be known after a restart: it is not proposed.
+                return self.unrecorded(&why);
+            }
+        }
+        outcome
+    }
+}
+
+impl<S, G, V, M> WorkflowExecutor<'_, S, G, V, M>
+where
+    V: Deref,
+    V::Target: Governor,
+    M: ModelPort,
+{
+    /// One call's step (see the module docs), the record written by the caller.
+    fn take_step(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
+        save: Option<&Save>,
+    ) -> ExecutorOutcome {
         let mut position = self.position();
         // The log settles the outstanding step when it records it performed; this settles one it
         // recorded otherwise (an expectation another executor on the same log replaced).
@@ -704,7 +1158,14 @@ where
                 .performed_since(outstanding.recorded, &outstanding.proposal)
         {
             let index = outstanding.step;
-            settle(&mut position, index, &self.definition.steps[index], &report);
+            let proposal = outstanding.proposal.clone();
+            settle(
+                &mut position,
+                index,
+                &self.definition.steps[index],
+                &proposal,
+                &report,
+            );
         }
         position.outstanding = None;
         if frontier.data().case_id != commission.data().case_id {
@@ -806,6 +1267,7 @@ where
                     index,
                     step: step.clone(),
                     proposal: proposal.clone(),
+                    save: save.cloned(),
                 });
                 ExecutorOutcome::ProposedAction(proposal)
             }
@@ -916,6 +1378,18 @@ where
         }
     }
 
+    /// `NeedsHumanJudgment` for a run whose record could not be written, `why`: the workflow and
+    /// why.
+    fn unrecorded(&self, why: &str) -> ExecutorOutcome {
+        let text = |value: &str| CommissionValue::Text(value.to_owned());
+        ExecutorOutcome::NeedsHumanJudgment(ExecutorOutcomeNeedsHumanJudgment {
+            request: HumanDecisionRequest(CommissionValue::Object(vec![
+                ("workflow".to_owned(), text(&self.definition.name)),
+                ("why".to_owned(), text(why)),
+            ])),
+        })
+    }
+
     /// `NeedsHumanJudgment` for `step`, whose `actions` cannot be taken, and `why`: the workflow,
     /// the step, its actions, why, and the frontier's reasons, with the output it concerns when an
     /// output is why.
@@ -983,6 +1457,175 @@ fn holds(when: Option<&StepCondition>, frontier: &Frontier<frontier_state::Issue
         .any(|claim| claim.claim == condition.claim && claim.value == wanted)
 }
 
+/// `proposal`, made by the step named `step`, as a run record keeps it.
+fn request_of(step: &str, proposal: &ExecutorOutcomeProposedAction) -> StepRequest {
+    StepRequest {
+        step: step.to_owned(),
+        action: proposal.action.clone(),
+        arguments: loom_value(&proposal.arguments.0),
+    }
+}
+
+/// The proposal a run record's `request` keeps.
+fn proposal_of(request: &StepRequest) -> ExecutorOutcomeProposedAction {
+    ExecutorOutcomeProposedAction {
+        action: request.action.clone(),
+        arguments: ProposedActionArguments(commission_value(&request.arguments)),
+    }
+}
+
+/// `run` as the generated model names a Commission run.
+fn run_id(run: &RunId) -> CommissionRunId {
+    CommissionRunId(Uuid(run.0.0.clone()))
+}
+
+/// The usage a run record carries for an unmetered run: nothing.
+fn no_usage() -> CarriedUsage {
+    CarriedUsage {
+        steps: Vec::new(),
+        effects: EffectsUsage {
+            trials: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            duration_ms: 0,
+            cost_micro_usd: Some(0),
+            actions: Vec::new(),
+        },
+    }
+}
+
+/// The SHA-256, in lowercase hex, of `definition`'s canonical JSON: its members in declaration
+/// order, an absent `when` and an empty list written as such, every string escaped as the
+/// generated JSON writer escapes it. Two definitions with the same digest are the same definition.
+#[must_use]
+pub fn definition_digest(definition: &WorkflowDefinition) -> String {
+    use loom_json::{member, push_text, push_value};
+
+    fn texts(out: &mut String, items: &[String]) {
+        out.push('[');
+        for (index, item) in items.iter().enumerate() {
+            if index > 0 {
+                out.push(',');
+            }
+            push_text(out, item);
+        }
+        out.push(']');
+    }
+
+    let mut out = String::from("{");
+    member(&mut out, "name");
+    push_text(&mut out, &definition.name);
+    member(&mut out, "protocol");
+    push_text(&mut out, &definition.protocol);
+    member(&mut out, "steps");
+    out.push('[');
+    for (index, step) in definition.steps.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push('{');
+        member(&mut out, "name");
+        push_text(&mut out, &step.name);
+        member(&mut out, "when");
+        match &step.when {
+            None => out.push_str("null"),
+            Some(condition) => {
+                out.push('{');
+                member(&mut out, "claim");
+                push_text(&mut out, &condition.claim);
+                member(&mut out, "value");
+                push_text(
+                    &mut out,
+                    match condition.value {
+                        Truth::True => "True",
+                        Truth::False => "False",
+                        Truth::Unknown => "Unknown",
+                    },
+                );
+                out.push('}');
+            }
+        }
+        member(&mut out, "kind");
+        out.push('{');
+        match &step.kind {
+            StepKind::Deterministic(DeterministicStep { action, arguments }) => {
+                member(&mut out, "kind");
+                push_text(&mut out, "Deterministic");
+                member(&mut out, "action");
+                push_text(&mut out, action);
+                member(&mut out, "arguments");
+                push_value(&mut out, arguments);
+            }
+            StepKind::Judgement(JudgementStep {
+                actions,
+                instructions,
+                inputs,
+            }) => {
+                member(&mut out, "kind");
+                push_text(&mut out, "Judgement");
+                member(&mut out, "actions");
+                texts(&mut out, actions);
+                member(&mut out, "instructions");
+                push_text(&mut out, instructions);
+                member(&mut out, "inputs");
+                out.push('[');
+                for (at, input) in inputs.iter().enumerate() {
+                    if at > 0 {
+                        out.push(',');
+                    }
+                    out.push('{');
+                    member(&mut out, "step");
+                    push_text(&mut out, &input.step);
+                    member(&mut out, "output");
+                    push_text(&mut out, &input.output);
+                    out.push('}');
+                }
+                out.push(']');
+            }
+        }
+        out.push('}');
+        member(&mut out, "outputs");
+        out.push('[');
+        for (at, output) in step.outputs.iter().enumerate() {
+            if at > 0 {
+                out.push(',');
+            }
+            out.push('{');
+            member(&mut out, "name");
+            push_text(&mut out, &output.name);
+            member(&mut out, "pointer");
+            push_text(&mut out, &output.pointer);
+            member(&mut out, "type");
+            push_text(&mut out, type_name(output.r#type));
+            out.push('}');
+        }
+        out.push(']');
+        out.push('}');
+    }
+    out.push_str("]}");
+    Sha256::digest(out.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// Commission's JSON as the generated model's, value for value.
+fn loom_value(value: &CommissionValue) -> LoomValue {
+    match value {
+        CommissionValue::Null => LoomValue::Null,
+        CommissionValue::Bool(flag) => LoomValue::Bool(*flag),
+        CommissionValue::Number(number) => LoomValue::Number(number.clone()),
+        CommissionValue::Text(text) => LoomValue::Text(text.clone()),
+        CommissionValue::Array(items) => LoomValue::Array(items.iter().map(loom_value).collect()),
+        CommissionValue::Object(members) => LoomValue::Object(
+            members
+                .iter()
+                .map(|(key, value)| (key.clone(), loom_value(value)))
+                .collect(),
+        ),
+    }
+}
+
 /// A step's literal arguments as Commission's JSON, value for value.
 fn commission_value(value: &LoomValue) -> CommissionValue {
     match value {
@@ -1004,9 +1647,16 @@ fn commission_value(value: &LoomValue) -> CommissionValue {
 
 /// `step`, at `index`, performed with `report`: the position advances past it, and its outputs
 /// are taken, or the first it could not produce is kept, ending every later call.
-fn settle(position: &mut Position, index: usize, step: &WorkflowStep, report: &CommissionValue) {
+fn settle(
+    position: &mut Position,
+    index: usize,
+    step: &WorkflowStep,
+    proposal: &ExecutorOutcomeProposedAction,
+    report: &CommissionValue,
+) {
     position.outstanding = None;
     position.performed = Some(index);
+    position.requests.push(request_of(&step.name, proposal));
     match produce(step, report) {
         Ok(outputs) => position.outputs.extend(outputs),
         Err(unproduced) => {

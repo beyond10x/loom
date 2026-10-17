@@ -9,6 +9,151 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-17
+
+Loom 0.24.0 puts a model and custom protocols within reach of an embedding host. The SDK carries
+an llm-backed model port and a Claude Code model port (`ClaudeCodePort`), so a host writes
+neither. `b10x-loom run --action-bindings` runs an installed custom protocol through commands the
+operator binds to its actions, and refuses to start unconfined programs unless the operator opts
+in with `--unconfined-bindings` or `"unconfined_bindings": true` in that file
+(`ConfinementUnavailable`). A host can pass explicit decisions on an
+evaluation request and declare, when it opens a case, the independence dimensions of each evidence
+producer. A model loop's budget now stops a run as `LoopBudget`, and Commission's runtime enforces
+run and action budgets (`RunBudget`) over effects that report their usage. A workflow run survives
+a restart through a durable run record. Loom links Canon 0.6.0 and engineering-protocols 0.8.0.
+Breaking: `b10x_loom_cli::model_port` is gone (use `loom_sdk::llm::LlmModelPort`);
+`SuspensionReason` gains `LoopBudget` and `RunBudget` and `EvaluationInput` gains `Decisions`, so
+exhaustive matches handle them, as `OpenError` handles its four new variants; code that builds
+`IntentRequest`, `EffectOutcomePerformed`, `LoopEnd`, `RunUsageReport`, `EvaluationRequest` or
+`CaseState` with a struct literal sets the new fields (`bindings`, `usage`, `charges`, `effects`,
+`decisions`, `independence`); and a host that links Canon itself moves to Canon 0.6.0.
+
+A workflow run survives a restart (`story:dw-durable-run-state`). `WorkflowExecutor::with_store`
+takes a `b10x_loom_executor::workflow::WorkflowRunStore`; bound to a Run with `begin(&run_id)`, the executor writes
+the run's `loom.workflow.WorkflowRunRecord` after every performed step and every call: the steps
+performed and the one proposed, the outputs taken, and the usage so far
+(`loom.metering.CarriedUsage`). `resume(&run_id)` in another process continues the run at the step
+after the last performed one, every output bound and no performed step proposed again, after an
+approval (`resume_after_grant`) or a crash between steps, and `RunMeter::carry` makes the meter's
+report cover every segment. `loom_governor::FileWorkflowRunStore` keeps one file per Run, under the
+lock and atomic write `FileCaseStore` and `FileSuspensionStore` use, so the three may share one
+directory; a record of another Run or of another definition is refused and nothing of it is read. A
+request proposed and not recorded performed is proposed again after a restart: an effect must
+tolerate one repeat. `b10x-loom-governor` now depends on `b10x-loom-executor` (it was a
+dev-dependency), and the SDK stability page lists the new port,
+`loom_sdk::loom::workflow::WorkflowRunStore`. A host that gives the executor no store sees no
+change.
+
+Loom links Canon 0.6.0 and engineering-protocols 0.8.0. `b10x-canon` moves from 0.4.0 to 0.6.0 and
+`b10x-canon-engineering` from 0.7.0 to 0.8.0 in `loom-protocols`, `loom-governor`,
+`loom-intake-slice` and `loom-intake-router`, and `Cargo.lock` holds one `b10x-canon`. A new
+conformance test, `the_governor_decision_equals_the_pinned_canon_decision_bytes`, holds the
+`canon-decision/1` document the governor returns equal to the one the pinned Canon release's
+`evaluate_with` renders, for the software-change fixtures `chg-1842` and
+`security-boundary-independent`. Breaking: a host that links Canon itself moves to Canon 0.6.0 so it
+resolves one `b10x-canon`; the catalog's engineering protocols record revision `0.8.0` as their
+source.
+
+Breaking: `b10x_loom_cli::model_port` is gone; its `LlmModelPort` is `loom_sdk::llm::LlmModelPort`
+(the CLI's module was no stable surface).
+
+Breaking: `b10x_loom_intake_slice::intent::IntentRequest` gains the public field `bindings`,
+so code that builds one with a struct literal must add `bindings: None`.
+
+Breaking: `SuspensionReason` gains the variant `LoopBudget`, so a host that matches it
+exhaustively no longer compiles until it handles the variant; and a governed run, a
+`LoopExecutor` run or a workflow judgement step stopped by a budget of its model loop now ends
+`Suspended` with it instead of `NoUsefulAction`.
+
+Breaking: `EffectOutcomePerformed` gains the field `usage`, so a host that builds one with a struct
+literal adds `usage: None`; `SuspensionReason` gains the variant `RunBudget`, so an exhaustive match
+handles it; `LoopEnd` gains `charges` and `loom.metering.RunUsageReport` gains `effects`, so code
+that builds either with a struct literal sets them.
+
+### Added
+
+- Two model ports in the SDK, so a host embedding it needs to write neither:
+  `loom_sdk::llm::LlmModelPort`, the llm-backed port `b10x-loom` runs a plugin turn on, moved from
+  the command line into the SDK; and `loom_sdk::loom::wire::ClaudeCodePort`, a port on an
+  operator's existing Claude Code login. One turn of it is one `claude -p --output-format json`
+  invocation in the port's directory with the port's model, the command's own tools switched off;
+  the turn's tools and conversation go to its standard input, a call comes back as a JSON object
+  the loop executes, and the turn's usage is the usage the command reports. It is single-attempt,
+  bounded in output and time, and a missing or failing command is a typed refusal naming it. Loom
+  code reads no credential for either: the `claude` command reads its own login.
+- `b10x-loom run --action-bindings <FILE>` runs an installed custom protocol through commands the
+  operator binds to its actions (`intake.bindings.ActionBindings`). Each admitted action starts
+  its `argv` without a shell. The arguments go to standard input as JSON, the environment keeps
+  only `PATH`, and the program is killed after `timeout_seconds` (60 by default). Exit 0 is
+  `Performed`, with standard output (one JSON object) as the report. Any other end is `Refused`.
+  The report may list evidence, and each kind must be one the action declares in `may_produce`.
+  An action left unbound stops the run `NoLocalExecutor` naming it. A file that binds an action
+  the protocol does not declare is refused before any model call. A binding confers no authority.
+  Bound programs are not confined by Substrate, so `run` starts them only when the operator opts
+  in, with `--unconfined-bindings` or with the file's own `"unconfined_bindings": true`
+  (`intake.bindings.ActionBindings` gains the optional `unconfined_bindings`), and reports on
+  standard error which one opted in; the flag wins when both are given. Without an opt-in the
+  run is refused before any model call with `stopped: ConfinementUnavailable (CommandUnconfined: ...)`,
+  exit status 3 (`intake.confinement.ConfinementRefusal` gains `CommandUnconfined`). `resume`
+  still continues only `software-change@1`.
+- Explicit decisions through the governor: an outcome that requires a decision
+  (`requires: decision: <name>`, for example `inconclusive` once a budget is spent) can now become
+  legitimate through Loom. `loom.evaluation.EvaluationRequest` gains `decisions`, a list of
+  `canon-decisions/1` entries (`ExplicitDecision`: the decision, the outcome, the principal who
+  took it and the case revision it was taken at), which `loom_governor::evaluate` and
+  `b10x-loom evaluate` hand to Canon; a decision taken at another revision than the snapshot's is
+  superseded, and Canon refuses a termination only it would make legitimate. Decisions Canon
+  refuses are reported with the new refusal input `Decisions`. `CanonGovernor::decide(case,
+  outcome, decision, principal)` records a decision on the held case at its current revision, so
+  later `frontier` and `completion` calls evaluate with it until the case moves; Canon refuses one
+  for an undeclared outcome or an outcome that does not require it (`DecisionError::Refused`), and
+  `FileCaseStore` keeps the decisions in `StoredCase.decisions`, left out when there are none, so
+  cases stored earlier read as cases with none. Loom decides nothing about who may take a decision.
+  Breaking: `EvaluationRequest` gains the field `decisions` and `CaseState` the field `decisions`,
+  so code that builds either with a struct literal adds `decisions: Vec::new()`; and
+  `EvaluationInput` gains the variant `Decisions`, so a host that matches it exhaustively handles
+  the variant.
+- A host declares, when it opens a case on `CanonGovernor`, the independence dimensions on which
+  each evidence producer is independent of the case's work (`CaseIndependence`,
+  `CanonGovernor::open_with_independence`, `open_case_with_independence`, also
+  `loom_sdk::CaseIndependence`), and the governor puts them in the case's `canon-case/1` snapshot.
+  A claim whose evidence match demands independence (`independent_on`) is then decided on a
+  declared producer's records instead of staying unknown, so an action it guards can become
+  admissible. A producer that is not an identifier, or a dimension the protocol does not declare,
+  is refused naming it before anything is stored; one listed twice is refused, never replaced.
+  `CanonGovernor::independence` reports them. They are held with the case: `FileCaseStore` keeps
+  them in `StoredCase.independence` and reads a case stored without them, as 0.23.0 wrote every
+  case, as declaring none. `open` and `open_case` declare none, as before. Breaking:
+  `CaseState` gains the field `independence`, so a store or test that builds one with a struct
+  literal adds `independence: CaseIndependence::none()`; `OpenError` gains `InvalidProducer`,
+  `UndeclaredDimension`, `RepeatedProducer` and `RepeatedDimension`, so a host that matches it
+  exhaustively handles them.
+
+- Run and action budgets in Commission's runtime. A host's `LoopContext::run_budget` (default
+  none) returns a `RunBudget`: steps, input and output tokens, wall time and cost for the whole
+  run, and per action (`ActionBudget`) a trial count and the same spending limits. An effect
+  reports what it spent on its own model calls with `EffectOutcomePerformed.usage`
+  (`EffectUsage`); the runtime charges every effect answer to the run and to its action
+  (`LoopEnd::charges`, a `RunCharges`) and observes the usage. A trial limit stops the run before
+  the request that would pass it is handed to the effect port; a spending limit stops it once an
+  effect's usage took the charge past it, or left the cost unknown under a cost limit. The Run is
+  suspended for `SuspensionReason::RunBudget`, naming the action, the limit, its value and the
+  charge, distinct from a model-loop `Budget` stop. `RunMeter::charge_effects` puts the charges
+  in the run's usage report as `RunUsageReport.effects`, beside the model-port usage.
+
+### Changed
+
+- A governed run stopped by one of its model loop's budgets (turns, input or output tokens, cost,
+  wall time, or a ceiling the loop could no longer observe) reports that budget: `Loom::run_loop`,
+  `LoopExecutor` and `WorkflowExecutor`'s judgement steps return
+  `ExecutorOutcome::Suspended` with `SuspensionReason::LoopBudget`, carrying the loop's stop as
+  `loom.run.LoopStop`'s wire writes it (for example
+  `{"kind": "max-input-tokens", "limit": 100, "reported": 150}`), and the runtime suspends the Run
+  for it; a `LoopExecutor` run whose case moved while it ran is still `CaseMoved`. A host no
+  longer runs its budgeted loop outside Commission to read `LoopOutcome.stop`.
+  A cancelled, unstructured or provider-incomplete stop, and one above the compaction trigger,
+  still end `NoUsefulAction`.
+
 ## [0.23.0] - 2026-10-16
 
 Loom 0.23.0 runs a workflow's data collection concurrently and hands a judgement step its inputs

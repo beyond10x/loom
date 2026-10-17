@@ -18,3 +18,6 @@ b10x-loom-governor = { path = "../loom-governor" }
 b10x-loom-intake-router = { path = "../loom-intake-router" }
 b10x-loom-intake-slice = { path = "../loom-intake-slice" }
 b10x-loom-executor = { path = "../loom-executor" }
+b10x-llm-core = { git = "https://github.com/beyond10x/llm", tag = "0.4.0" }
+serde_json = "1"
+tokio = { version = "1.53", features = ["rt"] }

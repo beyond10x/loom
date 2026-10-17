@@ -1,11 +1,11 @@
 // generated from loom v1
-// model digest 7e01de49f6648bd42c3487572f5bf305ca3e9c2e76adeb528dd2ffcdffa645c9
-// contract digest 339d7d1174a6fc6f5384f70ff5342398aa19ad068e03cd1146e66a670161b962
+// model digest 08aaad3d648d503c874a006c3741c4fc037129ea3e56464b9d052c782600e763
+// contract digest 6dfdf4bff25c8bd3098b5577c415d0338d6bd99de5cda7767d3103908d655aea
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Evaluation — `loom.evaluation`.
 //!
-//! One stateless evaluation: a protocol named from the host's catalog, a canon-case/1 case snapshot, the canon-evidence/1 records that go with it and an optional trusted evaluation time go in; Canon's decision comes out, or a refusal naming the input it could not use. It decides and never acts, reads no clock and calls no network or model.
+//! One stateless evaluation: a protocol named from the host's catalog, a canon-case/1 case snapshot, the canon-evidence/1 records that go with it, the canon-decisions/1 explicit decisions taken for it and an optional trusted evaluation time go in; Canon's decision comes out, or a refusal naming the input it could not use. It decides and never acts, reads no clock and calls no network or model.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
 
@@ -98,6 +98,8 @@ pub enum EvaluationInput {
     Evidence,
     /// `Time`.
     Time,
+    /// `Decisions`.
+    Decisions,
 }
 
 /// EvaluationRefusal — `loom.evaluation.EvaluationRefusal`.
@@ -124,11 +126,26 @@ pub struct EvaluationRequest {
     pub evidence: Vec<EvidenceRecord>,
     /// `at` — `Optional<Timestamp>`.
     pub at: Option<crate::primitives::Timestamp>,
+    /// `decisions` — `List<loom.evaluation.ExplicitDecision>`.
+    pub decisions: Vec<ExplicitDecision>,
 }
 
 /// EvidenceRecord — `loom.evaluation.EvidenceRecord`: a distinct wrapper around `Json`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EvidenceRecord(pub crate::json::Value);
+
+/// ExplicitDecision — `loom.evaluation.ExplicitDecision`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExplicitDecision {
+    /// `decision` — `String`.
+    pub decision: String,
+    /// `outcome` — `String`.
+    pub outcome: String,
+    /// `principal` — `String`.
+    pub principal: String,
+    /// `case_revision` — `String`.
+    pub case_revision: String,
+}
 
 /// ProtocolName — `loom.evaluation.ProtocolName`: a distinct wrapper around `String`.
 #[derive(Debug, Clone, PartialEq, Eq)]
