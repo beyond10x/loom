@@ -9,6 +9,8 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+Loom links llm 0.6.0 (`story:llm-routes-pin`). Every `b10x-llm-*` dependency moves from tag `0.4.0` to `0.6.0` and `Cargo.lock` holds one version of each; llm 0.5.0 and 0.6.0 name no breaking change in the crates Loom uses. The specification gains the domain `loom.models` (`ess/domains/models.yaml`): `loom.models.ModelsConfig` (`routes`, the path of an `llm.routes/1` document relative to the configuration file, and `roles`, a list of `loom.models.RoleModel`), each naming a `loom.models.ModelRole` (`agent` or `classifier`) and the `model` that serves it, a route name or an `<endpoint>/<model-id>` name. Types only; nothing reads it yet. Breaking: none.
+
 A workflow run survives a restart (`story:dw-durable-run-state`). `WorkflowExecutor::with_store`
 takes a `b10x_loom_executor::workflow::WorkflowRunStore`; bound to a Run with `begin(&run_id)`, the executor writes
 the run's `loom.workflow.WorkflowRunRecord` after every performed step and every call: the steps
