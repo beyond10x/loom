@@ -108,7 +108,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | Reads proposed together (`ProposedReads`) are admitted only when the effect port reads every one and the handed frontier lists each `Admissible` with no authority, else nothing is invoked; admitted reads are revalidated each, invoked concurrently, each once through its binding, joined, and recorded in proposal order; a stale read alone is not invoked; an effect error fails the loop after every read joined; a fan-out is one step | `crates/loom-commission-testkit/tests/read_fan_out.rs` (`admitted_reads_run_concurrently_and_join`, `effects_are_recorded_in_proposal_order`, `a_fan_out_with_a_write_or_an_approval_required_read_invokes_nothing`, `a_stale_read_is_refused_and_the_others_are_performed`, `an_effect_error_fails_the_loop_after_every_read_joined`), `crates/loom-connectors/tests/read_fan_out.rs` (`each_read_is_invoked_once_through_its_binding`) |
 | A consequential action leaves Loom only as a proposal, and the executor links no Connectors crate | `crates/loom-executor/tests/connector_boundary.rs` (`consequential_actions_leave_loom_only_as_a_proposal`) |
 | A Connector invocation is made once, and only Connectors' own "nothing changed" is a refusal | `crates/loom-connectors/tests/connectors_invoker.rs` |
-| A write through the Connectors command line runs only for an admitted request and is bound to its admitted action and arguments, with an absolute approval proof path passed and never read, and an idempotency key derived from the request id; another action, input other than the admitted arguments, an operation not described as a write, or a missing, relative or control-character proof path, invokes nothing; an `unknown` or lost write is returned unknown and never invoked again; reads still refuse a write; only an applied write of the admitted request becomes the protocol's evidence, naming its step | `crates/loom-connectors/tests/connectors_cli_write.rs` (`an_admitted_write_passes_the_proof_path_and_the_derived_key`, `a_write_without_an_absolute_proof_path_starts_nothing`, `an_operation_not_described_as_a_write_is_refused_before_the_invoke`, `the_same_admitted_request_yields_the_same_idempotency_key`, `an_unknown_write_is_returned_unknown_and_never_invoked_again`, `a_write_whose_answer_is_lost_is_unknown`, `invoke_read_still_refuses_a_mutation_operation`), `crates/loom-connectors/tests/support_triage_route.rs` (`an_applied_route_records_a_routing_record_naming_the_step`, `the_route_is_not_admitted_before_the_review_approved`, `a_route_not_applied_records_no_evidence`), `crates/loom-connectors/tests/adversary_w172_governed_write.rs` (`input_the_runtime_did_not_admit_is_never_written`, `a_request_admitted_for_another_action_writes_nothing`, `a_control_character_proof_path_starts_no_process`, `the_adapter_refuses_the_write_of_another_admitted_request`) |
+| A write through the Connectors command line runs only for an admitted request and is bound to its admitted action and arguments, with an absolute approval proof path passed and never read, and an idempotency key derived from the request id; another action, input other than the admitted arguments, an operation not described as a write, or a missing, relative or control-character proof path, invokes nothing; an `unknown` or lost write is returned unknown and never invoked again; reads still refuse a write; only an applied write of the admitted request becomes the protocol's evidence, naming its step and, for a route, its target (the `queue` or `owner` the admitted arguments name, which the governor removes before Canon reads the record); a route whose target cannot be read, or whose answer names another one, records nothing and says why | `crates/loom-connectors/tests/connectors_cli_write.rs` (`an_admitted_write_passes_the_proof_path_and_the_derived_key`, `a_write_without_an_absolute_proof_path_starts_nothing`, `an_operation_not_described_as_a_write_is_refused_before_the_invoke`, `the_same_admitted_request_yields_the_same_idempotency_key`, `an_unknown_write_is_returned_unknown_and_never_invoked_again`, `a_write_whose_answer_is_lost_is_unknown`, `invoke_read_still_refuses_a_mutation_operation`), `crates/loom-connectors/tests/support_triage_route.rs` (`an_applied_route_records_a_routing_record_naming_the_step`, `the_route_is_not_admitted_before_the_review_approved`, `a_route_not_applied_records_no_evidence`), `crates/loom-connectors/tests/adversary_w172_governed_write.rs` (`input_the_runtime_did_not_admit_is_never_written`, `a_request_admitted_for_another_action_writes_nothing`, `a_control_character_proof_path_starts_no_process`, `the_adapter_refuses_the_write_of_another_admitted_request`, `the_record_names_the_target_the_admitted_arguments_name`, `a_route_whose_target_cannot_be_read_records_nothing_and_says_why`, `an_answer_naming_another_target_records_nothing`), `crates/loom-governor/tests/adversary2_governor.rs` (`a_target_in_the_facts_leaves_the_record_as_canon_evaluates_it`) |
 | A plugin turn reads only the sources and kinds of its projection, and a proposal is recorded, never sent | `crates/loom-plugin/tests/effects.rs` (`effects_refuse_an_undeclared_read`, `propose_writes_the_record_only`) |
 | A slack-handler run describes and invokes only the three configured Slack reads and the turns' data-source reads, and records one line per item it proposes for; nothing is sent | `crates/loom-plugin-slack/tests/run.rs` (`fixture_run_invokes_no_write`, `fixture_run_records_three_proposals`) |
 | A read through Connectors is performed naming its audit record; a write without a recorded attempt is an error | `crates/loom-connectors/tests/connectors_invoker.rs` (`an_admitted_read_is_performed_with_its_result_and_names_its_audit_record`, `a_write_without_a_recorded_attempt_is_still_an_error`), `crates/loom-commission-testkit/tests/effect_invocation.rs` (`a_performed_that_names_another_record_than_its_binding_requires_is_not_answered`) |
@@ -377,8 +377,13 @@ classification, and an answer lost or unreadable after it started is `Unknown`, 
 `loom_connectors::evidence::WriteEvidenceAdapter` is the host evidence adapter: only an `applied`
 write of its action becomes the protocol's evidence (an observation, then `submit_evidence`),
 naming the action and the admitted request, and the write of another admitted request (another
-idempotency key) records nothing. `tests/connectors_cli_write.rs` and
-`tests/support_triage_route.rs` (on `support-triage@1` and the Canon governor) hold it.
+idempotency key) records nothing. A route's record names its target in its facts (`target`): the
+`queue`, or for an owner route the `owner`, the admitted arguments name, exactly one of them, as
+non-empty text; a target that cannot be read, or an answer from Connectors naming another queue
+or owner, records nothing, and `WriteEvidenceError::Unreadable` says why. The governor removes
+`target` before Canon reads the record, as it removes a facts `producer`.
+`tests/connectors_cli_write.rs` and `tests/support_triage_route.rs` (on `support-triage@1` and
+the Canon governor) hold it.
 
 ## Mandate
 
@@ -633,7 +638,8 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   Each record carries `observed_at`, the host clock's instant of its observation
   (`LocalExecutor::with_clock`, `run::run_with_clock`; `clock::SystemClock` by default), and the
   verifier's producer; the governor gives Canon `EvidenceData.producer`, never a producer in the
-  facts (it removes a facts `producer` before Canon reads the record), and reads no clock. It
+  facts (it removes a facts `producer`, and the host's `target`, before Canon reads the record),
+  and reads no clock. It
   takes a record's `observed_at` only as the instant of the observation the record cites and
   that it received: a record citing an observation it never received, with or without an
   `observed_at`, or with any `observed_at` member other than that instant, is refused and nothing
@@ -669,7 +675,12 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   Suspension held removes its context (`intake.routing.DropResumeContext`); a process that dies
   first leaves one, so a reader pairs each context with its commission's Suspension. Before any
   model call, `ResumeHost::check` refuses a path the context cannot keep as text, and each store's
-  open proves the directory takes a write. Without it `run` keeps the memory
+  open proves the directory takes a write. With `--config`, the context keeps the
+  configuration's absolute path (`ResumeContext.config`) and, in `model`, the name serving the
+  role `agent`; `resume` loads it again (`loom_sdk::models::from_config`), resolves that name and
+  checks its credential before any model call, refusing exit 1 with the file and the role. A
+  context naming both `config` and `catalog` is refused when it is kept and when it is read.
+  Without it `run` keeps the memory
   store and `run_until_blocked`. `crates/loom-cli/tests/run_state.rs` runs the binary to a held
   Suspension and reads `<DIR>` back through the stores.
 - `approve <COMMISSION> <CAPABILITY> --state <DIR>` writes a grant (`intake.routing.Grant`,

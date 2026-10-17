@@ -84,20 +84,22 @@
 //! carries no record. The record's `producer` is the trusted one `submit_evidence` attributed the
 //! evidence to (`EvidenceData.producer`), never one its facts name: a producer in the facts is
 //! removed before Canon reads the record, so it never decides whether the record applies, and a
-//! trusted producer that is not a Canon identifier (it holds whitespace) is given
-//! as none, so its record satisfies no demand for independence. Its `observed_at` is read from the
-//! facts, as the host wrote it; the governor reads no clock. It is taken only as the instant of
-//! the observation the record cites: a record citing an observation this governor never received
-//! (with or without an `observed_at`), or one of whose `observed_at` members is not the text of
-//! each cited observation's `observed_at`, is refused (`GovernorUnavailable`, Commission's error
-//! naming no record) and nothing of it is kept; [`CanonGovernor::check_evidence`] gives the
-//! [`EvidenceRefusal`] naming the record. Every record received for a held case is
-//! kept, in the order received ([`CanonGovernor::evidence`]); it applies only when its facts read
-//! as such a record and Canon evaluates the case with it and the records that already apply
-//! without refusal (a declared kind and subject, an id used once). Whether it applies is decided
-//! once, when it arrives, so a record that does not apply never stops a later evaluation. Which
-//! artifact revision a record is about is Canon's to judge: a record bound to a superseded
-//! revision of its subject is excluded by Canon's revision binding.
+//! trusted producer that is not a Canon identifier (it holds whitespace) is given as none, so its
+//! record satisfies no demand for independence. The host's facts (`target`, the route target a
+//! routing record names) are removed the same way: Canon refuses a field `canon-evidence/1` does
+//! not declare, and they are kept with the evidence, never read. Its `observed_at` is read from the
+//! facts, as the host wrote it; the governor reads no clock. It is taken only as the instant of the
+//! observation the record cites: a record citing an observation this governor never received (with
+//! or without an `observed_at`), or one of whose `observed_at` members is not the text of each
+//! cited observation's `observed_at`, is refused (`GovernorUnavailable`, Commission's error naming
+//! no record) and nothing of it is kept; [`CanonGovernor::check_evidence`] gives the
+//! [`EvidenceRefusal`] naming the record. Every record received for a held case is kept, in the
+//! order received ([`CanonGovernor::evidence`]); it applies only when its facts read as such a
+//! record and Canon evaluates the case with it and the records that already apply without refusal
+//! (a declared kind and subject, an id used once). Whether it applies is decided once, when it
+//! arrives, so a record that does not apply never stops a later evaluation. Which artifact revision
+//! a record is about is Canon's to judge: a record bound to a superseded revision of its subject is
+//! excluded by Canon's revision binding.
 //!
 //! Observations are kept apart, in the order received ([`CanonGovernor::observations`]), and are
 //! never evidence (Atlas ADR 0074).
@@ -1476,16 +1478,25 @@ fn snapshot(ir: &Ir, state: &CaseState) -> Case {
     }
 }
 
+/// The members of a record's facts that are the host's and not `canon-evidence/1` fields, removed
+/// before Canon reads the record: `target`, the queue or owner a routing record names
+/// (`story:routing-record-names-target`).
+const HOST_FACTS: &[&str] = &["target"];
+
 /// The `canon-evidence/1` record `data`'s facts carry, when they carry one of its kind, naming
 /// the trusted producer `submit_evidence` attributed it to. A producer the facts name is never
 /// read: its `producer` member is removed before Canon reads the record, so whatever it holds (a
 /// null, a number, an object) never decides whether the record applies. A trusted producer Canon
 /// would refuse as an identifier (one holding whitespace) is named as no producer, which
-/// satisfies no demand for independence.
+/// satisfies no demand for independence. The host's facts (`HOST_FACTS`) are removed too: they
+/// are not fields of the record, which Canon would refuse.
 fn canon_record(data: &EvidenceData) -> Option<EvidenceRecord> {
     let mut value = canon_value(&data.facts)?;
     if let serde_yaml_ng::Value::Mapping(members) = &mut value {
         members.remove("producer");
+        for name in HOST_FACTS {
+            members.remove(*name);
+        }
     }
     let mut record = evidence_from_value(&value).ok()?;
     record.producer = is_identifier(&data.producer).then(|| Principal::new(data.producer.as_str()));

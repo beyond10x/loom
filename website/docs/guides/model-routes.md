@@ -87,8 +87,15 @@ b10x-loom run --config loom.yaml --model anthropic/claude-opus-4-1 "fix the fail
 ```
 
 A role that is neither configured nor given, and a model that cannot take a forced tool call, stop
-the run before any model call. `--config` takes neither `--catalog` nor `--state`. See
-[Run an intent](run-an-intent.md) for the rest of the command.
+the run before any model call. `--config` does not take `--catalog`.
+
+With `--state <DIR>`, the commission's resume context keeps the configuration's absolute path and
+the name that serves the role `agent` (`--model`, when given). A later `resume <COMMISSION> --state
+<DIR>`, from any directory, loads that configuration again and continues on the same route, with
+the credential its routes document names. A configuration that is gone, a routes document that no
+longer serves the name, or a secret that does not resolve stops the resume, exit status 1, naming
+the file and the role `agent`, before any model call. See [Run an intent](run-an-intent.md) for
+the rest of the command.
 
 ## Load the models from the SDK
 

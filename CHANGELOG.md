@@ -9,6 +9,30 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-17
+
+Loom 0.26.0 links llm 0.7.0, names the target in the routing record of a governed write, and
+resumes a case kept with `b10x-loom run --config` on its configured models. The `routing_record`
+the host evidence adapter records for an applied `ticket.route` names the queue or owner the
+admitted arguments name, and a target that cannot be read records nothing. `run --config` now
+takes `--state`: the resume context keeps the configuration's absolute path, and `resume` reloads
+it and checks the agent's credential before any model call.
+Breaking: a host that links llm itself moves to llm 0.7.0; a `ticket.route` whose admitted
+arguments name no readable target records no `routing_record` and returns
+`WriteEvidenceError::Unreadable`; a resume context gains the optional member `config`.
+
+Loom links llm 0.7.0: every `b10x-llm-*` dependency names tag `0.7.0`, and `Cargo.lock` holds one
+version of each. llm 0.7.0 adds `TurnRequest.controls`; Loom sets none, so every request it builds
+stays the `llm.turn/3` envelope byte for byte and its recorded requests do not change. llm 0.7.0
+also refuses an unknown key at every level of a Chat Completions or Responses request, naming its
+path, where 0.6.0 passed over keys below the top level.
+Breaking: a host that links llm itself moves to llm 0.7.0 so it resolves one copy of each
+`b10x-llm-*` crate.
+
+A routing record names the route target (`story:routing-record-names-target`). The `routing_record` `WriteEvidenceAdapter::support_triage_route` records for an applied `ticket.route` carries `target` in its facts: the `queue`, or for an owner route the `owner`, the admitted arguments name, never model output. A route whose target is absent, not text, empty or named twice (`queue` and `owner`), or whose answer from Connectors names another queue or owner, delivers no observation and records no evidence; `WriteEvidenceError::Unreadable` says why. `target` is not a `canon-evidence/1` field: the governor removes it before Canon reads the record, as it removes a facts `producer`, so the record still discharges `ticket.routed`. Breaking: a `ticket.route` whose admitted arguments name no readable target, which recorded a `routing_record` before, now records none and returns `WriteEvidenceError::Unreadable`.
+
+A case kept with `b10x-loom run --config` resumes on its configured models (`story:cli-run-config-resume`). `run --config <PATH> --state <DIR>` is no longer refused: the resume context (`intake.routing.ResumeContext`) gains `config`, the configuration's absolute path, and keeps in `model` the name that serves the role `agent` (`--model`, when given); the classifier is not kept, since a resume classifies nothing. `resume` loads the configuration again through `loom_sdk::models::from_config`, resolves that name and checks its credential; a configuration that is gone, a name its routes document no longer serves, or a secret that does not resolve stops the resume, exit status 1, naming the file and the role `agent`, before any model call. A context kept before this change reads as having no configuration; one naming both `config` and `catalog` is refused when it is kept and when it is read. `ResumeHost` and `ResumeContextData` gain the field `config`. Breaking: a Rust caller that builds `b10x_loom_intake_slice::intent::ResumeHost` or the generated `ResumeContextData` by its fields adds `config`.
+
 ## [0.25.0] - 2026-10-17
 
 Loom 0.25.0 lets a host perform a governed write and choose its models from a routes document. A

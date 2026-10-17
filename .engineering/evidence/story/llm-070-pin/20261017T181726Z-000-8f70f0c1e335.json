@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-17T18:17:26Z",
+  "actor": "human:timo",
+  "artifact": "story:llm-070-pin",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "package gates of the 9 llm-linking crates on 0f6f8511: clippy clean; 1309 passed, 0 failed, 14 ignored",
+    "reference": "0f6f8511"
+  }
+}

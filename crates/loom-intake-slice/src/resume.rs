@@ -59,7 +59,7 @@ const PREFIX: &str = "resume-";
 pub const LONGEST_COMMISSION_ID: usize = crate::state_dir::LONGEST_ID;
 
 /// The members a kept context has, in the order written.
-const MEMBERS: [&str; 14] = [
+const MEMBERS: [&str; 15] = [
     "commission_id",
     "case_id",
     "agent_revision_id",
@@ -74,11 +74,13 @@ const MEMBERS: [&str; 14] = [
     "cgroup_root",
     "model",
     "catalog",
+    "config",
 ];
 
 /// The members a kept context may lack, read as absent: a context kept before its field was
-/// declared (0.21.0 and earlier) names no regression-test command.
-const OPTIONAL_MEMBERS: [&str; 1] = ["regression_test_command"];
+/// declared names no regression-test command (0.21.0 and earlier) and no models configuration
+/// (0.25.0 and earlier).
+const OPTIONAL_MEMBERS: [&str; 2] = ["regression_test_command", "config"];
 
 /// The members a kept route has.
 const ROUTE_MEMBERS: [&str; 5] = [
@@ -352,6 +354,7 @@ fn encode(context: &ResumeContextData) -> String {
         "cgroup_root": context.cgroup_root,
         "model": context.model,
         "catalog": context.catalog,
+        "config": context.config,
     });
     let mut text = serde_json::to_string_pretty(&value).unwrap_or_default();
     text.push('\n');
@@ -425,7 +428,15 @@ fn decode(text: &str, commission: &CommissionId) -> Result<ResumeContextData, St
         cgroup_root: optional_text(object, "cgroup_root")?,
         model: text_of(object, "model")?,
         catalog: optional_text(object, "catalog")?,
+        config: optional_text(object, "config")?,
     };
+    if context.config.is_some() && context.catalog.is_some() {
+        return Err(
+            "names both a models configuration (`config`) and an llm catalog \
+                    (`catalog`); a context names at most one"
+                .into(),
+        );
+    }
     if &context.commission_id != commission {
         return Err(format!(
             "holds the context of commission {}, not {}",
@@ -520,6 +531,7 @@ mod tests {
             cgroup_root: None,
             model: "lab-agent".to_owned(),
             catalog: Some("/catalog.toml".to_owned()),
+            config: None,
         }
     }
 
@@ -664,5 +676,39 @@ mod tests {
         value["authority"] = json!("granted");
         fs::write(store.path(&kept.commission_id).unwrap(), value.to_string()).unwrap();
         assert!(store.get(&kept.commission_id).is_err());
+    }
+
+    /// A context kept with a models configuration reads back with it; one kept before `config`
+    /// was declared reads as having none; one naming both `config` and `catalog` is refused.
+    #[test]
+    fn a_context_keeps_its_configuration_and_never_with_a_catalog() {
+        let dir = scratch("config");
+        let store = ResumeContextStore::open(dir.path()).unwrap();
+        let mut configured = context("00000000-0000-4000-8000-000000000001");
+        configured.catalog = None;
+        configured.config = Some("/work/loom.yaml".to_owned());
+        configured.model = "worker".to_owned();
+        store.keep(&configured).unwrap();
+        assert_eq!(
+            store.get(&configured.commission_id).unwrap(),
+            Some(configured.clone())
+        );
+
+        let older = context("00000000-0000-4000-8000-000000000003");
+        let mut value: Value = serde_json::from_str(&encode(&older)).unwrap();
+        value.as_object_mut().unwrap().remove("config");
+        fs::write(store.path(&older.commission_id).unwrap(), value.to_string()).unwrap();
+        let read = store.get(&older.commission_id).unwrap().unwrap();
+        assert_eq!(read.config, None);
+        assert_eq!(read, older);
+
+        let mut both = context("00000000-0000-4000-8000-000000000005");
+        both.config = Some("/work/loom.yaml".to_owned());
+        fs::write(store.path(&both.commission_id).unwrap(), encode(&both)).unwrap();
+        let error = store
+            .get(&both.commission_id)
+            .expect_err("a context naming both a configuration and a catalog is refused");
+        assert!(error.to_string().contains("config"), "{error}");
+        assert!(error.to_string().contains("catalog"), "{error}");
     }
 }

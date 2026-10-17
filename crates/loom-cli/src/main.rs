@@ -224,13 +224,16 @@ fn resume(arguments: &ResumeArgs, out: &mut dyn Write) -> Result<SliceRun, Slice
         &catalog,
     )
     .map_err(|e| SliceError::Context(e.to_string()))?;
-    let agent = match &context.catalog {
-        Some(path) => Box::new(
+    let agent: Arc<dyn Model> = match (&context.catalog, &context.config) {
+        (Some(path), _) => Arc::new(
             ModelCatalog::read(Path::new(path))
                 .and_then(|models| models.model("--model", &context.model))
                 .map_err(SliceError::Context)?,
-        ) as Box<dyn Model>,
-        None => chosen_model(None, &context.model).map_err(SliceError::Context)?,
+        ),
+        (None, Some(config)) => {
+            configured_agent(Path::new(config), &context.model).map_err(SliceError::Context)?
+        }
+        (None, None) => Arc::from(chosen_model(None, &context.model).map_err(SliceError::Context)?),
     };
     let runner: Arc<dyn TestRunner> = match context.confinement {
         Backend::None => Arc::new(UnconfinedRunner),
@@ -248,6 +251,26 @@ fn resume(arguments: &ResumeArgs, out: &mut dyn Write) -> Result<SliceRun, Slice
     resume_with_state(
         &context, &request, &catalog, &governor, &governor, &*agent, out, &state,
     )
+}
+
+/// The agent model a resume context kept with a models configuration names: `served`, a name of
+/// the routes document the configuration at `config` names, loaded again, whose credential must
+/// resolve now. A configuration that cannot be loaded, a name it no longer serves and a secret
+/// that does not resolve are refused naming the file and the role `agent`, before any model call.
+fn configured_agent(config: &Path, served: &str) -> Result<Arc<dyn Model>, String> {
+    let refused = |error: &dyn std::fmt::Display| {
+        format!(
+            "the models configuration {} kept for this commission cannot serve the role `agent` \
+             (`{served}`): {error}",
+            config.display()
+        )
+    };
+    let models = loom_sdk::models::from_config(config).map_err(|error| refused(&error))?;
+    let model = models.model(served).map_err(|error| refused(&error))?;
+    models
+        .check_credential(served)
+        .map_err(|error| refused(&error))?;
+    Ok(model)
 }
 
 /// Runs `plugin run` or `plugin report`, as `PLUGIN_RUN_HELP` states.
@@ -525,7 +548,7 @@ fn execute(
     }
     // Both models are settled here, before any model call: an alias the catalog does not name,
     // a catalog or configuration that cannot be read, or a role without a model stops the run now.
-    let (mut classifier_route, mut agent_route) = settled_models(arguments)?;
+    let ((mut classifier_route, mut agent_route), agent_served) = settled_models(arguments)?;
     let catalog = InstallStore::user()?.catalog()?;
     // The action bindings are held to the catalog before any model call.
     if let (Some(path), Some(bindings)) = (
@@ -565,8 +588,11 @@ fn execute(
             Confinement::None => Backend::None,
         },
         cgroup_root: arguments.cgroup_root.clone(),
-        model: model_name(arguments.model.as_deref()).to_owned(),
+        // With `--config`, the name its routes document serves the agent by, so a resume
+        // continues on the same model.
+        model: agent_served.unwrap_or_else(|| model_name(arguments.model.as_deref()).to_owned()),
         catalog: arguments.catalog.clone(),
+        config: arguments.config.clone(),
     };
     host.check(&intent_request(arguments)?)
         .map_err(|e| e.to_string())?;
@@ -757,8 +783,9 @@ fn execute_on<S: FallibleCaseStore, T: EvaluationTime>(
 /// both flags name Codex models.
 type SettledModels = (Option<Arc<dyn Model>>, Option<Arc<dyn Model>>);
 
-/// The models `--catalog` or `--config` names, settled before any model call.
-fn settled_models(arguments: &RunArgs) -> Result<SettledModels, String> {
+/// The models `--catalog` or `--config` names, settled before any model call, and with
+/// `--config` the name of its routes document that serves the agent (`--model`, when given).
+fn settled_models(arguments: &RunArgs) -> Result<(SettledModels, Option<String>), String> {
     if let Some(path) = &arguments.catalog {
         let models = ModelCatalog::read(path)?;
         let classifier = models.model(
@@ -767,12 +794,15 @@ fn settled_models(arguments: &RunArgs) -> Result<SettledModels, String> {
         )?;
         let agent = models.model("--model", model_name(arguments.model.as_deref()))?;
         return Ok((
-            Some(Arc::new(classifier) as Arc<dyn Model>),
-            Some(Arc::new(agent) as Arc<dyn Model>),
+            (
+                Some(Arc::new(classifier) as Arc<dyn Model>),
+                Some(Arc::new(agent) as Arc<dyn Model>),
+            ),
+            None,
         ));
     }
     let Some(path) = &arguments.config else {
-        return Ok((None, None));
+        return Ok(((None, None), None));
     };
     let models =
         loom_sdk::models::from_config(path).map_err(|error| format!("--config {error}"))?;
@@ -788,7 +818,11 @@ fn settled_models(arguments: &RunArgs) -> Result<SettledModels, String> {
         (ModelRole::Agent, "agent", "--model"),
         arguments.model.as_deref(),
     )?;
-    Ok((Some(classifier), Some(agent)))
+    let served = arguments
+        .model
+        .clone()
+        .or_else(|| models.name_of(ModelRole::Agent).map(str::to_owned));
+    Ok(((Some(classifier), Some(agent)), served))
 }
 
 /// The model of `role` under `--config <config>`: the name its flag gave, of the configuration's
