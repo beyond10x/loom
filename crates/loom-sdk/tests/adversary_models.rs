@@ -492,6 +492,7 @@ routes:
 /// Without `HOME`, a `file:~/` endpoint cannot resolve; the refusal names the document and the
 /// endpoint. A role served by another endpoint of the same document needs no home and loads.
 #[test]
+#[ignore = "needs a per-endpoint resolver call in llm; until then every endpoint of the routes document must resolve (https://github.com/beyond10x/llm/issues/36)"]
 fn an_unset_home_refuses_only_the_endpoint_that_needs_it() {
     let dir = dir_with(
         "format: llm.routes/1
@@ -539,6 +540,7 @@ fn child_unset_home() {
 /// The same for a `keychain:` endpoint, which this build refuses: a routes document shared with
 /// llm's own tools may hold one, and a role that does not use it still loads.
 #[test]
+#[ignore = "needs a per-endpoint resolver call in llm; until then every endpoint of the routes document must resolve (https://github.com/beyond10x/llm/issues/36)"]
 fn a_keychain_endpoint_no_role_uses_does_not_refuse_the_configuration() {
     let dir = dir_with(
         "format: llm.routes/1

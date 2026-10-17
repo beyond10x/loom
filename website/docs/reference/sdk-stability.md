@@ -94,8 +94,8 @@ implements it through.
 | `loom_sdk::CaseIndependence` | The independence dimensions a host declares for each evidence producer when it opens a case |
 | `loom_sdk::ProtocolCatalog` | The protocol catalog shared by routing, case opening and admission |
 | `loom_sdk::llm::LlmModelPort` | A `ModelPort` over an llm `Model`: one `Model::turn` per turn, the port `b10x-loom` runs a plugin turn on |
-| `loom_sdk::models::from_config` | Loads a host's models from a models configuration (YAML): the model of each declared role, over the `llm.routes/1` document it names, relative to the configuration's directory |
-| `loom_sdk::models::from_routes` | The llm `Model` one name of an `llm.routes/1` document serves: a route, or `<endpoint>/<model-id>` of a declared endpoint |
+| `loom_sdk::models::from_config` | Loads a host's models from a models configuration (YAML): the model of each declared role, over the `llm.routes/1` document it names, relative to the configuration's directory; every endpoint of the routes document must resolve, including ones no role uses ([llm issue 36](https://github.com/beyond10x/llm/issues/36)) |
+| `loom_sdk::models::from_routes` | The llm `Model` one name of an `llm.routes/1` document serves: a route, or `<endpoint>/<model-id>` of a declared endpoint; every endpoint of the document must resolve, including ones no role uses ([llm issue 36](https://github.com/beyond10x/llm/issues/36)) |
 | `loom_sdk::models::parse_config` | Parses a models configuration into a `ModelsConfig`, the parser `from_config` uses |
 | `loom_sdk::models::Models` | What `from_config` returns: the model of each declared role, and any other name of the same routes document |
 | `loom_sdk::models::ModelsError` | Why models could not be loaded; its message names the file and the role or name |
