@@ -426,10 +426,17 @@ entities:
         type: intake.confinement.Backend
       - name: cgroup_root
         type: Optional<String>
-      # The agent model: a Codex model name, or with `catalog` a route alias of that llm catalog.
+      # The agent model: a Codex model name, with `catalog` a route alias of that llm catalog, or
+      # with `config` the name the configuration's routes document serves the role `agent` by
+      # (a `--model` override included).
       - name: model
         type: String
       - name: catalog
+        type: Optional<String>
+      # The absolute path of the models configuration (`run --config`) the agent model is a name
+      # of; absent for a context kept before it was declared (0.25.0 and earlier) and for a run
+      # given none. A context naming both `config` and `catalog` is refused when it is read.
+      - name: config
         type: Optional<String>
     lifecycle:
       initial: Kept
