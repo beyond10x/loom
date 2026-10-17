@@ -2,12 +2,28 @@
 format: aep.planning-md/3
 id: story:routing-record-names-target
 kind: story
-status: draft
+status: active
 title: A routing record names the route target
 relations:
 - decomposes: epic:effect-bindings
 - serves: vision:O1
-revision: 1
+scope:
+- confidence: inferred
+  path: AGENTS.md
+- confidence: inferred
+  path: CHANGELOG.md
+- confidence: cited
+  path: crates/loom-connectors/src/evidence.rs
+- confidence: cited
+  path: crates/loom-connectors/tests/adversary_w172_governed_write.rs
+- confidence: cited
+  path: crates/loom-connectors/tests/support_triage_route.rs
+- confidence: inferred
+  path: website/docs/reference/sdk-stability.md
+revision: 6
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-17T17:02:03Z", actor: "human:timo", revision: 5}
+- {from: "proposed", to: "active", at: "2026-10-17T17:02:03Z", actor: "human:timo", revision: 6}
 ---
 ## Outcome
 
@@ -26,3 +42,24 @@ ids, but not the target.
 ## Source
 
 Adversary review of `story:connectors-governed-write` (finding 4, a judgement note).
+
+## Decisions
+
+- The fact is `target`, a string: the queue or owner the admitted arguments name (`queue`, or
+  `owner` for an owner route; exactly one of them). `support-triage@1` names the kind's meaning
+  ("naming the target") but no fact field, so Loom names it.
+- The admitted arguments are the source. When Connectors' answer names a queue or owner too and
+  it differs, the adapter refuses (`WriteEvidenceError::Unreadable`) and records nothing.
+- A target that is absent, not text, empty, or named twice (`queue` and `owner`) is unreadable:
+  the adapter reads it before it delivers the observation, so nothing is delivered or recorded,
+  and the error names the reason.
+- The target goes in `facts` only, not in `provenance`.
+- No ESS change: the evidence facts are Canon's `canon-evidence/1` record, which `ess/` does not
+  declare; `ess specify validate --path ess --strict-requires` stays green.
+
+## Scope
+
+`crates/loom-connectors/src/evidence.rs` (`WriteEvidenceAdapter::record`),
+`crates/loom-connectors/tests/support_triage_route.rs`,
+`crates/loom-connectors/tests/adversary_w172_governed_write.rs`, the governed-write row of
+`AGENTS.md`, `website/docs/reference/sdk-stability.md`, `CHANGELOG.md`.
