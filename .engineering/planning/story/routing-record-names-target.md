@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:routing-record-names-target
 kind: story
-status: active
+status: implemented
 title: A routing record names the route target
 relations:
 - decomposes: epic:effect-bindings
@@ -22,10 +22,11 @@ scope:
   path: crates/loom-governor/src/lib.rs
 - confidence: inferred
   path: website/docs/reference/sdk-stability.md
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-17T17:02:03Z", actor: "human:timo", revision: 5}
 - {from: "proposed", to: "active", at: "2026-10-17T17:02:03Z", actor: "human:timo", revision: 6}
+- {from: "active", to: "implemented", at: "2026-10-17T18:17:26Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 

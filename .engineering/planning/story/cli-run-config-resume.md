@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:cli-run-config-resume
 kind: story
-status: active
+status: implemented
 title: A case kept with run --config resumes on its configured models
 relations:
 - decomposes: epic:model-routes
@@ -27,10 +27,11 @@ scope:
   path: ess/intake/domains/routing.yaml
 - confidence: cited
   path: generated/rust/intake
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-17T17:02:14Z", actor: "human:timo", revision: 5}
 - {from: "proposed", to: "active", at: "2026-10-17T17:02:15Z", actor: "human:timo", revision: 6}
+- {from: "active", to: "implemented", at: "2026-10-17T18:17:26Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 
