@@ -478,6 +478,40 @@ mod models {
     // models paths: end
 }
 
+/// The `loom_sdk::connectors` paths the page's embedding table lists: the command-line client and
+/// its governed write, and the host evidence adapter.
+///
+/// [`every_connectors_path_on_the_page_resolves`] reads these lines out of this file, between the
+/// two marker comments, so keep one path per `use` and nothing else between them.
+#[allow(unused_imports)]
+mod connectors {
+    // connectors paths: begin
+    use loom_sdk::connectors::cli::ConnectorsCli;
+    use loom_sdk::connectors::cli::WriteError;
+    use loom_sdk::connectors::cli::datasource::MutationClassification;
+    use loom_sdk::connectors::cli::datasource::WriteApproval;
+    use loom_sdk::connectors::cli::datasource::WriteOperation;
+    use loom_sdk::connectors::cli::datasource::WriteRefusal;
+    use loom_sdk::connectors::cli::datasource::WriteResult;
+    use loom_sdk::connectors::cli::idempotency_key;
+    use loom_sdk::connectors::evidence::WriteEvidenceAdapter;
+    use loom_sdk::connectors::evidence::WriteEvidenceError;
+    // connectors paths: end
+
+    /// The governed write's signature, as a host calls it: compilation is the witness.
+    #[allow(dead_code)]
+    fn invoke_write_signature(
+        cli: &ConnectorsCli,
+        request: &loom_sdk::commission::ports::effect::AdmittedRequest,
+        operation: &WriteOperation,
+        input: &loom_sdk::connectors::cli::json::Value,
+        approval: &WriteApproval,
+    ) -> Result<WriteResult, WriteError> {
+        let _key: String = idempotency_key(request);
+        cli.invoke_write(request, operation, input, approval)
+    }
+}
+
 /// The stability page, read at run time.
 fn page() -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(PAGE);
@@ -668,6 +702,37 @@ fn every_models_path_on_the_page_resolves() {
         "loom_sdk::models::from_routes",
         "loom_sdk::models::parse_config",
         "loom_sdk::models::ModelsConfig",
+    ] {
+        assert!(listed.contains(path), "the page lists {path}");
+    }
+}
+
+#[test]
+fn every_connectors_path_on_the_page_resolves() {
+    let imported = unique(used_paths("connectors paths"), "the connectors block");
+    assert!(
+        !imported.is_empty(),
+        "the connectors block holds the imports"
+    );
+
+    let page = page();
+    let listed = unique(
+        table_column(&page, EMBEDDING_HEADING, 0)
+            .iter()
+            .flat_map(|cell| cell.split(','))
+            .map(|path| path.trim().trim_matches('`').to_owned())
+            .filter(|path| path.starts_with("loom_sdk::connectors::"))
+            .collect(),
+        "the embedding table",
+    );
+    assert_eq!(
+        listed, imported,
+        "the page's embedding table lists exactly the `loom_sdk::connectors` paths that resolve here"
+    );
+    for path in [
+        "loom_sdk::connectors::cli::ConnectorsCli",
+        "loom_sdk::connectors::cli::idempotency_key",
+        "loom_sdk::connectors::evidence::WriteEvidenceAdapter",
     ] {
         assert!(listed.contains(path), "the page lists {path}");
     }

@@ -17,3 +17,4 @@ tokio = { version = "1.53", features = ["rt-multi-thread"] }
 
 [dev-dependencies]
 b10x-loom-commission-testkit = { path = "../loom-commission-testkit" }
+b10x-loom-governor = { path = "../loom-governor" }

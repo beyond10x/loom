@@ -1,11 +1,11 @@
 // generated from loom v1
-// model digest 748fceb21cf7ee6d4e3507a439a01eec6e7e9190c5bee46f896cc1ad49fa1326
-// contract digest 46c4d4d570ca4756a9a8caf1cdfa2d49a60fe40d986d3e54b1dd2ba9a7b18d06
+// model digest d963e91e2eff0bd7be27b613dc6014a58f63a3404143010ceaa390d8c1120a90
+// contract digest 7065673dfdf28e8b98b7e5d5d5e1933bea6c5ee58b6f0579685582e353e9b84f
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Data source — `loom.datasource`.
 //!
-//! A data source read through the Connectors command line: the configured source (a Connectors adapter alias, a connection and the read operation it declares for each kind of read), how the command line is run, what `operations describe` reports for an operation and what one read answers. A read never carries a credential and never runs an operation Connectors describes as a mutation.
+//! A data source read through the Connectors command line: the configured source (a Connectors adapter alias, a connection and the read operation it declares for each kind of read), how the command line is run, what `operations describe` reports for an operation and what one read answers; and a governed write: the operation written, the person's approval proof it passes and what Connectors answers for it. A read never carries a credential and never runs an operation Connectors describes as a mutation. A write carries no credential either; it runs only for a request the runtime admitted, with the path of the approval proof, and is never retried.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
 
@@ -45,6 +45,19 @@ pub struct DataSource {
     pub search: Option<OperationId>,
     /// `get` — `Optional<loom.datasource.OperationId>`.
     pub get: Option<OperationId>,
+}
+
+/// MutationClassification — `loom.datasource.MutationClassification`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MutationClassification {
+    /// `NotAttempted`.
+    NotAttempted,
+    /// `Refused`.
+    Refused,
+    /// `Applied`.
+    Applied,
+    /// `Unknown`.
+    Unknown,
 }
 
 /// OperationId — `loom.datasource.OperationId`: a distinct wrapper around `String`.
@@ -102,3 +115,55 @@ pub struct SourceEntity {
 /// SourceName — `loom.datasource.SourceName`: a distinct wrapper around `String`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceName(pub String);
+
+/// WriteApproval — `loom.datasource.WriteApproval`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WriteApproval {
+    /// `proof_file` — `String`.
+    pub proof_file: String,
+}
+
+/// WriteOperation — `loom.datasource.WriteOperation`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WriteOperation {
+    /// `action` — `String`.
+    pub action: String,
+    /// `adapter` — `loom.datasource.AdapterAlias`.
+    pub adapter: AdapterAlias,
+    /// `connection` — `loom.datasource.ConnectionId`.
+    pub connection: ConnectionId,
+    /// `operation` — `loom.datasource.OperationId`.
+    pub operation: OperationId,
+}
+
+/// WriteRefusal — `loom.datasource.WriteRefusal`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WriteRefusal {
+    /// `adapter` — `loom.datasource.AdapterAlias`.
+    pub adapter: AdapterAlias,
+    /// `operation` — `Optional<loom.datasource.OperationId>`.
+    pub operation: Option<OperationId>,
+    /// `code` — `String`.
+    pub code: String,
+    /// `message` — `String`.
+    pub message: String,
+}
+
+/// WriteResult — `loom.datasource.WriteResult`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WriteResult {
+    /// `classification` — `loom.datasource.MutationClassification`.
+    pub classification: MutationClassification,
+    /// `idempotency_key` — `String`.
+    pub idempotency_key: String,
+    /// `request_id` — `Optional<String>`.
+    pub request_id: Option<String>,
+    /// `body` — `Optional<Json>`.
+    pub body: Option<crate::json::Value>,
+    /// `source_audit` — `Optional<Json>`.
+    pub source_audit: Option<crate::json::Value>,
+    /// `audit_ref` — `Optional<String>`.
+    pub audit_ref: Option<String>,
+    /// `code` — `Optional<String>`.
+    pub code: Option<String>,
+}
