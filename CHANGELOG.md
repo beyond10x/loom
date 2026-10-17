@@ -9,6 +9,20 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-17
+
+Loom 0.25.0 lets a host perform a governed write and choose its models from a routes document. A
+host writes through Connectors' command line with `ConnectorsCli::invoke_write`, bound to the
+request the runtime admitted (its action and arguments) and to the person's Connectors approval
+proof, passed as `--approval-file` with an idempotency key derived from the request id; a write
+Connectors reports `unknown` is never retried, and the host evidence adapter records the protocol's
+evidence for an applied write, `routing_record` for `support-triage@1`'s `ticket.route`. Models
+come from a configuration naming an `llm.routes/1` document and a model per role, through
+`loom_sdk::models` and `b10x-loom run --config`; Loom links llm 0.6.0.
+Breaking: none for callers of existing paths; the SDK gains `loom_sdk::models`,
+`loom_sdk::connectors::cli::ConnectorsCli::invoke_write` and `loom_sdk::connectors::evidence`, and a
+host that links llm itself moves to llm 0.6.0 so it resolves one copy of each `b10x-llm-*` crate.
+
 Loom links llm 0.6.0 (`story:llm-routes-pin`). Every `b10x-llm-*` dependency moves from tag `0.4.0` to `0.6.0` and `Cargo.lock` holds one version of each; llm 0.5.0 and 0.6.0 name no breaking change in the crates Loom uses. The specification gains the domain `loom.models` (`ess/domains/models.yaml`): `loom.models.ModelsConfig` (`routes`, the path of an `llm.routes/1` document relative to the configuration file, and `roles`, a list of `loom.models.RoleModel`), each naming a `loom.models.ModelRole` (`agent` or `classifier`) and the `model` that serves it, a route name or an `<endpoint>/<model-id>` name. Types only; nothing reads it yet. Breaking: none.
 
 A host loads its models from a configuration or a routes document through the SDK alone (`story:sdk-models-from-config`). `loom_sdk::models::from_config(path)` reads a `loom.models.ModelsConfig` (YAML, parsed by `loom_sdk::models::parse_config`, which refuses an unknown field, an undeclared role and a role listed twice) and returns `Models`: the llm `Model` of each declared role, and `Models::model(name)` for another name of the same routes document, whose path is relative to the configuration's directory. `loom_sdk::models::from_routes(path, name)` returns the model one name of an `llm.routes/1` document serves, a route or `<endpoint>/<model-id>`. Both build the port with llm's `Routes::port` and resolve credentials from the document's `env:` and `file:` references (`~/` against `HOME`; `keychain:` is refused, that llm feature is off); Loom reads no secret itself and nothing is read or sent when the models are built; a missing secret is refused `unauthorized` at the first turn, unless the host asks first with `Models::check_credential(name)`, which resolves the secret of the endpoint the name reaches (the value is dropped) and names the endpoint and the reference kind in its refusal. `Models::name_of(role)` returns the name that serves a configured role. Files are read as regular files only, and every refusal names the file and the role or name. `b10x-loom-sdk` gains the dependencies `b10x-llm-models` (features `environment`, `file`), `b10x-llm-http` and the generated `loom` crate; the SDK stability page lists the new paths. Breaking: none for callers; the SDK only gains paths (`loom_sdk::models`).
