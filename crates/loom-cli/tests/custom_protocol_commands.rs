@@ -5,7 +5,9 @@
 //! output is the action's performed report, and the evidence it states is submitted. An action the
 //! file binds no command to ends the run `NoLocalExecutor`, naming the action. Substrate does not
 //! confine the bound commands, so a run is refused `ConfinementUnavailable (CommandUnconfined)`
-//! before any model call unless `--unconfined-bindings` opts in; the other cases opt in.
+//! before any model call unless the operator opts in: with `--unconfined-bindings`, or with the
+//! file's own `unconfined_bindings: true`, and the flag wins when both are given. The other cases
+//! opt in with the flag.
 //!
 //! Every case runs the binary. The models are the fixture catalog of `catalog_route.rs`
 //! (`fixtures/catalog-route/catalog.toml`) at a loopback socket this file opens, replaying
@@ -244,6 +246,106 @@ fn unconfined_bindings_runs_the_bound_commands_and_says_they_are_unconfined() {
     assert_eq!(scratch.calls("record-note").len(), 1);
     assert_eq!(scratch.calls("publish-summary").len(), 1);
     assert_eq!(server.join().expect("the server finished").len(), 5);
+}
+
+#[test]
+fn unconfined_bindings_in_the_file_runs_the_bound_commands_and_names_the_file() {
+    let (output, scratch, bindings) = opted_in_run("file-opt-in", true, &[]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}\n{stderr}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let expected = format!(
+        "bound commands: unconfined (unconfined_bindings in {})",
+        bindings.display()
+    );
+    assert!(stderr.contains(&expected), "{stderr}");
+    assert_eq!(scratch.calls("record-note").len(), 1);
+    assert_eq!(scratch.calls("publish-summary").len(), 1);
+}
+
+#[test]
+fn the_flag_wins_over_unconfined_bindings_in_the_file() {
+    let (output, scratch, _) = opted_in_run("both-opt-in", true, OPT_IN);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}\n{stderr}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        stderr.contains("bound commands: unconfined (--unconfined-bindings)"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("unconfined_bindings in"), "{stderr}");
+    assert_eq!(scratch.calls("record-note").len(), 1);
+    assert_eq!(scratch.calls("publish-summary").len(), 1);
+}
+
+#[test]
+fn unconfined_bindings_false_in_the_file_is_refused_before_any_model_call() {
+    let scratch = Scratch::new("file-opt-out");
+    scratch.install();
+    let record = scratch.script("record-note", r#"{"note":"n-1"}"#);
+    let bindings = scratch.bindings(&json!({
+        "protocol": "team-ops@1",
+        "unconfined_bindings": false,
+        "bindings": [{"action": "note.record", "argv": [record]}],
+    }));
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let output = scratch.run(&base_url, &bindings, &[]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(
+        stderr.contains("stopped: ConfinementUnavailable (CommandUnconfined: "),
+        "{stderr}"
+    );
+    assert!(
+        listener.accept().is_err(),
+        "the model endpoint was contacted"
+    );
+    assert!(scratch.calls("record-note").is_empty());
+}
+
+/// A run of both bound actions whose file sets `unconfined_bindings` to `in_file`, given `flags`;
+/// the scratch directory and the file's path come back with the output.
+fn opted_in_run(label: &str, in_file: bool, flags: &[&str]) -> (Output, Scratch, PathBuf) {
+    let scratch = Scratch::new(label);
+    scratch.install();
+    let record = scratch.script(
+        "record-note",
+        r#"{"note":"n-1","evidence":[{"kind":"note_recorded","result":"recorded"}]}"#,
+    );
+    let publish = scratch.script(
+        "publish-summary",
+        r#"{"published":true,"evidence":[{"kind":"summary_published","result":"published"}]}"#,
+    );
+    let bindings = scratch.bindings(&json!({
+        "protocol": "team-ops@1",
+        "unconfined_bindings": in_file,
+        "bindings": [
+            {"action": "note.record", "argv": [record]},
+            {"action": "summary.publish", "argv": [publish]},
+        ],
+    }));
+    let (base_url, server) = serve(vec![
+        classify(),
+        select("note.record"),
+        arguments(&json!({"text": "deploy finished"})),
+        select("summary.publish"),
+        arguments(&json!({"channel": "ops"})),
+    ]);
+    let output = scratch.run(&base_url, &bindings, flags);
+    if output.status.success() {
+        assert_eq!(server.join().expect("the server finished").len(), 5);
+    }
+    (output, scratch, bindings)
 }
 
 /// A scratch directory under the build's temporary directory, removed on drop.

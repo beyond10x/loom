@@ -14,9 +14,11 @@ summary: >-
   start with a cleared environment that keeps only PATH, never Loom's own credentials, and are
   killed past the configuration's timeout. Substrate does not confine them, so a run given a run
   configuration is refused, before any model call, with the confinement refusal CommandUnconfined
-  unless the operator opts in to running the commands unconfined. A routed protocol that declares
-  an action the file binds no command to ends with no local executor, naming the action. Configuration is trusted
-  host context, never model output, and a protocol document never names a command.
+  unless the operator opts in to running the commands unconfined: with the run's
+  `--unconfined-bindings` flag, or with the file's own `unconfined_bindings: true`; the flag wins,
+  and the run reports which one opted in. A routed protocol that declares an action the file binds
+  no command to ends with no local executor, naming the action. Configuration is trusted host
+  context, never model output, and a protocol document never names a command.
 
 naming:
   wire: bindings
@@ -34,7 +36,9 @@ types:
         type: List<String>
 
   # A run configuration file: the protocol whose actions it binds, as `name@major`, the seconds a
-  # command may run before it is killed (60 when absent), and one binding per action. An action
+  # command may run before it is killed (60 when absent), whether the operator opts in to running
+  # its commands unconfined (false when absent; the run's `--unconfined-bindings` flag opts in
+  # too, and wins), and one binding per action. An action
   # bound twice, an action the protocol does not declare, an empty argv and a bundled protocol are
   # refused when the file is read, before any model call.
   - name: intake.bindings.ActionBindings
@@ -44,6 +48,8 @@ types:
         type: String
       - name: timeout_seconds
         type: Optional<Integer>
+      - name: unconfined_bindings
+        type: Optional<Boolean>
       - name: bindings
         type: List<intake.bindings.ActionBinding>
 

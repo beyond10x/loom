@@ -13,7 +13,8 @@ describes the clock tool, pinned installation and offline loading. `run --action
 drives an installed protocol through commands the operator binds to its actions: each admitted
 action starts its program without a shell, with its arguments as JSON on standard input, and the
 program's JSON report becomes the action's result; a binding confers no authority, and the
-commands run unconfined only with `--unconfined-bindings`. Transient model failures get
+commands run unconfined only with `--unconfined-bindings` or the file's own
+`"unconfined_bindings": true`. Transient model failures get
 at most three attempts on the same binding; reports count every attempt. Persistent overload
 is reported as unavailable, and tool effects are never retried by this policy.
 

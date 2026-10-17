@@ -14,8 +14,9 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 Loom 0.24.0 puts a model and custom protocols within reach of an embedding host. The SDK carries
 an llm-backed model port and a Claude Code model port (`ClaudeCodePort`), so a host writes
 neither. `b10x-loom run --action-bindings` runs an installed custom protocol through commands the
-operator binds to its actions, and refuses to start unconfined programs without
-`--unconfined-bindings` (`ConfinementUnavailable`). A host can pass explicit decisions on an
+operator binds to its actions, and refuses to start unconfined programs unless the operator opts
+in with `--unconfined-bindings` or `"unconfined_bindings": true` in that file
+(`ConfinementUnavailable`). A host can pass explicit decisions on an
 evaluation request and declare, when it opens a case, the independence dimensions of each evidence
 producer. A model loop's budget now stops a run as `LoopBudget`, and Commission's runtime enforces
 run and action budgets (`RunBudget`) over effects that report their usage. A workflow run survives
@@ -88,9 +89,11 @@ that builds either with a struct literal sets them.
   The report may list evidence, and each kind must be one the action declares in `may_produce`.
   An action left unbound stops the run `NoLocalExecutor` naming it. A file that binds an action
   the protocol does not declare is refused before any model call. A binding confers no authority.
-  Bound programs are not confined by Substrate, so `run` starts them only with
-  `--unconfined-bindings` and reports that opt-in on standard error. Without the flag the run is
-  refused before any model call with `stopped: ConfinementUnavailable (CommandUnconfined: ...)`,
+  Bound programs are not confined by Substrate, so `run` starts them only when the operator opts
+  in, with `--unconfined-bindings` or with the file's own `"unconfined_bindings": true`
+  (`intake.bindings.ActionBindings` gains the optional `unconfined_bindings`), and reports on
+  standard error which one opted in; the flag wins when both are given. Without an opt-in the
+  run is refused before any model call with `stopped: ConfinementUnavailable (CommandUnconfined: ...)`,
   exit status 3 (`intake.confinement.ConfinementRefusal` gains `CommandUnconfined`). `resume`
   still continues only `software-change@1`.
 - Explicit decisions through the governor: an outcome that requires a decision
