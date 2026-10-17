@@ -18,9 +18,11 @@ scope:
   path: crates/loom-connectors/tests/adversary_w172_governed_write.rs
 - confidence: cited
   path: crates/loom-connectors/tests/support_triage_route.rs
+- confidence: cited
+  path: crates/loom-governor/src/lib.rs
 - confidence: inferred
   path: website/docs/reference/sdk-stability.md
-revision: 6
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-17T17:02:03Z", actor: "human:timo", revision: 5}
 - {from: "proposed", to: "active", at: "2026-10-17T17:02:03Z", actor: "human:timo", revision: 6}
@@ -63,3 +65,13 @@ Adversary review of `story:connectors-governed-write` (finding 4, a judgement no
 `crates/loom-connectors/tests/support_triage_route.rs`,
 `crates/loom-connectors/tests/adversary_w172_governed_write.rs`, the governed-write row of
 `AGENTS.md`, `website/docs/reference/sdk-stability.md`, `CHANGELOG.md`.
+
+## Decision revised: where the target lives
+
+Canon's `canon-evidence/1` record denies unknown fields, and the governor reads each recorded
+fact set through it after removing `producer` (`crates/loom-governor/src/lib.rs`, `canon_record`),
+so a `target` key would make the record silently stop applying. The target stays in the facts
+the adapter records, beside `producer`, as a host field Canon does not read: `canon_record` removes
+`target` as it removes `producer`, and a test shows a routing record with a target still
+discharges `ticket.routed`. Canon's `result` is not used (it takes part in matching), nor
+`provenance`. Scope adds `crates/loom-governor/src/lib.rs` and its tests.
