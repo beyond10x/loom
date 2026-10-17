@@ -9,6 +9,18 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-17
+
+Loom 0.26.0 links llm 0.7.0, names the target in the routing record of a governed write, and
+resumes a case kept with `b10x-loom run --config` on its configured models. The `routing_record`
+the host evidence adapter records for an applied `ticket.route` names the queue or owner the
+admitted arguments name, and a target that cannot be read records nothing. `run --config` now
+takes `--state`: the resume context keeps the configuration's absolute path, and `resume` reloads
+it and checks the agent's credential before any model call.
+Breaking: a host that links llm itself moves to llm 0.7.0; a `ticket.route` whose admitted
+arguments name no readable target records no `routing_record` and returns
+`WriteEvidenceError::Unreadable`; a resume context gains the optional member `config`.
+
 Loom links llm 0.7.0: every `b10x-llm-*` dependency names tag `0.7.0`, and `Cargo.lock` holds one
 version of each. llm 0.7.0 adds `TurnRequest.controls`; Loom sets none, so every request it builds
 stays the `llm.turn/3` envelope byte for byte and its recorded requests do not change. llm 0.7.0
