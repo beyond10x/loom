@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:cli-run-config
 kind: story
-status: active
+status: implemented
 title: b10x-loom run takes its models from a configuration file
 relations:
 - decomposes: epic:model-routes
@@ -25,10 +25,11 @@ scope:
   path: crates/loom-cli/tests/run_config.rs
 - confidence: inferred
   path: website/docs/reference/cli.md
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-17T00:43:25Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":2}}}
 - {from: "proposed", to: "active", at: "2026-10-17T00:43:25Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":2}}}
+- {from: "active", to: "implemented", at: "2026-10-17T04:33:36Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"test_result":1,"review_outcome":2}}}
 ---
 ## Outcome
 

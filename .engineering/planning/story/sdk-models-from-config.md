@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:sdk-models-from-config
 kind: story
-status: active
+status: implemented
 title: The SDK loads a host's models from a configuration or a routes document
 relations:
 - decomposes: epic:model-routes
@@ -27,10 +27,11 @@ scope:
   path: generated/rust/loom
 - confidence: inferred
   path: website/docs/reference/sdk-stability.md
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-17T00:43:24Z", actor: "human:timo", revision: 7}
 - {from: "proposed", to: "active", at: "2026-10-17T00:43:25Z", actor: "human:timo", revision: 8}
+- {from: "active", to: "implemented", at: "2026-10-17T04:33:36Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 

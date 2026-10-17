@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:docs-model-routes
 kind: story
-status: active
+status: implemented
 title: The site documents one routes document and the configuration that names Loom's models
 relations:
 - decomposes: epic:model-routes
@@ -17,10 +17,11 @@ scope:
   path: website/docs/guides/model-routes.md
 - confidence: inferred
   path: website/sidebars.js
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-17T00:43:25Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":3}}}
 - {from: "proposed", to: "active", at: "2026-10-17T00:43:25Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":3}}}
+- {from: "active", to: "implemented", at: "2026-10-17T04:33:37Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"test_result":1,"review_outcome":3}}}
 ---
 ## Outcome
 

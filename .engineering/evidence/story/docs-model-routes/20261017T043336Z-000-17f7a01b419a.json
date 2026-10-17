@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-17T04:33:36Z",
+  "actor": "human:timo",
+  "artifact": "story:docs-model-routes",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "unit 5e7cb3a2 merged in 746f2d6b, site build ok; wave head fb919fde gate: fmt; clippy -D warnings and cargo test --no-fail-fast of 10 packages (cli, docs, executor, intake-router, intake-slice, plugin, plugin-slack, sdk, selector-laya, loom generated) 1304 passed 0 failed 14 ignored on 01170eb3, loom-docs 23 passed after the format commit; spec, intake-spec, ess-gate, drift, intake-drift, conform, consumer-check, docs-check, no-hand-model exit 0"
+  }
+}
