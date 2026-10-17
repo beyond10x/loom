@@ -9,6 +9,24 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-17
+
+Loom 0.24.0 puts a model and custom protocols within reach of an embedding host. The SDK carries
+an llm-backed model port and a Claude Code model port (`ClaudeCodePort`), so a host writes
+neither. `b10x-loom run --action-bindings` runs an installed custom protocol through commands the
+operator binds to its actions, and refuses to start unconfined programs without
+`--unconfined-bindings` (`ConfinementUnavailable`). A host can pass explicit decisions on an
+evaluation request and declare, when it opens a case, the independence dimensions of each evidence
+producer. A model loop's budget now stops a run as `LoopBudget`, and Commission's runtime enforces
+run and action budgets (`RunBudget`) over effects that report their usage. A workflow run survives
+a restart through a durable run record. Loom links Canon 0.6.0 and engineering-protocols 0.8.0.
+Breaking: `b10x_loom_cli::model_port` is gone (use `loom_sdk::llm::LlmModelPort`);
+`SuspensionReason` gains `LoopBudget` and `RunBudget` and `EvaluationInput` gains `Decisions`, so
+exhaustive matches handle them, as `OpenError` handles its four new variants; code that builds
+`IntentRequest`, `EffectOutcomePerformed`, `LoopEnd`, `RunUsageReport`, `EvaluationRequest` or
+`CaseState` with a struct literal sets the new fields (`bindings`, `usage`, `charges`, `effects`,
+`decisions`, `independence`); and a host that links Canon itself moves to Canon 0.6.0.
+
 A workflow run survives a restart (`story:dw-durable-run-state`). `WorkflowExecutor::with_store`
 takes a `b10x_loom_executor::workflow::WorkflowRunStore`; bound to a Run with `begin(&run_id)`, the executor writes
 the run's `loom.workflow.WorkflowRunRecord` after every performed step and every call: the steps
