@@ -91,6 +91,51 @@ fn a_record_canon_evaluates_has_its_effect_through_the_governor() {
     );
 }
 
+/// A host's `target` in the facts (the queue or owner a routing record names,
+/// `story:routing-record-names-target`) is not a `canon-evidence/1` field, which Canon refuses:
+/// the governor removes it before Canon reads the record, so the record has the effect Canon gives
+/// it without one, whatever the member holds.
+#[test]
+fn a_target_in_the_facts_leaves_the_record_as_canon_evaluates_it() {
+    let ir = ir_of("software-change", 1);
+    let rows: [(&str, json::Value); 4] = [
+        ("text", json::Value::Text("billing".to_owned())),
+        ("null", json::Value::Null),
+        ("number", json::parse("7").expect("a number")),
+        (
+            "object",
+            json::parse(r#"{"queue":"billing"}"#).expect("an object"),
+        ),
+    ];
+    let mut divergent = Vec::new();
+    for (label, target) in rows {
+        let governor = CanonGovernor::new(MemoryCaseStore::default());
+        let revisions = software_change_revisions();
+        let case = governor
+            .open(SOFTWARE_CHANGE, revisions.clone(), software_change_inputs())
+            .expect("the case opens");
+        let mut with_target = facts("t-1", "test_result", Some("pass"), "implementation", "R2");
+        if let json::Value::Object(members) = &mut with_target {
+            members.push(("target".to_owned(), target));
+        }
+        submit(&governor, &case, 1, "test_result", with_target).expect("taken");
+
+        let record = canon_record("t-1", "test_result", Some("pass"), "implementation", "R2");
+        let expected = canon_claims(&ir, &case, &revisions, &[record]);
+        let issued = claims(&governor.frontier(&case).expect("frontier").into_data());
+        if issued != expected {
+            divergent.push(format!(
+                "target {label}: governor {issued:?}, Canon {expected:?}"
+            ));
+        }
+    }
+    assert!(
+        divergent.is_empty(),
+        "a record naming a target loses its effect through the governor:\n{}",
+        divergent.join("\n")
+    );
+}
+
 // ---------------------------------------------------------------------------------------------
 // The frontier id's inputs
 // ---------------------------------------------------------------------------------------------

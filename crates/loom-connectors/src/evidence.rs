@@ -16,9 +16,13 @@
 //! [`idempotency_key`] of the request it is recorded for.
 //!
 //! The evidence's facts are the `canon-evidence/1` record the governor reads (`format`, `id`,
-//! `kind`, `subject`, `subject_revision`, `observed_at`); its provenance names the step (`action`,
-//! the admitted `action_request_id` and its `run_id`) and Connectors' own record of the write
-//! (`request_id`, `idempotency_key`, `source_audit`).
+//! `kind`, `subject`, `subject_revision`, `observed_at`) and, for a route, `target`: the queue, or
+//! for an owner route the owner, the admitted arguments name (`queue` or `owner`, exactly one of
+//! them), never what a model said. The governor removes `target` before Canon reads the record.
+//! A route whose target cannot be read (absent, not text, empty, or named twice), or whose answer
+//! from Connectors names another queue or owner, records nothing. Its provenance names the step
+//! (`action`, the admitted `action_request_id` and its `run_id`) and Connectors' own record of the
+//! write (`request_id`, `idempotency_key`, `source_audit`).
 
 use std::fmt;
 
@@ -38,12 +42,18 @@ use crate::cli::idempotency_key;
 /// The observation source the adapter names: what Connectors reported.
 pub const SOURCE: &str = "connectors";
 
+/// The arguments a route names its target under: the queue, or for an owner route the owner.
+const ROUTE_TARGETS: &[&str] = &["queue", "owner"];
+
 /// Turns an applied write of one action into the protocol's evidence for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WriteEvidenceAdapter {
     action: String,
     kind: String,
     subject: String,
+    /// The arguments the target is named under, exactly one of them; none when the evidence names
+    /// no target.
+    targets: &'static [&'static str],
 }
 
 /// Why a write's evidence was not recorded.
@@ -107,12 +117,17 @@ impl WriteEvidenceAdapter {
             action: action.into(),
             kind: kind.into(),
             subject: subject.into(),
+            targets: &[],
         }
     }
 
-    /// `support-triage@1`'s: an applied `ticket.route` is a `routing_record` about the `ticket`.
+    /// `support-triage@1`'s: an applied `ticket.route` is a `routing_record` about the `ticket`,
+    /// naming the route target, the `queue` or `owner` the admitted arguments name.
     pub fn support_triage_route() -> Self {
-        Self::new("ticket.route", "routing_record", "ticket")
+        Self {
+            targets: ROUTE_TARGETS,
+            ..Self::new("ticket.route", "routing_record", "ticket")
+        }
     }
 
     /// The action whose writes this adapter records.
@@ -136,8 +151,11 @@ impl WriteEvidenceAdapter {
     /// [`WriteEvidenceError::OtherAction`] for a request of another action, and
     /// [`WriteEvidenceError::OtherRequest`] for a write whose idempotency key is not
     /// [`idempotency_key`] of `request` (the write of another admitted request), each before
-    /// anything is delivered; [`WriteEvidenceError::Observation`] and [`WriteEvidenceError::Evidence`] when the
-    /// governor or `submit_evidence` refused.
+    /// anything is delivered; [`WriteEvidenceError::Unreadable`] for an applied route whose target
+    /// the admitted arguments do not name readably (absent, not text, empty, or both `queue` and
+    /// `owner`) or whose answer names another one, saying why, before anything is delivered, and
+    /// for a `source_audit` that is no JSON; [`WriteEvidenceError::Observation`] and
+    /// [`WriteEvidenceError::Evidence`] when the governor or `submit_evidence` refused.
     #[allow(clippy::too_many_arguments)]
     pub fn record<P>(
         &self,
@@ -170,6 +188,9 @@ impl WriteEvidenceAdapter {
         if written.classification != MutationClassification::Applied {
             return Ok(None);
         }
+        let target = self
+            .target(&admitted.arguments.0, written.body.as_ref())
+            .map_err(WriteEvidenceError::Unreadable)?;
         let text = |value: &str| Value::Text(value.to_owned());
         let optional = |value: &Option<String>| value.as_deref().map_or(Value::Null, text);
         let source_audit = match &written.source_audit {
@@ -204,14 +225,18 @@ impl WriteEvidenceAdapter {
             payload: Value::Object(reported.clone()),
         }))
         .map_err(WriteEvidenceError::Observation)?;
-        let facts = Value::Object(vec![
+        let mut facts = vec![
             ("format".to_owned(), text("canon-evidence/1")),
             ("id".to_owned(), text(&format!("write-{}", evidence.0.0))),
             ("kind".to_owned(), text(&self.kind)),
             ("subject".to_owned(), text(&self.subject)),
             ("subject_revision".to_owned(), text(subject_revision)),
             ("observed_at".to_owned(), text(&observed_at.0)),
-        ]);
+        ];
+        if let Some((_, target)) = &target {
+            facts.push(("target".to_owned(), text(target)));
+        }
+        let facts = Value::Object(facts);
         let mut provenance = vec![("source".to_owned(), text(SOURCE))];
         provenance.extend(reported);
         submit_evidence(
@@ -230,5 +255,93 @@ impl WriteEvidenceAdapter {
         )
         .map_err(WriteEvidenceError::Evidence)?;
         Ok(Some(evidence))
+    }
+
+    /// The target the admitted `arguments` name, as `(argument, target)`: the one of
+    /// [`Self::targets`] they name, as non-empty text. `answer`, Connectors' answer for the write,
+    /// may name it too, under the same argument; naming another one, or the same one otherwise,
+    /// differs. A `null` member names nothing. `None` for an adapter that names no target; the
+    /// error says why the target cannot be read.
+    fn target(
+        &self,
+        arguments: &Value,
+        answer: Option<&loom::json::Value>,
+    ) -> Result<Option<(&'static str, String)>, String> {
+        if self.targets.is_empty() {
+            return Ok(None);
+        }
+        let either = self
+            .targets
+            .iter()
+            .map(|name| format!("`{name}`"))
+            .collect::<Vec<_>>()
+            .join(" or ");
+        let Value::Object(members) = arguments else {
+            return Err(format!(
+                "the admitted `{}` arguments are {}, so they name no target ({either})",
+                self.action,
+                arguments.describes()
+            ));
+        };
+        let named: Vec<(&'static str, &Value)> = members
+            .iter()
+            .filter(|(_, value)| *value != Value::Null)
+            .filter_map(|(key, value)| {
+                self.targets
+                    .iter()
+                    .find(|name| **name == key.as_str())
+                    .map(|name| (*name, value))
+            })
+            .collect();
+        let (name, value) = match named.as_slice() {
+            [] => {
+                return Err(format!(
+                    "the admitted `{}` arguments name no target ({either})",
+                    self.action
+                ));
+            }
+            [one] => *one,
+            [first, second, ..] => {
+                return Err(format!(
+                    "the admitted `{}` arguments name the target twice, both `{}` and `{}`",
+                    self.action, first.0, second.0
+                ));
+            }
+        };
+        let target = match value {
+            Value::Text(target) if target.is_empty() => {
+                return Err(format!("the admitted `{name}` target is empty"));
+            }
+            Value::Text(target) => target.clone(),
+            other => {
+                return Err(format!(
+                    "the admitted `{name}` target is not text but {}",
+                    other.describes()
+                ));
+            }
+        };
+        if let Some(loom::json::Value::Object(answered)) = answer {
+            for (key, value) in answered {
+                let Some(other) = self.targets.iter().find(|other| **other == key.as_str()) else {
+                    continue;
+                };
+                if *value == loom::json::Value::Null {
+                    continue;
+                }
+                let same = *other == name
+                    && matches!(value, loom::json::Value::Text(answered) if *answered == target);
+                if !same {
+                    return Err(format!(
+                        "Connectors' answer names `{other}` {}, which differs from the admitted \
+                         `{name}` `{target}`",
+                        match value {
+                            loom::json::Value::Text(answered) => format!("`{answered}`"),
+                            value => value.describes().to_owned(),
+                        }
+                    ));
+                }
+            }
+        }
+        Ok(Some((name, target)))
     }
 }

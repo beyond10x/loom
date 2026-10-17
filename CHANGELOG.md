@@ -9,6 +9,8 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+A routing record names the route target (`story:routing-record-names-target`). The `routing_record` `WriteEvidenceAdapter::support_triage_route` records for an applied `ticket.route` carries `target` in its facts: the `queue`, or for an owner route the `owner`, the admitted arguments name, never model output. A route whose target is absent, not text, empty or named twice (`queue` and `owner`), or whose answer from Connectors names another queue or owner, delivers no observation and records no evidence; `WriteEvidenceError::Unreadable` says why. `target` is not a `canon-evidence/1` field: the governor removes it before Canon reads the record, as it removes a facts `producer`, so the record still discharges `ticket.routed`. Breaking: a `ticket.route` whose admitted arguments name no readable target, which recorded a `routing_record` before, now records none and returns `WriteEvidenceError::Unreadable`.
+
 ## [0.25.0] - 2026-10-17
 
 Loom 0.25.0 lets a host perform a governed write and choose its models from a routes document. A
