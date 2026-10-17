@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-17T18:17:26Z",
+  "actor": "human:timo",
+  "artifact": "story:cli-run-config-resume",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "package gates of b10x-loom-cli, b10x-loom-intake-slice and intake on dae6ac54: clippy clean; 331 passed, 0 failed, 7 ignored; ess_gate 10 passed; intake-drift clean",
+    "reference": "dae6ac54"
+  }
+}

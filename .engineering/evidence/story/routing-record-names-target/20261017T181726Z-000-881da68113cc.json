@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-17T18:17:26Z",
+  "actor": "human:timo",
+  "artifact": "story:routing-record-names-target",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "package gates of b10x-loom-connectors and b10x-loom-governor on 127b3a9f: clippy clean; 165 passed after the adversary_w172 rerun (15 passed)",
+    "reference": "127b3a9f"
+  }
+}
