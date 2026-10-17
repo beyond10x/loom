@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest 748fceb21cf7ee6d4e3507a439a01eec6e7e9190c5bee46f896cc1ad49fa1326
-  contract digest 46c4d4d570ca4756a9a8caf1cdfa2d49a60fe40d986d3e54b1dd2ba9a7b18d06
+  model digest 6a6ad002ac3aaa113c3aea19a8f78895734cb64f4acfb833f30fdc32564aa3bd
+  contract digest 9458cf4995477ec72d1a644f68a4d0a160ee405f3636cb5bc1f7642bf360a50d
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-184 capabilities: **183 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+189 capabilities: **188 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -23,12 +23,17 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.datasource.ConnectionId` |
 | domain type | `loom.datasource.ConnectorsCliConfig` |
 | domain type | `loom.datasource.DataSource` |
+| domain type | `loom.datasource.MutationClassification` |
 | domain type | `loom.datasource.OperationId` |
 | domain type | `loom.datasource.ReadKind` |
 | domain type | `loom.datasource.ReadRefusal` |
 | domain type | `loom.datasource.ReadResult` |
 | domain type | `loom.datasource.SourceEntity` |
 | domain type | `loom.datasource.SourceName` |
+| domain type | `loom.datasource.WriteApproval` |
+| domain type | `loom.datasource.WriteOperation` |
+| domain type | `loom.datasource.WriteRefusal` |
+| domain type | `loom.datasource.WriteResult` |
 | domain type | `loom.evaluation.ActionStatus` |
 | domain type | `loom.evaluation.CaseSnapshot` |
 | domain type | `loom.evaluation.ClaimValue` |

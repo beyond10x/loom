@@ -108,6 +108,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | Reads proposed together (`ProposedReads`) are admitted only when the effect port reads every one and the handed frontier lists each `Admissible` with no authority, else nothing is invoked; admitted reads are revalidated each, invoked concurrently, each once through its binding, joined, and recorded in proposal order; a stale read alone is not invoked; an effect error fails the loop after every read joined; a fan-out is one step | `crates/loom-commission-testkit/tests/read_fan_out.rs` (`admitted_reads_run_concurrently_and_join`, `effects_are_recorded_in_proposal_order`, `a_fan_out_with_a_write_or_an_approval_required_read_invokes_nothing`, `a_stale_read_is_refused_and_the_others_are_performed`, `an_effect_error_fails_the_loop_after_every_read_joined`), `crates/loom-connectors/tests/read_fan_out.rs` (`each_read_is_invoked_once_through_its_binding`) |
 | A consequential action leaves Loom only as a proposal, and the executor links no Connectors crate | `crates/loom-executor/tests/connector_boundary.rs` (`consequential_actions_leave_loom_only_as_a_proposal`) |
 | A Connector invocation is made once, and only Connectors' own "nothing changed" is a refusal | `crates/loom-connectors/tests/connectors_invoker.rs` |
+| A write through the Connectors command line runs only for an admitted request, with an absolute approval proof path passed and never read, and an idempotency key derived from the request id; an operation not described as a write, or a missing or relative proof path, invokes nothing; an `unknown` or lost write is returned unknown and never invoked again; reads still refuse a write; only an applied write becomes the protocol's evidence, naming its step | `crates/loom-connectors/tests/connectors_cli_write.rs` (`an_admitted_write_passes_the_proof_path_and_the_derived_key`, `a_write_without_an_absolute_proof_path_starts_nothing`, `an_operation_not_described_as_a_write_is_refused_before_the_invoke`, `the_same_admitted_request_yields_the_same_idempotency_key`, `an_unknown_write_is_returned_unknown_and_never_invoked_again`, `a_write_whose_answer_is_lost_is_unknown`, `invoke_read_still_refuses_a_mutation_operation`), `crates/loom-connectors/tests/support_triage_route.rs` (`an_applied_route_records_a_routing_record_naming_the_step`, `the_route_is_not_admitted_before_the_review_approved`, `a_route_not_applied_records_no_evidence`) |
 | A plugin turn reads only the sources and kinds of its projection, and a proposal is recorded, never sent | `crates/loom-plugin/tests/effects.rs` (`effects_refuse_an_undeclared_read`, `propose_writes_the_record_only`) |
 | A slack-handler run describes and invokes only the three configured Slack reads and the turns' data-source reads, and records one line per item it proposes for; nothing is sent | `crates/loom-plugin-slack/tests/run.rs` (`fixture_run_invokes_no_write`, `fixture_run_records_three_proposals`) |
 | A read through Connectors is performed naming its audit record; a write without a recorded attempt is an error | `crates/loom-connectors/tests/connectors_invoker.rs` (`an_admitted_read_is_performed_with_its_result_and_names_its_audit_record`, `a_write_without_a_recorded_attempt_is_still_an_error`), `crates/loom-commission-testkit/tests/effect_invocation.rs` (`a_performed_that_names_another_record_than_its_binding_requires_is_not_answered`) |
@@ -340,9 +341,9 @@ a write without a recorded attempt included, is `Err`. The sync port runs on a T
 invoker owns. `crates/loom-connectors/tests/connectors_invoker.rs` holds it against a fake service
 on a loopback port.
 
-`loom_connectors::cli::ConnectorsCli` is the other path: a plain read client over the operator's
-`connectors` command line, for a host polling a `loom.datasource` source outside a run and for a
-plugin turn's `source.read` inside one. It needs no `AdmittedRequest` and no binding. Each read is
+`loom_connectors::cli::ConnectorsCli` is the other path: a client over the operator's
+`connectors` command line, for reads and for one governed write. As a read client it serves a host polling a `loom.datasource` source outside a run and a
+plugin turn's `source.read` inside one. A read needs no `AdmittedRequest` and no binding. Each read is
 `operations describe`, then exactly one `operations invoke --input-stdin`, with `--output json` and
 the configured `--config` and `--state-dir`; argv holds only those flags and their ids. It reads
 no credential: the CLI's own keyring custody holds it, and the program starts with only the
@@ -350,8 +351,8 @@ variables `cli::INHERITED` names, never a token. Writes are refused twice. The c
 operation `operations describe` reports with the `mutation` profile (`cli::WRITE_PROFILES`) before
 any invoke; `describe` prints no effect, and adapters publish other profiles, `resource` among
 them, for reads, which are read. Connectors refuses any write without `--approval-file` (connectors
-`v0.38.0`, `crates/connectors-host/src/local/owner/mutation/execution.rs:161`), which this client
-never passes (`no_invoke_ever_carries_an_approval_file`); that second check is what holds a write an
+`v0.38.0`, `crates/connectors-host/src/local/owner/mutation/execution.rs:161`), which no read
+passes (`no_invoke_ever_carries_an_approval_file` holds `src/cli.rs`, where the reads are); that second check is what holds a write an
 adapter publishes under another profile. A kind the source declares no operation for starts no
 process. Each command is bounded by the configuration's `timeout_seconds` (60 when absent) and the
 process it started is killed and reaped past it; a process that process forked is not killed, and
@@ -360,6 +361,20 @@ outlives the read. A Connectors refusal is a
 connections revalidate --adapter <alias>`, which the client never runs.
 `crates/loom-connectors/tests/connectors_cli.rs` and `connectors_cli_adversary.rs` hold it against
 the fake `tests/fixtures/connectors/fake-connectors`, which logs its argv.
+
+`ConnectorsCli::invoke_write` (`src/cli/write.rs`) is the local transport for a write the runtime
+admitted; `ConnectorsInvoker` stays the service transport. It takes the `AdmittedRequest`, a
+`loom.datasource.WriteOperation` and a `WriteApproval` naming the absolute path of the proof
+`connectors approvals issue` wrote for the person's confirmation: Loom passes the path as
+`--approval-file` and never reads, writes or stores the proof; an empty or relative path is refused
+before any process starts. The describe must report the `mutation` profile, else `not-a-write` and
+no invoke. The invoke carries `--idempotency-key` from `cli::idempotency_key`, derived from the
+admitted request id, and runs once; its answer is a `WriteResult` with Connectors'
+classification, and an answer lost or unreadable after it started is `Unknown`, never retried.
+`loom_connectors::evidence::WriteEvidenceAdapter` is the host evidence adapter: only an `applied`
+write of its action becomes the protocol's evidence (an observation, then `submit_evidence`),
+naming the action and the admitted request. `tests/connectors_cli_write.rs` and
+`tests/support_triage_route.rs` (on `support-triage@1` and the Canon governor) hold it.
 
 ## Mandate
 

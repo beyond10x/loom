@@ -411,6 +411,7 @@ version = "0.24.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
+ "b10x-loom-governor",
  "connectors-client",
  "connectors-core",
  "loom",
