@@ -2,11 +2,13 @@
 format: aep.planning-md/3
 id: decision-blocker:connectors-governed-write
 kind: decision-blocker
-status: open
+status: cleared
 title: Nobody has decided how a write through ConnectorsCli is approved, admitted and recorded as evidence
 relations:
 - blocks: story:connectors-governed-write
-revision: 1
+revision: 3
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-17T06:43:40Z", actor: "human:timo", revision: 3}
 ---
 ## Question
 
@@ -59,3 +61,23 @@ person's confirmation plus the Canon decision admitting the step) and passes Con
 ## Source
 
 Scoping of `story:connectors-governed-write`; Atlas ADR 0074; Connectors `docs/local-gitlab-merge.md`.
+
+## Decision (2026-10-17)
+
+A. `invoke_write(&AdmittedRequest, operation, input, &WriteApproval)`:
+
+- Only the runtime builds an `AdmittedRequest`.
+- `WriteApproval` names the path of the person's confirmation, the proof `connectors approvals
+  issue` wrote; Loom passes the path as `--approval-file` and never reads or stores the proof. A
+  missing path is refused before Connectors starts.
+- The idempotency key is derived from the admitted request id. A write Connectors reports
+  `unknown` is returned as it is and never retried.
+- A host evidence adapter turns Connectors' applied result (`mutation`, `request_id`,
+  `source_audit`) into the protocol's evidence (`routing_record` for `ticket.route`) naming the
+  step, through `submit_evidence`.
+- The command line is the local transport; the service invoker (`ConnectorsInvoker`) is unchanged.
+  `support-triage@1` needs no change.
+
+Why: admission stays with the runtime and the governor (Atlas ADR 0074), Connectors' approval proof
+is used unchanged, and no accepted record changes. B would let the call decide admission itself; C
+leaves a local host without a write path.
