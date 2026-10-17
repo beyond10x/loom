@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:connectors-governed-write
 kind: story
-status: active
+status: implemented
 title: A host performs a governed write through ConnectorsCli
 relations:
 - decomposes: epic:effect-bindings
 - serves: vision:O1
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-17T07:17:00Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-17T07:17:01Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-17T08:47:00Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 
