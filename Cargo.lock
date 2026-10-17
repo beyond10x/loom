@@ -195,8 +195,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-chat"
-version = "0.4.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.4.0#0e270c91ea3114a97e8fa0544a832ddcf1fa1f4f"
+version = "0.6.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.6.0#74921f7cc61ed198cdf610ffbcd200515ef3de56"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -210,8 +210,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-core"
-version = "0.4.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.4.0#0e270c91ea3114a97e8fa0544a832ddcf1fa1f4f"
+version = "0.6.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.6.0#74921f7cc61ed198cdf610ffbcd200515ef3de56"
 dependencies = [
  "serde",
  "serde_json",
@@ -221,8 +221,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-credentials"
-version = "0.4.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.4.0#0e270c91ea3114a97e8fa0544a832ddcf1fa1f4f"
+version = "0.6.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.6.0#74921f7cc61ed198cdf610ffbcd200515ef3de56"
 dependencies = [
  "b10x-llm-core",
  "base64 0.22.1",
@@ -237,8 +237,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-http"
-version = "0.4.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.4.0#0e270c91ea3114a97e8fa0544a832ddcf1fa1f4f"
+version = "0.6.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.6.0#74921f7cc61ed198cdf610ffbcd200515ef3de56"
 dependencies = [
  "b10x-llm-core",
  "bytes",
@@ -251,8 +251,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-messages"
-version = "0.4.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.4.0#0e270c91ea3114a97e8fa0544a832ddcf1fa1f4f"
+version = "0.6.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.6.0#74921f7cc61ed198cdf610ffbcd200515ef3de56"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -266,8 +266,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-models"
-version = "0.4.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.4.0#0e270c91ea3114a97e8fa0544a832ddcf1fa1f4f"
+version = "0.6.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.6.0#74921f7cc61ed198cdf610ffbcd200515ef3de56"
 dependencies = [
  "b10x-llm-chat",
  "b10x-llm-core",
@@ -277,12 +277,14 @@ dependencies = [
  "b10x-llm-providers",
  "b10x-llm-responses",
  "b10x-llm-routing",
+ "serde",
+ "serde_yaml",
 ]
 
 [[package]]
 name = "b10x-llm-providers"
-version = "0.4.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.4.0#0e270c91ea3114a97e8fa0544a832ddcf1fa1f4f"
+version = "0.6.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.6.0#74921f7cc61ed198cdf610ffbcd200515ef3de56"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -291,14 +293,15 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "tokio",
+ "toml 1.1.6+spec-1.1.0",
  "url",
  "zeroize",
 ]
 
 [[package]]
 name = "b10x-llm-responses"
-version = "0.4.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.4.0#0e270c91ea3114a97e8fa0544a832ddcf1fa1f4f"
+version = "0.6.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.6.0#74921f7cc61ed198cdf610ffbcd200515ef3de56"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -310,8 +313,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-routing"
-version = "0.4.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.4.0#0e270c91ea3114a97e8fa0544a832ddcf1fa1f4f"
+version = "0.6.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.6.0#74921f7cc61ed198cdf610ffbcd200515ef3de56"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-providers",
@@ -323,8 +326,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-llm-tool-call"
-version = "0.4.0"
-source = "git+https://github.com/beyond10x/llm?tag=0.4.0#0e270c91ea3114a97e8fa0544a832ddcf1fa1f4f"
+version = "0.6.0"
+source = "git+https://github.com/beyond10x/llm?tag=0.6.0#74921f7cc61ed198cdf610ffbcd200515ef3de56"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -556,6 +559,9 @@ name = "b10x-loom-sdk"
 version = "0.24.0"
 dependencies = [
  "b10x-llm-core",
+ "b10x-llm-credentials",
+ "b10x-llm-http",
+ "b10x-llm-models",
  "b10x-loom-commission",
  "b10x-loom-connectors",
  "b10x-loom-executor",
@@ -563,7 +569,12 @@ dependencies = [
  "b10x-loom-intake-router",
  "b10x-loom-intake-slice",
  "b10x-loom-protocols",
+ "libc",
+ "loom",
+ "serde",
  "serde_json",
+ "serde_yaml_ng",
+ "tempfile",
  "tokio",
 ]
 
@@ -1143,7 +1154,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2956,7 +2967,9 @@ name = "loom-docs"
 version = "0.24.0"
 dependencies = [
  "anyhow",
+ "b10x-llm-models",
  "b10x-loom-cli",
+ "b10x-loom-sdk",
  "clap",
  "serde_json",
 ]
@@ -3357,7 +3370,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3616,7 +3629,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3673,7 +3686,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3880,6 +3893,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_yaml"
+version = "0.9.34+deprecated"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
+]
+
+[[package]]
 name = "serde_yaml_ng"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4077,10 +4103,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4624,7 +4650,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

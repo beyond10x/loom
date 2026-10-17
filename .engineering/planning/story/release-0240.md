@@ -2,12 +2,16 @@
 format: aep.planning-md/3
 id: story:release-0240
 kind: story
-status: draft
+status: implemented
 title: Release Loom 0.24.0
 relations:
 - depends_on: story:cli-custom-protocol-commands
 - serves: vision:O1
-revision: 2
+revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-17T07:16:34Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-10-17T07:16:34Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-17T07:16:40Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Why
 

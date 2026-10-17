@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-17T07:16:40Z",
+  "actor": "human:timo",
+  "artifact": "story:release-0240",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "release run 39011709026 green on tag 0.24.0 (3550d54); GitHub Release by b10x-bot"
+  }
+}

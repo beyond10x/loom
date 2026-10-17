@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest 08aaad3d648d503c874a006c3741c4fc037129ea3e56464b9d052c782600e763
-  contract digest 6dfdf4bff25c8bd3098b5577c415d0338d6bd99de5cda7767d3103908d655aea
+  model digest 748fceb21cf7ee6d4e3507a439a01eec6e7e9190c5bee46f896cc1ad49fa1326
+  contract digest 46c4d4d570ca4756a9a8caf1cdfa2d49a60fe40d986d3e54b1dd2ba9a7b18d06
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-181 capabilities: **180 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+184 capabilities: **183 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -55,6 +55,9 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.metering.EffectsUsage` |
 | domain type | `loom.metering.RunUsageReport` |
 | domain type | `loom.metering.StepUsage` |
+| domain type | `loom.models.ModelRole` |
+| domain type | `loom.models.ModelsConfig` |
+| domain type | `loom.models.RoleModel` |
 | domain type | `loom.plugin.Classification` |
 | domain type | `loom.plugin.Cursor` |
 | domain type | `loom.plugin.InboundItem` |

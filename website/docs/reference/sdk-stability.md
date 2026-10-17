@@ -3,7 +3,7 @@ title: SDK stability
 sidebar_label: SDK stability
 sidebar_position: 4
 description: The stable surface of b10x-loom-sdk, the ports a host implements and the loom_sdk paths control-plane imports, with the promise Loom makes for them.
-source: crates/loom-sdk/src/lib.rs, crates/loom-sdk/src/llm.rs, crates/loom-executor/src/wire/claude_code.rs, crates/loom-sdk/tests/host_ports.rs, control-plane's crates/control-plane-runtime (its loom_sdk imports), CHANGELOG.md
+source: crates/loom-sdk/src/lib.rs, crates/loom-sdk/src/llm.rs, crates/loom-sdk/src/models.rs, crates/loom-executor/src/wire/claude_code.rs, crates/loom-sdk/tests/host_ports.rs, control-plane's crates/control-plane-runtime (its loom_sdk imports), CHANGELOG.md
 ---
 
 # SDK stability
@@ -94,6 +94,12 @@ implements it through.
 | `loom_sdk::CaseIndependence` | The independence dimensions a host declares for each evidence producer when it opens a case |
 | `loom_sdk::ProtocolCatalog` | The protocol catalog shared by routing, case opening and admission |
 | `loom_sdk::llm::LlmModelPort` | A `ModelPort` over an llm `Model`: one `Model::turn` per turn, the port `b10x-loom` runs a plugin turn on |
+| `loom_sdk::models::from_config` | Loads a host's models from a models configuration (YAML): the model of each declared role, over the `llm.routes/1` document it names, relative to the configuration's directory; every endpoint of the routes document must resolve, including ones no role uses ([llm issue 36](https://github.com/beyond10x/llm/issues/36)) |
+| `loom_sdk::models::from_routes` | The llm `Model` one name of an `llm.routes/1` document serves: a route, or `<endpoint>/<model-id>` of a declared endpoint; every endpoint of the document must resolve, including ones no role uses ([llm issue 36](https://github.com/beyond10x/llm/issues/36)) |
+| `loom_sdk::models::parse_config` | Parses a models configuration into a `ModelsConfig`, the parser `from_config` uses |
+| `loom_sdk::models::Models` | What `from_config` returns: the model of each declared role (`get`, and `name_of` for the name that serves it), any other name of the same routes document (`model`), and `check_credential`, which resolves the `env:` or `file:` secret of the endpoint a name reaches and drops the value, so a host can refuse a missing secret before any model call |
+| `loom_sdk::models::ModelsError` | Why models could not be loaded; its message names the file and the role or name |
+| `loom_sdk::models::ModelsConfig`, `loom_sdk::models::ModelRole`, `loom_sdk::models::RoleModel` | The models configuration, generated from `loom.models` under `ess/`; it changes with that declaration |
 | `loom_sdk::loom::wire::ClaudeCodePort` | A `ModelPort` on an operator's Claude Code login: one `claude -p --output-format json` invocation per turn, the command reading its own login |
 | `loom_sdk::TestRunner`, `loom_sdk::SubstrateRunner`, `loom_sdk::UnconfinedRunner`, `loom_sdk::TestExecution`, `loom_sdk::ConfinementError` | The slice's test runners |
 | `loom_sdk::commission`, `loom_sdk::connectors`, `loom_sdk::loom`, `loom_sdk::governor`, `loom_sdk::protocols`, `loom_sdk::intake::router`, `loom_sdk::intake::slice` | The re-exported crates, under these module names |

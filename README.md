@@ -198,6 +198,8 @@ committed after each test run; without it no run is a regression result, so
 `--catalog <PATH>`, an [llm](https://beyond10x.github.io/llm/) catalog file, both name route
 aliases of that catalog instead, such as a self-hosted endpoint whose account needs no
 credential; an unknown alias or an unreadable catalog stops the run before any model call.
+With `--config <PATH>`, a models configuration naming an `llm.routes/1` document and the model of the roles `agent` and `classifier`, each role runs on its route with the credential the document's `secret:` reference names; `--model` or `--classifier-model`, when given, overrides its role with another name of that document.
+A role neither configured nor given, or a model that cannot take a forced tool call, stops the run before any model call; `--config` takes neither `--catalog` nor `--state`.
 With `--state <DIR>` the run keeps its case, its commission's Suspension and a resume context in
 that directory, so a run that stops for an approval leaves what a later resume continues from;
 a run that ends without a Suspension removes its resume context, and a directory that cannot be

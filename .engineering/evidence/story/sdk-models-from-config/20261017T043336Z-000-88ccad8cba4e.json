@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-17T04:33:36Z",
+  "actor": "human:timo",
+  "artifact": "story:sdk-models-from-config",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "unit 6161793f merged in c3db1477, adversary cases ea8b5354 (14, 4 red) and fix a922be22 merged in 0d505b1d; two cases ignored pending beyond10x/llm#36; wave head fb919fde gate: fmt; clippy -D warnings and cargo test --no-fail-fast of 10 packages (cli, docs, executor, intake-router, intake-slice, plugin, plugin-slack, sdk, selector-laya, loom generated) 1304 passed 0 failed 14 ignored on 01170eb3, loom-docs 23 passed after the format commit; spec, intake-spec, ess-gate, drift, intake-drift, conform, consumer-check, docs-check, no-hand-model exit 0"
+  }
+}

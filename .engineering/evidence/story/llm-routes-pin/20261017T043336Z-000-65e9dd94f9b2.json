@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-17T04:33:36Z",
+  "actor": "human:timo",
+  "artifact": "story:llm-routes-pin",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "unit c75914f (spec ef4edca) merged in b60f723; wave head fb919fde gate: fmt; clippy -D warnings and cargo test --no-fail-fast of 10 packages (cli, docs, executor, intake-router, intake-slice, plugin, plugin-slack, sdk, selector-laya, loom generated) 1304 passed 0 failed 14 ignored on 01170eb3, loom-docs 23 passed after the format commit; spec, intake-spec, ess-gate, drift, intake-drift, conform, consumer-check, docs-check, no-hand-model exit 0"
+  }
+}

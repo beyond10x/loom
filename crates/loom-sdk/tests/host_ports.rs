@@ -23,6 +23,9 @@ const PORTS_HEADING: &str = "## Ports a host implements";
 /// The page's heading over the paths control-plane imports.
 const CONTROL_PLANE_HEADING: &str = "## Used by control-plane";
 
+/// The page's heading over the types and functions an embedding calls.
+const EMBEDDING_HEADING: &str = "## Types and functions an embedding calls";
+
 /// Implements each port for its host value and records the port's path, as written, in
 /// `IMPLEMENTED`: the list the page's port table is compared with.
 macro_rules! host_ports {
@@ -456,6 +459,25 @@ mod control_plane {
     // control-plane paths: end
 }
 
+/// One `use` per `loom_sdk::models` path of the page's embedding table: a host's models, loaded
+/// from a configuration or a routes document.
+///
+/// [`every_models_path_on_the_page_resolves`] reads these lines out of this file, between the two
+/// marker comments, so keep one path per `use` and nothing else between them.
+#[allow(unused_imports)]
+mod models {
+    // models paths: begin
+    use loom_sdk::models::ModelRole;
+    use loom_sdk::models::Models;
+    use loom_sdk::models::ModelsConfig;
+    use loom_sdk::models::ModelsError;
+    use loom_sdk::models::RoleModel;
+    use loom_sdk::models::from_config;
+    use loom_sdk::models::from_routes;
+    use loom_sdk::models::parse_config;
+    // models paths: end
+}
+
 /// The stability page, read at run time.
 fn page() -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(PAGE);
@@ -599,4 +621,54 @@ fn every_control_plane_path_on_the_page_resolves() {
         listed, imported,
         "the page's control-plane table equals the `use` lines that resolve here"
     );
+}
+
+/// The `use` paths of this file between `// <marker>: begin` and `// <marker>: end`.
+fn used_paths(marker: &str) -> Vec<String> {
+    let source = include_str!("host_ports.rs");
+    let begin = format!("// {marker}: begin");
+    let end = format!("// {marker}: end");
+    source
+        .lines()
+        .skip_while(|line| line.trim() != begin)
+        .skip(1)
+        .take_while(|line| line.trim() != end)
+        .map(|line| {
+            let path = line
+                .trim()
+                .strip_prefix("use ")
+                .and_then(|rest| rest.strip_suffix(';'))
+                .unwrap_or_else(|| panic!("{line:?} is one `use` of one path"));
+            path.split(" as ").next().unwrap_or(path).to_owned()
+        })
+        .collect()
+}
+
+#[test]
+fn every_models_path_on_the_page_resolves() {
+    let imported = unique(used_paths("models paths"), "the models block");
+    assert!(!imported.is_empty(), "the models block holds the imports");
+
+    let page = page();
+    let listed = unique(
+        table_column(&page, EMBEDDING_HEADING, 0)
+            .iter()
+            .flat_map(|cell| cell.split(','))
+            .map(|path| path.trim().trim_matches('`').to_owned())
+            .filter(|path| path.starts_with("loom_sdk::models::"))
+            .collect(),
+        "the embedding table",
+    );
+    assert_eq!(
+        listed, imported,
+        "the page's embedding table lists exactly the `loom_sdk::models` paths that resolve here"
+    );
+    for path in [
+        "loom_sdk::models::from_config",
+        "loom_sdk::models::from_routes",
+        "loom_sdk::models::parse_config",
+        "loom_sdk::models::ModelsConfig",
+    ] {
+        assert!(listed.contains(path), "the page lists {path}");
+    }
 }

@@ -48,6 +48,8 @@ pub use b10x_loom_executor as loom;
 
 pub mod llm;
 
+pub mod models;
+
 /// The governor (`b10x-loom-governor`).
 pub use loom_governor as governor;
 
