@@ -786,8 +786,8 @@ fn settled_models(arguments: &RunArgs) -> Result<SettledModels, String> {
 
 /// The model of `role` under `--config <config>`: the name its flag gave, of the configuration's
 /// routes document, else the role's configured model. A role neither configured nor given, a
-/// name the document does not serve, and a model that cannot take a forced tool call are
-/// refused, naming the role and the flag.
+/// name the document does not serve, a model that cannot take a forced tool call, and a model
+/// whose endpoint's secret does not resolve are refused, naming the role and the flag.
 fn role_model(
     models: &Models,
     config: &Path,
@@ -819,6 +819,12 @@ fn role_model(
              tool call",
             model.provenance().model.as_str()
         ));
+    }
+    let served = given.or_else(|| models.name_of(role));
+    if let Some(served) = served {
+        models
+            .check_credential(served)
+            .map_err(|error| format!("{source}: the role `{name}`: {error}"))?;
     }
     Ok(model)
 }

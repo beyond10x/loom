@@ -9,8 +9,10 @@
 //! `env:<VAR>`, and `file:<path>` where `~/` is the `HOME` of the process (a `~/` reference is
 //! refused when `HOME` is unset). A `keychain:` reference is refused when the models are built:
 //! this build does not enable llm's keychain feature. Loom never reads a secret itself, and
-//! nothing is read or sent before the first turn: a variable or file that is missing is refused
-//! `unauthorized` at that turn.
+//! nothing is read or sent when the models are built: a variable or file that is missing is
+//! refused `unauthorized` at the first turn, unless the host asks first with
+//! [`Models::check_credential`], which resolves the secret of the endpoint a name reaches and
+//! drops the value.
 //!
 //! Every file is read as a regular file only, and every refusal names the file and the role or
 //! name it concerns.
@@ -23,7 +25,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use llm_core::Model;
+use llm_credentials::SecretRef;
 use llm_http::{HttpClient, Limits};
+use llm_models::Resolvers;
 use llm_models::routes::{RouteResolvers, Routes, SecretSources};
 use serde::de::{
     self, DeserializeSeed, Deserializer, EnumAccess, MapAccess, SeqAccess, VariantAccess, Visitor,
@@ -73,7 +77,7 @@ pub struct Models {
     routes: Routes,
     resolvers: RouteResolvers,
     http: HttpClient,
-    roles: Vec<(ModelRole, Arc<dyn Model>)>,
+    roles: Vec<(ModelRole, String, Arc<dyn Model>)>,
 }
 
 impl Models {
@@ -82,8 +86,17 @@ impl Models {
     pub fn get(&self, role: ModelRole) -> Option<Arc<dyn Model>> {
         self.roles
             .iter()
-            .find(|(declared, _)| *declared == role)
-            .map(|(_, model)| Arc::clone(model))
+            .find(|(declared, _, _)| *declared == role)
+            .map(|(_, _, model)| Arc::clone(model))
+    }
+
+    /// The name of the model the configuration gives `role`, if it declares it.
+    #[must_use]
+    pub fn name_of(&self, role: ModelRole) -> Option<&str> {
+        self.roles
+            .iter()
+            .find(|(declared, _, _)| *declared == role)
+            .map(|(_, name, _)| name.as_str())
     }
 
     /// The model `name` serves in the routes document: a route, else `<endpoint>/<model-id>`.
@@ -92,6 +105,50 @@ impl Models {
     /// The name is not one the document serves; the message names the document and the name.
     pub fn model(&self, name: &str) -> Result<Arc<dyn Model>, ModelsError> {
         build(&self.path, &self.routes, &self.resolvers, &self.http, name)
+    }
+
+    /// Checks that the secret the endpoint serving `name` names resolves, now: the variable is
+    /// set, or the file is readable. An anonymous endpoint has none and passes. The value is
+    /// dropped as read, never returned, printed or kept.
+    ///
+    /// # Errors
+    /// `name` is not one the document serves, or its endpoint's `env:` or `file:` secret cannot
+    /// be resolved. The message names the endpoint and the reference kind and gives llm's reason,
+    /// which carries no secret material; it never holds the value.
+    pub fn check_credential(&self, name: &str) -> Result<(), ModelsError> {
+        let target = self.routes.target(name).map_err(|error| {
+            ModelsError::in_file(&self.path, format!("model `{name}`: {}", error.message))
+        })?;
+        let Some(kind) = self
+            .routes
+            .endpoints()
+            .find(|endpoint| endpoint.name() == &target.endpoint)
+            .and_then(|endpoint| endpoint.secret_kind())
+        else {
+            return Ok(());
+        };
+        let endpoint = target.endpoint.as_str();
+        let refused = |why: &dyn fmt::Display| {
+            ModelsError::in_file(
+                &self.path,
+                format!(
+                    "endpoint `{endpoint}`: its `{}:` secret cannot be resolved: {why}",
+                    kind.as_str()
+                ),
+            )
+        };
+        let resolver = self
+            .resolvers
+            .resolver(&target.endpoint)
+            .ok_or_else(|| refused(&"no resolver was built for it"))?;
+        let reference = SecretRef::new(endpoint).map_err(|error| refused(&error))?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .map_err(|error| refused(&error))?;
+        runtime
+            .block_on(resolver.resolve(&reference))
+            .map(drop)
+            .map_err(|error| refused(&error))
     }
 }
 
@@ -102,7 +159,11 @@ impl fmt::Debug for Models {
             .field("routes", &self.path)
             .field(
                 "roles",
-                &self.roles.iter().map(|(role, _)| role).collect::<Vec<_>>(),
+                &self
+                    .roles
+                    .iter()
+                    .map(|(role, _, _)| role)
+                    .collect::<Vec<_>>(),
             )
             .finish_non_exhaustive()
     }
@@ -358,7 +419,7 @@ pub fn from_config(path: &Path) -> Result<Models, ModelsError> {
         };
         let model = build(&routes_path, &routes, &resolvers, &http, &entry.model)
             .map_err(|error| ModelsError::in_file(path, format!("role `{role}`: {error}")))?;
-        roles.push((entry.role, model));
+        roles.push((entry.role, entry.model.clone(), model));
     }
     Ok(Models {
         path: routes_path,
