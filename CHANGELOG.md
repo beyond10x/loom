@@ -9,6 +9,14 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+Loom links llm 0.7.0: every `b10x-llm-*` dependency names tag `0.7.0`, and `Cargo.lock` holds one
+version of each. llm 0.7.0 adds `TurnRequest.controls`; Loom sets none, so every request it builds
+stays the `llm.turn/3` envelope byte for byte and its recorded requests do not change. llm 0.7.0
+also refuses an unknown key at every level of a Chat Completions or Responses request, naming its
+path, where 0.6.0 passed over keys below the top level.
+Breaking: a host that links llm itself moves to llm 0.7.0 so it resolves one copy of each
+`b10x-llm-*` crate.
+
 ## [0.25.0] - 2026-10-17
 
 Loom 0.25.0 lets a host perform a governed write and choose its models from a routes document. A
