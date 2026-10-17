@@ -688,6 +688,145 @@ fn the_adapter_refuses_a_request_of_another_action() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// story:routing-record-names-target: the record names the route target.
+
+/// The applied write of `arguments`, Connectors answering `body` for it.
+fn applied_answering(arguments: &str, body: Option<&str>) -> (AdmittedRequest, WriteResult) {
+    let request = admitted_for(ROUTE, arguments, 1);
+    let mut written = result_of(&request, MutationClassification::Applied);
+    written.body = body.map(|body| json::parse(body).unwrap());
+    (request, written)
+}
+
+/// The facts' `target`, when the adapter recorded one record.
+fn recorded_target(ledger: &Ledger) -> Option<commission_json::Value> {
+    let evidence = ledger
+        .evidence
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    assert_eq!(evidence.len(), 1, "one record");
+    assert_eq!(
+        evidence[0].provenance.member("target"),
+        None,
+        "the target is in the facts only"
+    );
+    evidence[0].facts.member("target").cloned()
+}
+
+/// The target is the queue, or for an owner route the owner, the admitted arguments name; an
+/// answer that names the same one, or none, is recorded with it. A `null` member names nothing.
+#[test]
+fn the_record_names_the_target_the_admitted_arguments_name() {
+    let text = |value: &str| Some(commission_json::Value::Text(value.to_owned()));
+    for (arguments, body, target) in [
+        (ARGUMENTS, None, "billing"),
+        (
+            ARGUMENTS,
+            Some(r#"{"ticket":"48213","queue":"billing"}"#),
+            "billing",
+        ),
+        (ARGUMENTS, Some(r#"{"ticket":"48213"}"#), "billing"),
+        (r#"{"ticket":"48213","owner":"agent-7"}"#, None, "agent-7"),
+        (
+            r#"{"ticket":"48213","queue":"billing","owner":null}"#,
+            None,
+            "billing",
+        ),
+        (
+            ARGUMENTS,
+            Some(r#"{"queue":"billing","owner":null}"#),
+            "billing",
+        ),
+        (
+            r#"{"ticket":"48213","owner":"agent-7"}"#,
+            Some(r#"{"owner":"agent-7"}"#),
+            "agent-7",
+        ),
+    ] {
+        let (request, written) = applied_answering(arguments, body);
+        let ledger = Ledger::default();
+        let answer = record(&ledger, &request, &written);
+        assert_eq!(
+            answer,
+            Ok(Some(EvidenceId(uuid(0x701)))),
+            "{arguments} {body:?}"
+        );
+        assert_eq!(
+            recorded_target(&ledger),
+            text(target),
+            "{arguments} {body:?}"
+        );
+    }
+}
+
+/// A target that is absent, not text, empty or named twice cannot be read: nothing is
+/// delivered or recorded, and the adapter says why.
+#[test]
+fn a_route_whose_target_cannot_be_read_records_nothing_and_says_why() {
+    for (arguments, why) in [
+        (r#"{"ticket":"48213"}"#, "name no target"),
+        (r#"{"ticket":"48213","queue":null}"#, "name no target"),
+        (r#"{"ticket":"48213","owner":7}"#, "not text"),
+        (r#"{"ticket":"48213","queue":""}"#, "empty"),
+        (
+            r#"{"ticket":"48213","queue":"billing","owner":"agent-7"}"#,
+            "both",
+        ),
+    ] {
+        let (request, written) = applied_answering(arguments, None);
+        let ledger = Ledger::default();
+        let answer = record(&ledger, &request, &written);
+        match &answer {
+            Err(error @ WriteEvidenceError::Unreadable(_)) => assert!(
+                error.to_string().contains(why),
+                "{arguments}: `{error}` does not say `{why}`"
+            ),
+            other => panic!("{arguments}: recorded a route whose target cannot be read: {other:?}"),
+        }
+        assert_eq!(
+            ledger.delivered(),
+            (0, 0),
+            "{arguments}: nothing is delivered"
+        );
+    }
+}
+
+/// An answer naming another queue or owner than the admitted arguments is refused: the target
+/// comes from what was admitted, and an answer contradicting it records nothing.
+#[test]
+fn an_answer_naming_another_target_records_nothing() {
+    for (arguments, body) in [
+        (ARGUMENTS, r#"{"ticket":"48213","queue":"support"}"#),
+        (ARGUMENTS, r#"{"ticket":"48213","owner":"billing"}"#),
+        (ARGUMENTS, r#"{"ticket":"48213","queue":7}"#),
+        (
+            r#"{"ticket":"48213","owner":"agent-7"}"#,
+            r#"{"owner":"agent-8"}"#,
+        ),
+        (
+            r#"{"ticket":"48213","owner":"agent-7"}"#,
+            r#"{"queue":"agent-7"}"#,
+        ),
+    ] {
+        let (request, written) = applied_answering(arguments, Some(body));
+        let ledger = Ledger::default();
+        let answer = record(&ledger, &request, &written);
+        match &answer {
+            Err(error @ WriteEvidenceError::Unreadable(_)) => assert!(
+                error.to_string().contains("differs"),
+                "{arguments} {body}: `{error}` does not say the answer differs"
+            ),
+            other => panic!("{arguments} {body}: recorded a contradicted target: {other:?}"),
+        }
+        assert_eq!(
+            ledger.delivered(),
+            (0, 0),
+            "{arguments} {body}: nothing is delivered"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Invariant 6: support-triage@1.
 
 type Store = CanonGovernor<MemoryCaseStore>;

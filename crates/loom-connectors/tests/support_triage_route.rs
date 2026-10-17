@@ -474,8 +474,8 @@ fn routing_records(governor: &Store, case: &CaseId) -> Vec<EvidenceData> {
 
 /// `ticket.route` is blocked until the review approved the classification and the requester is
 /// known; then admitted once, performed through `invoke_write`, and the applied write recorded as
-/// a `routing_record` naming `ticket.route` and its admitted request, after which the ticket is
-/// routed and triaged.
+/// a `routing_record` naming `ticket.route`, its admitted request and the route target, after
+/// which the ticket is routed and triaged.
 #[test]
 fn an_applied_route_records_a_routing_record_naming_the_step() {
     let fixture = Fixture::new("applied", "invoke-route-applied.json", 0);
@@ -542,6 +542,16 @@ fn an_applied_route_records_a_routing_record_naming_the_step() {
         evidence.facts.member("subject"),
         Some(&commission_json::Value::Text("ticket".to_owned()))
     );
+    // The record names the route target, the queue the admitted arguments name, in its facts
+    // only (`story:routing-record-names-target`); the governor still reads it as the
+    // `routing_record` that discharges `ticket.routed`.
+    assert_eq!(
+        evidence.facts.member("target"),
+        Some(&commission_json::Value::Text("billing".to_owned())),
+        "{:?}",
+        evidence.facts
+    );
+    assert_eq!(provenance.member("target"), None, "{provenance:?}");
     let after = frontier(&governor, &case);
     assert_eq!(claim(&after, "ticket.routed"), Truth::True);
     assert_eq!(claim(&after, "ticket.triaged"), Truth::True);
