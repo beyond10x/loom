@@ -57,7 +57,8 @@ const POLL: Duration = Duration::from_millis(10);
 const STDERR_TAIL: usize = 512;
 
 /// Decodes a run configuration file's text: a JSON object of exactly `protocol`, `bindings` and
-/// an optional `timeout_seconds`, each binding exactly `action` and `argv`.
+/// an optional `timeout_seconds` and `unconfined_bindings`, each binding exactly `action` and
+/// `argv`.
 ///
 /// # Errors
 /// What is not as declared, named.
@@ -66,7 +67,7 @@ pub fn decode(text: &str) -> Result<ActionBindings, String> {
     let object = exactly(
         &value,
         &["protocol", "bindings"],
-        &["timeout_seconds"],
+        &["timeout_seconds", "unconfined_bindings"],
         "the file",
     )?;
     let protocol = object["protocol"]
@@ -76,6 +77,14 @@ pub fn decode(text: &str) -> Result<ActionBindings, String> {
     let timeout_seconds = match object.get("timeout_seconds") {
         None | Some(Value::Null) => None,
         Some(value) => Some(value.as_i64().ok_or("timeout_seconds is not an integer")?),
+    };
+    let unconfined_bindings = match object.get("unconfined_bindings") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(
+            value
+                .as_bool()
+                .ok_or("unconfined_bindings is not a boolean")?,
+        ),
     };
     let bindings = object["bindings"]
         .as_array()
@@ -103,6 +112,7 @@ pub fn decode(text: &str) -> Result<ActionBindings, String> {
     Ok(ActionBindings {
         protocol,
         timeout_seconds,
+        unconfined_bindings,
         bindings,
     })
 }
@@ -550,6 +560,16 @@ mod tests {
     }
 
     #[test]
+    fn unconfined_bindings_decodes_as_a_boolean_and_nothing_else() {
+        let bindings =
+            decode(r#"{"protocol":"a@1","unconfined_bindings":true,"bindings":[]}"#).unwrap();
+        assert_eq!(bindings.unconfined_bindings, Some(true));
+        let error =
+            decode(r#"{"protocol":"a@1","unconfined_bindings":"yes","bindings":[]}"#).unwrap_err();
+        assert!(error.contains("unconfined_bindings"), "{error}");
+    }
+
+    #[test]
     fn a_file_decodes_into_the_declared_bindings() {
         let bindings = decode(
             r#"{"protocol":"a@1","timeout_seconds":5,"bindings":[{"action":"x","argv":["p","q"]}]}"#,
@@ -560,6 +580,7 @@ mod tests {
             ActionBindings {
                 protocol: "a@1".into(),
                 timeout_seconds: Some(5),
+                unconfined_bindings: None,
                 bindings: vec![ActionBinding {
                     action: "x".into(),
                     argv: vec!["p".into(), "q".into()],
