@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:unperformable-names-actions
 kind: story
-status: draft
+status: active
 title: NoPerformableAction names the actions and the open claim no effect performs
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -35,7 +35,10 @@ scope:
   path: website/docs/reference/commission
 - confidence: cited
   path: website/docs/reference/run-events.md
-revision: 5
+revision: 7
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-20T04:14:24Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":1}}}
+- {from: "proposed", to: "active", at: "2026-10-20T04:14:24Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":1}}}
 ---
 ## Outcome
 

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:refused-effect-ends-run
 kind: story
-status: draft
+status: active
 title: A host ends a run on an effect refusal, and the outcome names the request and the reason
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -27,7 +27,10 @@ scope:
   path: generated/rust/commission
 - confidence: cited
   path: website/docs/reference/commission
-revision: 5
+revision: 7
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-20T04:14:23Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":2}}}
+- {from: "proposed", to: "active", at: "2026-10-20T04:14:24Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":2}}}
 ---
 ## Outcome
 

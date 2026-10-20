@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:sdk-confines-any-child
 kind: story
-status: draft
+status: active
 title: 'loom-sdk confines a child process the host names: program, arguments, directory, environment, profile'
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -20,7 +20,10 @@ scope:
   path: crates/loom-sdk/src/lib.rs
 - confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 6
+revision: 8
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-20T04:14:24Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":2}}}
+- {from: "proposed", to: "active", at: "2026-10-20T04:14:24Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":2}}}
 ---
 ## Outcome
 

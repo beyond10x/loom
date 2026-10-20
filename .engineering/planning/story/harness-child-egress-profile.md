@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:harness-child-egress-profile
 kind: story
-status: draft
+status: active
 title: A confinement profile with named egress runs a harness child that must reach its vendor API
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -17,7 +17,10 @@ scope:
   path: crates/loom-intake-slice/src/confinement.rs
 - confidence: cited
   path: crates/loom-intake-slice/tests/confined_child.rs
-revision: 6
+revision: 8
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-20T04:14:24Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":1}}}
+- {from: "proposed", to: "active", at: "2026-10-20T04:14:24Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":1}}}
 ---
 ## Outcome
 
