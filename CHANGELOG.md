@@ -9,6 +9,21 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-20
+
+Loom 0.27.0 links engineering-protocols 0.9.0, tells an authority provider the action request it
+decides, and lets a host read the decision document behind a frontier the governor issued. The
+bundled catalog gains `eval-gated-change@1`. `AuthorityProvider::decide` receives the revalidated
+`ActionRequestData`, and the runtime reads the case revision again after an allow and before a
+resumed request is invoked, performing nothing on a move it sees.
+`CanonGovernor::decision_document(&case, &frontier_id)` returns the `canon-decision/1` document
+kept under the id of a frontier the governor issued.
+Breaking: a host implementing `AuthorityProvider` adds the `request` parameter and a caller of
+`check_authority` passes it; a request the provider allowed is no longer performed when the runtime
+sees its case moved; a host that links `b10x-canon-engineering` itself moves to tag `0.9.0`;
+`b10x-loom resume` refuses a commission `run --state` kept under 0.26.0, so run that intent again;
+a user-installed or host-registered `eval-gated-change@1` collides with the new bundled name.
+
 Loom links engineering-protocols 0.9.0, the tag takt pins, so a crate depending on both resolves
 one `b10x-canon-engineering`: the four manifests that name it (`loom-governor`, `loom-protocols`,
 `loom-intake-slice`, `loom-intake-router`) name `tag = "0.9.0"`, and `Cargo.lock` holds one copy of
