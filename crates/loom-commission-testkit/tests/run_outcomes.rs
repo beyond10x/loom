@@ -403,7 +403,9 @@ fn resume_continues_the_same_run() {
 /// Expectation 8: `RunOutcome` is declared in the specification as a union of the six variants
 /// and reaches this crate generated, through `b10x-loom-commission`'s re-export. `story:runtime-merge`
 /// adds two: `AwaitingApproval` and `NoPerformableAction` (the slice's approval gate and its
-/// `NoLocalExecutor`, in Commission's terms).
+/// `NoLocalExecutor`, in Commission's terms). `story:moved-run-named-outcome` adds `CaseMovedOn`,
+/// and `story:refused-effect-ends-run` adds `EffectRefused` (a refusal the effect port marks
+/// final).
 fn run_outcome_is_the_generated_type() {
     let path = root().join("ess/commission/domains/responsibility.yaml");
     let source = std::fs::read_to_string(&path)
@@ -449,6 +451,7 @@ fn run_outcome_is_the_generated_type() {
             "AwaitingApproval",
             "CaseMovedOn",
             "Completed",
+            "EffectRefused",
             "NeedsAuthority",
             "NeedsExternalEvidence",
             "NeedsHumanJudgment",
