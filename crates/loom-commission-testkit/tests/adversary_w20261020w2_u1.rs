@@ -21,7 +21,7 @@ use b10x_loom_commission::model::responsibility::{
     Commission, CommissionData, CommissionId, EffectOutcome, EffectOutcomeRefused, ExecutorOutcome,
     ExecutorOutcomeProposedAction, ExecutorOutcomeProposedReads, FrontierAction, ObservationId,
     PrincipalId, ProposedActionArguments, RevalidateActionRequestOutcome, RunId, RunOutcome,
-    RunOutcomeCompleted, Unit, commission_state,
+    RunOutcomeCompleted, RunOutcomeEffectRefused, Unit, commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{
@@ -267,5 +267,65 @@ fn adversary_a_stale_read_beside_a_final_refusal_is_judged_as_the_move() {
         "a stale read shows the case moved, and the move is judged as after a stale proposal \
          (docs/commission/contracts/commission-executor.md; runtime items 8a and 2): the governor \
          holds the case complete"
+    );
+}
+
+fn named(n: u64, reason: &str) -> RunOutcome {
+    RunOutcome::EffectRefused(RunOutcomeEffectRefused {
+        action_request_id: ActionRequestId(uuid(0x300 + n)),
+        reason: reason.to_owned(),
+    })
+}
+
+/// Pass 2, against a349ee2. The same fan-out, but the revision `fetch`'s revalidation read (5) is
+/// not borne out: the next load finds the case at 4 again, the revision the loop holds, so there is
+/// no move to judge. Item 8a and the executor contract now say that beside a stale read "the move is
+/// judged first"; once it is judged and ends nothing, the final refusal of `search` is still the
+/// port's answer, and the story's acceptance has the executor called once and the request never
+/// handed to the port again. The fix drops the final refusal instead: the executor runs again,
+/// proposes the same reads, and the port is handed `search` a second time.
+#[test]
+fn adversary_a_final_refusal_survives_a_stale_read_the_next_load_does_not_bear_out() {
+    let case = CaseId("case-adv-stale-not-borne-out".to_owned());
+    let governor = FakeGovernor::new();
+    let open = listing(4, vec![admissible("search"), admissible("fetch")]);
+    // The start, the completion, the frontier and `search`'s revalidation answer at 4; `fetch`'s
+    // revalidation reads revision 5; every call after answers at 4 again.
+    governor.script(
+        case.clone(),
+        repeat_n(open.clone(), 5)
+            .chain([listing(5, vec![admissible("search"), admissible("fetch")])])
+            .chain([open]),
+    );
+    let executor = ScriptedExecutor::new([
+        reads(&["search", "fetch"]),
+        reads(&["search", "fetch"]),
+        idle(),
+        idle(),
+    ]);
+    let effects =
+        Effects::answering("search", refused(GUARD, true)).reading(vec!["search", "fetch"]);
+
+    let end = run(&governor, &executor, &effects, &case);
+
+    assert!(
+        matches!(
+            end.requests[1].outcome,
+            RevalidateActionRequestOutcome::Stale { .. }
+        ),
+        "precondition: `fetch` is stale: {:?}",
+        end.requests[1].outcome
+    );
+    assert_eq!(
+        end.outcome,
+        named(1, GUARD),
+        "the move is judged first and ends nothing, so the final refusal of the first `search` \
+         ends the run"
+    );
+    assert_eq!(executor.calls().len(), 1, "the executor is not run again");
+    assert_eq!(
+        effects.invoked().iter().filter(|a| *a == "search").count(),
+        1,
+        "a request the port refused as final is never handed to it again"
     );
 }
