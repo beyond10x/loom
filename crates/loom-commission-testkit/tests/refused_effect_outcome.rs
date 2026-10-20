@@ -590,6 +590,51 @@ fn a_stale_read_beside_a_final_refusal_ends_as_after_a_stale_proposal() {
     );
 }
 
+/// The same fan-out under a step budget of one, the stale read's revision not borne out: the next
+/// load finds the case at 4 again. The stale iteration used up the budget, and the refusal kept
+/// across it still ends the run `EffectRefused`, before the budget suspends it: a final refusal is
+/// never lost, and the read it refused is never handed to the port again.
+/// (`adversary_w20261020w2_u1.rs` holds the same case without a budget.)
+#[test]
+fn a_final_refusal_kept_across_a_stale_read_ends_the_run_before_its_budget() {
+    let case = CaseId("case-final-refusal-kept-at-budget".to_owned());
+    let governor = FakeGovernor::new();
+    let open = listing(4, vec![admissible("search"), admissible("fetch")]);
+    // `fetch`'s revalidation reads revision 5; every call after answers at 4 again.
+    governor.script(
+        case.clone(),
+        std::iter::repeat_n(open.clone(), 5)
+            .chain([listing(5, vec![admissible("search"), admissible("fetch")])])
+            .chain([open]),
+    );
+    let executor = ScriptedExecutor::new([
+        fan_out(&["search", "fetch"]),
+        fan_out(&["search", "fetch"]),
+        idle(),
+    ]);
+    let effects =
+        Effects::answering("search", refused(GUARD, true)).reading(vec!["search", "fetch"]);
+
+    let (end, _) = run(&governor, &executor, &effects, &case, Some(1));
+
+    assert!(
+        matches!(
+            end.requests[1].outcome,
+            RevalidateActionRequestOutcome::Stale { .. }
+        ),
+        "precondition: `fetch` is stale: {:?}",
+        end.requests[1].outcome
+    );
+    assert_eq!(end.outcome, ended_refused(1, GUARD));
+    assert_eq!(executor.calls().len(), 1, "the executor is not run again");
+    assert_eq!(
+        effects.invoked(),
+        vec![request(1, &end.run_id, &case, 4, "search")],
+        "the refused read is handed to the port once"
+    );
+    assert_eq!(end.steps, 1, "the stale fan-out was a step");
+}
+
 const MERGE: &str = "merge";
 const CAPABILITY: &str = "repository.merge";
 
