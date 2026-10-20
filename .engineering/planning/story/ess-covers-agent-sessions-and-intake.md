@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:ess-covers-agent-sessions-and-intake
 kind: story
-status: draft
+status: active
 title: Loom's ESS counts metering at llm's Model, models the agent session executor and runs a conformance suite for ess/intake
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -42,7 +42,10 @@ scope:
   path: generated/rust/loom
 - confidence: cited
   path: website/docs/reference
-revision: 4
+revision: 6
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-20T17:46:06Z", actor: "human:timo", revision: 5}
+- {from: "proposed", to: "active", at: "2026-10-20T17:46:07Z", actor: "human:timo", revision: 6}
 ---
 ## Outcome
 

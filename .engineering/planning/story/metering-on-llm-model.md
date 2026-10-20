@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:metering-on-llm-model
 kind: story
-status: draft
+status: active
 title: The run meter and the reasoning-model selector run on llm Model, not the harness ModelPort
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -34,7 +34,10 @@ scope:
   path: crates/loom-executor/tests/selection_telemetry.rs
 - confidence: cited
   path: crates/loom-selector-laya/tests/laya_arguments_slice.rs
-revision: 8
+revision: 10
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-20T17:46:11Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":1}}}
+- {from: "proposed", to: "active", at: "2026-10-20T17:46:12Z", actor: "human:timo", revision: 10, decided_on: {"recorded":{"review_outcome":1}}}
 ---
 ## Outcome
 

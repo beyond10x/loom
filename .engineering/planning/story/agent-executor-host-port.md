@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:agent-executor-host-port
 kind: story
-status: draft
+status: active
 title: AgentExecutor is listed among the ports a host implements
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -17,7 +17,10 @@ scope:
   path: crates/loom-sdk/tests/host_ports.rs
 - confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 4
+revision: 6
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-20T17:46:13Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"review_outcome":2}}}
+- {from: "proposed", to: "active", at: "2026-10-20T17:46:14Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":2}}}
 ---
 ## Outcome
 

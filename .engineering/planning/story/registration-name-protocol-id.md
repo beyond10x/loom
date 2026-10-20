@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:registration-name-protocol-id
 kind: story
-status: draft
+status: active
 title: A protocol id with a dot registers, or its refusal names the registration form
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -16,7 +16,10 @@ scope:
   path: crates/loom-protocols/src/lib.rs
 - confidence: cited
   path: crates/loom-protocols/tests/catalog.rs
-revision: 2
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-20T17:46:04Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-10-20T17:46:05Z", actor: "human:timo", revision: 4}
 ---
 ## Outcome
 

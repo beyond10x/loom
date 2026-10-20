@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:chooser-executor-for-plugin-turns
 kind: story
-status: draft
+status: active
 title: Plugin turns run on the chooser executor over llm Model, not the ported harness loop
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -40,7 +40,10 @@ scope:
   path: crates/loom-plugin/tests/support/mod.rs
 - confidence: cited
   path: crates/loom-sdk/src/lib.rs
-revision: 8
+revision: 10
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-20T17:46:08Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":2}}}
+- {from: "proposed", to: "active", at: "2026-10-20T17:46:10Z", actor: "human:timo", revision: 10, decided_on: {"recorded":{"review_outcome":2}}}
 ---
 ## Outcome
 
