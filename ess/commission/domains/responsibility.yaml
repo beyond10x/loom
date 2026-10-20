@@ -237,7 +237,8 @@ types:
   # EffectRefused (the effect port refused an admitted request as final, `ends_run`).
   # story:idle-bound-outcome adds IdleBound (a run with no step budget made no progress for as many
   # iterations in a row as the idle bound allows, `JudgeIdleIteration`, `bound`, where it would
-  # otherwise go on); NoAdmissibleAction stays for a frontier that admits nothing.
+  # otherwise go on: a case its own performed effect completed ends it Completed);
+  # NoAdmissibleAction stays for a frontier that admits nothing.
   - name: commission.responsibility.RunOutcome
     kind: union
     tag: kind
@@ -1416,8 +1417,11 @@ commands:
   # already admitted in the Run, at whatever revision. `idle_iterations` counts such iterations in a
   # row, this one included; a newly admitted request starts the count again, and a stale proposal
   # is not counted, since the next iteration judges the move. Two end the run (`bound`), and the
-  # run outcome is `IdleBound`, naming the count as `bound` does; fewer change nothing. A run with a
-  # step budget is bounded by its budget alone and is never judged here.
+  # run outcome is `IdleBound`, naming the count as `bound` does; fewer change nothing. A completed
+  # case comes first: when the iteration's own effect was performed, the case is loaded before the
+  # run ends, as at a step budget, and a case the governor holds complete ends the run completed,
+  # not `IdleBound`. A run with a step budget is bounded by its budget alone and is never judged
+  # here.
   - name: commission.responsibility.JudgeIdleIteration
     input:
       - name: idle_iterations
