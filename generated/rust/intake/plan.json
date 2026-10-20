@@ -2,8 +2,8 @@
   "provenance": {
     "system": "intake",
     "specification_version": "v1",
-    "source_digest": "04c180bd51b47a13b3848f21e849c765b36b48b6b4ca1bf5684b50f2f134945c",
-    "contract_digest": "908a52d11757a390dac329e10b9835c22ddbb918efa0885066a58a1ac7ce5cc1"
+    "source_digest": "c84aa29378709c1ea1503e3e4c3d7e60aad1a5fbb842d04434c53da098633521",
+    "contract_digest": "d487aaaa783817bc9372965bb6af0d99432ffcf7789f0f3629d011e7be0aaec8"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -521,6 +521,25 @@
     },
     {
       "kind": "command_contract",
+      "source": "intake.routing.KeepResumeContext",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "intake.routing.KeepResumeContext",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "the fields of error `intake.routing.ResumeContextStorageFailed`, which the specification gives no source, in `storage-failed`"
+        },
+        "contract": "given `intake.routing.KeepResumeContext` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `config-and-catalog` when `(defined(config) and defined(catalog))`, error `intake.routing.ResumeContextConfigAndCatalog`; `already-kept` for an identity a record already carries, error `intake.routing.ResumeContextAlreadyKept`; `kept` otherwise, creates `intake.routing.ResumeContext`, emits `intake.routing.ResumeContextKept`; `storage-failed` externally decided (the resume context store cannot keep the context), error `intake.routing.ResumeContextStorageFailed`"
+      }
+    },
+    {
+      "kind": "command_contract",
       "source": "intake.routing.RecordMergeHandoff",
       "disposition": {
         "disposition": "generated"
@@ -541,6 +560,13 @@
     {
       "kind": "event_type",
       "source": "intake.routing.MergeHandedOff",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "intake.routing.ResumeContextKept",
       "disposition": {
         "disposition": "generated"
       }
@@ -568,6 +594,20 @@
     },
     {
       "kind": "error_type",
+      "source": "intake.routing.ResumeContextAlreadyKept",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "intake.routing.ResumeContextConfigAndCatalog",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
       "source": "intake.routing.ResumeContextNotFound",
       "disposition": {
         "disposition": "generated"
@@ -576,6 +616,34 @@
     {
       "kind": "error_type",
       "source": "intake.routing.ResumeContextStorageFailed",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_type",
+      "source": "intake.routing.MergeHandoffs",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_query",
+      "source": "intake.routing.MergeHandoffs",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_type",
+      "source": "intake.routing.ResumeContexts",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_query",
+      "source": "intake.routing.ResumeContexts",
       "disposition": {
         "disposition": "generated"
       }

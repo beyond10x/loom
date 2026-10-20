@@ -1,6 +1,6 @@
 // generated from intake v1
-// model digest 04c180bd51b47a13b3848f21e849c765b36b48b6b4ca1bf5684b50f2f134945c
-// contract digest 908a52d11757a390dac329e10b9835c22ddbb918efa0885066a58a1ac7ce5cc1
+// model digest c84aa29378709c1ea1503e3e4c3d7e60aad1a5fbb842d04434c53da098633521
+// contract digest d487aaaa783817bc9372965bb6af0d99432ffcf7789f0f3629d011e7be0aaec8
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Routing — `intake.routing`.
@@ -1423,6 +1423,72 @@ pub enum DropResumeContextOutcome {
     },
 }
 
+/// KeepResumeContext — the input of `intake.routing.KeepResumeContext`.
+///
+/// Everything it can result in is [`KeepResumeContextOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeepResumeContext {
+    /// `commission_id` — `intake.routing.CommissionId`.
+    pub commission_id: CommissionId,
+    /// `case_id` — `intake.routing.CaseId`.
+    pub case_id: CaseId,
+    /// `agent_revision_id` — `intake.routing.AgentRevisionId`.
+    pub agent_revision_id: AgentRevisionId,
+    /// `intent` — `String`.
+    pub intent: String,
+    /// `route` — `intake.routing.AcceptedRoute`.
+    pub route: AcceptedRoute,
+    /// `workspace` — `Optional<String>`.
+    pub workspace: Option<String>,
+    /// `test_command` — `List<String>`.
+    pub test_command: Vec<String>,
+    /// `test_paths` — `List<String>`.
+    pub test_paths: Vec<String>,
+    /// `regression_test_command` — `Optional<String>`.
+    pub regression_test_command: Option<String>,
+    /// `max_steps` — `Integer`.
+    pub max_steps: i64,
+    /// `confinement` — `intake.confinement.Backend`.
+    pub confinement: crate::confinement::Backend,
+    /// `cgroup_root` — `Optional<String>`.
+    pub cgroup_root: Option<String>,
+    /// `model` — `String`.
+    pub model: String,
+    /// `catalog` — `Optional<String>`.
+    pub catalog: Option<String>,
+    /// `config` — `Optional<String>`.
+    pub config: Option<String>,
+}
+
+/// Everything `intake.routing.KeepResumeContext` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeepResumeContextOutcome {
+    /// `config-and-catalog` — when `(defined(config) and defined(catalog))`.
+    ConfigAndCatalog {
+        /// Why it was refused: `intake.routing.ResumeContextConfigAndCatalog`.
+        error: ResumeContextConfigAndCatalog,
+    },
+    /// `already-kept` — for an identity a record already carries.
+    AlreadyKept {
+        /// Why it was refused: `intake.routing.ResumeContextAlreadyKept`.
+        error: ResumeContextAlreadyKept,
+    },
+    /// `kept` — otherwise.
+    Kept {
+        /// The `intake.routing.ResumeContextKept` this outcome publishes.
+        resume_context_kept: ResumeContextKept,
+    },
+    /// `storage-failed` — externally decided (the resume context store cannot keep the context).
+    StorageFailed {
+        /// Why it was refused: `intake.routing.ResumeContextStorageFailed`.
+        error: ResumeContextStorageFailed,
+    },
+}
+
 /// RecordMergeHandoff — the input of `intake.routing.RecordMergeHandoff`.
 ///
 /// Everything it can result in is [`RecordMergeHandoffOutcome`].
@@ -1480,6 +1546,15 @@ pub struct MergeHandedOff {
     pub head: String,
 }
 
+/// ResumeContextKept — the event `intake.routing.ResumeContextKept`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResumeContextKept {
+    /// `commission_id` — `intake.routing.CommissionId`.
+    pub commission_id: CommissionId,
+    /// `case_id` — `intake.routing.CaseId`.
+    pub case_id: CaseId,
+}
+
 /// The declared error `intake.routing.HeadAlreadyHandedOff`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeadAlreadyHandedOff {
@@ -1503,6 +1578,20 @@ pub struct MergeHandoffStorageFailed {
     pub reason: String,
 }
 
+/// The declared error `intake.routing.ResumeContextAlreadyKept`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResumeContextAlreadyKept {
+    /// `commission_id` — `intake.routing.CommissionId`.
+    pub commission_id: CommissionId,
+}
+
+/// The declared error `intake.routing.ResumeContextConfigAndCatalog`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResumeContextConfigAndCatalog {
+    /// `commission_id` — `intake.routing.CommissionId`.
+    pub commission_id: CommissionId,
+}
+
 /// The declared error `intake.routing.ResumeContextNotFound`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResumeContextNotFound {
@@ -1517,11 +1606,69 @@ pub struct ResumeContextStorageFailed {
     pub reason: String,
 }
 
-/// What this bounded context owes its implementor, as typed seams.
+/// MergeHandoffs — one row of the view `intake.routing.MergeHandoffs`.
 ///
-/// One trait per obligation in the synthesis plan, each carrying the plan's own contract.
-/// [`Unimplemented`](obligations::Unimplemented) satisfies every trait by refusing in the type system, so the workspace builds —
-/// and says exactly what it cannot yet do — before a line is hand-written.
+/// Projects `intake.routing.MergeHandoff` at `read_your_writes` consistency.
+/// The specification fully determines every row, so its query is generated over the storage port —
+/// see the plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergeHandoffs {
+    /// `action_request_id` — `intake.routing.ActionRequestId`.
+    pub action_request_id: ActionRequestId,
+    /// `commission_id` — `intake.routing.CommissionId`.
+    pub commission_id: CommissionId,
+    /// `workspace` — `String`.
+    pub workspace: String,
+    /// `head` — `String`.
+    pub head: String,
+    /// `state` — `intake.routing.MergeHandoff.State`.
+    pub state: MergeHandoffState,
+}
+
+/// ResumeContexts — one row of the view `intake.routing.ResumeContexts`.
+///
+/// Projects `intake.routing.ResumeContext` at `read_your_writes` consistency.
+/// The specification fully determines every row, so its query is generated over the storage port —
+/// see the plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResumeContexts {
+    /// `commission_id` — `intake.routing.CommissionId`.
+    pub commission_id: CommissionId,
+    /// `case_id` — `intake.routing.CaseId`.
+    pub case_id: CaseId,
+    /// `agent_revision_id` — `intake.routing.AgentRevisionId`.
+    pub agent_revision_id: AgentRevisionId,
+    /// `intent` — `String`.
+    pub intent: String,
+    /// `workspace` — `Optional<String>`.
+    pub workspace: Option<String>,
+    /// `test_command` — `List<String>`.
+    pub test_command: Vec<String>,
+    /// `test_paths` — `List<String>`.
+    pub test_paths: Vec<String>,
+    /// `regression_test_command` — `Optional<String>`.
+    pub regression_test_command: Option<String>,
+    /// `max_steps` — `Integer`.
+    pub max_steps: i64,
+    /// `confinement` — `intake.confinement.Backend`.
+    pub confinement: crate::confinement::Backend,
+    /// `cgroup_root` — `Optional<String>`.
+    pub cgroup_root: Option<String>,
+    /// `model` — `String`.
+    pub model: String,
+    /// `catalog` — `Optional<String>`.
+    pub catalog: Option<String>,
+    /// `config` — `Optional<String>`.
+    pub config: Option<String>,
+    /// `state` — `intake.routing.ResumeContext.State`.
+    pub state: ResumeContextState,
+}
+
+/// What this bounded context owes its implementor, and the seams of what is generated.
+///
+/// One trait per obligation in the synthesis plan, each carrying the plan's own contract, and one
+/// per generated behaviour, which [`Generated`](crate::behaviour::Generated) implements.
+/// [`Unimplemented`](obligations::Unimplemented) satisfies every owed trait by refusing in the type system.
 pub mod obligations {
     /// The behaviour `intake.routing.DropResumeContext` — an implementation obligation.
     ///
@@ -1534,6 +1681,19 @@ pub mod obligations {
         /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
         /// implementation never returns it.
         fn drop_resume_context(&mut self, input: super::DropResumeContext) -> Result<super::DropResumeContextOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `intake.routing.KeepResumeContext` — an implementation obligation.
+    ///
+    /// Why it is not generated: kept an obligation by the fields of error `intake.routing.ResumeContextStorageFailed`, which the specification gives no source, in `storage-failed`.
+    ///
+    /// Contract: given `intake.routing.KeepResumeContext` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `config-and-catalog` when `(defined(config) and defined(catalog))`, error `intake.routing.ResumeContextConfigAndCatalog`; `already-kept` for an identity a record already carries, error `intake.routing.ResumeContextAlreadyKept`; `kept` otherwise, creates `intake.routing.ResumeContext`, emits `intake.routing.ResumeContextKept`; `storage-failed` externally decided (the resume context store cannot keep the context), error `intake.routing.ResumeContextStorageFailed`.
+    pub trait KeepResumeContextBehavior {
+        /// Decides and enacts exactly one declared outcome of `intake.routing.KeepResumeContext`.
+        ///
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
+        fn keep_resume_context(&mut self, input: super::KeepResumeContext) -> Result<super::KeepResumeContextOutcome, crate::obligation::UnmetObligation>;
     }
 
     /// The behaviour `intake.routing.RecordMergeHandoff` — an implementation obligation.
@@ -1549,6 +1709,28 @@ pub mod obligations {
         fn record_merge_handoff(&mut self, input: super::RecordMergeHandoff) -> Result<super::RecordMergeHandoffOutcome, crate::obligation::UnmetObligation>;
     }
 
+    /// The query `intake.routing.MergeHandoffs` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage port. Implement it yourself to replace that query.
+    pub trait MergeHandoffsQuery {
+        /// Serves `intake.routing.MergeHandoffs` rows at the view's declared consistency.
+        ///
+        /// `Err` is the typed refusal of a row whose declared type cannot hold its value.
+        fn merge_handoffs(&self) -> Result<Vec<super::MergeHandoffs>, crate::obligation::UnmetObligation>;
+    }
+
+    /// The query `intake.routing.ResumeContexts` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage port. Implement it yourself to replace that query.
+    pub trait ResumeContextsQuery {
+        /// Serves `intake.routing.ResumeContexts` rows at the view's declared consistency.
+        ///
+        /// `Err` is the typed refusal of a row whose declared type cannot hold its value.
+        fn resume_contexts(&self) -> Result<Vec<super::ResumeContexts>, crate::obligation::UnmetObligation>;
+    }
+
     /// Every obligation of this bounded context, refused in the type system.
     ///
     /// Each method returns the typed refusal naming what is owed — never a panic, never a guessed
@@ -1558,6 +1740,12 @@ pub mod obligations {
     impl DropResumeContextBehavior for Unimplemented {
         fn drop_resume_context(&mut self, _input: super::DropResumeContext) -> Result<super::DropResumeContextOutcome, crate::obligation::UnmetObligation> {
             Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "intake.routing.DropResumeContext" })
+        }
+    }
+
+    impl KeepResumeContextBehavior for Unimplemented {
+        fn keep_resume_context(&mut self, _input: super::KeepResumeContext) -> Result<super::KeepResumeContextOutcome, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "intake.routing.KeepResumeContext" })
         }
     }
 
