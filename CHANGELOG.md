@@ -102,10 +102,18 @@ selector or generator by handing it the metered model; `RunMeter::new` takes the
 The SDK stability page lists `AgentExecutor` among the ports a host implements
 (`story:agent-executor-host-port`), at `loom_sdk::commission::ports::executor::AgentExecutor`: a
 host implements `run`, and the runtime calls the provided `run_with_usage`, which returns `run`'s
-outcome with no usage unless the host overrides it. `crates/loom-sdk/tests/host_ports.rs`
-implements it through `loom_sdk` alone and calls `run_with_usage` once, so a release that changes
-either method names it under `Breaking:`. Its row among the paths control-plane imports stays, its
-kind now `port` as for the other ports there. The trait does not change.
+outcome with no usage unless the host overrides it. Four more traits a host supplies join it:
+`Governor` (`loom_sdk::commission::ports::governor::Governor`, which `run_until_blocked` takes),
+`CredentialResolver` (`loom_sdk::connectors::CredentialResolver`, which resolves an endpoint's
+credential for `ConnectorsInvoker`), `TestRunner` (`loom_sdk::intake::slice::confinement::TestRunner`,
+which the slice's `LocalExecutor` takes through `with_runner`) and `Briefing`
+(`loom_sdk::loom::model_selector::Briefing`, what `ModelSelector` and `ModelArguments` tell the
+model). `crates/loom-sdk/tests/host_ports.rs` implements each through `loom_sdk` alone and calls
+`run_with_usage` once, so a release that changes any of them names it under `Breaking:`.
+`loom_sdk` now re-exports `serde_json` (`loom_sdk::serde_json`), whose `Value` a `Briefing`
+returns as an action's argument schema and which no `loom_sdk` path reached before. The rows of
+`AgentExecutor` and `Governor` among the paths control-plane imports stay, their kind now `port`
+as for the other ports there. No trait changes.
 Breaking: none.
 
 ## [0.29.0] - 2026-10-20

@@ -63,12 +63,15 @@ implements it through.
 | `EvaluationTime` | `loom_sdk::governor::EvaluationTime` | The trusted time a case is evaluated at |
 | `EffectPort` | `loom_sdk::commission::ports::effect::EffectPort` | Performing an admitted action |
 | `ConnectorInvoker` | `loom_sdk::commission::ports::connector::ConnectorInvoker` | Invoking the connector operation an action is bound to |
+| `CredentialResolver` | `loom_sdk::connectors::CredentialResolver` | The service credential a Connectors endpoint names, which `ConnectorsInvoker` asks for at each invocation; the invoker reads and keeps none |
 | `ObservationPort` | `loom_sdk::commission::ports::evidence::ObservationPort` | Receiving the observations a run reports |
 | `EvidencePort` | `loom_sdk::commission::ports::evidence::EvidencePort` | Receiving evidence attributed to its producer |
 | `AgentExecutor` | `loom_sdk::commission::ports::executor::AgentExecutor` | What an executor proposes for one frontier of its commission (`run`); the runtime calls the provided `run_with_usage`, which returns `run`'s outcome with no usage unless the host overrides it to report what the call spent |
+| `Governor` | `loom_sdk::commission::ports::governor::Governor` | A case's current revision, the frontier issued for it and whether the case is complete, which only the governor determines; `loom_sdk::CanonGovernor` implements it over Canon |
 | `ActionSelector` | `loom_sdk::loom::selection::ActionSelector` | Picking one action from the catalogue |
 | `WorkflowRunStore` | `loom_sdk::loom::workflow::WorkflowRunStore` | Durable storage of a workflow run's record, so the run resumes after a restart |
 | `ArgumentGenerator` | `loom_sdk::loom::arguments::ArgumentGenerator` | Arguments for the selected action only |
+| `Briefing` | `loom_sdk::loom::model_selector::Briefing` | What `ModelSelector` and `ModelArguments` tell the model: the text every request carries, the standing instructions of a selection request and of an argument request, and each action's argument schema, a `loom_sdk::serde_json::Value`; the provided `send`, `select` and `arguments` make one request each, and a host overrides them to ask otherwise |
 | `ModelPort` | `loom_sdk::loom::harness::wire::ModelPort` | One model turn over a wire |
 | `ToolPort` | `loom_sdk::loom::harness::wire::ToolPort` | The tools a turn may call, and their calls |
 | `BearerSource` | `loom_sdk::loom::harness::wire::BearerSource` | The credential a wire sends, resolved at each call |
@@ -78,9 +81,11 @@ implements it through.
 | `LoopSink` | `loom_sdk::loom::harness::turn_loop::LoopSink` | Receiving the loop's events |
 | `StreamSink` | `loom_sdk::loom::harness::wire::StreamSink` | Receiving a turn's stream events |
 | `LoopContext` | `loom_sdk::commission::runtime::LoopContext` | Ids, the time and the step budget, which no model supplies |
+| `TestRunner` | `loom_sdk::intake::slice::confinement::TestRunner` | Running the slice's test command in a workspace and reporting the confinement it observed applied, not the one it was asked for; the slice's `LocalExecutor` takes one through `with_runner`, and `loom_sdk::SubstrateRunner` is Loom's |
 
 `LoopContext` and `EffectPort` are also at the top (`loom_sdk::LoopContext`,
-`loom_sdk::EffectPort`), as are `ActionSelector`, `ArgumentGenerator` and `CaseStore`.
+`loom_sdk::EffectPort`), as are `ActionSelector`, `ArgumentGenerator`, `CaseStore` and
+`TestRunner`.
 
 ## Types and functions an embedding calls
 
@@ -109,6 +114,7 @@ implements it through.
 | `loom_sdk::connectors::cli::WriteError` | Why a governed write was not invoked: refused (no absolute proof path, an operation not described as a write, a describe Connectors refused) or failed |
 | `loom_sdk::connectors::cli::datasource::WriteOperation`, `loom_sdk::connectors::cli::datasource::WriteApproval`, `loom_sdk::connectors::cli::datasource::WriteResult`, `loom_sdk::connectors::cli::datasource::MutationClassification`, `loom_sdk::connectors::cli::datasource::WriteRefusal` | The governed write's operation, approval proof path, result (Connectors' classification, `request_id` and audit record) and refusal, generated from `loom.datasource` under `ess/`; they change with that declaration |
 | `loom_sdk::connectors::evidence::WriteEvidenceAdapter`, `loom_sdk::connectors::evidence::WriteEvidenceError` | The host evidence adapter: an applied write of its action becomes the protocol's evidence for the step (for `support-triage@1`, a `routing_record` for `ticket.route` naming its target, the `queue` or `owner` the admitted arguments name, in its facts as `target`) through `submit_evidence`; a write not applied records none, nor does a route whose target cannot be read or whose answer names another one (`WriteEvidenceError::Unreadable`) |
+| `loom_sdk::serde_json` | The `serde_json` crate Loom links, re-exported for the `Value` a `Briefing` returns as an action's argument schema |
 | `loom_sdk::commission`, `loom_sdk::connectors`, `loom_sdk::loom`, `loom_sdk::governor`, `loom_sdk::protocols`, `loom_sdk::intake::router`, `loom_sdk::intake::slice` | The re-exported crates, under these module names |
 
 ## Used by control-plane
@@ -138,7 +144,7 @@ Rows marked *generated* are generated model types or modules, outside the promis
 | `loom_sdk::commission::ports::effect::EffectPort` | port |
 | `loom_sdk::commission::ports::evidence::submit_evidence` | function |
 | `loom_sdk::commission::ports::executor::AgentExecutor` | port |
-| `loom_sdk::commission::ports::governor::Governor` | trait |
+| `loom_sdk::commission::ports::governor::Governor` | port |
 | `loom_sdk::governor::CaseState` | type |
 | `loom_sdk::governor::FallibleCaseStore` | port |
 | `loom_sdk::loom::arguments::ArgumentContext` | type |
