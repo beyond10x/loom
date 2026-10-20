@@ -16,11 +16,11 @@ use loom_sdk::commission::model::behaviour::Generated;
 use loom_sdk::commission::model::json::Value as CommissionValue;
 use loom_sdk::commission::model::primitives::{Timestamp, Uuid as CommissionUuid};
 use loom_sdk::commission::model::responsibility::{
-    ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, AuthorityVerdict, CaseId,
-    Commission, CommissionData, CommissionId, CompletionDetermination, EffectOutcome,
-    EffectOutcomePerformed, Frontier, FrontierAction, FrontierData, FrontierId, FrontierObligation,
-    GovernorError, Observation, ObservationId, PrincipalId, RunId, Unit, commission_state,
-    frontier_state, observation_state,
+    ActionRequestData, ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext,
+    AuthorityVerdict, CaseId, Commission, CommissionData, CommissionId, CompletionDetermination,
+    EffectOutcome, EffectOutcomePerformed, Frontier, FrontierAction, FrontierData, FrontierId,
+    FrontierObligation, GovernorError, Observation, ObservationId, PrincipalId, RunId, Unit,
+    commission_state, frontier_state, observation_state,
 };
 use loom_sdk::commission::outcome::RunStore;
 use loom_sdk::commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
@@ -104,6 +104,7 @@ impl AuthorityProvider for NoAuthority {
     fn decide(
         &self,
         _commission: &CommissionData,
+        _request: &ActionRequestData,
         capability: &str,
     ) -> Result<AuthorityVerdict, AuthorityProviderError> {
         Err(AuthorityProviderError {

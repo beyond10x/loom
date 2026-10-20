@@ -19,7 +19,8 @@
 //! request proposed again later in the resumed run (whose Suspension the resume has taken and
 //! released by then), is not allowed by it. Everything else needs approval, as the slice's own
 //! provider answers. A suspension store that cannot be read is a failure to decide, which never
-//! allows.
+//! allows. It reads the request from the Suspension the store holds, not from the action request
+//! Commission passes it.
 //!
 //! With Mandate (`approve --mandate`, `resume --mandate`, `story:mandate-approval-on-resume`), a
 //! [`MandateApprovals`] the host built from its Mandate file takes part: [`approve`] records a
@@ -36,9 +37,9 @@ use std::path::{Path, PathBuf};
 
 use b10x_loom_commission::model::json;
 use b10x_loom_commission::model::responsibility::{
-    AuthorityContext, AuthorityVerdict, AuthorityVerdictApprovalRequired, AuthorityVerdictDeny,
-    CaseId, CommissionData, CommissionId as HeldCommissionId, SuspensionReason, SuspensionState,
-    Unit,
+    ActionRequestData, AuthorityContext, AuthorityVerdict, AuthorityVerdictApprovalRequired,
+    AuthorityVerdictDeny, CaseId, CommissionData, CommissionId as HeldCommissionId,
+    SuspensionReason, SuspensionState, Unit,
 };
 use b10x_loom_commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
 use b10x_loom_commission::ports::suspension::SuspensionPort;
@@ -409,6 +410,7 @@ impl AuthorityProvider for GrantAuthority<'_> {
     fn decide(
         &self,
         commission: &CommissionData,
+        _request: &ActionRequestData,
         capability: &str,
     ) -> Result<AuthorityVerdict, AuthorityProviderError> {
         if let Some(grant) = &self.grant
@@ -611,8 +613,8 @@ mod tests {
     fn a_grant_allows_only_the_request_the_pending_suspension_holds() {
         use b10x_loom_commission::model::primitives::Uuid as HeldUuid;
         use b10x_loom_commission::model::responsibility::{
-            ActionRequestId as HeldRequestId, AgentRevisionId, AuthorityContext, CaseId,
-            HoldSuspension, HoldSuspensionOutcome, PrincipalId, ProposedActionArguments,
+            ActionRequestData, ActionRequestId as HeldRequestId, AgentRevisionId, AuthorityContext,
+            CaseId, HoldSuspension, HoldSuspensionOutcome, PrincipalId, ProposedActionArguments,
             ReleaseSuspension, RunId, SuspensionKey, TakeSuspension,
         };
         use loom_governor::FileSuspensionStore;
@@ -635,9 +637,18 @@ mod tests {
         let key = SuspensionKey {
             commission_id: commission.commission_id.clone(),
         };
+        // The request the resume revalidates: the one the Suspension below holds.
+        let asked = ActionRequestData {
+            action_request_id: request.clone(),
+            run_id: RunId(HeldUuid("00000000-0000-4000-8000-000000000003".to_owned())),
+            case_id: commission.case_id.clone(),
+            expected_case_revision: 3,
+            action: "repository.merge".to_owned(),
+            arguments: ProposedActionArguments(json::Value::Object(Vec::new())),
+        };
         let allows = |grant: Option<GrantData>, capability: &str| {
             matches!(
-                GrantAuthority::new(grant, &suspensions).decide(&commission, capability),
+                GrantAuthority::new(grant, &suspensions).decide(&commission, &asked, capability),
                 Ok(AuthorityVerdict::Allow(_))
             )
         };
@@ -684,7 +695,7 @@ mod tests {
         )));
         assert!(
             matches!(
-                GrantAuthority::new(Some(carried), &suspensions).decide(&commission, "repository.merge"),
+                GrantAuthority::new(Some(carried), &suspensions).decide(&commission, &asked, "repository.merge"),
                 Ok(AuthorityVerdict::Deny(AuthorityVerdictDeny { reason })) if reason.contains("--mandate")
             ),
             "a grant naming a Mandate approval, without Mandate"

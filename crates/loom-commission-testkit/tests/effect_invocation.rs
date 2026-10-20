@@ -22,15 +22,15 @@ use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
-    ActionBinding, ActionBindingData, ActionBindingKey, ActionRequestId, ActionStatus,
-    AgentRevisionId, AuthorityContext, AuthorityVerdict, AuthorityVerdictApprovalRequired,
-    AuthorityVerdictDeny, CaseId, Commission, CommissionData, CommissionId, ConnectorAttemptId,
-    ConnectorAuditRef, ConnectorInstanceId, ConnectorOperationEffect, ConnectorOperationId,
-    EffectOutcome, EffectOutcomePerformed, ExecutorOutcome, ExecutorOutcomeProposedAction,
-    Frontier, FrontierAction, FrontierData, ObservationData, ObservationId, PrincipalId,
-    ProposedActionArguments, RevalidateActionRequestOutcome, RunId, RunOutcome,
-    RunOutcomeAwaitingApproval, RunOutcomeCompleted, RunOutcomeNeedsAuthority, Unit,
-    commission_state, frontier_state,
+    ActionBinding, ActionBindingData, ActionBindingKey, ActionRequestData, ActionRequestId,
+    ActionStatus, AgentRevisionId, AuthorityContext, AuthorityVerdict,
+    AuthorityVerdictApprovalRequired, AuthorityVerdictDeny, CaseId, Commission, CommissionData,
+    CommissionId, ConnectorAttemptId, ConnectorAuditRef, ConnectorInstanceId,
+    ConnectorOperationEffect, ConnectorOperationId, EffectOutcome, EffectOutcomePerformed,
+    ExecutorOutcome, ExecutorOutcomeProposedAction, Frontier, FrontierAction, FrontierData,
+    ObservationData, ObservationId, PrincipalId, ProposedActionArguments,
+    RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeAwaitingApproval,
+    RunOutcomeCompleted, RunOutcomeNeedsAuthority, Unit, commission_state, frontier_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
@@ -274,10 +274,11 @@ impl AuthorityProvider for Authority<'_> {
     fn decide(
         &self,
         commission: &CommissionData,
+        request: &ActionRequestData,
         capability: &str,
     ) -> Result<AuthorityVerdict, AuthorityProviderError> {
         self.journal.note(Step::Authority);
-        self.inner.decide(commission, capability)
+        self.inner.decide(commission, request, capability)
     }
 }
 

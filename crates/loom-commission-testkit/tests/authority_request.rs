@@ -233,6 +233,16 @@ impl AuthorityProvider for RevisionBoundGrant {
     }
 }
 
+/// The one question `provider` was asked: its capability and its action request.
+fn asked_once(provider: &StaticAuthorityProvider) -> (String, ActionRequestData) {
+    let asked = provider.asked();
+    let requests = provider.requests();
+    match (asked.as_slice(), requests.as_slice()) {
+        ([query], [request]) => (query.capability.clone(), request.clone()),
+        _ => panic!("the provider is asked once, got {asked:?} about {requests:?}"),
+    }
+}
+
 /// Runs the commission on `case` with a suspension port, the merge proposed once at revision 7 and
 /// withheld by `authority`, so the run ends holding a Suspension for the request.
 fn suspend_at_seven(
@@ -282,22 +292,19 @@ fn the_provider_sees_the_request_it_decides() {
         panic!("one request revalidated, got {:?}", end.requests);
     };
     let revalidated = revalidated.request.clone();
-    let asked = withholding.asked();
-    let [query] = asked.as_slice() else {
-        panic!("the provider is asked once, got {asked:?}");
-    };
+    let (capability, seen) = asked_once(&withholding);
     assert_eq!(
-        query.request, revalidated,
+        seen, revalidated,
         "the provider is asked about the request the runtime revalidated"
     );
-    assert_eq!(query.capability, CAPABILITY);
-    assert_eq!(query.request.action, MERGE);
+    assert_eq!(capability, CAPABILITY);
+    assert_eq!(seen.action, MERGE);
     assert_eq!(
-        query.request.expected_case_revision, 7,
+        seen.expected_case_revision, 7,
         "the request is bound to the frontier's revision, never to one the arguments name"
     );
-    assert_eq!(query.request.case_id, case);
-    assert_eq!(query.request.arguments, arguments());
+    assert_eq!(seen.case_id, case);
+    assert_eq!(seen.arguments, arguments());
     assert!(effects.invoked().is_empty(), "nothing is performed yet");
 
     // The resume, in a new process: the case is still at 7 and completes once the merge is done.
@@ -317,15 +324,12 @@ fn the_provider_sees_the_request_it_decides() {
         &mut Context::starting_at(0x500),
     )
     .unwrap_or_else(|error| panic!("the resume failed: {error:?}"));
-    let asked = granting.asked();
-    let [query] = asked.as_slice() else {
-        panic!("the resumed request is decided once, got {asked:?}");
-    };
+    let (capability, seen) = asked_once(&granting);
     assert_eq!(
-        query.request, revalidated,
+        seen, revalidated,
         "the resumed request's provider is asked about the request the Suspension holds"
     );
-    assert_eq!(query.capability, CAPABILITY);
+    assert_eq!(capability, CAPABILITY);
     assert_eq!(
         effects.invoked(),
         vec![revalidated],
@@ -377,7 +381,10 @@ fn a_grant_bound_to_one_revision_does_not_allow_the_next() {
         .iter()
         .map(|revalidated| revalidated.request.clone())
         .collect();
-    assert_eq!(asked, revalidated, "each time about the request revalidated");
+    assert_eq!(
+        asked, revalidated,
+        "each time about the request revalidated"
+    );
     assert_eq!(
         effects.invoked(),
         vec![asked[0].clone()],
@@ -405,10 +412,8 @@ fn a_failing_provider_still_grants_nothing() {
     let governor = FakeGovernor::new();
     governor.script(case.clone(), [gated_merge(7)]);
     let executor = ScriptedExecutor::new(
-        std::iter::once(propose_merge()).chain(repeat_n(
-            ExecutorOutcome::NoUsefulAction(Unit(true)),
-            3,
-        )),
+        std::iter::once(propose_merge())
+            .chain(repeat_n(ExecutorOutcome::NoUsefulAction(Unit(true)), 3)),
     );
     let effects = Effects::default();
     let provider = failing();
@@ -422,11 +427,8 @@ fn a_failing_provider_still_grants_nothing() {
         &mut Context::starting_at(0x300),
     )
     .unwrap_or_else(|error| panic!("the loop failed: {error:?}"));
-    let asked = provider.asked();
-    let [query] = asked.as_slice() else {
-        panic!("the provider is asked once, got {asked:?}");
-    };
-    assert_eq!(query.request, end.requests[0].request);
+    let (_, seen) = asked_once(&provider);
+    assert_eq!(seen, end.requests[0].request);
     assert!(end.admitted.is_empty(), "nothing is admitted: {end:?}");
     assert!(effects.invoked().is_empty(), "nothing is performed");
 
@@ -458,11 +460,8 @@ fn a_failing_provider_still_grants_nothing() {
         }
         other => panic!("a failing provider refuses the resume NotGranted, got {other:?}"),
     }
-    let asked = provider.asked();
-    let [query] = asked.as_slice() else {
-        panic!("the provider is asked once, got {asked:?}");
-    };
-    assert_eq!(query.request, held);
+    let (_, seen) = asked_once(&provider);
+    assert_eq!(seen, held);
     assert!(effects.invoked().is_empty(), "nothing is performed");
     let commission_id = commission(&case).data().commission_id.clone();
     let stored = SuspensionPort::get(&suspensions, &commission_id)

@@ -32,7 +32,7 @@ use loom_sdk::commission::model::behaviour::Generated;
 use loom_sdk::commission::model::json::{self, Value};
 use loom_sdk::commission::model::primitives::{Timestamp, Uuid};
 use loom_sdk::commission::model::responsibility::{
-    ActionRequestId, AgentRevisionId, AuthorityContext, AuthorityVerdict,
+    ActionRequestData, ActionRequestId, AgentRevisionId, AuthorityContext, AuthorityVerdict,
     AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData, CommissionId,
     ObservationId, PrincipalId, RevalidateActionRequestOutcome, RunId, RunOutcome,
     commission_state,
@@ -267,6 +267,7 @@ impl AuthorityProvider for NoGrant {
     fn decide(
         &self,
         _commission: &CommissionData,
+        _request: &ActionRequestData,
         capability: &str,
     ) -> Result<AuthorityVerdict, AuthorityProviderError> {
         Ok(AuthorityVerdict::ApprovalRequired(

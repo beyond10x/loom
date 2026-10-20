@@ -15,9 +15,9 @@ use b10x_loom_cli::mandate::Mandate;
 use b10x_loom_commission::model::json;
 use b10x_loom_commission::model::primitives::Uuid as HeldUuid;
 use b10x_loom_commission::model::responsibility::{
-    ActionRequestId as HeldRequestId, AgentRevisionId, AuthorityVerdict, CaseId, CommissionData,
-    CommissionId as HeldCommissionId, HoldSuspension, HoldSuspensionOutcome, PrincipalId,
-    ProposedActionArguments, RunId, SuspensionKey, SuspensionReason,
+    ActionRequestData, ActionRequestId as HeldRequestId, AgentRevisionId, AuthorityVerdict, CaseId,
+    CommissionData, CommissionId as HeldCommissionId, HoldSuspension, HoldSuspensionOutcome,
+    PrincipalId, ProposedActionArguments, RunId, SuspensionKey, SuspensionReason,
 };
 use b10x_loom_commission::ports::authority::AuthorityProvider;
 use b10x_loom_commission::ports::suspension::SuspensionPort;
@@ -147,7 +147,16 @@ impl State {
             principal: PrincipalId("operator".to_owned()),
             authority_context: mandate.authority_context(),
         };
-        match authority.decide(&data, CAPABILITY) {
+        // The request the resume revalidates: the one `hold` keeps, under the grant's request id.
+        let request = ActionRequestData {
+            action_request_id: HeldRequestId(HeldUuid(grant.action_request_id.0.0.clone())),
+            run_id: RunId(HeldUuid("00000000-0000-4000-8000-0000000000c3".to_owned())),
+            case_id: CaseId(CASE.to_owned()),
+            expected_case_revision: 3,
+            action: CAPABILITY.to_owned(),
+            arguments: ProposedActionArguments(json::Value::Object(Vec::new())),
+        };
+        match authority.decide(&data, &request, CAPABILITY) {
             Ok(AuthorityVerdict::Allow(_)) => Ok(()),
             other => Err(format!("{other:?}")),
         }

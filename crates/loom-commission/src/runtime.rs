@@ -1095,7 +1095,7 @@ where
                 RevalidateActionRequestOutcome::NeedsAuthority { error } => {
                     pending = Some(data.clone());
                     if let AuthorityCheck::Decided(answer) =
-                        check_authority(authority, commission, &error.capability)
+                        check_authority(authority, commission, &data, &error.capability)
                     {
                         match &answer {
                             AuthorityVerdict::Allow(Unit(true)) => admitted = true,
@@ -1388,7 +1388,7 @@ where
             return refused(ResumeRefusal::NotAdmitted(answer));
         }
         RevalidateActionRequestOutcome::NeedsAuthority { error } => {
-            let check = check_authority(authority, commission, &error.capability);
+            let check = check_authority(authority, commission, &request, &error.capability);
             if !check.allows() {
                 return refused(ResumeRefusal::NotGranted(check));
             }

@@ -7,7 +7,8 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use b10x_loom_commission::model::responsibility::{
-    AuthorityVerdict, AuthorityVerdictApprovalRequired, AuthorityVerdictDeny, CommissionData,
+    ActionRequestData, AuthorityVerdict, AuthorityVerdictApprovalRequired, AuthorityVerdictDeny,
+    CommissionData,
 };
 use b10x_loom_commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
 use b10x_loom_commission_testkit::kits::authority::{self, AuthorityFixture, Backing, Check};
@@ -35,6 +36,7 @@ impl AuthorityProvider for Mutant {
     fn decide(
         &self,
         _commission: &CommissionData,
+        _request: &ActionRequestData,
         capability: &str,
     ) -> Result<AuthorityVerdict, AuthorityProviderError> {
         let answer = match self.defect {

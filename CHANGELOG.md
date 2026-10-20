@@ -9,6 +9,8 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+An authority provider sees the action request it decides (`story:authority-sees-the-request`). `AuthorityProvider::decide` takes the action request beside the commission and the capability: the `ActionRequestData` the runtime revalidated, at the run loop's check and at a resumed request's, its id, Run and case the runtime's and its `expected_case_revision` the revision of the frontier the proposal was chosen from, never one the executor wrote; its action and arguments are the proposal as written. A provider can therefore allow one request at one case revision and refuse the same action at the next. `check_authority` takes the request too, and still refuses on a provider's `Err`. No provider in Loom grants more or less than before: `MandateAuthority`, `PluginAuthority`, the slice's `GrantAuthority` and its run provider do not read the request. The testkit's `StaticAuthorityProvider` records each request (`requests`). Breaking: a host implementing `AuthorityProvider` adds the parameter, `fn decide(&self, commission: &CommissionData, request: &ActionRequestData, capability: &str) -> Result<AuthorityVerdict, AuthorityProviderError>`, and a caller of `check_authority(provider, commission, request, capability)` passes the request.
+
 ## [0.26.0] - 2026-10-17
 
 Loom 0.26.0 links llm 0.7.0, names the target in the routing record of a governed write, and

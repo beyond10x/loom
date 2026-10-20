@@ -110,6 +110,7 @@ mod hosts {
         fn decide(
             &self,
             _commission: &CommissionData,
+            _request: &loom_sdk::commission::model::responsibility::ActionRequestData,
             _capability: &str,
         ) -> Result<AuthorityVerdict, AuthorityProviderError> {
             unreachable!("{NEVER_CALLED}")

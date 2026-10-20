@@ -14,9 +14,9 @@ use std::path::PathBuf;
 use b10x_loom_commission::model::json;
 use b10x_loom_commission::model::primitives::{Timestamp as CommissionTimestamp, Uuid as Id};
 use b10x_loom_commission::model::responsibility::{
-    ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, AuthorityVerdict, CaseId,
-    Commission, CommissionData, CommissionId, EffectOutcome, ExecutorOutcome,
-    ExecutorOutcomeProposedAction, FrontierAction, ObservationId, PrincipalId,
+    ActionRequestData, ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext,
+    AuthorityVerdict, CaseId, Commission, CommissionData, CommissionId, EffectOutcome,
+    ExecutorOutcome, ExecutorOutcomeProposedAction, FrontierAction, ObservationId, PrincipalId,
     ProposedActionArguments, RunId, Unit, commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
@@ -250,6 +250,18 @@ fn commission_with(
     })
 }
 
+/// The action request every decision here is about. `MandateAuthority` does not read it.
+fn request() -> ActionRequestData {
+    ActionRequestData {
+        action_request_id: ActionRequestId(id(0xe1)),
+        run_id: RunId(id(0xe2)),
+        case_id: CaseId(CASE.to_owned()),
+        expected_case_revision: 1,
+        action: "merge".to_owned(),
+        arguments: ProposedActionArguments(json::Value::Null),
+    }
+}
+
 /// Counts what policy was asked, and answers as `inner` does.
 struct Counting<'a> {
     asked: &'a Cell<usize>,
@@ -389,7 +401,7 @@ fn security_a_model_proposal_naming_a_granted_subject_or_case_grants_nothing() {
     let allowed = commission_with(CASE, host_context(&context_of(granted())));
     let control = provider(allowing(), SequentialDecisionIds::new());
     assert_eq!(
-        control.decide(allowed.data(), CAPABILITY),
+        control.decide(allowed.data(), &request(), CAPABILITY),
         Ok(AuthorityVerdict::Allow(Unit(true))),
         "control: the granted subject on the granted case is allowed"
     );
@@ -402,7 +414,7 @@ fn security_a_model_proposal_naming_a_granted_subject_or_case_grants_nothing() {
     // The subject: the host says the ungranted member acts; the model names the granted one.
     let as_ungranted = commission_with(CASE, host_context(&context_of(ungranted())));
     let subject_side = provider(allowing(), SequentialDecisionIds::new());
-    let decided = subject_side.decide(as_ungranted.data(), CAPABILITY);
+    let decided = subject_side.decide(as_ungranted.data(), &request(), CAPABILITY);
     assert!(
         !matches!(decided, Ok(AuthorityVerdict::Allow(_))),
         "the host's ungranted subject must not be allowed, got {decided:?}"
@@ -416,7 +428,7 @@ fn security_a_model_proposal_naming_a_granted_subject_or_case_grants_nothing() {
     // The resource: the commission is for a case nobody holds; the model names the granted case.
     let other_case = commission_with(OTHER_CASE, host_context(&context_of(granted())));
     let resource_side = provider(allowing(), SequentialDecisionIds::new());
-    let decided = resource_side.decide(other_case.data(), CAPABILITY);
+    let decided = resource_side.decide(other_case.data(), &request(), CAPABILITY);
     assert!(
         !matches!(decided, Ok(AuthorityVerdict::Allow(_))),
         "the granted subject on another case must not be allowed, got {decided:?}"
@@ -446,7 +458,7 @@ fn security_only_the_exact_granted_action_is_allowed() {
         "repository",
         "repository.merge.force",
     ] {
-        let decided = provider.decide(commission.data(), capability);
+        let decided = provider.decide(commission.data(), &request(), capability);
         assert!(
             !matches!(decided, Ok(AuthorityVerdict::Allow(_))),
             "{capability:?} is not the granted action and must not be allowed, got {decided:?}"
@@ -483,7 +495,7 @@ fn security_a_poisoned_allocator_grants_nothing_afterwards() {
         },
     );
     let first = catch_unwind(AssertUnwindSafe(|| {
-        provider.decide(commission.data(), CAPABILITY)
+        provider.decide(commission.data(), &request(), CAPABILITY)
     }));
     assert!(
         first.is_err(),
@@ -491,7 +503,7 @@ fn security_a_poisoned_allocator_grants_nothing_afterwards() {
     );
 
     for _ in 0..2 {
-        let decided = provider.decide(commission.data(), CAPABILITY);
+        let decided = provider.decide(commission.data(), &request(), CAPABILITY);
         match &decided {
             Err(error) => assert!(
                 error.message.contains("Unavailable"),
@@ -500,7 +512,7 @@ fn security_a_poisoned_allocator_grants_nothing_afterwards() {
             ),
             other => panic!("a poisoned allocator must decide nothing, got {other:?}"),
         }
-        assert!(!check_authority(&provider, &commission, CAPABILITY).allows());
+        assert!(!check_authority(&provider, &commission, &request(), CAPABILITY).allows());
     }
 }
 
@@ -614,7 +626,7 @@ fn security_a_verified_context_naming_its_subject_twice_grants_nothing() {
             SequentialDecisionIds::new(),
         );
         let commission = commission_with(CASE, context_from(&text));
-        let decided = provider.decide(commission.data(), CAPABILITY);
+        let decided = provider.decide(commission.data(), &request(), CAPABILITY);
         assert!(
             decided.is_err(),
             "{text}: a context naming its subject twice decides nothing, got {decided:?}"
@@ -629,7 +641,7 @@ fn security_a_verified_context_naming_its_subject_twice_grants_nothing() {
 fn security_an_approval_requirement_is_not_granted_on_resume() {
     let commission = commission_with(CASE, host_context(&context_of(granted())));
     let provider = provider(requiring_approval(), SequentialDecisionIds::new());
-    assert!(!check_authority(&provider, &commission, CAPABILITY).allows());
+    assert!(!check_authority(&provider, &commission, &request(), CAPABILITY).allows());
 
     let governor = gating_governor(CASE);
     let executor = proposing("null");
@@ -704,7 +716,7 @@ fn security_distinct_case_ids_are_distinct_mandate_resources() {
     // Through the provider: the granted subject holds `maintainer` on CASE only.
     let commission = commission_with(&CASE.to_uppercase(), host_context(&context_of(granted())));
     let provider = provider(allowing(), SequentialDecisionIds::new());
-    let decided = provider.decide(commission.data(), CAPABILITY);
+    let decided = provider.decide(commission.data(), &request(), CAPABILITY);
     assert!(
         !matches!(decided, Ok(AuthorityVerdict::Allow(_))),
         "case {} was granted through the grant on case {CASE}: {decided:?}",
