@@ -693,6 +693,7 @@ impl ChildCommand {
             scratch: None,
             measurements: Default::default(),
             read_only_roots: Vec::new(),
+            read_only_files: Vec::new(),
             secret_slots: Vec::new(),
             capsule: None,
             lease_ttl_ms: None,
@@ -827,9 +828,9 @@ fn check_host(name: &str, host: &str, pinned: Ipv4Addr) -> Result<(), Confinemen
 }
 
 /// Accept Substrate's record of what it applied only when it is the confinement `input` required:
-/// its workspace access, profile, read-only roots and capability snapshot, no secret slot, a
-/// cgroup, and exactly the requested network ([`network_applied`]). A test's launch and a child's
-/// are held to the same record.
+/// its workspace access, profile, read-only roots, read-only files and capability snapshot, no
+/// secret slot, a cgroup, and exactly the requested network ([`network_applied`]). A test's launch
+/// and a child's are held to the same record.
 fn check_record(
     input: &ExecStartInput,
     egress: Option<&EgressAperture>,
@@ -840,6 +841,7 @@ fn check_record(
         || input.sandbox.aperture.as_deref() != egress.map(|aperture| aperture.name.as_str())
         || record.profile != input.sandbox.profile
         || record.read_only_roots != input.read_only_roots
+        || record.read_only_files != input.read_only_files
         || !record.secret_slots.is_empty()
         || record.capability_snapshot != input.sandbox.capability_snapshot
         || record.cgroup.is_empty()
@@ -1152,6 +1154,7 @@ impl RustClosure {
             scratch: None,
             measurements: Default::default(),
             read_only_roots: self.roots.clone(),
+            read_only_files: Vec::new(),
             secret_slots: Vec::new(),
             capsule: None,
             lease_ttl_ms: None,
@@ -1629,6 +1632,7 @@ mod tests {
             workspace_access: input.workspace_access.clone(),
             capsule: None,
             read_only_roots: input.read_only_roots.clone(),
+            read_only_files: input.read_only_files.clone(),
             secret_slots: Vec::new(),
         }
     }
@@ -1713,6 +1717,24 @@ mod tests {
         };
         let record = record_for(&input, applied_aperture("other", PINNED, None));
         assert!(check_record(&input, Some(&other), &record).is_err());
+    }
+
+    #[test]
+    fn a_record_binding_a_read_only_file_the_request_did_not_name_is_refused() {
+        let child = ChildCommand::new("true", [] as [&str; 0], "/work/space");
+        let input = child.input("space", "snapshot".to_owned());
+        let mut record = record_for(&input, AppliedNetwork::None);
+        check_record(&input, None, &record).unwrap();
+        record.read_only_files.push(substrate_wire::ReadOnlyFile {
+            host_path: "/etc/hostname".to_owned(),
+            mount: "/etc/hostname".to_owned(),
+        });
+        let error = check_record(&input, None, &record).unwrap_err();
+        assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
+        assert_eq!(
+            error.detail,
+            "Substrate's applied confinement does not match the required profile"
+        );
     }
 
     #[test]
