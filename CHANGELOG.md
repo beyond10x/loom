@@ -64,13 +64,16 @@ row that ended it, apart from a run whose frontier admits nothing, which still e
 budget, two iterations in a row that admit no new request end the run, whatever kind of idle
 iteration they are (no useful action, local reasoning, a refused or denied proposal, a repeated
 admission, a move the governor does not bear out), and a new admission starts the count again.
-The runtime decides it with `outcome::judge_idle`, the behaviour ESS generates for the new command
+A completed case comes first: when the last idle iteration's effect was performed, the case is
+loaded before the bound ends the run, as at a step budget, and a case the governor holds complete
+ends it `Completed`, where 0.27.0 ended it `NoAdmissibleAction`. The runtime decides it with `outcome::judge_idle`, the behaviour ESS generates for the new command
 `JudgeIdleIteration`. The intake slice maps `IdleBound` to `StopReason::NothingAdmissible` with the
 stop line it printed before, and the `run --output jsonl` contract does not change; the slice's own
 runs always carry a step budget and never reach the idle bound.
 Breaking: a host that matches `RunOutcome` exhaustively handles `IdleBound`, and a host that read
 `NoAdmissibleAction` as the end of a run with no step budget that made no progress reads
-`IdleBound` instead.
+`IdleBound` instead, or `Completed` where the last idle iteration's performed effect completed the
+case.
 
 ## [0.27.0] - 2026-10-20
 

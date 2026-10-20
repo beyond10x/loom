@@ -150,16 +150,21 @@
 //! [`judge_idle`] decides it from the idle iterations in a row, this one included: `bound` at two,
 //! and `below`, which changes nothing, at one. A run whose frontier admits nothing still ends with
 //! no admissible action, on the outcome derived from that frontier (8-10), never on the idle
-//! bound. An iteration is idle when it admits no request, or admits only requests with the action and arguments of ones already admitted in
-//! this Run, at whatever revision (a refused fan-out admits none): an effect that moved the case does not make the same proposal
-//! new. A newly admitted request starts the count again. Idle covers `NoUsefulAction`,
+//! bound. An iteration is idle when it admits no request, or admits only requests with the action
+//! and arguments of ones already admitted in this Run, at whatever revision (a refused fan-out
+//! admits none): an effect that moved the case does not make the same proposal new. A newly
+//! admitted request starts the count again. Idle covers `NoUsefulAction`,
 //! `CompletedLocalReasoning`, a refused proposal, an authority answer other than an allow and a
 //! repeated admission alike, whatever the effect port answered for it short of a final refusal,
 //! which ends the run (8), and a `CaseMoved` the governor does not bear out counts as
 //! `NoUsefulAction`; a stale proposal is not counted, since the next iteration ends the run, and a
 //! `CaseMoved` the governor bears out ends it at once (9). The idle bound ends a run whose
-//! derivation would let it go on, so the case is not loaded again before it (10). A loop that
-//! keeps making progress is ended by [`UNBUDGETED_STEP_LIMIT`]. With a step budget, the budget
+//! derivation would let it go on, so the case is not loaded again before it (10), except after an
+//! iteration whose effect the port reported `Performed` (8, 8a): a completed case comes first, so,
+//! as at the step budget (0), the case is loaded ([`Governor::current_revision`], then
+//! [`Governor::completion`]) before the bound ends the run, and a case the governor holds complete
+//! ends it completed, carrying the governor's outcome, not `IdleBound`. A loop that keeps making
+//! progress is ended by [`UNBUDGETED_STEP_LIMIT`]. With a step budget, the budget
 //! alone bounds the loop.
 //!
 //! # Run and action budgets
@@ -1295,12 +1300,23 @@ where
         }
 
         // Without a step budget, an iteration that made no progress is judged against the idle
-        // bound; a stale one is not counted, since the next iteration judges the move.
+        // bound; a stale one is not counted, since the next iteration judges the move. A case this
+        // iteration's performed effect completed comes first: the case is loaded before the bound
+        // ends the run, as at the step budget (0), and a complete one ends it completed.
         if budget.is_none()
             && !stale
             && !progressed
             && let Some(ended) = idle_end(idle.saturating_add(1))?
         {
+            if effected {
+                governor.current_revision(case)?;
+                if let CompletionDetermination::Complete(complete) = governor.completion(case)? {
+                    let outcome = RunOutcome::Completed(RunOutcomeCompleted {
+                        outcome: complete.outcome,
+                    });
+                    return Ok(track.end(run_id, outcome));
+                }
+            }
             return Ok(track.end(run_id, ended));
         }
         after_stale = stale;
