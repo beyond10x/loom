@@ -30,6 +30,25 @@ its entry from `catalog.json` in that store (`$XDG_DATA_HOME/loom/protocols`, or
 
 An authority provider sees the action request it decides (`story:authority-sees-the-request`). `AuthorityProvider::decide` takes the action request beside the commission and the capability: the `ActionRequestData` the runtime revalidated, at the run loop's check and at a resumed request's, its id, Run and case the runtime's and its `expected_case_revision` the revision of the frontier the proposal was chosen from, never one the executor wrote; its action and arguments are the proposal as written. A provider can therefore allow one request at one case revision and refuse the same action at the next. The runtime reads the case's revision again once the provider allows, and a resume reads it once more right before it invokes the held request; on a move it sees, it performs nothing. The run loop records the request `Stale`, does not invoke it and judges the move on the next iteration. A resume that sees the move before it takes the Suspension is refused `ResumeRefusal::CaseMoved`, takes nothing and leaves the Suspension `Pending`; one that sees it after the take records the request `Stale`, releases the Suspension (`ReleaseSuspension`), invokes nothing and judges the move, since the request can never be performed; a new `run` is the remedy. A move after the runtime's last read, while the effect itself runs, is not seen: an effect port that must refuse a write on a moved case binds the write to the request's `expected_case_revision`. `check_authority` takes the request too, and still refuses on a provider's `Err`. No provider in Loom grants more or less than before: `MandateAuthority`, `PluginAuthority`, the slice's `GrantAuthority` and its run provider do not read the request. The testkit's `StaticAuthorityProvider` records each request (`requests`). Breaking: a host implementing `AuthorityProvider` adds the parameter, `fn decide(&self, commission: &CommissionData, request: &ActionRequestData, capability: &str) -> Result<AuthorityVerdict, AuthorityProviderError>`, and a caller of `check_authority(provider, commission, request, capability)` passes the request; a request the provider allowed is no longer performed when the runtime sees the case moved after its revalidation and before the invoke, and a resume that sees such a move after its take releases the Suspension instead of performing the request; `LoopFailure::SuspensionNotReleased` also covers a release refused after such a stale request.
 
+A host reads the decision behind a held case's frontier (`story:governor-exposes-canon-decision`).
+`CanonGovernor::decision_document(&case, &frontier_id)` returns `Some` of the whole
+`canon-decision/1` document Canon wrote behind a frontier the governor issued, explanation
+included, whose rendering gives that frontier id, as the generated JSON value
+(`loom_sdk::governor::model::json::Value`) `evaluate` returns in `canon`. `frontier` keeps the
+document it decided under the id it issues, in the governor's memory, so a host holding an id from
+Commission's loop (`LoopEnd::last_frontier`, a step's observation) reads the document that frontier
+was issued from, even when the trusted time moved since, as the host clock `b10x-loom` evaluates at
+does. A lookup never evaluates the case: an id the governor did not issue, or no longer keeps, is
+`None`. Per case the governor keeps only documents for the case as currently held, at most
+`KEPT_DOCUMENTS_PER_CASE` (16), the most recently issued: they are dropped when a frontier or a
+lookup finds the held case changed (a new artifact revision, evidence received, a decision
+recorded) and when a read finds the store no longer holds the case. For the same protocol,
+evidence, explicit decisions and time the document equals what `evaluate` returns. A case the
+governor cannot read (its held inputs or independence declarations do not satisfy its protocol)
+is refused `GovernorUnavailable`, and a case it does not hold `UnknownCase`, as `frontier` refuses
+them. Breaking: none for callers; `CanonGovernor` only gains a method and the constant
+`loom_governor::KEPT_DOCUMENTS_PER_CASE`.
+
 ## [0.26.0] - 2026-10-17
 
 Loom 0.26.0 links llm 0.7.0, names the target in the routing record of a governed write, and
