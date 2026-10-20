@@ -175,7 +175,7 @@ fn the_document_equals_what_evaluate_returns_for_the_same_snapshot() {
 /// the governor does not hold is `UnknownCase` in both.
 #[test]
 fn a_case_the_governor_cannot_decide_returns_no_document() {
-    let rows: [(&str, fn(&mut CaseState)); 5] = [
+    let rows: [(&str, Unusable); 5] = [
         ("no inputs", |state| state.inputs = CaseInputs::none()),
         ("a declared input missing", |state| {
             state.inputs = CaseInputs::try_from_pairs([
@@ -261,6 +261,9 @@ fn one_call_asks_for_one_evaluation() {
         "one call evaluates the case once"
     );
 }
+
+/// A change to a held case that leaves it unusable under its protocol.
+type Unusable = fn(&mut CaseState);
 
 /// A [`CaseStore`] shared with the test, so a held case can be changed behind the governor as a
 /// durable store could hand it back.
