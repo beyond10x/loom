@@ -100,7 +100,8 @@ read-only, `.git` included unless the host names it. A path that is absolute, cl
 or is no plain relative path, one through a symbolic link, absent or no directory, a directory
 holding a socket, device or FIFO or a file also hard-linked outside the writable paths, a path
 inside `target` or inside another named path, and more than Substrate's 64 writable paths with
-`target` are refused `ScopeInvalid` before anything starts, naming the path. The applied
+`target` are refused `ScopeInvalid`, naming the path, before anything starts or `target` is
+created, so the workspace is left as it was. The applied
 confinement's `writable_scopes` lists the named paths beside `target` and the profile digest covers
 them; a record reporting another writable set, wider or narrower, is refused, as before. Substrate
 makes only directories writable, so a file at the workspace root cannot be named. A child that

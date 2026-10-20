@@ -597,7 +597,8 @@ impl ChildCommand {
     /// later git call on the host runs. Substrate makes only directories writable, so a file at
     /// the workspace root cannot be named. Naming `target`, or a path twice, changes nothing.
     ///
-    /// Refused [`ConfinementRefusal::ScopeInvalid`] before anything starts, naming the path: a path
+    /// Refused [`ConfinementRefusal::ScopeInvalid`] before anything starts or `target` is created,
+    /// naming the path: a path
     /// that is absolute, climbs out with `..`, or is no plain relative path (`.`, an empty
     /// component, a trailing `/`); one through a symbolic link, absent, or no directory (a file,
     /// socket, device or FIFO); a directory holding a socket, device or FIFO, or a file also
@@ -1040,21 +1041,27 @@ fn validate_workspace(root: &Path, writable: &[String]) -> Result<PathBuf, Confi
         ));
     }
     let named: Vec<&String> = writable.iter().filter(|path| *path != WRITABLE).collect();
-    // Before `target` is created, so a refused path leaves the workspace as it was.
+    // Every check of the named paths, and the scan of what the writable paths hold, runs before
+    // `target` is created, so a refused path leaves the workspace as it was.
     for path in &named {
         check_writable_directory(&root, path)?;
     }
     let target = root.join(WRITABLE);
     reject_links(&target)?;
+    // A `target` not created yet holds nothing to scan; one already there is scanned with the
+    // named paths, so a hard link between them counts as internal.
+    let scopes: Vec<PathBuf> = target
+        .is_dir()
+        .then(|| target.clone())
+        .into_iter()
+        .chain(named.iter().map(|path| root.join(path)))
+        .collect();
+    validate_writable_artifacts(&scopes)?;
     match std::fs::create_dir(&target) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && target.is_dir() => {}
         Err(e) => return Err(scope_error(format!("target/ must be a directory: {e}"))),
     }
-    let scopes: Vec<PathBuf> = std::iter::once(target)
-        .chain(named.iter().map(|path| root.join(path)))
-        .collect();
-    validate_writable_artifacts(&scopes)?;
     Ok(root)
 }
 
@@ -1616,7 +1623,7 @@ mod tests {
     }
 
     #[test]
-    fn a_writable_path_through_a_link_absent_or_no_directory_is_refused_on_disk() {
+    fn a_writable_path_refused_on_disk_leaves_the_workspace_as_it_was() {
         let fixture = tempfile::tempdir().unwrap();
         let workspace = fixture.path().join("workspace");
         std::fs::create_dir_all(workspace.join("src/lib")).unwrap();
@@ -1642,8 +1649,33 @@ mod tests {
                 "{path}: a refused path leaves the workspace as it was"
             );
         }
+        // What a named directory holds is scanned before `target` is created too.
+        std::fs::create_dir(workspace.join("sockets")).unwrap();
+        let _held = std::os::unix::net::UnixListener::bind(workspace.join("sockets/held")).unwrap();
+        std::fs::create_dir(workspace.join("linked")).unwrap();
+        std::fs::hard_link(workspace.join("file"), workspace.join("linked/alias")).unwrap();
+        for (path, named) in [("sockets", "socket"), ("linked", "hard links outside")] {
+            let writable = check_writable(&[PathBuf::from(path)]).unwrap();
+            let error = validate_workspace(&workspace, &writable).unwrap_err();
+            assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{path}");
+            assert!(
+                error
+                    .detail
+                    .contains(&workspace.join(path).display().to_string()),
+                "{error}"
+            );
+            assert!(error.detail.contains(named), "{path}: {error}");
+            assert!(
+                !workspace.join("target").exists(),
+                "{path}: a refused path leaves the workspace as it was"
+            );
+        }
         let writable = check_writable(&[PathBuf::from("src/lib")]).unwrap();
         validate_workspace(&workspace, &writable).expect("a plain directory is writable");
+        assert!(
+            workspace.join("target").is_dir(),
+            "an accepted launch has `target`"
+        );
     }
 
     #[test]

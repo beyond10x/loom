@@ -433,8 +433,9 @@ fn a_child_writes_only_the_paths_the_host_named() {
 /// is refused `ScopeInvalid` before anything starts, naming the path: an absolute path, one that
 /// climbs out with `..`, one through a symbolic link (to outside the workspace or inside it), an
 /// absent path, a file, a socket, a directory holding a socket or a file hard-linked from outside
-/// the writable paths, and a path inside `target` or inside another named path. The same
-/// workspace with a well-named path gets past every check, to the missing backend.
+/// the writable paths, and a path inside `target` or inside another named path. Each refusal
+/// leaves the workspace as it was, without `target`. The same workspace with a well-named path
+/// gets past every check, to the missing backend.
 #[test]
 fn a_writable_path_outside_the_workspace_or_through_a_link_is_refused() {
     let fixture = tempfile::tempdir().unwrap();
@@ -442,7 +443,7 @@ fn a_writable_path_outside_the_workspace_or_through_a_link_is_refused() {
     let outside = fixture.path().join("outside");
     std::fs::create_dir_all(workspace.join("scratch/inner")).unwrap();
     std::fs::create_dir(&outside).unwrap();
-    std::os::unix::fs::symlink(&outside, workspace.join("escape")).unwrap();
+    std::os::unix::fs::symlink(&outside, workspace.join("outward")).unwrap();
     std::os::unix::fs::symlink("scratch", workspace.join("alias")).unwrap();
     std::fs::write(workspace.join("file"), "a file").unwrap();
     let _socket = UnixListener::bind(workspace.join("socket")).unwrap();
@@ -461,8 +462,8 @@ fn a_writable_path_outside_the_workspace_or_through_a_link_is_refused() {
         (absolute.as_str(), "absolute"),
         ("../outside", "climbs out"),
         ("scratch/../../outside", "climbs out"),
-        ("escape", "symbolic link"),
-        ("escape/inner", "symbolic link"),
+        ("outward", "symbolic link"),
+        ("outward/inner", "symbolic link"),
         ("alias", "symbolic link"),
         ("absent", "does not exist"),
         ("file", "no directory"),
@@ -479,6 +480,10 @@ fn a_writable_path_outside_the_workspace_or_through_a_link_is_refused() {
         );
         assert!(error.detail.contains(path), "{path}: {error}");
         assert!(error.detail.contains(refused), "{path}: {error}");
+        assert!(
+            !workspace.join("target").exists(),
+            "{path}: a refused path leaves the workspace as it was"
+        );
     }
     let nested = child()
         .with_writable("scratch")
@@ -487,6 +492,10 @@ fn a_writable_path_outside_the_workspace_or_through_a_link_is_refused() {
     assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
     assert!(error.detail.contains("scratch/inner"), "{error}");
     assert!(!ran.exists(), "nothing ran");
+    assert!(
+        !workspace.join("target").exists(),
+        "the workspace is as it was"
+    );
 
     let error = runner
         .run_child(&child().with_writable("scratch"))
