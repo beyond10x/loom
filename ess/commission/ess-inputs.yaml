@@ -9,3 +9,5 @@ scenarios:
   - scenarios/settled-hold-stores-nothing.yaml
   - scenarios/unwritable-hold-stores-nothing.yaml
   - scenarios/unwritable-start-stores-nothing.yaml
+  # story:pending-effect: a Waiting outcome names every pending request, in order.
+  - scenarios/waiting-names-every-pending-request-in-order.yaml

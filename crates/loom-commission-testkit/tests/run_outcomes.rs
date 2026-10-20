@@ -459,6 +459,7 @@ fn run_outcome_is_the_generated_type() {
             "NoAdmissibleAction",
             "NoPerformableAction",
             "Suspended",
+            "Waiting",
         ],
         "RunOutcome variants"
     );

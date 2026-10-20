@@ -20,6 +20,11 @@
 //! `RunOutcome::NoPerformableAction`, naming the actions no effect performs and the frontier's
 //! open claims, and otherwise nothing changes.
 //!
+//! [`judge_budget_stop`] decides how a run ends that a budget stops (`JudgeBudgetStop`,
+//! `story:pending-effect`): `RunOutcome::Waiting`, naming the requests the effect port last
+//! answered pending and the budget's reason, when one is pending, and otherwise
+//! `RunOutcome::Suspended` with the reason, as before.
+//!
 //! [`RunStore`] holds runs for the `StartRun`, `SuspendRun` and `ResumeRun` commands through
 //! [`crate::model::behaviour::Generated`]: it implements the three obligations itself. Resume
 //! continues the same run: its id and case revision are kept, and no new run is created. The store
@@ -37,17 +42,18 @@ use crate::model::behaviour::{Generated, RunStorage};
 use crate::model::obligation::UnmetObligation;
 use crate::model::primitives::Uuid;
 use crate::model::responsibility::obligations::{
-    JudgeEffectRefusalBehavior, JudgeIdleIterationBehavior, JudgePerformableActionsBehavior,
-    ResumeRunBehavior, StartRunBehavior, SuspendRunBehavior,
+    JudgeBudgetStopBehavior, JudgeEffectRefusalBehavior, JudgeIdleIterationBehavior,
+    JudgePerformableActionsBehavior, ResumeRunBehavior, StartRunBehavior, SuspendRunBehavior,
 };
 use crate::model::responsibility::{
     Admission, AnyRun, AuthorityVerdict, CompletionDetermination, ExecutorOutcome, Frontier,
-    JudgeEffectRefusal, JudgeEffectRefusalOutcome, JudgeIdleIteration, JudgeIdleIterationOutcome,
-    JudgePerformableActions, JudgePerformableActionsOutcome, ResumeRun, ResumeRunOutcome, Run,
-    RunData, RunId, RunOutcome, RunOutcomeCompleted, RunOutcomeNeedsAuthority,
-    RunOutcomeNeedsExternalEvidence, RunOutcomeNeedsHumanJudgment, RunOutcomeSuspended, RunResumed,
-    RunSnapshot, RunStarted, RunStateConflict, RunSuspended, StartRun, StartRunOutcome, SuspendRun,
-    SuspendRunOutcome, Unit, frontier_state,
+    JudgeBudgetStop, JudgeBudgetStopOutcome, JudgeEffectRefusal, JudgeEffectRefusalOutcome,
+    JudgeIdleIteration, JudgeIdleIterationOutcome, JudgePerformableActions,
+    JudgePerformableActionsOutcome, ResumeRun, ResumeRunOutcome, Run, RunData, RunId, RunOutcome,
+    RunOutcomeCompleted, RunOutcomeNeedsAuthority, RunOutcomeNeedsExternalEvidence,
+    RunOutcomeNeedsHumanJudgment, RunOutcomeSuspended, RunResumed, RunSnapshot, RunStarted,
+    RunStateConflict, RunSuspended, StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome, Unit,
+    frontier_state,
 };
 
 /// What [`derive`] decides for a run.
@@ -187,6 +193,24 @@ pub fn judge_performable(
     input: JudgePerformableActions,
 ) -> Result<JudgePerformableActionsOutcome, UnmetObligation> {
     Generated::new(()).judge_performable_actions(input)
+}
+
+/// How a run ends that a budget stops (`JudgeBudgetStop`), as the behaviour ESS generates from the
+/// specification decides it: `Waiting`, naming `input.pending` and `input.reason`, when at least
+/// one request the effect port last answered pending is still to be invoked again, and the run
+/// ends with `RunOutcome::Waiting` carrying both; `Suspended` otherwise, which changes nothing, so
+/// the run ends `RunOutcome::Suspended` with the reason, as before. Either way the runtime has
+/// suspended the Run for `input.reason`. The runtime ([`crate::runtime`]) and the conformance
+/// target both decide through it.
+///
+/// # Errors
+///
+/// The generated behaviour's typed refusal of an input the specification declares no outcome for.
+/// `suspended` answers every input `waiting` does not, so it never answers it.
+pub fn judge_budget_stop(
+    input: JudgeBudgetStop,
+) -> Result<JudgeBudgetStopOutcome, UnmetObligation> {
+    Generated::new(()).judge_budget_stop(input)
 }
 
 /// Rule 6 of [`derive`]: what the frontier alone decides.

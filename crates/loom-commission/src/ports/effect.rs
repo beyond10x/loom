@@ -5,10 +5,16 @@
 //! authority provider's allow. [`AdmittedRequest`] is the proof: only the runtime makes one, so an
 //! effect port cannot be handed a request that skipped revalidation through this trait.
 //!
-//! The port answers with the generated [`EffectOutcome`]: what it did, or that it refused and
-//! changed nothing. The runtime delivers that outcome to the governor as an observation, never as
-//! evidence (Atlas ADR 0074). A port that cannot answer at all returns an [`EffectError`]; the
-//! runtime then suspends the Run.
+//! The port answers with the generated [`EffectOutcome`]: what it did, that it refused and
+//! changed nothing, or that the work the request started has not finished (`Pending`,
+//! `story:pending-effect`). The runtime delivers that outcome to the governor as an observation,
+//! never as evidence (Atlas ADR 0074). A port that cannot answer at all returns an
+//! [`EffectError`]; the runtime then suspends the Run. A request answered `Pending` is handed to
+//! the port again at the run's next iteration, the same request under its own id, revalidated
+//! first as before its first invocation, until the port answers otherwise or the case moves, the
+//! frontier or the provider no longer admits it, or a budget ends the run (`RunOutcome::Waiting`).
+//! Nothing waits between two invocations: how long one takes is the port's, and a port keys the
+//! work it started by the request's id.
 //!
 //! The port is domain-neutral. [`crate::ports::connector::ConnectorEffects`] is the
 //! Connector-backed implementation: it performs the actions a commission's bindings name, each
@@ -60,8 +66,9 @@ pub trait EffectPort {
         None
     }
 
-    /// Performs `request` for `commission`, or refuses it. An `Err` is a failure to answer, never a
-    /// refusal.
+    /// Performs `request` for `commission`, refuses it, or answers that the work it started for it
+    /// has not finished (`Pending`), and the runtime hands it the same request again later. An
+    /// `Err` is a failure to answer, never a refusal.
     fn invoke(
         &self,
         commission: &Commission<commission_state::Assigned>,

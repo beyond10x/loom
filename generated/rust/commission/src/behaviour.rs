@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 22e4f2a529e6c0fca03f4ec58015ca8a05779db65158e508c18edf8c6030121e
-// contract digest 170b2b60f0518f937b6647a9e0d22ca806145af5cce1b938696720af5ba78996
+// model digest 3b3d3d9548ab5fbe6c639f4928c9136fce6fc3039ca9711b1dd9a4fccb975c22
+// contract digest 6fa3d582b4640078931da19526d7a7f46a311ce6f1d689702a9914b3cd6adb85
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -75,6 +75,20 @@ impl<P> Generated<P> {
 impl<P: crate::responsibility::obligations::HoldSuspensionBehavior> crate::responsibility::obligations::HoldSuspensionBehavior for Generated<P> {
     fn hold_suspension(&mut self, input: crate::responsibility::HoldSuspension) -> Result<crate::responsibility::HoldSuspensionOutcome, UnmetObligation> {
         crate::responsibility::obligations::HoldSuspensionBehavior::hold_suspension(&mut self.ports, input)
+    }
+}
+
+/// `commission.responsibility.JudgeBudgetStop`, generated: every outcome is one the specification fully determines.
+impl<P> crate::responsibility::obligations::JudgeBudgetStopBehavior for Generated<P>
+{
+    fn judge_budget_stop(&mut self, input: crate::responsibility::JudgeBudgetStop) -> Result<crate::responsibility::JudgeBudgetStopOutcome, UnmetObligation> {
+        let _ = &input;
+        // `waiting`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(compare_numbers(Some(&input.pending).map(|value| value.len().to_string()), Some("1".to_owned()), core::cmp::Ordering::is_ge), "commission.responsibility.JudgeBudgetStop")? {
+            return Ok(crate::responsibility::JudgeBudgetStopOutcome::Waiting { error: crate::responsibility::RequestsWaiting { action_request_ids: input.pending.clone(), reason: input.reason.clone() } });
+        }
+        // `suspended`: the default.
+        return Ok(crate::responsibility::JudgeBudgetStopOutcome::Suspended);
     }
 }
 

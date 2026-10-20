@@ -92,6 +92,36 @@ is absent. `b10x-loom-intake-slice` now depends on `libc` (already in `Cargo.loc
 `O_NOFOLLOW`.
 Breaking: none.
 
+An effect can answer pending and be invoked again within the budgets
+(`story:pending-effect`). `EffectOutcome::Pending` (`EffectOutcomePending`, carrying the port's
+report) says the work an admitted request started, such as a CI job or a review, has not finished.
+The runtime invokes the same request again at the next iteration, under its own id and at its own
+revision, with no executor call between and no wait or timer, until the port answers `Performed` or
+`Refused`. Each invocation is revalidated as the first was: a request that needs authority is asked
+about again and the case's revision read again after the allow, and a request whose case moved, or
+that the frontier no longer admits or the provider denies, is not invoked again. A provider that
+answers `ApprovalRequired` at that ask ends the run `NeedsAuthority`, as at a first ask, the Run
+suspended and a Suspension held for the request under `run_with_suspension`. So a resumed request
+answered pending is asked about again at its next invocation, and a provider that allows only
+while the Suspension is pending, as the intake slice's grant authority does, asks for approval
+again: the run holds a new Suspension for the same request. A pending read of a fan-out is invoked
+again alone, through `invoke_reads`, and only while the fan-out rule still admits it. Each invocation is a step and one trial on
+the run budget, each answer is recorded and delivered as one observation, never evidence, and a
+pending answer is no idle iteration and leaves the idle count where it was. A budget that stops the
+run while a request is pending ends it `RunOutcome::Waiting` (`RunOutcomeWaiting`: the pending
+requests and the budget's reason) where it would otherwise be `Suspended`; the Run is suspended for
+the budget either way. The runtime decides it with `outcome::judge_budget_stop`, the behaviour ESS
+generates for the new command `JudgeBudgetStop`. `LoopEnd::requests`, `admitted` and `effects` list
+a request once for each invocation, and `LoopEnd::steps` counts every invocation again as a step
+beside the executor calls, so a run with pending answers reports more steps than executor calls
+(the slice prints `steps` as it is). The intake slice stops a `Waiting` run `StepBudget`, so the
+`run --output jsonl` contract does not change, and every effect port Loom ships keeps answering
+`Performed` or `Refused`.
+Breaking: a host that matches `EffectOutcome` or `RunOutcome` exhaustively handles `Pending` and
+`Waiting`; a host that reads `LoopEnd::admitted` as one entry per request reads a request answered
+pending once per invocation, and one that reads `LoopEnd::steps` as executor calls reads them plus
+the invocations again.
+
 ## [0.28.0] - 2026-10-20
 
 Loom 0.28.0 lets an effect port end a run, names the idle bound, and confines a child process a

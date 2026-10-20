@@ -47,7 +47,8 @@ executor, such as a human tool or a workflow, would need its own effect path.
 - An action that needs authority is proposed too. Loom never suspends for authority: the runtime
   rechecks the proposal and asks its authority provider.
 - `run_until_blocked` invokes each admitted request once, and moves the case to a new revision only
-  after an effect the port reports as `Performed`.
+  after an effect the port reports as `Performed`. A request the port answers `Pending` is invoked
+  again at the next iteration, revalidated first, until the port answers otherwise.
 - The slice's `LocalEffects` performs `software.change/1` actions in a git work tree. It never
   merges, pushes or deploys.
 - Commission's `ConnectorEffects` performs the actions a commission binds to Connector operations,

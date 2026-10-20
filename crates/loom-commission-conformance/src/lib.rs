@@ -23,6 +23,9 @@
 //! * `JudgePerformableActions` by `b10x_loom_commission::outcome::judge_performable`, the
 //!   judgement the runtime makes of a frontier before the executor runs and of an admitted
 //!   request, when the effect port performs none of the actions the run needs;
+//! * `JudgeBudgetStop` by `b10x_loom_commission::outcome::judge_budget_stop`, the judgement the
+//!   runtime makes at every budget stop, `Waiting` while a request the effect port answered
+//!   pending is still to be invoked again;
 //! * the views `RunStates` and `SuspensionStates` by the generated queries over the same stores.
 //!
 //! This crate translates values and records what was published. It decides no outcome: each
@@ -47,15 +50,17 @@ use b10x_loom_commission::model::responsibility::obligations::{
 };
 use b10x_loom_commission::model::responsibility::{
     ActionRequest, ActionRequestData, ActionRequestId, CaseId, CommissionId, HoldSuspension,
-    HoldSuspensionOutcome, JudgeEffectRefusal, JudgeEffectRefusalOutcome, JudgeIdleIteration,
-    JudgeIdleIterationOutcome, JudgePerformableActions, JudgePerformableActionsOutcome,
-    ProposedActionArguments, ReleaseSuspension, ReleaseSuspensionOutcome, ResumeRun,
-    ResumeRunOutcome, RevalidateActionRequestOutcome, RunId, RunStateConflict, RunStorageFailed,
-    StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionRequestMismatch,
-    SuspensionSettled, SuspensionStateConflict, SuspensionStorageFailed, TakeSuspension,
-    TakeSuspensionOutcome,
+    HoldSuspensionOutcome, JudgeBudgetStop, JudgeBudgetStopOutcome, JudgeEffectRefusal,
+    JudgeEffectRefusalOutcome, JudgeIdleIteration, JudgeIdleIterationOutcome,
+    JudgePerformableActions, JudgePerformableActionsOutcome, ProposedActionArguments,
+    ReleaseSuspension, ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome,
+    RevalidateActionRequestOutcome, RunId, RunStateConflict, RunStorageFailed, StartRun,
+    StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionRequestMismatch, SuspensionSettled,
+    SuspensionStateConflict, SuspensionStorageFailed, TakeSuspension, TakeSuspensionOutcome,
 };
-use b10x_loom_commission::outcome::{RunStore, judge_idle, judge_performable, judge_refusal};
+use b10x_loom_commission::outcome::{
+    RunStore, judge_budget_stop, judge_idle, judge_performable, judge_refusal,
+};
 use ess_conformance::scenario::{CommandRef, ErrorRef, EventRef, OutcomeRef};
 use ess_conformance::target::{
     ConformanceTarget, DeclaredErrorValue, EventObservationRequest, ExternalOutcomeControl,
@@ -85,6 +90,8 @@ const JUDGE_IDLE: &str = "commission.responsibility.JudgeIdleIteration";
 const IDLE_BOUND_REACHED: &str = "commission.responsibility.IdleBoundReached";
 const JUDGE_PERFORMABLE: &str = "commission.responsibility.JudgePerformableActions";
 const ACTIONS_UNPERFORMABLE: &str = "commission.responsibility.ActionsUnperformable";
+const JUDGE_BUDGET_STOP: &str = "commission.responsibility.JudgeBudgetStop";
+const REQUESTS_WAITING: &str = "commission.responsibility.RequestsWaiting";
 const RUN_STARTED: &str = "commission.responsibility.RunStarted";
 const RUN_SUSPENDED: &str = "commission.responsibility.RunSuspended";
 const RUN_RESUMED: &str = "commission.responsibility.RunResumed";
@@ -212,6 +219,7 @@ impl ConformanceTarget for CommissionTarget {
             JUDGE_REFUSAL => judge_effect_refusal(input)?,
             JUDGE_IDLE => judge_idle_iteration(input)?,
             JUDGE_PERFORMABLE => judge_performable_actions(input)?,
+            JUDGE_BUDGET_STOP => judge_budget_stop_command(input)?,
             other => {
                 return Err(TargetError::unavailable(
                     format!("invoking `{other}`"),
@@ -795,6 +803,47 @@ fn judge_performable_actions(input: &Input) -> Result<Option<SemanticCommandResu
         }
         JudgePerformableActionsOutcome::Performable => took(JUDGE_PERFORMABLE, "performable"),
     }))
+}
+
+/// `JudgeBudgetStop`: the pending requests and the budget's reason the input names, judged as the
+/// runtime judges every budget stop. It reads and writes no store, so every view stays as it was.
+fn judge_budget_stop_command(input: &Input) -> Result<Option<SemanticCommandResult>, TargetError> {
+    let (Some(pending), Some(reason)) = (
+        codec::uuid_list(input, "pending"),
+        input.get("reason").and_then(codec::suspension_reason),
+    ) else {
+        return Ok(None);
+    };
+    let outcome = judge_budget_stop(JudgeBudgetStop {
+        pending: pending.into_iter().map(ActionRequestId).collect(),
+        reason,
+    })
+    .map_err(|unmet| {
+        TargetError::unavailable(
+            format!("judging through `{JUDGE_BUDGET_STOP}`"),
+            format!("{} is owed: {}", unmet.capability, unmet.source),
+        )
+    })?;
+    Ok(match outcome {
+        JudgeBudgetStopOutcome::Waiting { error: waiting } => {
+            let Some(reason) = codec::from_suspension_reason(&waiting.reason) else {
+                return Ok(None);
+            };
+            let ids = waiting
+                .action_request_ids
+                .into_iter()
+                .map(|id| Node::Text(id.0.0))
+                .collect();
+            Some(
+                took(JUDGE_BUDGET_STOP, "waiting").with_error(
+                    error(REQUESTS_WAITING)
+                        .with("action_request_ids", Node::Seq(ids))
+                        .with("reason", reason),
+                ),
+            )
+        }
+        JudgeBudgetStopOutcome::Suspended => Some(took(JUDGE_BUDGET_STOP, "suspended")),
+    })
 }
 
 /// The action request the input of `RevalidateActionRequest` names, identity included.

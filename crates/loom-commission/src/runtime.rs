@@ -9,8 +9,10 @@
 //! 0. the step budget ([`LoopContext::step_budget`], or [`UNBUDGETED_STEP_LIMIT`] when it sets
 //!    none): when the steps taken reach it, the Run is suspended through `SuspendRun` with
 //!    `SuspensionReason::Budget({"max_steps": <budget>})` and the run ends suspended with that
-//!    reason. A step is an executor call whose iteration did not end the run ([`LoopEnd::steps`]).
-//!    When the last step left an approval gate pending (5), the iteration first reads the case and
+//!    reason, or `Waiting` while a request is pending (8b). A step is an executor call whose
+//!    iteration did not end the run ([`LoopEnd::steps`]), or an invocation of a pending request
+//!    again (8b). When the last step left an approval gate pending (5) and no request is pending,
+//!    the iteration first reads the case and
 //!    the frontier (1-3) and checks the gate, so a last step that leaves the gate unchanged ends
 //!    `AwaitingApproval`, not suspended for its budget. When the last step's effect was
 //!    `Performed` (8) and left no gate pending, as a step performed under a grant never does (5),
@@ -20,8 +22,8 @@
 //!    run as item 2 says; only a case still at the revision held is suspended for its budget;
 //! 1. [`Governor::current_revision`]: the case is loaded. After an iteration whose effect the port
 //!    reported `Performed`, the loaded revision is the one the loop holds the case at from then on;
-//!    after a `Refused` one, as after no effect or a fan-out with a stale read (8a), a move is
-//!    somebody else's;
+//!    after a `Refused` or `Pending` one, as after no effect or a fan-out with a stale read (8a), a
+//!    move is somebody else's;
 //! 2. [`Governor::completion`]: a case the governor holds complete ends the run completed, carrying
 //!    the governor's outcome, and the iteration makes no further call. Otherwise, when the loaded
 //!    revision is not the one the loop holds the case at, the runtime has found a move itself (as
@@ -54,7 +56,9 @@
 //!    needing no authority, one that proposed nothing, and one whose request was refused, stale,
 //!    denied or not performed. The step budget (0) and the idle bound still end a run that only
 //!    repeats granted steps; at the budget, the case a granted step leaves is loaded first (0), so
-//!    a case it completed ends the run completed;
+//!    a case it completed ends the run completed. While a request is pending (8b) the gate is not
+//!    read: the step that admitted it is the one the gate is read after, once the port answered
+//!    it otherwise, as though it had answered so at once;
 //! 6. [`AgentExecutor::run`] on that frontier, less every action the effect port does not perform
 //!    and that needs no authority (`story:effect-invocation`), action by action: an action with an
 //!    entry listed `ApprovalRequired`, or an entry naming a capability, stays with all its entries,
@@ -87,10 +91,12 @@
 //!    [`EffectPort::invoke`] once, as an [`AdmittedRequest`]. Its
 //!    [`EffectOutcome`] is recorded ([`LoopEnd::effects`]) and delivered as one observation: id and
 //!    time from the context, source [`EFFECT_SOURCE`], subject `<case>@<request revision>`, payload
-//!    `outcome` (`Performed` or `Refused`), `action_request`, `action`, `arguments`, and `report`
-//!    with, when the effect was invoked through a Connector, the one `attempt` a write produced or
-//!    the `audit` record of a read, or `reason`. It is never evidence.
-//!    The loop never retries an invocation. A `Refused` the port marks final
+//!    `outcome` (`Performed`, `Refused` or `Pending`), `action_request`, `action`, `arguments`, and
+//!    `report` with, when the effect was invoked through a Connector, the one `attempt` a write
+//!    produced or the `audit` record of a read, or `reason`, or a pending answer's `report`. It is
+//!    never evidence.
+//!    The loop never retries an invocation: a request is invoked again only after the port
+//!    answered it `Pending` (8b). A `Refused` the port marks final
 //!    (`EffectOutcomeRefused.ends_run`, `story:refused-effect-ends-run`) then ends the run, once the
 //!    run budget's spending limits were checked: [`judge_refusal`] answers `final`, and the run
 //!    ends `EffectRefused`, naming the request and the port's reason, with no further load of the
@@ -127,7 +133,44 @@
 //!    no read of the fan-out makes the loaded revision the Run's (1). When no read was admitted and
 //!    none was stale, the iteration is as a refused proposal. A fan-out is one step, for the step
 //!    budget and the idle bound alike; it is progress when one of its admitted reads is new, and it
-//!    never passes the approval gate (5);
+//!    never passes the approval gate (5). The reads the port answered `Pending` are invoked again
+//!    together (8b);
+//!
+//!    8b. a request the port answered `Pending` (`EffectOutcomePending`, `story:pending-effect`),
+//!    after a proposal (8), a fan-out (8a) or a resume, is pending: the work it started has not
+//!    finished. The next iteration loads the case and reads the frontier as any other (1-4), and,
+//!    instead of the gate (5) and the executor (6), invokes the same request again, under its own
+//!    id and at its own revision, with no wait or timer before it; the reads of a fan-out pending
+//!    together are invoked again together, the others of it not again. A case the governor holds
+//!    complete ends the run first, and a move the load finds ends it as in 2, the request not
+//!    invoked again. Each pending request is revalidated as before its first invocation and
+//!    recorded with that answer ([`LoopEnd::requests`]): one that still needs authority is asked
+//!    about again ([`check_authority`]), and once the provider allows it the case is loaded again,
+//!    a case at another revision making it stale, as in 8. A pending read is never invoked on an
+//!    authority: it is invoked again only while the rule that admitted its fan-out (8a) still holds
+//!    for it on the frontier the iteration read, the port reading it and every entry of it
+//!    `Admissible` and naming no capability; one it no longer holds for is recorded as needing the
+//!    capability an entry names (otherwise as not admitted) and, as one the frontier no longer
+//!    admits, is not invoked again. A stale one is not invoked again, and the iteration is as a
+//!    stale proposal:
+//!    a step, after which the next iteration judges the move. A request the provider answers
+//!    `ApprovalRequired` for when asked again ends the run `NeedsAuthority`, naming the provider's
+//!    request, as at a first `ApprovalRequired` (8): with a suspension port the Run is suspended
+//!    and the commission's Suspension holds the request, at its revision, for a resume to perform;
+//!    it is never dropped. One the frontier no longer admits, or the provider denies (remembered as
+//!    in 8) or fails to decide for, is not invoked again and is no longer pending; when none is
+//!    admitted and none is stale, the iteration goes on to the gate (5) and the executor (6) as any
+//!    other. The admitted ones, unless their actions' trial
+//!    limits stop the run first, are recorded as admitted and handed to the port again, a read
+//!    through [`EffectPort::invoke_reads`], the one request otherwise through
+//!    [`EffectPort::invoke`], and every answer is recorded and observed as in 8, the run budget's
+//!    spending limits checked, and a final refusal judged, as in 8a. An invocation again is a
+//!    step. A request answered `Pending` again stays pending; once none is, the step that admitted
+//!    them is judged against the idle bound as though the port had answered so at once (progress
+//!    when it was), and a request performed under a grant passes the gate (5). A step budget or a
+//!    run budget that stops the run while a request is pending ends it `Waiting`
+//!    ([`judge_budget_stop`] answers `waiting`), naming the pending requests in the order made and
+//!    the budget's reason, the Run suspended for that reason as at any budget stop;
 //! 9. on `CaseMoved`, by which the executor reports that the case moved while it worked, naming
 //!    the revision of the frontier it was handed (`story:moved-case-outcome`), the governor decides
 //!    whether it moved: the case is loaded once more ([`Governor::current_revision`]). At the
@@ -166,7 +209,9 @@
 //! repeated admission alike, whatever the effect port answered for it short of a final refusal,
 //! which ends the run (8), and a `CaseMoved` the governor does not bear out counts as
 //! `NoUsefulAction`; a stale proposal is not counted, since the next iteration ends the run, and a
-//! `CaseMoved` the governor bears out ends it at once (9). The idle bound ends a run whose
+//! `CaseMoved` the governor bears out ends it at once (9). An iteration whose request the port
+//! answered `Pending`, and each that invokes it again and is answered `Pending`, is no idle
+//! iteration and leaves the count where it was (8b). The idle bound ends a run whose
 //! derivation would let it go on, so the case is not loaded again before it (10), except after an
 //! iteration whose effect the port reported `Performed` (8, 8a): a completed case comes first, so,
 //! as at the step budget (0), the case is loaded ([`Governor::current_revision`], then
@@ -179,19 +224,21 @@
 //!
 //! A [`LoopContext::run_budget`] bounds the run and each action it lists
 //! (`ess/commission/domains/responsibility.yaml`, `RunBudget`). Every effect answer the loop
-//! records (8, 8a, and a resumed request) is charged to the run and to its request's action
+//! records (8, 8a, 8b, and a resumed request) is charged to the run and to its request's action
 //! ([`LoopEnd::charges`]): one trial, and the usage a `Performed` effect reported (input and output
 //! tokens, wall time, cost; a negative figure charges nothing, and a usage with no cost leaves the
-//! cost unknown). A reported usage is delivered in the effect's observation as `usage`. A breach
-//! suspends the Run through `SuspendRun` with `SuspensionReason::RunBudget`, naming the action
-//! (none for the run's own limits), the limit, its value and the charge, and the run ends
-//! suspended with that reason:
+//! cost unknown); a `Pending` answer is one trial and no usage. A reported usage is delivered in
+//! the effect's observation as `usage`. A breach suspends the Run through `SuspendRun` with
+//! `SuspensionReason::RunBudget`, naming the action (none for the run's own limits), the limit,
+//! its value and the charge, and the run ends suspended with that reason, or `Waiting` while a
+//! request is pending (8b):
 //!
 //! * `max_steps` acts as the step budget (0), the lower of the two holding; when it is the one
 //!   reached, the reason is `RunBudget`, else `Budget`;
-//! * an action's `max_trials` is checked before a request is handed to the effect port: a request
-//!   that would pass it is recorded with its revalidation and not admitted, and a fan-out that
-//!   would take any action past it invokes none of its reads. A resumed request is not checked;
+//! * an action's `max_trials` is checked before a request is handed to the effect port, and before
+//!   a pending one is handed to it again: a request that would pass it is recorded with its
+//!   revalidation and not admitted, and a fan-out that would take any action past it invokes none
+//!   of its reads. A resumed request is not checked;
 //! * the spending limits (`max_tokens_in`, `max_tokens_out`, `max_duration_ms`,
 //!   `max_cost_micro_usd`), the action's in the order the budget lists them and then the run's,
 //!   are checked once an effect, or a whole fan-out, was recorded and observed: a charge above a
@@ -215,8 +262,8 @@
 //! the port: a commission that holds a Suspension, `Pending` or `Resuming`, starts no Run
 //! ([`LoopFailure::CommissionSuspended`], naming its state and request; a port that cannot be read
 //! is [`LoopFailure::SuspensionStore`]), and nothing is performed. And when a step's request needs
-//! authority and the provider answers `ApprovalRequired`, so the run ends `NeedsAuthority` (8), the
-//! Run is first suspended through `SuspendRun` with `SuspensionReason::Authority`, whose payload
+//! authority and the provider answers `ApprovalRequired`, so the run ends `NeedsAuthority` (8), or
+//! answers so when a pending request is asked about again (8b), the Run is first suspended through `SuspendRun` with `SuspensionReason::Authority`, whose payload
 //! names the `capability` and the provider's `request`, and the commission's Suspension — the Run,
 //! the pending request and that reason — is held `Pending` through the port (`HoldSuspension`).
 //! The caller sees the same [`LoopEnd`] as without a port. A `SuspendRun` that fails ends the loop
@@ -256,7 +303,12 @@
 //! the Run and took the Suspension. At the request's revision, the request, under its own id and
 //! at its own revision, is handed to [`EffectPort::invoke`] once, recorded and observed as the loop
 //! does (8), and the Suspension is released for that request (`ReleaseSuspension`), removed; a
-//! refusal the port marks final then ends the resumed Run `EffectRefused`, as in 8. At
+//! refusal the port marks final then ends the resumed Run `EffectRefused`, as in 8, and a
+//! `Pending` answer leaves the request pending, invoked again from the loop's first iteration on
+//! as in 8b, revalidated and asked about again, never from the released Suspension. A provider that
+//! allows the request only while its Suspension is `Pending` (the intake slice's grant authority)
+//! answers `ApprovalRequired` at that ask, so the resumed Run ends `NeedsAuthority` and holds a new
+//! Suspension for the same request, which an approval and a resume perform again. At
 //! another revision the request can never be performed: it is recorded `Stale` in
 //! [`LoopEnd::requests`], the Suspension is released for it all the same, nothing is invoked, and
 //! the loop goes on as after a stale proposal (8), so its first iteration judges the move (2). A
@@ -287,22 +339,24 @@ use crate::model::responsibility::{
     ActionCharge, BudgetLimit, ChargedUsage, RunBudget, RunBudgetBreach, RunCharges,
 };
 use crate::model::responsibility::{
-    ActionRequest, ActionRequestData, ActionRequestId, ActionRequestStale, ActionStatus, AnyRun,
-    AuthorityVerdict, CaseId, Commission, CompletionDetermination, EffectOutcome, ExecutorOutcome,
-    ExecutorOutcomeProposedAction, Frontier, FrontierAction, FrontierData, GovernorError,
-    HoldSuspension, HoldSuspensionOutcome, JudgeEffectRefusal, JudgeEffectRefusalOutcome,
+    ActionNeedsAuthority, ActionNotAdmitted, ActionRequest, ActionRequestData, ActionRequestId,
+    ActionRequestStale, ActionStatus, AnyRun, AuthorityVerdict, CaseId, Commission,
+    CompletionDetermination, EffectOutcome, ExecutorOutcome, ExecutorOutcomeProposedAction,
+    Frontier, FrontierAction, FrontierData, GovernorError, HoldSuspension, HoldSuspensionOutcome,
+    JudgeBudgetStop, JudgeBudgetStopOutcome, JudgeEffectRefusal, JudgeEffectRefusalOutcome,
     JudgeIdleIteration, JudgeIdleIterationOutcome, JudgePerformableActions,
     JudgePerformableActionsOutcome, Observation, ObservationData, ObservationId, ReleaseSuspension,
     ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome, RevalidateActionRequestOutcome, Run,
     RunData, RunId, RunOutcome, RunOutcomeAwaitingApproval, RunOutcomeCaseMovedOn,
-    RunOutcomeCompleted, RunOutcomeEffectRefused, RunOutcomeIdleBound,
-    RunOutcomeNoPerformableAction, RunOutcomeSuspended, RunStarted, RunStorageFailed, StartRun,
-    StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionKey, SuspensionReason,
-    SuspensionState, SuspensionStateConflict, TakeSuspension, TakeSuspensionOutcome, Truth, Unit,
-    commission_state, frontier_state, observation_state,
+    RunOutcomeCompleted, RunOutcomeEffectRefused, RunOutcomeIdleBound, RunOutcomeNeedsAuthority,
+    RunOutcomeNoPerformableAction, RunOutcomeSuspended, RunOutcomeWaiting, RunStarted,
+    RunStorageFailed, StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionKey,
+    SuspensionReason, SuspensionState, SuspensionStateConflict, TakeSuspension,
+    TakeSuspensionOutcome, Truth, Unit, commission_state, frontier_state, observation_state,
 };
 use crate::outcome::{
-    CapabilityVerdict, Derived, derive, judge_idle, judge_performable, judge_refusal,
+    CapabilityVerdict, Derived, derive, judge_budget_stop, judge_idle, judge_performable,
+    judge_refusal,
 };
 use crate::ports::authority::{AuthorityCheck, AuthorityProvider, check_authority};
 use crate::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -362,13 +416,18 @@ pub struct LoopEnd {
     pub run_id: RunId,
     /// How the run ended.
     pub outcome: RunOutcome,
-    /// Every request the loop made, in order, with its revalidation outcome.
+    /// Every request the loop made, in order, with its revalidation outcome. A request the effect
+    /// port answered `Pending` is listed again with each revalidation before it is invoked again.
     pub requests: Vec<Revalidated>,
-    /// The requests admitted, in order. Each was handed to the effect port once.
+    /// The requests admitted, in order, each once for every time it was handed to the effect
+    /// port: once, unless the port answered `Pending` and it was invoked again.
     pub admitted: Vec<ActionRequestData>,
     /// What the effect port answered for each admitted request, in the same order.
     pub effects: Vec<EffectOutcome>,
-    /// The executor calls whose iteration did not end the run.
+    /// The steps the run took, which the step budget bounds: every executor call whose iteration
+    /// did not end the run, every invocation of a pending request again (item 8b) whose iteration
+    /// did not end it, and a resumed Run's resumed request. A run whose effect port never answers
+    /// `Pending` counts its executor calls alone, as before.
     pub steps: usize,
     /// The frontier the last iteration that got so far read before its executor step; `None` when
     /// no iteration read one.
@@ -838,6 +897,31 @@ struct Resumed {
     taken: SuspensionKey,
 }
 
+/// The requests the effect port last answered `Pending`, which the next iteration invokes again
+/// (`story:pending-effect`).
+struct Waiting {
+    /// The pending requests, in the order they were made: one request, or reads of one fan-out.
+    requests: Vec<ActionRequestData>,
+    /// Whether they are reads of a fan-out (8a), invoked again together through
+    /// [`EffectPort::invoke_reads`]; otherwise the one request is invoked through
+    /// [`EffectPort::invoke`].
+    reads: bool,
+    /// Whether the step that admitted them made progress, a request whose action and arguments
+    /// no earlier admitted request had: once none of them is pending, the idle bound judges that
+    /// step by it.
+    progressed: bool,
+}
+
+impl Waiting {
+    /// The ids of the pending requests, in order.
+    fn ids(&self) -> Vec<ActionRequestId> {
+        self.requests
+            .iter()
+            .map(|pending| pending.action_request_id.clone())
+            .collect()
+    }
+}
+
 /// What one loop has made so far.
 struct Track {
     requests: Vec<Revalidated>,
@@ -944,6 +1028,9 @@ where
     // How the run ends on a read the port refused as final in a fan-out beside a stale read, kept
     // until the next iteration has judged the move (8a).
     let mut kept_refusal: Option<RunOutcome> = None;
+    // The requests the effect port last answered `Pending`, which the next iteration invokes
+    // again instead of running the executor (8b).
+    let mut waiting: Option<Waiting> = None;
 
     let limit = budget.unwrap_or(UNBUDGETED_STEP_LIMIT);
     // Why the Run is suspended when its steps reach `limit`: the run budget's step limit when it
@@ -968,7 +1055,7 @@ where
     // effect port or a governor that fails first leaves it `Resuming`. On a case that moved, the
     // request bound to its revision can never be performed: it is recorded stale, the Suspension
     // is released, nothing is invoked, and the next iteration judges the move, as after a stale
-    // proposal (8).
+    // proposal (8). A request the port answered `Pending` is invoked again as in 8b.
     if let Some(Resumed {
         request: data,
         answer,
@@ -990,12 +1077,22 @@ where
             governor.observe(effect_observation(context, &data, &effect))?;
             release_taken(suspensions, taken, &data)?;
             effected = matches!(effect, EffectOutcome::Performed(_));
+            if matches!(effect, EffectOutcome::Pending(_)) {
+                // The resumed step is judged against no idle bound, so neither is its request
+                // once the port answers otherwise.
+                waiting = Some(Waiting {
+                    requests: vec![data.clone()],
+                    reads: false,
+                    progressed: true,
+                });
+            }
             track.steps += 1;
             if let Some(breach) = run_budget
                 .as_ref()
                 .and_then(|limits| spent_past(limits, &track))
             {
-                return suspend_ended(runs, run_id, SuspensionReason::RunBudget(breach), track);
+                let reason = SuspensionReason::RunBudget(breach);
+                return budget_ended(runs, run_id, reason, waiting.as_ref(), track);
             }
             // A refusal the port marks final ends the resumed Run, its Suspension released (8).
             if let Some(ended) = refusal_end(&data, &effect)? {
@@ -1020,10 +1117,11 @@ where
     loop {
         // With the budget used up, a pending approval gate is still read and checked first, after
         // a stale proposal the move is judged first, and after a performed effect the case is
-        // loaded first, so a case the last step completed ends the run completed.
+        // loaded first, so a case the last step completed ends the run completed. While a request
+        // is pending no gate is read (8b), and the run ends `Waiting`.
         let exhausted = track.steps >= limit;
-        if exhausted && gate.is_none() && !after_stale && !effected {
-            return suspend_ended(runs, run_id, exhausted_for, track);
+        if exhausted && (gate.is_none() || waiting.is_some()) && !after_stale && !effected {
+            return budget_ended(runs, run_id, exhausted_for, waiting.as_ref(), track);
         }
 
         let loaded = if first {
@@ -1061,9 +1159,9 @@ where
             return Ok(track.end(run_id, ended));
         }
         // After a performed effect that left no gate pending, a case still open is suspended for
-        // its budget (0).
-        if exhausted && gate.is_none() && !after_stale {
-            return suspend_ended(runs, run_id, exhausted_for, track);
+        // its budget (0), or ends `Waiting` while a request is pending.
+        if exhausted && (gate.is_none() || waiting.is_some()) && !after_stale {
+            return budget_ended(runs, run_id, exhausted_for, waiting.as_ref(), track);
         }
 
         let frontier = governor.frontier(case)?;
@@ -1078,6 +1176,112 @@ where
         }
         // The frontier the executor is handed; the gate and the outcome read it too.
         let handed = offered(&frontier, effects);
+
+        // The requests the port answered `Pending` are invoked again before any executor runs,
+        // each revalidated as before its first invocation (8b). No gate is read for them.
+        if let Some(pending) = waiting.take() {
+            if exhausted {
+                return budget_ended(runs, run_id, exhausted_for, Some(&pending), track);
+            }
+            let again = invoke_again(
+                governor,
+                authority,
+                effects,
+                commission,
+                context,
+                &handed,
+                &pending,
+                run_budget.as_ref(),
+                &mut track,
+                &mut denied,
+            )?;
+            // The provider withholds the pending request now: the run ends needing authority as
+            // at a first `ApprovalRequired` (8), and with a suspension port the Run is suspended
+            // and the commission's Suspension holds the request, for a resume to perform.
+            if let Some(Withheld {
+                request,
+                capability,
+                approval,
+            }) = again.withheld
+            {
+                if let Some(suspending) = suspensions {
+                    let reason = SuspensionReason::Authority(Value::Object(vec![
+                        ("capability".to_owned(), Value::Text(capability)),
+                        ("request".to_owned(), Value::Text(approval.clone())),
+                    ]));
+                    suspend_for_approval(runs, suspending, run, &request, reason)?;
+                }
+                let outcome =
+                    RunOutcome::NeedsAuthority(RunOutcomeNeedsAuthority { request: approval });
+                return Ok(track.end(run_id, outcome));
+            }
+            if let Some(breach) = again.over_budget {
+                // Nothing was invoked: the requests admitted are still pending.
+                let still = Waiting {
+                    requests: again.admitted,
+                    ..pending
+                };
+                let reason = SuspensionReason::RunBudget(breach);
+                return budget_ended(runs, run_id, reason, Some(&still), track);
+            }
+            if !again.admitted.is_empty() {
+                waiting = (!again.pending.is_empty()).then_some(Waiting {
+                    requests: again.pending,
+                    reads: pending.reads,
+                    progressed: pending.progressed,
+                });
+                if let Some(breach) = run_budget
+                    .as_ref()
+                    .and_then(|limits| spent_past(limits, &track))
+                {
+                    let reason = SuspensionReason::RunBudget(breach);
+                    return budget_ended(runs, run_id, reason, waiting.as_ref(), track);
+                }
+                // A refusal the port marks final ends the run as in 8 and 8a: at once, unless a
+                // stale revalidation showed a move, which the next iteration judges first.
+                if let Some(ended) = again.ended {
+                    if !again.stale {
+                        return Ok(track.end(run_id, ended));
+                    }
+                    kept_refusal = Some(ended);
+                }
+                effected = again.performed && !again.stale;
+                // Once none is pending, the step that admitted them is judged against the idle
+                // bound as it would have been had the port answered so at once, and a step
+                // performed under a grant passes the approval gate (5).
+                if waiting.is_none() {
+                    if budget.is_none()
+                        && !again.stale
+                        && !pending.progressed
+                        && let Some(ended) =
+                            idle_judged(governor, case, idle.saturating_add(1), effected)?
+                    {
+                        return Ok(track.end(run_id, ended));
+                    }
+                    if !again.stale {
+                        idle = if pending.progressed {
+                            0
+                        } else {
+                            idle.saturating_add(1)
+                        };
+                    }
+                    if effected && again.allowed {
+                        gate = None;
+                    }
+                }
+                after_stale = again.stale;
+                track.steps += 1;
+                continue;
+            }
+            if again.stale {
+                // Somebody else moved the case: the next iteration judges the move (8).
+                after_stale = true;
+                track.steps += 1;
+                continue;
+            }
+            // None is admitted any more, so none is pending: the iteration goes on (5, 6).
+        }
+
         if let Some(before) = &gate
             && unchanged(before, &handed.data().actions)
         {
@@ -1088,7 +1292,7 @@ where
             }
         }
         if exhausted {
-            return suspend_ended(runs, run_id, exhausted_for, track);
+            return budget_ended(runs, run_id, exhausted_for, None, track);
         }
 
         let outcome = executor.run(commission, &handed);
@@ -1207,7 +1411,8 @@ where
                     .as_ref()
                     .and_then(|limits| trials_past(limits, &track, &[data.action.as_str()]))
                 {
-                    return suspend_ended(runs, run_id, SuspensionReason::RunBudget(breach), track);
+                    let reason = SuspensionReason::RunBudget(breach);
+                    return budget_ended(runs, run_id, reason, None, track);
                 }
                 track.admitted.push(data.clone());
                 progressed = new;
@@ -1217,13 +1422,23 @@ where
                     .map_err(|error| Stopped::from(LoopFailure::Effect(error)))?;
                 track.record(&data, &effect);
                 governor.observe(effect_observation(context, &data, &effect))?;
+                // A pending answer leaves the request to be invoked again at the next
+                // iteration (8b).
+                if matches!(effect, EffectOutcome::Pending(_)) {
+                    waiting = Some(Waiting {
+                        requests: vec![data.clone()],
+                        reads: false,
+                        progressed: new,
+                    });
+                }
                 // Usage past a spending limit stops the run once the effect is recorded and
                 // observed.
                 if let Some(breach) = run_budget
                     .as_ref()
                     .and_then(|limits| spent_past(limits, &track))
                 {
-                    return suspend_ended(runs, run_id, SuspensionReason::RunBudget(breach), track);
+                    let reason = SuspensionReason::RunBudget(breach);
+                    return budget_ended(runs, run_id, reason, waiting.as_ref(), track);
                 }
                 // A refusal the port marks final ends the run once it is recorded and observed;
                 // the case is not loaded again (8).
@@ -1242,7 +1457,7 @@ where
         if let ExecutorOutcome::ProposedReads(proposed) = &outcome
             && fans_out(&proposed.reads, &handed, effects)
         {
-            let fanned = fan_out(
+            let mut fanned = fan_out(
                 governor,
                 effects,
                 commission,
@@ -1253,12 +1468,22 @@ where
                 run_budget.as_ref(),
                 &mut track,
             )?;
+            // The reads the port answered `Pending` are invoked again together at the next
+            // iteration (8b).
+            if !fanned.pending.is_empty() {
+                waiting = Some(Waiting {
+                    requests: std::mem::take(&mut fanned.pending),
+                    reads: true,
+                    progressed: fanned.progressed,
+                });
+            }
             if let Some(breach) = fanned.over_budget.or_else(|| {
                 run_budget
                     .as_ref()
                     .and_then(|limits| spent_past(limits, &track))
             }) {
-                return suspend_ended(runs, run_id, SuspensionReason::RunBudget(breach), track);
+                let reason = SuspensionReason::RunBudget(breach);
+                return budget_ended(runs, run_id, reason, waiting.as_ref(), track);
             }
             // A read the port refused as final ends the run once every read was recorded, unless a
             // stale read showed the case moved: then the refusal is kept, the next iteration
@@ -1318,25 +1543,19 @@ where
         // Without a step budget, an iteration that made no progress is judged against the idle
         // bound; a stale one is not counted, since the next iteration judges the move. A case this
         // iteration's performed effect completed comes first: the case is loaded before the bound
-        // ends the run, as at the step budget (0), and a complete one ends it completed.
+        // ends the run, as at the step budget (0), and a complete one ends it completed. An
+        // iteration whose request the port answered `Pending` is not judged and leaves the count
+        // as it was: it is judged once the port answers otherwise (8b).
         if budget.is_none()
             && !stale
             && !progressed
-            && let Some(ended) = idle_end(idle.saturating_add(1))?
+            && waiting.is_none()
+            && let Some(ended) = idle_judged(governor, case, idle.saturating_add(1), effected)?
         {
-            if effected {
-                governor.current_revision(case)?;
-                if let CompletionDetermination::Complete(complete) = governor.completion(case)? {
-                    let outcome = RunOutcome::Completed(RunOutcomeCompleted {
-                        outcome: complete.outcome,
-                    });
-                    return Ok(track.end(run_id, outcome));
-                }
-            }
             return Ok(track.end(run_id, ended));
         }
         after_stale = stale;
-        if !stale {
+        if !stale && waiting.is_none() {
             idle = if progressed {
                 0
             } else {
@@ -1385,20 +1604,39 @@ fn step_budget_reason(limit: usize) -> SuspensionReason {
     )]))
 }
 
-/// Suspends the Run for `reason`, a budget it reached, and ends the loop suspended.
-fn suspend_ended<R: SuspendRunBehavior + ?Sized>(
+/// Suspends the Run for `reason`, a budget it reached, and ends the loop as [`judge_budget_stop`]
+/// answers (`JudgeBudgetStop`, `story:pending-effect`): `Waiting`, naming the requests `waiting`
+/// holds and `reason`, when one is pending; otherwise suspended with `reason`, as before. A
+/// judgement the generated behaviour cannot make is [`LoopFailure::Obligation`], the Run
+/// suspended.
+fn budget_ended<R: SuspendRunBehavior + ?Sized>(
     runs: &mut R,
     run_id: &RunId,
     reason: SuspensionReason,
+    waiting: Option<&Waiting>,
     track: Track,
 ) -> Result<LoopEnd, Stopped> {
+    let stopped = |failure: LoopFailure, reason: &SuspensionReason| Stopped {
+        failure,
+        suspended: Some((Box::new(reason.clone()), None)),
+    };
     if let Err(failure) = suspend(runs, run_id, reason.clone()) {
-        return Err(Stopped {
-            failure,
-            suspended: Some((Box::new(reason), None)),
-        });
+        return Err(stopped(failure, &reason));
     }
-    let outcome = RunOutcome::Suspended(RunOutcomeSuspended { reason });
+    let judged = judge_budget_stop(JudgeBudgetStop {
+        pending: waiting.map(Waiting::ids).unwrap_or_default(),
+        reason: reason.clone(),
+    });
+    let outcome = match judged {
+        Ok(JudgeBudgetStopOutcome::Waiting { error }) => RunOutcome::Waiting(RunOutcomeWaiting {
+            action_request_ids: error.action_request_ids,
+            reason: error.reason,
+        }),
+        Ok(JudgeBudgetStopOutcome::Suspended) => {
+            RunOutcome::Suspended(RunOutcomeSuspended { reason })
+        }
+        Err(unmet) => return Err(stopped(LoopFailure::Obligation(unmet), &reason)),
+    };
     Ok(track.end(run_id, outcome))
 }
 
@@ -1725,19 +1963,6 @@ fn fans_out<F: EffectPort + ?Sized>(
     handed: &Frontier<frontier_state::Issued>,
     effects: &F,
 ) -> bool {
-    let admissible = |action: &str| {
-        let mut listed = handed
-            .data()
-            .actions
-            .iter()
-            .filter(|entry| entry.action == action)
-            .peekable();
-        listed.peek().is_some()
-            && listed.all(|entry| {
-                entry.status == ActionStatus::Admissible
-                    && entry.capability.as_deref().is_none_or(str::is_empty)
-            })
-    };
     // Two reads with the same action and arguments would invoke one read twice in one step.
     let distinct = reads.iter().enumerate().all(|(at, read)| {
         reads[..at]
@@ -1746,11 +1971,63 @@ fn fans_out<F: EffectPort + ?Sized>(
     });
     (1..=MAX_FAN_OUT).contains(&reads.len())
         && distinct
-        && reads.iter().all(|read| {
-            effects.performs(&read.action)
-                && effects.reads(&read.action)
-                && admissible(&read.action)
+        && reads
+            .iter()
+            .all(|read| fan_out_read(&read.action, handed, effects))
+}
+
+/// Whether `action` may be read in a fan-out (items 8a, 8b): the effect port performs and reads it
+/// ([`EffectPort::reads`]), and the `handed` frontier lists it, every entry of it `Admissible`
+/// and naming no capability.
+fn fan_out_read<F: EffectPort + ?Sized>(
+    action: &str,
+    handed: &Frontier<frontier_state::Issued>,
+    effects: &F,
+) -> bool {
+    let mut listed = handed
+        .data()
+        .actions
+        .iter()
+        .filter(|entry| entry.action == action)
+        .peekable();
+    effects.performs(action)
+        && effects.reads(action)
+        && listed.peek().is_some()
+        && listed.all(|entry| {
+            entry.status == ActionStatus::Admissible
+                && entry.capability.as_deref().is_none_or(str::is_empty)
         })
+}
+
+/// How a pending read that [`fan_out_read`] no longer allows on `handed` is recorded, though its
+/// revalidation admitted it (item 8b): as needing the capability an entry of it names, since a
+/// read of a fan-out is never invoked on an authority (8a); otherwise as not admitted, with the
+/// reasons its entries give.
+fn refused_read(
+    action: &str,
+    handed: &Frontier<frontier_state::Issued>,
+) -> RevalidateActionRequestOutcome {
+    let entries = || {
+        handed
+            .data()
+            .actions
+            .iter()
+            .filter(move |entry| entry.action == action)
+    };
+    match entries().find_map(|entry| entry.capability.clone().filter(|named| !named.is_empty())) {
+        Some(capability) => RevalidateActionRequestOutcome::NeedsAuthority {
+            error: ActionNeedsAuthority {
+                action: action.to_owned(),
+                capability,
+            },
+        },
+        None => RevalidateActionRequestOutcome::NotAdmitted {
+            error: ActionNotAdmitted {
+                action: action.to_owned(),
+                reasons: entries().flat_map(|entry| entry.reasons.clone()).collect(),
+            },
+        },
+    }
 }
 
 /// What one admitted fan-out did.
@@ -1768,6 +2045,9 @@ struct FannedOut {
     /// How the run ends when the port refused a read as final: the first such read, in the
     /// order proposed ([`refusal_end`]). It ends the run only when no read was `stale`.
     ended: Option<RunOutcome>,
+    /// The reads the port answered `Pending`, in the order proposed, which the next iteration
+    /// invokes again (8b).
+    pending: Vec<ActionRequestData>,
 }
 
 /// Performs the fan-out `reads`, which [`fans_out`] admitted, as item 8a documents: each read
@@ -1825,6 +2105,7 @@ where
             stale,
             over_budget: None,
             ended: None,
+            pending: Vec::new(),
         });
     }
     // A fan-out that would take an action past its trial limit invokes none of its reads.
@@ -1837,6 +2118,7 @@ where
             stale,
             over_budget: Some(breach),
             ended: None,
+            pending: Vec::new(),
         });
     }
     let progressed = admitted.iter().any(|data| {
@@ -1846,36 +2128,86 @@ where
             .any(|earlier| earlier.action == data.action && earlier.arguments == data.arguments)
     });
     track.admitted.extend(admitted.iter().cloned());
-    let requests: Vec<AdmittedRequest> =
-        admitted.iter().cloned().map(AdmittedRequest::new).collect();
-    let answers = match effects.invoke_reads(commission, &requests) {
-        Some(answers) if answers.len() == requests.len() => answers,
-        Some(answers) => {
-            return Err(LoopFailure::Effect(EffectError::new(format!(
-                "the effect port answered {} of {} reads",
-                answers.len(),
-                requests.len()
-            )))
-            .into());
-        }
-        None => {
-            return Err(LoopFailure::Effect(EffectError::new(
-                "the effect port reads the actions proposed but invokes no fan-out",
-            ))
-            .into());
-        }
+    let answers = invoke_together(effects, commission, &admitted)?;
+    let answered = record_answers(governor, context, track, &admitted, answers)?;
+    Ok(FannedOut {
+        admitted: true,
+        progressed,
+        performed: answered.performed,
+        stale,
+        over_budget: None,
+        ended: answered.ended,
+        pending: answered.pending,
+    })
+}
+
+/// Hands `reads`, admitted reads, to [`EffectPort::invoke_reads`] together and answers what each
+/// returned, in order. A port that answers `None`, or another number of answers, fails the loop
+/// as an effect failure.
+fn invoke_together<F: EffectPort + ?Sized>(
+    effects: &F,
+    commission: &Commission<commission_state::Assigned>,
+    reads: &[ActionRequestData],
+) -> Result<Vec<Result<EffectOutcome, EffectError>>, Stopped> {
+    let requests: Vec<AdmittedRequest> = reads.iter().cloned().map(AdmittedRequest::new).collect();
+    match effects.invoke_reads(commission, &requests) {
+        Some(answers) if answers.len() == requests.len() => Ok(answers),
+        Some(answers) => Err(LoopFailure::Effect(EffectError::new(format!(
+            "the effect port answered {} of {} reads",
+            answers.len(),
+            requests.len()
+        )))
+        .into()),
+        None => Err(LoopFailure::Effect(EffectError::new(
+            "the effect port reads the actions proposed but invokes no fan-out",
+        ))
+        .into()),
+    }
+}
+
+/// What the effect port answered for requests handed to it together, once every answer was
+/// recorded and observed.
+struct Answered {
+    /// Whether any effect was `Performed`.
+    performed: bool,
+    /// The requests answered `Pending`, in order.
+    pending: Vec<ActionRequestData>,
+    /// How the run ends when the port refused one as final: the first such, in order
+    /// ([`refusal_end`]).
+    ended: Option<RunOutcome>,
+}
+
+/// Records and observes, in the order of `handed`, what the effect port answered for each
+/// (`answers`, in the same order). An `Err` fails the loop once every answer that came was
+/// recorded and observed; the first `Err` in order is the failure.
+fn record_answers<G, C>(
+    governor: &G,
+    context: &mut C,
+    track: &mut Track,
+    handed: &[ActionRequestData],
+    answers: Vec<Result<EffectOutcome, EffectError>>,
+) -> Result<Answered, Stopped>
+where
+    G: ObservationPort + ?Sized,
+    C: LoopContext + ?Sized,
+{
+    let mut answered = Answered {
+        performed: false,
+        pending: Vec::new(),
+        ended: None,
     };
-    let mut performed = false;
     let mut failed: Option<EffectError> = None;
-    let mut ended: Option<RunOutcome> = None;
-    for (data, answer) in admitted.iter().zip(answers) {
+    for (data, answer) in handed.iter().zip(answers) {
         match answer {
             Ok(effect) => {
-                performed |= matches!(effect, EffectOutcome::Performed(_));
+                answered.performed |= matches!(effect, EffectOutcome::Performed(_));
                 track.record(data, &effect);
                 governor.observe(effect_observation(context, data, &effect))?;
-                if ended.is_none() {
-                    ended = refusal_end(data, &effect)?;
+                if matches!(effect, EffectOutcome::Pending(_)) {
+                    answered.pending.push(data.clone());
+                }
+                if answered.ended.is_none() {
+                    answered.ended = refusal_end(data, &effect)?;
                 }
             }
             Err(error) => {
@@ -1883,17 +2215,168 @@ where
             }
         }
     }
-    if let Some(error) = failed {
-        return Err(LoopFailure::Effect(error).into());
+    match failed {
+        Some(error) => Err(LoopFailure::Effect(error).into()),
+        None => Ok(answered),
     }
-    Ok(FannedOut {
-        admitted: true,
-        progressed,
-        performed,
-        stale,
+}
+
+/// What invoking the pending requests again did (item 8b).
+struct InvokedAgain {
+    /// The requests revalidation admitted again, in order: handed to the port, unless
+    /// `over_budget` names the trial limit that kept them back.
+    admitted: Vec<ActionRequestData>,
+    /// Whether some revalidation answered stale, or the case moved while the provider decided:
+    /// somebody else moved the case.
+    stale: bool,
+    /// Whether the one request needed authority and the provider allowed it.
+    allowed: bool,
+    /// The trial limit handing `admitted` to the port would pass, so nothing was invoked.
+    over_budget: Option<RunBudgetBreach>,
+    /// Whether any effect was `Performed`.
+    performed: bool,
+    /// The requests the port answered `Pending` again, in order.
+    pending: Vec<ActionRequestData>,
+    /// How the run ends when the port refused one as final ([`refusal_end`]).
+    ended: Option<RunOutcome>,
+    /// The one request the provider answered `ApprovalRequired` for when asked again: the run
+    /// ends needing authority, as at a first `ApprovalRequired` (8).
+    withheld: Option<Withheld>,
+}
+
+/// A pending request whose authority the provider withheld when it was asked again (item 8b).
+struct Withheld {
+    /// The pending request, as the run made it.
+    request: ActionRequestData,
+    /// The capability the frontier names for its action.
+    capability: String,
+    /// What the provider's `ApprovalRequired` asks to be approved.
+    approval: String,
+}
+
+/// Invokes `waiting`'s requests again, as item 8b documents. Each is revalidated first, as before
+/// its first invocation, under its own id and at its own revision: a request that still needs
+/// authority is asked about again, and once the provider allows it the case is loaded again, a
+/// case at another revision making it stale (8). One revalidation does not admit is recorded with
+/// its answer and is not invoked. A provider's deny is remembered as in 8. A read of a fan-out is
+/// invoked again only while the fan-out rule of item 8a still holds for it on `handed`, the
+/// frontier the iteration read ([`fan_out_read`]): one it no longer holds for is recorded as
+/// [`refused_read`] answers and not invoked, so a read is never invoked on an authority. The
+/// admitted ones are checked against their actions' trial limits and handed to the port
+/// together: reads through [`EffectPort::invoke_reads`], the one request otherwise through
+/// [`EffectPort::invoke`]. Every answer is recorded and observed in order.
+// The ports, the loop's state, the frontier the iteration read and the pending requests.
+#[allow(clippy::too_many_arguments)]
+fn invoke_again<G, A, F, C>(
+    governor: &G,
+    authority: &A,
+    effects: &F,
+    commission: &Commission<commission_state::Assigned>,
+    context: &mut C,
+    handed: &Frontier<frontier_state::Issued>,
+    waiting: &Waiting,
+    budget: Option<&RunBudget>,
+    track: &mut Track,
+    denied: &mut Vec<String>,
+) -> Result<InvokedAgain, Stopped>
+where
+    G: Governor + ObservationPort + ?Sized,
+    A: AuthorityProvider + ?Sized,
+    F: EffectPort + ?Sized,
+    C: LoopContext + ?Sized,
+{
+    let mut again = InvokedAgain {
+        admitted: Vec::new(),
+        stale: false,
+        allowed: false,
         over_budget: None,
-        ended,
-    })
+        performed: false,
+        pending: Vec::new(),
+        ended: None,
+        withheld: None,
+    };
+    for data in &waiting.requests {
+        let mut answer = revalidate(governor, &ActionRequest::new(data.clone()))?;
+        let mut admitted = false;
+        match &answer {
+            // A read is admitted again only as a read of a fan-out is (8a).
+            RevalidateActionRequestOutcome::Admitted
+                if waiting.reads && !fan_out_read(&data.action, handed, effects) =>
+            {
+                answer = refused_read(&data.action, handed);
+            }
+            RevalidateActionRequestOutcome::Admitted => admitted = true,
+            RevalidateActionRequestOutcome::Stale { .. } => again.stale = true,
+            RevalidateActionRequestOutcome::NeedsAuthority { error } if !waiting.reads => {
+                if let AuthorityCheck::Decided(verdict) =
+                    check_authority(authority, commission, data, &error.capability)
+                {
+                    match verdict {
+                        AuthorityVerdict::Allow(Unit(true)) => {
+                            let current = governor.current_revision(&data.case_id)?;
+                            if current == data.expected_case_revision {
+                                admitted = true;
+                                again.allowed = true;
+                            } else {
+                                again.stale = true;
+                                answer = RevalidateActionRequestOutcome::Stale {
+                                    error: ActionRequestStale {
+                                        expected_case_revision: data.expected_case_revision,
+                                        current_case_revision: current,
+                                    },
+                                };
+                            }
+                        }
+                        AuthorityVerdict::Deny(_) => denied.push(error.action.clone()),
+                        AuthorityVerdict::ApprovalRequired(required) => {
+                            again.withheld = Some(Withheld {
+                                request: data.clone(),
+                                capability: error.capability.clone(),
+                                approval: required.request,
+                            });
+                        }
+                        AuthorityVerdict::Allow(_) => {}
+                    }
+                }
+            }
+            RevalidateActionRequestOutcome::NeedsAuthority { .. }
+            | RevalidateActionRequestOutcome::NotAdmitted { .. } => {}
+        }
+        track.requests.push(Revalidated {
+            request: data.clone(),
+            outcome: answer,
+        });
+        if admitted {
+            again.admitted.push(data.clone());
+        }
+    }
+    if again.admitted.is_empty() {
+        return Ok(again);
+    }
+    let actions: Vec<&str> = again
+        .admitted
+        .iter()
+        .map(|data| data.action.as_str())
+        .collect();
+    if let Some(breach) = budget.and_then(|limits| trials_past(limits, track, &actions)) {
+        again.over_budget = Some(breach);
+        return Ok(again);
+    }
+    track.admitted.extend(again.admitted.iter().cloned());
+    let answers = if waiting.reads {
+        invoke_together(effects, commission, &again.admitted)?
+    } else {
+        again
+            .admitted
+            .iter()
+            .map(|data| effects.invoke(commission, &AdmittedRequest::new(data.clone())))
+            .collect()
+    };
+    let answered = record_answers(governor, context, track, &again.admitted, answers)?;
+    again.performed = answered.performed;
+    again.pending = answered.pending;
+    again.ended = answered.ended;
+    Ok(again)
 }
 
 /// How the run ends after the effect port answered `effect` for `request`: with `EffectRefused`,
@@ -1937,6 +2420,31 @@ fn idle_end(idle_iterations: i64) -> Result<Option<RunOutcome>, LoopFailure> {
         }
         JudgeIdleIterationOutcome::Below => None,
     })
+}
+
+/// How a run with no step budget ends after an iteration that made no progress, `idle_iterations`
+/// in a row with it ([`idle_end`]), or `None` when it goes on. When the bound ends the run and the
+/// iteration's own effect was performed (`effected`), the case is loaded first, as at the step
+/// budget (0), and a case the governor holds complete ends the run completed, carrying the
+/// governor's outcome.
+fn idle_judged<G: Governor + ?Sized>(
+    governor: &G,
+    case: &CaseId,
+    idle_iterations: i64,
+    effected: bool,
+) -> Result<Option<RunOutcome>, Stopped> {
+    let Some(ended) = idle_end(idle_iterations)? else {
+        return Ok(None);
+    };
+    if effected {
+        governor.current_revision(case)?;
+        if let CompletionDetermination::Complete(complete) = governor.completion(case)? {
+            return Ok(Some(RunOutcome::Completed(RunOutcomeCompleted {
+                outcome: complete.outcome,
+            })));
+        }
+    }
+    Ok(Some(ended))
 }
 
 /// How a run ends after its executor reported `CaseMoved` (item 9), or proposed nothing on a
@@ -2185,6 +2693,7 @@ fn effect_observation<C: LoopContext + ?Sized>(
             text(match effect {
                 EffectOutcome::Performed(_) => "Performed",
                 EffectOutcome::Refused(_) => "Refused",
+                EffectOutcome::Pending(_) => "Pending",
             }),
         ),
         (
@@ -2219,6 +2728,9 @@ fn effect_observation<C: LoopContext + ?Sized>(
         EffectOutcome::Refused(refused) => {
             payload.push(("reason".to_owned(), text(&refused.reason)));
         }
+        EffectOutcome::Pending(pending) => {
+            payload.push(("report".to_owned(), pending.report.clone()));
+        }
     }
     Observation::new(ObservationData {
         observation_id: context.observation_id(),
@@ -2246,7 +2758,7 @@ fn uncharged() -> ChargedUsage {
 fn charge(charges: &mut RunCharges, action: &str, effect: &EffectOutcome) {
     let usage = match effect {
         EffectOutcome::Performed(performed) => performed.usage.as_ref(),
-        EffectOutcome::Refused(_) => None,
+        EffectOutcome::Refused(_) | EffectOutcome::Pending(_) => None,
     };
     let index = if let Some(index) = charges.actions.iter().position(|c| c.action == action) {
         index

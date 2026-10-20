@@ -242,6 +242,9 @@ types:
   # story:unperformable-names-actions gives NoPerformableAction its payload
   # (RunOutcomeNoPerformableAction): the actions no effect performs and the frontier's open claims,
   # as `JudgePerformableActions` answers `unperformable` for them.
+  # story:pending-effect adds Waiting (a budget ended the run while the effect port's last answer
+  # for a request was Pending, `JudgeBudgetStop`, `waiting`): where the run would otherwise be
+  # Suspended for that budget, it names the pending requests and the budget's reason.
   - name: commission.responsibility.RunOutcome
     kind: union
     tag: kind
@@ -257,6 +260,7 @@ types:
       CaseMovedOn: commission.responsibility.RunOutcomeCaseMovedOn
       EffectRefused: commission.responsibility.RunOutcomeEffectRefused
       IdleBound: commission.responsibility.RunOutcomeIdleBound
+      Waiting: commission.responsibility.RunOutcomeWaiting
 
   # The governor's outcome identifier, as the governor reports it.
   - name: commission.responsibility.RunOutcomeCompleted
@@ -334,6 +338,17 @@ types:
       - name: open_claims
         type: List<String>
 
+  # story:pending-effect: the requests the effect port last answered Pending when a budget ended
+  # the run, in the order they were made (one, or the pending reads of one fan-out), and the reason
+  # the Run was suspended for that budget, as `JudgeBudgetStop` answers `waiting` for them.
+  - name: commission.responsibility.RunOutcomeWaiting
+    kind: struct
+    fields:
+      - name: action_request_ids
+        type: List<commission.responsibility.ActionRequestId>
+      - name: reason
+        type: commission.responsibility.SuspensionReason
+
   # story:runtime-merge: the actions that need approval, in frontier order, on a frontier a step
   # left unchanged; none of them was denied by an authority verdict in the run.
   - name: commission.responsibility.RunOutcomeAwaitingApproval
@@ -344,13 +359,34 @@ types:
 
   # story:runtime-merge (Atlas ADR 0082): what the effect port reports for one admitted action
   # request it was handed. The runtime delivers it to the governor as an observation, never as
-  # evidence.
+  # evidence. story:pending-effect adds Pending (EffectOutcomePending): the work the request
+  # started has not finished, and the port asks to be invoked again for the same request.
   - name: commission.responsibility.EffectOutcome
     kind: union
     tag: kind
     variants:
       Performed: commission.responsibility.EffectOutcomePerformed
       Refused: commission.responsibility.EffectOutcomeRefused
+      Pending: commission.responsibility.EffectOutcomePending
+
+  # story:pending-effect: the effect port started the work the admitted request asks for (a CI job,
+  # a review) and it has not finished: observe again. `report` is what the port saw of it so far.
+  # The runtime invokes the same request again, under its own id and at its own revision, at the
+  # next iteration of the run, until the port answers Performed or Refused, revalidating it before
+  # each invocation exactly as before the first: a request whose case moved, that the frontier no
+  # longer admits, or whose authority the provider no longer allows is not invoked again. No wait
+  # or timer comes between two invocations; how long one takes is the port's. Each invocation is a
+  # step and one trial of the request's action against the run budget, and each answer is recorded
+  # and delivered as one observation, never as evidence. A pending answer is no idle iteration and
+  # leaves the count of idle iterations where it was (`JudgeIdleIteration`): the step that admitted
+  # the request is judged once the port answers otherwise. A budget that ends the run while a
+  # request is pending ends it Waiting, naming the request (`JudgeBudgetStop`). Nothing it reports
+  # was performed, so the case moves only after a Performed.
+  - name: commission.responsibility.EffectOutcomePending
+    kind: struct
+    fields:
+      - name: report
+        type: Json
 
   # What the effect did, as the effect port reports it. Commission declares no structure for it.
   # story:effect-invocation (decision-blocker:invocation-attempt-record, A): the one Connector
@@ -1150,6 +1186,15 @@ errors:
       - name: open_claims
         type: List<String>
 
+  # story:pending-effect: a budget ended the run while these requests were pending. It names them
+  # and the reason the Run was suspended for the budget.
+  - name: commission.responsibility.RequestsWaiting
+    fields:
+      - name: action_request_ids
+        type: List<commission.responsibility.ActionRequestId>
+      - name: reason
+        type: commission.responsibility.SuspensionReason
+
 commands:
   - name: commission.responsibility.StartRun
     input:
@@ -1449,7 +1494,10 @@ commands:
   # case comes first: when the iteration's own effect was performed, the case is loaded before the
   # run ends, as at a step budget, and a case the governor holds complete ends the run completed,
   # not `IdleBound`. A run with a step budget is bounded by its budget alone and is never judged
-  # here.
+  # here. story:pending-effect: an iteration whose request the effect port answered Pending, and
+  # each that invokes it again and is answered Pending, is not judged and leaves `idle_iterations`
+  # where it was; the iteration whose invocation is answered otherwise is judged as the one that
+  # admitted the request would have been.
   - name: commission.responsibility.JudgeIdleIteration
     input:
       - name: idle_iterations
@@ -1494,6 +1542,30 @@ commands:
             actions: input.unperformed
             open_claims: input.open_claims
       - name: performable
+        accepts: nothing
+
+  # story:pending-effect: how a run ends that a budget stops: the step budget, or a limit of the
+  # run budget (`RunBudgetBreach`). `reason` is what the Run is suspended for, through `SuspendRun`,
+  # in either case. `pending` lists the requests the effect port last answered Pending, which the
+  # run would otherwise invoke again, in the order they were made. With one or more, the run
+  # outcome is `Waiting`, naming them and the reason as `waiting` does: the work they started has
+  # not finished. With none, nothing changes (`suspended`), and the run outcome is `Suspended` with
+  # the reason, as before.
+  - name: commission.responsibility.JudgeBudgetStop
+    input:
+      - name: pending
+        type: List<commission.responsibility.ActionRequestId>
+      - name: reason
+        type: commission.responsibility.SuspensionReason
+    outcomes:
+      - name: waiting
+        when: pending.count >= 1
+        error: commission.responsibility.RequestsWaiting
+        payload:
+          commission.responsibility.RequestsWaiting:
+            action_request_ids: input.pending
+            reason: input.reason
+      - name: suspended
         accepts: nothing
 
 events:
