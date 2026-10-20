@@ -10,6 +10,7 @@
 //! Source paths are read when the test runs (`CARGO_MANIFEST_DIR`), never baked in at build time:
 //! a build directory shared between worktrees reuses binaries across them.
 
+use b10x_loom_commission::action_request::request;
 use b10x_loom_commission::admission::admit;
 use b10x_loom_commission::model::behaviour::{Generated, RunStorage};
 use b10x_loom_commission::model::json::{self, Value};
@@ -18,14 +19,15 @@ use b10x_loom_commission::model::responsibility::obligations::{
     ResumeRunBehavior, RunStatesQuery, StartRunBehavior, SuspendRunBehavior,
 };
 use b10x_loom_commission::model::responsibility::{
-    ActionStatus, Admission, AgentRevisionId, AuthorityContext, AuthorityVerdict,
-    AuthorityVerdictApprovalRequired, AuthorityVerdictDeny, CaseId, Commission, CommissionData,
-    CommissionId, ExecutorOutcome, ExecutorOutcomeNeedsHumanJudgment,
-    ExecutorOutcomeProposedAction, ExecutorOutcomeSuspended, FrontierAction, FrontierObligation,
-    HumanDecisionRequest, PrincipalId, ProposedActionArguments, ResumeRun, ResumeRunOutcome, RunId,
-    RunOutcome, RunOutcomeCompleted, RunOutcomeNeedsAuthority, RunOutcomeNeedsExternalEvidence,
-    RunOutcomeNeedsHumanJudgment, RunOutcomeSuspended, RunState, RunStateConflict, StartRun,
-    StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionReason, Unit, commission_state,
+    ActionRequestData, ActionRequestId, ActionStatus, Admission, AgentRevisionId, AuthorityContext,
+    AuthorityVerdict, AuthorityVerdictApprovalRequired, AuthorityVerdictDeny, CaseId, Commission,
+    CommissionData, CommissionId, ExecutorOutcome, ExecutorOutcomeNeedsHumanJudgment,
+    ExecutorOutcomeProposedAction, ExecutorOutcomeSuspended, Frontier, FrontierAction,
+    FrontierObligation, HumanDecisionRequest, PrincipalId, ProposedActionArguments, ResumeRun,
+    ResumeRunOutcome, RunId, RunOutcome, RunOutcomeCompleted, RunOutcomeNeedsAuthority,
+    RunOutcomeNeedsExternalEvidence, RunOutcomeNeedsHumanJudgment, RunOutcomeSuspended, RunState,
+    RunStateConflict, StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionReason,
+    Unit, commission_state, frontier_state,
 };
 use b10x_loom_commission::outcome::{CapabilityVerdict, Derived, RunStore, derive};
 use b10x_loom_commission::ports::authority::{AuthorityCheck, check_authority};
@@ -60,6 +62,20 @@ fn commission() -> Commission<commission_state::Assigned> {
         principal: PrincipalId("principal-a".to_owned()),
         authority_context: AuthorityContext(Value::Null),
     })
+}
+
+/// The request the runtime makes for `proposed` on `frontier`, which the provider is asked about.
+fn request_for(
+    frontier: &Frontier<frontier_state::Issued>,
+    proposed: &ExecutorOutcomeProposedAction,
+) -> ActionRequestData {
+    request(
+        ActionRequestId(uuid(0xf1)),
+        RunId(uuid(0xf2)),
+        frontier,
+        proposed.clone(),
+    )
+    .into_data()
 }
 
 fn action(name: &str, status: ActionStatus, capability: Option<&str>) -> FrontierAction {
@@ -139,7 +155,12 @@ fn derived(row: &Row) -> Derived {
     let verdict = match &outcome {
         ExecutorOutcome::ProposedAction(proposed) => match admit(&frontier, &proposed.action) {
             Admission::NeedsAuthority(needs) => {
-                match check_authority(&row.authority, &commission, &needs.capability) {
+                match check_authority(
+                    &row.authority,
+                    &commission,
+                    &request_for(&frontier, proposed),
+                    &needs.capability,
+                ) {
                     AuthorityCheck::Decided(verdict) => Some((needs.capability, verdict)),
                     AuthorityCheck::Refused(error) => {
                         panic!("{}: the provider failed: {error}", row.name)

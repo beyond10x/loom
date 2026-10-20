@@ -7,8 +7,9 @@ use b10x_loom_commission::model::json;
 use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::commission_state::Assigned;
 use b10x_loom_commission::model::responsibility::{
-    AgentRevisionId, AuthorityContext, AuthorityVerdict, AuthorityVerdictApprovalRequired,
-    AuthorityVerdictDeny, CaseId, Commission, CommissionData, CommissionId, PrincipalId, Unit,
+    ActionRequestData, ActionRequestId, AgentRevisionId, AuthorityContext, AuthorityVerdict,
+    AuthorityVerdictApprovalRequired, AuthorityVerdictDeny, CaseId, Commission, CommissionData,
+    CommissionId, PrincipalId, ProposedActionArguments, RunId, Unit,
 };
 use b10x_loom_commission::ports::authority::{
     AuthorityCheck, AuthorityProvider, AuthorityProviderError, check_authority,
@@ -27,6 +28,18 @@ fn commission() -> Commission<Assigned> {
         principal: PrincipalId("principal-b".to_owned()),
         authority_context: AuthorityContext(context),
     })
+}
+
+/// The action request every check here is about.
+fn request() -> ActionRequestData {
+    ActionRequestData {
+        action_request_id: ActionRequestId(Uuid("2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e".to_owned())),
+        run_id: RunId(Uuid("3c4d5e6f-7a8b-4c9d-8e0f-2a3b4c5d6e7f".to_owned())),
+        case_id: CaseId("case-adversary".to_owned()),
+        expected_case_revision: 5,
+        action: "ledger.post".to_owned(),
+        arguments: ProposedActionArguments(json::Value::Null),
+    }
 }
 
 fn query(commission: &Commission<Assigned>, capability: &str) -> AuthorityQuery {
@@ -48,21 +61,21 @@ fn unknown_capability_is_refused_and_recorded() {
     let commission = commission();
     let fake = StaticAuthorityProvider::new().answer("ledger.read", allow());
 
-    let unknown = check_authority(&fake, &commission, "ledger.delete");
+    let unknown = check_authority(&fake, &commission, &request(), "ledger.delete");
     assert!(
         matches!(unknown, AuthorityCheck::Refused(_)),
         "a capability missing from the table must be refused, got {unknown:?}"
     );
     assert!(!unknown.allows(), "an unknown capability must never allow");
 
-    let empty = check_authority(&fake, &commission, "");
+    let empty = check_authority(&fake, &commission, &request(), "");
     assert!(
         matches!(empty, AuthorityCheck::Refused(_)),
         "the empty capability is not in the table and must be refused, got {empty:?}"
     );
 
     let bare = StaticAuthorityProvider::new();
-    let nothing = check_authority(&bare, &commission, "ledger.read");
+    let nothing = check_authority(&bare, &commission, &request(), "ledger.read");
     assert!(
         matches!(nothing, AuthorityCheck::Refused(_)),
         "an empty table must refuse every capability, got {nothing:?}"
@@ -84,11 +97,11 @@ fn capability_is_passed_and_matched_exactly() {
     let spelled = " Payment.Send ";
     let fake = StaticAuthorityProvider::new().answer(spelled, allow());
 
-    let exact = check_authority(&fake, &commission, spelled);
+    let exact = check_authority(&fake, &commission, &request(), spelled);
     assert_eq!(exact, AuthorityCheck::Decided(allow()));
 
     for near in ["Payment.Send", "payment.send", " payment.send "] {
-        let other = check_authority(&fake, &commission, near);
+        let other = check_authority(&fake, &commission, &request(), near);
         assert!(
             matches!(other, AuthorityCheck::Refused(_)),
             "`{near}` is not the scripted `{spelled}` and must be refused, got {other:?}"
@@ -115,7 +128,7 @@ fn later_table_entry_replaces_earlier_one() {
     let allow_then_fail = StaticAuthorityProvider::new()
         .answer("account.close", allow())
         .fail("account.close", "revoked");
-    let failed = check_authority(&allow_then_fail, &commission, "account.close");
+    let failed = check_authority(&allow_then_fail, &commission, &request(), "account.close");
     assert_eq!(
         failed,
         AuthorityCheck::Refused(AuthorityProviderError::new("revoked")),
@@ -136,7 +149,12 @@ fn later_table_entry_replaces_earlier_one() {
             }),
         );
     assert_eq!(
-        check_authority(&deny_then_approval, &commission, "account.close"),
+        check_authority(
+            &deny_then_approval,
+            &commission,
+            &request(),
+            "account.close"
+        ),
         AuthorityCheck::Decided(AuthorityVerdict::ApprovalRequired(
             AuthorityVerdictApprovalRequired {
                 request: "second".to_owned(),
@@ -155,6 +173,7 @@ fn panicking_provider_yields_no_verdict() {
         fn decide(
             &self,
             _commission: &CommissionData,
+            _request: &ActionRequestData,
             _capability: &str,
         ) -> Result<AuthorityVerdict, AuthorityProviderError> {
             panic!("provider crashed")
@@ -163,7 +182,7 @@ fn panicking_provider_yields_no_verdict() {
 
     let commission = commission();
     let outcome = catch_unwind(AssertUnwindSafe(|| {
-        check_authority(&Panics, &commission, "ledger.read")
+        check_authority(&Panics, &commission, &request(), "ledger.read")
     }));
     assert!(
         outcome.is_err(),
@@ -194,8 +213,8 @@ fn shared_provider_records_every_call_across_threads() {
                 } else {
                     "ledger.write"
                 };
-                let through_port = check_authority(&*provider, &commission, capability);
-                let through_fake = check_authority(&*fake, &commission, capability);
+                let through_port = check_authority(&*provider, &commission, &request(), capability);
+                let through_fake = check_authority(&*fake, &commission, &request(), capability);
                 (capability, through_port, through_fake)
             })
         })

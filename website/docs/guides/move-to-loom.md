@@ -19,7 +19,7 @@ Every crate now comes from the Loom repository:
 
 ```toml
 [dependencies]
-b10x-loom-commission = { git = "https://github.com/beyond10x/loom", tag = "0.26.0" }
+b10x-loom-commission = { git = "https://github.com/beyond10x/loom", tag = "0.27.0" }
 ```
 
 An application that uses several of them can depend on `b10x-loom-sdk` alone; see
@@ -46,7 +46,7 @@ An application that uses several of them can depend on `b10x-loom-sdk` alone; se
 
 - Model calls use [llm](https://beyond10x.github.io/llm/) ([GitHub](https://github.com/beyond10x/llm))
   at release tag `0.3.1`, including the provider overload fix.
-- The engineering protocol registry is `b10x-canon-engineering` `0.8.0` from
+- The engineering protocol registry is `b10x-canon-engineering` `0.9.0` from
   [engineering protocols](https://beyond10x.github.io/engineering-protocols/)
   ([GitHub](https://github.com/beyond10x/engineering-protocols)); it replaces `b10x-els`. Its
   `software.change/1` declares the case inputs `risk`, `change_kind` and
@@ -54,7 +54,7 @@ An application that uses several of them can depend on `b10x-loom-sdk` alone; se
   `CanonGovernor::open`), and declares the write actions `tests.write` and `implementation.edit`
   where earlier releases had `repository.edit`.
 - [Canon](https://beyond10x.github.io/canon/) ([GitHub](https://github.com/beyond10x/canon)) is
-  the revision `b10x-canon-engineering` names, tag `0.4.0`. A consumer that adds Canon itself
+  the revision `b10x-canon-engineering` names, tag `0.6.0`. A consumer that adds Canon itself
   uses the same reference, or it builds a second Canon whose types do not match.
 
 The [crate list](../reference/crates.md) is generated from the workspace and is the current list.

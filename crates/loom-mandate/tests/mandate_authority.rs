@@ -16,9 +16,9 @@ use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::json::{self, Value};
 use b10x_loom_commission::model::primitives::{Timestamp as CommissionTimestamp, Uuid as Id};
 use b10x_loom_commission::model::responsibility::{
-    ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, AuthorityVerdict, CaseId,
-    Commission, CommissionData, CommissionId, EffectOutcome, ExecutorOutcome,
-    ExecutorOutcomeProposedAction, FrontierAction, ObservationId, PrincipalId,
+    ActionRequestData, ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext,
+    AuthorityVerdict, CaseId, Commission, CommissionData, CommissionId, EffectOutcome,
+    ExecutorOutcome, ExecutorOutcomeProposedAction, FrontierAction, ObservationId, PrincipalId,
     ProposedActionArguments, RunId, RunOutcome, SuspensionReason, SuspensionState, Unit,
     commission_state,
 };
@@ -231,6 +231,18 @@ fn commission() -> Commission<commission_state::Assigned> {
     commission_with(CASE, host_context(&subject_context()))
 }
 
+/// The action request every decision here is about. `MandateAuthority` does not read it.
+fn request() -> ActionRequestData {
+    ActionRequestData {
+        action_request_id: ActionRequestId(id(0xe1)),
+        run_id: RunId(id(0xe2)),
+        case_id: CaseId(CASE.to_owned()),
+        expected_case_revision: 1,
+        action: "merge".to_owned(),
+        arguments: ProposedActionArguments(Value::Null),
+    }
+}
+
 /// Refuses every request for the reason it was given, as a policy deciding against the caller.
 struct Refusing(DenialReason);
 
@@ -271,10 +283,10 @@ fn a_request_mandate_allows_is_granted() {
     let commission = commission();
 
     assert_eq!(
-        provider.decide(commission.data(), CAPABILITY),
+        provider.decide(commission.data(), &request(), CAPABILITY),
         Ok(AuthorityVerdict::Allow(Unit(true)))
     );
-    assert!(check_authority(&provider, &commission, CAPABILITY).allows());
+    assert!(check_authority(&provider, &commission, &request(), CAPABILITY).allows());
 }
 
 /// Loom's own governor issues `case-<n>` ids, never UUIDs. Such a case is a Mandate resource: a
@@ -287,10 +299,10 @@ fn a_governor_case_id_is_a_mandate_resource() {
     let commission = commission_with(case, host_context(&subject_context()));
 
     assert_eq!(
-        provider.decide(commission.data(), CAPABILITY),
+        provider.decide(commission.data(), &request(), CAPABILITY),
         Ok(AuthorityVerdict::Allow(Unit(true)))
     );
-    assert!(check_authority(&provider, &commission, CAPABILITY).allows());
+    assert!(check_authority(&provider, &commission, &request(), CAPABILITY).allows());
 }
 
 /// Every case id derives its own resource id, the UUID version 5 of its exact bytes under the
@@ -355,13 +367,14 @@ fn distinct_case_ids_are_distinct_resources() {
     let (graph, revision) = granting_graph_on(CASE, &others);
     let provider = authority(graph, revision, allowing());
     assert_eq!(
-        provider.decide(self::commission().data(), CAPABILITY),
+        provider.decide(self::commission().data(), &request(), CAPABILITY),
         Ok(AuthorityVerdict::Allow(Unit(true))),
         "the case the grant is on is granted"
     );
     for case in others {
         let decided = provider.decide(
             commission_with(case, host_context(&subject_context())).data(),
+            &request(),
             CAPABILITY,
         );
         assert!(
@@ -390,7 +403,7 @@ fn a_request_mandate_denies_is_denied() {
     for reason in reasons {
         let (graph, revision) = granting_graph();
         let provider = authority(graph, revision, Refusing(reason));
-        match provider.decide(commission.data(), CAPABILITY) {
+        match provider.decide(commission.data(), &request(), CAPABILITY) {
             Ok(AuthorityVerdict::Deny(deny)) => assert!(
                 deny.reason.contains(&format!("{reason:?}")),
                 "{reason:?}: the denial names Mandate's reason: {}",
@@ -398,7 +411,7 @@ fn a_request_mandate_denies_is_denied() {
             ),
             other => panic!("{reason:?}: a Mandate refusal is a denial, got {other:?}"),
         }
-        assert!(!check_authority(&provider, &commission, CAPABILITY).allows());
+        assert!(!check_authority(&provider, &commission, &request(), CAPABILITY).allows());
     }
 
     // Policy's own deny, and a credential issued for another audience, reach Mandate's decision
@@ -408,7 +421,7 @@ fn a_request_mandate_denies_is_denied() {
     denying.deny(organization(), subject(), action(), resource());
     let provider = authority(graph, revision, denying);
     assert!(matches!(
-        provider.decide(commission.data(), CAPABILITY),
+        provider.decide(commission.data(), &request(), CAPABILITY),
         Ok(AuthorityVerdict::Deny(_))
     ));
 
@@ -420,6 +433,7 @@ fn a_request_mandate_denies_is_denied() {
     };
     match provider.decide(
         commission_with(CASE, host_context(&other_audience)).data(),
+        &request(),
         CAPABILITY,
     ) {
         Ok(AuthorityVerdict::Deny(deny)) => assert!(
@@ -505,7 +519,7 @@ fn an_approval_required_decision_suspends_as_the_gate_does() {
 
     // The decision the provider reports is Mandate's first decision, by its identity.
     let first = SequentialDecisionIds::new().next_decision_id().to_string();
-    match provider.decide(commission.data(), CAPABILITY) {
+    match provider.decide(commission.data(), &request(), CAPABILITY) {
         Ok(AuthorityVerdict::ApprovalRequired(required)) => assert_eq!(required.request, first),
         other => panic!("an approval requirement is Commission's, got {other:?}"),
     }
@@ -595,12 +609,12 @@ fn an_unavailable_mandate_grants_nothing() {
     for policy in policies {
         let (graph, revision) = granting_graph();
         let provider = authority(graph, revision, BoxedPolicy(policy));
-        let decided = provider.decide(commission.data(), CAPABILITY);
+        let decided = provider.decide(commission.data(), &request(), CAPABILITY);
         assert!(
             decided.is_err(),
             "an outage decides nothing, got {decided:?}"
         );
-        match check_authority(&provider, &commission, CAPABILITY) {
+        match check_authority(&provider, &commission, &request(), CAPABILITY) {
             AuthorityCheck::Refused(error) => assert!(
                 error.message.contains("Unavailable"),
                 "the refusal names the outage: {}",
@@ -666,13 +680,13 @@ fn an_authority_context_that_is_no_mandate_context_grants_nothing() {
             },
         );
         let commission = commission_with(CASE, context_from(&text));
-        let decided = provider.decide(commission.data(), CAPABILITY);
+        let decided = provider.decide(commission.data(), &request(), CAPABILITY);
         assert!(
             decided.is_err(),
             "{text}: no Mandate context decides nothing, got {decided:?}"
         );
         assert!(
-            !check_authority(&provider, &commission, CAPABILITY).allows(),
+            !check_authority(&provider, &commission, &request(), CAPABILITY).allows(),
             "{text}: no grant"
         );
         assert_eq!(asked.get(), 0, "{text}: Mandate was asked nothing");
@@ -690,7 +704,11 @@ fn an_authority_context_that_is_no_mandate_context_grants_nothing() {
         },
     );
     let commission = commission_with("", host_context(&subject_context()));
-    assert!(provider.decide(commission.data(), CAPABILITY).is_err());
+    assert!(
+        provider
+            .decide(commission.data(), &request(), CAPABILITY)
+            .is_err()
+    );
     assert_eq!(asked.get(), 0, "Mandate was asked nothing");
 
     // The same provider, given the host's context, is asked and grants: the refusals above are
@@ -706,7 +724,7 @@ fn an_authority_context_that_is_no_mandate_context_grants_nothing() {
         },
     );
     assert_eq!(
-        provider.decide(self::commission().data(), CAPABILITY),
+        provider.decide(self::commission().data(), &request(), CAPABILITY),
         Ok(AuthorityVerdict::Allow(Unit(true)))
     );
     assert_eq!(asked.get(), 1);

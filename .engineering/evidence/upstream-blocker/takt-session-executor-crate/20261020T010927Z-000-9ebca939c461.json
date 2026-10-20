@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-20T01:09:27Z",
+  "actor": "human:timo",
+  "artifact": "upstream-blocker:takt-session-executor-crate",
+  "kind": "upstream-blocker",
+  "revision": 2,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:loom-on-llm-and-metaharness-acceptance-r1",
+    "review": "review-result:loom-on-llm-and-metaharness-acceptance-r1",
+    "outcome": "fixed"
+  }
+}

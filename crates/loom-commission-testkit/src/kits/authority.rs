@@ -29,9 +29,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::{
-    AgentRevisionId, AuthorityContext, AuthorityVerdict, AuthorityVerdictApprovalRequired,
-    AuthorityVerdictDeny, CaseId, Commission, CommissionData, CommissionId, PrincipalId, Unit,
-    commission_state,
+    ActionRequestData, ActionRequestId, AgentRevisionId, AuthorityContext, AuthorityVerdict,
+    AuthorityVerdictApprovalRequired, AuthorityVerdictDeny, CaseId, Commission, CommissionData,
+    CommissionId, PrincipalId, ProposedActionArguments, RunId, Unit, commission_state,
 };
 use b10x_loom_commission::ports::authority::{AuthorityProvider, check_authority};
 
@@ -278,6 +278,18 @@ fn commission() -> Commission<commission_state::Assigned> {
     })
 }
 
+/// The action request every check asks about, on the commission's case.
+fn request() -> ActionRequestData {
+    ActionRequestData {
+        action_request_id: ActionRequestId(Uuid("00000000-0000-4000-8000-000000000003".to_owned())),
+        run_id: RunId(Uuid("00000000-0000-4000-8000-000000000004".to_owned())),
+        case_id: CaseId("kit-case-authority".to_owned()),
+        expected_case_revision: 1,
+        action: "kit.action".to_owned(),
+        arguments: ProposedActionArguments(Value::Null),
+    }
+}
+
 /// Asks `provider` for `capability` and holds the answer to `backed`, the backing's verdict for
 /// it: exactly, or, with `exact` false, by kind of verdict only.
 fn answers_as_backed<P: AuthorityProvider>(
@@ -286,7 +298,7 @@ fn answers_as_backed<P: AuthorityProvider>(
     backed: &AuthorityVerdict,
     exact: bool,
 ) -> Result<(), String> {
-    let decided = provider.decide(commission().data(), capability);
+    let decided = provider.decide(commission().data(), &request(), capability);
     let matches = match &decided {
         Ok(answer) if exact => answer == backed,
         Ok(answer) => std::mem::discriminant(answer) == std::mem::discriminant(backed),
@@ -320,14 +332,15 @@ fn backing_failure<F: AuthorityFixture>(fixture: &F) -> Result<(), String> {
     let backing = Backing::with(Ok(allow()), Ok(allow()));
     let provider = fixture.provider(backing.clone());
     let commission = commission();
+    let request = request();
     // The provider first decides while the backing allows. What it answers is the as-given
     // checks' business, not this one's; the call is there so a provider that remembers it has
     // something to remember.
-    let _ = provider.decide(commission.data(), CAPABILITY);
+    let _ = provider.decide(commission.data(), &request, CAPABILITY);
 
     backing.set(CAPABILITY, Err(unavailable()));
 
-    match provider.decide(commission.data(), CAPABILITY) {
+    match provider.decide(commission.data(), &request, CAPABILITY) {
         Ok(AuthorityVerdict::Deny(_)) | Err(_) => {}
         Ok(decided) => {
             return Err(format!(
@@ -336,7 +349,7 @@ fn backing_failure<F: AuthorityFixture>(fixture: &F) -> Result<(), String> {
             ));
         }
     }
-    let check = check_authority(&provider, &commission, CAPABILITY);
+    let check = check_authority(&provider, &commission, &request, CAPABILITY);
     if check.allows() {
         return Err(format!(
             "the backing call failed after it had allowed; Commission's authority check \

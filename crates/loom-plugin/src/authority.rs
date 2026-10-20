@@ -2,10 +2,11 @@
 //!
 //! Commission's runtime asks it, at the moment of the call, for a capability the governor's
 //! frontier names. It grants the two capabilities of `inbound-answer@1`, `datasource.read` and
-//! `reply.propose`, and denies every other: a capability it does not know gets no grant.
+//! `reply.propose`, and denies every other: a capability it does not know gets no grant. It
+//! decides on the capability alone and does not read the action request.
 
 use loom_sdk::commission::model::responsibility::{
-    AuthorityVerdict, AuthorityVerdictDeny, CommissionData, Unit,
+    ActionRequestData, AuthorityVerdict, AuthorityVerdictDeny, CommissionData, Unit,
 };
 use loom_sdk::commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
 
@@ -20,6 +21,7 @@ impl AuthorityProvider for PluginAuthority {
     fn decide(
         &self,
         _commission: &CommissionData,
+        _request: &ActionRequestData,
         capability: &str,
     ) -> Result<AuthorityVerdict, AuthorityProviderError> {
         Ok(if GRANTED.contains(&capability) {

@@ -21,8 +21,8 @@ use loom_sdk::ProtocolCatalog;
 use loom_sdk::commission::model::json::Value;
 use loom_sdk::commission::model::primitives::Uuid;
 use loom_sdk::commission::model::responsibility::{
-    AgentRevisionId, AuthorityContext, AuthorityVerdict, CaseId, CommissionData, CommissionId,
-    PrincipalId, Unit,
+    ActionRequestData, ActionRequestId, AgentRevisionId, AuthorityContext, AuthorityVerdict,
+    CaseId, CommissionData, CommissionId, PrincipalId, ProposedActionArguments, RunId, Unit,
 };
 use loom_sdk::commission::ports::authority::AuthorityProvider;
 use serde_json::json;
@@ -252,10 +252,18 @@ fn authority_grants_only_the_two_capabilities() {
         principal: PrincipalId("loom-plugin".to_owned()),
         authority_context: AuthorityContext(Value::Null),
     };
+    let request = ActionRequestData {
+        action_request_id: ActionRequestId(Uuid("00000000-0000-4000-8000-000000000003".to_owned())),
+        run_id: RunId(Uuid("00000000-0000-4000-8000-000000000004".to_owned())),
+        case_id: CaseId("case-1".to_owned()),
+        expected_case_revision: 1,
+        action: "source.read".to_owned(),
+        arguments: ProposedActionArguments(Value::Null),
+    };
     assert_eq!(GRANTED, ["datasource.read", "reply.propose"]);
     for capability in GRANTED {
         assert_eq!(
-            PluginAuthority.decide(&commission, capability),
+            PluginAuthority.decide(&commission, &request, capability),
             Ok(AuthorityVerdict::Allow(Unit(true))),
             "{capability}"
         );
@@ -271,7 +279,7 @@ fn authority_grants_only_the_two_capabilities() {
     ] {
         assert!(
             matches!(
-                PluginAuthority.decide(&commission, capability),
+                PluginAuthority.decide(&commission, &request, capability),
                 Ok(AuthorityVerdict::Deny(_))
             ),
             "`{capability}` is denied"

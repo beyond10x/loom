@@ -24,7 +24,7 @@ control-plane path, and fails when either table here and the code disagree.
 
   ```toml
   [dependencies]
-  b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.26.0" }
+  b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.27.0" }
   ```
 
 - Outside the promise:
@@ -45,7 +45,7 @@ the same JSON document that Canon release renders for the same case
 
 | Loom | `b10x-canon` | `b10x-canon-engineering` |
 |---|---|---|
-| 0.26.0 | 0.6.0 | 0.8.0 |
+| 0.27.0 | 0.6.0 | 0.9.0 |
 
 A release that moves either pin names it in its `CHANGELOG.md` entry.
 
@@ -56,7 +56,7 @@ implements it through.
 
 | Port | Path | What the host supplies |
 |---|---|---|
-| `AuthorityProvider` | `loom_sdk::commission::ports::authority::AuthorityProvider` | Whether a commission holds a capability, from organizational authority |
+| `AuthorityProvider` | `loom_sdk::commission::ports::authority::AuthorityProvider` | Whether a commission holds a capability for the action request the runtime revalidated (its action, arguments and case revision), from organizational authority |
 | `SuspensionPort` | `loom_sdk::commission::ports::suspension::SuspensionPort` | Durable storage of a run suspended on a withheld approval |
 | `FallibleCaseStore` | `loom_sdk::governor::FallibleCaseStore` | A case store whose reads and writes can fail |
 | `CaseStore` | `loom_sdk::governor::CaseStore` | A case store that cannot fail |

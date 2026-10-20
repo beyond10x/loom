@@ -9,6 +9,61 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-20
+
+Loom 0.27.0 links engineering-protocols 0.9.0, tells an authority provider the action request it
+decides, and lets a host read the decision document behind a frontier the governor issued. The
+bundled catalog gains `eval-gated-change@1`. `AuthorityProvider::decide` receives the revalidated
+`ActionRequestData`, and the runtime reads the case revision again after an allow and before a
+resumed request is invoked, performing nothing on a move it sees.
+`CanonGovernor::decision_document(&case, &frontier_id)` returns the `canon-decision/1` document
+kept under the id of a frontier the governor issued.
+Breaking: a host implementing `AuthorityProvider` adds the `request` parameter and a caller of
+`check_authority` passes it; a request the provider allowed is no longer performed when the runtime
+sees its case moved; a host that links `b10x-canon-engineering` itself moves to tag `0.9.0`;
+`b10x-loom resume` refuses a commission `run --state` kept under 0.26.0, so run that intent again;
+a user-installed or host-registered `eval-gated-change@1` collides with the new bundled name.
+
+Loom links engineering-protocols 0.9.0, the tag takt pins, so a crate depending on both resolves
+one `b10x-canon-engineering`: the four manifests that name it (`loom-governor`, `loom-protocols`,
+`loom-intake-slice`, `loom-intake-router`) name `tag = "0.9.0"`, and `Cargo.lock` holds one copy of
+it and one `b10x-canon`, still at tag `0.6.0`. engineering-protocols 0.9.0 adds the built-in
+protocol `eval.gated_change/1` and changes no existing one, so the bundled catalog the router and
+`b10x-loom protocols list` read gains `eval-gated-change@1`, recording revision `0.9.0` as every
+engineering protocol does. The slice does not perform it: a pick of it in `b10x-loom run` stops
+`NoLocalExecutor` naming it before a case opens, as a pick of `incident-response@1` does.
+Breaking: a host that links `b10x-canon-engineering` itself moves to tag `0.9.0` so it resolves one
+copy; the classifier is offered one more protocol, `eval-gated-change@1`; `b10x-loom resume`
+refuses a commission that `run --state` kept under 0.26.0, whose kept route names the catalog
+without `eval-gated-change@1`, so run that intent again; `eval-gated-change@1` is now a bundled
+name, so a definition of that name installed in the user protocol store under 0.26.0 fails every
+command that reads the store as a duplicate registration and `protocols remove` refuses it: delete
+its entry from `catalog.json` in that store (`$XDG_DATA_HOME/loom/protocols`, or
+`~/.local/share/loom/protocols`) by hand; a host that adds its own `eval-gated-change@1` to
+`ProtocolCatalog::bundled()` or `engineering()`, or registers one with
+`CanonGovernor::with_protocol`, is refused because the name is taken.
+
+An authority provider sees the action request it decides (`story:authority-sees-the-request`). `AuthorityProvider::decide` takes the action request beside the commission and the capability: the `ActionRequestData` the runtime revalidated, at the run loop's check and at a resumed request's, its id, Run and case the runtime's and its `expected_case_revision` the revision of the frontier the proposal was chosen from, never one the executor wrote; its action and arguments are the proposal as written. A provider can therefore allow one request at one case revision and refuse the same action at the next. The runtime reads the case's revision again once the provider allows, and a resume reads it once more right before it invokes the held request; on a move it sees, it performs nothing. The run loop records the request `Stale`, does not invoke it and judges the move on the next iteration. A resume that sees the move before it takes the Suspension is refused `ResumeRefusal::CaseMoved`, takes nothing and leaves the Suspension `Pending`; one that sees it after the take records the request `Stale`, releases the Suspension (`ReleaseSuspension`), invokes nothing and judges the move, since the request can never be performed; a new `run` is the remedy. A move after the runtime's last read, while the effect itself runs, is not seen: an effect port that must refuse a write on a moved case binds the write to the request's `expected_case_revision`. `check_authority` takes the request too, and still refuses on a provider's `Err`. No provider in Loom grants more or less than before: `MandateAuthority`, `PluginAuthority`, the slice's `GrantAuthority` and its run provider do not read the request. The testkit's `StaticAuthorityProvider` records each request (`requests`). Breaking: a host implementing `AuthorityProvider` adds the parameter, `fn decide(&self, commission: &CommissionData, request: &ActionRequestData, capability: &str) -> Result<AuthorityVerdict, AuthorityProviderError>`, and a caller of `check_authority(provider, commission, request, capability)` passes the request; a request the provider allowed is no longer performed when the runtime sees the case moved after its revalidation and before the invoke, and a resume that sees such a move after its take releases the Suspension instead of performing the request; `LoopFailure::SuspensionNotReleased` also covers a release refused after such a stale request.
+
+A host reads the decision behind a held case's frontier (`story:governor-exposes-canon-decision`).
+`CanonGovernor::decision_document(&case, &frontier_id)` returns `Some` of the whole
+`canon-decision/1` document Canon wrote behind a frontier the governor issued, explanation
+included, whose rendering gives that frontier id, as the generated JSON value
+(`loom_sdk::governor::model::json::Value`) `evaluate` returns in `canon`. `frontier` keeps the
+document it decided under the id it issues, in the governor's memory, so a host holding an id from
+Commission's loop (`LoopEnd::last_frontier`, a step's observation) reads the document that frontier
+was issued from, even when the trusted time moved since, as the host clock `b10x-loom` evaluates at
+does. A lookup never evaluates the case: an id the governor did not issue, or no longer keeps, is
+`None`. Per case the governor keeps only documents for the case as currently held, at most
+`KEPT_DOCUMENTS_PER_CASE` (16), the most recently issued: they are dropped when a frontier or a
+lookup finds the held case changed (a new artifact revision, evidence received, a decision
+recorded) and when a read finds the store no longer holds the case. For the same protocol,
+evidence, explicit decisions and time the document equals what `evaluate` returns. A case the
+governor cannot read (its held inputs or independence declarations do not satisfy its protocol)
+is refused `GovernorUnavailable`, and a case it does not hold `UnknownCase`, as `frontier` refuses
+them. Breaking: none for callers; `CanonGovernor` only gains a method and the constant
+`loom_governor::KEPT_DOCUMENTS_PER_CASE`.
+
 ## [0.26.0] - 2026-10-17
 
 Loom 0.26.0 links llm 0.7.0, names the target in the routing record of a governed write, and

@@ -130,8 +130,8 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "b10x-assertion-providers"
-version = "0.8.0"
-source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.8.0#dc231c7741c700489e84e89cb6194be754479bc5"
+version = "0.9.0"
+source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.9.0#53a221be0bbcf40129ee9a4e7bb1a28007ad18a2"
 dependencies = [
  "clap",
  "jsonschema 0.33.0",
@@ -156,8 +156,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-canon-engineering"
-version = "0.8.0"
-source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.8.0#dc231c7741c700489e84e89cb6194be754479bc5"
+version = "0.9.0"
+source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.9.0#53a221be0bbcf40129ee9a4e7bb1a28007ad18a2"
 dependencies = [
  "b10x-canon",
  "b10x-canon-engineering-assertions",
@@ -168,8 +168,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-canon-engineering-assertions"
-version = "0.8.0"
-source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.8.0#dc231c7741c700489e84e89cb6194be754479bc5"
+version = "0.9.0"
+source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.9.0#53a221be0bbcf40129ee9a4e7bb1a28007ad18a2"
 dependencies = [
  "anyhow",
  "b10x-assertion-providers",
@@ -340,7 +340,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-cli"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -368,14 +368,14 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-commission"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "commission",
 ]
 
 [[package]]
 name = "b10x-loom-commission-conformance"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "b10x-loom-commission",
  "ess-conformance",
@@ -385,7 +385,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-commission-testkit"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-executor",
@@ -397,7 +397,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-conformance"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "b10x-loom-executor",
  "ess-conformance",
@@ -407,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-connectors"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
@@ -421,7 +421,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-executor"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "b10x-llm-credentials",
  "b10x-loom-commission",
@@ -441,7 +441,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-governor"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "b10x-canon",
  "b10x-canon-engineering",
@@ -457,14 +457,14 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-intake-references"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "regex",
 ]
 
 [[package]]
 name = "b10x-loom-intake-router"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "b10x-canon-engineering",
  "b10x-llm-core",
@@ -476,7 +476,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-intake-slice"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "b10x-canon-engineering",
  "b10x-llm-core",
@@ -502,7 +502,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-mandate"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
@@ -520,7 +520,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-plugin"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-tool-call",
@@ -533,7 +533,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-plugin-slack"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-loom-plugin",
@@ -544,7 +544,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-protocols"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "b10x-canon",
  "b10x-canon-engineering",
@@ -557,7 +557,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-sdk"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -581,7 +581,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-selector-laya"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-http",
@@ -2947,7 +2947,7 @@ version = "1.0.0"
 
 [[package]]
 name = "loom-commission-docs"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "clap",
  "serde_json",
@@ -2955,7 +2955,7 @@ dependencies = [
 
 [[package]]
 name = "loom-commission-xtask"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "clap",
  "proc-macro2",
@@ -2965,7 +2965,7 @@ dependencies = [
 
 [[package]]
 name = "loom-docs"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "anyhow",
  "b10x-llm-models",
@@ -2977,7 +2977,7 @@ dependencies = [
 
 [[package]]
 name = "loom-xtask"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "clap",
  "proc-macro2",

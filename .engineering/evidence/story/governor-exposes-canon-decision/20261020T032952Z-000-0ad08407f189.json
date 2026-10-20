@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-20T03:29:52Z",
+  "actor": "human:timo",
+  "artifact": "story:governor-exposes-canon-decision",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "merged in cddc055a (e196fccc); full gate on f63b2884 (task check's 20 steps run one by one, task plan, release-check 0.27.0): 21 of 22 exit 0; cargo test --workspace --no-fail-fast 2043 passed, 1 failed (adversary_w20261020_u1, which read only [Unreleased] after the release commit), 14 ignored; fixed in b5b4cbed (one test file) and rerun there: cargo fmt --all --check, clippy and cargo test of b10x-loom-intake-slice (188 passed, 0 failed), release-check 0.27.0 and task website, all exit 0",
+    "reference": "~/.cache/loom-wave-2026-10-20-w1/full-gate.log, ~/.cache/loom-wave-2026-10-20-w1/regate.log"
+  }
+}

@@ -6,8 +6,9 @@ use b10x_loom_commission::model::json;
 use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::commission_state::Assigned;
 use b10x_loom_commission::model::responsibility::{
-    AgentRevisionId, AuthorityContext, AuthorityVerdict, AuthorityVerdictApprovalRequired,
-    AuthorityVerdictDeny, CaseId, Commission, CommissionData, CommissionId, PrincipalId, Unit,
+    ActionRequestData, ActionRequestId, AgentRevisionId, AuthorityContext, AuthorityVerdict,
+    AuthorityVerdictApprovalRequired, AuthorityVerdictDeny, CaseId, Commission, CommissionData,
+    CommissionId, PrincipalId, ProposedActionArguments, RunId, Unit,
 };
 use b10x_loom_commission::ports::authority::{AuthorityCheck, AuthorityProvider, check_authority};
 use b10x_loom_commission_testkit::fake_authority::{AuthorityQuery, StaticAuthorityProvider};
@@ -39,6 +40,18 @@ fn commission() -> Commission<Assigned> {
     })
 }
 
+/// The action request every check here is about.
+fn request() -> ActionRequestData {
+    ActionRequestData {
+        action_request_id: ActionRequestId(Uuid("6c3a9d2e-1f4b-4a7c-8e5d-2b9f0a1c3d4e".to_owned())),
+        run_id: RunId(Uuid("7d4b0e3f-2a5c-4b8d-9f6e-3c0a1b2d4e5f".to_owned())),
+        case_id: CaseId("case-17".to_owned()),
+        expected_case_revision: 4,
+        action: "ledger.post".to_owned(),
+        arguments: ProposedActionArguments(json::Value::Null),
+    }
+}
+
 fn provider() -> StaticAuthorityProvider {
     StaticAuthorityProvider::new()
         .answer(ALLOWED, AuthorityVerdict::Allow(Unit(true)))
@@ -65,7 +78,7 @@ fn authority_port_contract() {
     let provider: &dyn AuthorityProvider = &fake;
 
     // Expectation 1: a capability the fake allows returns allow.
-    let allowed = check_authority(provider, &commission, ALLOWED);
+    let allowed = check_authority(provider, &commission, &request(), ALLOWED);
     assert_eq!(
         allowed,
         AuthorityCheck::Decided(AuthorityVerdict::Allow(Unit(true))),
@@ -74,7 +87,7 @@ fn authority_port_contract() {
     assert!(allowed.allows(), "allow must read as allowing");
 
     // Expectation 2: a capability the fake denies with reason R returns deny carrying R.
-    let denied = check_authority(provider, &commission, DENIED);
+    let denied = check_authority(provider, &commission, &request(), DENIED);
     assert_eq!(
         denied,
         AuthorityCheck::Decided(AuthorityVerdict::Deny(AuthorityVerdictDeny {
@@ -85,7 +98,7 @@ fn authority_port_contract() {
     assert!(!denied.allows(), "deny must not read as allowing");
 
     // Expectation 3: approval required with request Q returns approval required carrying Q.
-    let approval = check_authority(provider, &commission, NEEDS_APPROVAL);
+    let approval = check_authority(provider, &commission, &request(), NEEDS_APPROVAL);
     assert_eq!(
         approval,
         AuthorityCheck::Decided(AuthorityVerdict::ApprovalRequired(
@@ -101,7 +114,7 @@ fn authority_port_contract() {
     );
 
     // Expectation 4: a provider error returns a refusal, not an allow.
-    let failed = check_authority(provider, &commission, FAILING);
+    let failed = check_authority(provider, &commission, &request(), FAILING);
     match &failed {
         AuthorityCheck::Refused(error) => assert!(
             error.to_string().contains(FAILURE),
@@ -130,5 +143,10 @@ fn authority_port_contract() {
         expected,
         "the fake must record one query per call, carrying the commission's principal and \
          authority context unchanged"
+    );
+    assert_eq!(
+        fake.requests(),
+        vec![request(); 4],
+        "the fake must record the request of every call, unchanged"
     );
 }

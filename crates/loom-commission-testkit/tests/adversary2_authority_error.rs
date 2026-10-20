@@ -16,8 +16,8 @@ use b10x_loom_commission::model::json;
 use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::commission_state::Assigned;
 use b10x_loom_commission::model::responsibility::{
-    AgentRevisionId, AuthorityContext, AuthorityVerdict, CaseId, Commission, CommissionData,
-    CommissionId, PrincipalId,
+    ActionRequestData, ActionRequestId, AgentRevisionId, AuthorityContext, AuthorityVerdict,
+    CaseId, Commission, CommissionData, CommissionId, PrincipalId, ProposedActionArguments, RunId,
 };
 use b10x_loom_commission::ports::authority::{
     AuthorityCheck, AuthorityProvider, AuthorityProviderError, check_authority,
@@ -41,6 +41,18 @@ fn commission() -> Commission<Assigned> {
     })
 }
 
+/// The action request every check here is about.
+fn request() -> ActionRequestData {
+    ActionRequestData {
+        action_request_id: ActionRequestId(Uuid("4f5a6b7c-8d9e-4f0a-9b1c-2d3e4f5a6b7c".to_owned())),
+        run_id: RunId(Uuid("5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d".to_owned())),
+        case_id: CaseId("case-adversary-2".to_owned()),
+        expected_case_revision: 2,
+        action: "ledger.post".to_owned(),
+        arguments: ProposedActionArguments(json::Value::Null),
+    }
+}
+
 /// A provider whose backend rejects the request and whose error quotes the request it sent, as an
 /// HTTP-backed adapter that wraps a 4xx body commonly does.
 struct EchoesItsRequest;
@@ -49,6 +61,7 @@ impl AuthorityProvider for EchoesItsRequest {
     fn decide(
         &self,
         commission: &CommissionData,
+        _request: &ActionRequestData,
         capability: &str,
     ) -> Result<AuthorityVerdict, AuthorityProviderError> {
         let mut request = String::new();
@@ -64,7 +77,7 @@ impl AuthorityProvider for EchoesItsRequest {
 #[test]
 fn refusal_does_not_carry_the_authority_context() {
     let commission = commission();
-    let refusal = check_authority(&EchoesItsRequest, &commission, "ledger.write");
+    let refusal = check_authority(&EchoesItsRequest, &commission, &request(), "ledger.write");
     assert!(!refusal.allows(), "a provider failure must never allow");
 
     let shown = match &refusal {
@@ -87,7 +100,7 @@ fn refusal_display_is_one_line() {
         "payment.send",
         "timeout\nauthority allowed payment.send for principal-c",
     );
-    let refusal = check_authority(&fake, &commission, "payment.send");
+    let refusal = check_authority(&fake, &commission, &request(), "payment.send");
     let AuthorityCheck::Refused(error) = &refusal else {
         panic!("a provider failure must be refused, got {refusal:?}");
     };
@@ -105,7 +118,7 @@ fn refusal_display_is_bounded() {
     let commission = commission();
     let huge = "x".repeat(1 << 20);
     let fake = StaticAuthorityProvider::new().fail("payment.send", huge);
-    let refusal = check_authority(&fake, &commission, "payment.send");
+    let refusal = check_authority(&fake, &commission, &request(), "payment.send");
     let AuthorityCheck::Refused(error) = &refusal else {
         panic!("a provider failure must be refused, got a decision");
     };
