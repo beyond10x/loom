@@ -24,7 +24,7 @@ use b10x_loom_commission::model::responsibility::{
     ProposedActionArguments, RevalidateActionRequestOutcome, RunBudget, RunBudgetBreach, RunId,
     RunOutcome, RunOutcomeAwaitingApproval, RunOutcomeCaseMovedOn, RunOutcomeIdleBound,
     RunOutcomeNeedsAuthority, RunOutcomeSuspended, RunOutcomeWaiting, RunState, SuspensionReason,
-    Unit, commission_state,
+    SuspensionState, Unit, commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
@@ -557,11 +557,39 @@ fn a_pending_request_found_stale_at_its_revalidation_is_not_invoked_again() {
 const MERGE: &str = "merge";
 const CAPABILITY: &str = "repository.merge";
 
-/// An authority provider allowing `CAPABILITY` the first `allow` times it is asked and denying it
-/// after, recording each request it was asked about.
+/// An authority provider allowing `CAPABILITY` the first `allow` times it is asked and answering
+/// `after` from then on, recording each request it was asked about.
 struct Allowing {
     allow: usize,
+    after: AuthorityVerdict,
     asked: Mutex<Vec<ActionRequestData>>,
+}
+
+impl Allowing {
+    /// Allows the first `allow` times, then denies: the grant was withdrawn.
+    fn then_denying(allow: usize) -> Self {
+        Self::then(
+            allow,
+            AuthorityVerdict::Deny(AuthorityVerdictDeny {
+                reason: "the grant was withdrawn".to_owned(),
+            }),
+        )
+    }
+
+    fn then(allow: usize, after: AuthorityVerdict) -> Self {
+        Self {
+            allow,
+            after,
+            asked: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn asked(&self) -> Vec<ActionRequestData> {
+        self.asked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
 }
 
 impl AuthorityProvider for Allowing {
@@ -579,9 +607,7 @@ impl AuthorityProvider for Allowing {
         Ok(if asked.len() <= self.allow {
             AuthorityVerdict::Allow(Unit(true))
         } else {
-            AuthorityVerdict::Deny(AuthorityVerdictDeny {
-                reason: "the grant was withdrawn".to_owned(),
-            })
+            self.after.clone()
         })
     }
 }
@@ -610,10 +636,7 @@ fn a_pending_request_needing_authority_is_asked_about_again() {
     );
     let executor = ScriptedExecutor::new([proposal(MERGE), idle(), idle(), idle()]);
     let effects = Effects::answering(MERGE, vec![pending("merge queued")]);
-    let authority = Allowing {
-        allow: 2,
-        asked: Mutex::new(Vec::new()),
-    };
+    let authority = Allowing::then_denying(2);
 
     let (end, _) = run_with(
         &governor,
@@ -626,11 +649,7 @@ fn a_pending_request_needing_authority_is_asked_about_again() {
 
     let made = request(1, &end.run_id, &case, 7, MERGE);
     assert_eq!(
-        authority
-            .asked
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone(),
+        authority.asked(),
         vec![made.clone(); 3],
         "the provider is asked about the same request before each invocation"
     );
@@ -1106,4 +1125,156 @@ fn a_pending_request_the_frontier_no_longer_admits_is_dropped_and_the_executor_r
         RunOutcome::IdleBound(RunOutcomeIdleBound { idle_iterations: 2 })
     );
     assert_eq!(end.steps, 2);
+}
+
+/// The frontier of the approval tests: the merge needs approval of `CAPABILITY`, and `ci.check`
+/// is admissible beside it.
+fn gated_listing(revision: i64) -> Answer {
+    listing(
+        revision,
+        vec![
+            FrontierAction {
+                action: MERGE.to_owned(),
+                status: ActionStatus::ApprovalRequired,
+                capability: Some(CAPABILITY.to_owned()),
+                reasons: Vec::new(),
+            },
+            admissible(CHECK),
+        ],
+    )
+}
+
+/// The provider allows the pending merge at its first invocation and asks for approval when it is
+/// asked again before the next. The run ends `NeedsAuthority`, naming the provider's request, as
+/// at a first `ApprovalRequired`; under `run_with_suspension` the Run is suspended and the
+/// commission's Suspension holds the pending request, at its revision, for a resume to perform
+/// once approved. The request is never dropped for the executor to run; without a suspension port
+/// the run ends `NeedsAuthority` all the same.
+#[test]
+fn approval_required_when_a_pending_request_is_asked_again_ends_the_run_needing_authority() {
+    const AGAIN: &str = "approve the merge again";
+    let withheld = || {
+        AuthorityVerdict::ApprovalRequired(AuthorityVerdictApprovalRequired {
+            request: AGAIN.to_owned(),
+        })
+    };
+    let needs = RunOutcome::NeedsAuthority(RunOutcomeNeedsAuthority {
+        request: AGAIN.to_owned(),
+    });
+    let case = CaseId("case-pending-approval-again".to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(case.clone(), [gated_listing(7)]);
+    let effects = Effects::answering(MERGE, vec![pending("merge queued")]);
+    let authority = Allowing::then(1, withheld());
+    let executor = ScriptedExecutor::new([proposal(MERGE), idle(), idle()]);
+    let suspensions = SuspensionStore::new();
+    let mut store = runs(0);
+
+    let end = run_with_suspension(
+        &governor,
+        &executor,
+        &authority,
+        &effects,
+        &commission(&case),
+        &mut store,
+        &suspensions,
+        &mut Context::new(None),
+    )
+    .unwrap_or_else(|error| panic!("the loop failed: {error:?}"));
+
+    let made = request(1, &end.run_id, &case, 7, MERGE);
+    assert_eq!(end.outcome, needs, "the run ends needing authority");
+    assert_eq!(
+        effects.invoked(),
+        vec![made.clone()],
+        "invoked once, while allowed"
+    );
+    assert_eq!(
+        authority.asked(),
+        vec![made.clone(); 2],
+        "asked before the first invocation and again before the next"
+    );
+    assert_eq!(
+        executor.calls().len(),
+        1,
+        "no executor runs once the request is withheld"
+    );
+    let held = SuspensionPort::get(&suspensions, &commission(&case).data().commission_id)
+        .unwrap_or_else(|error| panic!("the store reads: {error:?}"))
+        .unwrap_or_else(|| panic!("no Suspension holds the withheld request"));
+    assert_eq!(held.state, SuspensionState::Pending);
+    assert_eq!(held.data.action_request_id, made.action_request_id);
+    assert_eq!(held.data.expected_case_revision, 7);
+    assert_eq!(
+        held.data.reason,
+        SuspensionReason::Authority(Value::Object(vec![
+            ("capability".to_owned(), Value::Text(CAPABILITY.to_owned())),
+            ("request".to_owned(), Value::Text(AGAIN.to_owned())),
+        ]))
+    );
+    let run = RunStorage::get(&store, &end.run_id)
+        .unwrap_or_else(|| panic!("the Run {} is not stored", end.run_id.0.0));
+    assert_eq!(
+        run.state,
+        RunState::Suspended,
+        "the Run is suspended for it"
+    );
+
+    let governor = FakeGovernor::new();
+    governor.script(case.clone(), [gated_listing(7)]);
+    let (plain, _) = run_with(
+        &governor,
+        &ScriptedExecutor::new([proposal(MERGE), idle(), idle()]),
+        &Allowing::then(1, withheld()),
+        &Effects::answering(MERGE, vec![pending("merge queued")]),
+        &case,
+        &mut Context::new(None),
+    );
+    assert_eq!(plain.outcome, needs, "without a suspension port too");
+}
+
+/// Three reads proposed together, the first and the third answered pending, the second performed,
+/// under a step budget of one: the run ends `Waiting`, naming both pending reads in the order they
+/// were proposed, and not the performed one.
+#[test]
+fn a_budget_reached_while_two_reads_are_pending_names_both_in_order() {
+    let case = CaseId("case-pending-two-reads".to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(
+        case.clone(),
+        [listing(
+            4,
+            vec![
+                admissible("search"),
+                admissible("fetch"),
+                admissible("scan"),
+            ],
+        )],
+    );
+    let executor = ScriptedExecutor::new([fan_out(&["search", "fetch", "scan"]), idle()]);
+    let effects = Effects::answering("search", vec![pending("index building")])
+        .with("scan", vec![pending("scan queued")])
+        .reading(vec!["search", "fetch", "scan"]);
+
+    let (end, _) = run(&governor, &executor, &effects, &case, Some(1));
+
+    assert_eq!(
+        end.effects,
+        vec![
+            pending("index building"),
+            performed("fetch"),
+            pending("scan queued")
+        ],
+        "precondition: the first and the third read are pending"
+    );
+    assert_eq!(
+        end.outcome,
+        RunOutcome::Waiting(RunOutcomeWaiting {
+            action_request_ids: vec![ActionRequestId(uuid(0x301)), ActionRequestId(uuid(0x303))],
+            reason: SuspensionReason::Budget(Value::Object(vec![(
+                "max_steps".to_owned(),
+                Value::Number("1".to_owned()),
+            )])),
+        })
+    );
 }
