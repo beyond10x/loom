@@ -46,6 +46,7 @@
 //! | [`StopReason::NoLocalExecutor`] | `NoPerformableAction` | the pick is not `software-change@1`; the case opens and one frontier is read |
 //! | [`StopReason::NoLocalExecutor`] | none: no case is opened | the pick is a protocol the request's action bindings bind ([`crate::bindings`]) and one of its actions has no command; the detail names it |
 //! | [`StopReason::Refused`] | none: no case is opened | the router refuses the pick: outside the registry, or unsure |
+//! | [`StopReason::Refused`] | `EffectRefused` | an effect port refused an admitted request as final; the detail is its reason. The slice's own effect ports never mark a refusal final |
 //!
 //! Any other end is a [`SliceError`]: a model that gives no usable pick, a workspace the case
 //! cannot open on, a governor that refuses, an executor or verifier failing on the workspace, Loom
@@ -914,9 +915,13 @@ fn finish(
         RunOutcome::NeedsHumanJudgment(needs) => Err(SliceError::Unexpected(format!(
             "NeedsHumanJudgment {needs:?}"
         ))),
-        RunOutcome::EffectRefused(refused) => {
-            Err(SliceError::Unexpected(format!("EffectRefused {refused:?}")))
-        }
+        RunOutcome::EffectRefused(refused) => stop(
+            out,
+            protocol,
+            steps,
+            StopReason::Refused,
+            Some(refused.reason),
+        ),
     }
 }
 

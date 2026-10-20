@@ -16,6 +16,8 @@
 //!   forced, and `HoldSuspension`'s `settled` is the host settling the hold a scenario forced;
 //! * `RevalidateActionRequest` by `b10x_loom_commission::action_request::revalidate`, against the
 //!   governor in [`governor`];
+//! * `JudgeEffectRefusal` by `b10x_loom_commission::outcome::judge_refusal`, the judgement the
+//!   runtime makes of every refusal an effect port answers;
 //! * the views `RunStates` and `SuspensionStates` by the generated queries over the same stores.
 //!
 //! This crate translates values and records what was published. It decides no outcome: each
@@ -40,13 +42,13 @@ use b10x_loom_commission::model::responsibility::obligations::{
 };
 use b10x_loom_commission::model::responsibility::{
     ActionRequest, ActionRequestData, ActionRequestId, CaseId, CommissionId, HoldSuspension,
-    HoldSuspensionOutcome, ProposedActionArguments, ReleaseSuspension, ReleaseSuspensionOutcome,
-    ResumeRun, ResumeRunOutcome, RevalidateActionRequestOutcome, RunId, RunStateConflict,
-    RunStorageFailed, StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome,
-    SuspensionRequestMismatch, SuspensionSettled, SuspensionStateConflict, SuspensionStorageFailed,
-    TakeSuspension, TakeSuspensionOutcome,
+    HoldSuspensionOutcome, JudgeEffectRefusal, JudgeEffectRefusalOutcome, ProposedActionArguments,
+    ReleaseSuspension, ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome,
+    RevalidateActionRequestOutcome, RunId, RunStateConflict, RunStorageFailed, StartRun,
+    StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionRequestMismatch, SuspensionSettled,
+    SuspensionStateConflict, SuspensionStorageFailed, TakeSuspension, TakeSuspensionOutcome,
 };
-use b10x_loom_commission::outcome::RunStore;
+use b10x_loom_commission::outcome::{RunStore, judge_refusal};
 use ess_conformance::scenario::{CommandRef, ErrorRef, EventRef, OutcomeRef};
 use ess_conformance::target::{
     ConformanceTarget, DeclaredErrorValue, EventObservationRequest, ExternalOutcomeControl,
@@ -70,6 +72,8 @@ const START_RUN: &str = "commission.responsibility.StartRun";
 const SUSPEND_RUN: &str = "commission.responsibility.SuspendRun";
 const RESUME_RUN: &str = "commission.responsibility.ResumeRun";
 const REVALIDATE: &str = "commission.responsibility.RevalidateActionRequest";
+const JUDGE_REFUSAL: &str = "commission.responsibility.JudgeEffectRefusal";
+const EFFECT_REFUSED_FINAL: &str = "commission.responsibility.EffectRefusedFinal";
 const RUN_STARTED: &str = "commission.responsibility.RunStarted";
 const RUN_SUSPENDED: &str = "commission.responsibility.RunSuspended";
 const RUN_RESUMED: &str = "commission.responsibility.RunResumed";
@@ -194,6 +198,7 @@ impl ConformanceTarget for CommissionTarget {
             TAKE_SUSPENSION => take_suspension(&mut live, input, correlation),
             RELEASE_SUSPENSION => release_suspension(&mut live, input, correlation),
             REVALIDATE => revalidate_request(&mut live, input)?,
+            JUDGE_REFUSAL => judge_effect_refusal(input)?,
             other => {
                 return Err(TargetError::unavailable(
                     format!("invoking `{other}`"),
@@ -685,6 +690,41 @@ fn revalidate_request(
         }
         RevalidateActionRequestOutcome::Admitted => took(REVALIDATE, "admitted"),
     }))
+}
+
+/// `JudgeEffectRefusal`: the refusal the input describes, judged as the runtime judges an effect
+/// port's refusal. It reads and writes no store, so every view stays as it was.
+fn judge_effect_refusal(input: &Input) -> Result<Option<SemanticCommandResult>, TargetError> {
+    let Some(command) = refusal(input) else {
+        return Ok(None);
+    };
+    let outcome = judge_refusal(command).map_err(|unmet| {
+        TargetError::unavailable(
+            format!("judging through `{JUDGE_REFUSAL}`"),
+            format!("{} is owed: {}", unmet.capability, unmet.source),
+        )
+    })?;
+    Ok(Some(match outcome {
+        JudgeEffectRefusalOutcome::Final { error: refused } => took(JUDGE_REFUSAL, "final")
+            .with_error(
+                error(EFFECT_REFUSED_FINAL)
+                    .with(
+                        "action_request_id",
+                        Node::Text(refused.action_request_id.0.0),
+                    )
+                    .with("reason", Node::Text(refused.reason)),
+            ),
+        JudgeEffectRefusalOutcome::Ordinary => took(JUDGE_REFUSAL, "ordinary"),
+    }))
+}
+
+/// The input of `JudgeEffectRefusal`.
+fn refusal(input: &Input) -> Option<JudgeEffectRefusal> {
+    Some(JudgeEffectRefusal {
+        action_request_id: ActionRequestId(codec::uuid(input, "action_request_id")?),
+        reason: codec::text(input, "reason")?,
+        ends_run: codec::boolean(input, "ends_run")?,
+    })
 }
 
 /// The action request the input of `RevalidateActionRequest` names, identity included.

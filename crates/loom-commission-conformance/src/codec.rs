@@ -39,6 +39,14 @@ pub fn integer(input: &Input, name: &str) -> Option<i64> {
     }
 }
 
+/// The `Boolean` field `name`.
+pub fn boolean(input: &Input, name: &str) -> Option<bool> {
+    match input.get(name)? {
+        Node::Bool(value) => Some(*value),
+        _ => None,
+    }
+}
+
 /// The `Json` field `name`.
 pub fn json(input: &Input, name: &str) -> Option<Value> {
     input.get(name).and_then(to_json)
