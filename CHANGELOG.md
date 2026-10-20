@@ -58,6 +58,20 @@ final.
 Breaking: a host that builds an `EffectOutcomeRefused` sets `ends_run` (`false` keeps today's
 behaviour), and a host that matches `RunOutcome` exhaustively handles `EffectRefused`.
 
+A run the idle bound ended has its own run outcome, `IdleBound`, naming the idle iterations in a
+row that ended it, apart from a run whose frontier admits nothing, which still ends
+`NoAdmissibleAction` (`story:idle-bound-outcome`). The rule does not change: without a step
+budget, two iterations in a row that admit no new request end the run, whatever kind of idle
+iteration they are (no useful action, local reasoning, a refused or denied proposal, a repeated
+admission, a move the governor does not bear out), and a new admission starts the count again.
+The runtime decides it with `outcome::judge_idle`, the behaviour ESS generates for the new command
+`JudgeIdleIteration`. The intake slice maps `IdleBound` to `StopReason::NothingAdmissible` with the
+stop line it printed before, and the `run --output jsonl` contract does not change; the slice's own
+runs always carry a step budget and never reach the idle bound.
+Breaking: a host that matches `RunOutcome` exhaustively handles `IdleBound`, and a host that read
+`NoAdmissibleAction` as the end of a run with no step budget that made no progress reads
+`IdleBound` instead.
+
 ## [0.27.0] - 2026-10-20
 
 Loom 0.27.0 links engineering-protocols 0.9.0, tells an authority provider the action request it

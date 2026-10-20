@@ -146,8 +146,11 @@
 //!     other outcome, the run outcome is derived from the frontier the executor was handed.
 //!
 //! Without a step budget the loop is bounded where the frontier does not change: two iterations in
-//! a row that are idle end the run with no admissible action. An iteration is idle when it admits
-//! no request, or admits only requests with the action and arguments of ones already admitted in
+//! a row that are idle end the run `IdleBound`, naming how many (`story:idle-bound-outcome`).
+//! [`judge_idle`] decides it from the idle iterations in a row, this one included: `bound` at two,
+//! and `below`, which changes nothing, at one. A run whose frontier admits nothing still ends with
+//! no admissible action, on the outcome derived from that frontier (8-10), never on the idle
+//! bound. An iteration is idle when it admits no request, or admits only requests with the action and arguments of ones already admitted in
 //! this Run, at whatever revision (a refused fan-out admits none): an effect that moved the case does not make the same proposal
 //! new. A newly admitted request starts the count again. Idle covers `NoUsefulAction`,
 //! `CompletedLocalReasoning`, a refused proposal, an authority answer other than an allow and a
@@ -275,15 +278,16 @@ use crate::model::responsibility::{
     AuthorityVerdict, CaseId, Commission, CompletionDetermination, EffectOutcome, ExecutorOutcome,
     ExecutorOutcomeProposedAction, Frontier, FrontierAction, FrontierData, GovernorError,
     HoldSuspension, HoldSuspensionOutcome, JudgeEffectRefusal, JudgeEffectRefusalOutcome,
-    Observation, ObservationData, ObservationId, ReleaseSuspension, ReleaseSuspensionOutcome,
-    ResumeRun, ResumeRunOutcome, RevalidateActionRequestOutcome, Run, RunData, RunId, RunOutcome,
-    RunOutcomeAwaitingApproval, RunOutcomeCaseMovedOn, RunOutcomeCompleted,
-    RunOutcomeEffectRefused, RunOutcomeSuspended, RunStarted, RunStorageFailed, StartRun,
-    StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionKey, SuspensionReason,
-    SuspensionState, SuspensionStateConflict, TakeSuspension, TakeSuspensionOutcome, Unit,
-    commission_state, frontier_state, observation_state,
+    JudgeIdleIteration, JudgeIdleIterationOutcome, Observation, ObservationData, ObservationId,
+    ReleaseSuspension, ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome,
+    RevalidateActionRequestOutcome, Run, RunData, RunId, RunOutcome, RunOutcomeAwaitingApproval,
+    RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeEffectRefused, RunOutcomeIdleBound,
+    RunOutcomeSuspended, RunStarted, RunStorageFailed, StartRun, StartRunOutcome, SuspendRun,
+    SuspendRunOutcome, SuspensionKey, SuspensionReason, SuspensionState, SuspensionStateConflict,
+    TakeSuspension, TakeSuspensionOutcome, Unit, commission_state, frontier_state,
+    observation_state,
 };
-use crate::outcome::{CapabilityVerdict, Derived, derive, judge_refusal};
+use crate::outcome::{CapabilityVerdict, Derived, derive, judge_idle, judge_refusal};
 use crate::ports::authority::{AuthorityCheck, AuthorityProvider, check_authority};
 use crate::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use crate::ports::evidence::ObservationPort;
@@ -910,8 +914,8 @@ where
     let mut held = held;
     // Whether the previous iteration invoked an effect.
     let mut effected = false;
-    // Whether the previous iteration admitted no request.
-    let mut idle = false;
+    // The idle iterations in a row up to the previous one: none after one that made progress.
+    let mut idle: i64 = 0;
     // The actions of the frontier the previous step's executor was handed, when it listed actions
     // awaiting approval and the step was not performed under a grant.
     let mut gate: Option<Vec<FrontierAction>> = None;
@@ -1290,12 +1294,22 @@ where
             }
         }
 
-        if budget.is_none() && !stale && !progressed && idle {
-            return Ok(track.end(run_id, RunOutcome::NoAdmissibleAction(Unit(true))));
+        // Without a step budget, an iteration that made no progress is judged against the idle
+        // bound; a stale one is not counted, since the next iteration judges the move.
+        if budget.is_none()
+            && !stale
+            && !progressed
+            && let Some(ended) = idle_end(idle.saturating_add(1))?
+        {
+            return Ok(track.end(run_id, ended));
         }
         after_stale = stale;
         if !stale {
-            idle = !progressed;
+            idle = if progressed {
+                0
+            } else {
+                idle.saturating_add(1)
+            };
         }
         track.steps += 1;
         gate = if granted || awaited(&handed, &denied).is_empty() {
@@ -1834,6 +1848,20 @@ fn refusal_end(
             JudgeEffectRefusalOutcome::Ordinary => None,
         },
     )
+}
+
+/// How a run with no step budget ends after `idle_iterations` idle iterations in a row, this one
+/// included (`JudgeIdleIteration`, `story:idle-bound-outcome`): `IdleBound`, naming them, when
+/// [`judge_idle`] answers `bound`; `None` when it answers `below`, and the run goes on.
+fn idle_end(idle_iterations: i64) -> Result<Option<RunOutcome>, LoopFailure> {
+    Ok(match judge_idle(JudgeIdleIteration { idle_iterations })? {
+        JudgeIdleIterationOutcome::Bound { error } => {
+            Some(RunOutcome::IdleBound(RunOutcomeIdleBound {
+                idle_iterations: error.idle_iterations,
+            }))
+        }
+        JudgeIdleIterationOutcome::Below => None,
+    })
 }
 
 /// How a run ends after its executor reported `CaseMoved` (item 9), or proposed nothing on a

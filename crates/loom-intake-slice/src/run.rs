@@ -41,6 +41,7 @@
 //! | --- | --- | --- |
 //! | [`StopReason::ApprovalRequired`] | `NeedsAuthority`, `AwaitingApproval` | Loom proposes an action the frontier lists as needing approval, or a step leaves a frontier that lists one unchanged (every action's status and reasons); the detail names the proposed action, or the awaited actions in frontier order |
 //! | [`StopReason::NothingAdmissible`] | `NoAdmissibleAction`, `NeedsExternalEvidence` | Loom proposes nothing and the frontier lists no admissible action |
+//! | [`StopReason::NothingAdmissible`] | `IdleBound` | Commission's idle bound ended the run: with no step budget, two iterations in a row made no progress. The slice's runs always take `max_steps` as their step budget, so they never end so; the stop is the one above, with no detail |
 //! | [`StopReason::NothingAdmissible`] | `CaseMovedOn` | the case moved to another revision while the run worked, and its frontier there still admits an action; the run, bound to the revision it left, stops, and the detail names both revisions (`case moved on from revision <bound> to <current>`) |
 //! | [`StopReason::StepBudget`] | `Suspended` for `Budget` | the steps taken reach the request's `max_steps` |
 //! | [`StopReason::NoLocalExecutor`] | `NoPerformableAction` | the pick is not `software-change@1`; the case opens and one frontier is read |
@@ -890,7 +891,9 @@ fn finish(
             let detail = Some(awaiting.actions.join(", "));
             gated_stop(out, protocol, steps, detail, awaiting.actions, gate)
         }
-        RunOutcome::NoAdmissibleAction(_) | RunOutcome::NeedsExternalEvidence(_) => {
+        RunOutcome::NoAdmissibleAction(_)
+        | RunOutcome::NeedsExternalEvidence(_)
+        | RunOutcome::IdleBound(_) => {
             stop(out, protocol, steps, StopReason::NothingAdmissible, None)
         }
         RunOutcome::CaseMovedOn(moved) => {
@@ -922,7 +925,6 @@ fn finish(
             StopReason::Refused,
             Some(refused.reason),
         ),
-        RunOutcome::IdleBound(idle) => Err(SliceError::Unexpected(format!("IdleBound {idle:?}"))),
     }
 }
 

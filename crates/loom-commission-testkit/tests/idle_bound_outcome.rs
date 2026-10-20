@@ -349,7 +349,11 @@ fn a_repeated_admission_counts_toward_the_idle_bound() {
         request(2, &end.run_id, &case, 4, "edit"),
         request(3, &end.run_id, &case, 4, "edit"),
     ];
-    assert_eq!(effects.invoked(), made, "each admitted request is performed");
+    assert_eq!(
+        effects.invoked(),
+        made,
+        "each admitted request is performed"
+    );
     assert_eq!(end.admitted, made);
     assert_eq!(
         governor.calls(),
@@ -387,7 +391,11 @@ fn a_newly_admitted_request_starts_the_count_again() {
     );
 
     assert_eq!(end.outcome, idle_bound(2));
-    assert_eq!(executor.calls().len(), 4, "the new admission kept the run going");
+    assert_eq!(
+        executor.calls().len(),
+        4,
+        "the new admission kept the run going"
+    );
     assert_eq!(
         effects.invoked(),
         vec![request(1, &end.run_id, &case, 4, "edit")]
