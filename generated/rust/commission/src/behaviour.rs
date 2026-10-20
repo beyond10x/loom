@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest fbc987193ce2337d53be5610bdd3340aff0f3e68872a482a1d5a8855cf1111a0
-// contract digest e679ebf85e98d2d040d787f1e5a953f9df198141e1508772547f007aec6e08a1
+// model digest e9437a6cbbf5f15c726617ea201063d6ccd75146e1c90c4840f04720a2ca6fb5
+// contract digest 02850b7968172d53983b13b09f1ed99fa07041b914715b721bc0cfbabe8649bf
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -89,6 +89,20 @@ impl<P> crate::responsibility::obligations::JudgeEffectRefusalBehavior for Gener
         }
         // `ordinary`: the default.
         return Ok(crate::responsibility::JudgeEffectRefusalOutcome::Ordinary);
+    }
+}
+
+/// `commission.responsibility.JudgeIdleIteration`, generated: every outcome is one the specification fully determines.
+impl<P> crate::responsibility::obligations::JudgeIdleIterationBehavior for Generated<P>
+{
+    fn judge_idle_iteration(&mut self, input: crate::responsibility::JudgeIdleIteration) -> Result<crate::responsibility::JudgeIdleIterationOutcome, UnmetObligation> {
+        let _ = &input;
+        // `bound`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(compare_numbers(Some(&input.idle_iterations).map(|value| value.to_string()), Some("2".to_owned()), core::cmp::Ordering::is_ge), "commission.responsibility.JudgeIdleIteration")? {
+            return Ok(crate::responsibility::JudgeIdleIterationOutcome::Bound { error: crate::responsibility::IdleBoundReached { idle_iterations: input.idle_iterations.clone() } });
+        }
+        // `below`: the default.
+        return Ok(crate::responsibility::JudgeIdleIterationOutcome::Below);
     }
 }
 
@@ -181,4 +195,46 @@ fn decided(truth: Option<bool>, command: &'static str) -> Result<bool, UnmetObli
 /// Equality of two read values; an unread one is Unknown.
 fn equal<T: PartialEq>(left: Option<T>, right: Option<T>) -> Option<bool> {
     Some(left? == right?)
+}
+
+/// A decimal rendering as its sign, its whole digits and its fraction digits, without the zeros
+/// that do not change its value; `None` where it is not a plain decimal.
+fn number_parts(text: &str) -> Option<(bool, String, String)> {
+    let (negative, digits) = match text.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, text.strip_prefix('+').unwrap_or(text)),
+    };
+    let (whole, fraction) = digits.split_once('.').unwrap_or((digits, ""));
+    if whole.is_empty() && fraction.is_empty() {
+        return None;
+    }
+    if !whole.bytes().chain(fraction.bytes()).all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let whole = whole.trim_start_matches('0').to_owned();
+    let fraction = fraction.trim_end_matches('0').to_owned();
+    let zero = whole.is_empty() && fraction.is_empty();
+    Some((negative && !zero, whole, fraction))
+}
+
+/// Compares two decimal renderings exactly; an unread or unparsable one is Unknown.
+fn compare_numbers(
+    left: Option<String>,
+    right: Option<String>,
+    accepts: fn(core::cmp::Ordering) -> bool,
+) -> Option<bool> {
+    let (left, right) = (number_parts(&left?)?, number_parts(&right?)?);
+    let magnitude = left
+        .1
+        .len()
+        .cmp(&right.1.len())
+        .then_with(|| left.1.cmp(&right.1))
+        .then_with(|| left.2.cmp(&right.2));
+    let ordering = match (left.0, right.0) {
+        (false, false) => magnitude,
+        (true, true) => magnitude.reverse(),
+        (true, false) => core::cmp::Ordering::Less,
+        (false, true) => core::cmp::Ordering::Greater,
+    };
+    Some(accepts(ordering))
 }

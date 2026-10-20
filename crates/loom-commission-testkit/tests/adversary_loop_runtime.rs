@@ -27,7 +27,8 @@ use b10x_loom_commission::model::responsibility::{
     ExecutorOutcomeNeedsHumanJudgment, ExecutorOutcomeProposedAction, Frontier, FrontierAction,
     HumanDecisionRequest, ObservationId, PrincipalId, ProposedActionArguments,
     RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeCaseMovedOn, RunOutcomeCompleted,
-    RunOutcomeNeedsHumanJudgment, RunState, Unit, commission_state, frontier_state,
+    RunOutcomeIdleBound, RunOutcomeNeedsHumanJudgment, RunState, Unit, commission_state,
+    frontier_state,
 };
 use b10x_loom_commission::model::responsibility::{EffectOutcome, EffectOutcomePerformed};
 use b10x_loom_commission::outcome::RunStore;
@@ -344,7 +345,7 @@ fn authority_allow_admits_the_request() {
 }
 
 /// GREEN probe. Deny, with another action admissible: nothing admitted, the provider asked per
-/// proposal, and the bound ends the run after two denied iterations.
+/// proposal, and the bound ends the run `IdleBound` after two denied iterations.
 #[test]
 fn authority_deny_admits_nothing_and_is_bounded() {
     let case = CaseId("case-deny".to_owned());
@@ -371,7 +372,10 @@ fn authority_deny_admits_nothing_and_is_bounded() {
 
     assert_eq!(authority.asked().len(), 2);
     assert!(end.admitted.is_empty(), "denied yet admitted: {end:?}");
-    assert_eq!(end.outcome, RunOutcome::NoAdmissibleAction(Unit(true)));
+    assert_eq!(
+        end.outcome,
+        RunOutcome::IdleBound(RunOutcomeIdleBound { idle_iterations: 2 })
+    );
 }
 
 /// GREEN probe. Provider failure, the action needing authority being the frontier's only one:

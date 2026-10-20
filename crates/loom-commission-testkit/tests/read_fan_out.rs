@@ -32,7 +32,8 @@ use b10x_loom_commission::model::responsibility::{
     EffectOutcomePerformed, EffectOutcomeRefused, ExecutorOutcome, ExecutorOutcomeProposedAction,
     ExecutorOutcomeProposedReads, FrontierAction, ObservationId, PrincipalId,
     ProposedActionArguments, RevalidateActionRequestOutcome, RunId, RunOutcome,
-    RunOutcomeAwaitingApproval, RunOutcomeCompleted, SuspensionReason, Unit, commission_state,
+    RunOutcomeAwaitingApproval, RunOutcomeCompleted, RunOutcomeIdleBound, SuspensionReason,
+    commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{
@@ -554,7 +555,7 @@ fn a_fan_out_with_a_write_or_an_approval_required_read_invokes_nothing() {
         effects: Reads,
         outcome: RunOutcome,
     }
-    let idle_end = RunOutcome::NoAdmissibleAction(Unit(true));
+    let idle_end = RunOutcome::IdleBound(RunOutcomeIdleBound { idle_iterations: 2 });
     let cases = vec![
         Case {
             name: "a write among the reads",
@@ -663,7 +664,7 @@ fn an_empty_or_oversized_fan_out_invokes_nothing() {
         assert!(end.requests.is_empty(), "{name}");
         assert_eq!(
             end.outcome,
-            RunOutcome::NoAdmissibleAction(Unit(true)),
+            RunOutcome::IdleBound(RunOutcomeIdleBound { idle_iterations: 2 }),
             "{name}"
         );
     }

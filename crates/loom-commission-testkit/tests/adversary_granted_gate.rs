@@ -19,7 +19,7 @@ use b10x_loom_commission::model::responsibility::{
     AuthorityVerdict, CaseId, Commission, CommissionData, CommissionId, EffectOutcome,
     EffectOutcomePerformed, EffectOutcomeRefused, ExecutorOutcome, ExecutorOutcomeProposedAction,
     FrontierAction, ObservationId, PrincipalId, ProposedActionArguments, RunId, RunOutcome,
-    RunOutcomeAwaitingApproval, RunOutcomeCompleted, Unit, commission_state,
+    RunOutcomeAwaitingApproval, RunOutcomeCompleted, RunOutcomeIdleBound, Unit, commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -345,7 +345,7 @@ fn a_grant_for_one_action_passes_the_gate_of_another_for_one_step() {
 }
 
 /// Without a step budget the idle bound ends a Run that only repeats one granted step (design
-/// note), with no admissible action; the same granted effect is performed three times on an
+/// note), as `IdleBound`; the same granted effect is performed three times on an
 /// unchanged frontier, where before this change it was performed once and the Run ended
 /// `AwaitingApproval`.
 #[test]
@@ -367,5 +367,8 @@ fn the_idle_bound_ends_a_run_that_repeats_a_granted_step() {
     let authority = StaticAuthorityProvider::new().answer("datasource.read", allow());
     let end = run(&governor, &executor, &authority, &effects, &case, None);
     assert_eq!(effects.invoked(), ["read", "read", "read"]);
-    assert_eq!(end.outcome, RunOutcome::NoAdmissibleAction(Unit(true)));
+    assert_eq!(
+        end.outcome,
+        RunOutcome::IdleBound(RunOutcomeIdleBound { idle_iterations: 2 })
+    );
 }

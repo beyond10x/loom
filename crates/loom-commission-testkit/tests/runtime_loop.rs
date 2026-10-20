@@ -32,8 +32,9 @@
 //! every action and changes nothing.
 //!
 //! The loop is bounded where the frontier does not change (wave 2026-10-04-w5, run-outcomes F4):
-//! two iterations in a row that admit no request end the run with no admissible action, and an
-//! admitted request starts the count again, unless the same action and arguments were already
+//! two iterations in a row that admit no request end the run `IdleBound`
+//! (`story:idle-bound-outcome`; with no admissible action before it), and an admitted request
+//! starts the count again, unless the same action and arguments were already
 //! admitted in this Run, which counts as admitting nothing. A stale revalidation does not count;
 //! the next iteration's load ends the run (adversary pass 2, F-A and F-B). It covers
 //! `NoUsefulAction`, `CompletedLocalReasoning` and a refused proposal alike. A Run is bound to the case revision it started against
@@ -59,8 +60,8 @@ use b10x_loom_commission::model::responsibility::{
     ExecutorOutcome, ExecutorOutcomeProposedAction, ExecutorOutcomeSuspended, Frontier,
     FrontierAction, FrontierId, ObservationId, PrincipalId, ProposedActionArguments,
     RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeCaseMovedOn, RunOutcomeCompleted,
-    RunOutcomeNeedsAuthority, RunOutcomeSuspended, RunState, RunStates, SuspensionReason, Unit,
-    commission_state, frontier_state,
+    RunOutcomeIdleBound, RunOutcomeNeedsAuthority, RunOutcomeSuspended, RunState, RunStates,
+    SuspensionReason, Unit, commission_state, frontier_state,
 };
 use b10x_loom_commission::model::responsibility::{EffectOutcome, EffectOutcomePerformed};
 use b10x_loom_commission::outcome::RunStore;
@@ -758,7 +759,7 @@ fn unchanged_frontier_is_bounded(runs: &mut Generated<RunStore>) {
     assert_eq!(executor.at(), [3, 6], "{name}: executor calls");
     assert_eq!(
         end.outcome,
-        RunOutcome::NoAdmissibleAction(Unit(true)),
+        RunOutcome::IdleBound(RunOutcomeIdleBound { idle_iterations: 2 }),
         "{name}: outcome"
     );
 
@@ -788,7 +789,7 @@ fn unchanged_frontier_is_bounded(runs: &mut Generated<RunStore>) {
     assert!(end.admitted.is_empty(), "{name}: admitted");
     assert_eq!(
         end.outcome,
-        RunOutcome::NoAdmissibleAction(Unit(true)),
+        RunOutcome::IdleBound(RunOutcomeIdleBound { idle_iterations: 2 }),
         "{name}: outcome"
     );
 

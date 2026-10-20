@@ -364,7 +364,14 @@ fn skeleton_lands_port_vocabulary_and_modules() {
             ("CaseMovedOn", "RunOutcomeCaseMovedOn"),
             // story:refused-effect-ends-run: the effect port refused a request as final.
             ("EffectRefused", "RunOutcomeEffectRefused"),
+            // story:idle-bound-outcome: the idle bound ended a run that made no progress.
+            ("IdleBound", "RunOutcomeIdleBound"),
         ],
+    );
+    assert_struct(
+        &model,
+        "RunOutcomeIdleBound",
+        &[("idle_iterations", "Integer")],
     );
     assert_struct(
         &model,
@@ -474,6 +481,7 @@ fn skeleton_lands_port_vocabulary_and_modules() {
         std::any::type_name::<model::RunOutcomeNeedsHumanJudgment>(),
         std::any::type_name::<model::RunOutcomeNeedsExternalEvidence>(),
         std::any::type_name::<model::RunOutcomeEffectRefused>(),
+        std::any::type_name::<model::RunOutcomeIdleBound>(),
     ];
     for name in names {
         assert!(
