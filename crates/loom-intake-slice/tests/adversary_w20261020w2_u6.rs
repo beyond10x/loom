@@ -12,8 +12,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use b10x_loom_intake_slice::confinement::{
-    ChildCommand, ConfinementRefusal, SubstrateRunner, prepare_delegated_cgroup,
+    ChildCommand, ConfinementRefusal, SubstrateRunner, TestRunner as _, prepare_delegated_cgroup,
 };
+use b10x_loom_intake_slice::executor::TestCommand;
 
 const DELEGATED: &str = "LOOM_ADV_W20261020W2_U6_DELEGATED";
 const REPORT: &str = "LOOM_ADV_W20261020W2_U6_REPORT";
@@ -94,6 +95,97 @@ fn delegated(name: &str, case: impl FnOnce(&SubstrateRunner, &Path)) {
         }
         Some(missing) => eprintln!("skipped: missing prerequisite: {missing}"),
     }
+}
+
+/// For every directory descriptor the confined process holds, try to create `escape-<n>` in that
+/// directory and `escape-up-<n>` in its parent, and to read `beside` in its parent, saying which
+/// landed; then list the descriptors. A confined process holding no descriptor of a host
+/// directory writes and reads nothing that way.
+const THROUGH_DESCRIPTORS: &str = r#"for d in /proc/self/fd/*; do
+  [ -d "$d" ] || continue
+  n=${d##*/}
+  (printf escaped > "$d/escape-$n") 2>/dev/null && echo "fd $n wrote in $(readlink "$d")"
+  (printf escaped > "$d/../escape-up-$n") 2>/dev/null && echo "fd $n wrote above $(readlink "$d")"
+  b=$(cat "$d/../beside" 2>/dev/null) && echo "fd $n read beside: $b"
+done
+ls -l /proc/self/fd
+true"#;
+
+/// What the host keeps in `beside`, next to the workspace, where no confined process reads.
+const BESIDE: &str = "host-only-marker-7f3a";
+
+/// The names starting with `escape` directly in `directory`.
+fn escapes(directory: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with("escape"))
+        .collect();
+    names.sort();
+    names
+}
+
+/// What a run reached outside the paths it may write: `escape` names in the workspace root and
+/// beside the workspace, and whether its output holds what the host keeps beside it.
+fn reached(workspace: &Path, output: &str) -> (Vec<String>, Vec<String>, bool) {
+    (
+        escapes(workspace),
+        escapes(workspace.parent().unwrap()),
+        output.contains(BESIDE),
+    )
+}
+
+/// The story's acceptance: a child "fails to write one outside" the path the host named. A child
+/// that uses what it was handed, not only the paths it sees, must still write nothing in the
+/// read-only rest of the workspace and nothing beside the workspace.
+#[test]
+fn adv_a_child_writes_nothing_outside_its_named_path_through_a_descriptor_it_holds() {
+    delegated(
+        "adv_a_child_writes_nothing_outside_its_named_path_through_a_descriptor_it_holds",
+        |runner, workspace| {
+            std::fs::create_dir(workspace.join("scratch")).unwrap();
+            std::fs::write(workspace.join("README"), "kept\n").unwrap();
+            std::fs::write(workspace.parent().unwrap().join("beside"), BESIDE).unwrap();
+            let child = ChildCommand::new("sh", ["-c", THROUGH_DESCRIPTORS], workspace)
+                .with_writable("scratch");
+            let result = runner.run_child(&child).expect("the child runs confined");
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            assert_eq!(result.applied.writable_scopes, ["scratch", "target"]);
+            assert_eq!(
+                reached(workspace, &result.output),
+                (Vec::new(), Vec::new(), false),
+                "(written in the read-only workspace root, written beside the workspace, read \
+                 beside it):\n{}",
+                result.output
+            );
+        },
+    );
+}
+
+/// The story's acceptance: `TestRunner::run` keeps `target` as its only writable path, for a test
+/// that uses what it was handed as much as for one that writes where it sees.
+#[test]
+fn adv_a_test_writes_nothing_outside_target_through_a_descriptor_it_holds() {
+    delegated(
+        "adv_a_test_writes_nothing_outside_target_through_a_descriptor_it_holds",
+        |runner, workspace| {
+            std::fs::create_dir(workspace.join("src")).unwrap();
+            std::fs::write(workspace.parent().unwrap().join("beside"), BESIDE).unwrap();
+            let test = TestCommand::new("sh", ["-c", THROUGH_DESCRIPTORS]);
+            let result = runner
+                .run(&test, workspace)
+                .expect("the test runs confined");
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            assert_eq!(result.applied.writable_scopes, ["target"]);
+            assert_eq!(
+                reached(workspace, &result.output),
+                (Vec::new(), Vec::new(), false),
+                "(written in the read-only workspace root, written beside the workspace, read \
+                 beside it):\n{}",
+                result.output
+            );
+        },
+    );
 }
 
 /// A nested named path `a/b`: the child writes nothing beside it, in its parent, through `..`,
