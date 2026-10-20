@@ -91,6 +91,30 @@ Breaking: a `ChildCommand` asking for `NetworkMode::Aperture` without an apertur
 refused `CapabilityUnserved` once the driver had opened, is refused `ScopeInvalid` before anything
 starts.
 
+A run the idle bound ended has its own run outcome, `IdleBound`, naming the idle iterations in a
+row that ended it, apart from a run whose frontier admits nothing, which still ends
+`NoAdmissibleAction` (`story:idle-bound-outcome`). The rule does not change: without a step
+budget, two iterations in a row that admit no new request end the run, whatever kind of idle
+iteration they are (no useful action, local reasoning, a refused or denied proposal, a repeated
+admission, a move the governor does not bear out), and a new admission starts the count again.
+A completed case comes first: when the last idle iteration's effect was performed, the case is
+loaded before the bound ends the run, as at a step budget, and a case the governor holds complete
+ends it `Completed`, where 0.27.0 ended it `NoAdmissibleAction`. The runtime decides it with `outcome::judge_idle`, the behaviour ESS generates for the new command
+`JudgeIdleIteration`. The intake slice maps `IdleBound` to `StopReason::NothingAdmissible` with the
+stop line it printed before, and the `run --output jsonl` contract does not change; the slice's own
+runs always carry a step budget and never reach the idle bound.
+Breaking: a host that matches `RunOutcome` exhaustively handles `IdleBound`, and a host that read
+`NoAdmissibleAction` as the end of a run with no step budget that made no progress reads
+`IdleBound` instead, or `Completed` where the last idle iteration's performed effect completed the
+case.
+
+The confinement code builds on Substrate 0.7.17 (`b10x-substrate-host` and `b10x-substrate-wire`
+at tag `0.7.17`), as moved in 0.27.1. Substrate's start request and its record of the applied
+confinement gain `read_only_files`, single host files bound read-only: Loom asks for none, and a
+record listing one is refused `CapabilityUnserved`, as any record that differs from the request is.
+Breaking: a host that builds Substrate's `AppliedConfinement`, the type of
+`TestExecution::driver_record`, sets `read_only_files`.
+
 A confined child writes the workspace paths the host names (`story:child-writable-workspace`), as
 a harness child editing its scratch copy, `git commit` in it or a forge command writing its state
 must. `ChildCommand::with_writable(path)`, repeatable, names a directory of the workspace, relative
@@ -101,11 +125,11 @@ or is no plain relative path, one through a symbolic link, absent or no director
 holding a socket, device or FIFO or a file also hard-linked outside the writable paths, a path
 inside `target` or inside another named path, and more than Substrate's 64 writable paths with
 `target` are refused `ScopeInvalid`, naming the path, before anything starts or `target` is
-created, so the workspace is left as it was. The applied
-confinement's `writable_scopes` lists the named paths beside `target` and the profile digest covers
-them; a record reporting another writable set, wider or narrower, is refused, as before. Substrate
-makes only directories writable, so a file at the workspace root cannot be named. A child that
-names no path, and every test through `TestRunner::run`, still writes only under `target`.
+created, so the workspace is left as it was. The applied confinement's `writable_scopes` lists the
+named paths beside `target` and the profile digest covers them; a record reporting another
+writable set, wider or narrower, is refused, as before. Substrate makes only directories writable,
+so a file at the workspace root cannot be named. A child that names no path, and every test
+through `TestRunner::run`, still writes only under `target`.
 `crates/loom-intake-slice/tests/confined_child.rs` holds it
 (`a_child_writes_only_the_paths_the_host_named`,
 `a_writable_path_outside_the_workspace_or_through_a_link_is_refused`).

@@ -874,6 +874,7 @@ fn outcome_name(outcome: &RunOutcome) -> &'static str {
         RunOutcome::NoPerformableAction(_) => "NoPerformableAction",
         RunOutcome::CaseMovedOn(_) => "CaseMovedOn",
         RunOutcome::EffectRefused(_) => "EffectRefused",
+        RunOutcome::IdleBound(_) => "IdleBound",
     }
 }
 

@@ -31,7 +31,8 @@
 //!    evidence. The loop then goes on. An [`EffectError`] suspends the Run with
 //!    `ExternalAvailability` and returns a `LoopError` with `LoopFailure::Effect`, naming the Run;
 //! 8. the outcome is derived as before. Without a step budget, two idle iterations in a row end
-//!    the run with no admissible action, as before; with one, the budget bounds the loop.
+//!    the run `IdleBound` (`story:idle-bound-outcome`; with no admissible action before it); with
+//!    one, the budget bounds the loop.
 //!
 //! The slice's stop reasons, in Commission's terms (each with a named test below):
 //!
@@ -58,7 +59,7 @@ use b10x_loom_commission::model::responsibility::{
     ExecutorOutcome, ExecutorOutcomeProposedAction, Frontier, FrontierAction, FrontierId,
     FrontierObligation, ObservationId, PrincipalId, ProposedActionArguments,
     RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeAwaitingApproval,
-    RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeNeedsAuthority,
+    RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeIdleBound, RunOutcomeNeedsAuthority,
     RunOutcomeNeedsExternalEvidence, RunOutcomeSuspended, RunState, SuspensionReason, Unit,
     commission_state, frontier_state,
 };
@@ -714,7 +715,10 @@ fn a_request_not_admitted_is_never_invoked() {
     let end = ended("not admitted", result);
     assert!(effects.invoked().is_empty(), "not admitted, yet invoked");
     assert!(end.effects.is_empty());
-    assert_eq!(end.outcome, RunOutcome::NoAdmissibleAction(Unit(true)));
+    assert_eq!(
+        end.outcome,
+        RunOutcome::IdleBound(RunOutcomeIdleBound { idle_iterations: 2 })
+    );
 
     // Stale: proposed at 7, the case at 8 by revalidation.
     let case = CaseId("case-stale".to_owned());
@@ -841,7 +845,7 @@ fn the_step_budget_suspends_the_run_for_budget() {
 }
 
 /// With a step budget, idle steps run to the budget: the budget bounds the loop, not the idle
-/// bound. Control: without one, two idle iterations end the run with no admissible action.
+/// bound. Control: without one, two idle iterations end the run on the idle bound, `IdleBound`.
 #[test]
 fn with_a_step_budget_idle_steps_run_to_the_budget() {
     let case = CaseId("case-idle-budget".to_owned());
@@ -880,7 +884,10 @@ fn with_a_step_budget_idle_steps_run_to_the_budget() {
     );
     let end = ended("idle without a budget", result);
     assert_eq!(executor.calls().len(), 2);
-    assert_eq!(end.outcome, RunOutcome::NoAdmissibleAction(Unit(true)));
+    assert_eq!(
+        end.outcome,
+        RunOutcome::IdleBound(RunOutcomeIdleBound { idle_iterations: 2 })
+    );
 }
 
 /// `NothingAdmissible`: the executor has nothing to propose and the frontier admits no action. The
@@ -1229,7 +1236,10 @@ fn a_denied_action_is_not_awaited() {
     );
     let end = ended("denied, alone", result);
     assert_eq!(authority.asked().len(), 2, "the executor ran again");
-    assert_eq!(end.outcome, RunOutcome::NoAdmissibleAction(Unit(true)));
+    assert_eq!(
+        end.outcome,
+        RunOutcome::IdleBound(RunOutcomeIdleBound { idle_iterations: 2 })
+    );
 
     let case = CaseId("case-denied-beside".to_owned());
     let governor = FakeGovernor::new();

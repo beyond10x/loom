@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest fbc987193ce2337d53be5610bdd3340aff0f3e68872a482a1d5a8855cf1111a0
-// contract digest e679ebf85e98d2d040d787f1e5a953f9df198141e1508772547f007aec6e08a1
+// model digest e9437a6cbbf5f15c726617ea201063d6ccd75146e1c90c4840f04720a2ca6fb5
+// contract digest 02850b7968172d53983b13b09f1ed99fa07041b914715b721bc0cfbabe8649bf
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Responsibility — `commission.responsibility`.
@@ -556,6 +556,8 @@ pub enum RunOutcome {
     Completed(RunOutcomeCompleted),
     /// Tagged `EffectRefused` — `commission.responsibility.RunOutcomeEffectRefused`.
     EffectRefused(RunOutcomeEffectRefused),
+    /// Tagged `IdleBound` — `commission.responsibility.RunOutcomeIdleBound`.
+    IdleBound(RunOutcomeIdleBound),
     /// Tagged `NeedsAuthority` — `commission.responsibility.RunOutcomeNeedsAuthority`.
     NeedsAuthority(RunOutcomeNeedsAuthority),
     /// Tagged `NeedsExternalEvidence` — `commission.responsibility.RunOutcomeNeedsExternalEvidence`.
@@ -600,6 +602,13 @@ pub struct RunOutcomeEffectRefused {
     pub action_request_id: ActionRequestId,
     /// `reason` — `String`.
     pub reason: String,
+}
+
+/// RunOutcomeIdleBound — `commission.responsibility.RunOutcomeIdleBound`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunOutcomeIdleBound {
+    /// `idle_iterations` — `Integer`.
+    pub idle_iterations: i64,
 }
 
 /// RunOutcomeNeedsAuthority — `commission.responsibility.RunOutcomeNeedsAuthority`.
@@ -2612,6 +2621,31 @@ pub enum JudgeEffectRefusalOutcome {
     Ordinary,
 }
 
+/// JudgeIdleIteration — the input of `commission.responsibility.JudgeIdleIteration`.
+///
+/// Everything it can result in is [`JudgeIdleIterationOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JudgeIdleIteration {
+    /// `idle_iterations` — `Integer`.
+    pub idle_iterations: i64,
+}
+
+/// Everything `commission.responsibility.JudgeIdleIteration` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JudgeIdleIterationOutcome {
+    /// `bound` — when `idle_iterations >= 2`.
+    Bound {
+        /// Why it was refused: `commission.responsibility.IdleBoundReached`.
+        error: IdleBoundReached,
+    },
+    /// `below` — otherwise.
+    Below,
+}
+
 /// ReleaseSuspension — the input of `commission.responsibility.ReleaseSuspension`.
 ///
 /// Everything it can result in is [`ReleaseSuspensionOutcome`].
@@ -2945,6 +2979,13 @@ pub struct EffectRefusedFinal {
     pub reason: String,
 }
 
+/// The declared error `commission.responsibility.IdleBoundReached`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdleBoundReached {
+    /// `idle_iterations` — `Integer`.
+    pub idle_iterations: i64,
+}
+
 /// The declared error `commission.responsibility.RunStateConflict`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunStateConflict {
@@ -3075,6 +3116,17 @@ pub mod obligations {
         ///
         /// `Err` is the typed refusal of a request the model declares no outcome for.
         fn judge_effect_refusal(&mut self, input: super::JudgeEffectRefusal) -> Result<super::JudgeEffectRefusalOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `commission.responsibility.JudgeIdleIteration` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait JudgeIdleIterationBehavior {
+        /// Decides and enacts exactly one declared outcome of `commission.responsibility.JudgeIdleIteration`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn judge_idle_iteration(&mut self, input: super::JudgeIdleIteration) -> Result<super::JudgeIdleIterationOutcome, crate::obligation::UnmetObligation>;
     }
 
     /// The behaviour `commission.responsibility.ReleaseSuspension` — an implementation obligation.

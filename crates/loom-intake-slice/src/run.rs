@@ -41,6 +41,7 @@
 //! | --- | --- | --- |
 //! | [`StopReason::ApprovalRequired`] | `NeedsAuthority`, `AwaitingApproval` | Loom proposes an action the frontier lists as needing approval, or a step leaves a frontier that lists one unchanged (every action's status and reasons); the detail names the proposed action, or the awaited actions in frontier order |
 //! | [`StopReason::NothingAdmissible`] | `NoAdmissibleAction`, `NeedsExternalEvidence` | Loom proposes nothing and the frontier lists no admissible action |
+//! | [`StopReason::NothingAdmissible`] | `IdleBound` | Commission's idle bound ended the run: with no step budget, two iterations in a row made no progress. The slice's runs always take `max_steps` as their step budget, so they never end so; the stop is the one above, with no detail |
 //! | [`StopReason::NothingAdmissible`] | `CaseMovedOn` | the case moved to another revision while the run worked, and its frontier there still admits an action; the run, bound to the revision it left, stops, and the detail names both revisions (`case moved on from revision <bound> to <current>`) |
 //! | [`StopReason::StepBudget`] | `Suspended` for `Budget` | the steps taken reach the request's `max_steps` |
 //! | [`StopReason::NoLocalExecutor`] | `NoPerformableAction` | the pick is not `software-change@1`; the case opens and one frontier is read |
@@ -890,7 +891,9 @@ fn finish(
             let detail = Some(awaiting.actions.join(", "));
             gated_stop(out, protocol, steps, detail, awaiting.actions, gate)
         }
-        RunOutcome::NoAdmissibleAction(_) | RunOutcome::NeedsExternalEvidence(_) => {
+        RunOutcome::NoAdmissibleAction(_)
+        | RunOutcome::NeedsExternalEvidence(_)
+        | RunOutcome::IdleBound(_) => {
             stop(out, protocol, steps, StopReason::NothingAdmissible, None)
         }
         RunOutcome::CaseMovedOn(moved) => {
@@ -1465,7 +1468,7 @@ mod tests {
     use b10x_loom_commission::model::primitives::Uuid;
     use b10x_loom_commission::model::responsibility::{
         ActionRequestId, ChargedUsage, RunCharges, RunId, RunOutcome, RunOutcomeCaseMovedOn,
-        RunOutcomeEffectRefused,
+        RunOutcomeEffectRefused, RunOutcomeIdleBound, Unit,
     };
     use b10x_loom_commission::runtime::LoopEnd;
 
@@ -1531,6 +1534,48 @@ mod tests {
         assert_eq!(
             String::from_utf8_lossy(&out),
             "stopped: Refused (the step guard does not admit this change)\n"
+        );
+    }
+
+    /// story:idle-bound-outcome: a run the idle bound ended stops `NothingAdmissible`, as it did
+    /// when the runtime ended it `NoAdmissibleAction`: the same `SliceRun` and the same stop line,
+    /// with no detail, so neither `b10x-loom`'s output nor the `run --output jsonl` contract
+    /// changes.
+    #[test]
+    fn an_idle_bound_run_stops_nothing_admissible_as_before() {
+        let stopped = |outcome: RunOutcome| {
+            let mut out = Vec::new();
+            let run = finish(
+                &mut out,
+                "software-change@1".to_owned(),
+                ended(outcome, 1),
+                ApprovalGate::Approvable,
+            )
+            .unwrap_or_else(|error| panic!("the stop failed: {error}"));
+            (run, String::from_utf8_lossy(&out).into_owned())
+        };
+
+        let idle = stopped(RunOutcome::IdleBound(RunOutcomeIdleBound {
+            idle_iterations: 2,
+        }));
+
+        assert_eq!(
+            idle,
+            (
+                SliceRun {
+                    protocol: "software-change@1".to_owned(),
+                    steps: 1,
+                    stop_reason: StopReason::NothingAdmissible,
+                    approvals: Vec::new(),
+                    gate: ApprovalGate::Approvable,
+                },
+                "stopped: NothingAdmissible\n".to_owned()
+            )
+        );
+        assert_eq!(
+            idle,
+            stopped(RunOutcome::NoAdmissibleAction(Unit(true))),
+            "the stop the idle bound ended a run with on 0.26.0"
         );
     }
 

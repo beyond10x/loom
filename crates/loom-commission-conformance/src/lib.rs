@@ -18,6 +18,8 @@
 //!   governor in [`governor`];
 //! * `JudgeEffectRefusal` by `b10x_loom_commission::outcome::judge_refusal`, the judgement the
 //!   runtime makes of every refusal an effect port answers;
+//! * `JudgeIdleIteration` by `b10x_loom_commission::outcome::judge_idle`, the judgement the
+//!   runtime makes of every iteration of a run with no step budget that made no progress;
 //! * the views `RunStates` and `SuspensionStates` by the generated queries over the same stores.
 //!
 //! This crate translates values and records what was published. It decides no outcome: each
@@ -42,13 +44,14 @@ use b10x_loom_commission::model::responsibility::obligations::{
 };
 use b10x_loom_commission::model::responsibility::{
     ActionRequest, ActionRequestData, ActionRequestId, CaseId, CommissionId, HoldSuspension,
-    HoldSuspensionOutcome, JudgeEffectRefusal, JudgeEffectRefusalOutcome, ProposedActionArguments,
-    ReleaseSuspension, ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome,
-    RevalidateActionRequestOutcome, RunId, RunStateConflict, RunStorageFailed, StartRun,
-    StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionRequestMismatch, SuspensionSettled,
-    SuspensionStateConflict, SuspensionStorageFailed, TakeSuspension, TakeSuspensionOutcome,
+    HoldSuspensionOutcome, JudgeEffectRefusal, JudgeEffectRefusalOutcome, JudgeIdleIteration,
+    JudgeIdleIterationOutcome, ProposedActionArguments, ReleaseSuspension,
+    ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome, RevalidateActionRequestOutcome, RunId,
+    RunStateConflict, RunStorageFailed, StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome,
+    SuspensionRequestMismatch, SuspensionSettled, SuspensionStateConflict, SuspensionStorageFailed,
+    TakeSuspension, TakeSuspensionOutcome,
 };
-use b10x_loom_commission::outcome::{RunStore, judge_refusal};
+use b10x_loom_commission::outcome::{RunStore, judge_idle, judge_refusal};
 use ess_conformance::scenario::{CommandRef, ErrorRef, EventRef, OutcomeRef};
 use ess_conformance::target::{
     ConformanceTarget, DeclaredErrorValue, EventObservationRequest, ExternalOutcomeControl,
@@ -74,6 +77,8 @@ const RESUME_RUN: &str = "commission.responsibility.ResumeRun";
 const REVALIDATE: &str = "commission.responsibility.RevalidateActionRequest";
 const JUDGE_REFUSAL: &str = "commission.responsibility.JudgeEffectRefusal";
 const EFFECT_REFUSED_FINAL: &str = "commission.responsibility.EffectRefusedFinal";
+const JUDGE_IDLE: &str = "commission.responsibility.JudgeIdleIteration";
+const IDLE_BOUND_REACHED: &str = "commission.responsibility.IdleBoundReached";
 const RUN_STARTED: &str = "commission.responsibility.RunStarted";
 const RUN_SUSPENDED: &str = "commission.responsibility.RunSuspended";
 const RUN_RESUMED: &str = "commission.responsibility.RunResumed";
@@ -199,6 +204,7 @@ impl ConformanceTarget for CommissionTarget {
             RELEASE_SUSPENSION => release_suspension(&mut live, input, correlation),
             REVALIDATE => revalidate_request(&mut live, input)?,
             JUDGE_REFUSAL => judge_effect_refusal(input)?,
+            JUDGE_IDLE => judge_idle_iteration(input)?,
             other => {
                 return Err(TargetError::unavailable(
                     format!("invoking `{other}`"),
@@ -725,6 +731,29 @@ fn refusal(input: &Input) -> Option<JudgeEffectRefusal> {
         reason: codec::text(input, "reason")?,
         ends_run: codec::boolean(input, "ends_run")?,
     })
+}
+
+/// `JudgeIdleIteration`: the idle iterations in a row the input counts, judged as the runtime
+/// judges a run with no step budget after an iteration that made no progress. It reads and writes
+/// no store, so every view stays as it was.
+fn judge_idle_iteration(input: &Input) -> Result<Option<SemanticCommandResult>, TargetError> {
+    let Some(idle_iterations) = codec::integer(input, "idle_iterations") else {
+        return Ok(None);
+    };
+    let outcome = judge_idle(JudgeIdleIteration { idle_iterations }).map_err(|unmet| {
+        TargetError::unavailable(
+            format!("judging through `{JUDGE_IDLE}`"),
+            format!("{} is owed: {}", unmet.capability, unmet.source),
+        )
+    })?;
+    Ok(Some(match outcome {
+        JudgeIdleIterationOutcome::Bound { error: reached } => took(JUDGE_IDLE, "bound")
+            .with_error(
+                error(IDLE_BOUND_REACHED)
+                    .with("idle_iterations", codec::number(reached.idle_iterations)),
+            ),
+        JudgeIdleIterationOutcome::Below => took(JUDGE_IDLE, "below"),
+    }))
 }
 
 /// The action request the input of `RevalidateActionRequest` names, identity included.
