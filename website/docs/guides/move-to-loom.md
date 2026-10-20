@@ -54,7 +54,7 @@ An application that uses several of them can depend on `b10x-loom-sdk` alone; se
   `CanonGovernor::open`), and declares the write actions `tests.write` and `implementation.edit`
   where earlier releases had `repository.edit`.
 - [Canon](https://beyond10x.github.io/canon/) ([GitHub](https://github.com/beyond10x/canon)) is
-  the revision `b10x-canon-engineering` names, tag `0.4.0`. A consumer that adds Canon itself
+  the revision `b10x-canon-engineering` names, tag `0.6.0`. A consumer that adds Canon itself
   uses the same reference, or it builds a second Canon whose types do not match.
 
 The [crate list](../reference/crates.md) is generated from the workspace and is the current list.
