@@ -15,8 +15,9 @@ use std::process::Command;
 
 use b10x_loom_intake_slice::confinement::{
     Backend, ChildCommand, ConfinementRefusal, ExecEnvironment, NetworkMode, SandboxProfile,
-    SubstrateRunner, prepare_delegated_cgroup,
+    SubstrateRunner, TestRunner as _, prepare_delegated_cgroup,
 };
+use b10x_loom_intake_slice::executor::TestCommand;
 
 /// Set in the test binary started inside the delegated scope, so it runs the case instead of
 /// starting itself again.
@@ -210,4 +211,133 @@ fn the_environment_holds_only_what_the_host_named() {
             assert_eq!(result.output, "FIRST=one\nSECOND=two\n");
         },
     );
+}
+
+#[test]
+fn a_program_that_reads_as_an_assignment_is_refused_before_anything_starts() {
+    let fixture = tempfile::tempdir().unwrap();
+    let workspace = fixture.path().join("workspace");
+    std::fs::create_dir(&workspace).unwrap();
+    let runner = SubstrateRunner::new(Some(fixture.path().to_owned()));
+    let child = ChildCommand::new("GH_TOKEN=synthetic-value", ["/usr/bin/env"], &workspace);
+    let error = runner.run_child(&child).unwrap_err();
+    assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
+    assert!(error.detail.contains("`GH_TOKEN=…`"), "{error}");
+    assert!(!error.detail.contains("synthetic-value"), "{error}");
+    let test = TestCommand::new("RUST_LOG=debug", ["cargo", "test"]);
+    let error = runner.run(&test, &workspace).unwrap_err();
+    assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
+    assert!(
+        !workspace.join("target").exists(),
+        "the workspace is untouched and no driver was opened"
+    );
+}
+
+/// A child running in one workspace directory while the runner is asked for a driver in another:
+/// opening it would end the running child, so the second launch is refused and the first runs on.
+#[test]
+fn a_launch_needing_another_driver_is_refused_while_a_child_runs() {
+    delegated(
+        "a_launch_needing_another_driver_is_refused_while_a_child_runs",
+        |runner, workspace| {
+            let elsewhere = workspace.parent().unwrap().join("other/elsewhere");
+            std::fs::create_dir_all(&elsewhere).unwrap();
+            let started = workspace.join("target/started");
+            let first = ChildCommand::new(
+                "sh",
+                ["-c", "touch target/started; sleep 3; printf first-done"],
+                workspace,
+            );
+            let first_runner = runner.clone();
+            let handle = std::thread::spawn(move || first_runner.run_child(&first));
+            wait_for(&started, &handle);
+            let other = runner.run_child(&ChildCommand::new("true", [] as [&str; 0], &elsewhere));
+            let error = other.expect_err("no driver is opened over a running child");
+            assert_eq!(
+                error.reason,
+                ConfinementRefusal::CapabilityUnserved,
+                "{error}"
+            );
+            let first = handle.join().unwrap().expect("the first child runs on");
+            assert_eq!(
+                (first.exit_code, first.output.as_str()),
+                (Some(0), "first-done")
+            );
+            let after = runner
+                .run_child(&ChildCommand::new("true", [] as [&str; 0], &elsewhere))
+                .expect("with nothing running, the other driver opens");
+            assert_eq!(after.exit_code, Some(0), "{}", after.output);
+        },
+    );
+}
+
+/// The story's case: a test command runs beside a running child, through one runner.
+#[test]
+fn a_test_runs_beside_a_running_child_through_one_runner() {
+    delegated(
+        "a_test_runs_beside_a_running_child_through_one_runner",
+        |runner, workspace| {
+            let started = workspace.join("target/started");
+            let child = ChildCommand::new(
+                "sh",
+                ["-c", "touch target/started; sleep 3; printf child-done"],
+                workspace,
+            );
+            let child_runner = runner.clone();
+            let handle = std::thread::spawn(move || child_runner.run_child(&child));
+            wait_for(&started, &handle);
+            let test = runner
+                .run(
+                    &TestCommand::new("sh", ["-c", "printf test-done"]),
+                    workspace,
+                )
+                .expect("the test runs beside the child");
+            assert_eq!(
+                (test.exit_code, test.output.as_str()),
+                (Some(0), "test-done")
+            );
+            let child = handle.join().unwrap().expect("the child runs on");
+            assert_eq!(
+                (child.exit_code, child.output.as_str()),
+                (Some(0), "child-done")
+            );
+        },
+    );
+}
+
+/// A child its deadline ended has no exit status and is still a result, marked timed out: only a
+/// child ended by something other than itself or its deadline is refused (unit-tested in
+/// `confinement.rs`, since no child can provoke that end on purpose).
+#[test]
+fn a_timed_out_child_is_a_result_with_no_exit_status() {
+    delegated(
+        "a_timed_out_child_is_a_result_with_no_exit_status",
+        |runner, workspace| {
+            let timed = runner
+                .run_child(
+                    &ChildCommand::new("sleep", ["30"], workspace)
+                        .with_timeout(std::time::Duration::from_millis(250)),
+                )
+                .expect("a timed-out child is a result");
+            assert!(timed.timed_out, "{}", timed.output);
+            assert_eq!(timed.exit_code, None);
+        },
+    );
+}
+
+/// Wait until the child running on `handle` created `marker`.
+fn wait_for<T: std::fmt::Debug>(marker: &Path, handle: &std::thread::JoinHandle<T>) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !marker.exists() {
+        assert!(
+            !handle.is_finished(),
+            "the child returned before it created {}",
+            marker.display()
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the child started within 30 s"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
 }

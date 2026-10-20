@@ -752,8 +752,14 @@ a skip with a named missing prerequisite establishes no qualification.
 arguments, the directory adopted as the workspace, and Substrate's `ExecEnvironment`,
 `SandboxProfile` and `NetworkMode`, `NetworkMode::None` by default) on the same launch path:
 writes only under `target/`, no toolchain or cache mounted, exactly the named environment, a typed
-refusal for a missing guarantee, only no network accepted as applied, and the applied confinement
-in its `TestExecution`. `crates/loom-intake-slice/tests/confined_child.rs` holds it; its delegated
+refusal for a missing guarantee, only no network accepted as applied (checked after the child
+ran, refusing its result), a result with no exit status and no timeout refused, and the applied
+confinement in its `TestExecution`. A program containing `=` (test or child) is refused before
+anything starts: Substrate execs through `/usr/bin/env`, which reads it as an assignment. A runner
+and its clones share one driver per workspace directory, because opening a driver kills every
+`substrate-ex_*` cgroup under its root; no driver opens on a root while a launch of this process
+runs there (the process-wide count in `confinement.rs`), so the launch needing it is refused
+instead. `crates/loom-intake-slice/tests/confined_child.rs` holds it; its delegated
 cases start their own test binary under `systemd-run --user --scope -p Delegate=yes` and skip
 naming the missing prerequisite where bubblewrap, a user systemd manager or the driver is absent.
 The slice's own git calls

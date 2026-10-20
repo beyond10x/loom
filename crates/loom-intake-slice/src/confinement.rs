@@ -8,8 +8,8 @@ use std::fmt;
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use crate::executor::TestCommand;
@@ -68,35 +68,120 @@ fn scope_error(detail: impl fmt::Display) -> ConfinementError {
     refuse(ConfinementRefusal::ScopeInvalid, detail)
 }
 
+/// The Substrate runner: tests ([`TestRunner`]) and children the host names
+/// ([`SubstrateRunner::run_child`]) run through it confined.
+///
+/// A runner and its clones share one Substrate driver per directory that holds their workspaces,
+/// opened at the first launch there, so their launches run side by side. Opening a driver ends
+/// every confined run under its cgroup root (Substrate reconciles them as orphans), so no driver is
+/// opened on a root while a launch of this process runs under it: that launch's sibling is refused
+/// with [`ConfinementRefusal::CapabilityUnserved`] instead.
 #[derive(Debug, Clone, Default)]
 pub struct SubstrateRunner {
     cgroup_root: Option<PathBuf>,
+    drivers: Arc<Drivers>,
 }
+
+/// The drivers a runner and its clones opened, by the directory holding their workspaces.
+#[derive(Default)]
+struct Drivers(Mutex<BTreeMap<PathBuf, Arc<OpenDriver>>>);
+impl fmt::Debug for Drivers {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let drivers = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        f.debug_list().entries(drivers.keys()).finish()
+    }
+}
+
+/// One opened driver, the cgroup root it reconciled, and its private state directory.
+struct OpenDriver {
+    driver: Arc<HostDriver>,
+    cgroup_root: PathBuf,
+    _state: tempfile::TempDir,
+}
+
+/// The confined launches running in this process, by cgroup root, over every runner.
+static RUNNING: Mutex<BTreeMap<PathBuf, usize>> = Mutex::new(BTreeMap::new());
+
+fn running() -> MutexGuard<'static, BTreeMap<PathBuf, usize>> {
+    RUNNING.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// One launch running under a cgroup root, counted from before its start until it is dropped.
+struct Running(PathBuf);
+impl Running {
+    fn enter(cgroup_root: &Path) -> Self {
+        *running().entry(cgroup_root.to_owned()).or_default() += 1;
+        Self(cgroup_root.to_owned())
+    }
+}
+impl Drop for Running {
+    fn drop(&mut self) {
+        let mut running = running();
+        if let Some(count) = running.get_mut(&self.0) {
+            *count -= 1;
+            if *count == 0 {
+                running.remove(&self.0);
+            }
+        }
+    }
+}
+
 impl SubstrateRunner {
     pub fn new(cgroup_root: Option<PathBuf>) -> Self {
-        Self { cgroup_root }
+        Self {
+            cgroup_root,
+            drivers: Arc::default(),
+        }
     }
 
     /// Probe the real backend before opening a model session. No test is launched.
     pub fn preflight(&self, root: &Path) -> Result<(), ConfinementError> {
         let root = validate_workspace(root)?;
-        let (_state, _driver) = self.open(&root)?;
+        self.driver(&root)?;
         Ok(())
     }
 
-    fn open(&self, root: &Path) -> Result<(tempfile::TempDir, Arc<HostDriver>), ConfinementError> {
+    /// The driver for the workspace `root`: the one this runner or a clone opened for its
+    /// directory, or a new one. The workspace is adopted on it either way.
+    fn driver(&self, root: &Path) -> Result<Arc<OpenDriver>, ConfinementError> {
+        let parent = root
+            .parent()
+            .ok_or_else(|| scope_error("workspace has no parent"))?;
+        let mut drivers = self
+            .drivers
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let open = match drivers.get(parent) {
+            Some(open) => Arc::clone(open),
+            None => {
+                let open = Arc::new(self.open(parent)?);
+                drivers.insert(parent.to_owned(), Arc::clone(&open));
+                open
+            }
+        };
+        drop(drivers);
+        open.driver
+            .workspace_root_identity(workspace_name(root)?)
+            .map_err(|e| {
+                refuse(
+                    ConfinementRefusal::WorkspaceNameInvalid,
+                    format!("Substrate adopt: {e:?}"),
+                )
+            })?;
+        Ok(open)
+    }
+
+    fn open(&self, parent: &Path) -> Result<OpenDriver, ConfinementError> {
         let state = tempfile::Builder::new()
             .prefix("loom-substrate-")
             .tempdir()
             .map_err(|e| refuse(ConfinementRefusal::BackendMissing, e))?;
-        let mut config = HostConfig::minimum(
-            root.parent()
-                .ok_or_else(|| scope_error("workspace has no parent"))?,
-        );
+        let mut config = HostConfig::minimum(parent);
         config.capsule_root = state.path().join("capsules");
         validate_backend(&config.bubblewrap)?;
         config.cgroup_root = self.cgroup_root.clone().or_else(discover_cgroup_root);
-        let delegated = config.cgroup_root.as_ref().is_some_and(|path| {
+        let cgroup_root = config.cgroup_root.clone().filter(|path| {
             path.join("cgroup.controllers").is_file()
                 && std::fs::read_to_string(path.join("cgroup.procs"))
                     .is_ok_and(|s| s.trim().is_empty())
@@ -105,10 +190,22 @@ impl SubstrateRunner {
                     .open(path.join("cgroup.procs"))
                     .is_ok()
         });
-        if !delegated {
+        let Some(cgroup_root) = cgroup_root else {
             return Err(refuse(
                 ConfinementRefusal::CgroupUndelegated,
                 "Substrate requires an empty delegated cgroup v2 subtree containing this process in a child; use systemd-run --user -p Delegate=yes --scope or --cgroup-root",
+            ));
+        };
+        // Opening kills every exec cgroup under the root; hold the count so no launch starts
+        // there meanwhile, and open nothing over a launch already running there.
+        let running = running();
+        if running.get(&cgroup_root).is_some_and(|count| *count > 0) {
+            return Err(refuse(
+                ConfinementRefusal::CapabilityUnserved,
+                format!(
+                    "a confined launch of this process is running under {}; opening another Substrate driver there would end it",
+                    cgroup_root.display()
+                ),
             ));
         }
         let driver = HostDriver::open(config).map_err(|e| {
@@ -117,6 +214,7 @@ impl SubstrateRunner {
                 format!("Substrate open: {e:?}"),
             )
         })?;
+        drop(running);
         let facts = driver.machine().facts;
         if facts.exec_cgroup_limits.is_none() {
             return Err(refuse(
@@ -130,39 +228,42 @@ impl SubstrateRunner {
                 "Substrate does not serve no-network execution with scoped workspace writes",
             ));
         }
-        let name = root
-            .file_name()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| scope_error("workspace name must be UTF-8"))?;
-        driver.workspace_root_identity(name).map_err(|e| {
-            refuse(
-                ConfinementRefusal::WorkspaceNameInvalid,
-                format!("Substrate adopt: {e:?}"),
-            )
-        })?;
-        Ok((state, driver))
+        Ok(OpenDriver {
+            driver,
+            cgroup_root,
+            _state: state,
+        })
     }
 
     /// Run a child process the host names, confined through Substrate with the guarantees a test
-    /// has: a guarantee Substrate does not serve, or an applied confinement other than the one
-    /// requested, is a [`ConfinementError`] and nothing runs unconfined; the child's environment
-    /// is exactly [`ChildCommand::environment`]; and the result carries the applied confinement
-    /// and the driver's own record of it.
+    /// has. A guarantee Substrate does not serve is a [`ConfinementError`] and nothing runs, never
+    /// an unconfined fall-back. The child's environment is exactly [`ChildCommand::environment`].
+    /// Once the child has run, its result is refused as a [`ConfinementError`] when the
+    /// confinement Substrate applied is not the one requested, or when Substrate reports no exit
+    /// status and no timeout; otherwise it carries the applied confinement and the driver's own
+    /// record of it.
     pub fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
+        check_program(&child.program)?;
         let root = validate_workspace(&child.directory)?;
-        let (_state, driver) = self.open(&root)?;
+        let open = self.driver(&root)?;
         let workspace = workspace_name(&root)?;
-        let input = child.input(workspace, driver.machine().snapshot);
-        Self::launch(&driver, workspace, &input)
+        let input = child.input(workspace, open.driver.machine().snapshot);
+        child_result(Self::launch(&open, workspace, &input)?)
     }
 
     /// Start `input` in the adopted workspace, wait for it, and accept its result only when the
-    /// confinement Substrate applied is the one `input` required.
+    /// confinement Substrate applied is the one `input` required. A program Substrate's
+    /// `/usr/bin/env` would read as a variable assignment is refused before anything starts.
     fn launch(
-        driver: &HostDriver,
+        open: &OpenDriver,
         workspace: &str,
         input: &ExecStartInput,
-    ) -> Result<TestExecution, ConfinementError> {
+    ) -> Result<Launched, ConfinementError> {
+        if let Some(program) = input.argv.first() {
+            check_program(program)?;
+        }
+        let driver = &open.driver;
+        let _running = Running::enter(&open.cgroup_root);
         let profile = requested_profile(input);
         let digest = profile_digest(&profile, &input.env.allow);
         let root_identity = driver
@@ -256,6 +357,16 @@ impl SubstrateRunner {
                 .to_vec(),
             read_only_roots: roots_projection(&record.read_only_roots),
         };
+        let ending = format!(
+            "state {}, refusal {}, output complete {}",
+            enum_name(&observed.resource.state),
+            observed
+                .resource
+                .refusal
+                .as_ref()
+                .map_or("none", |r| r.code.as_str()),
+            observed.output_complete
+        );
         let mut output = format!(
             "{}{}",
             String::from_utf8_lossy(tail(&observed.stdout)),
@@ -267,14 +378,39 @@ impl SubstrateRunner {
         if let Some(refusal) = observed.resource.refusal {
             output.push_str(&format!("\n{}: {}\n", refusal.code, refusal.message));
         }
-        Ok(TestExecution {
-            exit_code,
-            timed_out,
-            output,
-            applied,
-            driver_record: Some(record),
+        Ok(Launched {
+            execution: TestExecution {
+                exit_code,
+                timed_out,
+                output,
+                applied,
+                driver_record: Some(record),
+            },
+            ending,
         })
     }
+}
+
+/// What one launch returned, and how Substrate observed its end.
+struct Launched {
+    execution: TestExecution,
+    ending: String,
+}
+
+/// A child's result: refused when Substrate reports no exit status and no timeout, since such a
+/// child was ended by something other than itself or its deadline.
+fn child_result(launched: Launched) -> Result<TestExecution, ConfinementError> {
+    let execution = launched.execution;
+    if execution.exit_code.is_none() && !execution.timed_out {
+        return Err(refuse(
+            ConfinementRefusal::CapabilityUnserved,
+            format!(
+                "Substrate reports no exit status for the child and no timeout ({})",
+                launched.ending
+            ),
+        ));
+    }
+    Ok(execution)
 }
 
 impl TestRunner for SubstrateRunner {
@@ -283,13 +419,14 @@ impl TestRunner for SubstrateRunner {
     }
 
     fn run(&self, command: &TestCommand, root: &Path) -> Result<TestExecution, ConfinementError> {
+        check_program(&command.program().to_string_lossy())?;
         let root = validate_workspace(root)?;
-        let (_state, driver) = self.open(&root)?;
+        let open = self.driver(&root)?;
         let closure = RustClosure::discover(&root)?;
-        let snapshot = driver.machine();
+        let snapshot = open.driver.machine();
         let workspace = workspace_name(&root)?;
         let input = closure.input(command, workspace, snapshot.snapshot)?;
-        let mut execution = Self::launch(&driver, workspace, &input)?;
+        let mut execution = Self::launch(&open, workspace, &input)?.execution;
         if execution.exit_code != Some(0)
             && (execution.output.contains("offline")
                 || execution.output.contains("no matching package"))
@@ -303,7 +440,8 @@ impl TestRunner for SubstrateRunner {
 /// A child process the host names, run confined by [`SubstrateRunner::run_child`] with the
 /// guarantees a test has.
 ///
-/// Its program and arguments are never a shell line. Its directory is adopted as Substrate's
+/// Its program and arguments are never a shell line, and a program containing `=` is refused,
+/// since Substrate's `/usr/bin/env` would read it as an assignment. Its directory is adopted as Substrate's
 /// workspace and is the child's working directory, `/workspace`; the child writes only under its
 /// `target/`, as a test does, and no toolchain or cache is mounted. Its environment is exactly the
 /// one the host names as Substrate's [`ExecEnvironment`], empty unless it names one. It asks
@@ -434,6 +572,18 @@ impl ChildCommand {
             capsule: None,
             lease_ttl_ms: None,
         }
+    }
+}
+
+/// Refuse a program Substrate's `/usr/bin/env` would read as a `NAME=VALUE` assignment, which
+/// would set a variable nobody named, one Substrate refuses by name included. The refusal names
+/// the program up to its `=`, never the value.
+fn check_program(program: &str) -> Result<(), ConfinementError> {
+    match program.split_once('=') {
+        Some((name, _)) => Err(scope_error(format!(
+            "the program `{name}=…` contains '=': Substrate starts a program through /usr/bin/env, which would read it as a variable assignment"
+        ))),
+        None => Ok(()),
     }
 }
 
@@ -964,6 +1114,75 @@ mod tests {
         let bare = ChildCommand::new("true", [] as [&str; 0], "/work/space");
         assert!(bare.environment().allow.is_empty() && bare.environment().set.is_empty());
         assert_eq!(bare.timeout(), ChildCommand::DEFAULT_TIMEOUT);
+    }
+
+    #[test]
+    fn no_driver_is_opened_over_a_launch_running_under_its_cgroup_root() {
+        let fixture = tempfile::tempdir().unwrap();
+        // Shaped as an empty delegated cgroup, so only the running launch stands in the way.
+        let cgroup = fixture.path().join("cgroup");
+        std::fs::create_dir(&cgroup).unwrap();
+        std::fs::write(cgroup.join("cgroup.controllers"), "cpu memory pids\n").unwrap();
+        std::fs::write(cgroup.join("cgroup.procs"), "").unwrap();
+        let runner = SubstrateRunner::new(Some(cgroup.clone()));
+        assert!(Arc::ptr_eq(&runner.drivers, &runner.clone().drivers));
+        let launch = Running::enter(&cgroup);
+        let error = runner
+            .open(fixture.path())
+            .err()
+            .expect("nothing is opened");
+        let expected = if Path::new("/usr/bin/bwrap").is_file() {
+            ConfinementRefusal::CapabilityUnserved
+        } else {
+            ConfinementRefusal::BackendMissing
+        };
+        assert_eq!(error.reason, expected, "{error}");
+        drop(launch);
+        assert!(
+            !running().contains_key(&cgroup),
+            "a finished launch is no longer counted"
+        );
+    }
+
+    #[test]
+    fn a_child_result_with_no_exit_status_and_no_timeout_is_refused() {
+        let launched = |exit_code, timed_out| Launched {
+            execution: TestExecution {
+                exit_code,
+                timed_out,
+                output: String::new(),
+                applied: AppliedConfinement {
+                    backend: Backend::Substrate,
+                    profile_digest: String::new(),
+                    capability_snapshot: String::new(),
+                    cgroup: "substrate-ex_loom_1_0".to_owned(),
+                    filesystem: "workspace-rw-system-ro".to_owned(),
+                    network: "none".to_owned(),
+                    profile: "workspace".to_owned(),
+                    writable_scopes: vec!["target".to_owned()],
+                    read_only_roots: Vec::new(),
+                },
+                driver_record: None,
+            },
+            ending: "state unknown, refusal none, output complete true".to_owned(),
+        };
+        let error = child_result(launched(None, false)).unwrap_err();
+        assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
+        assert!(error.detail.contains("state unknown"), "{error}");
+        assert!(child_result(launched(None, true)).unwrap().timed_out);
+        assert_eq!(
+            child_result(launched(Some(3), false)).unwrap().exit_code,
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn a_program_that_reads_as_an_assignment_is_refused_naming_it_without_its_value() {
+        let error = check_program("GH_TOKEN=synthetic-value").unwrap_err();
+        assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid);
+        assert!(error.detail.contains("`GH_TOKEN=…`"), "{error}");
+        assert!(!error.detail.contains("synthetic-value"), "{error}");
+        check_program("/usr/bin/env").unwrap();
     }
 
     #[test]

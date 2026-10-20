@@ -16,16 +16,27 @@ on the launch path a test takes and with a test's guarantees: the child writes o
 directory's `target/` and no toolchain or cache is mounted; its environment is exactly the
 Substrate `ExecEnvironment` the host names, empty unless it names one; it asks Substrate for the
 `SandboxProfile` and `NetworkMode` the host names, `Workspace` with `None` by default, always
-required; a guarantee Substrate does not serve, or an applied confinement other than the one
-requested (only no network is accepted as applied), is a `ConfinementError` and nothing runs,
-never an unconfined fall-back; and the `TestExecution` it returns carries the applied confinement
-and the driver's record. `loom_sdk::ChildCommand` is exported beside `TestRunner`, and
-`loom_sdk::intake::slice::confinement` re-exports the Substrate types it is named with
-(`ExecEnvironment`, `BaselineEnvironment`, `SandboxProfile`, `NetworkMode`). `TestRunner` runs as
-before. `crates/loom-intake-slice/tests/confined_child.rs` holds it; its delegated cases start
-their own test binary in a delegated user systemd scope and skip naming the missing prerequisite
-where bubblewrap, a user systemd manager or the Substrate driver is absent.
-Breaking: none.
+required; a guarantee Substrate does not serve is a `ConfinementError` and nothing runs, never an
+unconfined fall-back; the applied confinement is compared with the request after the child ran,
+and a result whose applied confinement differs (only no network is accepted as applied), or that
+Substrate reports with no exit status and no timeout, is refused as a `ConfinementError`; any
+other result is the `TestExecution` it returns, carrying the applied confinement and the driver's
+record. A program containing `=`, which Substrate's `/usr/bin/env` would read as a variable
+assignment, is refused `ScopeInvalid` before anything starts, naming the program up to its `=`;
+this holds for a test command too. Tests and children launched through one `SubstrateRunner` and
+its clones share one Substrate driver per directory holding their workspaces, so a child runs
+beside a test or another child; because opening a driver ends every confined run under its cgroup
+root, no driver is opened on a root while a launch of this process runs under it, and the launch
+that needed it is refused `CapabilityUnserved`. `loom_sdk::ChildCommand` is exported beside
+`TestRunner`, and `loom_sdk::intake::slice::confinement` re-exports the Substrate types it is named
+with (`ExecEnvironment`, `BaselineEnvironment`, `SandboxProfile`, `NetworkMode`).
+`crates/loom-intake-slice/tests/confined_child.rs` holds it; its delegated cases start their own
+test binary in a delegated user systemd scope and skip naming the missing prerequisite where
+bubblewrap, a user systemd manager or the Substrate driver is absent.
+Breaking: a test command whose program contains `=` (`run --test-cmd 'NAME=VALUE cargo test'`),
+which ran with that variable set under Substrate, is refused `ScopeInvalid`; a `SubstrateRunner`
+launch that needs a new driver while another launch of the process runs under the same cgroup
+root is refused `CapabilityUnserved`, where opening the driver used to end the running launch.
 
 ## [0.27.0] - 2026-10-20
 
