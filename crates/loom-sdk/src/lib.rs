@@ -21,6 +21,7 @@
 //! [`RunMeter`], [`MeteredModelPort`] and [`MeteredExecutor`] report a run's model calls, tokens
 //! and cost per executor call (`loom::metering`): a [`MeteredModelPort`] is an llm `Model` over
 //! the one a host built, each of its turns one call, priced with the run's [`RateCard`].
+//! [`serde_json`] is the one Loom links, whose `Value` a host's `Briefing` returns.
 //!
 //! `examples/software_change.rs` embeds the runtime end to end: it opens a case on
 //! `software-change@1`, runs the loop over scripted fake models and stops at
@@ -86,3 +87,7 @@ pub use loom_governor::{CanonGovernor, CaseIndependence, CaseInputs, CaseStore, 
 
 /// The protocol catalog shared by routing, case initialization and governor admission.
 pub use loom_protocols::ProtocolCatalog;
+
+/// The `serde_json` Loom links. A host's [`loom::model_selector::Briefing`] returns an action's
+/// argument schema as its `Value`, so a host implements the port through `loom_sdk` alone.
+pub use serde_json;

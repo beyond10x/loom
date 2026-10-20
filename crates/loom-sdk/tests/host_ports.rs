@@ -56,6 +56,10 @@ host_ports! {
     loom_sdk::commission::ports::evidence::ObservationPort => hosts::Observations;
     loom_sdk::commission::ports::evidence::EvidencePort => hosts::Evidence;
     loom_sdk::commission::ports::executor::AgentExecutor => hosts::Executor;
+    loom_sdk::commission::ports::governor::Governor => hosts::CaseGovernor;
+    loom_sdk::connectors::CredentialResolver => hosts::Credentials;
+    loom_sdk::intake::slice::confinement::TestRunner => hosts::Tests;
+    loom_sdk::loom::model_selector::Briefing => hosts::Brief;
     loom_sdk::loom::selection::ActionSelector => hosts::Selector;
     loom_sdk::loom::workflow::WorkflowRunStore => hosts::RunRecords;
     loom_sdk::loom::arguments::ArgumentGenerator => hosts::Arguments;
@@ -74,12 +78,15 @@ host_ports! {
 mod hosts {
     use loom_sdk::commission::model::json::Value;
     use loom_sdk::commission::model::primitives::Timestamp;
+    use std::path::Path;
+
     use loom_sdk::commission::model::responsibility::{
         ActionBindingData, ActionRequestId, AuthorityVerdict, CaseId, Commission, CommissionData,
-        CommissionId, EffectOutcome, ExecutorOutcome, Frontier, GovernorError, HoldSuspension,
-        HoldSuspensionOutcome, Observation, ObservationData, ObservationId, ReleaseSuspension,
-        ReleaseSuspensionOutcome, SuspensionSnapshot, TakeSuspension, TakeSuspensionOutcome, Unit,
-        commission_state, frontier_state, observation_state,
+        CommissionId, CompletionDetermination, ConnectorCredentialRef, EffectOutcome,
+        ExecutorOutcome, Frontier, GovernorError, HoldSuspension, HoldSuspensionOutcome,
+        Observation, ObservationData, ObservationId, ReleaseSuspension, ReleaseSuspensionOutcome,
+        SuspensionSnapshot, TakeSuspension, TakeSuspensionOutcome, Unit, commission_state,
+        frontier_state, observation_state,
     };
     use loom_sdk::commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
     use loom_sdk::commission::ports::connector::ConnectorInvoker;
@@ -88,9 +95,15 @@ mod hosts {
         AttributedEvidence, EvidencePort, ObservationPort,
     };
     use loom_sdk::commission::ports::executor::AgentExecutor;
+    use loom_sdk::commission::ports::governor::Governor;
     use loom_sdk::commission::ports::suspension::{SuspensionPort, SuspensionStoreError};
     use loom_sdk::commission::runtime::LoopContext;
+    use loom_sdk::connectors::{CredentialError, CredentialResolver};
     use loom_sdk::governor::{CaseState, CaseStore, EvaluationTime, FallibleCaseStore};
+    use loom_sdk::intake::slice::confinement::{
+        Backend, ConfinementError, TestExecution, TestRunner,
+    };
+    use loom_sdk::intake::slice::executor::TestCommand;
     use loom_sdk::loom::arguments::{ArgumentContext, ArgumentGenerator};
     use loom_sdk::loom::harness::turn_loop::{
         ApprovalDecision, ApprovalPort, EnvironmentError, HookPort, LoopEvent, LoopSink,
@@ -102,6 +115,7 @@ mod hosts {
     };
     use loom_sdk::loom::model::run::{CatalogueEntry, CommissionRunId, SelectionStrategy};
     use loom_sdk::loom::model::workflow::WorkflowRunRecord;
+    use loom_sdk::loom::model_selector::Briefing;
     use loom_sdk::loom::selection::{ActionSelector, Choice, SelectionContext, SelectorError};
     use loom_sdk::loom::workflow::{RunStoreError, WorkflowRunStore};
 
@@ -283,6 +297,71 @@ mod hosts {
             _frontier: &Frontier<frontier_state::Issued>,
         ) -> ExecutorOutcome {
             EXECUTOR_OUTCOME
+        }
+    }
+
+    pub struct CaseGovernor;
+
+    impl Governor for CaseGovernor {
+        fn current_revision(&self, _case: &CaseId) -> Result<i64, GovernorError> {
+            unreachable!("{NEVER_CALLED}")
+        }
+
+        fn frontier(
+            &self,
+            _case: &CaseId,
+        ) -> Result<Frontier<frontier_state::Issued>, GovernorError> {
+            unreachable!("{NEVER_CALLED}")
+        }
+
+        fn completion(&self, _case: &CaseId) -> Result<CompletionDetermination, GovernorError> {
+            unreachable!("{NEVER_CALLED}")
+        }
+    }
+
+    pub struct Credentials;
+
+    impl CredentialResolver for Credentials {
+        fn resolve(&self, _credential: &ConnectorCredentialRef) -> Result<String, CredentialError> {
+            unreachable!("{NEVER_CALLED}")
+        }
+    }
+
+    pub struct Tests;
+
+    impl TestRunner for Tests {
+        fn run(
+            &self,
+            _command: &TestCommand,
+            _root: &Path,
+        ) -> Result<TestExecution, ConfinementError> {
+            unreachable!("{NEVER_CALLED}")
+        }
+
+        fn backend(&self) -> Backend {
+            unreachable!("{NEVER_CALLED}")
+        }
+    }
+
+    /// Implements the four methods a host implements; `send`, `select` and `arguments` are
+    /// provided.
+    pub struct Brief;
+
+    impl Briefing for Brief {
+        fn text(&self) -> String {
+            unreachable!("{NEVER_CALLED}")
+        }
+
+        fn selection_instructions(&self) -> String {
+            unreachable!("{NEVER_CALLED}")
+        }
+
+        fn argument_instructions(&self) -> String {
+            unreachable!("{NEVER_CALLED}")
+        }
+
+        fn arguments_schema(&self, _action: &str) -> loom_sdk::serde_json::Value {
+            unreachable!("{NEVER_CALLED}")
         }
     }
 
@@ -605,6 +684,10 @@ fn a_host_implements_every_port_through_loom_sdk_alone() {
         "ObservationPort",
         "EvidencePort",
         "AgentExecutor",
+        "Governor",
+        "CredentialResolver",
+        "TestRunner",
+        "Briefing",
         "ActionSelector",
         "WorkflowRunStore",
         "ArgumentGenerator",
