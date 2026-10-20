@@ -20,14 +20,18 @@ naming:
   display: Metering
 
 types:
-  # One executor call of the run: its number, counted from 1, the model calls made while it ran,
-  # (step 0, listed only when there was such a call, holds the calls made while no executor call
-  # ran, so the steps always sum to the totals),
+  # One executor call of the run: its number, counted from 1, the model calls made while it ran
+  # (a turn called on the executor call's own thread, and one called on another thread, a thread
+  # it spawned or the host's, while it ran; when executor calls of one meter overlap, a call made
+  # on a thread running none of them is counted in the one opened last; step 0, listed only when
+  # there was such a call, holds the calls made while no executor call ran, so the steps always
+  # sum to the totals; a metered model wrapped again on its meter counts each turn once),
   # the tokens the provider reported for the calls that answered, and their cost in micro-US-
   # dollars, each turn priced once by the run's rate card and rounded once.
   # The cost is absent when a turn was made without a rate card, when the card does not price the
-  # model a turn reported, when a turn that answered reported no usage, or when a turn failed (its
-  # tokens, and so its cost, are unknown).
+  # model a turn reported, when a turn that answered reported no usage, a usage llm marks not final
+  # or one that names no input or output tokens, or when a turn failed (its tokens, and so its
+  # cost, are unknown).
   # story:executor-reports-usage: an executor call that reports what it spent through
   # `AgentExecutor::run_with_usage` (`commission.responsibility.ExecutorStep.usage`, an executor
   # that is not a model loop) adds the reported input and output tokens to its step, and the

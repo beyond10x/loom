@@ -14,13 +14,16 @@
 //! reached there passes the turn through uncounted.
 //!
 //! The [`MeteredExecutor`] opens one step per executor call ([`AgentExecutor::run_with_usage`],
-//! which the runtime makes, or [`AgentExecutor::run`]), counted from 1, and every call that
-//! executor call makes is counted in its step: a `turn` called on the thread the executor call runs
-//! on, on whichever thread the turn's future is then driven. The step is carried by the executor call, not
-//! held by the meter, so executor calls on one meter may overlap on several threads, each counting
-//! its own calls, and a [`MeteredExecutor`] inside an executor call of the same meter opens no
-//! second step. A call made while no executor call runs on its thread is counted in step 0, which
-//! the report lists only when there was one, so the steps always sum to the totals. A step carries
+//! which the runtime makes, or [`AgentExecutor::run`]), counted from 1, and a step holds the model
+//! calls made while its executor call ran: a `turn` called on the thread the executor call runs on,
+//! and one called on another thread (a thread the executor call spawned, or the host's) while it
+//! runs, on whichever thread the turn's future is then driven. Executor calls on one meter may
+//! overlap on several threads: each holds the calls made on its own thread, and a call made on a
+//! thread that runs none of them is counted in the one opened last, since which of them it serves
+//! is not known; Commission's runtime makes one executor call of a run at a time. A
+//! [`MeteredExecutor`] inside an executor call of the same meter opens no second step. A call made
+//! while no executor call of the meter runs is counted in step 0, which the report lists only when
+//! there was one, so the steps always sum to the totals. A step carries
 //! the label its executor gave the call ([`RunMeter::label_step`]): a
 //! [`crate::workflow::WorkflowExecutor`] metered with
 //! [`crate::workflow::WorkflowExecutor::with_meter`] labels each call with the workflow step it
@@ -339,6 +342,8 @@ struct Ledger {
     effects: Option<RunCharges>,
     /// What earlier segments' effects were charged, as [`RunMeter::carry`] took it.
     carried_effects: Option<EffectsUsage>,
+    /// The steps whose executor calls are running, on any thread, in the order they opened.
+    running: Vec<usize>,
 }
 
 thread_local! {
@@ -501,6 +506,7 @@ impl RunMeter {
                 tallies: vec![Tally::empty()],
                 effects: None,
                 carried_effects: None,
+                running: Vec::new(),
             })),
         }
     }
@@ -618,10 +624,19 @@ impl RunMeter {
         })
     }
 
-    /// The step a call made now on this thread is counted in: its executor call's step, else
-    /// `outside` (0, or for a fork of the ported loop's port, the step it was made in).
+    /// The step a call made now on this thread is counted in: the step of the executor call
+    /// running on this thread; else `outside` when it names one (for a fork of the ported loop's
+    /// port, the step it was made in); else the step of the executor call of this meter running on
+    /// another thread, a thread it spawned or the host's, the one opened last when several run;
+    /// else step 0, made while no executor call ran.
     pub(crate) fn step_here(&self, outside: usize) -> usize {
-        self.open_here().unwrap_or(outside)
+        if let Some(step) = self.open_here() {
+            return step;
+        }
+        if outside != 0 {
+            return outside;
+        }
+        self.ledger().running.last().copied().unwrap_or(0)
     }
 
     /// Whether a metered turn of this meter is running on this thread: a metered model reached
@@ -711,13 +726,16 @@ impl RunMeter {
         let step = {
             let mut ledger = self.ledger();
             ledger.tallies.push(Tally::empty());
-            ledger.tallies.len() - 1
+            let step = ledger.tallies.len() - 1;
+            ledger.running.push(step);
+            step
         };
         OPEN.with_borrow_mut(|open| open.push((self.id(), step)));
         Some(step)
     }
 
-    /// Closes `step` on this thread: calls made here later are no longer counted in it.
+    /// Closes `step`, on this thread and among the running: calls made later are no longer
+    /// counted in it.
     fn close_step(&self, step: usize) {
         let id = self.id();
         OPEN.with_borrow_mut(|open| {
@@ -725,6 +743,10 @@ impl RunMeter {
                 open.remove(at);
             }
         });
+        let mut ledger = self.ledger();
+        if let Some(at) = ledger.running.iter().rposition(|open| *open == step) {
+            ledger.running.remove(at);
+        }
     }
 
     fn ledger(&self) -> MutexGuard<'_, Ledger> {
@@ -797,9 +819,10 @@ impl Future for Inner<'_> {
 /// `M` is how the model is held: the `Arc<dyn Model>` or `Box<dyn Model>` a host built, a
 /// reference to one, or an `Arc` of a model of its own. The metered model answers with the inner
 /// model's provenance and capabilities, so an answer llm checks against the metered model's
-/// binding is checked against the inner one's. Each `turn` is one call of the step of the executor
-/// call running on the thread `turn` is called on, else of step 0, counted before the inner turn
-/// runs, whichever thread then drives its future.
+/// binding is checked against the inner one's. Each `turn` is one call, counted before the inner
+/// turn runs, of the step of the executor call running on the thread `turn` is called on, else of
+/// the executor call of the meter running elsewhere (the one opened last), else of step 0,
+/// whichever thread then drives its future.
 #[derive(Debug)]
 pub struct MeteredModelPort<M> {
     pub(crate) inner: M,

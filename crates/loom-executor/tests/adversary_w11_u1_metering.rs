@@ -723,3 +723,36 @@ fn a_model_metered_on_two_meters_counts_its_turn_in_each() {
         );
     }
 }
+
+/// While executor calls on one meter overlap, a turn made on a thread that runs none of them (the
+/// host's) is counted in the one that opened last: it was made while each ran, and which one it
+/// serves is not known. Once both returned, the host's turn is step 0's.
+#[test]
+fn a_turn_on_another_thread_while_executor_calls_overlap_counts_in_the_last_opened() {
+    let model = Scripted::new([]);
+    let meter = RunMeter::new(None);
+    let (a, a_opened, a_go) = gated(&model, &meter, 0);
+    let (b, b_opened, b_go) = gated(&model, &meter, 0);
+    let host = metered(&model, &meter);
+
+    std::thread::scope(|scope| {
+        let a_done = scope.spawn(|| a.run(&commission(), &frontier()));
+        a_opened.recv().expect("A opened its step");
+        let b_done = scope.spawn(|| b.run(&commission(), &frontier()));
+        b_opened.recv().expect("B opened its step");
+        let _ = turn(&host);
+        a_go.send(()).expect("A is waiting");
+        b_go.send(()).expect("B is waiting");
+        a_done.join().expect("A returned");
+        b_done.join().expect("B returned");
+    });
+    let _ = turn(&host);
+
+    let report = meter.report(&run_id());
+    assert_eq!(
+        steps(&report),
+        vec![(0, 1), (1, 0), (2, 1)],
+        "the host's turn while both ran is B's, the one after both returned is step 0's: \
+         {report:?}"
+    );
+}

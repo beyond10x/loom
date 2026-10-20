@@ -123,12 +123,15 @@ output and cached input tokens the provider reported and the cost in micro-US-do
 and per step.
 
 - Every `turn` of a metered model is one call, counted before the turn runs, so a turn that
-  fails, unwinds or is dropped unfinished is a call too; it adds no tokens. A call belongs to
-  the step of the executor call on the thread that called `turn`, whichever thread then
-  drives its future.
-- A step is one executor call, counted from 1. Calls made while no executor call runs are step 0,
-  listed only when there were any, so the steps always sum to the totals. Executor calls on one
-  meter must not overlap, and an executor is wrapped by one `MeteredExecutor`.
+  fails, unwinds or is dropped unfinished is a call too; it adds no tokens. A metered model
+  wrapped again on the same meter counts each turn once.
+- A step is one executor call, counted from 1, and holds the calls made while it ran: a `turn`
+  called on the executor call's own thread, or on another thread (one it spawned, or yours) while
+  it runs, whichever thread then drives the turn's future. Calls made while no executor call runs
+  are step 0, listed only when there were any, so the steps always sum to the totals. When
+  executor calls on one meter overlap, each holds the calls made on its own thread, and a call
+  made on a thread that runs none of them is counted in the one that started last. An executor
+  is wrapped by one `MeteredExecutor`.
 - A step's `label` names what its executor call did: a `WorkflowExecutor` built
   `.with_meter(&meter)` labels each call with the workflow step it took, so a judgement step's
   model calls read under its name. Step 0 and a call that took no step carry no label.
@@ -152,7 +155,7 @@ and per step.
   effect usage with this segment's. Call `executor.save()` after `meter.charge_effects(…)` so the
   record holds the segment's effects.
 
-`crates/loom-executor/tests/run_metering.rs` drives these over scripted ports.
+`crates/loom-executor/tests/run_metering.rs` drives these over scripted llm models.
 
 ## What holds whatever you supply
 
