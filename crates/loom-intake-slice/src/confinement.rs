@@ -5,6 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -318,8 +319,8 @@ impl SubstrateRunner {
     /// ([`ChildCommand::with_egress`]); an aperture naming no host is refused before anything
     /// starts. Once the child has run, its result is refused as a [`ConfinementError`] when the
     /// confinement Substrate applied is not the one requested, a wider network included, or when
-    /// Substrate reports no exit status and no timeout; otherwise it carries the applied
-    /// confinement and the driver's own record of it.
+    /// Substrate reports no exit status unless the child's timeout or its aperture's byte ceiling
+    /// ended it; otherwise it carries the applied confinement and the driver's own record of it.
     pub fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
         check_program(&child.program)?;
         check_network(child.network, child.egress.as_ref())?;
@@ -449,9 +450,10 @@ impl SubstrateRunner {
         if observed.stdout_truncated || observed.stderr_truncated {
             output.push_str("\n[Substrate output truncated]\n");
         }
-        if let Some(refusal) = observed.resource.refusal {
+        let refusal = observed.resource.refusal.map(|refusal| {
             output.push_str(&format!("\n{}: {}\n", refusal.code, refusal.message));
-        }
+            refusal.code
+        });
         Ok(Launched {
             execution: TestExecution {
                 exit_code,
@@ -461,25 +463,40 @@ impl SubstrateRunner {
                 driver_record: Some(record),
             },
             ending,
+            refusal,
         })
     }
 }
 
-/// What one launch returned, and how Substrate observed its end.
+/// What one launch returned, how Substrate observed its end, and the code of the refusal it ended
+/// with, if any.
 struct Launched {
     execution: TestExecution,
     ending: String,
+    refusal: Option<String>,
 }
 
-/// A child's result: refused when Substrate reports no exit status and no timeout, since such a
-/// child was ended by something other than itself or its deadline.
+/// The refusal Substrate ends a run with once its egress aperture's declared byte ceiling is
+/// reached, as it ends one at its deadline with `exec.timeout`.
+const BYTE_LIMIT: &str = "exec.aperture-byte-limit";
+
+/// A child's result: refused when Substrate reports no exit status, unless the child's deadline or
+/// the byte ceiling of the egress aperture it ran with ended it, since such a child was ended by
+/// something other than itself or a bound the host declared. A child its byte ceiling ended has
+/// no exit status and is not timed out; its output names [`BYTE_LIMIT`] and its driver record
+/// counts the bytes that crossed.
 fn child_result(launched: Launched) -> Result<TestExecution, ConfinementError> {
     let execution = launched.execution;
-    if execution.exit_code.is_none() && !execution.timed_out {
+    // Only a ceiling the record shows applied: the record already equals the declaration.
+    let ceiling_ended = launched.refusal.as_deref() == Some(BYTE_LIMIT)
+        && execution.driver_record.as_ref().is_some_and(|record| {
+            matches!(&record.network, AppliedNetwork::Aperture(aperture) if aperture.max_bytes.is_some())
+        });
+    if execution.exit_code.is_none() && !execution.timed_out && !ceiling_ended {
         return Err(refuse(
             ConfinementRefusal::CapabilityUnserved,
             format!(
-                "Substrate reports no exit status for the child and no timeout ({})",
+                "Substrate reports no exit status for the child, no timeout and no byte ceiling it declared ({})",
                 launched.ending
             ),
         ));
@@ -587,9 +604,13 @@ impl ChildCommand {
     }
 
     /// The same child reaching `aperture` and nothing else: [`NetworkMode::Aperture`], with the
-    /// host, port and pinned address `aperture` declares. An aperture naming no host or port, one
-    /// whose name Substrate refuses, one with a byte ceiling of zero, or one pinned to no IPv4
-    /// address is refused before anything starts.
+    /// host, port and pinned address `aperture` declares. A declaration Substrate's daemon never
+    /// makes is refused before anything starts: a name it refuses, no port, a byte ceiling of zero,
+    /// a host that is no host name or IPv4 literal, an IPv4 literal other than the pinned address,
+    /// and a pinned address that is no IPv4 one or not at the named port. A child its byte ceiling
+    /// ends is a result with no exit status, not timed out, whose output names
+    /// `exec.aperture-byte-limit`. It gets no certificate bundle: a child that verifies TLS
+    /// certificates cannot verify the host's.
     #[must_use]
     pub fn with_egress(self, aperture: EgressAperture) -> Self {
         Self {
@@ -701,9 +722,13 @@ fn workspace_name(root: &Path) -> Result<&str, ConfinementError> {
 
 /// Refuse, before anything starts, a network the child cannot have exactly as named: an aperture
 /// with no named host, a mode and an aperture that disagree, and an aperture declaration
-/// Substrate's daemon would refuse at startup (a name it refuses, no port, a byte ceiling of zero)
-/// or its forwarder cannot dial (no IPv4 address). The embedded driver checks only a request's
-/// shape, so the declaration's rules are held here.
+/// Substrate's daemon never makes. The daemon declares `name=host:port/tcp` with a name it admits,
+/// a port other than 0 and a byte ceiling other than zero, and pins the IPv4 address `host`
+/// resolves to at that port; so a host that is no host name or IPv4 literal ([`check_host`]), an
+/// IPv4 literal other than the pinned address, a pinned address that is no IPv4 one, or a pinned
+/// port other than the named port is refused too. The embedded driver checks only a request's
+/// shape, and writes the host verbatim into the child's `/etc/hosts`, so the declaration's rules
+/// are held here.
 fn check_network(
     network: NetworkMode,
     egress: Option<&EgressAperture>,
@@ -734,12 +759,57 @@ fn check_network(
             "egress aperture `{name}` declares a byte ceiling of zero"
         )));
     }
-    if !aperture.pinned.is_ipv4() {
+    let SocketAddr::V4(pinned) = aperture.pinned else {
         return Err(scope_error(format!(
             "egress aperture `{name}` is pinned to no IPv4 address; Substrate's forwarder dials IPv4 only"
         )));
+    };
+    if pinned.port() != aperture.port {
+        return Err(scope_error(format!(
+            "egress aperture `{name}` is pinned to port {}, not the port it names ({})",
+            pinned.port(),
+            aperture.port
+        )));
     }
-    Ok(())
+    check_host(name, &aperture.host, *pinned.ip())
+}
+
+/// Refuse an aperture's host unless it is a declaration Substrate's daemon makes for an address
+/// pinned at `pinned`: an IPv4 literal, which resolves to itself and so must be `pinned`, or a host
+/// name, dot-separated labels of ASCII letters, digits and inner hyphens, at most 63 bytes each and
+/// 253 in all, the last not all digits. Anything else (whitespace, a second line, a port, a URL,
+/// an IPv6 literal) never resolves to an IPv4 address there.
+fn check_host(name: &str, host: &str, pinned: Ipv4Addr) -> Result<(), ConfinementError> {
+    if let Ok(literal) = host.parse::<Ipv4Addr>() {
+        return if literal == pinned {
+            Ok(())
+        } else {
+            Err(scope_error(format!(
+                "egress aperture `{name}` names the address {literal} but is pinned to {pinned}"
+            )))
+        };
+    }
+    let label = |label: &str| {
+        (1..=63).contains(&label.len())
+            && label
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+    };
+    let host_name = host.len() <= 253
+        && host.split('.').all(label)
+        && !host
+            .rsplit('.')
+            .next()
+            .is_some_and(|last| last.bytes().all(|byte| byte.is_ascii_digit()));
+    if host_name {
+        Ok(())
+    } else {
+        Err(scope_error(format!(
+            "egress aperture `{name}` names the host {host:?}, which is no host name or IPv4 literal"
+        )))
+    }
 }
 
 /// Accept Substrate's record of what it applied only when it is the confinement `input` required:
@@ -1388,6 +1458,21 @@ mod tests {
         );
     }
 
+    /// An applied-confinement projection; the child-result rule does not read it.
+    fn projection(network: &str) -> AppliedConfinement {
+        AppliedConfinement {
+            backend: Backend::Substrate,
+            profile_digest: String::new(),
+            capability_snapshot: String::new(),
+            cgroup: "substrate-ex_loom_1_0".to_owned(),
+            filesystem: "workspace-rw-system-ro".to_owned(),
+            network: network.to_owned(),
+            profile: "workspace".to_owned(),
+            writable_scopes: vec!["target".to_owned()],
+            read_only_roots: Vec::new(),
+        }
+    }
+
     #[test]
     fn a_child_result_with_no_exit_status_and_no_timeout_is_refused() {
         let launched = |exit_code, timed_out| Launched {
@@ -1395,20 +1480,11 @@ mod tests {
                 exit_code,
                 timed_out,
                 output: String::new(),
-                applied: AppliedConfinement {
-                    backend: Backend::Substrate,
-                    profile_digest: String::new(),
-                    capability_snapshot: String::new(),
-                    cgroup: "substrate-ex_loom_1_0".to_owned(),
-                    filesystem: "workspace-rw-system-ro".to_owned(),
-                    network: "none".to_owned(),
-                    profile: "workspace".to_owned(),
-                    writable_scopes: vec!["target".to_owned()],
-                    read_only_roots: Vec::new(),
-                },
+                applied: projection("none"),
                 driver_record: None,
             },
             ending: "state unknown, refusal none, output complete true".to_owned(),
+            refusal: None,
         };
         let error = child_result(launched(None, false)).unwrap_err();
         assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
@@ -1418,6 +1494,62 @@ mod tests {
             child_result(launched(Some(3), false)).unwrap().exit_code,
             Some(3)
         );
+    }
+
+    #[test]
+    fn a_child_its_declared_byte_ceiling_ended_is_a_result_and_no_other_end_is() {
+        let bounded = EgressAperture {
+            max_bytes: Some(1024),
+            ..model()
+        };
+        let input = ChildCommand::new("true", [] as [&str; 0], "/work/space")
+            .with_egress(bounded)
+            .input("space", "snapshot".to_owned());
+        let ended = |network: AppliedNetwork, refusal: Option<&str>| Launched {
+            execution: TestExecution {
+                exit_code: None,
+                timed_out: false,
+                output: format!(
+                    "\n{BYTE_LIMIT}: The declared egress aperture byte ceiling was reached.\n"
+                ),
+                applied: projection("aperture:model@10.0.0.1:443"),
+                driver_record: Some(record_for(&input, network)),
+            },
+            ending: format!(
+                "state cancelled, refusal {}, output complete true",
+                refusal.unwrap_or("none")
+            ),
+            refusal: refusal.map(str::to_owned),
+        };
+        let result = child_result(ended(
+            applied_aperture("model", PINNED, Some(1024)),
+            Some(BYTE_LIMIT),
+        ))
+        .expect("a child its byte ceiling ended is a result");
+        assert_eq!((result.exit_code, result.timed_out), (None, false));
+        assert!(result.output.contains(BYTE_LIMIT), "{}", result.output);
+        let record = result.driver_record.expect("the driver's record");
+        assert_eq!(
+            record.network,
+            applied_aperture("model", PINNED, Some(1024)),
+            "the bytes that crossed are kept"
+        );
+        for (network, refusal) in [
+            (
+                applied_aperture("model", PINNED, Some(1024)),
+                Some("exec.cancelled"),
+            ),
+            (applied_aperture("model", PINNED, Some(1024)), None),
+            (applied_aperture("model", PINNED, None), Some(BYTE_LIMIT)),
+            (AppliedNetwork::None, Some(BYTE_LIMIT)),
+        ] {
+            let error = child_result(ended(network.clone(), refusal)).unwrap_err();
+            assert_eq!(
+                error.reason,
+                ConfinementRefusal::CapabilityUnserved,
+                "{network:?} {refusal:?}"
+            );
+        }
     }
 
     #[test]
@@ -1634,6 +1766,66 @@ mod tests {
             let error = check_network(network, egress.as_ref()).unwrap_err();
             assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
             assert!(error.detail.contains(named), "{named}: {error}");
+        }
+    }
+
+    #[test]
+    fn an_aperture_host_or_pin_the_daemon_never_declares_is_refused() {
+        let with_host = |host: &str| EgressAperture {
+            host: host.to_owned(),
+            ..model()
+        };
+        let longest_label = format!("{}.test", "a".repeat(63));
+        let label_too_long = format!("{}.test", "a".repeat(64));
+        let name_too_long = format!("{0}.{0}.{0}.{0}.test", "a".repeat(63));
+        for host in [
+            "api.example.test",
+            "localhost",
+            "a-b.c1.example",
+            "10.0.0.1",
+            longest_label.as_str(),
+        ] {
+            check_network(NetworkMode::Aperture, Some(&with_host(host)))
+                .unwrap_or_else(|error| panic!("{host:?}: {error}"));
+        }
+        for host in [
+            "api.example.test\n127.0.0.1\tother.example.test",
+            "api example test",
+            " api.example.test",
+            "api.example.test:443",
+            "https://api.example.test/",
+            "api.example.test.",
+            ".api.example.test",
+            "api..example.test",
+            "-api.example.test",
+            "api-.example.test",
+            "api_model.example.test",
+            "api.example.tést",
+            "10.0.1",
+            "1",
+            "::1",
+            "[::1]",
+            "#api.example.test",
+            label_too_long.as_str(),
+            name_too_long.as_str(),
+        ] {
+            let error = check_network(NetworkMode::Aperture, Some(&with_host(host))).unwrap_err();
+            assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{host:?}");
+            assert!(
+                error.detail.contains("no host name or IPv4 literal"),
+                "{host:?}: {error}"
+            );
+        }
+        let error = check_network(NetworkMode::Aperture, Some(&with_host("10.0.0.2"))).unwrap_err();
+        assert!(error.detail.contains("pinned to 10.0.0.1"), "{error}");
+        for pinned in ["10.0.0.1:0", "10.0.0.1:8443"] {
+            let aperture = EgressAperture {
+                pinned: pinned.parse().unwrap(),
+                ..model()
+            };
+            let error = check_network(NetworkMode::Aperture, Some(&aperture)).unwrap_err();
+            assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{pinned}");
+            assert!(error.detail.contains("not the port it names"), "{error}");
         }
     }
 
