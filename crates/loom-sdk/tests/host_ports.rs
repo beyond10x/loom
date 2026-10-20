@@ -76,10 +76,10 @@ host_ports! {
 
 /// One host type per port, each implemented through `loom_sdk` paths alone.
 mod hosts {
-    use loom_sdk::commission::model::json::Value;
-    use loom_sdk::commission::model::primitives::Timestamp;
     use std::path::Path;
 
+    use loom_sdk::commission::model::json::Value;
+    use loom_sdk::commission::model::primitives::Timestamp;
     use loom_sdk::commission::model::responsibility::{
         ActionBindingData, ActionRequestId, AuthorityVerdict, CaseId, Commission, CommissionData,
         CommissionId, CompletionDetermination, ConnectorCredentialRef, EffectOutcome,
