@@ -994,15 +994,31 @@ fn a_child_finds_the_snapshot_of_its_ca_bundle_through_ssl_cert_file() {
 /// The variables through which a TLS client takes another trust store than the bundle Substrate
 /// points `SSL_CERT_FILE` at, replacing or widening it; a child naming a bundle is refused when its
 /// environment names any of them.
-const TRUST_STORE_VARIABLES: [&str; 8] = [
+const TRUST_STORE_VARIABLES: [&str; 13] = [
     "SSL_CERT_FILE",
     "SSL_CERT_DIR",
     "CURL_CA_BUNDLE",
     "CURL_CA_PATH",
+    "CURL_HOME",
     "REQUESTS_CA_BUNDLE",
     "NODE_EXTRA_CA_CERTS",
     "GIT_SSL_CAINFO",
     "GIT_SSL_CAPATH",
+    "GIT_SSL_NO_VERIFY",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_PARAMETERS",
+];
+
+/// Git configuration keys a `GIT_CONFIG_KEY_<n>` may name beside a bundle and be refused for:
+/// `http.sslCAInfo`, `http.sslCAPath` and `http.sslVerify`, section and key in any case, with
+/// or without a URL subsection.
+const GIT_TRUST_KEYS: [&str; 5] = [
+    "http.sslCAInfo",
+    "HTTP.SSLCAPATH",
+    "http.sslverify",
+    "http.https://model.example.test/.sslCAInfo",
+    "Http.https://model.example.test:443/a.b.SslVerify",
 ];
 
 /// Substrate's ceiling on a certificate bundle, 1 MiB.
@@ -1014,9 +1030,11 @@ const BUNDLE_CEILING: usize = 1024 * 1024;
 /// writer), an empty file, one larger than Substrate's 1 MiB and one this process cannot read; a
 /// bundle named without an egress aperture, which would trust nothing the child can reach; and a
 /// bundle beside an environment naming any variable that replaces or widens a TLS client's trust
-/// store ([`TRUST_STORE_VARIABLES`]), the refusal naming the variable. Each refusal leaves the
-/// workspace as it was, without `target`. A well-named bundle beside an aperture, one of exactly
-/// 1 MiB included, gets past every check, to the missing backend.
+/// store ([`TRUST_STORE_VARIABLES`]), or a `GIT_CONFIG_KEY_<n>` naming one of Git's
+/// ([`GIT_TRUST_KEYS`]), the refusal naming the variable. Each refusal leaves the workspace as it
+/// was, without `target`. A well-named bundle beside an aperture, one of exactly 1 MiB included,
+/// and one beside Git configuration naming other keys, get past every check, to the missing
+/// backend.
 #[test]
 fn a_ca_bundle_the_host_cannot_name_is_refused_before_anything_starts() {
     use std::os::unix::fs::PermissionsExt as _;
@@ -1072,6 +1090,25 @@ fn a_ca_bundle_the_host_cannot_name_is_refused_before_anything_starts() {
             variable,
         ));
     }
+    let git_config = |pairs: &[(&str, &str)]| ExecEnvironment {
+        allow: Vec::new(),
+        set: pairs
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+            .collect(),
+    };
+    for key in GIT_TRUST_KEYS {
+        let environment = git_config(&[
+            ("GIT_CONFIG_COUNT", "1"),
+            ("GIT_CONFIG_KEY_0", key),
+            ("GIT_CONFIG_VALUE_0", "/workspace/ca.pem"),
+        ]);
+        refused.push((
+            bundle.clone(),
+            child().with_environment(environment),
+            "GIT_CONFIG_KEY_0",
+        ));
+    }
     if fifo_made {
         refused.push((fifo.clone(), child(), "no regular file"));
     }
@@ -1108,6 +1145,18 @@ fn a_ca_bundle_the_host_cannot_name_is_refused_before_anything_starts() {
             .unwrap_err();
         assert_eq!(error.reason, expected, "{accepted:?}: {error}");
     }
+    // Git configuration naming other keys stays allowed, a value naming a trust key included.
+    let other_keys = git_config(&[
+        ("GIT_CONFIG_COUNT", "2"),
+        ("GIT_CONFIG_KEY_0", "safe.directory"),
+        ("GIT_CONFIG_VALUE_0", "http.sslCAInfo"),
+        ("GIT_CONFIG_KEY_1", "http.sslBackend"),
+        ("GIT_CONFIG_VALUE_1", "openssl"),
+    ]);
+    let error = runner
+        .run_child(&child().with_environment(other_keys).with_ca_bundle(&bundle))
+        .unwrap_err();
+    assert_eq!(error.reason, expected, "{error}");
     assert!(!ran.exists(), "nothing ran");
 }
 
