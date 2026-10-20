@@ -1045,6 +1045,23 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             .map_err(|_| GovernorError::GovernorUnavailable)
     }
 
+    /// The `canon-decision/1` document Canon wrote for the case as held now, its explanation
+    /// included: the decision `frontier` renders into its frontier id and `completion` reads its
+    /// outcome from, at the case's current revision. It is one evaluation, made as theirs is (see
+    /// the crate documentation, "Evaluation"), and the document is the generated JSON value
+    /// [`evaluate`] returns as `canon`, equal to it for the same protocol, snapshot, evidence,
+    /// explicit decisions and time.
+    ///
+    /// # Errors
+    /// `UnknownCase` when the case is not held, and `GovernorUnavailable` when it cannot be decided
+    /// (its store fails, its protocol is not registered, its held inputs or independence
+    /// declarations do not satisfy the protocol, the trusted time fails or Canon refuses), as
+    /// `frontier` refuses it.
+    pub fn decision_document(&self, case: &CaseId) -> Result<loom::json::Value, GovernorError> {
+        let (_, _, decision) = self.decided(case)?;
+        loom::json::parse(&render(&decision)).map_err(|_| GovernorError::GovernorUnavailable)
+    }
+
     /// The held case, after checking its inputs against its protocol as at opening.
     fn held(&self, case: &CaseId) -> Result<CaseState, GovernorError> {
         self.held_with_ir(case).map(|(state, _)| state)

@@ -28,6 +28,17 @@ its entry from `catalog.json` in that store (`$XDG_DATA_HOME/loom/protocols`, or
 `ProtocolCatalog::bundled()` or `engineering()`, or registers one with
 `CanonGovernor::with_protocol`, is refused because the name is taken.
 
+A host reads the decision behind a held case's frontier (`story:governor-exposes-canon-decision`).
+`CanonGovernor::decision_document(&case)` returns the whole `canon-decision/1` document Canon wrote
+for the case at its current revision, explanation included, as the generated JSON value
+(`loom_sdk::governor::model::json::Value`) `evaluate` returns in `canon`: the document whose
+rendering the frontier id hashes and whose outcomes the completion reads, from one evaluation made
+as `frontier` and `completion` make theirs, never a second evaluator. For the same protocol,
+evidence, explicit decisions and time it equals what `evaluate` returns. A case the governor cannot
+decide (its held inputs or independence declarations do not satisfy its protocol) is refused
+`GovernorUnavailable`, and a case it does not hold `UnknownCase`, as `frontier` refuses them.
+Breaking: none for callers; `CanonGovernor` only gains a method.
+
 ## [0.26.0] - 2026-10-17
 
 Loom 0.26.0 links llm 0.7.0, names the target in the routing record of a governed write, and
