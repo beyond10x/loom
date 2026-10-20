@@ -13,13 +13,15 @@ A refused protocol registration names the registration its protocol id takes
 (`story:registration-name-protocol-id`). A catalog keeps one registration form, `name@major`:
 lowercase letters, digits and hyphens before `@`, starting with a lowercase letter and at most 100
 bytes, then a positive canonical major. `ProtocolCatalog::add_yaml("self.improvement@1", …)` is
-still refused; its refusal now states that whole rule and
-that protocol id `self.improvement/1` registers as `self-improvement@1`, dots and underscores as
-hyphens and `/<major>` as `@<major>`, the mapping the bundled catalog follows (`software.change/1`
-is `software-change@1`, `eval.gated_change/1` is `eval-gated-change@1`). The name is derived from
-the id and revision the definition declares when it parses, else from the registration given, and
-`protocols add` and `protocols remove`, which refuse before reading a definition, name it from the
-registration given. No bundled or stored registration changes.
+still refused; its refusal now states that whole rule and that protocol id `self.improvement/1`
+registers as `self-improvement@1`, dots and underscores as hyphens and `/<major>` as `@<major>`,
+the mapping the bundled catalog follows (`software.change/1` is `software-change@1`,
+`eval.gated_change/1` is `eval-gated-change@1`). An id the mapping gives no registration for
+(`3d.render/1`) is refused with the rule alone, saying so. A refusal quotes at most 120 bytes of
+the refused name. The name is derived from the id and revision the definition declares when it
+parses, else from the registration given, and `protocols add` and `protocols remove`, which refuse
+before reading a definition, name it from the registration given. No bundled or stored
+registration changes.
 Breaking: none.
 
 ## [0.29.0] - 2026-10-20

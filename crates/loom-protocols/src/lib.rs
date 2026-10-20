@@ -250,34 +250,38 @@ fn parse_registration(name: &str) -> Option<u64> {
 /// (`software.change/1` is `software-change@1`): dots and underscores become hyphens and
 /// `/<major>` becomes `@<major>`. `None` when the result is still no registration.
 fn registration_for(id: &str, revision: &str) -> Option<String> {
+    if id.len() > 100 {
+        return None;
+    }
     let name = format!("{}@{revision}", id.replace(['.', '_'], "-"));
     parse_registration(&name).map(|_| name)
 }
 /// Why `name` is no registration, naming the registration its protocol id takes: the id and
 /// revision the definition declares when it was read (`declared`), else the id `name` spells
-/// before its last `@` (or `/`) with the major after it.
+/// before its last `@` (or `/`) with the major after it. When the mapping gives no registration
+/// for that id, the refusal says so and states the rule alone.
 fn registration_refusal(name: &str, declared: Option<(&str, u64)>) -> String {
-    let (id, revision) = match declared {
-        Some((id, revision)) => (id.to_owned(), revision.to_string()),
-        None => {
-            let (id, revision) = name
-                .rsplit_once('@')
-                .or_else(|| name.rsplit_once('/'))
-                .unwrap_or((name, ""));
-            (id.to_owned(), revision.to_owned())
-        }
-    };
     let rule = format!(
         "protocol registration must be name@major ({REGISTRATION_RULE}), not {}",
         echo(name)
     );
-    let mapping = "its dots and underscores as hyphens and /<major> as @<major>, as the bundled \
-                   software-change@1 holds software.change/1";
+    let (id, revision) = match declared {
+        Some((id, revision)) => (id.to_owned(), revision.to_string()),
+        None => match name.rsplit_once('@').or_else(|| name.rsplit_once('/')) {
+            Some((id, revision)) => (id.to_owned(), revision.to_owned()),
+            None => return format!("{rule}; the name given spells no protocol id and major"),
+        },
+    };
     match registration_for(&id, &revision) {
-        Some(expected) => {
-            format!("{rule}: protocol id {id}/{revision} registers as {expected}, {mapping}")
-        }
-        None => format!("{rule}: a protocol id registers with {mapping}"),
+        Some(expected) => format!(
+            "{rule}: protocol id {id}/{revision} registers as {expected}, its dots and \
+             underscores as hyphens and /<major> as @<major>, as the bundled software-change@1 \
+             holds software.change/1"
+        ),
+        None => format!(
+            "{rule}; protocol id {} has no registration under the bundled catalog's mapping",
+            echo(&format!("{id}/{revision}"))
+        ),
     }
 }
 /// How many bytes of a refused name its refusal echoes.
