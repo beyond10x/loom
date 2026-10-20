@@ -108,6 +108,13 @@ Breaking: a host that matches `RunOutcome` exhaustively handles `IdleBound`, and
 `IdleBound` instead, or `Completed` where the last idle iteration's performed effect completed the
 case.
 
+The confinement code builds on Substrate 0.7.17 (`b10x-substrate-host` and `b10x-substrate-wire`
+at tag `0.7.17`), as moved in 0.27.1. Substrate's start request and its record of the applied
+confinement gain `read_only_files`, single host files bound read-only: Loom asks for none, and a
+record listing one is refused `CapabilityUnserved`, as any record that differs from the request is.
+Breaking: a host that builds Substrate's `AppliedConfinement`, the type of
+`TestExecution::driver_record`, sets `read_only_files`.
+
 ## [0.27.0] - 2026-10-20
 
 Loom 0.27.0 links engineering-protocols 0.9.0, tells an authority provider the action request it
