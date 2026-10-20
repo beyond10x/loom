@@ -50,6 +50,22 @@ pub fn text_list(input: &Input, name: &str) -> Option<Vec<String>> {
     }
 }
 
+/// The `List<Uuid>` field `name`, each item in the canonical form [`uuid`] reads; `None` when it is
+/// no list or holds anything else.
+pub fn uuid_list(input: &Input, name: &str) -> Option<Vec<Uuid>> {
+    match input.get(name)? {
+        Node::Seq(items) => items
+            .iter()
+            .map(|item| {
+                item.as_text()
+                    .filter(|text| is_canonical_uuid(text))
+                    .map(|text| Uuid(text.to_owned()))
+            })
+            .collect(),
+        _ => None,
+    }
+}
+
 /// The `Boolean` field `name`.
 pub fn boolean(input: &Input, name: &str) -> Option<bool> {
     match input.get(name)? {

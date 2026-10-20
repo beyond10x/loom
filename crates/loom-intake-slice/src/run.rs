@@ -44,6 +44,7 @@
 //! | [`StopReason::NothingAdmissible`] | `IdleBound` | Commission's idle bound ended the run: with no step budget, two iterations in a row made no progress. The slice's runs always take `max_steps` as their step budget, so they never end so; the stop is the one above, with no detail |
 //! | [`StopReason::NothingAdmissible`] | `CaseMovedOn` | the case moved to another revision while the run worked, and its frontier there still admits an action; the run, bound to the revision it left, stops, and the detail names both revisions (`case moved on from revision <bound> to <current>`) |
 //! | [`StopReason::StepBudget`] | `Suspended` for `Budget` | the steps taken reach the request's `max_steps` |
+//! | [`StopReason::StepBudget`] | `Waiting` | a budget ended the run while an effect port's last answer for a request was pending. The slice's own effect ports never answer pending; the stop is the one above, with no detail |
 //! | [`StopReason::NoLocalExecutor`] | `NoPerformableAction` | the pick is not `software-change@1`; the case opens and one frontier is read. [`SliceRun::unperformed`] carries the actions the outcome names, each once, in frontier order |
 //! | [`StopReason::NoLocalExecutor`] | none: no case is opened | the pick is a protocol the request's action bindings bind ([`crate::bindings`]) and one of its actions has no command; the detail names it, and [`SliceRun::unperformed`] carries every action with no command, in the protocol's order |
 //! | [`StopReason::Refused`] | none: no case is opened | the router refuses the pick: outside the registry, or unsure |
@@ -934,7 +935,9 @@ fn finish(
             StopReason::Refused,
             Some(refused.reason),
         ),
-        RunOutcome::Waiting(waiting) => Err(SliceError::Unexpected(format!("Waiting {waiting:?}"))),
+        // A budget ended the run while an effect's answer for a request was pending: a step
+        // budget stop, as the run would have been suspended for its budget with nothing pending.
+        RunOutcome::Waiting(_) => stop(out, protocol, steps, StopReason::StepBudget, None),
     }
 }
 
