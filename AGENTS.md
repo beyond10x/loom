@@ -301,12 +301,14 @@ record that does not apply is set aside as `CanonGovernor` sets it aside; an unr
 a repeated id is refused. The time and the records are judged once each, never by re-running Canon
 on prefixes. `crates/loom-governor/tests/evaluate.rs` and `evaluate_adversary.rs` hold it against
 `CanonGovernor`; `crates/loom-cli/tests/evaluate.rs` holds the subcommand against the library.
-`CanonGovernor::decision_document` returns a held case's whole `canon-decision/1` document, as the
-generated JSON value `evaluate` returns in `canon`: the one the governor keeps in memory, one per
-case, from its most recent evaluation (`frontier`'s, `completion`'s or its own), so a read right
-after a frontier is the document that frontier's id hashes whatever the trusted time does; it
-evaluates once and keeps that only when nothing is kept or the held case changed since, and refuses
-a case it cannot read or decide as `frontier` does
+`CanonGovernor::decision_document(case, frontier)` returns the whole `canon-decision/1` document
+behind a frontier id the governor issued, as the generated JSON value `evaluate` returns in
+`canon`: `frontier` keeps the document under the id it issues, in memory, so a host holding an id
+from Commission's loop (`LoopEnd::last_frontier`) reads that frontier's document whatever the
+trusted time did since. A lookup never evaluates; it answers `None` for an id the governor did not
+issue or no longer keeps. Per case it keeps only documents for the case as currently held, at most
+`KEPT_DOCUMENTS_PER_CASE` (16), dropping them when it finds the held case changed or the store no
+longer holding it, and refuses a case as `frontier` does
 (`crates/loom-governor/tests/decision_document.rs`, `adversary_w20261020_u3.rs`).
 
 A case opens with the value of every case input its protocol declares (`CaseInputs`;

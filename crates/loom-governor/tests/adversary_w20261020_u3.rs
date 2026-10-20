@@ -52,7 +52,10 @@ fn the_document_read_after_a_frontier_is_the_one_that_frontier_was_issued_from_u
         .expect("the case opens");
 
     let frontier = governor.frontier(&case).expect("a frontier").into_data();
-    let document = governor.decision_document(&case).expect("a document");
+    let document = governor
+        .decision_document(&case, &frontier.frontier_id)
+        .expect("a document")
+        .unwrap();
 
     assert_eq!(
         governor.current_revision(&case),
@@ -246,7 +249,10 @@ fn the_document_read_after_a_run_is_the_one_its_last_frontier_was_issued_from_un
         Ok(frontier.case_revision),
         "the case did not move during the run"
     );
-    let document = governor.decision_document(&case).expect("a document");
+    let document = governor
+        .decision_document(&case, &frontier.frontier_id)
+        .expect("a document")
+        .unwrap();
     assert_eq!(
         frontier_id(CASE, frontier.case_revision, &canonical(&document)),
         frontier.frontier_id.0.0,

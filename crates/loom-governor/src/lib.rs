@@ -127,7 +127,7 @@
 //! repository's own tree, and `b10x-canon-engineering` is pinned to tag `0.9.0` of
 //! beyond10x/engineering-protocols.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -694,19 +694,25 @@ pub struct CanonGovernor<S, T = NoEvaluationTime> {
     protocols: BTreeMap<String, Ir>,
     catalog_definitions: Option<BTreeMap<String, String>>,
     time: T,
-    /// The document of the most recent evaluation of each case, keyed by case id
+    /// The documents behind the frontiers this governor issued, keyed by case id
     /// ([`CanonGovernor::decision_document`]).
-    kept: Mutex<BTreeMap<String, KeptDecision>>,
+    kept: Mutex<BTreeMap<String, KeptDocuments>>,
 }
 
-/// Canon's rendering of the decision the governor's most recent evaluation of a case made, and the
-/// held case it was made from.
+/// How many decision documents the governor keeps for one case: the documents behind the most
+/// recent frontiers it issued for the case as currently held ([`CanonGovernor::decision_document`]).
+pub const KEPT_DOCUMENTS_PER_CASE: usize = 16;
+
+/// The documents behind the frontiers the governor issued for one case, all for the case as held
+/// when they were issued.
 #[derive(Debug)]
-struct KeptDecision {
-    /// The case as held when it was evaluated: the document is the case's while it is still held so.
+struct KeptDocuments {
+    /// The case as held when the frontiers were issued: the documents are the case's while it is
+    /// still held so.
     state: CaseState,
-    /// `render` of the decision: the bytes the frontier id hashes.
-    rendered: String,
+    /// Each frontier id issued and `render` of the decision it hashes, oldest first, at most
+    /// [`KEPT_DOCUMENTS_PER_CASE`].
+    issued: VecDeque<(String, String)>,
 }
 
 impl<S: FallibleCaseStore> CanonGovernor<S> {
@@ -1060,56 +1066,93 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             .map_err(|_| GovernorError::GovernorUnavailable)
     }
 
-    /// The `canon-decision/1` document Canon wrote for the case, its explanation included, as the
-    /// generated JSON value [`evaluate`] returns as `canon`.
+    /// The `canon-decision/1` document behind the frontier `frontier` this governor issued for the
+    /// case: the whole document Canon wrote, its explanation included, whose rendering gives that
+    /// frontier id, as the generated JSON value [`evaluate`] returns as `canon`. `None` when this
+    /// governor holds no document for that id: one it did not issue, one issued before the held
+    /// case last changed, or one it no longer keeps. A lookup never evaluates the case.
     ///
-    /// It is the document of the governor's most recent evaluation of the case, the one `frontier`
-    /// or `completion` (or an earlier call of this method) last made, which the governor keeps,
-    /// one per case, while the case is still held as that evaluation found it: a document read
-    /// right after a frontier is the one that frontier's id hashes, whatever the trusted time does
-    /// in between, and reading it makes no evaluation. When nothing is kept for the case, or the
-    /// case moved since (a new artifact revision, evidence received, a decision recorded, here or
-    /// by another governor over the same store), the case is evaluated once, as `frontier`
-    /// evaluates it, and that document is kept and returned. For the same protocol, snapshot,
-    /// evidence, explicit decisions and time it equals the document [`evaluate`] returns.
+    /// `frontier` keeps the document it decided under the id it issues, in this process's memory,
+    /// so a host holding a frontier id from Commission's loop (`LoopEnd::last_frontier`, a step's
+    /// observation) reads the document that frontier was issued from, whatever the trusted time did
+    /// since. Per case the governor keeps only documents for the case as currently held, and at
+    /// most [`KEPT_DOCUMENTS_PER_CASE`] (16) of them, the most recently issued: they are dropped as
+    /// soon as a frontier or a lookup finds the held case changed (a new artifact revision, evidence
+    /// received, a decision recorded, here or by another governor over the same store), and a
+    /// case's are dropped when a read finds the store no longer holds it. For the same protocol,
+    /// snapshot, evidence, explicit decisions and time the document equals the one [`evaluate`]
+    /// returns.
     ///
     /// # Errors
-    /// `UnknownCase` when the case is not held, and `GovernorUnavailable` when it cannot be read or
-    /// decided (its store fails, its protocol is not registered, its held inputs or independence
-    /// declarations do not satisfy the protocol, or, when it is evaluated, the trusted time fails
-    /// or Canon refuses), as `frontier` refuses it. These checks run on every call, kept document
-    /// or not.
-    pub fn decision_document(&self, case: &CaseId) -> Result<loom::json::Value, GovernorError> {
-        let (state, ir) = self.held_with_ir(case)?;
-        let rendered = match self.kept_for(&state) {
-            Some(rendered) => rendered,
-            None => {
-                let rendered = render(&self.decide_held(case, &state, &ir)?);
-                self.keep(state, rendered.clone());
-                rendered
-            }
+    /// As `frontier` refuses the case, on every lookup: `UnknownCase` when it is not held, and
+    /// `GovernorUnavailable` when its store fails, its protocol is not registered or its held inputs
+    /// or independence declarations do not satisfy the protocol.
+    pub fn decision_document(
+        &self,
+        case: &CaseId,
+        frontier: &FrontierId,
+    ) -> Result<Option<loom::json::Value>, GovernorError> {
+        let state = self.held(case)?;
+        let Some(rendered) = self.kept_document(case, &state, frontier) else {
+            return Ok(None);
         };
-        loom::json::parse(&rendered).map_err(|_| GovernorError::GovernorUnavailable)
+        loom::json::parse(&rendered)
+            .map(Some)
+            .map_err(|_| GovernorError::GovernorUnavailable)
     }
 
-    /// The rendering kept for the case `state` is, when the evaluation it came from found the case
-    /// held exactly as `state`.
-    fn kept_for(&self, state: &CaseState) -> Option<String> {
+    /// The rendering kept for `case` under `frontier`, when the case is still held as `state`, as
+    /// it was when that frontier was issued; the case's documents are dropped when it is not.
+    fn kept_document(
+        &self,
+        case: &CaseId,
+        state: &CaseState,
+        frontier: &FrontierId,
+    ) -> Option<String> {
+        let mut kept = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
+        let documents = kept.get(&case.0)?;
+        if documents.state != *state {
+            kept.remove(&case.0);
+            return None;
+        }
+        documents
+            .issued
+            .iter()
+            .find(|(id, _)| *id == frontier.0.0)
+            .map(|(_, rendered)| rendered.clone())
+    }
+
+    /// Keeps `rendered`, the decision `frontier` was just issued from for `case` held as `state`,
+    /// as the most recent of the case's documents. Documents kept for the case as it was held
+    /// before are dropped, and the oldest beyond [`KEPT_DOCUMENTS_PER_CASE`].
+    fn keep(&self, case: &CaseId, state: CaseState, frontier: String, rendered: String) {
+        let mut kept = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
+        match kept.get_mut(&case.0) {
+            Some(documents) if documents.state == state => {
+                documents.issued.retain(|(id, _)| *id != frontier);
+                documents.issued.push_back((frontier, rendered));
+                while documents.issued.len() > KEPT_DOCUMENTS_PER_CASE {
+                    documents.issued.pop_front();
+                }
+            }
+            _ => {
+                kept.insert(
+                    case.0.clone(),
+                    KeptDocuments {
+                        state,
+                        issued: VecDeque::from([(frontier, rendered)]),
+                    },
+                );
+            }
+        }
+    }
+
+    /// Drops every document kept for `case`.
+    fn forget(&self, case: &CaseId) {
         self.kept
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .get(&state.id.0)
-            .filter(|kept| kept.state == *state)
-            .map(|kept| kept.rendered.clone())
-    }
-
-    /// Keeps `rendered`, the decision just made from `state`, as the case's most recent, replacing
-    /// whatever was kept for it.
-    fn keep(&self, state: CaseState, rendered: String) {
-        self.kept
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(state.id.0.clone(), KeptDecision { state, rendered });
+            .remove(&case.0);
     }
 
     /// The held case, after checking its inputs against its protocol as at opening.
@@ -1118,13 +1161,17 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
     }
 
     /// The held case and its compiled protocol; `GovernorUnavailable` when the store fails, the
-    /// protocol is not registered or the case's inputs do not satisfy it.
+    /// protocol is not registered or the case's inputs do not satisfy it, and `UnknownCase`, its
+    /// kept documents dropped, when the store does not hold it.
     fn held_with_ir(&self, case: &CaseId) -> Result<(CaseState, Ir), GovernorError> {
         let state = self
             .store
             .get(case)
             .map_err(|_| GovernorError::GovernorUnavailable)?
-            .ok_or(GovernorError::UnknownCase)?;
+            .ok_or_else(|| {
+                self.forget(case);
+                GovernorError::UnknownCase
+            })?;
         let ir = self
             .protocol_ir(&state.protocol)
             .map_err(|_| GovernorError::GovernorUnavailable)?;
@@ -1137,19 +1184,6 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
     /// Canon's decision for the case as held now, and the compiled protocol it was made under.
     fn decided(&self, case: &CaseId) -> Result<(CaseState, Ir, Decision), GovernorError> {
         let (state, ir) = self.held_with_ir(case)?;
-        let decision = self.decide_held(case, &state, &ir)?;
-        Ok((state, ir, decision))
-    }
-
-    /// Canon's decision for `case`, held as `state`, under `ir`, its compiled protocol: one
-    /// evaluation, from the evidence that applies, at the trusted time, with the recorded
-    /// decisions.
-    fn decide_held(
-        &self,
-        case: &CaseId,
-        state: &CaseState,
-        ir: &Ir,
-    ) -> Result<Decision, GovernorError> {
         let records: Vec<EvidenceRecord> = state
             .evidence
             .iter()
@@ -1160,14 +1194,15 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             .time
             .at(case)
             .map_err(|_| GovernorError::GovernorUnavailable)?;
-        decide_case(
-            ir,
-            &snapshot(ir, state),
+        let decision = decide_case(
+            &ir,
+            &snapshot(&ir, &state),
             &records,
             at.as_deref(),
             &state.decisions,
         )
-        .map_err(|_| GovernorError::GovernorUnavailable)
+        .map_err(|_| GovernorError::GovernorUnavailable)?;
+        Ok((state, ir, decision))
     }
 }
 
@@ -1219,7 +1254,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> Governor for CanonGovernor<S, T> {
             .collect();
         let rendered = render(&decision);
         let frontier_id = FrontierId(frontier_uuid(&state, &rendered));
-        self.keep(state.clone(), rendered);
+        self.keep(case, state.clone(), frontier_id.0.0.clone(), rendered);
         Ok(Frontier::new(FrontierData {
             frontier_id,
             case_id: state.id,
@@ -1231,8 +1266,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> Governor for CanonGovernor<S, T> {
     }
 
     fn completion(&self, case: &CaseId) -> Result<CompletionDetermination, GovernorError> {
-        let (state, _, decision) = self.decided(case)?;
-        self.keep(state, render(&decision));
+        let (_, _, decision) = self.decided(case)?;
         Ok(match completed(&decision) {
             Some(outcome) => {
                 CompletionDetermination::Complete(CompletionDeterminationComplete { outcome })

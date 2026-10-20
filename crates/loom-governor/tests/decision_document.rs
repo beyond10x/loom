@@ -1,7 +1,7 @@
-//! `CanonGovernor::decision_document` returns the `canon-decision/1` document behind the frontier
-//! and the completion the governor issues for a held case: the whole document Canon wrote,
-//! explanation included, at the case's current revision, from the one evaluation those make and
-//! never a second one (story `governor-exposes-canon-decision`).
+//! `CanonGovernor::decision_document(case, frontier)` returns the `canon-decision/1` document behind
+//! a frontier the governor issued for a held case: the whole document Canon wrote, explanation
+//! included, kept under the frontier id when the frontier was issued, and never evaluated again
+//! (story `governor-exposes-canon-decision`).
 //!
 //! Two oracles hold it. The frontier id is derived from the case, its revision and Canon's
 //! rendering of the decision, so a document whose rendering gives the id of the frontier issued at
@@ -11,13 +11,13 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use b10x_loom_commission::model::json as commission_json;
 use b10x_loom_commission::model::primitives::{Timestamp as ObservedAt, Uuid};
 use b10x_loom_commission::model::responsibility::{
-    CaseId, CompletionDetermination, EvidenceData, EvidenceId, GovernorError, Observation,
-    ObservationData, ObservationId,
+    CaseId, CompletionDetermination, EvidenceData, EvidenceId, FrontierId, GovernorError,
+    Observation, ObservationData, ObservationId,
 };
 use b10x_loom_commission::ports::evidence::{ObservationPort as _, submit_evidence};
 use b10x_loom_commission::ports::governor::Governor as _;
@@ -28,7 +28,7 @@ use loom_governor::model::json;
 use loom_governor::model::primitives::Timestamp;
 use loom_governor::{
     CanonGovernor, CaseIndependence, CaseInputs, CaseState, CaseStore, EvaluationTime,
-    FallibleCaseStore, MemoryCaseStore, evaluate,
+    FallibleCaseStore, KEPT_DOCUMENTS_PER_CASE, MemoryCaseStore, evaluate,
 };
 use loom_protocols::ProtocolCatalog;
 use serde_json::{Value, json};
@@ -50,8 +50,9 @@ fn the_document_is_the_one_the_frontier_id_hashes() {
     let mut check = |governor: &CanonGovernor<MemoryCaseStore>, state: &str| {
         let frontier = governor.frontier(&case).expect("a frontier").into_data();
         let document = governor
-            .decision_document(&case)
-            .unwrap_or_else(|error| panic!("{state}: no document: {error:?}"));
+            .decision_document(&case, &frontier.frontier_id)
+            .unwrap_or_else(|error| panic!("{state}: no document: {error:?}"))
+            .unwrap_or_else(|| panic!("{state}: no document is kept for the frontier"));
         assert_eq!(
             document.member("format"),
             Some(&json::Value::Text("canon-decision/1".into())),
@@ -112,7 +113,11 @@ fn the_document_equals_what_evaluate_returns_for_the_same_snapshot() {
         .decide(&case, "declined", "explicitly_declined", "lead-reviewer")
         .expect("the decision is recorded");
 
-    let document = governor.decision_document(&case).expect("a document");
+    let frontier = governor.frontier(&case).expect("a frontier").into_data();
+    let document = governor
+        .decision_document(&case, &frontier.frontier_id)
+        .expect("a document")
+        .expect("the frontier's document is kept");
     let decided = evaluate(
         &catalog,
         &EvaluationRequest {
@@ -208,10 +213,14 @@ fn a_case_the_governor_cannot_decide_returns_no_document() {
 
     for (label, unusable) in rows {
         let store = Arc::new(MemoryCaseStore::default());
-        let governor = admitted(CanonGovernor::new(Shared(Arc::clone(&store))));
+        let governor = admitted(CanonGovernor::new(Shared::over(&store)));
         let case = open(&governor);
+        let frontier = governor.frontier(&case).expect("a frontier").into_data();
         assert!(
-            governor.decision_document(&case).is_ok(),
+            matches!(
+                governor.decision_document(&case, &frontier.frontier_id),
+                Ok(Some(_))
+            ),
             "{label}: the case as opened is decided"
         );
 
@@ -223,7 +232,7 @@ fn a_case_the_governor_cannot_decide_returns_no_document() {
             "{label}: the frontier is refused"
         );
         assert_eq!(
-            governor.decision_document(&case),
+            governor.decision_document(&case, &frontier.frontier_id),
             Err(GovernorError::GovernorUnavailable),
             "{label}: the document is refused as the frontier is"
         );
@@ -236,12 +245,13 @@ fn a_case_the_governor_cannot_decide_returns_no_document() {
         Err(GovernorError::UnknownCase)
     );
     assert_eq!(
-        governor.decision_document(&unheld),
+        governor.decision_document(&unheld, &FrontierId(uuid(0x99))),
         Err(GovernorError::UnknownCase)
     );
 }
 
-/// One call is one evaluation: the trusted time, asked once per evaluation, is asked once.
+/// A frontier is one evaluation, and the lookup of its document none: the trusted time, asked
+/// once per evaluation, is asked once for the two.
 #[test]
 fn one_call_asks_for_one_evaluation() {
     let asked = Arc::new(AtomicUsize::new(0));
@@ -254,85 +264,113 @@ fn one_call_asks_for_one_evaluation() {
     );
     let case = open(&governor);
     let before = asked.load(Ordering::SeqCst);
-    governor.decision_document(&case).expect("a document");
+    let frontier = governor.frontier(&case).expect("a frontier").into_data();
+    let issued = asked.load(Ordering::SeqCst);
+    governor
+        .decision_document(&case, &frontier.frontier_id)
+        .expect("a document")
+        .expect("the frontier's document is kept");
+    assert_eq!(
+        asked.load(Ordering::SeqCst) - issued,
+        0,
+        "a lookup evaluates nothing"
+    );
     assert_eq!(
         asked.load(Ordering::SeqCst) - before,
         1,
-        "one call evaluates the case once"
+        "the frontier and its document are one evaluation"
     );
 }
 
-/// Under a trusted time that moves at every evaluation, the document of the most recent
-/// evaluation (a frontier's, a completion's) is read without another one while the case is held as
-/// that evaluation found it; evidence received, a decision another governor recorded over the same
-/// store and a new artifact revision each make the next read evaluate the case once again.
+/// Under a trusted time that moves at every evaluation, the document kept under a frontier id is
+/// read without an evaluation while the case is held as it was when that frontier was issued, a
+/// later frontier or a completion notwithstanding; evidence received, a decision another governor
+/// recorded over the same store and a new artifact revision each leave the earlier ids with no
+/// document, and the next frontier's id finds the case as it now is.
 #[test]
 fn a_kept_document_is_read_without_an_evaluation_until_the_case_moves() {
     let asked = Arc::new(AtomicUsize::new(0));
     let clock = Arc::clone(&asked);
     let store = Arc::new(MemoryCaseStore::default());
-    let governor = admitted(CanonGovernor::new(Shared(Arc::clone(&store)))).with_evaluation_time(
+    let governor = admitted(CanonGovernor::new(Shared::over(&store))).with_evaluation_time(
         move |_: &CaseId| -> Result<Option<String>, GovernorError> {
             let second = clock.fetch_add(1, Ordering::SeqCst);
             Ok(Some(format!("2026-10-04T12:00:{second:02}Z")))
         },
     );
-    let other = admitted(CanonGovernor::new(Shared(Arc::clone(&store))));
+    let other = admitted(CanonGovernor::new(Shared::over(&store)));
     let case = open(&governor);
     let evaluations = || asked.load(Ordering::SeqCst);
+    let lookup = |frontier: &FrontierId| governor.decision_document(&case, frontier);
 
     let frontier = governor.frontier(&case).expect("a frontier").into_data();
     let before = evaluations();
-    let issued = governor.decision_document(&case).expect("a document");
+    let issued = lookup(&frontier.frontier_id)
+        .expect("a document")
+        .expect("the frontier's document is kept");
     assert_eq!(
         frontier_id(CASE, frontier.case_revision, &canonical(&issued)),
         frontier.frontier_id.0.0,
         "the document read after the frontier is the one its id hashes"
     );
     assert_eq!(
-        governor.decision_document(&case),
-        Ok(issued.clone()),
+        lookup(&frontier.frontier_id),
+        Ok(Some(issued.clone())),
         "read again, the same document"
     );
     assert_eq!(evaluations(), before, "no read evaluated the case");
 
     governor.completion(&case).expect("a completion");
-    let before = evaluations();
-    let completed = governor.decision_document(&case).expect("a document");
-    assert_eq!(
-        evaluations(),
-        before,
-        "the completion's document is read as kept"
-    );
+    let later = governor.frontier(&case).expect("a frontier").into_data();
     assert_ne!(
-        completed, issued,
-        "the completion's evaluation, at a later instant, is the most recent"
+        later.frontier_id, frontier.frontier_id,
+        "a frontier issued at a later instant has another id"
     );
+    let before = evaluations();
+    let after = lookup(&later.frontier_id)
+        .expect("a document")
+        .expect("the later frontier's document is kept");
+    assert_eq!(
+        frontier_id(CASE, later.case_revision, &canonical(&after)),
+        later.frontier_id.0.0,
+        "the later frontier's id finds its own document"
+    );
+    assert_eq!(
+        lookup(&frontier.frontier_id),
+        Ok(Some(issued.clone())),
+        "the earlier frontier's document survives a completion and a later frontier"
+    );
+    assert_eq!(evaluations(), before, "no lookup evaluated the case");
 
     submit(&governor, &case, 0, &fixture_records()[2]);
-    let before = evaluations();
-    let received = governor.decision_document(&case).expect("a document");
     assert_eq!(
-        evaluations() - before,
-        1,
-        "evidence received: evaluated once"
+        lookup(&later.frontier_id),
+        Ok(None),
+        "evidence received: no document for a frontier of the case as it was"
     );
+    let received = governor.frontier(&case).expect("a frontier").into_data();
+    let received = lookup(&received.frontier_id)
+        .expect("a document")
+        .expect("the new frontier's document is kept");
     assert!(
         compact(&received).contains(r#""tests.pass":{"value":"true"}"#),
         "the document holds the evidence received: {}",
         compact(&received)
     );
 
+    let before_decision = governor.frontier(&case).expect("a frontier").into_data();
     other
         .decide(&case, "declined", "explicitly_declined", "lead-reviewer")
         .expect("the other governor records the decision");
-    let before = evaluations();
-    let decided = governor.decision_document(&case).expect("a document");
     assert_eq!(
-        evaluations() - before,
-        1,
-        "a decision recorded: evaluated once"
+        lookup(&before_decision.frontier_id),
+        Ok(None),
+        "a decision recorded: no document for a frontier of the case as it was"
     );
+    let decided = governor.frontier(&case).expect("a frontier").into_data();
+    let decided = lookup(&decided.frontier_id)
+        .expect("a document")
+        .expect("the new frontier's document is kept");
     assert!(
         compact(&decided).contains(r#""principals":["lead-reviewer"]"#),
         "the document holds the decision the other governor recorded: {}",
@@ -344,47 +382,158 @@ fn a_kept_document_is_read_without_an_evaluation_until_the_case_moves() {
         "neither moved the case revision"
     );
 
+    let before_move = governor.frontier(&case).expect("a frontier").into_data();
     governor
         .update_revision(&case, "implementation", "R3")
         .expect("the implementation moves");
-    let before = evaluations();
-    governor.decision_document(&case).expect("a document");
     assert_eq!(
-        evaluations() - before,
-        1,
-        "an artifact moved: evaluated once"
+        lookup(&before_move.frontier_id),
+        Ok(None),
+        "an artifact moved: no document for a frontier of the case as it was"
     );
+    let moved = governor.frontier(&case).expect("a frontier").into_data();
     let before = evaluations();
-    governor.decision_document(&case).expect("a document");
+    assert!(
+        matches!(lookup(&moved.frontier_id), Ok(Some(_))),
+        "the frontier at the new revision finds its document"
+    );
     assert_eq!(evaluations(), before, "and kept again");
+}
+
+/// The governor keeps the documents of the most recent [`KEPT_DOCUMENTS_PER_CASE`] frontiers it
+/// issued for a case held unchanged: each finds its own, the one issued before them none, and an id
+/// it never issued none, all with no evaluation.
+#[test]
+fn the_documents_kept_for_a_case_are_its_most_recent_frontiers_up_to_the_bound() {
+    let asked = Arc::new(AtomicUsize::new(0));
+    let clock = Arc::clone(&asked);
+    let governor = admitted(CanonGovernor::new(MemoryCaseStore::default())).with_evaluation_time(
+        move |_: &CaseId| -> Result<Option<String>, GovernorError> {
+            let second = clock.fetch_add(1, Ordering::SeqCst);
+            Ok(Some(format!("2026-10-04T12:00:{second:02}Z")))
+        },
+    );
+    let case = open(&governor);
+    let issued: Vec<_> = (0..=KEPT_DOCUMENTS_PER_CASE)
+        .map(|_| governor.frontier(&case).expect("a frontier").into_data())
+        .collect();
+    assert_eq!(KEPT_DOCUMENTS_PER_CASE, 16, "the documented bound");
+    let mut ids: Vec<&str> = issued
+        .iter()
+        .map(|frontier| frontier.frontier_id.0.0.as_str())
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), issued.len(), "every frontier has its own id");
+
+    let before = asked.load(Ordering::SeqCst);
+    assert_eq!(
+        governor.decision_document(&case, &issued[0].frontier_id),
+        Ok(None),
+        "the frontier issued before the most recent {KEPT_DOCUMENTS_PER_CASE} has no document"
+    );
+    for frontier in &issued[1..] {
+        let document = governor
+            .decision_document(&case, &frontier.frontier_id)
+            .expect("a document")
+            .expect("one of the most recent frontiers has its document");
+        assert_eq!(
+            frontier_id(CASE, frontier.case_revision, &canonical(&document)),
+            frontier.frontier_id.0.0,
+            "each kept document is the one its frontier's id hashes"
+        );
+    }
+    assert_eq!(
+        governor.decision_document(&case, &FrontierId(uuid(0x99))),
+        Ok(None),
+        "an id the governor never issued has no document"
+    );
+    assert_eq!(
+        asked.load(Ordering::SeqCst),
+        before,
+        "no lookup evaluated the case"
+    );
+}
+
+/// When a read finds that the store no longer holds a case, the governor drops the case's
+/// documents: the case held again, exactly as before, finds no document for its earlier frontier.
+#[test]
+fn a_case_the_store_no_longer_holds_loses_its_documents() {
+    let store = Arc::new(MemoryCaseStore::default());
+    let shared = Shared::over(&store);
+    let gone = Arc::clone(&shared.gone);
+    let governor = admitted(CanonGovernor::new(shared));
+    let case = open(&governor);
+    let frontier = governor.frontier(&case).expect("a frontier").into_data();
+    assert!(
+        matches!(
+            governor.decision_document(&case, &frontier.frontier_id),
+            Ok(Some(_))
+        ),
+        "the frontier's document is kept"
+    );
+
+    gone.store(true, Ordering::SeqCst);
+    assert_eq!(
+        governor.decision_document(&case, &frontier.frontier_id),
+        Err(GovernorError::UnknownCase),
+        "a case the store does not hold is refused as the frontier refuses it"
+    );
+
+    gone.store(false, Ordering::SeqCst);
+    assert_eq!(
+        governor.current_revision(&case),
+        Ok(frontier.case_revision),
+        "the case is held again, unchanged"
+    );
+    assert_eq!(
+        governor.decision_document(&case, &frontier.frontier_id),
+        Ok(None),
+        "its documents were dropped when the store did not hold it"
+    );
 }
 
 /// A change to a held case that leaves it unusable under its protocol.
 type Unusable = fn(&mut CaseState);
 
 /// A [`CaseStore`] shared with the test, so a held case can be changed behind the governor as a
-/// durable store could hand it back.
-struct Shared(Arc<MemoryCaseStore>);
+/// durable store could hand it back, and hidden from it (`gone`) as a store that no longer holds it.
+struct Shared {
+    cases: Arc<MemoryCaseStore>,
+    gone: Arc<AtomicBool>,
+}
+
+impl Shared {
+    fn over(cases: &Arc<MemoryCaseStore>) -> Self {
+        Self {
+            cases: Arc::clone(cases),
+            gone: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
 
 impl CaseStore for Shared {
     fn insert(&self, state: CaseState) -> bool {
-        CaseStore::insert(&*self.0, state)
+        CaseStore::insert(&*self.cases, state)
     }
 
     fn get(&self, case: &CaseId) -> Option<CaseState> {
-        CaseStore::get(&*self.0, case)
+        if self.gone.load(Ordering::SeqCst) {
+            return None;
+        }
+        CaseStore::get(&*self.cases, case)
     }
 
     fn update<T>(&self, case: &CaseId, change: impl FnOnce(&mut CaseState) -> T) -> Option<T> {
-        CaseStore::update(&*self.0, case, change)
+        CaseStore::update(&*self.cases, case, change)
     }
 
     fn observe(&self, observation: ObservationData) {
-        CaseStore::observe(&*self.0, observation);
+        CaseStore::observe(&*self.cases, observation);
     }
 
     fn observations(&self) -> Vec<ObservationData> {
-        CaseStore::observations(&*self.0)
+        CaseStore::observations(&*self.cases)
     }
 }
 
