@@ -293,6 +293,19 @@ Lifecycle: states `Pending`, `Resuming`; initial `Pending`; terminal `Resuming`.
 | `bound` | when | none | none | `IdleBoundReached` |
 | `below` | otherwise | none | none | none |
 
+#### JudgePerformableActions
+
+| Input | Type |
+|---|---|
+| `performed` | `integer` |
+| `unperformed` | list of `string` |
+| `open_claims` | list of `string` |
+
+| Outcome | When | Effect | Emits | Error |
+|---|---|---|---|---|
+| `unperformable` | when | none | none | `ActionsUnperformable` |
+| `performable` | otherwise | none | none | none |
+
 #### ReleaseSuspension
 
 | Input | Type |
@@ -444,6 +457,13 @@ Lifecycle: states `Pending`, `Resuming`; initial `Pending`; terminal `Resuming`.
 |---|---|
 | `expected_case_revision` | `integer` |
 | `current_case_revision` | `integer` |
+
+#### ActionsUnperformable
+
+| Field | Type |
+|---|---|
+| `actions` | list of `string` |
+| `open_claims` | list of `string` |
 
 #### EffectRefusedFinal
 

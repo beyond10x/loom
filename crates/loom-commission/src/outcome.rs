@@ -15,6 +15,11 @@
 //! the runtime checks first, and fewer change nothing. A frontier that admits nothing is not the
 //! idle bound: [`derive`] ends that run with `RunOutcome::NoAdmissibleAction`.
 //!
+//! [`judge_performable`] decides whether a run goes on when the effect port performs none of the
+//! actions it needs (`JudgePerformableActions`, `story:unperformable-names-actions`): it ends with
+//! `RunOutcome::NoPerformableAction`, naming the actions no effect performs and the frontier's
+//! open claims, and otherwise nothing changes.
+//!
 //! [`RunStore`] holds runs for the `StartRun`, `SuspendRun` and `ResumeRun` commands through
 //! [`crate::model::behaviour::Generated`]: it implements the three obligations itself. Resume
 //! continues the same run: its id and case revision are kept, and no new run is created. The store
@@ -32,16 +37,17 @@ use crate::model::behaviour::{Generated, RunStorage};
 use crate::model::obligation::UnmetObligation;
 use crate::model::primitives::Uuid;
 use crate::model::responsibility::obligations::{
-    JudgeEffectRefusalBehavior, JudgeIdleIterationBehavior, ResumeRunBehavior, StartRunBehavior,
-    SuspendRunBehavior,
+    JudgeEffectRefusalBehavior, JudgeIdleIterationBehavior, JudgePerformableActionsBehavior,
+    ResumeRunBehavior, StartRunBehavior, SuspendRunBehavior,
 };
 use crate::model::responsibility::{
     Admission, AnyRun, AuthorityVerdict, CompletionDetermination, ExecutorOutcome, Frontier,
     JudgeEffectRefusal, JudgeEffectRefusalOutcome, JudgeIdleIteration, JudgeIdleIterationOutcome,
-    ResumeRun, ResumeRunOutcome, Run, RunData, RunId, RunOutcome, RunOutcomeCompleted,
-    RunOutcomeNeedsAuthority, RunOutcomeNeedsExternalEvidence, RunOutcomeNeedsHumanJudgment,
-    RunOutcomeSuspended, RunResumed, RunSnapshot, RunStarted, RunStateConflict, RunSuspended,
-    StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome, Unit, frontier_state,
+    JudgePerformableActions, JudgePerformableActionsOutcome, ResumeRun, ResumeRunOutcome, Run,
+    RunData, RunId, RunOutcome, RunOutcomeCompleted, RunOutcomeNeedsAuthority,
+    RunOutcomeNeedsExternalEvidence, RunOutcomeNeedsHumanJudgment, RunOutcomeSuspended, RunResumed,
+    RunSnapshot, RunStarted, RunStateConflict, RunSuspended, StartRun, StartRunOutcome, SuspendRun,
+    SuspendRunOutcome, Unit, frontier_state,
 };
 
 /// What [`derive`] decides for a run.
@@ -163,6 +169,24 @@ pub fn judge_refusal(
 /// `below` answers every count `bound` does not, so it never answers it.
 pub fn judge_idle(input: JudgeIdleIteration) -> Result<JudgeIdleIterationOutcome, UnmetObligation> {
     Generated::new(()).judge_idle_iteration(input)
+}
+
+/// Whether a run goes on when the effect port performs none of the actions it needs
+/// (`JudgePerformableActions`), as the behaviour ESS generates from the specification decides it:
+/// `Unperformable`, naming `input.unperformed` and `input.open_claims`, when `input.performed` is
+/// zero and at least one action is unperformed, and the run ends with
+/// `RunOutcome::NoPerformableAction` carrying both; `Performable` otherwise, which changes nothing,
+/// so a frontier that lists no action goes on. The runtime ([`crate::runtime`]) and the
+/// conformance target both decide through it.
+///
+/// # Errors
+///
+/// The generated behaviour's typed refusal of an input the specification declares no outcome for.
+/// `performable` answers every input `unperformable` does not, so it never answers it.
+pub fn judge_performable(
+    input: JudgePerformableActions,
+) -> Result<JudgePerformableActionsOutcome, UnmetObligation> {
+    Generated::new(()).judge_performable_actions(input)
 }
 
 /// Rule 6 of [`derive`]: what the frontier alone decides.

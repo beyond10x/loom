@@ -20,6 +20,9 @@
 //!   runtime makes of every refusal an effect port answers;
 //! * `JudgeIdleIteration` by `b10x_loom_commission::outcome::judge_idle`, the judgement the
 //!   runtime makes of every iteration of a run with no step budget that made no progress;
+//! * `JudgePerformableActions` by `b10x_loom_commission::outcome::judge_performable`, the
+//!   judgement the runtime makes of a frontier before the executor runs and of an admitted
+//!   request, when the effect port performs none of the actions the run needs;
 //! * the views `RunStates` and `SuspensionStates` by the generated queries over the same stores.
 //!
 //! This crate translates values and records what was published. It decides no outcome: each
@@ -45,13 +48,14 @@ use b10x_loom_commission::model::responsibility::obligations::{
 use b10x_loom_commission::model::responsibility::{
     ActionRequest, ActionRequestData, ActionRequestId, CaseId, CommissionId, HoldSuspension,
     HoldSuspensionOutcome, JudgeEffectRefusal, JudgeEffectRefusalOutcome, JudgeIdleIteration,
-    JudgeIdleIterationOutcome, ProposedActionArguments, ReleaseSuspension,
-    ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome, RevalidateActionRequestOutcome, RunId,
-    RunStateConflict, RunStorageFailed, StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome,
-    SuspensionRequestMismatch, SuspensionSettled, SuspensionStateConflict, SuspensionStorageFailed,
-    TakeSuspension, TakeSuspensionOutcome,
+    JudgeIdleIterationOutcome, JudgePerformableActions, JudgePerformableActionsOutcome,
+    ProposedActionArguments, ReleaseSuspension, ReleaseSuspensionOutcome, ResumeRun,
+    ResumeRunOutcome, RevalidateActionRequestOutcome, RunId, RunStateConflict, RunStorageFailed,
+    StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionRequestMismatch,
+    SuspensionSettled, SuspensionStateConflict, SuspensionStorageFailed, TakeSuspension,
+    TakeSuspensionOutcome,
 };
-use b10x_loom_commission::outcome::{RunStore, judge_idle, judge_refusal};
+use b10x_loom_commission::outcome::{RunStore, judge_idle, judge_performable, judge_refusal};
 use ess_conformance::scenario::{CommandRef, ErrorRef, EventRef, OutcomeRef};
 use ess_conformance::target::{
     ConformanceTarget, DeclaredErrorValue, EventObservationRequest, ExternalOutcomeControl,
@@ -79,6 +83,8 @@ const JUDGE_REFUSAL: &str = "commission.responsibility.JudgeEffectRefusal";
 const EFFECT_REFUSED_FINAL: &str = "commission.responsibility.EffectRefusedFinal";
 const JUDGE_IDLE: &str = "commission.responsibility.JudgeIdleIteration";
 const IDLE_BOUND_REACHED: &str = "commission.responsibility.IdleBoundReached";
+const JUDGE_PERFORMABLE: &str = "commission.responsibility.JudgePerformableActions";
+const ACTIONS_UNPERFORMABLE: &str = "commission.responsibility.ActionsUnperformable";
 const RUN_STARTED: &str = "commission.responsibility.RunStarted";
 const RUN_SUSPENDED: &str = "commission.responsibility.RunSuspended";
 const RUN_RESUMED: &str = "commission.responsibility.RunResumed";
@@ -205,6 +211,7 @@ impl ConformanceTarget for CommissionTarget {
             REVALIDATE => revalidate_request(&mut live, input)?,
             JUDGE_REFUSAL => judge_effect_refusal(input)?,
             JUDGE_IDLE => judge_idle_iteration(input)?,
+            JUDGE_PERFORMABLE => judge_performable_actions(input)?,
             other => {
                 return Err(TargetError::unavailable(
                     format!("invoking `{other}`"),
@@ -753,6 +760,40 @@ fn judge_idle_iteration(input: &Input) -> Result<Option<SemanticCommandResult>, 
                     .with("idle_iterations", codec::number(reached.idle_iterations)),
             ),
         JudgeIdleIterationOutcome::Below => took(JUDGE_IDLE, "below"),
+    }))
+}
+
+/// `JudgePerformableActions`: the actions the input counts and lists, judged as the runtime judges
+/// a frontier before the executor runs and an admitted request whose action the effect port may
+/// not perform. It reads and writes no store, so every view stays as it was.
+fn judge_performable_actions(input: &Input) -> Result<Option<SemanticCommandResult>, TargetError> {
+    let (Some(performed), Some(unperformed), Some(open_claims)) = (
+        codec::integer(input, "performed"),
+        codec::text_list(input, "unperformed"),
+        codec::text_list(input, "open_claims"),
+    ) else {
+        return Ok(None);
+    };
+    let outcome = judge_performable(JudgePerformableActions {
+        performed,
+        unperformed,
+        open_claims,
+    })
+    .map_err(|unmet| {
+        TargetError::unavailable(
+            format!("judging through `{JUDGE_PERFORMABLE}`"),
+            format!("{} is owed: {}", unmet.capability, unmet.source),
+        )
+    })?;
+    Ok(Some(match outcome {
+        JudgePerformableActionsOutcome::Unperformable { error: named } => {
+            took(JUDGE_PERFORMABLE, "unperformable").with_error(
+                error(ACTIONS_UNPERFORMABLE)
+                    .with("actions", codec::texts(&named.actions))
+                    .with("open_claims", codec::texts(&named.open_claims)),
+            )
+        }
+        JudgePerformableActionsOutcome::Performable => took(JUDGE_PERFORMABLE, "performable"),
     }))
 }
 

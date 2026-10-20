@@ -904,6 +904,7 @@ fn confinement_refused(prepared: &PreparedIntent, reason: &str) -> Ending {
         steps: 0,
         stop_reason: StopReason::ConfinementUnavailable,
         approvals: Vec::new(),
+        unperformed: Vec::new(),
         gate: ApprovalGate::Approvable,
     })
 }
@@ -929,6 +930,7 @@ fn bindings_refused(protocol: &str) -> Ending {
         steps: 0,
         stop_reason: StopReason::ConfinementUnavailable,
         approvals: Vec::new(),
+        unperformed: Vec::new(),
         gate: ApprovalGate::Approvable,
     })
 }

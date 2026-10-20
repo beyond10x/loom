@@ -767,6 +767,7 @@ mod tests {
             steps: 3,
             stop_reason: StopReason::ApprovalRequired,
             approvals: vec!["repository.merge".to_owned()],
+            unperformed: Vec::new(),
             gate,
         };
         assert_eq!(run_exit_status(&run(ApprovalGate::Approvable)), 0);

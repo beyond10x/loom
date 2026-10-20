@@ -1,6 +1,6 @@
 // generated from intake v1
-// model digest 9a78674226df1f0b3a560f6466640d34e4a20f9119e94bacebf92038386e1008
-// contract digest ca82ce105dc72f6a20d493e23751dedc843123e85fab295e340813c472b7828e
+// model digest 04c180bd51b47a13b3848f21e849c765b36b48b6b4ca1bf5684b50f2f134945c
+// contract digest 908a52d11757a390dac329e10b9835c22ddbb918efa0885066a58a1ac7ce5cc1
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Routing — `intake.routing`.

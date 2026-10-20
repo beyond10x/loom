@@ -39,6 +39,17 @@ pub fn integer(input: &Input, name: &str) -> Option<i64> {
     }
 }
 
+/// The `List<String>` field `name`; `None` when it is no list or holds anything but text.
+pub fn text_list(input: &Input, name: &str) -> Option<Vec<String>> {
+    match input.get(name)? {
+        Node::Seq(items) => items
+            .iter()
+            .map(|item| item.as_text().map(ToOwned::to_owned))
+            .collect(),
+        _ => None,
+    }
+}
+
 /// The `Boolean` field `name`.
 pub fn boolean(input: &Input, name: &str) -> Option<bool> {
     match input.get(name)? {

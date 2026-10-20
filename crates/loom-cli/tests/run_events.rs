@@ -25,7 +25,7 @@ use b10x_loom_intake_slice::executor::{TestCommand, UnconfinedRunner};
 use b10x_loom_intake_slice::intent::{
     IntentRequest, Preparation, prepare_intent, run_intent_with_options, run_prepared_intent,
 };
-use b10x_loom_intake_slice::run::{RunOptions, StopReason};
+use b10x_loom_intake_slice::run::{RunOptions, SliceRequest, StopReason, run_with_options};
 use clap::Parser;
 use llm_core::{
     BoxFuture, CallId, Cancel, Capabilities, Error, Id, Item, Model, Protocol, Provenance,
@@ -224,9 +224,124 @@ frontier: implementation.edit (admissible), repository.inspect (admissible), rep
 stopped: ApprovalRequired (repository.merge)
 ";
 
+/// The actions `incident-response@1` declares, in its order (engineering-protocols 0.9.0,
+/// `protocols/incident-response/1.yaml`). The slice has a local executor for none of them.
+const INCIDENT_ACTIONS: [&str; 6] = [
+    "metrics.inspect",
+    "logs.search",
+    "release.inspect",
+    "traffic.shift",
+    "release.rollback",
+    "emergency.leave",
+];
+
+/// The terminal record of a `NoLocalExecutor` stop carries the actions no local executor performs
+/// as `unperformed_actions` (`story:unperformable-names-actions`), each once; the field is absent
+/// from the terminal record of every other stop.
+///
+/// - The binary's route (`prepare_intent` over the host catalog) stops a pick of
+///   `incident-response@1` before a case opens, since the slice executes only `software.change/1`
+///   and the clock contract: the record names every action the protocol declares, in its order.
+/// - A run through the library's slice entry point (`run::run_with_options`) opens the case, reads
+///   one frontier and ends `NoPerformableAction`: the record names every action that frontier
+///   lists, in frontier order, the ones the `frontier:` line it prints names. The agent is never
+///   asked.
+#[test]
+fn a_no_local_executor_stop_names_its_actions() {
+    let classification = || {
+        vec![(
+            "pick_protocol",
+            json!({"protocol": "incident-response@1", "confidence": 0.9, "reasons": ["an outage"]}),
+        )]
+    };
+    let (lines, status, _) = drive_jsonl_with(classification(), Vec::new(), 10);
+    let last = lines.last().expect("a terminal record");
+    assert_eq!(last["kind"], "Terminal", "{lines:#?}");
+    assert_eq!(last["stop_reason"], "NoLocalExecutor", "{last}");
+    assert_eq!(status, exit_status(StopReason::NoLocalExecutor));
+    assert_eq!(last["protocol"], "incident-response@1", "{last}");
+    assert_eq!(
+        last["unperformed_actions"],
+        json!(INCIDENT_ACTIONS),
+        "every action of the protocol, in its order: {last}"
+    );
+
+    let fixture = Fixture::new();
+    let buffer = Buffer::default();
+    let stream = EventStream::new(buffer.clone());
+    let governor = CanonGovernor::new(MemoryCaseStore::default());
+    let classifier = Recorded::new(classification());
+    let agent = Recorded::new(Vec::new());
+    let request = SliceRequest {
+        runner: Arc::new(UnconfinedRunner),
+        intent: INTENT.to_owned(),
+        workspace: fixture.workspace.clone(),
+        test: TestCommand::new("grep", ["-qx", "fixed", "check.txt"]),
+        max_steps: 10,
+        threshold: 0.5,
+        inputs: b10x_loom_intake_slice::case::RUN_DEFAULTS,
+        test_paths: b10x_loom_intake_slice::test_paths::TestPaths::default(),
+    };
+    let mut human = Vec::new();
+    let run = run_with_options(
+        &request,
+        &governor,
+        &governor,
+        &classifier,
+        &agent,
+        &mut human,
+        &RunOptions::default(),
+    )
+    .unwrap();
+    let human = String::from_utf8(human).unwrap();
+    assert_eq!(run.stop_reason, StopReason::NoLocalExecutor, "{human}");
+    stream.finish(Ok(&run)).unwrap();
+    let text = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+    let last: Value =
+        serde_json::from_str(text.lines().last().expect("a terminal record")).unwrap();
+    let listed: Vec<String> = human
+        .lines()
+        .rev()
+        .find_map(|line| line.strip_prefix("frontier: "))
+        .unwrap_or_else(|| panic!("no frontier line: {human}"))
+        .split(", ")
+        .map(|entry| entry.split(" (").next().unwrap_or(entry).to_owned())
+        .collect();
+    let mut sorted = listed.clone();
+    sorted.sort_unstable();
+    let mut declared = INCIDENT_ACTIONS.map(str::to_owned).to_vec();
+    declared.sort_unstable();
+    assert_eq!(
+        sorted, declared,
+        "the frontier lists each action once: {human}"
+    );
+    assert_eq!(
+        last["unperformed_actions"],
+        json!(listed),
+        "every action of the frontier it stopped on, in frontier order: {last}"
+    );
+
+    let (lines, _) = drive_jsonl(action("tests.run", json!({})), 1);
+    let last = lines.last().expect("a terminal record");
+    assert_eq!(last["stop_reason"], "StepBudget", "{last}");
+    assert!(last.get("unperformed_actions").is_none(), "{last}");
+}
+
 /// Runs `script` the way `b10x-loom run --output jsonl` does; returns the parsed lines and the
 /// exit status `main` would return.
 fn drive_jsonl(script: Vec<(&'static str, Value)>, max_steps: usize) -> (Vec<Value>, u8) {
+    let (lines, status, _) = drive_jsonl_with(classify(), script, max_steps);
+    (lines, status)
+}
+
+/// Runs `script` after the classification `classification` the way `b10x-loom run --output
+/// jsonl` does; returns the parsed lines, the exit status `main` would return and the human lines
+/// the run printed, which `--output jsonl` does not write.
+fn drive_jsonl_with(
+    classification: Vec<(&'static str, Value)>,
+    script: Vec<(&'static str, Value)>,
+    max_steps: usize,
+) -> (Vec<Value>, u8, String) {
     let fixture = Fixture::new();
     let buffer = Buffer::default();
     let stream = EventStream::new(buffer.clone());
@@ -234,14 +349,14 @@ fn drive_jsonl(script: Vec<(&'static str, Value)>, max_steps: usize) -> (Vec<Val
     let governor = CanonGovernor::new(MemoryCaseStore::default())
         .with_catalog(&catalog)
         .unwrap();
-    let classifier = Recorded::new(classify());
+    let classifier = Recorded::new(classification);
     let agent = Recorded::new(script);
     let classifier_seen = stream.observe(&classifier);
     let agent_seen = stream.observe(&agent);
     let options = RunOptions::default();
     let metrics = ContextMetrics::new(ContextPolicy::Legacy);
     let request = request(&fixture, max_steps);
-    let mut human = std::io::sink();
+    let mut human = Vec::new();
     let ended = match prepare_intent(
         &request,
         &catalog,
@@ -281,7 +396,7 @@ fn drive_jsonl(script: Vec<(&'static str, Value)>, max_steps: usize) -> (Vec<Val
         .lines()
         .map(|line| serde_json::from_str(line).unwrap_or_else(|e| panic!("{e}: {line}")))
         .collect();
-    (lines, status)
+    (lines, status, String::from_utf8(human).unwrap())
 }
 
 fn request(fixture: &Fixture, max_steps: usize) -> IntentRequest {

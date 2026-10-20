@@ -60,8 +60,8 @@ use b10x_loom_commission::model::responsibility::{
     FrontierObligation, ObservationId, PrincipalId, ProposedActionArguments,
     RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeAwaitingApproval,
     RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeIdleBound, RunOutcomeNeedsAuthority,
-    RunOutcomeNeedsExternalEvidence, RunOutcomeSuspended, RunState, SuspensionReason, Unit,
-    commission_state, frontier_state,
+    RunOutcomeNeedsExternalEvidence, RunOutcomeNoPerformableAction, RunOutcomeSuspended, RunState,
+    SuspensionReason, Unit, commission_state, frontier_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -986,7 +986,10 @@ fn a_frontier_with_nothing_performable_never_runs_the_executor() {
     );
     assert_eq!(
         end.outcome,
-        RunOutcome::NoPerformableAction(Unit(true)),
+        RunOutcome::NoPerformableAction(RunOutcomeNoPerformableAction {
+            actions: vec!["triage".to_owned(), "escalate".to_owned()],
+            open_claims: Vec::new(),
+        }),
         "{name}: outcome"
     );
 
@@ -1017,7 +1020,11 @@ fn a_frontier_with_nothing_performable_never_runs_the_executor() {
     // `triage` is never offered (`story:effect-invocation`): the frontier the executor is handed
     // admits nothing, so the outcome derived from it ends the run after the one call.
     assert_eq!(executor.calls().len(), 1, "{name}: the executor ran");
-    assert_ne!(end.outcome, RunOutcome::NoPerformableAction(Unit(true)));
+    assert!(
+        !matches!(end.outcome, RunOutcome::NoPerformableAction(_)),
+        "{name}: {:?}",
+        end.outcome
+    );
     assert_eq!(
         end.outcome,
         RunOutcome::NoAdmissibleAction(Unit(true)),
@@ -1551,7 +1558,13 @@ fn an_admitted_action_the_port_does_not_perform_ends_no_performable_action() {
     assert!(end.admitted.is_empty(), "{:?}", end.admitted);
     assert!(end.effects.is_empty());
     assert_eq!(end.steps, 0);
-    assert_eq!(end.outcome, RunOutcome::NoPerformableAction(Unit(true)));
+    assert_eq!(
+        end.outcome,
+        RunOutcome::NoPerformableAction(RunOutcomeNoPerformableAction {
+            actions: vec!["deploy".to_owned()],
+            open_claims: Vec::new(),
+        })
+    );
 }
 
 /// An executor proposing `edit` with new arguments on every call: each admission is progress.

@@ -106,6 +106,13 @@ types:
 
   # The one last record: why the run stopped and the exit status the process returns. A run that
   # failed has no stop reason, exit status 1 and the failure's message.
+  # story:unperformable-names-actions adds `unperformed_actions`: on a `NoLocalExecutor` stop, the
+  # actions no local executor performs, each once. A stop before any case opens (the picked
+  # protocol is outside what the run executes, or under action bindings an action has no command)
+  # names every such action the protocol declares, in the protocol's order; this is the stop the
+  # binary makes. A stop after the case opened, which the runtime ended `NoPerformableAction`,
+  # names the actions of the frontier it stopped on, in frontier order. Absent on every other stop
+  # and on a run that failed. A new optional field, so the stream stays at schema version 1.
   - name: intake.events.TerminalEvent
     kind: struct
     fields:
@@ -119,3 +126,5 @@ types:
         type: Optional<Integer>
       - name: error
         type: Optional<String>
+      - name: unperformed_actions
+        type: Optional<List<String>>

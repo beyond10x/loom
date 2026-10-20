@@ -1,14 +1,14 @@
 <!--
   generated from commission v1
-  model digest e9437a6cbbf5f15c726617ea201063d6ccd75146e1c90c4840f04720a2ca6fb5
-  contract digest 02850b7968172d53983b13b09f1ed99fa07041b914715b721bc0cfbabe8649bf
+  model digest 22e4f2a529e6c0fca03f4ec58015ca8a05779db65158e508c18edf8c6030121e
+  contract digest 170b2b60f0518f937b6647a9e0d22ca806145af5cce1b938696720af5ba78996
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — commission v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-133 capabilities: **126 generated**, **7 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+137 capabilities: **130 generated**, **7 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -87,6 +87,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `commission.responsibility.RunOutcomeNeedsAuthority` |
 | domain type | `commission.responsibility.RunOutcomeNeedsExternalEvidence` |
 | domain type | `commission.responsibility.RunOutcomeNeedsHumanJudgment` |
+| domain type | `commission.responsibility.RunOutcomeNoPerformableAction` |
 | domain type | `commission.responsibility.RunOutcomeSuspended` |
 | domain type | `commission.responsibility.Suspension.State` |
 | domain type | `commission.responsibility.SuspensionKey` |
@@ -111,6 +112,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command behaviour | `commission.responsibility.JudgeEffectRefusal` |
 | command contract | `commission.responsibility.JudgeIdleIteration` |
 | command behaviour | `commission.responsibility.JudgeIdleIteration` |
+| command contract | `commission.responsibility.JudgePerformableActions` |
+| command behaviour | `commission.responsibility.JudgePerformableActions` |
 | command contract | `commission.responsibility.ReleaseSuspension` |
 | command contract | `commission.responsibility.ResumeRun` |
 | command contract | `commission.responsibility.RevalidateActionRequest` |
@@ -126,6 +129,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | error type | `commission.responsibility.ActionNeedsAuthority` |
 | error type | `commission.responsibility.ActionNotAdmitted` |
 | error type | `commission.responsibility.ActionRequestStale` |
+| error type | `commission.responsibility.ActionsUnperformable` |
 | error type | `commission.responsibility.EffectRefusedFinal` |
 | error type | `commission.responsibility.IdleBoundReached` |
 | error type | `commission.responsibility.RunStateConflict` |

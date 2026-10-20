@@ -30,8 +30,8 @@ use b10x_loom_commission::model::responsibility::{
     ExecutorOutcome, ExecutorOutcomeProposedAction, Frontier, FrontierAction, FrontierData,
     ObservationData, ObservationId, PrincipalId, ProposedActionArguments,
     RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeAwaitingApproval,
-    RunOutcomeCompleted, RunOutcomeIdleBound, RunOutcomeNeedsAuthority, Unit, commission_state,
-    frontier_state,
+    RunOutcomeCompleted, RunOutcomeIdleBound, RunOutcomeNeedsAuthority,
+    RunOutcomeNoPerformableAction, Unit, commission_state, frontier_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
@@ -541,8 +541,8 @@ fn unbound_ungated_action_is_never_handed_to_the_executor() {
     );
 }
 
-/// 3. A frontier whose only action is unbound and ungated ends `NoPerformableAction`, and nothing
-///    is invoked.
+/// 3. A frontier whose only action is unbound and ungated ends `NoPerformableAction`, naming it
+///    (`story:unperformable-names-actions`), and nothing is invoked.
 fn frontier_of_only_an_unbound_ungated_action_ends_no_performable_action() {
     let name = "3: only unbound, ungated";
     let case = CaseId("case-unbound".to_owned());
@@ -562,7 +562,10 @@ fn frontier_of_only_an_unbound_ungated_action_ends_no_performable_action() {
     assert!(end.requests.is_empty(), "{name}");
     assert_eq!(
         end.outcome,
-        RunOutcome::NoPerformableAction(Unit(true)),
+        RunOutcome::NoPerformableAction(RunOutcomeNoPerformableAction {
+            actions: vec![SEARCH.to_owned()],
+            open_claims: Vec::new(),
+        }),
         "{name}: outcome"
     );
 }
@@ -738,7 +741,8 @@ fn refused_requests_invoke_nothing() {
 
 /// 6. An unbound action behind an authority gate stays in the frontier the executor receives; the
 ///    run stops at the gate (`NeedsAuthority` on a proposal, `AwaitingApproval` on an unchanged
-///    frontier), and once approved its invocation ends `NoPerformableAction` with nothing invoked.
+///    frontier), and once approved its invocation ends `NoPerformableAction`, naming it, with
+///    nothing invoked.
 fn unbound_gated_action_stays_visible_and_is_never_invoked() {
     let gate = || listing(4, vec![admissible(INSPECT), gated(MERGE)]);
 
@@ -807,7 +811,10 @@ fn unbound_gated_action_stays_visible_and_is_never_invoked() {
     assert!(end.effects.is_empty(), "{name}");
     assert_eq!(
         end.outcome,
-        RunOutcome::NoPerformableAction(Unit(true)),
+        RunOutcome::NoPerformableAction(RunOutcomeNoPerformableAction {
+            actions: vec![MERGE.to_owned()],
+            open_claims: Vec::new(),
+        }),
         "{name}: outcome"
     );
 }

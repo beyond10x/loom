@@ -27,7 +27,7 @@ use b10x_loom_commission::model::responsibility::{
     ExecutorOutcomeCaseMoved, ExecutorOutcomeProposedAction, FrontierAction, FrontierObligation,
     ObservationId, PrincipalId, ProposedActionArguments, RevalidateActionRequestOutcome, RunId,
     RunOutcome, RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeNeedsExternalEvidence,
-    RunOutcomeSuspended, SuspensionReason, Unit, commission_state,
+    RunOutcomeNoPerformableAction, RunOutcomeSuspended, SuspensionReason, Unit, commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -413,7 +413,8 @@ fn a_stale_proposal_whose_handed_current_frontier_admits_nothing_ends_with_no_ad
 }
 
 /// The current frontier lists actions, none of which the effect port performs: the run ends as the
-/// loop ends on such a frontier, with no performable action.
+/// loop ends on such a frontier, with no performable action, naming the actions of that frontier
+/// (`story:unperformable-names-actions`); it lists no claim, so none is open.
 #[test]
 fn a_moved_case_whose_current_frontier_lists_nothing_performable_ends_with_no_performable_action() {
     let governor = moved_to(at(
@@ -425,7 +426,10 @@ fn a_moved_case_whose_current_frontier_lists_nothing_performable_ends_with_no_pe
 
     assert_eq!(
         end.outcome,
-        RunOutcome::NoPerformableAction(Unit(true)),
+        RunOutcome::NoPerformableAction(RunOutcomeNoPerformableAction {
+            actions: vec![PUBLISH.to_owned()],
+            open_claims: Vec::new(),
+        }),
         "{end:#?}"
     );
     assert_eq!(governor.calls(), [load(), load()].concat());
