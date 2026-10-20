@@ -246,6 +246,7 @@ fn perform<I: ConnectorInvoker + ?Sized>(
     let Some(binding) = bindings.get(action) else {
         return Ok(EffectOutcome::Refused(EffectOutcomeRefused {
             reason: format!("`{action}` has no binding"),
+            ends_run: false,
         }));
     };
     match invoker.invoke(binding, request)? {

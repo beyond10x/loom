@@ -914,6 +914,9 @@ fn finish(
         RunOutcome::NeedsHumanJudgment(needs) => Err(SliceError::Unexpected(format!(
             "NeedsHumanJudgment {needs:?}"
         ))),
+        RunOutcome::EffectRefused(refused) => {
+            Err(SliceError::Unexpected(format!("EffectRefused {refused:?}")))
+        }
     }
 }
 

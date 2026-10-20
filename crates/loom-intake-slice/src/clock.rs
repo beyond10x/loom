@@ -244,6 +244,7 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> ClockEffects<'a, 'o, S, T>
                 .write(|out| refuse(out, &self.briefing, &request.action, reason))?;
             return Ok(EffectOutcome::Refused(EffectOutcomeRefused {
                 reason: reason.into(),
+                ends_run: false,
             }));
         }
         let report = self.read()?;

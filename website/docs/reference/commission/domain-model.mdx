@@ -269,6 +269,19 @@ Lifecycle: states `Pending`, `Resuming`; initial `Pending`; terminal `Resuming`.
 | `already-held` | existing instance | none | none | `SuspensionAlreadyHeld` |
 | `storage-failed` | external | none | none | `SuspensionStorageFailed` |
 
+#### JudgeEffectRefusal
+
+| Input | Type |
+|---|---|
+| `action_request_id` | [`ActionRequestId`](./types.mdx#actionrequestid) |
+| `reason` | `string` |
+| `ends_run` | `boolean` |
+
+| Outcome | When | Effect | Emits | Error |
+|---|---|---|---|---|
+| `final` | when | none | none | `EffectRefusedFinal` |
+| `ordinary` | otherwise | none | none | none |
+
 #### ReleaseSuspension
 
 | Input | Type |
@@ -420,6 +433,13 @@ Lifecycle: states `Pending`, `Resuming`; initial `Pending`; terminal `Resuming`.
 |---|---|
 | `expected_case_revision` | `integer` |
 | `current_case_revision` | `integer` |
+
+#### EffectRefusedFinal
+
+| Field | Type |
+|---|---|
+| `action_request_id` | [`ActionRequestId`](./types.mdx#actionrequestid) |
+| `reason` | `string` |
 
 #### RunStateConflict
 

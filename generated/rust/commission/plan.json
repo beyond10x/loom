@@ -2,8 +2,8 @@
   "provenance": {
     "system": "commission",
     "specification_version": "v1",
-    "source_digest": "f53571e132b2f71840edfe761bc401e64fb69f09c02e5231f9f99c89c76020a5",
-    "contract_digest": "d8e6b1ede68b8946fc3b58215b93b34033de96d39a3f84cf8669f4b6e8966278"
+    "source_digest": "fbc987193ce2337d53be5610bdd3340aff0f3e68872a482a1d5a8855cf1111a0",
+    "contract_digest": "e679ebf85e98d2d040d787f1e5a953f9df198141e1508772547f007aec6e08a1"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -488,6 +488,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "commission.responsibility.RunOutcomeEffectRefused",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "commission.responsibility.RunOutcomeNeedsAuthority",
       "disposition": {
         "disposition": "generated"
@@ -657,6 +664,20 @@
           "construct": "the fields of error `commission.responsibility.SuspensionSettled`, which the specification gives no source, in `settled`"
         },
         "contract": "given `commission.responsibility.HoldSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `settled` externally decided (the host already settled the request the Suspension would hold), error `commission.responsibility.SuspensionSettled`; `held` otherwise, creates `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionHeld`; `already-held` for an identity a record already carries, error `commission.responsibility.SuspensionAlreadyHeld`; `storage-failed` externally decided (the suspension port cannot hold the Suspension), error `commission.responsibility.SuspensionStorageFailed`"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "commission.responsibility.JudgeEffectRefusal",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "commission.responsibility.JudgeEffectRefusal",
+      "disposition": {
+        "disposition": "generated"
       }
     },
     {
@@ -832,6 +853,13 @@
     {
       "kind": "error_type",
       "source": "commission.responsibility.ActionRequestStale",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "commission.responsibility.EffectRefusedFinal",
       "disposition": {
         "disposition": "generated"
       }

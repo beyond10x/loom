@@ -231,6 +231,7 @@ impl EffectPort for CaseEffects<'_> {
             refuse.remove(at);
             return Ok(EffectOutcome::Refused(EffectOutcomeRefused {
                 reason: format!("{action} refused once by the test"),
+                ends_run: false,
             }));
         }
         self.case.perform(action);

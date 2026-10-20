@@ -191,6 +191,7 @@ impl EffectPort for Desk<'_> {
             MutationClassification::Refused | MutationClassification::NotAttempted => {
                 Ok(EffectOutcome::Refused(EffectOutcomeRefused {
                     reason: "connectors changed nothing".to_owned(),
+                    ends_run: false,
                 }))
             }
             MutationClassification::Unknown => {

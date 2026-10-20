@@ -262,6 +262,7 @@ fn an_allowed_but_refused_step_reads_the_gate() {
     let executor = ScriptedExecutor::new([proposal("read")]);
     let effects = Effects::answering(vec![EffectOutcome::Refused(EffectOutcomeRefused {
         reason: "no such source".to_owned(),
+        ends_run: false,
     })]);
     let authority = StaticAuthorityProvider::new().answer("datasource.read", allow());
     let end = run(&governor, &executor, &authority, &effects, &case, Some(10));

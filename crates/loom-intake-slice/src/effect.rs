@@ -235,6 +235,7 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> LocalEffects<'a, 'o, S, T>
             .write(|out| refuse(out, &self.briefing, action, reason))?;
         Ok(EffectOutcome::Refused(EffectOutcomeRefused {
             reason: reason.to_owned(),
+            ends_run: false,
         }))
     }
 }

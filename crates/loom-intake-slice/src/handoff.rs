@@ -303,7 +303,10 @@ impl<'a, 'o> HandoffEffects<'a, 'o> {
             self.console.write(|out| {
                 crate::effect::refuse(out, &self.briefing, &proposal.action, &reason)
             })?;
-            return Ok(EffectOutcome::Refused(EffectOutcomeRefused { reason }));
+            return Ok(EffectOutcome::Refused(EffectOutcomeRefused {
+                reason,
+                ends_run: false,
+            }));
         }
         let input = RecordMergeHandoff {
             action_request_id: ActionRequestId(Uuid(request.action_request_id.0.0.clone())),
@@ -343,7 +346,10 @@ impl<'a, 'o> HandoffEffects<'a, 'o> {
                 self.console.write(|out| {
                     crate::effect::refuse(out, &self.briefing, &proposal.action, &reason)
                 })?;
-                Ok(EffectOutcome::Refused(EffectOutcomeRefused { reason }))
+                Ok(EffectOutcome::Refused(EffectOutcomeRefused {
+                    reason,
+                    ends_run: false,
+                }))
             }
             RecordMergeHandoffOutcome::HeadAlreadyHandedOff { error } => {
                 let reason = format!(
@@ -353,7 +359,10 @@ impl<'a, 'o> HandoffEffects<'a, 'o> {
                 self.console.write(|out| {
                     crate::effect::refuse(out, &self.briefing, &proposal.action, &reason)
                 })?;
-                Ok(EffectOutcome::Refused(EffectOutcomeRefused { reason }))
+                Ok(EffectOutcome::Refused(EffectOutcomeRefused {
+                    reason,
+                    ends_run: false,
+                }))
             }
             RecordMergeHandoffOutcome::StorageFailed { error } => {
                 Err(crate::run::SliceError::State(format!(
