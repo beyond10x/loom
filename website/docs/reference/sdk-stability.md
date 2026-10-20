@@ -46,6 +46,7 @@ the same JSON document that Canon release renders for the same case
 | Loom | `b10x-canon` | `b10x-canon-engineering` |
 |---|---|---|
 | 0.26.0 | 0.6.0 | 0.8.0 |
+| Unreleased | 0.6.0 | 0.9.0 |
 
 A release that moves either pin names it in its `CHANGELOG.md` entry.
 

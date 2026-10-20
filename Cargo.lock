@@ -130,8 +130,8 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "b10x-assertion-providers"
-version = "0.8.0"
-source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.8.0#dc231c7741c700489e84e89cb6194be754479bc5"
+version = "0.9.0"
+source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.9.0#53a221be0bbcf40129ee9a4e7bb1a28007ad18a2"
 dependencies = [
  "clap",
  "jsonschema 0.33.0",
@@ -156,8 +156,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-canon-engineering"
-version = "0.8.0"
-source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.8.0#dc231c7741c700489e84e89cb6194be754479bc5"
+version = "0.9.0"
+source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.9.0#53a221be0bbcf40129ee9a4e7bb1a28007ad18a2"
 dependencies = [
  "b10x-canon",
  "b10x-canon-engineering-assertions",
@@ -168,8 +168,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-canon-engineering-assertions"
-version = "0.8.0"
-source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.8.0#dc231c7741c700489e84e89cb6194be754479bc5"
+version = "0.9.0"
+source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.9.0#53a221be0bbcf40129ee9a4e7bb1a28007ad18a2"
 dependencies = [
  "anyhow",
  "b10x-assertion-providers",
