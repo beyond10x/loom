@@ -18,12 +18,17 @@ pub use intake_model::confinement::{
     ToolchainRoot,
 };
 use sha2::{Digest as _, Sha256};
+/// Substrate's own declaration of the egress aperture a [`ChildCommand`] may reach: its name, the
+/// host and port the host names, the address that host was resolved to and an optional byte
+/// ceiling.
+pub use substrate_host::EgressAperture;
 use substrate_host::{DispatchOutcome, Driver as _, HostConfig, HostDriver};
+use substrate_wire::{
+    ApertureMechanism, ApertureMode, AppliedNetwork, ConfinementRequest, ExecLimits,
+    ExecStartInput, ReadOnlyRoot, WorkspaceAccess,
+};
 /// Substrate's own wire types a host names a [`ChildCommand`] with.
 pub use substrate_wire::{BaselineEnvironment, ExecEnvironment, NetworkMode, SandboxProfile};
-use substrate_wire::{
-    ConfinementRequest, ExecLimits, ExecStartInput, ReadOnlyRoot, WorkspaceAccess,
-};
 
 static NEXT_EXEC: AtomicU64 = AtomicU64::new(0);
 const WRITABLE: &str = "target";
@@ -71,22 +76,24 @@ fn scope_error(detail: impl fmt::Display) -> ConfinementError {
 /// The Substrate runner: tests ([`TestRunner`]) and children the host names
 /// ([`SubstrateRunner::run_child`]) run through it confined.
 ///
-/// A runner and its clones share one Substrate driver per directory that holds their workspaces,
-/// opened at the first launch there, so their launches in workspaces of one directory run side by
+/// A runner and its clones share one Substrate driver per directory that holds their workspaces
+/// and egress aperture they name (Substrate fixes a driver's apertures when it opens), opened at
+/// the first launch that needs it, so their launches in workspaces of one directory run side by
 /// side; each launch releases its execution from the driver once it ended. Opening a driver ends
 /// every confined run under its cgroup root (Substrate reconciles them as orphans), so no driver is
 /// opened on a root, however its path is spelled, while a launch of this process runs under it: a
-/// launch that needs a driver for another directory then is refused with
-/// [`ConfinementRefusal::CapabilityUnserved`] instead.
+/// launch that needs a driver for another directory, or for another egress aperture, then is
+/// refused with [`ConfinementRefusal::CapabilityUnserved`] instead.
 #[derive(Debug, Clone, Default)]
 pub struct SubstrateRunner {
     cgroup_root: Option<PathBuf>,
     drivers: Arc<Drivers>,
 }
 
-/// The drivers a runner and its clones opened, by the directory holding their workspaces.
+/// The drivers a runner and its clones opened, by the directory holding their workspaces, each
+/// declaring the egress aperture it was opened for, if any.
 #[derive(Default)]
-struct Drivers(Mutex<BTreeMap<PathBuf, Arc<OpenDriver>>>);
+struct Drivers(Mutex<BTreeMap<PathBuf, Vec<Arc<OpenDriver>>>>);
 impl fmt::Debug for Drivers {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let drivers = self.0.lock().unwrap_or_else(PoisonError::into_inner);
@@ -94,10 +101,12 @@ impl fmt::Debug for Drivers {
     }
 }
 
-/// One opened driver, the cgroup root it reconciled, and its private state directory.
+/// One opened driver, the cgroup root it reconciled, the egress aperture it declares, and its
+/// private state directory.
 struct OpenDriver {
     driver: Arc<HostDriver>,
     cgroup_root: PathBuf,
+    egress: Option<EgressAperture>,
     _state: tempfile::TempDir,
 }
 
@@ -153,13 +162,18 @@ impl SubstrateRunner {
     /// Probe the real backend before opening a model session. No test is launched.
     pub fn preflight(&self, root: &Path) -> Result<(), ConfinementError> {
         let root = validate_workspace(root)?;
-        self.driver(&root)?;
+        self.driver(&root, None)?;
         Ok(())
     }
 
-    /// The driver for the workspace `root`: the one this runner or a clone opened for its
-    /// directory, or a new one. The workspace is adopted on it either way.
-    fn driver(&self, root: &Path) -> Result<Arc<OpenDriver>, ConfinementError> {
+    /// The driver for the workspace `root` declaring `egress`: the one this runner or a clone
+    /// opened for its directory and that aperture, or a new one. The workspace is adopted on it
+    /// either way.
+    fn driver(
+        &self,
+        root: &Path,
+        egress: Option<&EgressAperture>,
+    ) -> Result<Arc<OpenDriver>, ConfinementError> {
         let parent = root
             .parent()
             .ok_or_else(|| scope_error("workspace has no parent"))?;
@@ -168,11 +182,18 @@ impl SubstrateRunner {
             .0
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        let open = match drivers.get(parent) {
-            Some(open) => Arc::clone(open),
+        let opened = drivers
+            .get(parent)
+            .and_then(|opened| opened.iter().find(|open| open.egress.as_ref() == egress))
+            .map(Arc::clone);
+        let open = match opened {
+            Some(open) => open,
             None => {
-                let open = Arc::new(self.open(parent)?);
-                drivers.insert(parent.to_owned(), Arc::clone(&open));
+                let open = Arc::new(self.open(parent, egress)?);
+                drivers
+                    .entry(parent.to_owned())
+                    .or_default()
+                    .push(Arc::clone(&open));
                 open
             }
         };
@@ -188,13 +209,18 @@ impl SubstrateRunner {
         Ok(open)
     }
 
-    fn open(&self, parent: &Path) -> Result<OpenDriver, ConfinementError> {
+    fn open(
+        &self,
+        parent: &Path,
+        egress: Option<&EgressAperture>,
+    ) -> Result<OpenDriver, ConfinementError> {
         let state = tempfile::Builder::new()
             .prefix("loom-substrate-")
             .tempdir()
             .map_err(|e| refuse(ConfinementRefusal::BackendMissing, e))?;
         let mut config = HostConfig::minimum(parent);
         config.capsule_root = state.path().join("capsules");
+        config.egress_apertures = egress.into_iter().cloned().collect();
         validate_backend(&config.bubblewrap)?;
         // One root has one name: the count of running launches is keyed by it, however the host
         // spelled the root.
@@ -251,32 +277,63 @@ impl SubstrateRunner {
                 "Substrate does not serve no-network execution with scoped workspace writes",
             ));
         }
+        // Substrate publishes the declared apertures only once its mechanism worked in a
+        // throwaway sandbox; a declared one it does not publish is never served.
+        if let Some(aperture) = egress {
+            let Some(served) = facts.exec_egress_apertures.as_ref() else {
+                return Err(refuse(
+                    ConfinementRefusal::CapabilityUnserved,
+                    format!(
+                        "Substrate does not serve the egress aperture `{}` on this machine: its mechanism did not prove itself when the driver opened",
+                        aperture.name
+                    ),
+                ));
+            };
+            if !served.iter().any(|fact| {
+                fact.name == aperture.name
+                    && fact.destination == aperture.pinned.to_string()
+                    && fact.max_bytes == aperture.max_bytes
+            }) {
+                return Err(refuse(
+                    ConfinementRefusal::CapabilityUnserved,
+                    format!(
+                        "Substrate published no egress aperture `{}` as it was declared",
+                        aperture.name
+                    ),
+                ));
+            }
+        }
         Ok(OpenDriver {
             driver,
             cgroup_root,
+            egress: egress.cloned(),
             _state: state,
         })
     }
 
     /// Run a child process the host names, confined through Substrate with the guarantees a test
     /// has. A guarantee Substrate does not serve is a [`ConfinementError`] and nothing runs, never
-    /// an unconfined fall-back. The child's environment is exactly [`ChildCommand::environment`].
-    /// Once the child has run, its result is refused as a [`ConfinementError`] when the
-    /// confinement Substrate applied is not the one requested, or when Substrate reports no exit
-    /// status and no timeout; otherwise it carries the applied confinement and the driver's own
-    /// record of it.
+    /// an unconfined fall-back. The child's environment is exactly [`ChildCommand::environment`],
+    /// and its network is none or exactly the egress aperture it names
+    /// ([`ChildCommand::with_egress`]); an aperture naming no host is refused before anything
+    /// starts. Once the child has run, its result is refused as a [`ConfinementError`] when the
+    /// confinement Substrate applied is not the one requested, a wider network included, or when
+    /// Substrate reports no exit status and no timeout; otherwise it carries the applied
+    /// confinement and the driver's own record of it.
     pub fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
         check_program(&child.program)?;
+        check_network(child.network, child.egress.as_ref())?;
         let root = validate_workspace(&child.directory)?;
-        let open = self.driver(&root)?;
+        let open = self.driver(&root, child.egress.as_ref())?;
         let workspace = workspace_name(&root)?;
         let input = child.input(workspace, open.driver.machine().snapshot);
         child_result(Self::launch(&open, workspace, &input)?)
     }
 
     /// Start `input` in the adopted workspace, wait for it, and accept its result only when the
-    /// confinement Substrate applied is the one `input` required. A program Substrate's
-    /// `/usr/bin/env` would read as a variable assignment is refused before anything starts.
+    /// confinement Substrate applied is the one `input` required, with the egress aperture the
+    /// driver declares when `input` asks for one. A program Substrate's `/usr/bin/env` would read
+    /// as a variable assignment is refused before anything starts.
     fn launch(
         open: &OpenDriver,
         workspace: &str,
@@ -286,9 +343,10 @@ impl SubstrateRunner {
             check_program(program)?;
         }
         let driver = &open.driver;
+        let egress = open.egress.as_ref();
         let _running = Running::enter(&open.cgroup_root);
-        let profile = requested_profile(input);
-        let digest = profile_digest(&profile, &input.env.allow);
+        let profile = requested_profile(input, egress);
+        let digest = profile_digest(&profile, &input.env.allow, egress);
         let root_identity = driver
             .workspace_root_identity(workspace)
             .map_err(|e| scope_error(format!("Substrate adopt: {e:?}")))?;
@@ -339,19 +397,7 @@ impl SubstrateRunner {
                 "Substrate returned no applied confinement",
             )
         })?;
-        if record.workspace_access != input.workspace_access
-            || !network_applied(input.sandbox.network, &record.network)
-            || record.profile != input.sandbox.profile
-            || record.read_only_roots != input.read_only_roots
-            || !record.secret_slots.is_empty()
-            || record.capability_snapshot != input.sandbox.capability_snapshot
-            || record.cgroup.is_empty()
-        {
-            return Err(refuse(
-                ConfinementRefusal::CapabilityUnserved,
-                "Substrate's applied confinement does not match the required profile",
-            ));
-        }
+        check_record(input, egress, &record)?;
         let timed_out = observed
             .resource
             .refusal
@@ -376,7 +422,7 @@ impl SubstrateRunner {
             capability_snapshot: record.capability_snapshot.clone(),
             cgroup: record.cgroup.clone(),
             filesystem: enum_name(&record.filesystem),
-            network: enum_name(&record.network),
+            network: applied_network_name(&record.network),
             profile: enum_name(&record.profile),
             writable_scopes: record
                 .workspace_access
@@ -449,7 +495,7 @@ impl TestRunner for SubstrateRunner {
     fn run(&self, command: &TestCommand, root: &Path) -> Result<TestExecution, ConfinementError> {
         check_program(&command.program().to_string_lossy())?;
         let root = validate_workspace(root)?;
-        let open = self.driver(&root)?;
+        let open = self.driver(&root, None)?;
         let closure = RustClosure::discover(&root)?;
         let snapshot = open.driver.machine();
         let workspace = workspace_name(&root)?;
@@ -475,6 +521,10 @@ impl TestRunner for SubstrateRunner {
 /// one the host names as Substrate's [`ExecEnvironment`], empty unless it names one. It asks
 /// Substrate for [`SandboxProfile::Workspace`] with [`NetworkMode::None`] unless the host names
 /// another, and Substrate is always required: a guarantee it does not serve refuses the launch.
+///
+/// A child that must reach one host, such as a harness and its vendor's API, names it as the
+/// Substrate [`EgressAperture`] it may reach ([`ChildCommand::with_egress`]): its network is then
+/// that aperture alone, every other guarantee kept. Substrate gives one run at most one aperture.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChildCommand {
     program: String,
@@ -483,6 +533,7 @@ pub struct ChildCommand {
     environment: ExecEnvironment,
     profile: SandboxProfile,
     network: NetworkMode,
+    egress: Option<EgressAperture>,
     timeout: Duration,
 }
 
@@ -507,6 +558,7 @@ impl ChildCommand {
             },
             profile: SandboxProfile::Workspace,
             network: NetworkMode::None,
+            egress: None,
             timeout: Self::DEFAULT_TIMEOUT,
         }
     }
@@ -526,10 +578,25 @@ impl ChildCommand {
         Self { profile, ..self }
     }
 
-    /// The same child asking Substrate for `network`.
+    /// The same child asking Substrate for `network`. [`NetworkMode::Aperture`] needs the aperture
+    /// [`ChildCommand::with_egress`] names; without one the launch is refused before anything
+    /// starts.
     #[must_use]
     pub fn with_network(self, network: NetworkMode) -> Self {
         Self { network, ..self }
+    }
+
+    /// The same child reaching `aperture` and nothing else: [`NetworkMode::Aperture`], with the
+    /// host, port and pinned address `aperture` declares. An aperture naming no host or port, one
+    /// whose name Substrate refuses, one with a byte ceiling of zero, or one pinned to no IPv4
+    /// address is refused before anything starts.
+    #[must_use]
+    pub fn with_egress(self, aperture: EgressAperture) -> Self {
+        Self {
+            network: NetworkMode::Aperture,
+            egress: Some(aperture),
+            ..self
+        }
     }
 
     /// The same child, killed once it has run for `timeout`.
@@ -568,6 +635,11 @@ impl ChildCommand {
         self.network
     }
 
+    /// The egress aperture the child may reach, if it names one.
+    pub fn egress(&self) -> Option<&EgressAperture> {
+        self.egress.as_ref()
+    }
+
     /// The maximum duration of one run of the child.
     pub fn timeout(&self) -> Duration {
         self.timeout
@@ -584,7 +656,8 @@ impl ChildCommand {
             sandbox: ConfinementRequest {
                 capability_snapshot: snapshot,
                 network: self.network,
-                aperture: None,
+                // A name only: the destination is the driver's declaration, never the request's.
+                aperture: self.egress.as_ref().map(|aperture| aperture.name.clone()),
                 profile: self.profile,
                 required: true,
             },
@@ -626,14 +699,113 @@ fn workspace_name(root: &Path) -> Result<&str, ConfinementError> {
         .ok_or_else(|| scope_error("workspace name must be UTF-8"))
 }
 
-/// Whether the network Substrate applied is the one requested. Only no network is accepted: an
-/// applied aperture is not verified here, so a request for one is refused rather than run
-/// unverified.
-fn network_applied(requested: NetworkMode, applied: &substrate_wire::AppliedNetwork) -> bool {
-    matches!(
-        (requested, applied),
-        (NetworkMode::None, substrate_wire::AppliedNetwork::None)
+/// Refuse, before anything starts, a network the child cannot have exactly as named: an aperture
+/// with no named host, a mode and an aperture that disagree, and an aperture declaration
+/// Substrate's daemon would refuse at startup (a name it refuses, no port, a byte ceiling of zero)
+/// or its forwarder cannot dial (no IPv4 address). The embedded driver checks only a request's
+/// shape, so the declaration's rules are held here.
+fn check_network(
+    network: NetworkMode,
+    egress: Option<&EgressAperture>,
+) -> Result<(), ConfinementError> {
+    let Some(aperture) = egress else {
+        return match network {
+            NetworkMode::None => Ok(()),
+            NetworkMode::Aperture => Err(scope_error(
+                "network aperture names no host: name the egress aperture with ChildCommand::with_egress",
+            )),
+        };
+    };
+    let name = &aperture.name;
+    if aperture.host.trim().is_empty() {
+        return Err(scope_error(format!(
+            "egress aperture `{name}` names no host"
+        )));
+    }
+    substrate_wire::validate_aperture_request(network, Some(name))
+        .map_err(|e| scope_error(format!("egress aperture `{name}`: {e}")))?;
+    if aperture.port == 0 {
+        return Err(scope_error(format!(
+            "egress aperture `{name}` names no port"
+        )));
+    }
+    if aperture.max_bytes == Some(0) {
+        return Err(scope_error(format!(
+            "egress aperture `{name}` declares a byte ceiling of zero"
+        )));
+    }
+    if !aperture.pinned.is_ipv4() {
+        return Err(scope_error(format!(
+            "egress aperture `{name}` is pinned to no IPv4 address; Substrate's forwarder dials IPv4 only"
+        )));
+    }
+    Ok(())
+}
+
+/// Accept Substrate's record of what it applied only when it is the confinement `input` required:
+/// its workspace access, profile, read-only roots and capability snapshot, no secret slot, a
+/// cgroup, and exactly the requested network ([`network_applied`]). A test's launch and a child's
+/// are held to the same record.
+fn check_record(
+    input: &ExecStartInput,
+    egress: Option<&EgressAperture>,
+    record: &substrate_wire::AppliedConfinement,
+) -> Result<(), ConfinementError> {
+    if record.workspace_access != input.workspace_access
+        || !network_applied(input.sandbox.network, egress, &record.network)
+        || input.sandbox.aperture.as_deref() != egress.map(|aperture| aperture.name.as_str())
+        || record.profile != input.sandbox.profile
+        || record.read_only_roots != input.read_only_roots
+        || !record.secret_slots.is_empty()
+        || record.capability_snapshot != input.sandbox.capability_snapshot
+        || record.cgroup.is_empty()
+    {
+        return Err(refuse(
+            ConfinementRefusal::CapabilityUnserved,
+            "Substrate's applied confinement does not match the required profile",
+        ));
+    }
+    Ok(())
+}
+
+/// Whether the network Substrate applied is the one requested: no network for
+/// [`NetworkMode::None`], and for [`NetworkMode::Aperture`] exactly the declared aperture, by its
+/// name, pinned destination, mechanism and byte ceiling. Any other network, wider or narrower, is
+/// not the one requested.
+fn network_applied(
+    requested: NetworkMode,
+    egress: Option<&EgressAperture>,
+    applied: &AppliedNetwork,
+) -> bool {
+    match (requested, egress, applied) {
+        (NetworkMode::None, None, AppliedNetwork::None) => true,
+        (NetworkMode::Aperture, Some(declared), AppliedNetwork::Aperture(applied)) => {
+            applied.mode == ApertureMode::Aperture
+                && applied.name == declared.name
+                && applied.destination == declared.pinned.to_string()
+                && applied.mechanism == ApertureMechanism::LoopbackForwarder
+                && applied.max_bytes == declared.max_bytes
+        }
+        _ => false,
+    }
+}
+
+/// A network as the confinement projection names it: `none`, or `aperture:<name>@<destination>`.
+fn network_name(aperture: Option<(&str, &str)>) -> String {
+    aperture.map_or_else(
+        || "none".to_owned(),
+        |(name, destination)| format!("aperture:{name}@{destination}"),
     )
+}
+
+/// The network Substrate applied, named as [`network_name`] names it.
+fn applied_network_name(network: &AppliedNetwork) -> String {
+    match network {
+        AppliedNetwork::None => network_name(None),
+        AppliedNetwork::Aperture(applied) => {
+            network_name(Some((&applied.name, &applied.destination)))
+        }
+    }
 }
 
 /// The resource bounds every confined launch runs under.
@@ -957,10 +1129,18 @@ fn roots_projection(roots: &[ReadOnlyRoot]) -> Vec<ToolchainRoot> {
         })
         .collect()
 }
-fn requested_profile(input: &ExecStartInput) -> ConfinementProfile {
+fn requested_profile(
+    input: &ExecStartInput,
+    egress: Option<&EgressAperture>,
+) -> ConfinementProfile {
     ConfinementProfile {
         backend: Backend::Substrate,
-        network: enum_name(&input.sandbox.network),
+        network: match (input.sandbox.network, egress) {
+            (NetworkMode::Aperture, Some(aperture)) => {
+                network_name(Some((&aperture.name, &aperture.pinned.to_string())))
+            }
+            (network, _) => enum_name(&network),
+        },
         writable_scopes: input
             .workspace_access
             .writable_subtrees()
@@ -982,7 +1162,11 @@ fn requested_profile(input: &ExecStartInput) -> ConfinementProfile {
         cpu_millis: input.limits.cpu_millis as i64,
     }
 }
-fn profile_digest(profile: &ConfinementProfile, inherited: &[BaselineEnvironment]) -> String {
+fn profile_digest(
+    profile: &ConfinementProfile,
+    inherited: &[BaselineEnvironment],
+    egress: Option<&EgressAperture>,
+) -> String {
     // Generated ESS model types deliberately have no serialization dependency.
     let mut json = serde_json::json!({ "backend":"substrate", "network":profile.network, "writable_scopes":profile.writable_scopes,
         "read_only_roots":profile.read_only_roots.iter().map(|r| serde_json::json!({"host_path":r.host_path,"mount":r.mount})).collect::<Vec<_>>(),
@@ -992,6 +1176,11 @@ fn profile_digest(profile: &ConfinementProfile, inherited: &[BaselineEnvironment
     // digest is what it was before children existed.
     if !inherited.is_empty() {
         json["inherited"] = inherited.iter().map(|name| name.as_str()).collect();
+    }
+    // The whole egress declaration, absent without one for the same reason.
+    if let Some(aperture) = egress {
+        json["egress"] = serde_json::json!({ "name":aperture.name, "host":aperture.host, "port":aperture.port,
+            "pinned":aperture.pinned.to_string(), "max_bytes":aperture.max_bytes });
     }
     format!("{:x}", Sha256::digest(json.to_string().as_bytes()))
 }
@@ -1159,7 +1348,7 @@ mod tests {
         let launch = Running::enter(&cgroup.canonicalize().unwrap());
         let spelled = cgroup.join("..").join("cgroup");
         let error = SubstrateRunner::new(Some(spelled))
-            .open(fixture.path())
+            .open(fixture.path(), None)
             .err()
             .expect("nothing is opened");
         let expected = if Path::new("/usr/bin/bwrap").is_file() {
@@ -1183,7 +1372,7 @@ mod tests {
         assert!(Arc::ptr_eq(&runner.drivers, &runner.clone().drivers));
         let launch = Running::enter(&cgroup);
         let error = runner
-            .open(fixture.path())
+            .open(fixture.path(), None)
             .err()
             .expect("nothing is opened");
         let expected = if Path::new("/usr/bin/bwrap").is_file() {
@@ -1253,45 +1442,257 @@ mod tests {
         check_program("./a-b").unwrap();
     }
 
-    #[test]
-    fn only_no_network_is_accepted_as_applied() {
-        use substrate_wire::{
-            ApertureBytes, ApertureMechanism, ApertureMode, AppliedAperture, AppliedNetwork,
-        };
-        let aperture = AppliedNetwork::Aperture(AppliedAperture {
-            mode: ApertureMode::Aperture,
+    /// Where the aperture `model` of these tests is pinned; nothing here connects to it.
+    const PINNED: &str = "10.0.0.1:443";
+
+    fn model() -> EgressAperture {
+        EgressAperture {
             name: "model".to_owned(),
-            destination: "10.0.0.1:443".to_owned(),
-            mechanism: ApertureMechanism::LoopbackForwarder,
-            bytes: ApertureBytes::default(),
+            host: "api.example.test".to_owned(),
+            port: 443,
+            pinned: PINNED.parse().unwrap(),
             max_bytes: None,
-        });
-        assert!(network_applied(NetworkMode::None, &AppliedNetwork::None));
-        assert!(!network_applied(NetworkMode::None, &aperture));
-        assert!(!network_applied(NetworkMode::Aperture, &aperture));
-        assert!(!network_applied(
-            NetworkMode::Aperture,
+        }
+    }
+
+    fn applied_aperture(name: &str, destination: &str, max_bytes: Option<u64>) -> AppliedNetwork {
+        AppliedNetwork::Aperture(substrate_wire::AppliedAperture {
+            mode: ApertureMode::Aperture,
+            name: name.to_owned(),
+            destination: destination.to_owned(),
+            mechanism: ApertureMechanism::LoopbackForwarder,
+            bytes: substrate_wire::ApertureBytes {
+                to_destination: 7,
+                from_destination: 11,
+            },
+            max_bytes,
+        })
+    }
+
+    /// A record of exactly what `input` asked for, with `network` as the applied network.
+    fn record_for(
+        input: &ExecStartInput,
+        network: AppliedNetwork,
+    ) -> substrate_wire::AppliedConfinement {
+        substrate_wire::AppliedConfinement {
+            capability_snapshot: input.sandbox.capability_snapshot.clone(),
+            cgroup: "substrate-ex_loom_1_0".to_owned(),
+            filesystem: substrate_wire::AppliedFilesystem::WorkspaceReadWriteSystemReadOnly,
+            network,
+            profile: input.sandbox.profile,
+            workspace_access: input.workspace_access.clone(),
+            capsule: None,
+            read_only_roots: input.read_only_roots.clone(),
+            secret_slots: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn only_the_requested_network_is_accepted_as_applied() {
+        let aperture = applied_aperture("model", PINNED, None);
+        assert!(network_applied(
+            NetworkMode::None,
+            None,
             &AppliedNetwork::None
         ));
+        assert!(!network_applied(NetworkMode::None, None, &aperture));
+        assert!(network_applied(
+            NetworkMode::Aperture,
+            Some(&model()),
+            &aperture
+        ));
+        assert!(!network_applied(
+            NetworkMode::Aperture,
+            Some(&model()),
+            &AppliedNetwork::None
+        ));
+        assert!(!network_applied(NetworkMode::Aperture, None, &aperture));
+        for other in [
+            applied_aperture("other", PINNED, None),
+            applied_aperture("model", "10.0.0.2:443", None),
+            applied_aperture("model", PINNED, Some(1024)),
+        ] {
+            assert!(
+                !network_applied(NetworkMode::Aperture, Some(&model()), &other),
+                "{other:?}"
+            );
+        }
+        let bounded = EgressAperture {
+            max_bytes: Some(1024),
+            ..model()
+        };
+        assert!(
+            !network_applied(NetworkMode::Aperture, Some(&bounded), &aperture),
+            "a declared ceiling applied without it is a wider network"
+        );
+    }
+
+    #[test]
+    fn a_record_reporting_another_network_than_requested_is_refused() {
+        let child = ChildCommand::new("true", [] as [&str; 0], "/work/space");
+        // A test's request and a plain child's ask for no network alike.
+        let none = child.input("space", "snapshot".to_owned());
+        check_record(&none, None, &record_for(&none, AppliedNetwork::None)).unwrap();
+        let wider = record_for(&none, applied_aperture("model", PINNED, None));
+        let error = check_record(&none, None, &wider).unwrap_err();
+        assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
+        assert_eq!(
+            error.detail,
+            "Substrate's applied confinement does not match the required profile"
+        );
+
+        let input = child
+            .with_egress(model())
+            .input("space", "snapshot".to_owned());
+        let exact = record_for(&input, applied_aperture("model", PINNED, None));
+        check_record(&input, Some(&model()), &exact).unwrap();
+        for other in [
+            AppliedNetwork::None,
+            applied_aperture("model", "10.0.0.2:443", None),
+            applied_aperture("other", PINNED, None),
+            applied_aperture("model", PINNED, Some(1024)),
+        ] {
+            let error = check_record(&input, Some(&model()), &record_for(&input, other.clone()))
+                .unwrap_err();
+            assert_eq!(
+                error.reason,
+                ConfinementRefusal::CapabilityUnserved,
+                "{other:?}"
+            );
+        }
+        // A driver declaring another aperture than the request names is no match either.
+        let other = EgressAperture {
+            name: "other".to_owned(),
+            ..model()
+        };
+        let record = record_for(&input, applied_aperture("other", PINNED, None));
+        assert!(check_record(&input, Some(&other), &record).is_err());
+    }
+
+    #[test]
+    fn an_egress_aperture_naming_no_host_or_one_substrate_cannot_serve_is_refused() {
+        check_network(NetworkMode::None, None).unwrap();
+        check_network(NetworkMode::Aperture, Some(&model())).unwrap();
+        let refused = [
+            (NetworkMode::Aperture, None, "names no host"),
+            (
+                NetworkMode::Aperture,
+                Some(EgressAperture {
+                    host: String::new(),
+                    ..model()
+                }),
+                "names no host",
+            ),
+            (
+                NetworkMode::Aperture,
+                Some(EgressAperture {
+                    host: "\t".to_owned(),
+                    ..model()
+                }),
+                "names no host",
+            ),
+            (NetworkMode::None, Some(model()), "disagree"),
+            (
+                NetworkMode::Aperture,
+                Some(EgressAperture {
+                    name: "api.example.test:443".to_owned(),
+                    ..model()
+                }),
+                "destination",
+            ),
+            (
+                NetworkMode::Aperture,
+                Some(EgressAperture {
+                    name: "Model".to_owned(),
+                    ..model()
+                }),
+                "legal aperture name",
+            ),
+            (
+                NetworkMode::Aperture,
+                Some(EgressAperture { port: 0, ..model() }),
+                "no port",
+            ),
+            (
+                NetworkMode::Aperture,
+                Some(EgressAperture {
+                    max_bytes: Some(0),
+                    ..model()
+                }),
+                "ceiling of zero",
+            ),
+            (
+                NetworkMode::Aperture,
+                Some(EgressAperture {
+                    pinned: "[::1]:443".parse().unwrap(),
+                    ..model()
+                }),
+                "IPv4",
+            ),
+        ];
+        for (network, egress, named) in refused {
+            let error = check_network(network, egress.as_ref()).unwrap_err();
+            assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
+            assert!(error.detail.contains(named), "{named}: {error}");
+        }
+    }
+
+    #[test]
+    fn a_child_with_egress_asks_for_its_aperture_by_name_and_its_profile_names_the_destination() {
+        let child = ChildCommand::new("true", [] as [&str; 0], "/work/space").with_egress(model());
+        assert_eq!(child.network(), NetworkMode::Aperture);
+        assert_eq!(child.egress(), Some(&model()));
+        let input = child.input("space", "snapshot".to_owned());
+        assert_eq!(
+            input.sandbox,
+            ConfinementRequest {
+                capability_snapshot: "snapshot".to_owned(),
+                network: NetworkMode::Aperture,
+                aperture: Some("model".to_owned()),
+                profile: SandboxProfile::Workspace,
+                required: true,
+            }
+        );
+        let profile = requested_profile(&input, Some(&model()));
+        assert_eq!(profile.network, "aperture:model@10.0.0.1:443");
+        assert_eq!(
+            applied_network_name(&applied_aperture("model", PINNED, None)),
+            profile.network
+        );
+        assert_eq!(applied_network_name(&AppliedNetwork::None), "none");
+        let digest = profile_digest(&profile, &[], Some(&model()));
+        assert_ne!(digest, profile_digest(&profile, &[], None));
+        for other in [
+            EgressAperture {
+                host: "other.example.test".to_owned(),
+                ..model()
+            },
+            EgressAperture {
+                max_bytes: Some(1024),
+                ..model()
+            },
+        ] {
+            assert_ne!(digest, profile_digest(&profile, &[], Some(&other)));
+        }
     }
 
     #[test]
     fn inherited_baseline_names_change_the_digest_and_their_absence_does_not() {
         let child = ChildCommand::new("true", [] as [&str; 0], "/work/space");
         let input = child.input("space", "snapshot".to_owned());
-        let profile = requested_profile(&input);
+        let profile = requested_profile(&input, None);
         assert_eq!(profile.network, "none");
         assert_eq!(profile.writable_scopes, ["target"]);
         assert_ne!(
-            profile_digest(&profile, &[]),
-            profile_digest(&profile, &[BaselineEnvironment::Path])
+            profile_digest(&profile, &[], None),
+            profile_digest(&profile, &[BaselineEnvironment::Path], None)
         );
         // With no inherited name the digest is the one a test's profile always had.
         let before = serde_json::json!({ "backend":"substrate", "network":"none", "writable_scopes":["target"],
             "read_only_roots":[], "environment":[],
             "timeout_ms":300_000, "memory_bytes":8_589_934_592_i64, "processes":2048, "cpu_millis":3_600_000 });
         assert_eq!(
-            profile_digest(&profile, &[]),
+            profile_digest(&profile, &[], None),
             format!("{:x}", Sha256::digest(before.to_string().as_bytes()))
         );
     }

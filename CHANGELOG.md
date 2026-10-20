@@ -42,6 +42,28 @@ which ran with that variable set under Substrate, or starts with `-`, is refused
 launch that needs a new driver while another launch of the process runs under the same cgroup
 root is refused `CapabilityUnserved`, where opening the driver used to end the running launch.
 
+A confined child reaches one host it names and nothing else (`story:harness-child-egress-profile`),
+as a harness child must reach its vendor's API. `ChildCommand::with_egress(EgressAperture)` names
+Substrate's own aperture declaration, re-exported at `loom_sdk::intake::slice::confinement`: a
+name, the host and port, the IPv4 address the host resolved it to (`pinned`) and an optional byte
+ceiling. The child then asks Substrate for `NetworkMode::Aperture` with that name only, and every
+other guarantee of the workspace profile holds. An aperture naming no host, port or IPv4 address,
+`NetworkMode::Aperture` without one, a mode and an aperture that disagree, and a declaration
+Substrate's daemon refuses (its name rules, a byte ceiling of zero) are refused `ScopeInvalid`
+before anything starts. The runner opens a driver declaring the aperture, shared like any other by
+directory and aperture, and an aperture that Substrate did not publish when that driver opened,
+because its mechanism did not prove itself there, is refused `CapabilityUnserved` and nothing
+runs. After the child ran, its result is accepted only when Substrate's record is exactly the
+declared aperture (name, pinned destination, loopback forwarder, ceiling); a record reporting
+another or a wider network is refused as a test's is. The applied confinement names it,
+`network` `aperture:<name>@<destination>`, and the profile digest covers the declaration; a test's
+and a plain child's are unchanged. `crates/loom-intake-slice/tests/confined_child.rs` holds it
+against loopback listeners the test starts: the named one is reached, another loopback port is
+not. Credentials for the vendor's API never pass through Loom, and the host chooses the hosts.
+Breaking: a `ChildCommand` asking for `NetworkMode::Aperture` without an aperture, which Substrate
+refused `CapabilityUnserved` once the driver had opened, is refused `ScopeInvalid` before anything
+starts.
+
 ## [0.27.0] - 2026-10-20
 
 Loom 0.27.0 links engineering-protocols 0.9.0, tells an authority provider the action request it
