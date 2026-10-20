@@ -132,13 +132,17 @@ runtime takes each step through it and charges a reported usage to the run, as i
 performed effect's usage, never to an action and never as a trial: `LoopEnd::charges`'s `run` holds
 it, a usage with no cost leaves the run's cost absent, and the step's observation carries it as
 `usage`. Once the step is observed, a charge past a spending limit of the run budget suspends the
-Run with `RunBudget` and ends the run before the step's outcome is acted on. `MeteredExecutor`
-adds the usage to its step's tokens and cost (no model call; a step with no model call takes the
-reported cost with or without a rate card), and the meter's `effects` totals are now the actions'
-sums, so the executor's usage is counted once, in its steps.
+Run with `RunBudget` and ends the run before the step's outcome is acted on. `MeteredExecutor`,
+called through `run_with_usage`, adds the usage to its step's tokens and cost (no model call);
+called through `run`, which hands on no usage, it adds none, so the meter and the run's charges
+agree. A step that made no model call needs no price: its cost is the cost its executor reported,
+or zero when it reported no usage, with or without a rate card, where 0.28.0 left every step of a
+run without a card at no cost. The meter's `effects` totals are now the actions' sums, so the
+executor's usage is counted once, in its steps.
 Breaking: a host whose executor wraps another forwards `run_with_usage`, or the inner executor's
 usage reaches neither the run nor its meter; a host that read `LoopEnd::charges.run` as the sum of
-its actions reads executor usage in it too.
+its actions reads executor usage in it too; and a host that read an absent cost from a step with
+no model call in a run without a rate card reads zero, or the reported cost.
 
 ## [0.28.0] - 2026-10-20
 
