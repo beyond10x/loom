@@ -50,6 +50,72 @@ fn catalog_composes_sources_and_accepts_renamed_clock_semantics() {
             .is_err()
     );
 }
+/// engineering-protocols 0.9.0 adds `eval.gated_change/1` (its `CHANGELOG.md`, `## [0.9.0]`), and
+/// `bundled()` starts from that release's registry, so the catalog the router and `protocols list`
+/// read holds `eval-gated-change@1` beside the protocols it held before, as an engineering
+/// definition of the same release. `protocols list` prints every entry of the installation
+/// store's catalog, which with nothing installed holds exactly the bundled names; its execution
+/// column for this one is the clock check's `NoLocalExecutor` refusal naming it, as for every
+/// definition the slice does not perform.
+#[test]
+fn the_bundled_catalog_lists_eval_gated_change() {
+    let names = |catalog: &ProtocolCatalog| -> Vec<String> {
+        catalog
+            .iter()
+            .map(|entry| entry.name().to_owned())
+            .collect()
+    };
+    let bundled = ProtocolCatalog::bundled().unwrap();
+    assert_eq!(
+        names(&bundled),
+        [
+            "eval-gated-change@1",
+            "incident-response@1",
+            "ml-experiment@1",
+            "software-change@1",
+            "support-triage@1",
+            "system-query@1",
+        ]
+    );
+    let entry = bundled
+        .get("eval-gated-change@1")
+        .expect("eval-gated-change@1 is bundled");
+    let source = &entry.definition.source;
+    assert_eq!(source.kind, SourceKind::Engineering);
+    assert_eq!(source.location, "engineering-protocols");
+    assert_eq!(source.path, "protocols/eval-gated-change/1.yaml");
+    assert_eq!(
+        source.revision,
+        bundled
+            .get("software-change@1")
+            .unwrap()
+            .definition
+            .source
+            .revision,
+        "one engineering-protocols release supplies every engineering definition"
+    );
+    assert!(
+        entry
+            .definition
+            .yaml
+            .contains("\n  id: eval.gated_change\n"),
+        "{}",
+        entry.definition.yaml
+    );
+    let execution = entry
+        .clock_compatible()
+        .expect_err("the slice does not perform eval-gated-change@1");
+    assert!(
+        execution.starts_with("NoLocalExecutor: eval-gated-change@1 "),
+        "{execution}"
+    );
+
+    let tmp = tempfile::tempdir().unwrap();
+    let listed = InstallStore::new(tmp.path().join("installed"))
+        .catalog()
+        .unwrap();
+    assert_eq!(names(&listed), names(&bundled));
+}
 #[test]
 fn clock_binding_refuses_changed_authority_and_completion_semantics() {
     let variants = [
