@@ -52,7 +52,10 @@ mode and an aperture that disagree, and a declaration Substrate's daemon never m
 `ScopeInvalid` before anything starts: no host or port, a name it refuses, a byte ceiling of
 zero, a host that is no host name or IPv4 literal (whitespace, a second line, a port, a URL), an
 IPv4 literal other than the pinned address, and a pinned address that is no IPv4 one or not at the
-named port. The runner opens a driver declaring the aperture, shared like any other by directory
+named port. The child reaches the aperture by the host's name, which Substrate maps to its
+forwarder on `127.0.0.1` inside the sandbox, so an IPv4 literal host other than `127.0.0.1`,
+which the child would dial and never reach, is refused `ScopeInvalid` too, naming the host: name
+such a host by its name. The runner opens a driver declaring the aperture, shared like any other by directory
 and aperture, and an aperture that Substrate did not publish when that driver opened, because its
 mechanism did not prove itself there, is refused `CapabilityUnserved` and nothing runs. After the
 child ran, its result is accepted only when Substrate's record is exactly the declared aperture
@@ -63,7 +66,8 @@ and its driver record counting the bytes that crossed. The applied confinement n
 aperture, `network` `aperture:<name>@<destination>`, and the profile digest covers the
 declaration; a test's and a plain child's are unchanged.
 `crates/loom-intake-slice/tests/confined_child.rs` holds it against loopback listeners the test
-starts: the named one is reached, another loopback port is not. An egress child gets no
+starts: the one named `model.example.test` and listening on 127.0.0.2 is reached by its name,
+while another loopback port, and 127.0.0.2 dialled directly, are not. An egress child gets no
 certificate bundle yet, so a child that verifies TLS certificates cannot verify its host's; and
 one aperture per run is Substrate's limit, so a child that must reach several hosts cannot be
 served. Credentials for the vendor's API never pass through Loom, and the host chooses the hosts.

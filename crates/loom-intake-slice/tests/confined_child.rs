@@ -312,9 +312,12 @@ fn a_test_runs_beside_a_running_child_through_one_runner() {
     );
 }
 
-/// A child its deadline ended has no exit status and is still a result, marked timed out: only a
-/// child ended by something other than itself or its deadline is refused (unit-tested in
-/// `confinement.rs`, since no child can provoke that end on purpose).
+/// A child its deadline ended has no exit status and is still a result, marked timed out, as one
+/// its egress aperture's byte ceiling ended is (`adversary_w20261020w2_u5.rs`,
+/// `adv_a_child_its_byte_ceiling_stopped_is_reported_as_such`): only a child with no exit status
+/// that something other than itself, its deadline or that ceiling ended is refused, which
+/// `confinement.rs` unit-tests (`a_child_result_with_no_exit_status_and_no_timeout_is_refused`,
+/// `a_child_its_declared_byte_ceiling_ended_is_a_result_and_no_other_end_is`).
 #[test]
 fn a_timed_out_child_is_a_result_with_no_exit_status() {
     delegated(
@@ -337,9 +340,14 @@ const BASH: &str = "/usr/bin/bash";
 /// The start of the refusal `run_child` gives when Substrate cannot serve the egress aperture.
 const EGRESS_UNSERVED: &str = "Substrate does not serve the egress aperture";
 
-/// A loopback listener the test starts, standing in for a host, and its address.
+/// A loopback listener the test starts on 127.0.0.1, standing in for a host, and its address.
 fn loopback_host() -> (TcpListener, SocketAddr) {
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    loopback_host_at(Ipv4Addr::LOCALHOST)
+}
+
+/// A listener the test starts on the loopback address `ip` (any of 127.0.0.0/8), and its address.
+fn loopback_host_at(ip: Ipv4Addr) -> (TcpListener, SocketAddr) {
+    let listener = TcpListener::bind((ip, 0)).unwrap();
     let address = listener.local_addr().unwrap();
     (listener, address)
 }
@@ -398,8 +406,13 @@ fn answer_once(listener: TcpListener, answer: &'static [u8]) -> std::thread::Joi
     })
 }
 
-/// The story's case: under an egress profile the child reaches the host the profile names and
-/// fails to reach one it does not name, here another loopback port of this machine.
+/// The host name the story's case names its host by.
+const NAMED_HOST: &str = "model.example.test";
+
+/// The story's case: under an egress profile the child reaches the host the profile names, by its
+/// name, and fails to reach one it does not name, here another loopback port of this machine. The
+/// named host listens on 127.0.0.2, so only the aperture, never the address the child dials by
+/// name, can carry the connection; dialling that address directly fails too.
 #[test]
 fn a_child_reaches_only_the_named_egress() {
     delegated(
@@ -408,25 +421,34 @@ fn a_child_reaches_only_the_named_egress() {
             if !Path::new(BASH).is_file() {
                 return skip(&format!("executable {BASH}"));
             }
-            let (named, named_at) = loopback_host();
+            let (named, named_at) = loopback_host_at(Ipv4Addr::new(127, 0, 0, 2));
             let (unnamed, unnamed_at) = loopback_host();
             unnamed.set_nonblocking(true).unwrap();
             let answered = answer_once(named, b"named-host\n");
             let script = format!(
-                "read -r line < /dev/tcp/127.0.0.1/{named}; printf 'named:%s\\n' \"$line\"; \
+                "read -r line < /dev/tcp/{NAMED_HOST}/{named}; printf 'named:%s\\n' \"$line\"; \
                  if : 2>/dev/null 3<>/dev/tcp/127.0.0.1/{unnamed}; \
-                 then echo unnamed:reached; else echo unnamed:refused; fi",
+                 then echo unnamed:reached; else echo unnamed:refused; fi; \
+                 if : 2>/dev/null 4<>/dev/tcp/127.0.0.2/{named}; \
+                 then echo pinned:reached; else echo pinned:refused; fi",
                 named = named_at.port(),
                 unnamed = unnamed_at.port(),
             );
-            let child = ChildCommand::new(BASH, ["-c", script.as_str()], workspace)
-                .with_egress(model_aperture(named_at));
+            let aperture = EgressAperture {
+                host: NAMED_HOST.to_owned(),
+                ..model_aperture(named_at)
+            };
+            let child =
+                ChildCommand::new(BASH, ["-c", script.as_str()], workspace).with_egress(aperture);
             assert_eq!(child.network(), NetworkMode::Aperture);
             let Some(result) = egress_result(runner.run_child(&child)) else {
                 return;
             };
             assert_eq!(result.exit_code, Some(0), "{}", result.output);
-            assert_eq!(result.output, "named:named-host\nunnamed:refused\n");
+            assert_eq!(
+                result.output,
+                "named:named-host\nunnamed:refused\npinned:refused\n"
+            );
             assert!(answered.join().unwrap(), "the named host was reached");
             assert_eq!(
                 unnamed.accept().map(|_| ()).unwrap_err().kind(),

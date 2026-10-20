@@ -25,8 +25,8 @@ use sha2::{Digest as _, Sha256};
 pub use substrate_host::EgressAperture;
 use substrate_host::{DispatchOutcome, Driver as _, HostConfig, HostDriver};
 use substrate_wire::{
-    ApertureMechanism, ApertureMode, AppliedNetwork, ConfinementRequest, ExecLimits,
-    ExecStartInput, ReadOnlyRoot, WorkspaceAccess,
+    APERTURE_LOOPBACK_ADDRESS, ApertureMechanism, ApertureMode, AppliedNetwork, ConfinementRequest,
+    ExecLimits, ExecStartInput, ReadOnlyRoot, WorkspaceAccess,
 };
 /// Substrate's own wire types a host names a [`ChildCommand`] with.
 pub use substrate_wire::{BaselineEnvironment, ExecEnvironment, NetworkMode, SandboxProfile};
@@ -604,9 +604,12 @@ impl ChildCommand {
     }
 
     /// The same child reaching `aperture` and nothing else: [`NetworkMode::Aperture`], with the
-    /// host, port and pinned address `aperture` declares. A declaration Substrate's daemon never
-    /// makes is refused before anything starts: a name it refuses, no port, a byte ceiling of zero,
-    /// a host that is no host name or IPv4 literal, an IPv4 literal other than the pinned address,
+    /// host, port and pinned address `aperture` declares. The child reaches it by the host's name,
+    /// which Substrate maps to its forwarder on `127.0.0.1` inside the sandbox, at the named port.
+    /// A declaration Substrate's daemon never makes, or one the child could not reach by, is
+    /// refused before anything starts: a name it refuses, no port, a byte ceiling of zero, a host
+    /// that is no host name or IPv4 literal, an IPv4 literal host other than `127.0.0.1` (named in
+    /// the refusal; name such a host by its name), an IPv4 literal other than the pinned address,
     /// and a pinned address that is no IPv4 one or not at the named port. A child its byte ceiling
     /// ends is a result with no exit status, not timed out, whose output names
     /// `exec.aperture-byte-limit`. It gets no certificate bundle: a child that verifies TLS
@@ -726,7 +729,8 @@ fn workspace_name(root: &Path) -> Result<&str, ConfinementError> {
 /// a port other than 0 and a byte ceiling other than zero, and pins the IPv4 address `host`
 /// resolves to at that port; so a host that is no host name or IPv4 literal ([`check_host`]), an
 /// IPv4 literal other than the pinned address, a pinned address that is no IPv4 one, or a pinned
-/// port other than the named port is refused too. The embedded driver checks only a request's
+/// port other than the named port is refused too, and so is an IPv4 literal host other than
+/// `127.0.0.1`, which the child could not reach the host by. The embedded driver checks only a request's
 /// shape, and writes the host verbatim into the child's `/etc/hosts`, so the declaration's rules
 /// are held here.
 fn check_network(
@@ -775,18 +779,28 @@ fn check_network(
 }
 
 /// Refuse an aperture's host unless it is a declaration Substrate's daemon makes for an address
-/// pinned at `pinned`: an IPv4 literal, which resolves to itself and so must be `pinned`, or a host
-/// name, dot-separated labels of ASCII letters, digits and inner hyphens, at most 63 bytes each and
-/// 253 in all, the last not all digits. Anything else (whitespace, a second line, a port, a URL,
-/// an IPv6 literal) never resolves to an IPv4 address there.
+/// pinned at `pinned` and one the child can reach by: a host name, dot-separated labels of ASCII
+/// letters, digits and inner hyphens, at most 63 bytes each and 253 in all, the last not all
+/// digits, or the IPv4 literal `127.0.0.1` pinned there. Anything else (whitespace, a second line,
+/// a port, a URL, an IPv6 literal) never resolves to an IPv4 address there. Another IPv4 literal is
+/// refused too: Substrate maps only a host name to the forwarder it starts on
+/// [`APERTURE_LOOPBACK_ADDRESS`] inside the sandbox, so a child dialling any other literal would
+/// never reach the host; a literal also resolves to itself, so it must be `pinned`.
 fn check_host(name: &str, host: &str, pinned: Ipv4Addr) -> Result<(), ConfinementError> {
     if let Ok(literal) = host.parse::<Ipv4Addr>() {
-        return if literal == pinned {
-            Ok(())
-        } else {
+        let forwarder: Ipv4Addr = APERTURE_LOOPBACK_ADDRESS
+            .parse()
+            .expect("Substrate's forwarder address is an IPv4 literal");
+        return if literal != forwarder {
+            Err(scope_error(format!(
+                "egress aperture `{name}` names the host {literal}: a child reaches an aperture by its host name, or at {forwarder}, where Substrate's forwarder listens in the sandbox; name the host by its name"
+            )))
+        } else if literal != pinned {
             Err(scope_error(format!(
                 "egress aperture `{name}` names the address {literal} but is pinned to {pinned}"
             )))
+        } else {
+            Ok(())
         };
     }
     let label = |label: &str| {
@@ -1782,11 +1796,39 @@ mod tests {
             "api.example.test",
             "localhost",
             "a-b.c1.example",
-            "10.0.0.1",
             longest_label.as_str(),
         ] {
             check_network(NetworkMode::Aperture, Some(&with_host(host)))
                 .unwrap_or_else(|error| panic!("{host:?}: {error}"));
+        }
+        // 127.0.0.1, where Substrate's forwarder listens in the sandbox, is the one literal a
+        // child reaches the host by, and only pinned there.
+        let at_forwarder = EgressAperture {
+            host: "127.0.0.1".to_owned(),
+            pinned: "127.0.0.1:443".parse().unwrap(),
+            ..model()
+        };
+        check_network(NetworkMode::Aperture, Some(&at_forwarder)).unwrap();
+        let error =
+            check_network(NetworkMode::Aperture, Some(&with_host("127.0.0.1"))).unwrap_err();
+        assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid);
+        assert!(error.detail.contains("pinned to 10.0.0.1"), "{error}");
+        for (host, pinned) in [
+            ("10.0.0.1", "10.0.0.1:443"),
+            ("10.0.0.2", "10.0.0.1:443"),
+            ("127.0.0.2", "127.0.0.2:443"),
+        ] {
+            let aperture = EgressAperture {
+                host: host.to_owned(),
+                pinned: pinned.parse().unwrap(),
+                ..model()
+            };
+            let error = check_network(NetworkMode::Aperture, Some(&aperture)).unwrap_err();
+            assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{host}");
+            assert!(
+                error.detail.contains(&format!("names the host {host}:")),
+                "{host}: {error}"
+            );
         }
         for host in [
             "api.example.test\n127.0.0.1\tother.example.test",
@@ -1816,8 +1858,6 @@ mod tests {
                 "{host:?}: {error}"
             );
         }
-        let error = check_network(NetworkMode::Aperture, Some(&with_host("10.0.0.2"))).unwrap_err();
-        assert!(error.detail.contains("pinned to 10.0.0.1"), "{error}");
         for pinned in ["10.0.0.1:0", "10.0.0.1:8443"] {
             let aperture = EgressAperture {
                 pinned: pinned.parse().unwrap(),

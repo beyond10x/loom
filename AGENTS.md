@@ -758,11 +758,13 @@ exactly the named aperture (name, pinned destination, mechanism, ceiling), check
 ran and refusing its result as a test's is refused, a result with no exit status refused unless
 its timeout or its aperture's byte ceiling (`exec.aperture-byte-limit`, named in its output, its
 driver record counting the bytes) ended it, and the applied confinement in its `TestExecution`,
-whose `network` names an aperture `aperture:<name>@<destination>`. An aperture declaration
-Substrate's daemon never makes (no host or port, a name it refuses, a zero byte ceiling, a host
-that is no host name or IPv4 literal, an IPv4 literal other than the pinned address, a pinned
-address that is no IPv4 one or not at the named port) is refused `ScopeInvalid` before anything
-starts; one Substrate did not publish when the driver opened (its mechanism unproven) is refused
+whose `network` names an aperture `aperture:<name>@<destination>`. The child reaches the aperture
+by the host's name, which Substrate maps to its forwarder on `127.0.0.1` inside the sandbox. An
+aperture declaration Substrate's daemon never makes (no host or port, a name it refuses, a zero
+byte ceiling, a host that is no host name or IPv4 literal, an IPv4 literal other than the pinned
+address, a pinned address that is no IPv4 one or not at the named port), and an IPv4 literal host
+other than `127.0.0.1`, which the child could not reach the host by, are refused `ScopeInvalid`
+before anything starts, the refusal naming the host; one Substrate did not publish when the driver opened (its mechanism unproven) is refused
 `CapabilityUnserved`. An egress child gets no certificate bundle yet, and Substrate gives a run at
 most one aperture. A program containing `=` or starting with `-` (test or child)
 is refused before anything starts: Substrate execs through `/usr/bin/env`, which reads it as an
