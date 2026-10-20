@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest e9437a6cbbf5f15c726617ea201063d6ccd75146e1c90c4840f04720a2ca6fb5
-// contract digest 02850b7968172d53983b13b09f1ed99fa07041b914715b721bc0cfbabe8649bf
+// model digest 22e4f2a529e6c0fca03f4ec58015ca8a05779db65158e508c18edf8c6030121e
+// contract digest 170b2b60f0518f937b6647a9e0d22ca806145af5cce1b938696720af5ba78996
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -106,6 +106,20 @@ impl<P> crate::responsibility::obligations::JudgeIdleIterationBehavior for Gener
     }
 }
 
+/// `commission.responsibility.JudgePerformableActions`, generated: every outcome is one the specification fully determines.
+impl<P> crate::responsibility::obligations::JudgePerformableActionsBehavior for Generated<P>
+{
+    fn judge_performable_actions(&mut self, input: crate::responsibility::JudgePerformableActions) -> Result<crate::responsibility::JudgePerformableActionsOutcome, UnmetObligation> {
+        let _ = &input;
+        // `unperformable`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(all(&[compare_numbers(Some(&input.performed).map(|value| value.to_string()), Some("0".to_owned()), core::cmp::Ordering::is_eq), compare_numbers(Some(&input.unperformed).map(|value| value.len().to_string()), Some("1".to_owned()), core::cmp::Ordering::is_ge)]), "commission.responsibility.JudgePerformableActions")? {
+            return Ok(crate::responsibility::JudgePerformableActionsOutcome::Unperformable { error: crate::responsibility::ActionsUnperformable { actions: input.unperformed.clone(), open_claims: input.open_claims.clone() } });
+        }
+        // `performable`: the default.
+        return Ok(crate::responsibility::JudgePerformableActionsOutcome::Performable);
+    }
+}
+
 impl<P: crate::responsibility::obligations::ReleaseSuspensionBehavior> crate::responsibility::obligations::ReleaseSuspensionBehavior for Generated<P> {
     fn release_suspension(&mut self, input: crate::responsibility::ReleaseSuspension) -> Result<crate::responsibility::ReleaseSuspensionOutcome, UnmetObligation> {
         crate::responsibility::obligations::ReleaseSuspensionBehavior::release_suspension(&mut self.ports, input)
@@ -190,6 +204,17 @@ fn undeclared(source: &'static str) -> UnmetObligation {
 /// A guard's truth, where it has one: Unknown selects no branch, so the model declares no outcome.
 fn decided(truth: Option<bool>, command: &'static str) -> Result<bool, UnmetObligation> {
     truth.ok_or_else(|| undeclared(command))
+}
+
+/// Three-valued conjunction: false wins, then Unknown.
+fn all(truths: &[Option<bool>]) -> Option<bool> {
+    if truths.contains(&Some(false)) {
+        Some(false)
+    } else if truths.contains(&None) {
+        None
+    } else {
+        Some(true)
+    }
 }
 
 /// Equality of two read values; an unread one is Unknown.

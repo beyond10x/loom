@@ -287,7 +287,7 @@ use crate::model::responsibility::{
     ReleaseSuspension, ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome,
     RevalidateActionRequestOutcome, Run, RunData, RunId, RunOutcome, RunOutcomeAwaitingApproval,
     RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeEffectRefused, RunOutcomeIdleBound,
-    RunOutcomeSuspended, RunStarted, RunStorageFailed, StartRun, StartRunOutcome, SuspendRun,
+    RunOutcomeNoPerformableAction, RunOutcomeSuspended, RunStarted, RunStorageFailed, StartRun, StartRunOutcome, SuspendRun,
     SuspendRunOutcome, SuspensionKey, SuspensionReason, SuspensionState, SuspensionStateConflict,
     TakeSuspension, TakeSuspensionOutcome, Unit, commission_state, frontier_state,
     observation_state,
@@ -1061,7 +1061,7 @@ where
         }
         track.last_frontier = Some(frontier.data().clone());
         if performs_none(&frontier, effects) {
-            return Ok(track.end(run_id, RunOutcome::NoPerformableAction(Unit(true))));
+            return Ok(track.end(run_id, unnamed_unperformable()));
         }
         // The frontier the executor is handed; the gate and the outcome read it too.
         let handed = offered(&frontier, effects);
@@ -1184,7 +1184,7 @@ where
             if admitted {
                 // Never hand the port an action it says it does not perform.
                 if !effects.performs(&data.action) {
-                    return Ok(track.end(run_id, RunOutcome::NoPerformableAction(Unit(true))));
+                    return Ok(track.end(run_id, unnamed_unperformable()));
                 }
                 // An action at its trial limit is not handed to the port again.
                 if let Some(breach) = run_budget
@@ -1947,6 +1947,15 @@ where
     })
 }
 
+/// `NoPerformableAction` naming no action and no claim yet: the specification gave the outcome its
+/// payload (`story:unperformable-names-actions`), and the runtime fills it in a later commit.
+fn unnamed_unperformable() -> RunOutcome {
+    RunOutcome::NoPerformableAction(RunOutcomeNoPerformableAction {
+        actions: Vec::new(),
+        open_claims: Vec::new(),
+    })
+}
+
 /// `CaseMovedOn` from the Run's revision `bound` to `loaded`.
 fn case_moved_on(bound: i64, loaded: i64) -> RunOutcome {
     RunOutcome::CaseMovedOn(RunOutcomeCaseMovedOn {
@@ -1985,7 +1994,7 @@ where
         return Ok(RunOutcome::NoAdmissibleAction(Unit(true)));
     }
     if performs_none(&frontier, effects) {
-        return Ok(RunOutcome::NoPerformableAction(Unit(true)));
+        return Ok(unnamed_unperformable());
     }
     let handed = offered(&frontier, effects);
     Ok(match derive(determination, &handed, reported, None) {

@@ -72,6 +72,10 @@
             "Refused",
             "StepBudget"
           ]
+        },
+        "unperformed_actions": {
+          "optional": true,
+          "type": "List<String>"
         }
       }
     },

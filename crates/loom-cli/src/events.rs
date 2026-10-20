@@ -101,6 +101,7 @@ impl EventStream {
                     protocol: Some(run.protocol.clone()),
                     steps: Some(i64::try_from(run.steps).unwrap_or(i64::MAX)),
                     error: None,
+                    unperformed_actions: None,
                 }
             }
             Err(error) => TerminalEvent {
@@ -109,6 +110,7 @@ impl EventStream {
                 protocol: None,
                 steps: None,
                 error: Some(error.to_owned()),
+                unperformed_actions: None,
             },
         };
         let status = u8::try_from(terminal.exit_status).unwrap_or(FAILED);
@@ -304,6 +306,7 @@ mod tests {
                 protocol: None,
                 steps: None,
                 error: Some("no login".into()),
+                unperformed_actions: None,
             }),
         });
         assert_eq!(

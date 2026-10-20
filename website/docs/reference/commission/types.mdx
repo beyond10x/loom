@@ -84,7 +84,7 @@ Tagged by `kind`.
 | `NeedsExternalEvidence` | [`RunOutcomeNeedsExternalEvidence`](#runoutcomeneedsexternalevidence) |
 | `NeedsHumanJudgment` | [`RunOutcomeNeedsHumanJudgment`](#runoutcomeneedshumanjudgment) |
 | `NoAdmissibleAction` | none |
-| `NoPerformableAction` | none |
+| `NoPerformableAction` | [`RunOutcomeNoPerformableAction`](#runoutcomenoperformableaction) |
 | `Suspended` | [`RunOutcomeSuspended`](#runoutcomesuspended) |
 
 ### SuspensionReason
@@ -326,6 +326,13 @@ Tagged by `kind`.
 | Field | Type |
 |---|---|
 | `request` | [`HumanDecisionRequest`](#humandecisionrequest) |
+
+### RunOutcomeNoPerformableAction
+
+| Field | Type |
+|---|---|
+| `actions` | list of `string` |
+| `open_claims` | list of `string` |
 
 ### RunOutcomeSuspended
 

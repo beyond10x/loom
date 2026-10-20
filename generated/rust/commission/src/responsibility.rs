@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest e9437a6cbbf5f15c726617ea201063d6ccd75146e1c90c4840f04720a2ca6fb5
-// contract digest 02850b7968172d53983b13b09f1ed99fa07041b914715b721bc0cfbabe8649bf
+// model digest 22e4f2a529e6c0fca03f4ec58015ca8a05779db65158e508c18edf8c6030121e
+// contract digest 170b2b60f0518f937b6647a9e0d22ca806145af5cce1b938696720af5ba78996
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Responsibility — `commission.responsibility`.
@@ -566,8 +566,8 @@ pub enum RunOutcome {
     NeedsHumanJudgment(RunOutcomeNeedsHumanJudgment),
     /// Tagged `NoAdmissibleAction` — `commission.responsibility.Unit`.
     NoAdmissibleAction(Unit),
-    /// Tagged `NoPerformableAction` — `commission.responsibility.Unit`.
-    NoPerformableAction(Unit),
+    /// Tagged `NoPerformableAction` — `commission.responsibility.RunOutcomeNoPerformableAction`.
+    NoPerformableAction(RunOutcomeNoPerformableAction),
     /// Tagged `Suspended` — `commission.responsibility.RunOutcomeSuspended`.
     Suspended(RunOutcomeSuspended),
 }
@@ -630,6 +630,15 @@ pub struct RunOutcomeNeedsExternalEvidence {
 pub struct RunOutcomeNeedsHumanJudgment {
     /// `request` — `commission.responsibility.HumanDecisionRequest`.
     pub request: HumanDecisionRequest,
+}
+
+/// RunOutcomeNoPerformableAction — `commission.responsibility.RunOutcomeNoPerformableAction`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunOutcomeNoPerformableAction {
+    /// `actions` — `List<String>`.
+    pub actions: Vec<String>,
+    /// `open_claims` — `List<String>`.
+    pub open_claims: Vec<String>,
 }
 
 /// RunOutcomeSuspended — `commission.responsibility.RunOutcomeSuspended`.
@@ -2646,6 +2655,35 @@ pub enum JudgeIdleIterationOutcome {
     Below,
 }
 
+/// JudgePerformableActions — the input of `commission.responsibility.JudgePerformableActions`.
+///
+/// Everything it can result in is [`JudgePerformableActionsOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JudgePerformableActions {
+    /// `performed` — `Integer`.
+    pub performed: i64,
+    /// `unperformed` — `List<String>`.
+    pub unperformed: Vec<String>,
+    /// `open_claims` — `List<String>`.
+    pub open_claims: Vec<String>,
+}
+
+/// Everything `commission.responsibility.JudgePerformableActions` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JudgePerformableActionsOutcome {
+    /// `unperformable` — when `(performed == 0 and unperformed.count >= 1)`.
+    Unperformable {
+        /// Why it was refused: `commission.responsibility.ActionsUnperformable`.
+        error: ActionsUnperformable,
+    },
+    /// `performable` — otherwise.
+    Performable,
+}
+
 /// ReleaseSuspension — the input of `commission.responsibility.ReleaseSuspension`.
 ///
 /// Everything it can result in is [`ReleaseSuspensionOutcome`].
@@ -2970,6 +3008,15 @@ pub struct ActionRequestStale {
     pub current_case_revision: i64,
 }
 
+/// The declared error `commission.responsibility.ActionsUnperformable`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionsUnperformable {
+    /// `actions` — `List<String>`.
+    pub actions: Vec<String>,
+    /// `open_claims` — `List<String>`.
+    pub open_claims: Vec<String>,
+}
+
 /// The declared error `commission.responsibility.EffectRefusedFinal`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectRefusedFinal {
@@ -3127,6 +3174,17 @@ pub mod obligations {
         ///
         /// `Err` is the typed refusal of a request the model declares no outcome for.
         fn judge_idle_iteration(&mut self, input: super::JudgeIdleIteration) -> Result<super::JudgeIdleIterationOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `commission.responsibility.JudgePerformableActions` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait JudgePerformableActionsBehavior {
+        /// Decides and enacts exactly one declared outcome of `commission.responsibility.JudgePerformableActions`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn judge_performable_actions(&mut self, input: super::JudgePerformableActions) -> Result<super::JudgePerformableActionsOutcome, crate::obligation::UnmetObligation>;
     }
 
     /// The behaviour `commission.responsibility.ReleaseSuspension` — an implementation obligation.
