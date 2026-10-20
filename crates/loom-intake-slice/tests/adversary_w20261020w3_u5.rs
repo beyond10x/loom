@@ -250,6 +250,10 @@ fn skip(missing: &str) {
 }
 
 /// `None` once the case skipped because Substrate does not serve the aperture here.
+#[expect(
+    dead_code,
+    reason = "the ruled expectation is a refusal before launch, which never reaches the aperture"
+)]
 fn egress_result(result: Result<TestExecution, ConfinementError>) -> Option<TestExecution> {
     match result {
         Err(error)
@@ -428,16 +432,15 @@ fn adv_a_curl_ca_bundle_in_the_environment_overrides_the_named_trust_anchor() {
             .with_egress(aperture)
             .with_ca_bundle(&trusted);
 
-            let Some(result) = egress_result(runner.run_child(&child)) else {
-                return;
-            };
-            assert_eq!(
-                result.exit_code,
-                Some(60),
-                "the child must trust only the named `trusted` bundle and reject the \
-                 `other`-signed host; a CURL_CA_BUNDLE in the environment must not redirect its \
-                 trust anchor: {}",
-                result.output
+            // Coordinator ruling (fix round 1): such a launch is refused before it starts, which
+            // is stronger than the child failing verification. Only this expectation changed.
+            let error = runner
+                .run_child(&child)
+                .expect_err("a CURL_CA_BUNDLE beside the named bundle is refused before launch");
+            assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
+            assert!(
+                error.detail.contains("CURL_CA_BUNDLE"),
+                "the refusal names the variable: {error}"
             );
         },
     );
