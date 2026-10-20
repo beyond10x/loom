@@ -991,13 +991,32 @@ fn a_child_finds_the_snapshot_of_its_ca_bundle_through_ssl_cert_file() {
     );
 }
 
+/// The variables through which a TLS client takes another trust store than the bundle Substrate
+/// points `SSL_CERT_FILE` at, replacing or widening it; a child naming a bundle is refused when its
+/// environment names any of them.
+const TRUST_STORE_VARIABLES: [&str; 8] = [
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "CURL_CA_BUNDLE",
+    "CURL_CA_PATH",
+    "REQUESTS_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+    "GIT_SSL_CAINFO",
+    "GIT_SSL_CAPATH",
+];
+
+/// Substrate's ceiling on a certificate bundle, 1 MiB.
+const BUNDLE_CEILING: usize = 1024 * 1024;
+
 /// A CA bundle the host cannot name is refused `ScopeInvalid` before anything starts, naming the
 /// path: a relative path, one that does not exist, a symbolic link (to a regular file too, as
-/// Substrate's daemon refuses one), a directory, a socket, an empty file and one this process
-/// cannot read; a bundle named without an egress aperture, which would trust nothing the child
-/// can reach; and a bundle beside an environment naming `SSL_CERT_FILE`, which Substrate would
-/// replace. Each refusal leaves the workspace as it was, without `target`. A well-named bundle
-/// beside an aperture gets past every check, to the missing backend.
+/// Substrate's daemon refuses one), a directory, a socket, a FIFO (refused without waiting for a
+/// writer), an empty file, one larger than Substrate's 1 MiB and one this process cannot read; a
+/// bundle named without an egress aperture, which would trust nothing the child can reach; and a
+/// bundle beside an environment naming any variable that replaces or widens a TLS client's trust
+/// store ([`TRUST_STORE_VARIABLES`]), the refusal naming the variable. Each refusal leaves the
+/// workspace as it was, without `target`. A well-named bundle beside an aperture, one of exactly
+/// 1 MiB included, gets past every check, to the missing backend.
 #[test]
 fn a_ca_bundle_the_host_cannot_name_is_refused_before_anything_starts() {
     use std::os::unix::fs::PermissionsExt as _;
@@ -1008,6 +1027,14 @@ fn a_ca_bundle_the_host_cannot_name_is_refused_before_anything_starts() {
     std::fs::create_dir(&anchors).unwrap();
     let bundle = anchors.join("bundle.pem");
     std::fs::write(&bundle, "anchor\n").unwrap();
+    let largest = anchors.join("largest.pem");
+    std::fs::write(&largest, vec![b'a'; BUNDLE_CEILING]).unwrap();
+    std::fs::write(anchors.join("large.pem"), vec![b'a'; BUNDLE_CEILING + 1]).unwrap();
+    let fifo = anchors.join("fifo.pem");
+    let fifo_made = Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .is_ok_and(|status| status.success());
     std::fs::write(anchors.join("empty.pem"), "").unwrap();
     std::os::unix::fs::symlink(&bundle, anchors.join("link.pem")).unwrap();
     let _socket = UnixListener::bind(anchors.join("socket")).unwrap();
@@ -1031,16 +1058,23 @@ fn a_ca_bundle_the_host_cannot_name_is_refused_before_anything_starts() {
         (anchors.clone(), child(), "no regular file"),
         (anchors.join("socket"), child(), "no regular file"),
         (anchors.join("empty.pem"), child(), "empty"),
+        (anchors.join("large.pem"), child(), "more than"),
         (bundle.clone(), plain(), "no egress aperture"),
-        (
-            bundle.clone(),
-            child().with_environment(ExecEnvironment {
-                allow: Vec::new(),
-                set: BTreeMap::from([("SSL_CERT_FILE".to_owned(), "/workspace/ca.pem".to_owned())]),
-            }),
-            "SSL_CERT_FILE",
-        ),
     ];
+    for variable in TRUST_STORE_VARIABLES {
+        let environment = ExecEnvironment {
+            allow: Vec::new(),
+            set: BTreeMap::from([(variable.to_owned(), "/workspace/ca.pem".to_owned())]),
+        };
+        refused.push((
+            bundle.clone(),
+            child().with_environment(environment),
+            variable,
+        ));
+    }
+    if fifo_made {
+        refused.push((fifo.clone(), child(), "no regular file"));
+    }
     if unreadable_here {
         refused.push((unreadable.clone(), child(), "cannot be read"));
     }
@@ -1063,16 +1097,73 @@ fn a_ca_bundle_the_host_cannot_name_is_refused_before_anything_starts() {
     }
     assert!(!ran.exists(), "nothing ran");
 
-    let error = runner
-        .run_child(&child().with_ca_bundle(&bundle))
-        .unwrap_err();
     let expected = if bubblewrap_present() {
         ConfinementRefusal::CgroupUndelegated
     } else {
         ConfinementRefusal::BackendMissing
     };
-    assert_eq!(error.reason, expected, "{error}");
+    for accepted in [&bundle, &largest] {
+        let error = runner
+            .run_child(&child().with_ca_bundle(accepted))
+            .unwrap_err();
+        assert_eq!(error.reason, expected, "{accepted:?}: {error}");
+    }
     assert!(!ran.exists(), "nothing ran");
+}
+
+/// A bundle path the host named and then swapped for a symbolic link before the launch is never
+/// followed: the launch reads the bundle once, through an open that follows no link, so it is
+/// refused `ScopeInvalid` and nothing starts. The child never sees the link's target, either in
+/// that launch or in the next one, which reads the regular file put back and trusts its bytes as
+/// read then.
+#[test]
+fn a_bundle_swapped_for_a_link_after_it_was_named_is_never_followed() {
+    delegated(
+        "a_bundle_swapped_for_a_link_after_it_was_named_is_never_followed",
+        |runner, workspace| {
+            let (_host, address) = loopback_host();
+            let anchors = tempfile::tempdir().unwrap();
+            let bundle = anchors.path().join("bundle.pem");
+            let elsewhere = anchors.path().join("elsewhere.pem");
+            std::fs::write(&bundle, "named anchor\n").unwrap();
+            std::fs::write(&elsewhere, "link target\n").unwrap();
+            let read = ChildCommand::new("sh", ["-c", "cat \"$SSL_CERT_FILE\""], workspace)
+                .with_egress(model_aperture(address))
+                .with_ca_bundle(&bundle);
+            let Some(first) = egress_result(runner.run_child(&read)) else {
+                return;
+            };
+            assert_eq!(
+                (first.exit_code, first.output.as_str()),
+                (Some(0), "named anchor\n")
+            );
+
+            std::fs::remove_file(&bundle).unwrap();
+            std::os::unix::fs::symlink(&elsewhere, &bundle).unwrap();
+            let marker = workspace.join("target/ran");
+            let swapped = ChildCommand::new(
+                "sh",
+                ["-c", "cat \"$SSL_CERT_FILE\"; touch target/ran"],
+                workspace,
+            )
+            .with_egress(model_aperture(address))
+            .with_ca_bundle(&bundle);
+            let error = runner
+                .run_child(&swapped)
+                .expect_err("a bundle swapped for a link is refused");
+            assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
+            assert!(error.detail.contains("symbolic link"), "{error}");
+            assert!(!marker.exists(), "nothing started");
+
+            std::fs::remove_file(&bundle).unwrap();
+            std::fs::write(&bundle, "put back\n").unwrap();
+            let after = runner.run_child(&read).expect("the child runs confined");
+            assert_eq!(
+                (after.exit_code, after.output.as_str()),
+                (Some(0), "put back\n")
+            );
+        },
+    );
 }
 
 /// Wait until the child running on `handle` created `marker`.
