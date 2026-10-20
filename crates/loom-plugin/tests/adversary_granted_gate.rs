@@ -46,8 +46,9 @@ fn a_proposal_on_the_last_budgeted_step_ends_the_turn_proposed() {
 
     assert_eq!(
         seen.lock().unwrap().len(),
-        TURN_STEP_BUDGET,
-        "precondition: one model turn per step, the proposal on the last"
+        2 * TURN_STEP_BUDGET,
+        "precondition: two model requests per step, a selection and its arguments, the \
+         proposal on the last"
     );
     assert_eq!(ended.reads.len(), TURN_STEP_BUDGET - 1, "{ended:?}");
     assert_eq!(

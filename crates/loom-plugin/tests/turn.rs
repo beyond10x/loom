@@ -1,7 +1,7 @@
 //! Acceptance for `story:plugin-host`, the governed turn: `turn::turn` on a case of
-//! `inbound-answer@1`, Loom's model loop on a scripted model port (each turn answers the next call
-//! of its script and keeps the request), `PluginAuthority`, and `DataSourceEffects` reading the
-//! fake `connectors` of `loom-connectors`.
+//! `inbound-answer@1`, Loom's chooser path on a scripted model (each step's selection and its
+//! arguments answer the next entry of its script, and every request is kept), `PluginAuthority`,
+//! and `DataSourceEffects` reading the fake `connectors` of `loom-connectors`.
 
 mod support;
 
@@ -53,26 +53,40 @@ fn turn_reaches_proposed_on_a_fixture_source() {
     assert_eq!(invokes.len(), 1, "one read, invoked once: {invokes:?}");
     assert!(invokes[0].contains(&LIST.to_owned()), "{invokes:?}");
     let requests = seen.lock().unwrap().clone();
-    assert_eq!(requests.len(), 2, "one model turn per step");
+    assert_eq!(
+        requests.len(),
+        4,
+        "two model requests per step: a selection, then its arguments"
+    );
     let tools: Vec<String> = requests[0]
         .tools
         .iter()
         .map(|tool| tool.name.as_str().to_owned())
         .collect();
+    assert_eq!(tools, ["select_action"], "a step starts with a selection");
+    let mut candidates: Vec<String> =
+        requests[0].tools[0].input_schema["properties"]["action"]["enum"]
+            .as_array()
+            .expect("the candidates")
+            .iter()
+            .map(|action| action.as_str().unwrap_or_default().to_owned())
+            .collect();
+    candidates.sort();
     assert_eq!(
-        tools,
-        ["reply_decline", "reply_propose", "source_read"],
+        candidates,
+        ["reply.decline", "reply.propose", "source.read"],
         "the frontier's catalogue, nothing else"
     );
     // `has_more` is only in the read's answer (`invoke-read.json`), never in the item.
     assert!(
-        !request_text(&requests[0]).contains("has_more"),
+        !request_text(&requests[0]).contains("has_more")
+            && !request_text(&requests[1]).contains("has_more"),
         "the first step has read nothing"
     );
-    let second = request_text(&requests[1]);
+    let second = request_text(&requests[2]);
     assert!(
-        second.contains("source.read chat list") && second.contains("\"has_more\":false"),
-        "the second step is told the read's answer:\n{second}"
+        second.contains("source.read chat list") && second.contains(r#"\"has_more\":false"#),
+        "the second step is told the read's answer, as data:\n{second}"
     );
 }
 
@@ -107,8 +121,8 @@ fn a_turn_that_only_reads_stops_at_its_budget() {
     assert_eq!(fixture.runs("invoke").len(), TURN_STEP_BUDGET);
     assert_eq!(
         seen.lock().unwrap().len(),
-        TURN_STEP_BUDGET,
-        "no model turn past the budget"
+        2 * TURN_STEP_BUDGET,
+        "two model requests per step, none past the budget"
     );
 }
 

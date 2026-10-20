@@ -1,5 +1,7 @@
-//! `b10x-loom` runs on the SDK's llm-backed model port (`loom_sdk::llm::LlmModelPort`) and defines
-//! none of its own. The CLI's source is read at run time from the tree the test runs in.
+//! `b10x-loom` defines no model port of its own and builds none: a plugin turn runs on the agent's
+//! llm `Model` itself, through Loom's chooser path (`story:chooser-executor-for-plugin-turns`). The
+//! SDK still ships its llm-backed port (`loom_sdk::llm::LlmModelPort`) for a host that runs the
+//! ported loop. The CLI's source is read at run time from the tree the test runs in.
 
 use std::fs;
 use std::path::PathBuf;
@@ -13,9 +15,10 @@ fn crate_file(relative: &str) -> PathBuf {
     PathBuf::from(manifest).join(relative)
 }
 
-/// `b10x-loom` runs on the SDK's llm-backed port and defines no model port of its own.
+/// `b10x-loom` defines no model port of its own and names no `LlmModelPort`; the SDK's port is
+/// still a model port.
 #[test]
-fn the_cli_runs_on_the_sdk_llm_port() {
+fn the_cli_defines_and_builds_no_model_port() {
     fn is_a_model_port<T: ModelPort>() {}
     is_a_model_port::<loom_sdk::llm::LlmModelPort>();
 
@@ -35,17 +38,17 @@ fn the_cli_runs_on_the_sdk_llm_port() {
             }
         }
     }
+    assert!(!sources.is_empty(), "the CLI's source files are read");
     for (path, source) in &sources {
         assert!(
             !source.contains("impl ModelPort for"),
             "{} defines a model port of its own",
             path.display()
         );
+        assert!(
+            !source.contains("LlmModelPort"),
+            "{} builds the SDK's harness bridge; a turn runs on the llm Model itself",
+            path.display()
+        );
     }
-    assert!(
-        sources
-            .iter()
-            .any(|(_, source)| source.contains("loom_sdk::llm::LlmModelPort")),
-        "the CLI names the SDK's llm-backed port"
-    );
 }

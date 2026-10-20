@@ -1,7 +1,8 @@
 //! Acceptance for `story:slack-plugin`, the command line: `b10x-loom plugin run slack-handler
 //! --config <file> --state <dir> --once` runs the fixture run, `plugin report` prints one line per
 //! proposal, an unknown plugin name is refused naming the registered ones, and the turn's model is
-//! built from a catalog route alias (story `plugin-host`'s carried bridge).
+//! built from a catalog route alias, Loom's chooser path asking it directly
+//! (`story:chooser-executor-for-plugin-turns`).
 //!
 //! Every case runs the binary. The Slack and `docs` reads go to the fake `connectors` of
 //! `loom-connectors`, answering from `loom-plugin-slack`'s fixtures (one channel: a mention asking
@@ -28,19 +29,23 @@ const CLASSIFIER: &str = "example/Classifier-Model";
 const AGENT: &str = "example/Agent-Model";
 
 /// The responses of the fixture run, in the order its requests are sent: each item is classified
-/// and answered before the next; an answer is one read and one proposal, a task one protocol pick.
+/// and answered before the next; an answer is one read and one proposal, each step a selection
+/// and then its arguments, a task one protocol pick.
 fn recorded() -> Vec<Vec<u8>> {
     let read = |query: &str| json!({"source": "docs", "kind": "search", "input": {"query": query}});
+    let select = |action: &str| sse(AGENT, "select_action", json!({ "action": action }));
     vec![
         sse(
             CLASSIFIER,
             "classify_item",
             json!({"intent": "ask", "hints": ["docs"], "confidence": 0.9}),
         ),
-        sse(AGENT, "source_read", read("rotate deploy key")),
+        select("source.read"),
+        sse(AGENT, "action_arguments", read("rotate deploy key")),
+        select("reply.propose"),
         sse(
             AGENT,
-            "reply_propose",
+            "action_arguments",
             json!({"text": "Rotate it with the deploy-key runbook (runbooks/deploy-key.md)."}),
         ),
         sse(
@@ -48,10 +53,12 @@ fn recorded() -> Vec<Vec<u8>> {
             "classify_item",
             json!({"intent": "find", "hints": ["docs"], "confidence": 0.85}),
         ),
-        sse(AGENT, "source_read", read("staging database runbook")),
+        select("source.read"),
+        sse(AGENT, "action_arguments", read("staging database runbook")),
+        select("reply.propose"),
         sse(
             AGENT,
-            "reply_propose",
+            "action_arguments",
             json!({"text": "The staging database runbook is runbooks/staging-database.md."}),
         ),
         sse(
@@ -84,7 +91,7 @@ fn plugin_run_slack_handler_once() {
     assert!(printed[2].starts_with(&format!("{TASK} proposed_case task case=software-change@1")));
     let record = fs::read_to_string(scratch.state().join("record.jsonl")).unwrap();
     assert_eq!(record.lines().count(), 3, "{record}");
-    assert_eq!(server.join().expect("the server finished").len(), 8);
+    assert_eq!(server.join().expect("the server finished").len(), 12);
     let invoked: Vec<String> = scratch
         .argv()
         .iter()
@@ -108,8 +115,8 @@ fn plugin_run_slack_handler_once() {
 }
 
 /// The classifier route serves each classification and the task's pick, and the agent route
-/// each turn request, which publishes the turn's actions as tools: the turn's model is the
-/// catalog's, through the bridge to the harness model port.
+/// each turn request: a selection among the turn's actions, then the selected action's
+/// arguments. The turn's model is the catalog's, asked directly.
 #[test]
 fn plugin_run_builds_the_turn_model_from_the_catalog() {
     let scratch = Scratch::new("turn-model");
@@ -156,22 +163,36 @@ fn plugin_run_builds_the_turn_model_from_the_catalog() {
     assert_eq!(
         models,
         [
-            CLASSIFIER, AGENT, AGENT, CLASSIFIER, AGENT, AGENT, CLASSIFIER, CLASSIFIER
+            CLASSIFIER, AGENT, AGENT, AGENT, AGENT, CLASSIFIER, AGENT, AGENT, AGENT, AGENT,
+            CLASSIFIER, CLASSIFIER
         ]
     );
-    let turn_tools = ["reply_decline", "reply_propose", "source_read"];
-    for (model, tools, body) in &calls {
+    let turn_tools: Vec<&str> = calls
+        .iter()
+        .filter(|(model, _, _)| model == AGENT)
+        .flat_map(|(_, tools, _)| tools.iter().map(String::as_str))
+        .collect();
+    assert_eq!(
+        turn_tools,
+        ["select_action", "action_arguments"].repeat(4),
+        "each step selects, then writes the selected action's arguments"
+    );
+    for (model, _, body) in &calls {
         if model == AGENT {
-            let mut tools = tools.clone();
-            tools.sort();
-            assert_eq!(tools, turn_tools, "a turn publishes the frontier's actions");
             assert!(body.contains("inbound-answer@1"), "the turn's instructions");
         }
     }
+    for action in ["reply.decline", "reply.propose", "source.read"] {
+        assert!(
+            calls[1].2.contains(&format!("\"{action}\"")),
+            "the first selection offers the frontier's {action}: {}",
+            calls[1].2
+        );
+    }
     assert!(
-        calls[2].2.contains("Rotating the deploy key"),
+        calls[3].2.contains("Rotating the deploy key"),
         "the second step of the first turn is told the read it made: {}",
-        calls[2].2
+        calls[3].2
     );
 }
 
@@ -318,7 +339,7 @@ fn plugin_run_stops_on_sigterm() {
         3,
         "it prints what it recorded:\n{stdout}"
     );
-    assert_eq!(server.join().expect("the server finished").len(), 8);
+    assert_eq!(server.join().expect("the server finished").len(), 12);
 }
 
 // ---------------------------------------------------------------------------------------------
