@@ -72,6 +72,7 @@ use crate::harness::wire::{
     ToolCall, ToolName, ToolOutcome, ToolPort, ToolSpec, TurnOutcome, TurnRequest, WireError,
     WireId,
 };
+use crate::metering::{MeteredModelPort, RunMeter};
 use crate::model::behaviour::{SelectionStorage, SessionStorage};
 use crate::model::run::obligations::{
     FileSessionBehavior, OpenSessionBehavior, RecordTurnBehavior, ResumeSessionBehavior,
@@ -1297,5 +1298,97 @@ where
             }) if moved => case_moved(frontier.data().case_revision),
             outcome => outcome,
         }
+    }
+}
+
+/// The loop's own [`ModelPort`], metered into a run by a [`MeteredModelPort`] until the port is
+/// deleted (`story:metering-on-llm-model`): each `turn` is one call, counted before the turn runs,
+/// of the step of the executor call running on this thread, else of step 0, and a turn through a
+/// fork is a call of the step the fork was made in, on whichever thread it turns. An answer's
+/// usage is priced against the model it names, as an llm usage whose counts are all known and
+/// final; a turn that failed or unwound adds no tokens and leaves the cost absent.
+impl<M: ModelPort> ModelPort for MeteredModelPort<M> {
+    fn wire(&self) -> &WireId {
+        self.inner.wire()
+    }
+
+    fn turn(
+        &mut self,
+        request: &TurnRequest,
+        sink: &mut dyn StreamSink,
+    ) -> Result<TurnOutcome, WireError> {
+        let step = self.meter.step_here(0);
+        metered_turn(&mut self.inner, &self.meter, step, request, sink)
+    }
+
+    fn fork(&self) -> Option<Box<dyn ModelPort + Send + '_>> {
+        let fork = self.inner.fork()?;
+        Some(Box::new(MeteredFork {
+            inner: fork,
+            meter: self.meter.clone(),
+            step: self.meter.step_here(0),
+        }))
+    }
+}
+
+/// One metered `turn` of `port`, counted in `step`.
+fn metered_turn(
+    port: &mut (impl ModelPort + ?Sized),
+    meter: &RunMeter,
+    step: usize,
+    request: &TurnRequest,
+    sink: &mut dyn StreamSink,
+) -> Result<TurnOutcome, WireError> {
+    let call = meter.begin(step);
+    let outcome = port.turn(request, sink);
+    let reported = outcome
+        .as_ref()
+        .ok()
+        .and_then(|answer| answer.usage.as_ref());
+    let usage = reported.map(|usage| llm_core::Usage {
+        input_tokens: Some(usage.input_tokens),
+        output_tokens: Some(usage.output_tokens),
+        cached_input_tokens: Some(usage.cached_input_tokens),
+        cache_creation_input_tokens: usage.cache_creation_input_tokens,
+        reasoning_output_tokens: None,
+    });
+    call.settle(
+        reported
+            .zip(usage.as_ref())
+            .map(|(reported, usage)| (reported.model.as_str(), usage)),
+    );
+    outcome
+}
+
+/// A fork of a metered port, metered into the same run.
+struct MeteredFork<'a> {
+    inner: Box<dyn ModelPort + Send + 'a>,
+    meter: RunMeter,
+    /// The step of the executor call the fork was made in: 0 when none ran.
+    step: usize,
+}
+
+impl ModelPort for MeteredFork<'_> {
+    fn wire(&self) -> &WireId {
+        self.inner.wire()
+    }
+
+    /// A call of the executor call running on this thread, else of the one the fork was made in.
+    fn turn(
+        &mut self,
+        request: &TurnRequest,
+        sink: &mut dyn StreamSink,
+    ) -> Result<TurnOutcome, WireError> {
+        let step = self.meter.step_here(self.step);
+        metered_turn(&mut *self.inner, &self.meter, step, request, sink)
+    }
+
+    fn fork(&self) -> Option<Box<dyn ModelPort + Send + '_>> {
+        let fork = self.inner.fork()?;
+        Some(Box::new(MeteredFork {
+            inner: fork,
+            meter: self.meter.clone(),
+            step: self.meter.step_here(self.step),
+        }))
     }
 }
