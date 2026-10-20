@@ -30,7 +30,8 @@ use b10x_loom_commission::model::responsibility::{
     ExecutorOutcome, ExecutorOutcomeProposedAction, Frontier, FrontierAction, FrontierData,
     ObservationData, ObservationId, PrincipalId, ProposedActionArguments,
     RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeAwaitingApproval,
-    RunOutcomeCompleted, RunOutcomeNeedsAuthority, Unit, commission_state, frontier_state,
+    RunOutcomeCompleted, RunOutcomeIdleBound, RunOutcomeNeedsAuthority, Unit, commission_state,
+    frontier_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
@@ -534,7 +535,10 @@ fn unbound_ungated_action_is_never_handed_to_the_executor() {
         "{name}: the same frontier, less the unbound action"
     );
     assert!(ran.invoked.is_empty(), "{name}: {:?}", ran.invoked);
-    assert_eq!(end.outcome, RunOutcome::NoAdmissibleAction(Unit(true)));
+    assert_eq!(
+        end.outcome,
+        RunOutcome::IdleBound(RunOutcomeIdleBound { idle_iterations: 2 })
+    );
 }
 
 /// 3. A frontier whose only action is unbound and ungated ends `NoPerformableAction`, and nothing

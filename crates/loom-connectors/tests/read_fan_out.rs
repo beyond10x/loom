@@ -26,8 +26,8 @@ use b10x_loom_commission::model::responsibility::{
     ConnectorAuditRef, ConnectorCredentialRef, ConnectorEndpoint, ConnectorEndpointData,
     ConnectorEndpointUrl, ConnectorInstanceId, ConnectorOperationEffect, ConnectorOperationId,
     EffectOutcome, ExecutorOutcome, ExecutorOutcomeProposedAction, ExecutorOutcomeProposedReads,
-    FrontierAction, ObservationId, PrincipalId, ProposedActionArguments, RunId, RunOutcome, Unit,
-    action_binding_state, commission_state, connector_endpoint_state,
+    FrontierAction, ObservationId, PrincipalId, ProposedActionArguments, RunId, RunOutcome,
+    RunOutcomeIdleBound, action_binding_state, commission_state, connector_endpoint_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::connector::ConnectorEffects;
@@ -469,5 +469,8 @@ fn a_fan_out_listing_a_bound_write_invokes_nothing() {
 
     assert_eq!(service.invocations().len(), 0, "nothing invoked");
     assert!(end.requests.is_empty(), "{:?}", end.requests);
-    assert_eq!(end.outcome, RunOutcome::NoAdmissibleAction(Unit(true)));
+    assert_eq!(
+        end.outcome,
+        RunOutcome::IdleBound(RunOutcomeIdleBound { idle_iterations: 2 })
+    );
 }

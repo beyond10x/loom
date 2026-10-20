@@ -22,8 +22,8 @@ use b10x_loom_commission::model::responsibility::{
     CommissionId, EffectOutcome, EffectOutcomePerformed, EffectOutcomeRefused, ExecutorOutcome,
     ExecutorOutcomeProposedAction, ExecutorOutcomeProposedReads, FrontierAction, ObservationId,
     PrincipalId, ProposedActionArguments, RevalidateActionRequestOutcome, RunId, RunOutcome,
-    RunOutcomeCaseMovedOn, RunOutcomeEffectRefused, RunOutcomeNeedsAuthority, RunState, Unit,
-    commission_state,
+    RunOutcomeCaseMovedOn, RunOutcomeEffectRefused, RunOutcomeIdleBound, RunOutcomeNeedsAuthority,
+    RunState, Unit, commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{
@@ -349,8 +349,8 @@ fn a_final_refusal_ends_a_budgeted_run_at_once() {
 }
 
 /// A refusal not marked final is an ordinary one, as on 0.26.0: the loop goes on, a repeated
-/// refused proposal is idle, and two idle iterations in a row end the run with no admissible
-/// action. The reason does not reach the outcome.
+/// refused proposal is idle, and two idle iterations in a row end the run on the idle bound
+/// (`IdleBound`, `story:idle-bound-outcome`). The reason does not reach the outcome.
 #[test]
 fn an_ordinary_refusal_still_counts_idle() {
     let case = CaseId("case-ordinary-refusal".to_owned());
@@ -363,7 +363,7 @@ fn an_ordinary_refusal_still_counts_idle() {
 
     assert_eq!(
         end.outcome,
-        RunOutcome::NoAdmissibleAction(Unit(true)),
+        RunOutcome::IdleBound(RunOutcomeIdleBound { idle_iterations: 2 }),
         "an ordinary refusal ends the run on the idle bound"
     );
     assert_eq!(
