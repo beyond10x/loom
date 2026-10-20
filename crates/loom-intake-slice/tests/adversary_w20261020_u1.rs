@@ -59,18 +59,21 @@ fn route(catalog: &ProtocolCatalog, without: Option<&str>) -> AcceptedRoute {
     }
 }
 
-/// The paragraph that names `protocol` and carries a `Breaking:` sentence, in the newest CHANGELOG
-/// section that has one: `[Unreleased]` while the change is unreleased, the release's own section
-/// once a release commit moved the entries under it.
+/// The paragraph whose `Breaking:` sentence names `protocol`, in the newest CHANGELOG section that
+/// has one: `[Unreleased]` while the change is unreleased, the release's own section once a release
+/// commit moved the entries under it. A later paragraph that only mentions `protocol` (an example in
+/// another change) is not the one announcing it.
 fn newest_paragraph_naming(protocol: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../CHANGELOG.md");
     let text = std::fs::read_to_string(&path).expect("CHANGELOG.md");
     text.split("\n## [")
         .skip(1)
         .find_map(|section| {
-            section
-                .split("\n\n")
-                .find(|paragraph| paragraph.contains(protocol) && paragraph.contains("Breaking:"))
+            section.split("\n\n").find(|paragraph| {
+                paragraph
+                    .split_once("Breaking:")
+                    .is_some_and(|(_, breaking)| breaking.contains(protocol))
+            })
         })
         .unwrap_or_else(|| {
             panic!("no CHANGELOG paragraph names {protocol} with a Breaking sentence")
