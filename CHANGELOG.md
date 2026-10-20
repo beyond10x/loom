@@ -12,18 +12,21 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 `NoPerformableAction` names what no effect performs (`story:unperformable-names-actions`). The run
 outcome carries `RunOutcomeNoPerformableAction`: `actions`, the actions the run needed performed
 that the effect port does not perform, each once, in frontier order (every action of a frontier
-the port performs none of, before the executor runs or after a move the governor bears out, or the
-one action of an admitted request the port does not perform), and `open_claims`, the claims of
-that frontier whose value is not `True`, in frontier order. The frontier relates no action to a
-claim, so the claims are the frontier's and not any one action's; Loom decides nothing about who
-performs them. The runtime decides it with `outcome::judge_performable`, the behaviour ESS
-generates for the new command `JudgePerformableActions`; when a run ends so does not change. The
+the port performs none of, before the executor runs or after a move, or the one action of an
+admitted request the port does not perform), and `open_claims`, the claims of that frontier whose
+value is not `True`, in frontier order. The frontier relates no action to a claim, so the claims
+are the frontier's and not any one action's; Loom decides nothing about who performs them. The
+runtime decides it with `outcome::judge_performable`, the behaviour ESS generates for the new
+command `JudgePerformableActions`. A move the runtime finds after a stale proposal onto a frontier
+the port performs none of now ends `NoPerformableAction`, naming them, as a move the governor
+bears out already did, where 0.28.0 ended it `NoAdmissibleAction`; no other run ends differently. The
 intake slice's `SliceRun::unperformed` carries the actions of a `NoLocalExecutor` stop, and the
 `run --output jsonl` terminal record of such a stop carries them as `unperformed_actions`, a new
 optional field within schema version 1: on the binary's route, every action of the picked protocol
 the run has no executor for, in the protocol's order. The human stop line does not change.
 Breaking: a host that builds or matches `RunOutcome::NoPerformableAction` with `Unit` uses
-`RunOutcomeNoPerformableAction`, and a host that builds `SliceRun` sets `unperformed`.
+`RunOutcomeNoPerformableAction`, a host that builds `SliceRun` sets `unperformed`, and a host that
+read `NoAdmissibleAction` after a found move onto such a frontier reads `NoPerformableAction`.
 
 ## [0.28.0] - 2026-10-20
 

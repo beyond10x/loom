@@ -25,11 +25,13 @@
 //! 2. [`Governor::completion`]: a case the governor holds complete ends the run completed, carrying
 //!    the governor's outcome, and the iteration makes no further call. Otherwise, when the loaded
 //!    revision is not the one the loop holds the case at, the runtime has found a move itself (as
-//!    after a stale proposal, 8): the frontier is read ([`Governor::frontier`]), and the run ends
-//!    `CaseMovedOn` when that frontier is for the loaded revision and, as the executor would be
-//!    handed it (6), admits an action, naming the Run's revision and the loaded one
-//!    (`story:moved-run-named-outcome`); otherwise with no admissible action. The executor is not
-//!    run;
+//!    after a stale proposal, 8): the frontier is read ([`Governor::frontier`]). A frontier for
+//!    another revision than the loaded one ends the run with no admissible action; one that lists
+//!    actions, none of which the effect port performs, with `NoPerformableAction`, naming them and
+//!    that frontier's open claims as in 4, as a move the governor bears out does (9); the run ends
+//!    `CaseMovedOn` when that frontier, as the executor would be handed it (6), admits an action,
+//!    naming the Run's revision and the loaded one (`story:moved-run-named-outcome`); otherwise
+//!    with no admissible action. The executor is not run;
 //! 3. [`Governor::frontier`]: the frontier is obtained ([`LoopEnd::last_frontier`]). When it is for
 //!    another revision than the one held, the run ends with no admissible action, so every request
 //!    carries the held revision;
@@ -1971,9 +1973,12 @@ where
 }
 
 /// How a run ends whose case the runtime found moved to `loaded` when it loaded it (item 2), the
-/// governor not holding it complete (`determination`): `CaseMovedOn` when the frontier current then
-/// is for `loaded` and, as the executor would be handed it, admits an action; otherwise with no
-/// admissible action. The Run is bound to `bound`, its own revision.
+/// governor not holding it complete (`determination`): with no admissible action when the frontier
+/// current then is for another revision than `loaded`; `NoPerformableAction` when it lists
+/// actions, none of which the effect port performs, naming them and its open claims as a move the
+/// governor bears out does (item 9, `story:unperformable-names-actions`); `CaseMovedOn` when, as
+/// the executor would be handed it, it admits an action; otherwise with no admissible action. The
+/// Run is bound to `bound`, its own revision.
 fn found_moved<G, F>(
     governor: &G,
     effects: &F,
@@ -1981,22 +1986,29 @@ fn found_moved<G, F>(
     bound: i64,
     loaded: i64,
     determination: &CompletionDetermination,
-) -> Result<RunOutcome, GovernorError>
+) -> Result<RunOutcome, LoopFailure>
 where
     G: Governor + ?Sized,
     F: EffectPort + ?Sized,
 {
     let frontier = governor.frontier(case)?;
-    let admits = frontier.data().case_revision == loaded
-        && matches!(
-            derive(
-                determination,
-                &offered(&frontier, effects),
-                &ExecutorOutcome::NoUsefulAction(Unit(true)),
-                None,
-            ),
-            Derived::Continue
-        );
+    if frontier.data().case_revision != loaded {
+        return Ok(RunOutcome::NoAdmissibleAction(Unit(true)));
+    }
+    if let Some(ended) =
+        unperformable_end(listed_actions(frontier.data()), frontier.data(), effects)?
+    {
+        return Ok(ended);
+    }
+    let admits = matches!(
+        derive(
+            determination,
+            &offered(&frontier, effects),
+            &ExecutorOutcome::NoUsefulAction(Unit(true)),
+            None,
+        ),
+        Derived::Continue
+    );
     Ok(if admits {
         case_moved_on(bound, loaded)
     } else {
