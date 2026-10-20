@@ -423,6 +423,7 @@ dependencies = [
 name = "b10x-loom-executor"
 version = "0.29.0"
 dependencies = [
+ "b10x-llm-core",
  "b10x-llm-credentials",
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
