@@ -235,6 +235,9 @@ types:
   # moved to a revision whose frontier still admits an action; the run stays bound to its own
   # revision, and the caller starts a new run at the current one). story:refused-effect-ends-run adds
   # EffectRefused (the effect port refused an admitted request as final, `ends_run`).
+  # story:idle-bound-outcome adds IdleBound (a run with no step budget made no progress for as many
+  # iterations in a row as the idle bound allows, `JudgeIdleIteration`, `bound`, where it would
+  # otherwise go on); NoAdmissibleAction stays for a frontier that admits nothing.
   - name: commission.responsibility.RunOutcome
     kind: union
     tag: kind
@@ -249,6 +252,7 @@ types:
       NoPerformableAction: commission.responsibility.Unit
       CaseMovedOn: commission.responsibility.RunOutcomeCaseMovedOn
       EffectRefused: commission.responsibility.RunOutcomeEffectRefused
+      IdleBound: commission.responsibility.RunOutcomeIdleBound
 
   # The governor's outcome identifier, as the governor reports it.
   - name: commission.responsibility.RunOutcomeCompleted
@@ -301,6 +305,14 @@ types:
         type: commission.responsibility.ActionRequestId
       - name: reason
         type: String
+
+  # story:idle-bound-outcome: the idle iterations in a row that ended the run, as
+  # `JudgeIdleIteration` answers `bound` for them.
+  - name: commission.responsibility.RunOutcomeIdleBound
+    kind: struct
+    fields:
+      - name: idle_iterations
+        type: Integer
 
   # story:runtime-merge: the actions that need approval, in frontier order, on a frontier a step
   # left unchanged; none of them was denied by an authority verdict in the run.
@@ -1102,6 +1114,13 @@ errors:
       - name: reason
         type: String
 
+  # story:idle-bound-outcome: the run made no progress for as many iterations in a row as the idle
+  # bound allows, and cannot go on. It names how many.
+  - name: commission.responsibility.IdleBoundReached
+    fields:
+      - name: idle_iterations
+        type: Integer
+
 commands:
   - name: commission.responsibility.StartRun
     input:
@@ -1390,6 +1409,27 @@ commands:
             action_request_id: input.action_request_id
             reason: input.reason
       - name: ordinary
+        accepts: nothing
+
+  # story:idle-bound-outcome: whether a run with no step budget goes on after an iteration that made
+  # no progress: it admitted no request, or only requests with the action and arguments of ones
+  # already admitted in the Run, at whatever revision. `idle_iterations` counts such iterations in a
+  # row, this one included; a newly admitted request starts the count again, and a stale proposal
+  # is not counted, since the next iteration judges the move. Two end the run (`bound`), and the
+  # run outcome is `IdleBound`, naming the count as `bound` does; fewer change nothing. A run with a
+  # step budget is bounded by its budget alone and is never judged here.
+  - name: commission.responsibility.JudgeIdleIteration
+    input:
+      - name: idle_iterations
+        type: Integer
+    outcomes:
+      - name: bound
+        when: idle_iterations >= 2
+        error: commission.responsibility.IdleBoundReached
+        payload:
+          commission.responsibility.IdleBoundReached:
+            idle_iterations: input.idle_iterations
+      - name: below
         accepts: nothing
 
 events:
