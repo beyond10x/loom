@@ -25,24 +25,14 @@ scope:
 - confidence: cited
   path: crates/loom-intake-slice/src/resume.rs
 - confidence: cited
-  path: ess/SKIPPED.md
-- confidence: cited
   path: ess/domains/metering.yaml
-- confidence: cited
-  path: ess/domains/session.yaml
-- confidence: cited
-  path: ess/ess-inputs.yaml
 - confidence: cited
   path: ess/intake/domains/routing.yaml
 - confidence: cited
-  path: ess/system.yaml
-- confidence: cited
   path: generated/rust/intake
 - confidence: cited
-  path: generated/rust/loom
-- confidence: cited
   path: website/docs/reference
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T17:46:06Z", actor: "human:timo", revision: 5}
 - {from: "proposed", to: "active", at: "2026-10-20T17:46:07Z", actor: "human:timo", revision: 6}
