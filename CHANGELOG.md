@@ -115,6 +115,26 @@ record listing one is refused `CapabilityUnserved`, as any record that differs f
 Breaking: a host that builds Substrate's `AppliedConfinement`, the type of
 `TestExecution::driver_record`, sets `read_only_files`.
 
+A confined child writes the workspace paths the host names (`story:child-writable-workspace`), as
+a harness child editing its scratch copy, `git commit` in it or a forge command writing its state
+must. `ChildCommand::with_writable(path)`, repeatable, names a directory of the workspace, relative
+to it, that the child may write beside `target`; the child asks Substrate for exactly those paths
+and `target` through Substrate's own `WorkspaceAccess::Scoped`, so the rest of the workspace stays
+read-only, `.git` included unless the host names it. A path that is absolute, climbs out with `..`
+or is no plain relative path, one through a symbolic link, absent or no directory, a directory
+holding a socket, device or FIFO or a file also hard-linked outside the writable paths, a path
+inside `target` or inside another named path, and more than Substrate's 64 writable paths with
+`target` are refused `ScopeInvalid`, naming the path, before anything starts or `target` is
+created, so the workspace is left as it was. The applied confinement's `writable_scopes` lists the
+named paths beside `target` and the profile digest covers them; a record reporting another
+writable set, wider or narrower, is refused, as before. Substrate makes only directories writable,
+so a file at the workspace root cannot be named. A child that names no path, and every test
+through `TestRunner::run`, still writes only under `target`.
+`crates/loom-intake-slice/tests/confined_child.rs` holds it
+(`a_child_writes_only_the_paths_the_host_named`,
+`a_writable_path_outside_the_workspace_or_through_a_link_is_refused`).
+Breaking: none.
+
 ## [0.27.0] - 2026-10-20
 
 Loom 0.27.0 links engineering-protocols 0.9.0, tells an authority provider the action request it

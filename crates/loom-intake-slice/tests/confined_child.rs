@@ -1,7 +1,7 @@
 //! A child process the host names runs confined through Substrate (`SubstrateRunner::run_child`),
 //! with the test runner's guarantees: a missing guarantee is a typed refusal and nothing runs, the
-//! child's environment holds only what the host named, and the applied confinement comes back with
-//! the result.
+//! child's environment holds only what the host named, it writes only `target` and the workspace
+//! paths the host named, and the applied confinement comes back with the result.
 //!
 //! The delegated cases need bubblewrap and a delegated cgroup v2 scope. Each starts its own test
 //! binary again under `systemd-run --user --scope -p Delegate=yes`, as `b10x-loom` starts itself,
@@ -14,6 +14,7 @@
 use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener};
+use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -333,6 +334,179 @@ fn a_timed_out_child_is_a_result_with_no_exit_status() {
             assert_eq!(timed.exit_code, None);
         },
     );
+}
+
+/// Try to write each path and say, per path, whether the write was `written` or `refused`.
+fn write_each(paths: &[&str]) -> String {
+    format!(
+        "for path in {}; do if (printf written > \"$path\") 2>/dev/null; \
+         then echo \"$path:written\"; else echo \"$path:refused\"; fi; done",
+        paths.join(" ")
+    )
+}
+
+/// The story's case: a child writes in the workspace directory the host names, a file it edits
+/// and one it creates, and nowhere else in the workspace: not in another directory, not in a file
+/// at its root, and not in `.git`, which the child writes only once the host names it. The
+/// applied confinement lists the named paths beside `target`, and a test run in the same
+/// workspace through the same runner still writes only under `target`.
+#[test]
+fn a_child_writes_only_the_paths_the_host_named() {
+    delegated(
+        "a_child_writes_only_the_paths_the_host_named",
+        |runner, workspace| {
+            for directory in ["scratch", "other", ".git"] {
+                std::fs::create_dir(workspace.join(directory)).unwrap();
+            }
+            std::fs::write(workspace.join("scratch/edited"), "before").unwrap();
+            std::fs::write(workspace.join("README"), "kept\n").unwrap();
+            let script = write_each(&[
+                "scratch/edited",
+                "scratch/created",
+                "other/written",
+                ".git/written",
+                "README",
+            ]);
+            let child = ChildCommand::new("sh", ["-c", script.as_str()], workspace)
+                .with_writable("scratch");
+            assert_eq!(child.writable(), [Path::new("scratch")]);
+            let result = runner.run_child(&child).expect("the child runs confined");
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            assert_eq!(
+                result.output,
+                "scratch/edited:written\nscratch/created:written\nother/written:refused\n\
+                 .git/written:refused\nREADME:refused\n"
+            );
+            for written in ["scratch/edited", "scratch/created"] {
+                assert_eq!(
+                    std::fs::read_to_string(workspace.join(written)).unwrap(),
+                    "written",
+                    "{written}"
+                );
+            }
+            for refused in ["other/written", ".git/written"] {
+                assert!(!workspace.join(refused).exists(), "{refused}");
+            }
+            assert_eq!(
+                std::fs::read_to_string(workspace.join("README")).unwrap(),
+                "kept\n"
+            );
+            assert_eq!(result.applied.writable_scopes, ["scratch", "target"]);
+            let record = result.driver_record.as_ref().expect("the driver's record");
+            assert_eq!(
+                record.workspace_access.writable_subtrees(),
+                Some(["scratch".to_owned(), "target".to_owned()].as_slice())
+            );
+
+            // `.git` is the host's to name; named alone, it is written and `scratch` is not.
+            let script = write_each(&[".git/written", "scratch/again"]);
+            let git = runner
+                .run_child(
+                    &ChildCommand::new("sh", ["-c", script.as_str()], workspace)
+                        .with_writable(".git"),
+                )
+                .expect("the child runs confined");
+            assert_eq!(git.exit_code, Some(0), "{}", git.output);
+            assert_eq!(git.output, ".git/written:written\nscratch/again:refused\n");
+            assert!(workspace.join(".git/written").is_file());
+            assert!(!workspace.join("scratch/again").exists());
+            assert_eq!(git.applied.writable_scopes, [".git", "target"]);
+            assert_ne!(git.applied.profile_digest, result.applied.profile_digest);
+
+            // A test in the same workspace, through the same runner, writes only under `target`.
+            let script = write_each(&["scratch/by-test", "target/by-test"]);
+            let test = runner
+                .run(&TestCommand::new("sh", ["-c", script.as_str()]), workspace)
+                .expect("the test runs confined");
+            assert_eq!(test.exit_code, Some(0), "{}", test.output);
+            assert_eq!(
+                test.output,
+                "scratch/by-test:refused\ntarget/by-test:written\n"
+            );
+            assert!(!workspace.join("scratch/by-test").exists());
+            assert_eq!(test.applied.writable_scopes, ["target"]);
+        },
+    );
+}
+
+/// A writable path the child could leave the workspace through, or that names no directory of it,
+/// is refused `ScopeInvalid` before anything starts, naming the path: an absolute path, one that
+/// climbs out with `..`, one through a symbolic link (to outside the workspace or inside it), an
+/// absent path, a file, a socket, a directory holding a socket or a file hard-linked from outside
+/// the writable paths, and a path inside `target` or inside another named path. Each refusal
+/// leaves the workspace as it was, without `target`. The same workspace with a well-named path
+/// gets past every check, to the missing backend.
+#[test]
+fn a_writable_path_outside_the_workspace_or_through_a_link_is_refused() {
+    let fixture = tempfile::tempdir().unwrap();
+    let workspace = fixture.path().join("workspace");
+    let outside = fixture.path().join("outside");
+    std::fs::create_dir_all(workspace.join("scratch/inner")).unwrap();
+    std::fs::create_dir(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, workspace.join("outward")).unwrap();
+    std::os::unix::fs::symlink("scratch", workspace.join("alias")).unwrap();
+    std::fs::write(workspace.join("file"), "a file").unwrap();
+    let _socket = UnixListener::bind(workspace.join("socket")).unwrap();
+    std::fs::create_dir(workspace.join("sockets")).unwrap();
+    let _held = UnixListener::bind(workspace.join("sockets/held")).unwrap();
+    std::fs::create_dir(workspace.join("linked")).unwrap();
+    std::fs::write(workspace.join("source"), "source").unwrap();
+    std::fs::hard_link(workspace.join("source"), workspace.join("linked/alias")).unwrap();
+    let ran = fixture.path().join("ran");
+    let script = format!("touch '{}'", ran.display());
+    let child = || ChildCommand::new("sh", ["-c", script.as_str()], &workspace);
+    // A directory that is no cgroup: a launch that got past the refusal would be refused for it.
+    let runner = SubstrateRunner::new(Some(fixture.path().to_owned()));
+    let absolute = outside.display().to_string();
+    for (path, refused) in [
+        (absolute.as_str(), "absolute"),
+        ("../outside", "climbs out"),
+        ("scratch/../../outside", "climbs out"),
+        ("outward", "symbolic link"),
+        ("outward/inner", "symbolic link"),
+        ("alias", "symbolic link"),
+        ("absent", "does not exist"),
+        ("file", "no directory"),
+        ("socket", "no directory"),
+        ("sockets", "socket"),
+        ("linked", "hard link"),
+        ("target/debug", "overlap"),
+    ] {
+        let error = runner.run_child(&child().with_writable(path)).unwrap_err();
+        assert_eq!(
+            error.reason,
+            ConfinementRefusal::ScopeInvalid,
+            "{path}: {error}"
+        );
+        assert!(error.detail.contains(path), "{path}: {error}");
+        assert!(error.detail.contains(refused), "{path}: {error}");
+        assert!(
+            !workspace.join("target").exists(),
+            "{path}: a refused path leaves the workspace as it was"
+        );
+    }
+    let nested = child()
+        .with_writable("scratch")
+        .with_writable("scratch/inner");
+    let error = runner.run_child(&nested).unwrap_err();
+    assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
+    assert!(error.detail.contains("scratch/inner"), "{error}");
+    assert!(!ran.exists(), "nothing ran");
+    assert!(
+        !workspace.join("target").exists(),
+        "the workspace is as it was"
+    );
+
+    let error = runner
+        .run_child(&child().with_writable("scratch"))
+        .unwrap_err();
+    let expected = if bubblewrap_present() {
+        ConfinementRefusal::CgroupUndelegated
+    } else {
+        ConfinementRefusal::BackendMissing
+    };
+    assert_eq!(error.reason, expected, "{error}");
+    assert!(!ran.exists(), "nothing ran");
 }
 
 /// The shell the egress cases connect with, through its `/dev/tcp` redirections.
