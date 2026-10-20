@@ -239,6 +239,9 @@ types:
   # iterations in a row as the idle bound allows, `JudgeIdleIteration`, `bound`, where it would
   # otherwise go on: a case its own performed effect completed ends it Completed);
   # NoAdmissibleAction stays for a frontier that admits nothing.
+  # story:unperformable-names-actions gives NoPerformableAction its payload
+  # (RunOutcomeNoPerformableAction): the actions no effect performs and the frontier's open claims,
+  # as `JudgePerformableActions` answers `unperformable` for them.
   - name: commission.responsibility.RunOutcome
     kind: union
     tag: kind
@@ -250,7 +253,7 @@ types:
       NeedsExternalEvidence: commission.responsibility.RunOutcomeNeedsExternalEvidence
       NoAdmissibleAction: commission.responsibility.Unit
       AwaitingApproval: commission.responsibility.RunOutcomeAwaitingApproval
-      NoPerformableAction: commission.responsibility.Unit
+      NoPerformableAction: commission.responsibility.RunOutcomeNoPerformableAction
       CaseMovedOn: commission.responsibility.RunOutcomeCaseMovedOn
       EffectRefused: commission.responsibility.RunOutcomeEffectRefused
       IdleBound: commission.responsibility.RunOutcomeIdleBound
@@ -314,6 +317,22 @@ types:
     fields:
       - name: idle_iterations
         type: Integer
+
+  # story:unperformable-names-actions: what no effect performs, as `JudgePerformableActions`
+  # answers `unperformable` for it. `actions` are the actions the run needed performed that the
+  # effect port does not perform, each once, in frontier order: every action a frontier lists, when
+  # the port performs none of them, or the action of an admitted request the port does not perform.
+  # `open_claims` are the claims of that frontier whose value is not True, in frontier order. The
+  # frontier relates no action to a claim, so the open claims are the frontier's, not any one
+  # action's; a host that knows the protocol relates them. Commission names what is missing and
+  # decides nothing about who performs it.
+  - name: commission.responsibility.RunOutcomeNoPerformableAction
+    kind: struct
+    fields:
+      - name: actions
+        type: List<String>
+      - name: open_claims
+        type: List<String>
 
   # story:runtime-merge: the actions that need approval, in frontier order, on a frontier a step
   # left unchanged; none of them was denied by an authority verdict in the run.
@@ -1122,6 +1141,15 @@ errors:
       - name: idle_iterations
         type: Integer
 
+  # story:unperformable-names-actions: the run cannot go on, since the effect port performs none of
+  # the actions it needs. It names them and the frontier's open claims.
+  - name: commission.responsibility.ActionsUnperformable
+    fields:
+      - name: actions
+        type: List<String>
+      - name: open_claims
+        type: List<String>
+
 commands:
   - name: commission.responsibility.StartRun
     input:
@@ -1434,6 +1462,38 @@ commands:
           commission.responsibility.IdleBoundReached:
             idle_iterations: input.idle_iterations
       - name: below
+        accepts: nothing
+
+  # story:unperformable-names-actions: whether a run goes on when the effect port performs none of
+  # the actions it needs. Before the executor runs, those are the actions the frontier lists:
+  # `performed` counts the listed actions the port performs, and `unperformed` lists the others,
+  # each once, in frontier order. After a proposal, it is the action of the admitted request:
+  # `performed` is 1 when the port performs it, else 0 with that action alone in `unperformed`.
+  # When the port performs none and at least one is unperformed, the run ends (`unperformable`):
+  # the port is handed nothing, and the run outcome is `NoPerformableAction`, naming the
+  # unperformed actions and `open_claims`, the claims of the frontier whose value is not True, in
+  # frontier order, as `unperformable` does. Otherwise nothing changes (`performable`), so a
+  # frontier that lists no action at all goes on.
+  - name: commission.responsibility.JudgePerformableActions
+    input:
+      - name: performed
+        type: Integer
+      - name: unperformed
+        type: List<String>
+      - name: open_claims
+        type: List<String>
+    outcomes:
+      - name: unperformable
+        when:
+          all:
+            - performed == 0
+            - unperformed.count >= 1
+        error: commission.responsibility.ActionsUnperformable
+        payload:
+          commission.responsibility.ActionsUnperformable:
+            actions: input.unperformed
+            open_claims: input.open_claims
+      - name: performable
         accepts: nothing
 
 events:
