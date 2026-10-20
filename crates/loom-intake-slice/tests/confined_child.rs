@@ -7,17 +7,24 @@
 //! binary again under `systemd-run --user --scope -p Delegate=yes`, as `b10x-loom` starts itself,
 //! and runs the case there. Where bubblewrap, a user systemd manager or the Substrate driver is
 //! absent, the case prints `skipped: missing prerequisite: …` and returns; such a skip establishes
-//! no qualification.
+//! no qualification. The egress cases also skip naming what is missing where `bash` is absent or
+//! Substrate does not serve an egress aperture on this machine. Their hosts are loopback listeners
+//! the test starts; nothing connects past loopback.
 
 use std::collections::BTreeMap;
+use std::io::Write as _;
+use std::net::{Ipv4Addr, SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use b10x_loom_intake_slice::confinement::{
-    Backend, ChildCommand, ConfinementRefusal, ExecEnvironment, NetworkMode, SandboxProfile,
-    SubstrateRunner, TestRunner as _, prepare_delegated_cgroup,
+    Backend, ChildCommand, ConfinementError, ConfinementRefusal, EgressAperture, ExecEnvironment,
+    NetworkMode, SandboxProfile, SubstrateRunner, TestExecution, TestRunner as _,
+    prepare_delegated_cgroup,
 };
 use b10x_loom_intake_slice::executor::TestCommand;
+use substrate_wire::{ApertureMechanism, AppliedNetwork};
 
 /// Set in the test binary started inside the delegated scope, so it runs the case instead of
 /// starting itself again.
@@ -321,6 +328,201 @@ fn a_timed_out_child_is_a_result_with_no_exit_status() {
                 .expect("a timed-out child is a result");
             assert!(timed.timed_out, "{}", timed.output);
             assert_eq!(timed.exit_code, None);
+        },
+    );
+}
+
+/// The shell the egress cases connect with, through its `/dev/tcp` redirections.
+const BASH: &str = "/usr/bin/bash";
+/// The start of the refusal `run_child` gives when Substrate cannot serve the egress aperture.
+const EGRESS_UNSERVED: &str = "Substrate does not serve the egress aperture";
+
+/// A loopback listener the test starts, standing in for a host, and its address.
+fn loopback_host() -> (TcpListener, SocketAddr) {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let address = listener.local_addr().unwrap();
+    (listener, address)
+}
+
+/// The egress aperture `model`, naming the host at `address` and pinned there.
+fn model_aperture(address: SocketAddr) -> EgressAperture {
+    EgressAperture {
+        name: "model".to_owned(),
+        host: address.ip().to_string(),
+        port: address.port(),
+        pinned: address,
+        max_bytes: None,
+    }
+}
+
+/// Inside the delegated binary: the case skips, naming what this machine lacks.
+fn skip(missing: &str) {
+    let report = std::env::var_os(REPORT).expect("a case skips only inside the delegated binary");
+    std::fs::write(report, missing).unwrap();
+}
+
+/// The result of a child with an egress aperture, or `None` once the case skipped because
+/// Substrate does not serve the aperture here; any other refusal fails the case.
+fn egress_result(result: Result<TestExecution, ConfinementError>) -> Option<TestExecution> {
+    match result {
+        Err(error)
+            if error.reason == ConfinementRefusal::CapabilityUnserved
+                && error.detail.starts_with(EGRESS_UNSERVED) =>
+        {
+            skip(&format!("Substrate egress apertures ({error})"));
+            None
+        }
+        result => Some(result.expect("the child runs confined with its egress")),
+    }
+}
+
+/// Answer one connection to `listener` with `answer`, waiting at most 30 s for it.
+fn answer_once(listener: TcpListener, answer: &'static [u8]) -> std::thread::JoinHandle<bool> {
+    listener.set_nonblocking(true).unwrap();
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while Instant::now() < deadline {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    stream.set_nonblocking(false).unwrap();
+                    stream.write_all(answer).unwrap();
+                    return true;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(error) => panic!("the named host accepts: {error}"),
+            }
+        }
+        false
+    })
+}
+
+/// The story's case: under an egress profile the child reaches the host the profile names and
+/// fails to reach one it does not name, here another loopback port of this machine.
+#[test]
+fn a_child_reaches_only_the_named_egress() {
+    delegated(
+        "a_child_reaches_only_the_named_egress",
+        |runner, workspace| {
+            if !Path::new(BASH).is_file() {
+                return skip(&format!("executable {BASH}"));
+            }
+            let (named, named_at) = loopback_host();
+            let (unnamed, unnamed_at) = loopback_host();
+            unnamed.set_nonblocking(true).unwrap();
+            let answered = answer_once(named, b"named-host\n");
+            let script = format!(
+                "read -r line < /dev/tcp/127.0.0.1/{named}; printf 'named:%s\\n' \"$line\"; \
+                 if : 2>/dev/null 3<>/dev/tcp/127.0.0.1/{unnamed}; \
+                 then echo unnamed:reached; else echo unnamed:refused; fi",
+                named = named_at.port(),
+                unnamed = unnamed_at.port(),
+            );
+            let child = ChildCommand::new(BASH, ["-c", script.as_str()], workspace)
+                .with_egress(model_aperture(named_at));
+            assert_eq!(child.network(), NetworkMode::Aperture);
+            let Some(result) = egress_result(runner.run_child(&child)) else {
+                return;
+            };
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            assert_eq!(result.output, "named:named-host\nunnamed:refused\n");
+            assert!(answered.join().unwrap(), "the named host was reached");
+            assert_eq!(
+                unnamed.accept().map(|_| ()).unwrap_err().kind(),
+                std::io::ErrorKind::WouldBlock,
+                "nothing reached the host the profile does not name"
+            );
+        },
+    );
+}
+
+/// An egress profile that names no host, by asking for an aperture without one or naming one with
+/// no host, is refused before anything starts: no driver opens and the workspace is untouched.
+#[test]
+fn an_egress_profile_with_no_named_host_is_refused() {
+    let fixture = tempfile::tempdir().unwrap();
+    let workspace = fixture.path().join("workspace");
+    std::fs::create_dir(&workspace).unwrap();
+    let outside = fixture.path().join("ran-outside");
+    let script = format!("touch target/ran; touch '{}'", outside.display());
+    let child = || ChildCommand::new("sh", ["-c", script.as_str()], &workspace);
+    // A directory that is no cgroup: a launch that got past the refusal would be refused for it.
+    let runner = SubstrateRunner::new(Some(fixture.path().to_owned()));
+    let address = SocketAddr::from((Ipv4Addr::LOCALHOST, 9));
+    for (child, case) in [
+        (child().with_network(NetworkMode::Aperture), "no aperture"),
+        (
+            child().with_egress(EgressAperture {
+                host: String::new(),
+                ..model_aperture(address)
+            }),
+            "an aperture with an empty host",
+        ),
+        (
+            child().with_egress(EgressAperture {
+                host: " ".to_owned(),
+                ..model_aperture(address)
+            }),
+            "an aperture with a blank host",
+        ),
+    ] {
+        let error = runner.run_child(&child).unwrap_err();
+        assert_eq!(
+            error.reason,
+            ConfinementRefusal::ScopeInvalid,
+            "{case}: {error}"
+        );
+        assert!(error.detail.contains("no host"), "{case}: {error}");
+    }
+    assert!(
+        !workspace.join("target").exists(),
+        "the workspace is untouched and no driver was opened"
+    );
+    assert!(!outside.exists(), "nothing ran unconfined");
+}
+
+/// The applied confinement names the aperture the child got, and the driver's record is the
+/// aperture declared; the same runner's child with no egress still reports no network. A record
+/// reporting a wider network than the request is refused as a test's is: no child can make
+/// Substrate report one, so `confinement.rs` holds that refusal
+/// (`a_record_reporting_another_network_than_requested_is_refused`).
+#[test]
+fn the_applied_record_names_the_egress() {
+    delegated(
+        "the_applied_record_names_the_egress",
+        |runner, workspace| {
+            let (_named, address) = loopback_host();
+            let child = ChildCommand::new("true", [] as [&str; 0], workspace)
+                .with_egress(model_aperture(address));
+            assert_eq!(child.egress(), Some(&model_aperture(address)));
+            let Some(result) = egress_result(runner.run_child(&child)) else {
+                return;
+            };
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            assert_eq!(result.applied.network, format!("aperture:model@{address}"));
+            assert_eq!(result.applied.profile, "workspace");
+            assert_eq!(result.applied.writable_scopes, ["target"]);
+            assert!(result.applied.read_only_roots.is_empty());
+            let record = result.driver_record.as_ref().expect("the driver's record");
+            let AppliedNetwork::Aperture(applied) = &record.network else {
+                panic!("the driver applied an aperture: {:?}", record.network);
+            };
+            assert_eq!(applied.name, "model");
+            assert_eq!(applied.destination, address.to_string());
+            assert_eq!(applied.mechanism, ApertureMechanism::LoopbackForwarder);
+            assert_eq!(applied.max_bytes, None);
+            assert_eq!(record.cgroup, result.applied.cgroup);
+
+            let plain = runner
+                .run_child(&ChildCommand::new("true", [] as [&str; 0], workspace))
+                .expect("a child with no egress runs beside it");
+            assert_eq!(plain.applied.network, "none");
+            assert_eq!(
+                plain.driver_record.as_ref().map(|record| &record.network),
+                Some(&AppliedNetwork::None)
+            );
+            assert_ne!(plain.applied.profile_digest, result.applied.profile_digest);
         },
     );
 }
