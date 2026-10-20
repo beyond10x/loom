@@ -14,10 +14,10 @@ run outcome `EffectRefused`, naming the request and the port's reason
 (`story:refused-effect-ends-run`). `EffectOutcomeRefused` gains `ends_run`; the runtime decides
 with `outcome::judge_refusal`, the behaviour ESS generates for the new command
 `JudgeEffectRefusal`, once the refusal was recorded and observed, wherever it hands the port a
-request: a proposal, a fan-out of reads once every read answered and none was stale (beside a
-stale read the move is judged first, so a case the governor holds complete still ends the run
-completed), and the request a resume performs, whose Suspension is released first. Nothing is
-retried. A refusal with `ends_run` false
+request: a proposal, a fan-out of reads once every read answered (beside a stale read the
+refusal is kept and the move is judged first, so a case the governor holds complete still ends the
+run completed, and the refusal ends it when the next load finds no move), and the request a resume
+performs, whose Suspension is released first. Nothing is retried. A refusal with `ends_run` false
 is an ordinary one and behaves as before: the loop goes on and the iteration counts toward the
 idle bound. The intake slice maps `EffectRefused` to `StopReason::Refused` with the reason, and the
 `run --output jsonl` contract does not change; the slice's own effect ports never mark a refusal

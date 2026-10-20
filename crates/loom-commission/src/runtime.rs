@@ -110,9 +110,11 @@
 //!    `Refused` read cancels nothing; an `Err` from any read fails the loop once every read has
 //!    answered and each that answered was recorded and observed, and nothing is retried. Without
 //!    one, and with the run budget not passed, a read the port refused as final ends the run
-//!    `EffectRefused` as in 8, naming the first such read in the order proposed, but only when no
-//!    read was stale: beside a stale read the move is judged first, as below, and a case the
-//!    governor holds complete then ends the run completed. When a
+//!    `EffectRefused` as in 8, naming the first such read in the order proposed, at once when no
+//!    read was stale. Beside a stale read the refusal is kept and the move is judged first, as
+//!    below: a case the governor holds complete ends the run completed, a move ends it as after a
+//!    stale proposal (2), and when the next iteration's load finds no move, the kept refusal ends
+//!    the run `EffectRefused` before any budget stop and before the executor runs. When a
 //!    read was stale, somebody else moved the case: once the admitted reads were recorded, the
 //!    iteration is as a stale proposal, so the next one loads the case and judges the move (2), and
 //!    no read of the fan-out makes the loaded revision the Run's (1). When no read was admitted and
@@ -919,6 +921,9 @@ where
     // Whether the previous iteration's proposal was stale: the case has moved, and this iteration
     // loads it before any budget stop (0).
     let mut after_stale = false;
+    // How the run ends on a read the port refused as final in a fan-out beside a stale read, kept
+    // until the next iteration has judged the move (8a).
+    let mut kept_refusal: Option<RunOutcome> = None;
 
     let limit = budget.unwrap_or(UNBUDGETED_STEP_LIMIT);
     // Why the Run is suspended when its steps reach `limit`: the run budget's step limit when it
@@ -1028,6 +1033,11 @@ where
                 loaded,
                 &determination,
             )?;
+            return Ok(track.end(run_id, ended));
+        }
+        // The move a stale read showed was judged and ended nothing: the final refusal kept beside
+        // it ends the run, before any budget stop and before the executor runs (8a).
+        if let Some(ended) = kept_refusal.take() {
             return Ok(track.end(run_id, ended));
         }
         // After a performed effect that left no gate pending, a case still open is suspended for
@@ -1226,12 +1236,14 @@ where
                 return suspend_ended(runs, run_id, SuspensionReason::RunBudget(breach), track);
             }
             // A read the port refused as final ends the run once every read was recorded, unless a
-            // stale read showed the case moved: then the next iteration judges the move first, as
-            // after a stale proposal (8a).
-            if !fanned.stale
-                && let Some(ended) = fanned.ended
-            {
-                return Ok(track.end(run_id, ended));
+            // stale read showed the case moved: then the refusal is kept, the next iteration
+            // judges the move first, as after a stale proposal, and the kept refusal ends the run
+            // when that judgement ends nothing (8a).
+            if let Some(ended) = fanned.ended {
+                if !fanned.stale {
+                    return Ok(track.end(run_id, ended));
+                }
+                kept_refusal = Some(ended);
             }
             if fanned.admitted {
                 decided = true;
