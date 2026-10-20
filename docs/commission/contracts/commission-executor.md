@@ -78,7 +78,10 @@ are invoked concurrently (`EffectPort::invoke_reads`, which a `Sync` port answer
 `invoke_concurrently`), each once, and joined; their effects are recorded and observed in the order
 proposed. A Connector-backed port invokes nothing in a fan-out holding a request whose binding is
 not a `Read`. A `Refused` read cancels nothing; an error from any read fails the loop after every
-read has answered, and nothing is retried. A fan-out is one step.
+read has answered, and nothing is retried. A read the port refuses as final (`ends_run`) ends the
+run `EffectRefused` once every read was recorded, naming the first such read, but only when no read
+of the fan-out was stale: beside a stale read the move is judged first, as above. A fan-out is one
+step.
 Writes, and every action that needs authority, are proposed one at a time.
 
 An executor that finds the case has moved to another revision since the frontier it was handed

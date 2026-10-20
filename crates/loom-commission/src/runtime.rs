@@ -110,7 +110,9 @@
 //!    `Refused` read cancels nothing; an `Err` from any read fails the loop once every read has
 //!    answered and each that answered was recorded and observed, and nothing is retried. Without
 //!    one, and with the run budget not passed, a read the port refused as final ends the run
-//!    `EffectRefused` as in 8, naming the first such read in the order proposed. When a
+//!    `EffectRefused` as in 8, naming the first such read in the order proposed, but only when no
+//!    read was stale: beside a stale read the move is judged first, as below, and a case the
+//!    governor holds complete then ends the run completed. When a
 //!    read was stale, somebody else moved the case: once the admitted reads were recorded, the
 //!    iteration is as a stale proposal, so the next one loads the case and judges the move (2), and
 //!    no read of the fan-out makes the loaded revision the Run's (1). When no read was admitted and
@@ -1223,8 +1225,12 @@ where
             }) {
                 return suspend_ended(runs, run_id, SuspensionReason::RunBudget(breach), track);
             }
-            // A read the port refused as final ends the run once every read was recorded (8a).
-            if let Some(ended) = fanned.ended {
+            // A read the port refused as final ends the run once every read was recorded, unless a
+            // stale read showed the case moved: then the next iteration judges the move first, as
+            // after a stale proposal (8a).
+            if !fanned.stale
+                && let Some(ended) = fanned.ended
+            {
                 return Ok(track.end(run_id, ended));
             }
             if fanned.admitted {
@@ -1659,7 +1665,7 @@ struct FannedOut {
     /// The trial limit the fan-out would have passed, so none of its reads was invoked.
     over_budget: Option<RunBudgetBreach>,
     /// How the run ends when the port refused a read as final: the first such read, in the
-    /// order proposed ([`refusal_end`]).
+    /// order proposed ([`refusal_end`]). It ends the run only when no read was `stale`.
     ended: Option<RunOutcome>,
 }
 
