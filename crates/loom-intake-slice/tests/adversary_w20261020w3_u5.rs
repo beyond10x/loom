@@ -282,7 +282,14 @@ fn make_test_cas(directory: &Path, signer: &str) {
         );
     };
     let new = [
-        "req", "-x509", "-nodes", "-days", "1", "-newkey", "ec", "-pkeyopt",
+        "req",
+        "-x509",
+        "-nodes",
+        "-days",
+        "1",
+        "-newkey",
+        "ec",
+        "-pkeyopt",
         "ec_paramgen_curve:prime256v1",
     ];
     for ca in ["trusted", "other"] {
@@ -306,7 +313,14 @@ fn make_test_cas(directory: &Path, signer: &str) {
     let signer_crt = format!("{signer}.crt");
     let signer_key = format!("{signer}.key");
     let mut args = new.to_vec();
-    args.extend(["-keyout", "host.key", "-out", "host.crt", "-subj", subject.as_str()]);
+    args.extend([
+        "-keyout",
+        "host.key",
+        "-out",
+        "host.crt",
+        "-subj",
+        subject.as_str(),
+    ]);
     args.extend(["-addext", names.as_str()]);
     args.extend(["-addext", "basicConstraints=critical,CA:FALSE"]);
     args.extend(["-addext", "extendedKeyUsage=serverAuth"]);
@@ -398,7 +412,11 @@ fn adv_a_curl_ca_bundle_in_the_environment_overrides_the_named_trust_anchor() {
             make_test_cas(anchors.path(), "other");
             let trusted = anchors.path().join("trusted.crt");
             // The host places the other CA inside the workspace, readable by the child.
-            std::fs::copy(anchors.path().join("other.crt"), workspace.join("other.crt")).unwrap();
+            std::fs::copy(
+                anchors.path().join("other.crt"),
+                workspace.join("other.crt"),
+            )
+            .unwrap();
             let host = TlsHost::start(anchors.path(), Ipv4Addr::new(127, 0, 0, 2));
             let aperture = aperture_named(NAMED_HOST, host.address);
 
