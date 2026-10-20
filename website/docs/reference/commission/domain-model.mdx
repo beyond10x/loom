@@ -282,6 +282,17 @@ Lifecycle: states `Pending`, `Resuming`; initial `Pending`; terminal `Resuming`.
 | `final` | when | none | none | `EffectRefusedFinal` |
 | `ordinary` | otherwise | none | none | none |
 
+#### JudgeIdleIteration
+
+| Input | Type |
+|---|---|
+| `idle_iterations` | `integer` |
+
+| Outcome | When | Effect | Emits | Error |
+|---|---|---|---|---|
+| `bound` | when | none | none | `IdleBoundReached` |
+| `below` | otherwise | none | none | none |
+
 #### ReleaseSuspension
 
 | Input | Type |
@@ -440,6 +451,12 @@ Lifecycle: states `Pending`, `Resuming`; initial `Pending`; terminal `Resuming`.
 |---|---|
 | `action_request_id` | [`ActionRequestId`](./types.mdx#actionrequestid) |
 | `reason` | `string` |
+
+#### IdleBoundReached
+
+| Field | Type |
+|---|---|
+| `idle_iterations` | `integer` |
 
 #### RunStateConflict
 

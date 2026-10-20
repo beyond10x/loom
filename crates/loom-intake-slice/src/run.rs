@@ -922,6 +922,7 @@ fn finish(
             StopReason::Refused,
             Some(refused.reason),
         ),
+        RunOutcome::IdleBound(idle) => Err(SliceError::Unexpected(format!("IdleBound {idle:?}"))),
     }
 }
 

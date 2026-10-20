@@ -2,8 +2,8 @@
   "provenance": {
     "system": "commission",
     "specification_version": "v1",
-    "source_digest": "fbc987193ce2337d53be5610bdd3340aff0f3e68872a482a1d5a8855cf1111a0",
-    "contract_digest": "e679ebf85e98d2d040d787f1e5a953f9df198141e1508772547f007aec6e08a1"
+    "source_digest": "e9437a6cbbf5f15c726617ea201063d6ccd75146e1c90c4840f04720a2ca6fb5",
+    "contract_digest": "02850b7968172d53983b13b09f1ed99fa07041b914715b721bc0cfbabe8649bf"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -495,6 +495,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "commission.responsibility.RunOutcomeIdleBound",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "commission.responsibility.RunOutcomeNeedsAuthority",
       "disposition": {
         "disposition": "generated"
@@ -682,6 +689,20 @@
     },
     {
       "kind": "command_contract",
+      "source": "commission.responsibility.JudgeIdleIteration",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "commission.responsibility.JudgeIdleIteration",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
       "source": "commission.responsibility.ReleaseSuspension",
       "disposition": {
         "disposition": "generated"
@@ -860,6 +881,13 @@
     {
       "kind": "error_type",
       "source": "commission.responsibility.EffectRefusedFinal",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "commission.responsibility.IdleBoundReached",
       "disposition": {
         "disposition": "generated"
       }
