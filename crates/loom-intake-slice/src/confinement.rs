@@ -26,7 +26,8 @@ pub use substrate_host::EgressAperture;
 use substrate_host::{DispatchOutcome, Driver as _, HostConfig, HostDriver};
 use substrate_wire::{
     APERTURE_LOOPBACK_ADDRESS, ApertureMechanism, ApertureMode, AppliedNetwork, ConfinementRequest,
-    ExecLimits, ExecStartInput, ReadOnlyRoot, WorkspaceAccess,
+    ExecLimits, ExecStartInput, MAX_WORKSPACE_WRITABLE_SUBTREES, ReadOnlyRoot, WorkspaceAccess,
+    validate_relative_path, validate_workspace_access,
 };
 /// Substrate's own wire types a host names a [`ChildCommand`] with.
 pub use substrate_wire::{BaselineEnvironment, ExecEnvironment, NetworkMode, SandboxProfile};
@@ -162,7 +163,7 @@ impl SubstrateRunner {
 
     /// Probe the real backend before opening a model session. No test is launched.
     pub fn preflight(&self, root: &Path) -> Result<(), ConfinementError> {
-        let root = validate_workspace(root)?;
+        let root = validate_workspace(root, &[])?;
         self.driver(&root, None)?;
         Ok(())
     }
@@ -315,16 +316,20 @@ impl SubstrateRunner {
     /// Run a child process the host names, confined through Substrate with the guarantees a test
     /// has. A guarantee Substrate does not serve is a [`ConfinementError`] and nothing runs, never
     /// an unconfined fall-back. The child's environment is exactly [`ChildCommand::environment`],
-    /// and its network is none or exactly the egress aperture it names
-    /// ([`ChildCommand::with_egress`]); an aperture naming no host is refused before anything
-    /// starts. Once the child has run, its result is refused as a [`ConfinementError`] when the
-    /// confinement Substrate applied is not the one requested, a wider network included, or when
-    /// Substrate reports no exit status unless the child's timeout or its aperture's byte ceiling
-    /// ended it; otherwise it carries the applied confinement and the driver's own record of it.
+    /// it writes only under `target` and the workspace paths the host named
+    /// ([`ChildCommand::with_writable`]), and its network is none or exactly the egress aperture
+    /// it names ([`ChildCommand::with_egress`]); an aperture naming no host, or a writable path
+    /// that names no directory of the workspace by itself, is refused before anything starts.
+    /// Once the child has run, its result is refused as a [`ConfinementError`] when the
+    /// confinement Substrate applied is not the one requested, a wider network or writable set
+    /// included, or when Substrate reports no exit status unless the child's timeout or its
+    /// aperture's byte ceiling ended it; otherwise it carries the applied confinement, listing the
+    /// writable paths, and the driver's own record of it.
     pub fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
         check_program(&child.program)?;
         check_network(child.network, child.egress.as_ref())?;
-        let root = validate_workspace(&child.directory)?;
+        let writable = check_writable(&child.writable)?;
+        let root = validate_workspace(&child.directory, &writable)?;
         let open = self.driver(&root, child.egress.as_ref())?;
         let workspace = workspace_name(&root)?;
         let input = child.input(workspace, open.driver.machine().snapshot);
@@ -511,7 +516,8 @@ impl TestRunner for SubstrateRunner {
 
     fn run(&self, command: &TestCommand, root: &Path) -> Result<TestExecution, ConfinementError> {
         check_program(&command.program().to_string_lossy())?;
-        let root = validate_workspace(root)?;
+        // A test writes only under `target`: no host names it another writable path.
+        let root = validate_workspace(root, &[])?;
         let open = self.driver(&root, None)?;
         let closure = RustClosure::discover(&root)?;
         let snapshot = open.driver.machine();
@@ -534,8 +540,10 @@ impl TestRunner for SubstrateRunner {
 /// Its program and arguments are never a shell line, and a program containing `=` is refused,
 /// since Substrate's `/usr/bin/env` would read it as an assignment. Its directory is adopted as Substrate's
 /// workspace and is the child's working directory, `/workspace`; the child writes only under its
-/// `target/`, as a test does, and no toolchain or cache is mounted. Its environment is exactly the
-/// one the host names as Substrate's [`ExecEnvironment`], empty unless it names one. It asks
+/// `target/`, as a test does, and under the workspace directories the host names
+/// ([`ChildCommand::with_writable`]), `.git` only when named, and no toolchain or cache is
+/// mounted. Its environment is exactly the one the host names as Substrate's
+/// [`ExecEnvironment`], empty unless it names one. It asks
 /// Substrate for [`SandboxProfile::Workspace`] with [`NetworkMode::None`] unless the host names
 /// another, and Substrate is always required: a guarantee it does not serve refuses the launch.
 ///
@@ -547,6 +555,7 @@ pub struct ChildCommand {
     program: String,
     args: Vec<String>,
     directory: PathBuf,
+    writable: Vec<PathBuf>,
     environment: ExecEnvironment,
     profile: SandboxProfile,
     network: NetworkMode,
@@ -569,6 +578,7 @@ impl ChildCommand {
             program: program.into(),
             args: args.into_iter().map(Into::into).collect(),
             directory: directory.into(),
+            writable: Vec::new(),
             environment: ExecEnvironment {
                 allow: Vec::new(),
                 set: BTreeMap::new(),
@@ -578,6 +588,25 @@ impl ChildCommand {
             egress: None,
             timeout: Self::DEFAULT_TIMEOUT,
         }
+    }
+
+    /// The same child, also writing under `path`, a directory of the workspace named relative to
+    /// it: a scratch copy the child edits, `.git` for a child that commits, or a command's state
+    /// directory. Everything else in the workspace stays read-only, `.git` included unless the
+    /// host names it; a child that may write `.git` may also plant hooks or configuration that a
+    /// later git call on the host runs. Substrate makes only directories writable, so a file at
+    /// the workspace root cannot be named. Naming `target`, or a path twice, changes nothing.
+    ///
+    /// Refused [`ConfinementRefusal::ScopeInvalid`] before anything starts, naming the path: a path
+    /// that is absolute, climbs out with `..`, or is no plain relative path (`.`, an empty
+    /// component, a trailing `/`); one through a symbolic link, absent, or no directory (a file,
+    /// socket, device or FIFO); a directory holding a socket, device or FIFO, or a file also
+    /// hard-linked outside the writable paths; a path inside `target` or inside another named
+    /// path; and more than 63 named paths, which with `target` pass Substrate's 64.
+    #[must_use]
+    pub fn with_writable(mut self, path: impl Into<PathBuf>) -> Self {
+        self.writable.push(path.into());
+        self
     }
 
     /// The same child with exactly `environment` and no other variable.
@@ -644,6 +673,11 @@ impl ChildCommand {
         &self.directory
     }
 
+    /// The workspace paths the host named writable beside `target`, as named.
+    pub fn writable(&self) -> &[PathBuf] {
+        &self.writable
+    }
+
     /// The child's whole environment.
     pub fn environment(&self) -> &ExecEnvironment {
         &self.environment
@@ -688,7 +722,7 @@ impl ChildCommand {
             limits: limits(self.timeout),
             wait: true,
             workspace_access: WorkspaceAccess::Scoped {
-                writable_subtrees: vec![WRITABLE.to_owned()],
+                writable_subtrees: writable_request(&self.writable),
             },
             scratch: None,
             measurements: Default::default(),
@@ -715,6 +749,72 @@ fn check_program(program: &str) -> Result<(), ConfinementError> {
         ))),
         None => Ok(()),
     }
+}
+
+/// The workspace paths a child asks Substrate to write, in the order Substrate requires (sorted,
+/// each once): `target` and the paths the host named, as named.
+fn writable_request(named: &[PathBuf]) -> Vec<String> {
+    let mut paths: Vec<String> = std::iter::once(WRITABLE.to_owned())
+        .chain(named.iter().map(|path| path.to_string_lossy().into_owned()))
+        .collect();
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+/// Refuse, before anything is touched, a named writable path that cannot name a directory of the
+/// workspace by itself: one that is not UTF-8, is absolute, climbs out with `..`, or is no plain
+/// relative path Substrate admits; a path inside another writable path, `target` included; and
+/// more writable paths than Substrate admits. Returns what the child asks to write
+/// ([`writable_request`]); [`validate_workspace`] checks the named paths on disk.
+fn check_writable(named: &[PathBuf]) -> Result<Vec<String>, ConfinementError> {
+    for path in named {
+        let Some(text) = path.to_str() else {
+            return Err(scope_error(format!(
+                "the writable path {path:?} is not UTF-8"
+            )));
+        };
+        if path.is_absolute() {
+            return Err(scope_error(format!(
+                "the writable path `{text}` is absolute, so it may lie outside the workspace; name a writable path relative to the workspace"
+            )));
+        }
+        if path.components().any(|part| part == Component::ParentDir) {
+            return Err(scope_error(format!(
+                "the writable path `{text}` climbs out with `..`; name a writable path inside the workspace"
+            )));
+        }
+        validate_relative_path(text).map_err(|e| {
+            scope_error(format!(
+                "the writable path `{text}` is no plain workspace-relative path ({e}); name it without `.`, empty components or a trailing `/`"
+            ))
+        })?;
+    }
+    let paths = writable_request(named);
+    // An ancestor sorts before every path beneath it, though not always right before it.
+    for (index, path) in paths.iter().enumerate() {
+        if let Some(inner) = paths[index + 1..].iter().find(|other| {
+            other
+                .strip_prefix(path.as_str())
+                .is_some_and(|rest| rest.starts_with('/'))
+        }) {
+            return Err(scope_error(format!(
+                "the writable paths `{path}` and `{inner}` overlap; name only `{path}`"
+            )));
+        }
+    }
+    if paths.len() > MAX_WORKSPACE_WRITABLE_SUBTREES as usize {
+        return Err(scope_error(format!(
+            "{} writable paths with `target` pass the {MAX_WORKSPACE_WRITABLE_SUBTREES} Substrate admits",
+            paths.len()
+        )));
+    }
+    // Substrate's own rules for the request's shape, which the driver applies again.
+    validate_workspace_access(&WorkspaceAccess::Scoped {
+        writable_subtrees: paths.clone(),
+    })
+    .map_err(|e| scope_error(format!("the writable paths are refused by Substrate: {e}")))?;
+    Ok(paths)
 }
 
 fn workspace_name(root: &Path) -> Result<&str, ConfinementError> {
@@ -827,9 +927,10 @@ fn check_host(name: &str, host: &str, pinned: Ipv4Addr) -> Result<(), Confinemen
 }
 
 /// Accept Substrate's record of what it applied only when it is the confinement `input` required:
-/// its workspace access, profile, read-only roots and capability snapshot, no secret slot, a
-/// cgroup, and exactly the requested network ([`network_applied`]). A test's launch and a child's
-/// are held to the same record.
+/// its workspace access (exactly the writable paths requested, so a record reporting a wider or
+/// another writable set is refused), profile, read-only roots and capability snapshot, no secret
+/// slot, a cgroup, and exactly the requested network ([`network_applied`]). A test's launch and a
+/// child's are held to the same record.
 fn check_record(
     input: &ExecStartInput,
     egress: Option<&EgressAperture>,
@@ -913,7 +1014,9 @@ fn enum_name(value: &impl serde::Serialize) -> String {
         .to_owned()
 }
 
-fn validate_workspace(root: &Path) -> Result<PathBuf, ConfinementError> {
+/// Validate the workspace `root` and what a launch in it may write: `target`, created here, and the
+/// `writable` paths a host named ([`check_writable`]; empty for a test). Returns the canonical root.
+fn validate_workspace(root: &Path, writable: &[String]) -> Result<PathBuf, ConfinementError> {
     let absolute = if root.is_absolute() {
         root.to_owned()
     } else {
@@ -936,6 +1039,11 @@ fn validate_workspace(root: &Path) -> Result<PathBuf, ConfinementError> {
             "Substrate workspace names require ASCII letters, digits, underscore or hyphen and cannot start with hyphen",
         ));
     }
+    let named: Vec<&String> = writable.iter().filter(|path| *path != WRITABLE).collect();
+    // Before `target` is created, so a refused path leaves the workspace as it was.
+    for path in &named {
+        check_writable_directory(&root, path)?;
+    }
     let target = root.join(WRITABLE);
     reject_links(&target)?;
     match std::fs::create_dir(&target) {
@@ -943,16 +1051,50 @@ fn validate_workspace(root: &Path) -> Result<PathBuf, ConfinementError> {
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && target.is_dir() => {}
         Err(e) => return Err(scope_error(format!("target/ must be a directory: {e}"))),
     }
-    validate_writable_artifacts(&target)?;
+    let scopes: Vec<PathBuf> = std::iter::once(target)
+        .chain(named.iter().map(|path| root.join(path)))
+        .collect();
+    validate_writable_artifacts(&scopes)?;
     Ok(root)
 }
 
+/// Refuse a named writable path unless each of its components, from the workspace down, exists
+/// and is a directory and no symbolic link: Substrate makes only directories writable, and a link
+/// could lead the child's writes out of the workspace or onto a path the host did not name.
+fn check_writable_directory(root: &Path, path: &str) -> Result<(), ConfinementError> {
+    let mut current = root.to_owned();
+    for component in path.split('/') {
+        current.push(component);
+        let metadata = match std::fs::symlink_metadata(&current) {
+            Ok(metadata) => metadata,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(scope_error(format!(
+                    "the writable path `{path}` does not exist in the workspace"
+                )));
+            }
+            Err(e) => return Err(scope_error(format!("the writable path `{path}`: {e}"))),
+        };
+        if metadata.file_type().is_symlink() {
+            return Err(scope_error(format!(
+                "the writable path `{path}` passes through the symbolic link {}",
+                current.display()
+            )));
+        }
+        if !metadata.is_dir() {
+            return Err(scope_error(format!(
+                "the writable path `{path}` is no directory (a file, socket, device or FIFO): Substrate makes only directories writable"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Read-only mounts do not protect an inode also reachable through a writable
-/// hardlink. Count every in-scope name and refuse aliases outside the scope.
+/// hardlink. Count every name under the writable `scopes` and refuse aliases outside them.
 /// Internal hardlinks are normal in Cargo's incremental cache and remain valid.
 /// Do not follow symlinks: the sandbox resolves those through its own mounts.
-fn validate_writable_artifacts(target: &Path) -> Result<(), ConfinementError> {
-    let mut directories = vec![target.to_owned()];
+fn validate_writable_artifacts(scopes: &[PathBuf]) -> Result<(), ConfinementError> {
+    let mut directories = scopes.to_vec();
     let mut links = BTreeMap::<(u64, u64), (u64, u64, PathBuf)>::new();
     while let Some(directory) = directories.pop() {
         for entry in std::fs::read_dir(directory).map_err(scope_error)? {
@@ -966,13 +1108,15 @@ fn validate_writable_artifacts(target: &Path) -> Result<(), ConfinementError> {
                         .entry((metadata.dev(), metadata.ino()))
                         .or_insert((metadata.nlink(), 0, path));
                     if *expected != metadata.nlink() {
-                        return Err(scope_error("target/ hardlinks changed during validation"));
+                        return Err(scope_error(
+                            "hard links in the writable paths changed during validation",
+                        ));
                     }
                     *seen += 1;
                 }
             } else if !metadata.file_type().is_symlink() {
                 return Err(scope_error(format!(
-                    "target/ contains a socket, device or other non-artifact: {}",
+                    "a writable path contains a socket, device or other non-artifact: {}",
                     path.display()
                 )));
             }
@@ -981,7 +1125,7 @@ fn validate_writable_artifacts(target: &Path) -> Result<(), ConfinementError> {
     for (_, (expected, seen, path)) in links {
         if expected != seen {
             return Err(scope_error(format!(
-                "target/ file has hardlinks outside its writable scope: {}; remove the alias before retrying",
+                "a file in a writable path has hard links outside the writable paths: {}; remove the alias before retrying",
                 path.display()
             )));
         }
@@ -1376,12 +1520,161 @@ mod tests {
         let file = target.join("artifact");
         std::fs::write(&file, "artifact").unwrap();
         std::fs::hard_link(&file, target.join("nested/internal")).unwrap();
-        validate_workspace(&workspace).expect("internal Cargo-style hardlinks are safe");
+        validate_workspace(&workspace, &[]).expect("internal Cargo-style hardlinks are safe");
         std::fs::hard_link(&file, workspace.join("source")).unwrap();
         assert_eq!(
-            validate_workspace(&workspace).unwrap_err().reason,
+            validate_workspace(&workspace, &[]).unwrap_err().reason,
             ConfinementRefusal::ScopeInvalid
         );
+    }
+
+    #[test]
+    fn a_hard_link_between_writable_paths_is_internal_and_one_leaving_them_is_not() {
+        let fixture = tempfile::tempdir().unwrap();
+        let workspace = fixture.path().join("workspace");
+        std::fs::create_dir_all(workspace.join("target")).unwrap();
+        std::fs::create_dir(workspace.join("scratch")).unwrap();
+        let file = workspace.join("target/artifact");
+        std::fs::write(&file, "artifact").unwrap();
+        std::fs::hard_link(&file, workspace.join("scratch/alias")).unwrap();
+        let writable = check_writable(&[PathBuf::from("scratch")]).unwrap();
+        validate_workspace(&workspace, &writable).expect("both names are writable");
+        let error = validate_workspace(&workspace, &[]).unwrap_err();
+        assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid);
+        assert!(error.detail.contains("hard links outside"), "{error}");
+    }
+
+    #[test]
+    fn a_child_asks_to_write_target_and_the_named_paths_in_substrates_order() {
+        let child = ChildCommand::new("true", [] as [&str; 0], "/work/space")
+            .with_writable("src")
+            .with_writable(".git")
+            .with_writable("a/b")
+            .with_writable("a-b")
+            .with_writable("target")
+            .with_writable("src");
+        let expected = [".git", "a-b", "a/b", "src", "target"];
+        assert_eq!(check_writable(child.writable()).unwrap(), expected);
+        let input = child.input("space", "snapshot".to_owned());
+        assert_eq!(
+            input.workspace_access.writable_subtrees(),
+            Some(expected.map(str::to_owned).as_slice())
+        );
+        let profile = requested_profile(&input, None);
+        assert_eq!(profile.writable_scopes, expected);
+        let bare = ChildCommand::new("true", [] as [&str; 0], "/work/space");
+        let plain = requested_profile(&bare.input("space", "snapshot".to_owned()), None);
+        assert_ne!(
+            profile_digest(&profile, &[], None),
+            profile_digest(&plain, &[], None)
+        );
+        let named = 63;
+        let most = (0..named).fold(bare.clone(), |child, n| {
+            child.with_writable(format!("p{n:02}"))
+        });
+        assert_eq!(check_writable(most.writable()).unwrap().len(), 64);
+        let error = check_writable(most.with_writable("p63").writable()).unwrap_err();
+        assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid);
+        assert!(error.detail.contains("65 writable paths"), "{error}");
+    }
+
+    #[test]
+    fn a_writable_path_that_names_no_plain_workspace_path_is_refused_naming_it() {
+        for (path, named) in [
+            ("/work/space/src", "absolute"),
+            ("..", "climbs out"),
+            ("../src", "climbs out"),
+            ("src/../..", "climbs out"),
+            ("", "no plain workspace-relative path"),
+            (".", "no plain workspace-relative path"),
+            ("./src", "no plain workspace-relative path"),
+            ("src/", "no plain workspace-relative path"),
+            ("src//lib", "no plain workspace-relative path"),
+            ("src/./lib", "no plain workspace-relative path"),
+            ("src\\lib", "no plain workspace-relative path"),
+            ("target/debug", "overlap"),
+        ] {
+            let error = check_writable(&[PathBuf::from(path)]).unwrap_err();
+            assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{path:?}");
+            assert!(
+                error.detail.contains(&format!("`{path}`")),
+                "{path:?}: {error}"
+            );
+            assert!(error.detail.contains(named), "{path:?}: {error}");
+        }
+        let error = check_writable(&[PathBuf::from("src"), PathBuf::from("src/lib")]).unwrap_err();
+        assert!(
+            error.detail.contains("`src` and `src/lib` overlap"),
+            "{error}"
+        );
+        use std::os::unix::ffi::OsStrExt as _;
+        let invalid = std::ffi::OsStr::from_bytes(b"src\xff");
+        let error = check_writable(&[PathBuf::from(invalid)]).unwrap_err();
+        assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid);
+        assert!(error.detail.contains("not UTF-8"), "{error}");
+        assert_eq!(check_writable(&[]).unwrap(), ["target"]);
+    }
+
+    #[test]
+    fn a_writable_path_through_a_link_absent_or_no_directory_is_refused_on_disk() {
+        let fixture = tempfile::tempdir().unwrap();
+        let workspace = fixture.path().join("workspace");
+        std::fs::create_dir_all(workspace.join("src/lib")).unwrap();
+        std::os::unix::fs::symlink(fixture.path(), workspace.join("up")).unwrap();
+        std::os::unix::fs::symlink("lib", workspace.join("src/alias")).unwrap();
+        std::fs::write(workspace.join("file"), "file").unwrap();
+        for (path, named) in [
+            ("up", "symbolic link"),
+            ("up/workspace", "symbolic link"),
+            ("src/alias", "symbolic link"),
+            ("absent", "does not exist"),
+            ("src/absent", "does not exist"),
+            ("file", "no directory"),
+            ("file/below", "no directory"),
+        ] {
+            let writable = check_writable(&[PathBuf::from(path)]).unwrap();
+            let error = validate_workspace(&workspace, &writable).unwrap_err();
+            assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{path}");
+            assert!(error.detail.contains(&format!("`{path}`")), "{error}");
+            assert!(error.detail.contains(named), "{path}: {error}");
+            assert!(
+                !workspace.join("target").exists(),
+                "{path}: a refused path leaves the workspace as it was"
+            );
+        }
+        let writable = check_writable(&[PathBuf::from("src/lib")]).unwrap();
+        validate_workspace(&workspace, &writable).expect("a plain directory is writable");
+    }
+
+    #[test]
+    fn a_record_reporting_other_writable_paths_than_requested_is_refused() {
+        let input = ChildCommand::new("true", [] as [&str; 0], "/work/space")
+            .with_writable("scratch")
+            .input("space", "snapshot".to_owned());
+        let exact = record_for(&input, AppliedNetwork::None);
+        check_record(&input, None, &exact).unwrap();
+        let scoped = |paths: &[&str]| WorkspaceAccess::Scoped {
+            writable_subtrees: paths.iter().map(|path| (*path).to_owned()).collect(),
+        };
+        for access in [
+            WorkspaceAccess::ReadWrite,
+            WorkspaceAccess::ReadOnly,
+            scoped(&["target"]),
+            scoped(&["scratch", "src", "target"]),
+            scoped(&["scratch/inner", "target"]),
+            scoped(&["target", "scratch"]),
+        ] {
+            let record = substrate_wire::AppliedConfinement {
+                workspace_access: access.clone(),
+                ..exact.clone()
+            };
+            let error = check_record(&input, None, &record).unwrap_err();
+            assert_eq!(
+                error.reason,
+                ConfinementRefusal::CapabilityUnserved,
+                "{access:?}"
+            );
+        }
     }
 
     #[test]
@@ -1419,6 +1712,7 @@ mod tests {
         assert_eq!(input.limits, limits(Duration::from_secs(7)));
         let bare = ChildCommand::new("true", [] as [&str; 0], "/work/space");
         assert!(bare.environment().allow.is_empty() && bare.environment().set.is_empty());
+        assert!(bare.writable().is_empty(), "only `target` is writable");
         assert_eq!(bare.timeout(), ChildCommand::DEFAULT_TIMEOUT);
     }
 
@@ -1937,7 +2231,7 @@ mod tests {
         let _socket =
             std::os::unix::net::UnixListener::bind(workspace.join("target/host.sock")).unwrap();
         assert_eq!(
-            validate_workspace(&workspace).unwrap_err().reason,
+            validate_workspace(&workspace, &[]).unwrap_err().reason,
             ConfinementRefusal::ScopeInvalid
         );
     }

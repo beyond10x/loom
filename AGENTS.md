@@ -757,10 +757,16 @@ Every executed test observation includes the actual applied confinement; refused
 no test observation or passing evidence. Real delegated tests must run to qualify confinement;
 a skip with a named missing prerequisite establishes no qualification.
 `SubstrateRunner::run_child` confines a child process the host names (`ChildCommand`: program and
-arguments, the directory adopted as the workspace, and Substrate's `ExecEnvironment`,
+arguments, the directory adopted as the workspace, the workspace directories it may write beside
+`target/` (`with_writable`), and Substrate's `ExecEnvironment`,
 `SandboxProfile` and `NetworkMode`, `NetworkMode::None` by default, or with `with_egress` the one
 Substrate `EgressAperture` it may reach) on the same launch path:
-writes only under `target/`, no toolchain or cache mounted, exactly the named environment, a typed
+writes only under `target/` and the directories named (Substrate's `WorkspaceAccess::Scoped`;
+`.git` only when named; a path that is absolute, climbs out with `..`, passes a symlink, is absent
+or no directory, holds a special file or a hard link from outside, or overlaps another is refused
+`ScopeInvalid` before launch; `TestRunner::run` keeps `target/` alone, and the applied
+confinement's `writable_scopes` lists them, a record naming another set refused), no toolchain or
+cache mounted, exactly the named environment, a typed
 refusal for a missing guarantee, only the requested network accepted as applied, no network or
 exactly the named aperture (name, pinned destination, mechanism, ceiling), checked after the child
 ran and refusing its result as a test's is refused, a result with no exit status refused unless
