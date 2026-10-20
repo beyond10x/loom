@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:llm-080-pin
 kind: story
-status: draft
+status: active
 title: Loom links llm 0.8.0
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -22,7 +22,10 @@ scope:
   path: crates/loom-plugin-slack/tests/support/mod.rs
 - confidence: cited
   path: crates/loom-plugin/tests/support/mod.rs
-revision: 2
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-20T08:57:06Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-10-20T08:57:07Z", actor: "human:timo", revision: 4}
 ---
 ## Outcome
 

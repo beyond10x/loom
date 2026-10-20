@@ -10,6 +10,7 @@ relations:
 - depends_on: story:chooser-executor-for-plugin-turns
 - depends_on: story:executor-reports-usage
 - depends_on: story:llm-080-pin
+- depends_on: story:ess-covers-agent-sessions-and-intake
 scope:
 - confidence: cited
   path: AGENTS.md
@@ -33,7 +34,7 @@ scope:
   path: crates/loom-executor/tests/selection_telemetry.rs
 - confidence: cited
   path: crates/loom-selector-laya/tests/laya_arguments_slice.rs
-revision: 7
+revision: 8
 ---
 ## Outcome
 
@@ -76,14 +77,20 @@ llm's `Model` before the port is deleted.
 
 ## ESS first
 
-No noun the specification lacks; `loom.metering` and the recorded selections are unchanged. The
-red step is `the_reported_calls_equal_the_turns_the_model_port_saw` over an llm `Model` test double.
+No noun the specification lacks; `loom.metering` and the recorded selections keep their types.
+Where the domain says calls are counted (`ess/domains/metering.yaml:3`, today the harness
+`ModelPort`) and priced (line 26, today `harness/turn_loop/price.rs`) is re-pointed at llm's `Model`
+by `story:ess-covers-agent-sessions-and-intake`, which this story depends on and which lands in the
+same wave. The red step is `the_reported_calls_equal_the_turns_the_model_port_saw` over an llm
+`Model` test double.
 
 ## Depends on
 
 - `story:chooser-executor-for-plugin-turns`, which moves the llm-backed selector this story keeps or
   removes.
 - `story:executor-reports-usage`, which rewrites `metering.rs` and `run_metering.rs` first.
+- `story:ess-covers-agent-sessions-and-intake`, which re-points the metering domain's counting
+  point first.
 
 ## Not in scope
 

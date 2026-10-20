@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:child-egress-ca-bundle
 kind: story
-status: draft
+status: active
 title: A confined child under an egress aperture trusts the CA bundle the host names
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -17,7 +17,10 @@ scope:
   path: crates/loom-intake-slice/src/confinement.rs
 - confidence: cited
   path: crates/loom-intake-slice/tests/confined_child.rs
-revision: 2
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-20T08:57:07Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-10-20T08:57:08Z", actor: "human:timo", revision: 4}
 ---
 ## Outcome
 

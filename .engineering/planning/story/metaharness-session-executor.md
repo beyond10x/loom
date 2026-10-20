@@ -8,6 +8,7 @@ relations:
 - decomposes: epic:loom-on-llm-and-metaharness
 - serves: vision:governed-autonomy
 - depends_on: story:delete-harness-port
+- depends_on: story:ess-covers-agent-sessions-and-intake
 scope:
 - confidence: cited
   path: AGENTS.md
@@ -27,15 +28,11 @@ scope:
   path: crates/loom-sdk/tests/host_ports.rs
 - confidence: inferred
   path: crates/loom-session-executor
-- confidence: inferred
-  path: ess/domains/session.yaml
 - confidence: cited
-  path: ess/system.yaml
-- confidence: cited
-  path: generated/rust/loom
+  path: ess/SKIPPED.md
 - confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 7
+revision: 9
 ---
 ## Outcome
 
@@ -74,13 +71,15 @@ application finds it. takt's Codex executor extends the same crate.
 
 ## ESS first
 
-The proposal shape (the change a session returns) is declared in Loom's `ess/` (a new
-`loom.session` domain, inferred name) before the crate moves; the red step is the conformance
-scenario synthesized from it.
+The session and the change it proposes are declared in Loom's `ess/` by
+`story:ess-covers-agent-sessions-and-intake` (the `loom.session` domain) before the crate moves.
+This story implements against it: the session scenarios that story names in `ess/SKIPPED.md` run
+against the moved executor and leave that file. The red step is the first of those scenarios.
 
 ## Depends on
 
 - takt's standalone session-executor crate (`upstream-blocker:takt-session-executor-crate`).
+- `story:ess-covers-agent-sessions-and-intake`, which declares the session domain.
 - `story:delete-harness-port`, which edits `README.md` and the loom-sdk files first and itself lands
   after every other story that edits `host_ports.rs`, `crates/loom-sdk/src/lib.rs`, the stability
   page or `Cargo.lock` (`story:engineering-protocols-090`, `story:governor-exposes-canon-decision`,
@@ -99,5 +98,5 @@ Crates: a new `loom-session-executor` crate (name inferred), `loom-sdk`.
 - `crates/loom-session-executor/` (new), `Cargo.toml` (workspace members), `Cargo.lock`
 - `crates/loom-sdk/Cargo.toml`, `crates/loom-sdk/src/lib.rs`, `crates/loom-sdk/tests/host_ports.rs`
 - `website/docs/reference/sdk-stability.md`
-- `ess/domains/session.yaml` (new, inferred), `ess/system.yaml`, `generated/rust/loom/`
+- `ess/SKIPPED.md` (the session scenarios leave it)
 - `CHANGELOG.md`, `AGENTS.md`, `README.md`

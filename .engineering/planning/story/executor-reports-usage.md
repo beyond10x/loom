@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:executor-reports-usage
 kind: story
-status: draft
+status: active
 title: An executor that is not a model loop reports its usage into the run charges, budget and meter
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -29,7 +29,10 @@ scope:
   path: generated/rust/commission
 - confidence: cited
   path: generated/rust/loom
-revision: 5
+revision: 7
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-20T08:57:05Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":1}}}
+- {from: "proposed", to: "active", at: "2026-10-20T08:57:06Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":1}}}
 ---
 ## Outcome
 

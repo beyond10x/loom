@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:pending-effect
 kind: story
-status: draft
+status: active
 title: An effect can answer pending and be invoked again within the budget without counting idle
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -37,7 +37,10 @@ scope:
   path: generated/rust/commission
 - confidence: cited
   path: website/docs/reference/commission
-revision: 8
+revision: 10
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-20T08:57:05Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":3}}}
+- {from: "proposed", to: "active", at: "2026-10-20T08:57:05Z", actor: "human:timo", revision: 10, decided_on: {"recorded":{"review_outcome":3}}}
 ---
 ## Outcome
 
