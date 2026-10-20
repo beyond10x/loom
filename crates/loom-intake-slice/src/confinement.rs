@@ -72,10 +72,12 @@ fn scope_error(detail: impl fmt::Display) -> ConfinementError {
 /// ([`SubstrateRunner::run_child`]) run through it confined.
 ///
 /// A runner and its clones share one Substrate driver per directory that holds their workspaces,
-/// opened at the first launch there, so their launches run side by side. Opening a driver ends
+/// opened at the first launch there, so their launches in workspaces of one directory run side by
+/// side; each launch releases its execution from the driver once it ended. Opening a driver ends
 /// every confined run under its cgroup root (Substrate reconciles them as orphans), so no driver is
-/// opened on a root while a launch of this process runs under it: that launch's sibling is refused
-/// with [`ConfinementRefusal::CapabilityUnserved`] instead.
+/// opened on a root, however its path is spelled, while a launch of this process runs under it: a
+/// launch that needs a driver for another directory then is refused with
+/// [`ConfinementRefusal::CapabilityUnserved`] instead.
 #[derive(Debug, Clone, Default)]
 pub struct SubstrateRunner {
     cgroup_root: Option<PathBuf>,
@@ -104,6 +106,20 @@ static RUNNING: Mutex<BTreeMap<PathBuf, usize>> = Mutex::new(BTreeMap::new());
 
 fn running() -> MutexGuard<'static, BTreeMap<PathBuf, usize>> {
     RUNNING.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// One execution a shared driver tracks, released when dropped. A driver tracks a bounded number
+/// of executions (`HostConfig::max_tracked_execs`) and keeps a finished one until it is
+/// discarded, so a launch discards its own once its result is read or it ended in a refusal;
+/// one still running is kept.
+struct Release<'a> {
+    driver: &'a HostDriver,
+    id: &'a str,
+}
+impl Drop for Release<'_> {
+    fn drop(&mut self) {
+        self.driver.discard_superseded_exec(self.id);
+    }
 }
 
 /// One launch running under a cgroup root, counted from before its start until it is dropped.
@@ -180,22 +196,29 @@ impl SubstrateRunner {
         let mut config = HostConfig::minimum(parent);
         config.capsule_root = state.path().join("capsules");
         validate_backend(&config.bubblewrap)?;
-        config.cgroup_root = self.cgroup_root.clone().or_else(discover_cgroup_root);
-        let cgroup_root = config.cgroup_root.clone().filter(|path| {
-            path.join("cgroup.controllers").is_file()
-                && std::fs::read_to_string(path.join("cgroup.procs"))
-                    .is_ok_and(|s| s.trim().is_empty())
-                && std::fs::OpenOptions::new()
-                    .write(true)
-                    .open(path.join("cgroup.procs"))
-                    .is_ok()
-        });
+        // One root has one name: the count of running launches is keyed by it, however the host
+        // spelled the root.
+        let cgroup_root = self
+            .cgroup_root
+            .clone()
+            .or_else(discover_cgroup_root)
+            .and_then(|path| path.canonicalize().ok())
+            .filter(|path| {
+                path.join("cgroup.controllers").is_file()
+                    && std::fs::read_to_string(path.join("cgroup.procs"))
+                        .is_ok_and(|s| s.trim().is_empty())
+                    && std::fs::OpenOptions::new()
+                        .write(true)
+                        .open(path.join("cgroup.procs"))
+                        .is_ok()
+            });
         let Some(cgroup_root) = cgroup_root else {
             return Err(refuse(
                 ConfinementRefusal::CgroupUndelegated,
                 "Substrate requires an empty delegated cgroup v2 subtree containing this process in a child; use systemd-run --user -p Delegate=yes --scope or --cgroup-root",
             ));
         };
+        config.cgroup_root = Some(cgroup_root.clone());
         // Opening kills every exec cgroup under the root; hold the count so no launch starts
         // there meanwhile, and open nothing over a launch already running there.
         let running = running();
@@ -274,6 +297,11 @@ impl SubstrateRunner {
             std::process::id(),
             NEXT_EXEC.fetch_add(1, Ordering::Relaxed)
         );
+        // Declared before anything that can return, so every path releases the execution.
+        let _release = Release {
+            driver: driver.as_ref(),
+            id: &id,
+        };
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -575,13 +603,18 @@ impl ChildCommand {
     }
 }
 
-/// Refuse a program Substrate's `/usr/bin/env` would read as a `NAME=VALUE` assignment, which
-/// would set a variable nobody named, one Substrate refuses by name included. The refusal names
-/// the program up to its `=`, never the value.
+/// Refuse a program Substrate's `/usr/bin/env` would read as one of its own operands instead of
+/// the program to run: a `NAME=VALUE` assignment, which would set a variable nobody named, one
+/// Substrate refuses by name included, and a word starting with `-`, an option there (a lone `-`
+/// is `-i`, and the next word would run instead). The refusal names an assignment up to its `=`,
+/// never the value.
 fn check_program(program: &str) -> Result<(), ConfinementError> {
     match program.split_once('=') {
         Some((name, _)) => Err(scope_error(format!(
             "the program `{name}=…` contains '=': Substrate starts a program through /usr/bin/env, which would read it as a variable assignment"
+        ))),
+        None if program.starts_with('-') => Err(scope_error(format!(
+            "the program `{program}` starts with '-': Substrate starts a program through /usr/bin/env, which would read it as an option"
         ))),
         None => Ok(()),
     }
@@ -1117,6 +1150,28 @@ mod tests {
     }
 
     #[test]
+    fn a_root_named_another_way_is_counted_as_one_root() {
+        let fixture = tempfile::tempdir().unwrap();
+        let cgroup = fixture.path().join("cgroup");
+        std::fs::create_dir(&cgroup).unwrap();
+        std::fs::write(cgroup.join("cgroup.controllers"), "cpu memory pids\n").unwrap();
+        std::fs::write(cgroup.join("cgroup.procs"), "").unwrap();
+        let launch = Running::enter(&cgroup.canonicalize().unwrap());
+        let spelled = cgroup.join("..").join("cgroup");
+        let error = SubstrateRunner::new(Some(spelled))
+            .open(fixture.path())
+            .err()
+            .expect("nothing is opened");
+        let expected = if Path::new("/usr/bin/bwrap").is_file() {
+            ConfinementRefusal::CapabilityUnserved
+        } else {
+            ConfinementRefusal::BackendMissing
+        };
+        assert_eq!(error.reason, expected, "{error}");
+        drop(launch);
+    }
+
+    #[test]
     fn no_driver_is_opened_over_a_launch_running_under_its_cgroup_root() {
         let fixture = tempfile::tempdir().unwrap();
         // Shaped as an empty delegated cgroup, so only the running launch stands in the way.
@@ -1183,6 +1238,19 @@ mod tests {
         assert!(error.detail.contains("`GH_TOKEN=…`"), "{error}");
         assert!(!error.detail.contains("synthetic-value"), "{error}");
         check_program("/usr/bin/env").unwrap();
+    }
+
+    #[test]
+    fn a_program_env_reads_as_an_option_is_refused() {
+        for program in ["-", "-i", "--", "-u"] {
+            let error = check_program(program).unwrap_err();
+            assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{program}");
+            assert!(error.detail.contains(&format!("`{program}`")), "{error}");
+        }
+        let error = check_program("-X=synthetic-value").unwrap_err();
+        assert!(!error.detail.contains("synthetic-value"), "{error}");
+        check_program("printf").unwrap();
+        check_program("./a-b").unwrap();
     }
 
     #[test]
