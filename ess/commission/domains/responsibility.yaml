@@ -793,7 +793,9 @@ entities:
   # request that may have been performed or not (the process that took it stopped before releasing
   # it): it stays stored and is never taken again, so the request is never performed twice and never
   # dropped without a durable trace; settling it is the host's. Once the request was performed the
-  # Suspension is released (`ReleaseSuspension`), removed; a `Pending` one is not released.
+  # Suspension is released (`ReleaseSuspension`), removed; a `Pending` one is not released. So is
+  # one whose request can never be performed: a resume that took it and finds the case moved off
+  # the request's revision before the request is invoked releases it and performs nothing.
   #
   # story:handoff-holds-no-suspension: a hold the host already settled (`HoldSuspension`,
   # `settled`) leaves nothing held: the host has already done what an approval of the request
@@ -1254,9 +1256,11 @@ commands:
         error: commission.responsibility.SuspensionStorageFailed
 
   # story:approval-suspend-resume-slice: once the request a resume took the Suspension for was
-  # performed, the Suspension is removed. It names the request that was performed: a Suspension
-  # held for another request is refused, naming both, and kept as it is. A `Pending` one, which no
-  # resume took, is not removed.
+  # performed, the Suspension is removed. It names that request: a Suspension held for another
+  # request is refused, naming both, and kept as it is. A `Pending` one, which no resume took, is
+  # not removed. story:authority-sees-the-request: a resume that took the Suspension and finds the
+  # case moved off the request's revision before invoking it releases it the same way, since the
+  # request bound to that revision can never be performed, and performs nothing.
   - name: commission.responsibility.ReleaseSuspension
     input:
       - name: suspension
