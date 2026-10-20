@@ -9,6 +9,24 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+A host confines a child process it names (`story:sdk-confines-any-child`).
+`SubstrateRunner::run_child(&ChildCommand)` runs a program with its arguments, never a shell line,
+in a directory the host names, adopted as Substrate's workspace and the child's working directory,
+on the launch path a test takes and with a test's guarantees: the child writes only under the
+directory's `target/` and no toolchain or cache is mounted; its environment is exactly the
+Substrate `ExecEnvironment` the host names, empty unless it names one; it asks Substrate for the
+`SandboxProfile` and `NetworkMode` the host names, `Workspace` with `None` by default, always
+required; a guarantee Substrate does not serve, or an applied confinement other than the one
+requested (only no network is accepted as applied), is a `ConfinementError` and nothing runs,
+never an unconfined fall-back; and the `TestExecution` it returns carries the applied confinement
+and the driver's record. `loom_sdk::ChildCommand` is exported beside `TestRunner`, and
+`loom_sdk::intake::slice::confinement` re-exports the Substrate types it is named with
+(`ExecEnvironment`, `BaselineEnvironment`, `SandboxProfile`, `NetworkMode`). `TestRunner` runs as
+before. `crates/loom-intake-slice/tests/confined_child.rs` holds it; its delegated cases start
+their own test binary in a delegated user systemd scope and skip naming the missing prerequisite
+where bubblewrap, a user systemd manager or the Substrate driver is absent.
+Breaking: none.
+
 ## [0.27.0] - 2026-10-20
 
 Loom 0.27.0 links engineering-protocols 0.9.0, tells an authority provider the action request it

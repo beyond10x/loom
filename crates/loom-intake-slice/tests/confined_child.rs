@@ -149,7 +149,10 @@ fn a_named_child_runs_confined_and_reports_what_was_applied() {
             assert_eq!(record.profile, SandboxProfile::Workspace);
             assert_eq!(record.network, substrate_wire::AppliedNetwork::None);
             assert_eq!(record.cgroup, result.applied.cgroup);
-            assert_eq!(record.capability_snapshot, result.applied.capability_snapshot);
+            assert_eq!(
+                record.capability_snapshot,
+                result.applied.capability_snapshot
+            );
             assert!(record.read_only_roots.is_empty());
             assert!(record.secret_slots.is_empty());
         },
