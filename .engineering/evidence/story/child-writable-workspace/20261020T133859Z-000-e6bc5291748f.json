@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-20T13:38:59Z",
+  "actor": "human:timo",
+  "artifact": "story:child-writable-workspace",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adv-w20261020w2-u6-pass-1",
+    "reference": "Loom 0.27.1 (Substrate 0.7.17 pin) fixed the descriptor escape; the socket refusal fixed in the rebuilt unit, merged 871b564",
+    "review": "review-result:adv-w20261020w2-u6-pass-1",
+    "outcome": "fixed"
+  }
+}
