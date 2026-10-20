@@ -9,7 +9,7 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
-Loom links llm 0.8.0 (`story:llm-080-pin`): every `b10x-llm-*` dependency names tag `0.8.0`, and
+Loom links llm 0.8.1 (`story:llm-080-pin`): every `b10x-llm-*` dependency names tag `0.8.1`, and
 `Cargo.lock` holds one version of each. Loom's own code does not change, and the requests it sends
 do not change byte for byte: llm 0.8.0 changes no request encoder, and the two new capability
 declarations are not written at their defaults. What a Loom host sees of llm 0.8.0: `Capabilities`
@@ -25,8 +25,13 @@ the first, and through an llm-gateway that already retried it the slice may retr
 streamed Responses turn's assistant text is the text the sink was shown, with a `shown-text-kept`
 or `shown-text-unpaired` warning when the server's message said otherwise; text a Messages `text`
 block opens with reaches the sink as a `TextDelta` when the block opens; and `response.queued` is
-ignored, no longer an `unknown-stream-event` warning.
-Breaking: a host that links llm itself moves to llm 0.8.0 so it resolves one copy of each
+ignored, no longer an `unknown-stream-event` warning. llm 0.8.1 adds what Loom needs against the
+live Messages route: a response carrying `container` (on the message, on `message_start.message`
+or on `message_delta.delta`), which 0.8.0 refused as `Unsupported`, is accepted, and so are the
+documented `diagnostics`, `stop_details`, `usage.speed`, `toolset_name` and a `direct` `caller`
+in the shapes a request that asked for none of them gets; any other value of those fields is
+refused as `protocol`.
+Breaking: a host that links llm itself moves to llm 0.8.1 so it resolves one copy of each
 `b10x-llm-*` crate, and a full `Capabilities { … }` literal in it sets `output_streaming` and
 `input_during_output` or ends with `..Capabilities::text(…)`.
 

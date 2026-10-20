@@ -840,7 +840,7 @@ other Git call sites except the separately hardened pinned-source helper at
 `crates/loom-protocols/src/git.rs`. That helper fetches into a private bare repository, never a
 run workspace, with hooks, fsmonitor, helpers and global/system configuration disabled. Gates still run when the operator or the bot commits and pushes.
 
-Model calls go through llm's crates at release tag `0.8.0`, never a hand-written HTTP client.
+Model calls go through llm's crates at release tag `0.8.1`, never a hand-written HTTP client.
 `model_retry.rs` owns caller retries using llm's retry
 classification and `RetryPolicy`: three identical attempts, no retry after a sink event,
 cancellation-aware backoff and per-attempt context metrics. Model ports stay single-attempt;
