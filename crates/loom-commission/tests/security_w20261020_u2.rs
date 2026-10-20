@@ -9,6 +9,9 @@
 //! * "When a selector, integration, verifier or authority provider fails, fail toward less
 //!   authority": a provider that panics while deciding performs nothing at either call site, and
 //!   a resume it panics in leaves the Suspension pending.
+//! * Pass 2, against the revision the runtime reads again once the provider allows: what that
+//!   read refuses leaves nothing taken, held or performed and is recorded stale, and a case that
+//!   moves after that read, while a resume takes its Suspension, is still not invoked.
 //!
 //! Every port here is hand-written against Commission alone, so the same cases build on any
 //! commit that has these ports.
@@ -17,16 +20,19 @@ use std::collections::VecDeque;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Mutex, PoisonError};
 
+use b10x_loom_commission::model::behaviour::RunStorage;
 use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
-    ActionRequestData, ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext,
-    AuthorityVerdict, AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData,
-    CommissionId, CompletionDetermination, CompletionDeterminationComplete, EffectOutcome,
-    EffectOutcomePerformed, ExecutorOutcome, ExecutorOutcomeProposedAction, Frontier,
-    FrontierAction, FrontierData, FrontierId, GovernorError, Observation, ObservationId,
-    PrincipalId, ProposedActionArguments, RunId, RunOutcome, RunOutcomeNeedsAuthority,
-    SuspensionState, Unit, commission_state, frontier_state, observation_state,
+    ActionRequestData, ActionRequestId, ActionRequestStale, ActionStatus, AgentRevisionId,
+    AuthorityContext, AuthorityVerdict, AuthorityVerdictApprovalRequired, CaseId, Commission,
+    CommissionData, CommissionId, CompletionDetermination, CompletionDeterminationComplete,
+    EffectOutcome, EffectOutcomePerformed, ExecutorOutcome, ExecutorOutcomeProposedAction,
+    Frontier, FrontierAction, FrontierData, FrontierId, GovernorError, HoldSuspension,
+    HoldSuspensionOutcome, Observation, ObservationId, PrincipalId, ProposedActionArguments,
+    ReleaseSuspension, ReleaseSuspensionOutcome, RevalidateActionRequestOutcome, RunId, RunOutcome,
+    RunOutcomeNeedsAuthority, SuspensionSnapshot, SuspensionState, TakeSuspension,
+    TakeSuspensionOutcome, Unit, commission_state, frontier_state, observation_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
@@ -34,9 +40,12 @@ use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPo
 use b10x_loom_commission::ports::evidence::ObservationPort;
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
-use b10x_loom_commission::ports::suspension::{SuspensionPort, SuspensionStore};
+use b10x_loom_commission::ports::suspension::{
+    SuspensionPort, SuspensionStore, SuspensionStoreError,
+};
 use b10x_loom_commission::runtime::{
-    LoopContext, resume_after_grant, run_until_blocked, run_with_suspension,
+    LoopContext, ResumeError, ResumeRefusal, resume_after_grant, run_until_blocked,
+    run_with_suspension,
 };
 
 const MERGE: &str = "merge";
@@ -526,4 +535,187 @@ fn security_a_panicking_provider_performs_nothing_on_a_resume() {
         .unwrap_or_else(|error| panic!("the store reads: {error:?}"))
         .unwrap_or_else(|| panic!("the Suspension is still stored"));
     assert_eq!(stored.state, SuspensionState::Pending);
+}
+
+/// Allows every capability and moves nothing.
+struct Allows;
+
+impl AuthorityProvider for Allows {
+    fn decide(
+        &self,
+        _commission: &CommissionData,
+        _request: &ActionRequestData,
+        _capability: &str,
+    ) -> Result<AuthorityVerdict, AuthorityProviderError> {
+        Ok(AuthorityVerdict::Allow(Unit(true)))
+    }
+}
+
+/// A suspension store during whose `TakeSuspension` another writer moves the case on, as one that
+/// writes the Suspension to disk gives any concurrent writer time to. Every command is answered by
+/// `inner`.
+struct MovesOnTake<'a> {
+    inner: &'a SuspensionStore,
+    case: &'a Case,
+}
+
+impl SuspensionPort for MovesOnTake<'_> {
+    fn hold(&self, input: HoldSuspension) -> HoldSuspensionOutcome {
+        self.inner.hold(input)
+    }
+
+    fn take(&self, input: TakeSuspension) -> TakeSuspensionOutcome {
+        self.case.moved_on();
+        self.inner.take(input)
+    }
+
+    fn release(&self, input: ReleaseSuspension) -> ReleaseSuspensionOutcome {
+        self.inner.release(input)
+    }
+
+    fn get(
+        &self,
+        commission: &CommissionId,
+    ) -> Result<Option<SuspensionSnapshot>, SuspensionStoreError> {
+        SuspensionPort::get(self.inner, commission)
+    }
+}
+
+/// Pass 2, a second move after the revision read once the provider allows: the resume reads the
+/// case at 7 after the allow, then resumes the Run and takes the Suspension, and while it takes
+/// it the case moves on to 8. The held request is bound to 7 and the case is at 8 when the
+/// resumed loop hands it over, so the effect port must not be handed it.
+#[test]
+fn security_a_case_moved_while_the_resume_takes_its_suspension_is_not_invoked() {
+    let case = Case::at(START);
+    let effects = Effects::on(&case);
+    let suspensions = SuspensionStore::new();
+    suspend_at_start(&case, &effects, &suspensions);
+
+    let taking = MovesOnTake {
+        inner: &suspensions,
+        case: &case,
+    };
+    let resumed = resume_after_grant(
+        &case,
+        &ProposesMergeOnce::none(),
+        &Allows,
+        &effects,
+        &commission(),
+        &mut runs(0x200),
+        &taking,
+        &mut Context::starting_at(0x500),
+    );
+
+    assert_eq!(
+        case.revision(),
+        START + 1,
+        "precondition: the case moved on while the Suspension was taken; the resume answered \
+         {resumed:?}"
+    );
+    let moved = effects.invoked_on_a_moved_case();
+    assert!(
+        moved.is_empty(),
+        "the resume handed the effect port the suspended request after the case left its \
+         revision while the Suspension was taken, as (request revision, case revision at \
+         invocation): {moved:?}; the resume answered {resumed:?}"
+    );
+}
+
+/// Pass 2, what the run loop's read after the allow leaves: the request the provider allowed at
+/// 7 on a case that moved to 8 while it decided is recorded `Stale`, naming both revisions, in
+/// place of `NeedsAuthority`; it is not admitted, not performed, and with a suspension port
+/// nothing is held for it.
+#[test]
+fn security_the_run_loop_records_a_request_allowed_on_a_moved_case_stale_and_holds_nothing() {
+    let case = Case::at(START);
+    let effects = Effects::on(&case);
+    let provider = MovesWhileDeciding::on(&case);
+    let suspensions = SuspensionStore::new();
+
+    let end = run_with_suspension(
+        &case,
+        &ProposesMergeOnce::new(),
+        &provider,
+        &effects,
+        &commission(),
+        &mut runs(0x100),
+        &suspensions,
+        &mut Context::starting_at(0x300),
+    )
+    .unwrap_or_else(|error| panic!("the loop failed: {error:?}"));
+
+    assert_eq!(provider.decided(), 1, "precondition: one decision; {end:?}");
+    let outcomes: Vec<RevalidateActionRequestOutcome> = end
+        .requests
+        .iter()
+        .map(|revalidated| revalidated.outcome.clone())
+        .collect();
+    assert_eq!(
+        outcomes,
+        vec![RevalidateActionRequestOutcome::Stale {
+            error: ActionRequestStale {
+                expected_case_revision: START,
+                current_case_revision: START + 1,
+            },
+        }],
+        "the request allowed on a moved case is recorded stale: {end:?}"
+    );
+    assert!(end.admitted.is_empty(), "nothing is admitted: {end:?}");
+    assert!(effects.invoked().is_empty(), "nothing is performed");
+    let held = SuspensionPort::get(&suspensions, &commission().data().commission_id)
+        .unwrap_or_else(|error| panic!("the store reads: {error:?}"));
+    assert_eq!(held, None, "nothing is held for a stale request");
+}
+
+/// Pass 2, what the resume's read after the allow leaves: refused `CaseMoved` naming 7 and 8,
+/// nothing performed, no Run put into the new process's run store, and the Suspension still
+/// `Pending` for the same request.
+#[test]
+fn security_a_resume_refused_after_the_allow_takes_nothing_and_resumes_no_run() {
+    let case = Case::at(START);
+    let effects = Effects::on(&case);
+    let suspensions = SuspensionStore::new();
+    suspend_at_start(&case, &effects, &suspensions);
+    let commission_id = commission().data().commission_id.clone();
+    let before = SuspensionPort::get(&suspensions, &commission_id)
+        .unwrap_or_else(|error| panic!("the store reads: {error:?}"))
+        .unwrap_or_else(|| panic!("precondition: a Suspension is held"));
+
+    let provider = MovesWhileDeciding::on(&case);
+    let mut fresh = runs(0x200);
+    let resumed = resume_after_grant(
+        &case,
+        &ProposesMergeOnce::none(),
+        &provider,
+        &effects,
+        &commission(),
+        &mut fresh,
+        &suspensions,
+        &mut Context::starting_at(0x500),
+    );
+
+    match &resumed {
+        Err(ResumeError::Refused(ResumeRefusal::CaseMoved {
+            expected_case_revision,
+            current_case_revision,
+        })) => {
+            assert_eq!(
+                (*expected_case_revision, *current_case_revision),
+                (START, START + 1)
+            );
+        }
+        other => panic!("a move while the provider decided refuses the resume, got {other:?}"),
+    }
+    assert!(effects.invoked().is_empty(), "nothing is performed");
+    assert!(
+        RunStorage::list(&fresh).is_empty(),
+        "no Run is put or resumed: {:?}",
+        RunStorage::list(&fresh)
+    );
+    let after = SuspensionPort::get(&suspensions, &commission_id)
+        .unwrap_or_else(|error| panic!("the store reads: {error:?}"))
+        .unwrap_or_else(|| panic!("the Suspension is still stored"));
+    assert_eq!(after.state, SuspensionState::Pending, "nothing is taken");
+    assert_eq!(after, before, "the Suspension is held as it was");
 }
