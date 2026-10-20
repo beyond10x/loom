@@ -17,19 +17,24 @@ use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
     ActionBudget, ActionCharge, ActionNeedsAuthority, ActionRequestData, ActionRequestId,
     ActionRequestStale, ActionStatus, AgentRevisionId, AuthorityContext, AuthorityVerdict,
-    AuthorityVerdictDeny, BudgetLimit, CaseId, ChargedUsage, Commission, CommissionData,
-    CommissionId, EffectOutcome, EffectOutcomePending, EffectOutcomePerformed, ExecutorOutcome,
-    ExecutorOutcomeProposedAction, ExecutorOutcomeProposedReads, FrontierAction, ObservationId,
-    PrincipalId, ProposedActionArguments, RevalidateActionRequestOutcome, RunBudget,
-    RunBudgetBreach, RunId, RunOutcome, RunOutcomeCaseMovedOn, RunOutcomeIdleBound,
-    RunOutcomeSuspended, RunOutcomeWaiting, RunState, SuspensionReason, Unit, commission_state,
+    AuthorityVerdictApprovalRequired, AuthorityVerdictDeny, BudgetLimit, CaseId, ChargedUsage,
+    Commission, CommissionData, CommissionId, EffectOutcome, EffectOutcomePending,
+    EffectOutcomePerformed, ExecutorOutcome, ExecutorOutcomeProposedAction,
+    ExecutorOutcomeProposedReads, FrontierAction, ObservationId, PrincipalId,
+    ProposedActionArguments, RevalidateActionRequestOutcome, RunBudget, RunBudgetBreach, RunId,
+    RunOutcome, RunOutcomeAwaitingApproval, RunOutcomeCaseMovedOn, RunOutcomeIdleBound,
+    RunOutcomeNeedsAuthority, RunOutcomeSuspended, RunOutcomeWaiting, RunState, SuspensionReason,
+    Unit, commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
 use b10x_loom_commission::ports::effect::{
     AdmittedRequest, EffectError, EffectPort, invoke_concurrently,
 };
-use b10x_loom_commission::runtime::{LoopContext, LoopEnd, Revalidated, run_until_blocked};
+use b10x_loom_commission::ports::suspension::{SuspensionPort, SuspensionStore};
+use b10x_loom_commission::runtime::{
+    LoopContext, LoopEnd, Revalidated, resume_after_grant, run_until_blocked, run_with_suspension,
+};
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
 use b10x_loom_commission_testkit::fake_executor::ScriptedExecutor;
 use b10x_loom_commission_testkit::fake_governor::{Answer, FakeGovernor, GovernorCall};
@@ -918,4 +923,187 @@ fn a_budget_reached_while_a_read_is_pending_names_that_read() {
             )])),
         })
     );
+}
+
+/// An action the frontier lists beside the pending one, which the executor may still take.
+const INSPECT: &str = "repository.inspect";
+
+/// A run store whose new runs take ids from `0x100 + base + 1` on, for a loop that suspends or
+/// resumes a Run.
+fn runs(base: u64) -> RunStore {
+    let mut issued = base;
+    RunStore::new(move || {
+        issued += 1;
+        RunId(uuid(0x100 + issued))
+    })
+}
+
+/// A resumed request answered pending: the resume releases the Suspension it took, since the port
+/// answered, and the loop's first iteration invokes the request again, revalidated and asked about
+/// again, until it is performed; only then does the executor run. Nothing is taken from the
+/// released Suspension.
+#[test]
+fn a_resumed_request_answered_pending_is_released_and_invoked_again() {
+    let case = CaseId("case-pending-resumed".to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(
+        case.clone(),
+        [listing(
+            7,
+            vec![
+                FrontierAction {
+                    action: MERGE.to_owned(),
+                    status: ActionStatus::ApprovalRequired,
+                    capability: Some(CAPABILITY.to_owned()),
+                    reasons: Vec::new(),
+                },
+                admissible(CHECK),
+            ],
+        )],
+    );
+    let effects = Effects::answering(MERGE, vec![pending("merge queued"), performed(MERGE)]);
+    let suspensions = SuspensionStore::new();
+    let withheld = AuthorityVerdict::ApprovalRequired(AuthorityVerdictApprovalRequired {
+        request: "approve the merge".to_owned(),
+    });
+    let suspended = run_with_suspension(
+        &governor,
+        &ScriptedExecutor::new([proposal(MERGE)]),
+        &StaticAuthorityProvider::new().answer(CAPABILITY, withheld),
+        &effects,
+        &commission(&case),
+        &mut runs(0),
+        &suspensions,
+        &mut Context::new(None),
+    )
+    .unwrap_or_else(|error| panic!("the loop failed: {error:?}"));
+    assert_eq!(
+        suspended.outcome,
+        RunOutcome::NeedsAuthority(RunOutcomeNeedsAuthority {
+            request: "approve the merge".to_owned(),
+        }),
+        "precondition: the merge is withheld and held as a Suspension"
+    );
+    assert!(
+        effects.invoked().is_empty(),
+        "precondition: nothing invoked"
+    );
+
+    let executor = ScriptedExecutor::new([idle(), idle()]);
+    let authority =
+        StaticAuthorityProvider::new().answer(CAPABILITY, AuthorityVerdict::Allow(Unit(true)));
+    let mut context = Context::new(None);
+    context.requests = 0x380;
+    context.observations = 0x480;
+    let end = resume_after_grant(
+        &governor,
+        &executor,
+        &authority,
+        &effects,
+        &commission(&case),
+        &mut runs(0x80),
+        &suspensions,
+        &mut context,
+    )
+    .unwrap_or_else(|error| panic!("the resume failed: {error:?}"));
+
+    let held = request(1, &suspended.run_id, &case, 7, MERGE);
+    assert_eq!(
+        effects.invoked(),
+        vec![held.clone(), held.clone()],
+        "invoked by the resume, and again by the loop, under its own id"
+    );
+    assert_eq!(
+        authority.requests(),
+        vec![held.clone(), held],
+        "the provider is asked at the resume and again before the invocation again"
+    );
+    assert_eq!(end.effects, vec![pending("merge queued"), performed(MERGE)]);
+    let stored = SuspensionPort::get(&suspensions, &commission(&case).data().commission_id)
+        .unwrap_or_else(|error| panic!("the store reads: {error:?}"));
+    assert_eq!(
+        stored, None,
+        "the Suspension is released once the port answered, pending or not"
+    );
+    assert_eq!(
+        executor.calls().len(),
+        1,
+        "the executor runs only once the request was performed"
+    );
+    // This fake's frontier keeps listing the merge as needing approval, so the executor's idle
+    // step leaves it unchanged and the approval gate ends the run, as it would after a resumed
+    // request performed at once.
+    assert_eq!(
+        end.outcome,
+        RunOutcome::AwaitingApproval(RunOutcomeAwaitingApproval {
+            actions: vec![MERGE.to_owned()],
+        })
+    );
+}
+
+/// The frontier stops listing the pending request's action, the case still at its revision: the
+/// revalidation before the invocation again refuses it, so it is recorded with that answer, not
+/// invoked again and no longer pending, and the same iteration goes on to the executor, which is
+/// handed the frontier as it is now.
+#[test]
+fn a_pending_request_the_frontier_no_longer_admits_is_dropped_and_the_executor_runs() {
+    let case = CaseId("case-pending-not-admitted".to_owned());
+    let governor = FakeGovernor::new();
+    // The first iteration and the request's revalidation (five calls) list `ci.check`; every call
+    // after lists only `repository.inspect`, at the same revision.
+    governor.script(
+        case.clone(),
+        std::iter::repeat_n(listing(4, vec![admissible(CHECK), admissible(INSPECT)]), 5)
+            .chain([listing(4, vec![admissible(INSPECT)])]),
+    );
+    let executor = ScriptedExecutor::new([proposal(CHECK), idle(), idle()]);
+    let effects = Effects::answering(CHECK, vec![pending("job running")]);
+
+    let (end, _) = run(&governor, &executor, &effects, &case, None);
+
+    let made = request(1, &end.run_id, &case, 4, CHECK);
+    assert_eq!(effects.invoked(), vec![made.clone()], "not invoked again");
+    assert_eq!(end.requests.len(), 2, "{:?}", end.requests);
+    assert!(
+        matches!(
+            &end.requests[1],
+            Revalidated {
+                request,
+                outcome: RevalidateActionRequestOutcome::NotAdmitted { .. },
+            } if *request == made
+        ),
+        "the refused revalidation is recorded: {:?}",
+        end.requests[1]
+    );
+    assert_eq!(
+        governor.calls(),
+        [
+            iteration(&case),
+            revalidation(&case),
+            iteration(&case),
+            revalidation(&case),
+            iteration(&case),
+        ]
+        .concat()
+    );
+    assert_eq!(
+        executor.calls().len(),
+        3,
+        "the iteration that dropped the request runs the executor, and so does the next"
+    );
+    let handed: Vec<String> = executor.frontiers()[1]
+        .actions
+        .iter()
+        .map(|listed| listed.action.clone())
+        .collect();
+    assert_eq!(
+        handed,
+        [INSPECT],
+        "the executor is handed the frontier as it is now"
+    );
+    assert_eq!(
+        end.outcome,
+        RunOutcome::IdleBound(RunOutcomeIdleBound { idle_iterations: 2 })
+    );
+    assert_eq!(end.steps, 2);
 }

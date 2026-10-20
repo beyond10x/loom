@@ -20,10 +20,10 @@ use b10x_loom_commission::model::primitives::{Timestamp, Uuid as CommissionUuid}
 use b10x_loom_commission::model::responsibility::{
     ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, AuthorityVerdict,
     AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData, CommissionId,
-    CompletionDetermination, EffectOutcome, EffectOutcomePerformed, EffectOutcomeRefused, Frontier,
-    FrontierAction, FrontierData, FrontierId, GovernorError, Observation, ObservationId,
-    PrincipalId, RunId, RunOutcome, RunOutcomeSuspended, SuspensionReason, Unit, commission_state,
-    frontier_state, observation_state,
+    CompletionDetermination, EffectOutcome, EffectOutcomePending, EffectOutcomePerformed,
+    EffectOutcomeRefused, Frontier, FrontierAction, FrontierData, FrontierId, GovernorError,
+    Observation, ObservationId, PrincipalId, RunId, RunOutcome, RunOutcomeSuspended,
+    SuspensionReason, Unit, commission_state, frontier_state, observation_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -197,10 +197,12 @@ impl ObservationPort for Case {
 }
 
 /// The host's effect port: performs every action on the case, except that it refuses the first
-/// invocation of each action named in `refuse_once`, changing nothing.
+/// invocation of each action named in `refuse_once`, and answers the first invocation of each
+/// named in `pending_once` pending (`story:pending-effect`), each changing nothing.
 struct CaseEffects<'c> {
     case: &'c Case,
     refuse_once: Mutex<Vec<&'static str>>,
+    pending_once: Mutex<Vec<&'static str>>,
 }
 
 impl<'c> CaseEffects<'c> {
@@ -208,6 +210,15 @@ impl<'c> CaseEffects<'c> {
         Self {
             case,
             refuse_once: Mutex::new(refuse_once),
+            pending_once: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// The same port, answering the first invocation of each of `actions` pending.
+    fn pending_once(self, actions: Vec<&'static str>) -> Self {
+        Self {
+            pending_once: Mutex::new(actions),
+            ..self
         }
     }
 }
@@ -232,6 +243,16 @@ impl EffectPort for CaseEffects<'_> {
             return Ok(EffectOutcome::Refused(EffectOutcomeRefused {
                 reason: format!("{action} refused once by the test"),
                 ends_run: false,
+            }));
+        }
+        let mut pending = self
+            .pending_once
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(at) = pending.iter().position(|named| *named == action) {
+            pending.remove(at);
+            return Ok(EffectOutcome::Pending(EffectOutcomePending {
+                report: CommissionValue::Text(format!("{action} still running")),
             }));
         }
         self.case.perform(action);
@@ -402,8 +423,22 @@ fn run_configured(
     turns: Vec<TurnOutcome>,
     config: LoopConfig,
 ) -> Ran {
+    run_effects(text, blocked, refuse_once, Vec::new(), turns, config)
+}
+
+/// [`run_configured`], the effect port answering the first invocation of each of `pending_once`
+/// pending.
+fn run_effects(
+    text: &str,
+    blocked: Vec<&'static str>,
+    refuse_once: Vec<&'static str>,
+    pending_once: Vec<&'static str>,
+    turns: Vec<TurnOutcome>,
+    config: LoopConfig,
+) -> Ran {
     let case = Case::new(blocked);
-    let effects = RecordingEffects::new(CaseEffects::new(&case, refuse_once));
+    let effects =
+        RecordingEffects::new(CaseEffects::new(&case, refuse_once).pending_once(pending_once));
     let loom = Loom::new(
         FirstAdmissibleSelector,
         EmptyObjectArguments,
@@ -755,6 +790,49 @@ fn a_step_advances_only_after_its_effect_was_performed() {
     assert_eq!(ran.attempted[..2], ["inspect", "inspect"]);
     assert!(
         matches!(&ran.end.outcome, RunOutcome::NeedsAuthority(_)),
+        "{:?}",
+        ran.end.outcome
+    );
+}
+
+/// story:pending-effect: the effect port answers `repository.inspect` pending once. The runtime
+/// invokes the same request again, with no executor call between, and `RecordingEffects` settles
+/// the step on the `Performed` that follows: the workflow's next call takes the edit, once, and
+/// the run reaches the merge approval as it does when nothing is pending.
+#[test]
+fn a_step_advances_on_the_performed_effect_after_a_pending_one() {
+    let ran = run_effects(
+        DEFINITION,
+        Vec::new(),
+        Vec::new(),
+        vec![INSPECT],
+        edits(),
+        LoopConfig::new("scripted-model", "INSTRUCTIONS"),
+    );
+
+    let requests = &ran.end.requests;
+    assert_eq!(
+        requests[0].request, requests[1].request,
+        "the pending inspect is invoked again as the same request: {requests:?}"
+    );
+    assert_eq!(requests[0].request.action, INSPECT);
+    assert_eq!(requests[2].request.action, EDIT, "{requests:?}");
+    assert!(
+        matches!(
+            ran.end.effects[..2],
+            [EffectOutcome::Pending(_), EffectOutcome::Performed(_)]
+        ),
+        "{:?}",
+        ran.end.effects
+    );
+    assert_eq!(
+        ran.attempted[..2],
+        ["inspect", "edit"],
+        "the workflow is called once for the inspect, and its next call takes the edit"
+    );
+    assert_eq!(ran.performed, [INSPECT, EDIT, RUN]);
+    assert!(
+        matches!(&ran.end.outcome, RunOutcome::NeedsAuthority(needs) if needs.request == "merge-approval"),
         "{:?}",
         ran.end.outcome
     );
