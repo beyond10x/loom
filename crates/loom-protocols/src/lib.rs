@@ -158,6 +158,12 @@ impl ProtocolCatalog {
         Ok(catalog)
     }
     /// Validate and add one host-selected definition. Duplicate identities always refuse.
+    ///
+    /// `name` is the registration, `name@major`: lowercase letters, digits and hyphens before `@`,
+    /// starting with a lowercase letter and at most 100 bytes, then a positive canonical major,
+    /// the document's revision. A protocol id is not one; `self.improvement/1`
+    /// registers as `self-improvement@1`, as the bundled `software-change@1` holds
+    /// `software.change/1`, and a refused registration names the one its protocol id takes.
     pub fn add_yaml(
         &mut self,
         name: &str,
@@ -167,7 +173,9 @@ impl ProtocolCatalog {
         if self.entries.contains_key(name) {
             return Err(format!("duplicate protocol registration: {name}"));
         }
-        let major = registration_major(name)?;
+        let Some(major) = parse_registration(name) else {
+            return Err(refuse_registration(name, Some(yaml)));
+        };
         if yaml.len() > MAX_PROTOCOL_BYTES {
             return Err("protocol document exceeds 1 MiB".into());
         }
@@ -205,11 +213,19 @@ impl ProtocolCatalog {
         self.entries.get(name)
     }
 }
+/// The major of `name`, refusing a registration that is not `name@major`. The refusal reads no
+/// definition, so it derives the registration it names from `name` itself.
 fn registration_major(name: &str) -> Result<u64, String> {
-    let invalid = || {
-        "protocol registration must be name@major (lowercase letters, digits and hyphens; positive canonical major)".to_owned()
-    };
-    let (stem, version) = name.split_once('@').ok_or_else(invalid)?;
+    parse_registration(name).ok_or_else(|| refuse_registration(name, None))
+}
+/// The rule [`parse_registration`] holds a registration to, as a refusal states it.
+const REGISTRATION_RULE: &str = "lowercase letters, digits and hyphens before @, starting with a \
+                                 lowercase letter and at most 100 bytes, then a positive canonical \
+                                 major";
+/// The major of a well-formed registration: lowercase letters, digits and hyphens before `@`,
+/// starting with a lowercase letter and at most 100 bytes, then a positive canonical major.
+fn parse_registration(name: &str) -> Option<u64> {
+    let (stem, version) = name.split_once('@')?;
     if stem.is_empty()
         || stem.len() > 100
         || !stem.as_bytes()[0].is_ascii_lowercase()
@@ -217,13 +233,81 @@ fn registration_major(name: &str) -> Result<u64, String> {
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
     {
-        return Err(invalid());
+        return None;
     }
-    let major: u64 = version.parse().map_err(|_| invalid())?;
-    if major == 0 || major.to_string() != version {
-        return Err(invalid());
+    let major: u64 = version.parse().ok()?;
+    (major != 0 && major.to_string() == version).then_some(major)
+}
+/// The registration the catalog gives protocol `id` at `revision`, as the bundled catalog does
+/// (`software.change/1` is `software-change@1`): dots and underscores become hyphens and
+/// `/<major>` becomes `@<major>`. `None` when the result is still no registration.
+fn registration_for(id: &str, revision: &str) -> Option<String> {
+    if id.len() > 100 {
+        return None;
     }
-    Ok(major)
+    let name = format!("{}@{revision}", id.replace(['.', '_'], "-"));
+    parse_registration(&name).map(|_| name)
+}
+/// The refusal of `name`, which [`parse_registration`] refused, for the definition `yaml` the
+/// host handed with it: the id and revision it declares when it is within
+/// [`MAX_PROTOCOL_BYTES`] and parses, else `name` itself, name the registration. `add_yaml` and
+/// the install store's `install_file` both refuse through it, so one input gets one answer.
+fn refuse_registration(name: &str, yaml: Option<&str>) -> String {
+    let declared = yaml
+        .filter(|yaml| yaml.len() <= MAX_PROTOCOL_BYTES)
+        .and_then(|yaml| b10x_canon::model::parse(yaml).ok());
+    registration_refusal(
+        name,
+        declared
+            .as_ref()
+            .map(|model| (model.protocol.id.as_str(), model.protocol.revision)),
+    )
+}
+/// Why `name` is no registration, naming the registration its protocol id takes: the id and
+/// revision the definition declares when it was read (`declared`), else the id `name` spells
+/// before its last `@` (or `/`) with the major after it. When the mapping gives no registration
+/// for that id, the refusal says so and states the rule alone.
+fn registration_refusal(name: &str, declared: Option<(&str, u64)>) -> String {
+    let rule = format!(
+        "protocol registration must be name@major ({REGISTRATION_RULE}), not {}",
+        echo(name)
+    );
+    let (id, revision) = match declared {
+        Some((id, revision)) => (id.to_owned(), revision.to_string()),
+        None => match name.rsplit_once('@').or_else(|| name.rsplit_once('/')) {
+            Some((id, revision)) => (id.to_owned(), revision.to_owned()),
+            None => return format!("{rule}; the name given spells no protocol id and major"),
+        },
+    };
+    match registration_for(&id, &revision) {
+        Some(expected) => format!(
+            "{rule}: protocol id {id}/{revision} registers as {expected}, its dots and \
+             underscores as hyphens and /<major> as @<major>, as the bundled software-change@1 \
+             holds software.change/1"
+        ),
+        None => format!(
+            "{rule}; protocol id {} has no registration under the bundled catalog's mapping",
+            echo(&format!("{id}/{revision}"))
+        ),
+    }
+}
+/// How many bytes of a refused name its refusal echoes.
+const ECHOED_BYTES: usize = 120;
+/// `text` quoted with its control and format characters escaped, at most [`ECHOED_BYTES`] of it,
+/// cut on a character boundary and marked when cut, so a refusal's length is bounded.
+fn echo(text: &str) -> String {
+    if text.len() <= ECHOED_BYTES {
+        return format!("{text:?}");
+    }
+    let mut end = ECHOED_BYTES;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!(
+        "{:?}… (cut to its first {end} of {} bytes)",
+        &text[..end],
+        text.len()
+    )
 }
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))

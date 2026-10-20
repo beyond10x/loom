@@ -50,6 +50,19 @@ not model output; only Canon completion makes a query successful. The integratio
 `crates/loom-intake-slice/tests/system_query.rs::clock_query_runs_in_both_policies_without_workspace_resources`
 holds this path in both context modes. `protocols add/list/remove` manage user installations;
 `--replace` is explicit and bundled definitions cannot be shadowed. The SDK exports the catalog.
+A registration has one form, `name@major`: lowercase letters, digits and hyphens before `@`,
+starting with a lowercase letter and at most 100 bytes, then a positive canonical major; a
+protocol id is not one. `self.improvement/1` registers as `self-improvement@1`, its dots and
+underscores as hyphens and `/<major>` as `@<major>`, as the bundled `software-change@1` holds
+`software.change/1`. A refusal of any other form names the registration its protocol id takes:
+`ProtocolCatalog::add_yaml` and `protocols add --file` (`InstallStore::install_file`, which reads
+the file to answer) derive it from the id and revision the definition declares when it parses,
+else from the name given; `protocols remove` and `protocols add --source`, which have no
+definition to read, from the name given. An id the mapping gives no registration for is refused
+with the rule alone, and a refusal quotes at most 120 bytes of the refused name
+(`crates/loom-protocols/tests/catalog.rs`,
+`a_protocol_id_with_a_dot_registers_under_the_documented_name`;
+`crates/loom-protocols/tests/adversary_w20261020w4_u1.rs`).
 
 Loom also owns `protocols/inbound-answer/1.yaml` (`inbound-answer@1`), the read-only protocol a
 plugin turn answers an inbound item under: `source.read` reads (capability `datasource.read`),

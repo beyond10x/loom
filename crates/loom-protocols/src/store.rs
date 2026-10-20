@@ -1,6 +1,6 @@
 use crate::{
     MAX_PROTOCOL_BYTES, ProtocolCatalog, ProtocolDefinition, ProtocolSource, SourceKind, digest,
-    registration_major,
+    parse_registration, refuse_registration, registration_major,
 };
 use serde_json::{Value, json};
 use std::{
@@ -55,7 +55,15 @@ impl InstallStore {
         read_manifest(&self.root.join("catalog.json"))
     }
     /// Snapshot one local regular UTF-8 YAML file, validating before atomic publication.
+    ///
+    /// A refused registration is answered as [`ProtocolCatalog::add_yaml`] answers it: from the
+    /// protocol id and revision the file declares, else, when it cannot be read or parsed, from
+    /// the name given.
     pub fn install_file(&self, name: &str, path: &Path, replace: bool) -> Result<(), String> {
+        if parse_registration(name).is_none() {
+            let yaml = read_regular(path, MAX_PROTOCOL_BYTES).ok();
+            return Err(refuse_registration(name, yaml.as_deref()));
+        }
         self.check_install(name, replace)?;
         let yaml = read_regular(path, MAX_PROTOCOL_BYTES)?;
         let location = path

@@ -59,7 +59,12 @@ b10x-loom protocols remove team-clock@1
 Installation validates and snapshots the exact YAML bytes, their SHA-256 digest and provenance.
 Changing or deleting the source file cannot change an installed definition. Replacing a name
 requires `--replace`; bundled names cannot be replaced or removed. The registration name has the
-form `lower-case-name@MAJOR`, and its major must match the definition's revision.
+form `lower-case-name@MAJOR`: lowercase letters, digits and hyphens, starting with a letter and at
+most 100 bytes, and its major must match the definition's revision. A protocol id is not a
+registration name: register `self.improvement/1` as `self-improvement@1`, its dots and underscores
+as hyphens and `/MAJOR` as `@MAJOR`, as the bundled `software-change@1` holds `software.change/1`.
+A refused name is answered with the registration the protocol id the file declares takes, when
+that mapping gives one.
 
 The store is `$XDG_DATA_HOME/loom/protocols`, or `~/.local/share/loom/protocols` when that variable is
 absent. Its manifest is atomically replaced. Invalid, missing or digest-mismatched installed records

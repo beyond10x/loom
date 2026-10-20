@@ -152,6 +152,85 @@ fn malformed_registration_revision_and_oversized_definitions_refuse() {
             .is_err()
     );
 }
+/// A catalog has one registration form, `name@major`, and a protocol whose id has a dot is not
+/// registered under that id: `self.improvement@1` is refused, and the refusal names the
+/// registration the catalog expects for `self.improvement/1`, `self-improvement@1`, and why. The
+/// expected name is the bundled catalog's own mapping (`software.change/1` is `software-change@1`),
+/// derived from the id the YAML declares when it parses, else from the registration given, and
+/// the install store's refusal, which reads no YAML, names it too. Every bundled and plugin
+/// definition registered under its own id is refused naming exactly the name it is bundled under.
+#[test]
+fn a_protocol_id_with_a_dot_registers_under_the_documented_name() {
+    let yaml = SYSTEM_QUERY_YAML.replace("id: system.query", "id: self.improvement");
+    let mut catalog = ProtocolCatalog::default();
+    let refusal = catalog
+        .add_yaml("self.improvement@1", &yaml, memory())
+        .expect_err("a dotted registration is refused");
+    assert!(
+        refusal.contains("protocol id self.improvement/1 registers as self-improvement@1"),
+        "{refusal}"
+    );
+    assert!(
+        refusal.contains("lowercase letters, digits and hyphens before @"),
+        "{refusal}"
+    );
+    assert!(catalog.get("self.improvement@1").is_none());
+    catalog
+        .add_yaml("self-improvement@1", &yaml, memory())
+        .expect("the named registration registers");
+    assert_eq!(
+        catalog
+            .get("self-improvement@1")
+            .unwrap()
+            .model
+            .protocol
+            .id
+            .as_str(),
+        "self.improvement"
+    );
+
+    let refusal = ProtocolCatalog::default()
+        .add_yaml("self.improvement@1", "garbage", memory())
+        .unwrap_err();
+    assert!(
+        refusal.contains("protocol id self.improvement/1 registers as self-improvement@1"),
+        "{refusal}"
+    );
+
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("self-improvement.yaml");
+    fs::write(&source, &yaml).unwrap();
+    let store = InstallStore::new(tmp.path().join("installed"));
+    let refusal = store
+        .install_file("self.improvement@1", &source, false)
+        .unwrap_err();
+    assert!(
+        refusal.contains("protocol id self.improvement/1 registers as self-improvement@1"),
+        "{refusal}"
+    );
+    assert!(!tmp.path().join("installed").exists());
+
+    let bundled = ProtocolCatalog::bundled().unwrap();
+    let plugins = ProtocolCatalog::plugins().unwrap();
+    for entry in bundled.iter().chain(plugins.iter()) {
+        let id = entry.model.protocol.id.as_str();
+        let revision = entry.model.protocol.revision;
+        let refusal = ProtocolCatalog::default()
+            .add_yaml(
+                &format!("{id}@{revision}"),
+                &entry.definition.yaml,
+                memory(),
+            )
+            .unwrap_err();
+        assert!(
+            refusal.contains(&format!(
+                "protocol id {id}/{revision} registers as {}",
+                entry.name()
+            )),
+            "{refusal}"
+        );
+    }
+}
 #[test]
 fn local_install_is_snapshot_atomic_and_explicitly_replaceable() {
     let tmp = tempfile::tempdir().unwrap();
