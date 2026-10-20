@@ -22,7 +22,8 @@ use b10x_loom_commission::model::responsibility::{
     CommissionId, EffectOutcome, EffectOutcomePerformed, EffectOutcomeRefused, ExecutorOutcome,
     ExecutorOutcomeProposedAction, ExecutorOutcomeProposedReads, FrontierAction, ObservationId,
     PrincipalId, ProposedActionArguments, RevalidateActionRequestOutcome, RunId, RunOutcome,
-    RunOutcomeEffectRefused, RunOutcomeNeedsAuthority, RunState, Unit, commission_state,
+    RunOutcomeCaseMovedOn, RunOutcomeEffectRefused, RunOutcomeNeedsAuthority, RunState, Unit,
+    commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{
@@ -192,6 +193,12 @@ impl Effects {
             answers: BTreeMap::from([(action, answer)]),
             ..Self::default()
         }
+    }
+
+    /// The same port, answering `action` with `answer` too.
+    fn with(mut self, action: &'static str, answer: EffectOutcome) -> Self {
+        self.answers.insert(action, answer);
+        self
     }
 
     fn reading(self, reads: Vec<&'static str>) -> Self {
@@ -484,6 +491,103 @@ fn a_final_refusal_of_a_read_ends_the_run_once_every_read_is_recorded() {
         .map(|o| o.source)
         .collect();
     assert_eq!(sources, ["executor", "effect", "effect"]);
+}
+
+fn fan_out(actions: &[&str]) -> ExecutorOutcome {
+    ExecutorOutcome::ProposedReads(ExecutorOutcomeProposedReads {
+        reads: actions.iter().map(|action| proposed(action)).collect(),
+    })
+}
+
+/// Both reads of a fan-out refused as final: the run ends naming the first in the order proposed,
+/// with its reason, and both refusals are recorded.
+#[test]
+fn two_final_reads_in_a_fan_out_name_the_first_in_proposal_order() {
+    let case = CaseId("case-final-refusal-two-reads".to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(
+        case.clone(),
+        [listing(4, vec![admissible("search"), admissible("fetch")])],
+    );
+    let executor = ScriptedExecutor::new([fan_out(&["search", "fetch"]), idle(), idle()]);
+    let effects = Effects::answering("search", refused("first", true))
+        .with("fetch", refused("second", true))
+        .reading(vec!["search", "fetch"]);
+
+    let (end, _) = run(&governor, &executor, &effects, &case, None);
+
+    assert_eq!(end.outcome, ended_refused(1, "first"));
+    assert_eq!(
+        end.effects,
+        vec![refused("first", true), refused("second", true)],
+        "both refusals are recorded, in the order proposed"
+    );
+    assert_eq!(executor.calls().len(), 1, "the executor is called once");
+}
+
+/// Only the second read of a fan-out is refused as final, the first performed: the run ends
+/// naming the second read's request, not the fan-out's first.
+#[test]
+fn a_final_refusal_of_the_second_read_names_its_request() {
+    let case = CaseId("case-final-refusal-second-read".to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(
+        case.clone(),
+        [listing(4, vec![admissible("search"), admissible("fetch")])],
+    );
+    let executor = ScriptedExecutor::new([fan_out(&["fetch", "search"]), idle(), idle()]);
+    let effects =
+        Effects::answering("search", refused(GUARD, true)).reading(vec!["search", "fetch"]);
+
+    let (end, _) = run(&governor, &executor, &effects, &case, None);
+
+    assert_eq!(end.outcome, ended_refused(2, GUARD));
+    assert_eq!(
+        end.effects,
+        vec![performed("fetch"), refused(GUARD, true)],
+        "both reads are recorded, in the order proposed"
+    );
+}
+
+/// A fan-out whose first read is refused as final and whose second is stale, the case having
+/// moved to revision 5 where it still admits an action: the stale read shows the move, which is
+/// judged first, as after a stale proposal, so the run ends `CaseMovedOn` and not `EffectRefused`.
+/// (`adversary_w20261020w2_u1.rs` holds the same fan-out on a case the governor holds complete.)
+#[test]
+fn a_stale_read_beside_a_final_refusal_ends_as_after_a_stale_proposal() {
+    let case = CaseId("case-final-refusal-beside-stale".to_owned());
+    let governor = FakeGovernor::new();
+    let open = listing(4, vec![admissible("search"), admissible("fetch")]);
+    // The start, the completion, the frontier and `search`'s revalidation answer at 4; `fetch`'s
+    // revalidation finds the case at 5, open, and so does every call after.
+    governor.script(
+        case.clone(),
+        std::iter::repeat_n(open, 5).chain([listing(5, vec![admissible("search")])]),
+    );
+    let executor = ScriptedExecutor::new([fan_out(&["search", "fetch"]), idle(), idle()]);
+    let effects =
+        Effects::answering("search", refused(GUARD, true)).reading(vec!["search", "fetch"]);
+
+    let (end, _) = run(&governor, &executor, &effects, &case, None);
+
+    assert!(
+        matches!(
+            end.requests[1].outcome,
+            RevalidateActionRequestOutcome::Stale { .. }
+        ),
+        "precondition: `fetch` is stale: {:?}",
+        end.requests[1].outcome
+    );
+    assert_eq!(end.effects, vec![refused(GUARD, true)], "only `search` ran");
+    assert_eq!(executor.calls().len(), 1, "the executor is not run again");
+    assert_eq!(
+        end.outcome,
+        RunOutcome::CaseMovedOn(RunOutcomeCaseMovedOn {
+            bound_case_revision: 4,
+            current_case_revision: 5,
+        }),
+        "the move is judged before the final refusal"
+    );
 }
 
 const MERGE: &str = "merge";
