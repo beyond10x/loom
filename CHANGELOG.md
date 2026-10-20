@@ -45,7 +45,8 @@ to verify, a path that is not UTF-8 or not absolute, a bundle beside an environm
 variable that replaces or widens a TLS client's trust store (`SSL_CERT_FILE`, `SSL_CERT_DIR`,
 `CURL_CA_BUNDLE`, `CURL_CA_PATH`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO`,
 `GIT_SSL_CAPATH`, each named in the refusal), and a path that does not exist, is a symbolic link,
-is no regular file, is empty or cannot be read (as Substrate's daemon refuses its own bundle) are
+is no regular file, is empty, holds more than 1 MiB or cannot be read (as Substrate refuses its own
+bundle) are
 refused `ScopeInvalid` before anything starts or `target` is created, naming the path. The
 profile digest covers the bundle's path; a
 child naming none keeps its digest. Substrate's record of the applied confinement names no bundle,

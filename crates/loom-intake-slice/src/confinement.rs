@@ -717,8 +717,8 @@ impl ChildCommand {
     ///   store, named in the refusal: `SSL_CERT_FILE`, `SSL_CERT_DIR`, `CURL_CA_BUNDLE`,
     ///   `CURL_CA_PATH`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO` and
     ///   `GIT_SSL_CAPATH`;
-    /// - a path that does not exist, is a symbolic link, is no regular file or is empty, as
-    ///   Substrate's daemon refuses its own bundle (name the file a link leads to);
+    /// - a path that does not exist, is a symbolic link, is no regular file, is empty or holds
+    ///   more than 1 MiB, as Substrate refuses its own bundle (name the file a link leads to);
     /// - a file this process cannot read, which Substrate could not snapshot.
     #[must_use]
     pub fn with_ca_bundle(self, path: impl Into<PathBuf>) -> Self {
@@ -1038,6 +1038,11 @@ const TRUST_STORE_VARIABLES: [&str; 8] = [
     "GIT_SSL_CAPATH",
 ];
 
+/// The largest certificate bundle a child is given, 1 MiB: the ceiling Substrate holds its own
+/// bundles to (`MAX_CA_BUNDLE_BYTES`, private to `b10x-substrate-sdk`'s transport and to
+/// `substrate-daemon`'s hosted admission, so not importable here).
+const MAX_CA_BUNDLE_BYTES: u64 = 1024 * 1024;
+
 /// Refuse, before anything starts, a certificate bundle the child cannot be given as named
 /// ([`ChildCommand::with_ca_bundle`]), each refusal naming the path, in this order:
 ///
@@ -1048,9 +1053,9 @@ const TRUST_STORE_VARIABLES: [&str; 8] = [
 /// 3. an environment naming any of [`TRUST_STORE_VARIABLES`] beside the bundle, each named in the
 ///    refusal: it would replace or widen the trust store the child gets through `SSL_CERT_FILE`
 ///    (whose own value Substrate would replace unseen);
-/// 4. a path that does not exist, is a symbolic link, is no regular file or is empty: Substrate's
-///    daemon refuses such a bundle of its own, and an empty one would trust nothing while the
-///    child is pointed at it;
+/// 4. a path that does not exist, is a symbolic link, is no regular file, is empty or holds more
+///    than [`MAX_CA_BUNDLE_BYTES`]: Substrate refuses such a bundle of its own, and an empty one
+///    would trust nothing while the child is pointed at it;
 /// 5. a file this process cannot read, which Substrate, copying it at each start, could not.
 ///
 /// A child naming no bundle passes unchanged.
@@ -1107,6 +1112,12 @@ fn check_ca_bundle(child: &ChildCommand) -> Result<(), ConfinementError> {
             "is empty: it would trust nothing, and Substrate's daemon refuses an empty bundle"
                 .to_owned(),
         );
+    }
+    if metadata.len() > MAX_CA_BUNDLE_BYTES {
+        return refused(format!(
+            "holds {} bytes, more than the {MAX_CA_BUNDLE_BYTES} (1 MiB) Substrate admits for a certificate bundle",
+            metadata.len()
+        ));
     }
     if let Err(e) = std::fs::File::open(path) {
         return refused(format!("cannot be read: {e}"));

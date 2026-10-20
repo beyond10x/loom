@@ -797,7 +797,8 @@ not absolute, one beside an environment naming a variable that replaces or widen
 trust store (`TRUST_STORE_VARIABLES`: `SSL_CERT_FILE`, `SSL_CERT_DIR`, `CURL_CA_BUNDLE`,
 `CURL_CA_PATH`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`,
 each named in the refusal), and one that does not exist, is a symbolic link, is no regular file,
-is empty or cannot be read are refused `ScopeInvalid` before anything starts, naming the path
+is empty, holds more than 1 MiB (`MAX_CA_BUNDLE_BYTES`, Substrate's ceiling) or cannot be read are
+refused `ScopeInvalid` before anything starts, naming the path
 (`check_ca_bundle`). A program containing `=` or starting with `-` (test or child)
 is refused before anything starts: Substrate execs through `/usr/bin/env`, which reads it as an
 assignment or an option. A runner and its clones share one driver per workspace directory, egress
