@@ -14,11 +14,12 @@ whichever actions the gate lists, and the gate forms again after the next step t
 granted.
 
 Every other step reads the gate as before: one that performed an action needing no authority, one
-that proposed nothing, and one whose request was refused, stale, denied or not performed. A
-request the provider allowed is performed only while the case is still at its revision: the case
-is loaded again after the allow, and a case that moved while the provider decided makes the
-request stale, so it is not performed and the step is no grant; the next iteration judges the
-move. The step
+that proposed nothing, and one whose request was refused, stale, denied or not performed. After
+the provider allows a request, the case's revision is read again: on a move, which somebody else
+made while the provider decided, the request is stale, it is not performed and the step is no
+grant; the next iteration judges the move. A move after that read, while the effect itself runs,
+is not seen; an effect port that must refuse a write on a moved case binds it to the request's
+`expected_case_revision`. The step
 budget and the idle bound still end a Run that only repeats granted steps. With the budget used up
 after a granted step, the next iteration first loads the case: a case that step completed ends the
 Run `Completed`, and a case still open is suspended for its budget.

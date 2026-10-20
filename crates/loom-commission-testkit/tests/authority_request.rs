@@ -14,22 +14,26 @@ use std::sync::{Mutex, PoisonError};
 use b10x_loom_commission::model::json::{self, Value};
 use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
-    ActionRequestData, ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext,
-    AuthorityVerdict, AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData,
-    CommissionId, EffectOutcome, EffectOutcomePerformed, ExecutorOutcome,
-    ExecutorOutcomeProposedAction, FrontierAction, ObservationId, PrincipalId,
-    ProposedActionArguments, RunId, RunOutcome, RunOutcomeCompleted, RunOutcomeNeedsAuthority,
-    SuspensionState, Unit, commission_state,
+    ActionRequestData, ActionRequestId, ActionRequestStale, ActionStatus, AgentRevisionId,
+    AuthorityContext, AuthorityVerdict, AuthorityVerdictApprovalRequired, CaseId, Commission,
+    CommissionData, CommissionId, EffectOutcome, EffectOutcomePerformed, ExecutorOutcome,
+    ExecutorOutcomeProposedAction, FrontierAction, HoldSuspension, HoldSuspensionOutcome,
+    ObservationId, PrincipalId, ProposedActionArguments, ReleaseSuspension,
+    ReleaseSuspensionOutcome, RevalidateActionRequestOutcome, RunId, RunOutcome,
+    RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeNeedsAuthority, SuspensionSnapshot,
+    SuspensionState, TakeSuspension, TakeSuspensionOutcome, Unit, commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::authority::{
     AuthorityCheck, AuthorityProvider, AuthorityProviderError, check_authority,
 };
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
-use b10x_loom_commission::ports::suspension::{SuspensionPort, SuspensionStore};
+use b10x_loom_commission::ports::suspension::{
+    SuspensionPort, SuspensionStore, SuspensionStoreError,
+};
 use b10x_loom_commission::runtime::{
-    LoopContext, LoopEnd, ResumeError, ResumeRefusal, resume_after_grant, run_until_blocked,
-    run_with_suspension,
+    LoopContext, LoopEnd, ResumeError, ResumeRefusal, Revalidated, resume_after_grant,
+    run_until_blocked, run_with_suspension,
 };
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
 use b10x_loom_commission_testkit::fake_executor::ScriptedExecutor;
@@ -477,4 +481,132 @@ fn a_failing_provider_still_grants_nothing() {
         "a provider failure is refused, got {check:?}"
     );
     assert!(!check.allows());
+}
+
+/// The suspension store, with somebody else moving the case once, as the first `take` lands: the
+/// governor is scripted to `moved` from then on.
+struct MovesOnTake<'a> {
+    inner: &'a SuspensionStore,
+    governor: &'a FakeGovernor,
+    case: CaseId,
+    moved: Answer,
+    took: Mutex<bool>,
+}
+
+impl SuspensionPort for MovesOnTake<'_> {
+    fn hold(&self, input: HoldSuspension) -> HoldSuspensionOutcome {
+        SuspensionPort::hold(self.inner, input)
+    }
+
+    fn take(&self, input: TakeSuspension) -> TakeSuspensionOutcome {
+        let first = !std::mem::replace(
+            &mut *self.took.lock().unwrap_or_else(PoisonError::into_inner),
+            true,
+        );
+        if first {
+            self.governor
+                .script(self.case.clone(), [self.moved.clone()]);
+        }
+        SuspensionPort::take(self.inner, input)
+    }
+
+    fn release(&self, input: ReleaseSuspension) -> ReleaseSuspensionOutcome {
+        SuspensionPort::release(self.inner, input)
+    }
+
+    fn get(
+        &self,
+        commission: &CommissionId,
+    ) -> Result<Option<SuspensionSnapshot>, SuspensionStoreError> {
+        SuspensionPort::get(self.inner, commission)
+    }
+}
+
+/// A resume reads the case at 7 after the provider allows the held request; the case moves to 8
+/// as the resume takes the Suspension. Read once more right before the invoke, the move is seen:
+/// the request is recorded `Stale` naming 7 and 8, nothing is invoked, the Suspension the resume
+/// took is released, since the request can never be performed, and the resumed loop judges the
+/// move: the Run bound to 7 ends `CaseMovedOn` at 8.
+#[test]
+fn a_resume_that_sees_the_case_moved_after_its_take_releases_the_suspension_and_performs_nothing() {
+    let case = CaseId("case-moved-after-take".to_owned());
+    let governor = FakeGovernor::new();
+    let effects = Effects::default();
+    let suspensions = SuspensionStore::new();
+    let withholding = StaticAuthorityProvider::new().answer(CAPABILITY, withheld());
+    let end = suspend_at_seven(&governor, &withholding, &effects, &suspensions, &case);
+    let held = end.requests[0].request.clone();
+
+    governor.script(case.clone(), [gated_merge(7)]);
+    let moved = Answer::at(8).with_items(
+        Vec::new(),
+        Vec::new(),
+        vec![
+            FrontierAction {
+                action: "inspect".to_owned(),
+                status: ActionStatus::Admissible,
+                capability: None,
+                reasons: Vec::new(),
+            },
+            FrontierAction {
+                action: MERGE.to_owned(),
+                status: ActionStatus::ApprovalRequired,
+                capability: Some(CAPABILITY.to_owned()),
+                reasons: Vec::new(),
+            },
+        ],
+    );
+    let port = MovesOnTake {
+        inner: &suspensions,
+        governor: &governor,
+        case: case.clone(),
+        moved,
+        took: Mutex::new(false),
+    };
+    let granting = StaticAuthorityProvider::new().answer(CAPABILITY, allow());
+    let resumed = resume_after_grant(
+        &governor,
+        &ScriptedExecutor::new([]),
+        &granting,
+        &effects,
+        &commission(&case),
+        &mut runs(0x200),
+        &port,
+        &mut Context::starting_at(0x500),
+    )
+    .unwrap_or_else(|error| panic!("the resume failed: {error:?}"));
+
+    assert!(
+        *port.took.lock().unwrap_or_else(PoisonError::into_inner),
+        "precondition: the resume took the Suspension"
+    );
+    assert!(effects.invoked().is_empty(), "nothing is performed");
+    assert_eq!(
+        resumed.requests,
+        vec![Revalidated {
+            request: held,
+            outcome: RevalidateActionRequestOutcome::Stale {
+                error: ActionRequestStale {
+                    expected_case_revision: 7,
+                    current_case_revision: 8,
+                },
+            },
+        }],
+        "the held request is recorded stale"
+    );
+    assert!(resumed.admitted.is_empty(), "nothing is admitted");
+    let commission_id = commission(&case).data().commission_id.clone();
+    assert_eq!(
+        SuspensionPort::get(&suspensions, &commission_id)
+            .unwrap_or_else(|error| panic!("the store reads: {error:?}")),
+        None,
+        "the Suspension the resume took is released"
+    );
+    assert_eq!(
+        resumed.outcome,
+        RunOutcome::CaseMovedOn(RunOutcomeCaseMovedOn {
+            bound_case_revision: 7,
+            current_case_revision: 8,
+        })
+    );
 }

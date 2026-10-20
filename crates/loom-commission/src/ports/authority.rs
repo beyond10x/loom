@@ -8,12 +8,13 @@
 //! The request is the [`ActionRequestData`] the runtime made and revalidated: its id, Run and case
 //! are the runtime's, and its `expected_case_revision` is the revision of the frontier the
 //! proposal was chosen from, never one the executor wrote. So a provider can allow one request at
-//! one case revision and refuse the same action at the next, and the runtime performs an allowed
-//! request only while the case is still at that revision: it loads the case again after the allow,
-//! and a case that moved while the provider decided makes the request stale
-//! ([`runtime`](crate::runtime), item 8 and `resume_after_grant`). Its `action` and `arguments` are the
-//! executor's proposal as written: model output, which a provider never takes identity or
-//! authority from (`AGENTS.md` § Rules).
+//! one case revision and refuse the same action at the next. The runtime reads the case's
+//! revision again after the allow, and once more right before it invokes a resumed request, and
+//! performs nothing on a move it sees ([`runtime`](crate::runtime), item 8 and
+//! `resume_after_grant`). A move after its last read, while the effect itself runs, it cannot
+//! see: an effect port that must refuse a write on a moved case binds the write to the request's
+//! `expected_case_revision`. Its `action` and `arguments` are the executor's proposal as written:
+//! model output, which a provider never takes identity or authority from (`AGENTS.md` § Rules).
 //!
 //! A provider that fails does not decide. [`check_authority`] turns the failure into
 //! [`AuthorityCheck::Refused`], which never allows: authority fails toward less authority.
