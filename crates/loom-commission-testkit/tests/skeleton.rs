@@ -359,7 +359,8 @@ fn skeleton_lands_port_vocabulary_and_modules() {
             ("NoAdmissibleAction", "Unit"),
             // story:runtime-merge: the slice's approval gate and its NoLocalExecutor.
             ("AwaitingApproval", "RunOutcomeAwaitingApproval"),
-            ("NoPerformableAction", "Unit"),
+            // story:unperformable-names-actions: it names the actions and the open claims.
+            ("NoPerformableAction", "RunOutcomeNoPerformableAction"),
             // story:moved-run-named-outcome: the case moved on to a frontier that admits an action.
             ("CaseMovedOn", "RunOutcomeCaseMovedOn"),
             // story:refused-effect-ends-run: the effect port refused a request as final.
@@ -393,6 +394,11 @@ fn skeleton_lands_port_vocabulary_and_modules() {
         &model,
         "RunOutcomeAwaitingApproval",
         &[("actions", "List<String>")],
+    );
+    assert_struct(
+        &model,
+        "RunOutcomeNoPerformableAction",
+        &[("actions", "List<String>"), ("open_claims", "List<String>")],
     );
     assert_struct(&model, "RunOutcomeCompleted", &[("outcome", "String")]);
     assert_struct(
