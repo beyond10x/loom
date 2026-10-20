@@ -59,19 +59,22 @@ fn route(catalog: &ProtocolCatalog, without: Option<&str>) -> AcceptedRoute {
     }
 }
 
-/// The paragraph of the CHANGELOG's `[Unreleased]` section that names `protocol`.
-fn unreleased_paragraph_naming(protocol: &str) -> String {
+/// The paragraph that names `protocol` and carries a `Breaking:` sentence, in the newest CHANGELOG
+/// section that has one: `[Unreleased]` while the change is unreleased, the release's own section
+/// once a release commit moved the entries under it.
+fn newest_paragraph_naming(protocol: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../CHANGELOG.md");
     let text = std::fs::read_to_string(&path).expect("CHANGELOG.md");
-    let unreleased = text
-        .split("\n## [Unreleased]\n")
-        .nth(1)
-        .and_then(|rest| rest.split("\n## [").next())
-        .expect("CHANGELOG.md has an [Unreleased] section");
-    unreleased
-        .split("\n\n")
-        .find(|paragraph| paragraph.contains(protocol))
-        .unwrap_or_else(|| panic!("no [Unreleased] paragraph names {protocol}"))
+    text.split("\n## [")
+        .skip(1)
+        .find_map(|section| {
+            section
+                .split("\n\n")
+                .find(|paragraph| paragraph.contains(protocol) && paragraph.contains("Breaking:"))
+        })
+        .unwrap_or_else(|| {
+            panic!("no CHANGELOG paragraph names {protocol} with a Breaking sentence")
+        })
         .to_owned()
 }
 
@@ -95,7 +98,7 @@ fn adversary_a_commission_suspended_before_the_new_bundled_protocol_is_refused_b
         return;
     };
 
-    let paragraph = unreleased_paragraph_naming(ADDED);
+    let paragraph = newest_paragraph_naming(ADDED);
     let breaking = paragraph
         .split_once("Breaking:")
         .map(|(_, sentence)| sentence)
