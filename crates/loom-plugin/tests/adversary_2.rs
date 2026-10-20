@@ -2,95 +2,75 @@
 //! correction of round 1: the model budget across Runs, the record as the truth of handled items,
 //! and retried failures. Each case asserts what the crate's own documentation, the ESS domain
 //! `loom.plugin` or the coordinator's correction says, and is red against the tree it was written
-//! for.
+//! for. `story:chooser-executor-for-plugin-turns` moved the turn to Loom's chooser path over an llm
+//! `Model`, and the model-budget case with it.
 
 mod support;
 
-use std::collections::VecDeque;
 use std::fs;
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 
 use b10x_loom_plugin::project::project;
 use b10x_loom_plugin::state::{RECORD_FILE, StateDir};
-use b10x_loom_plugin::turn::{TURN_MODEL_BUDGET, turn};
+use b10x_loom_plugin::turn::{TURN_MODEL_BUDGET, TURN_STEP_BUDGET, turn};
 use b10x_loom_plugin::{
     Cursor, Host, InboundItem, Intent, ItemId, MAX_FAILURES, Objective, Plugin, PluginError,
     PluginState, Poll, RecordLine, RecordOutcome, TurnModel, encode_record_line, run_plugin_on,
 };
-use llm_core::Model;
-use loom_sdk::loom::harness::responses;
-use loom_sdk::loom::harness::wire as port;
+use llm_core::{
+    BoxFuture, Cancel, Capabilities, Dispatch, Error, ErrorCode, Model, Provenance, StreamSink,
+    TurnOutcome, TurnRequest,
+};
 use serde_json::json;
-use support::{FakePlugin, Fixture, MODEL, Recorded, Seen, chat, classification, item};
+use support::{FakePlugin, Fixture, Recorded, Scripted, Seen, chat, classification, item};
 
-/// A model port that fails each turn's first `transient` attempts with a retriable transport
-/// error, as a flaky network or a provider's 5xx does, and then answers the next call of its
-/// script. Every request it is sent is kept.
+/// A turn model that answers as its `Scripted` model does for its first `answered` requests and
+/// fails every later one with a retriable transport error, as a network that went down does.
+/// Every request it is sent is kept.
 struct Flaky {
-    wire: port::WireId,
-    script: VecDeque<(String, serde_json::Value)>,
-    transient: usize,
-    failed: usize,
+    scripted: Scripted,
+    answered: usize,
     seen: Seen,
 }
 
-impl Flaky {
-    fn new(script: Vec<(&str, serde_json::Value)>, transient: usize) -> (Self, Seen) {
-        let seen = Seen::default();
-        (
-            Self {
-                wire: port::WireId::new(responses::WIRE).expect("valid"),
-                script: script
-                    .into_iter()
-                    .map(|(tool, arguments)| (tool.to_owned(), arguments))
-                    .collect(),
-                transient,
-                failed: 0,
-                seen: std::sync::Arc::clone(&seen),
-            },
-            seen,
-        )
-    }
-}
-
-impl port::ModelPort for Flaky {
-    fn wire(&self) -> &port::WireId {
-        &self.wire
+impl Model for Flaky {
+    fn provenance(&self) -> &Provenance {
+        self.scripted.provenance()
     }
 
-    fn turn(
-        &mut self,
-        request: &port::TurnRequest,
-        _sink: &mut dyn port::StreamSink,
-    ) -> Result<port::TurnOutcome, port::WireError> {
-        self.seen.lock().unwrap().push(request.clone());
-        if self.failed < self.transient {
-            self.failed += 1;
-            return Err(port::WireError::transport("connection reset by peer"));
+    fn capabilities(&self) -> &Capabilities {
+        self.scripted.capabilities()
+    }
+
+    fn turn<'a>(
+        &'a self,
+        request: &'a TurnRequest,
+        sink: &'a mut dyn StreamSink,
+        cancel: &'a Cancel,
+    ) -> BoxFuture<'a, Result<TurnOutcome, Error>> {
+        let sent = {
+            let mut seen = self.seen.lock().unwrap();
+            seen.push(request.clone());
+            seen.len()
+        };
+        if sent <= self.answered {
+            return self.scripted.turn(request, sink, cancel);
         }
-        self.failed = 0;
-        let (tool, arguments) = self
-            .script
-            .pop_front()
-            .ok_or_else(|| port::WireError::protocol("the script has no further turn"))?;
-        Ok(port::TurnOutcome {
-            stop_reason: port::StopReason::ToolCalls,
-            items: vec![port::Item::ToolCall(port::ToolCall {
-                call_id: port::CallId::new(format!("call_{}", self.seen.lock().unwrap().len()))
-                    .expect("valid"),
-                name: port::ToolName::new(tool).expect("valid"),
-                arguments,
-            })],
-            usage: None,
+        Box::pin(async {
+            Err(Error::new(ErrorCode::Transport, "connection reset by peer")
+                .with_dispatch(Dispatch::Unknown)
+                .with_retriable(true))
         })
     }
 }
 
-/// `TURN_MODEL_BUDGET` is "the most requests one turn sends to its model, across every loop of its
-/// Run". The budget is handed to each loop as `max_turns`, which counts loop turns, while the
-/// loop attempts a turn again on a retriable wire error without counting it (`MAX_TURN_RETRIES`).
-/// A model that reads on every step over a wire that fails twice before each answer is sent 3, 3
-/// and then, with 2 calls left, 3 more requests: 9 in one turn.
+/// `TURN_MODEL_BUDGET` is "the most requests one turn sends to its model, across every step of its
+/// Run, a retried attempt included". Each request is sent with Loom's caller retries, which attempt
+/// a request again after a retriable transport error, so a retried attempt is one more request. A
+/// model that reads on every step and goes down with two requests of the budget left is attempted
+/// twice for the next selection, the second attempt retrying the first; the third attempt is past
+/// the budget and is never sent.
 #[test]
 fn retried_wire_attempts_count_against_the_turn_model_budget() {
     let fixture = Fixture::new("adversary_2", "flaky_wire_budget");
@@ -103,13 +83,19 @@ fn retried_wire_attempts_count_against_the_turn_model_budget() {
         "source_read",
         json!({"source": "chat", "kind": "list", "input": {"channel": "C0FIXTURE1"}}),
     );
-    let (port, seen) = Flaky::new(vec![read; 8], 2);
+    let (scripted, _) = Scripted::new(vec![read; TURN_STEP_BUDGET]);
+    let seen: Seen = Arc::new(Mutex::new(Vec::new()));
+    let budget = usize::try_from(TURN_MODEL_BUDGET).unwrap();
+    let flaky = Flaky {
+        scripted,
+        answered: budget - 2,
+        seen: Arc::clone(&seen),
+    };
 
     let ended = turn(
         &host,
         TurnModel {
-            port: Box::new(port),
-            model: MODEL.to_owned(),
+            model: Arc::new(flaky),
         },
         &item,
         &classified,
@@ -118,9 +104,20 @@ fn retried_wire_attempts_count_against_the_turn_model_budget() {
 
     let asked = seen.lock().unwrap().len();
     assert!(
-        u64::try_from(asked).unwrap() <= TURN_MODEL_BUDGET,
+        asked <= budget,
         "the model was sent {asked} requests in one turn, past TURN_MODEL_BUDGET \
          ({TURN_MODEL_BUDGET}); the turn ended {ended:?}"
+    );
+    assert_eq!(
+        asked, budget,
+        "the failed selection was attempted again within the budget; the turn ended {ended:?}"
+    );
+    let ended = ended.expect("a spent budget is no failure of the turn");
+    assert_eq!(ended.outcome, RecordOutcome::Stopped, "{ended:?}");
+    assert_eq!(
+        ended.detail.as_deref(),
+        Some(format!("the turn used its {TURN_MODEL_BUDGET} model calls").as_str()),
+        "{ended:?}"
     );
 }
 

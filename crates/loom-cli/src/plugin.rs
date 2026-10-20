@@ -12,13 +12,9 @@ use std::sync::Arc;
 use b10x_loom_intake_slice::run::printable;
 use b10x_loom_plugin::datasource::ReadKind;
 use b10x_loom_plugin::state::RECORD_FILE;
-use b10x_loom_plugin::{
-    Intent, PluginError, RecordLine, RecordOutcome, TurnModel, decode_record_line,
-};
+use b10x_loom_plugin::{Intent, RecordLine, RecordOutcome, TurnModel, decode_record_line};
 use b10x_loom_plugin_slack::TurnModels;
 use llm_core::Model;
-
-use loom_sdk::llm::LlmModelPort;
 
 /// Whether `line` is a proposal: a proposed reply or a proposed case.
 pub fn is_proposal(line: &RecordLine) -> bool {
@@ -104,14 +100,12 @@ pub fn recorded(state: &Path) -> Result<Vec<RecordLine>, String> {
         .collect()
 }
 
-/// Turn models over `model`: each turn gets its own [`LlmModelPort`], every request naming the
-/// model's own name.
+/// Turn models over `model`: every turn runs on it, Loom's chooser path sending each selection
+/// and argument request to it directly, naming the model's own name.
 pub fn turn_models(model: Arc<dyn Model>) -> TurnModels {
     Box::new(move || {
-        let port = LlmModelPort::new(Arc::clone(&model)).map_err(PluginError::Unavailable)?;
         Ok(TurnModel {
-            model: port.model_name(),
-            port: Box::new(port),
+            model: Arc::clone(&model),
         })
     })
 }

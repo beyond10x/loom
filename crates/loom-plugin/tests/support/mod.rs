@@ -1,6 +1,6 @@
 //! What the plugin host's tests share: a fixture directory with the fake `connectors` of
-//! `loom-connectors`, a recorded classifier model, a scripted model port for turns, a fake plugin,
-//! and a scripted executor for the effect port alone. No model, network or credential is reached.
+//! `loom-connectors`, a recorded classifier model, a scripted model for turns, a fake plugin, and a
+//! scripted executor for the effect port alone. No model, network or credential is reached.
 #![allow(dead_code)]
 
 use std::collections::VecDeque;
@@ -32,8 +32,7 @@ use loom_sdk::commission::model::responsibility::{
 use loom_sdk::commission::outcome::RunStore;
 use loom_sdk::commission::ports::executor::AgentExecutor;
 use loom_sdk::commission::runtime::LoopEnd;
-use loom_sdk::loom::harness::responses;
-use loom_sdk::loom::harness::wire as port;
+use loom_sdk::loom::model_selector::{ARGUMENTS_TOOL, SELECT_TOOL};
 use loom_sdk::{CanonGovernor, EffectPort, LoopContext, MemoryCaseStore, ProtocolCatalog};
 use serde_json::json;
 
@@ -262,23 +261,48 @@ pub struct Recorded {
     seen: Mutex<Vec<TurnRequest>>,
 }
 
+/// The binding every fixture model reports.
+fn provenance() -> Provenance {
+    let id = |value: &str| Id::new(value).expect("fixture identifier");
+    Provenance {
+        protocol: Protocol::Responses,
+        provider: id("recorded"),
+        account: id("recorded"),
+        endpoint: id("recorded"),
+        model: id(MODEL),
+        binding_revision: id("rev-1"),
+    }
+}
+
+/// What every fixture model serves: tools and a named tool choice.
+fn capabilities() -> Capabilities {
+    Capabilities {
+        tools: true,
+        tool_choice: true,
+        ..Capabilities::text(32_768, 2_048)
+    }
+}
+
+/// A successful outcome of one call of `tool` with `arguments`, under the fixture binding.
+fn called(call: usize, tool: &str, arguments: serde_json::Value) -> TurnOutcome {
+    let mut observation = TurnObservation::new(provenance());
+    observation.final_usage = true;
+    TurnOutcome {
+        stop_reason: StopReason::ToolCalls,
+        items: vec![ModelItem::ToolCall(ToolCall {
+            call_id: CallId::new(format!("call_{call}")).expect("call id"),
+            name: ToolName::new(tool).expect("tool name"),
+            arguments,
+        })],
+        observation,
+    }
+}
+
 impl Recorded {
     pub fn answering(answers: Vec<(&str, serde_json::Value)>) -> Self {
-        let id = |value: &str| Id::new(value).expect("fixture identifier");
         Self {
-            provenance: Provenance {
-                protocol: Protocol::Responses,
-                provider: id("recorded"),
-                account: id("recorded"),
-                endpoint: id("recorded"),
-                model: id(MODEL),
-                binding_revision: id("rev-1"),
-            },
-            capabilities: Capabilities {
-                tools: true,
-                tool_choice: true,
-                ..Capabilities::text(32_768, 2_048)
-            },
+            provenance: provenance(),
+            capabilities: capabilities(),
             answers: answers
                 .into_iter()
                 .map(|(tool, arguments)| (tool.to_owned(), arguments))
@@ -325,31 +349,26 @@ impl Model for Recorded {
             .find(|(name, _)| *name == tool)
             .map(|(_, arguments)| arguments.clone())
             .unwrap_or_else(|| panic!("no recorded answer for the tool `{tool}`"));
-        let mut observation = TurnObservation::new(self.provenance.clone());
-        observation.final_usage = true;
-        let outcome = TurnOutcome {
-            stop_reason: StopReason::ToolCalls,
-            items: vec![ModelItem::ToolCall(ToolCall {
-                call_id: CallId::new("call_1").expect("call id"),
-                name: ToolName::new(&tool).expect("tool name"),
-                arguments,
-            })],
-            observation,
-        };
+        let outcome = called(1, &tool, arguments);
         Box::pin(async move { Ok(outcome) })
     }
 }
 
 // ---- the scripted turn model ---------------------------------------------------------------------
 
-/// What a scripted port saw, shared with the test after the port is handed away.
-pub type Seen = Arc<Mutex<Vec<port::TurnRequest>>>;
+/// What a scripted model saw, shared with the test after the model is handed away.
+pub type Seen = Arc<Mutex<Vec<TurnRequest>>>;
 
-/// A scripted model port of Loom's model loop: each turn answers the next call of its script and
-/// records the request. Past the script, it fails the turn.
+/// A scripted turn model on Loom's chooser path. Each entry of its script is one step, its action
+/// spelt with an underscore for the dot (`source_read` for `source.read`), and its arguments: the
+/// step's selection request (`select_action`) is answered with the entry's action, the argument
+/// request (`action_arguments`) with its arguments, and then the next entry is the current one. A
+/// selection Loom does not propose leaves the entry current. Every request is kept; past the
+/// script, or for any other tool, the request fails, and no caller retries it.
 pub struct Scripted {
-    wire: port::WireId,
-    script: VecDeque<(String, serde_json::Value)>,
+    provenance: Provenance,
+    capabilities: Capabilities,
+    script: Mutex<VecDeque<(String, serde_json::Value)>>,
     seen: Seen,
 }
 
@@ -358,11 +377,14 @@ impl Scripted {
         let seen = Seen::default();
         (
             Self {
-                wire: port::WireId::new(responses::WIRE).expect("valid"),
-                script: script
-                    .into_iter()
-                    .map(|(tool, arguments)| (tool.to_owned(), arguments))
-                    .collect(),
+                provenance: provenance(),
+                capabilities: capabilities(),
+                script: Mutex::new(
+                    script
+                        .into_iter()
+                        .map(|(step, arguments)| (step.replacen('_', ".", 1), arguments))
+                        .collect(),
+                ),
                 seen: Arc::clone(&seen),
             },
             seen,
@@ -371,37 +393,50 @@ impl Scripted {
 
     pub fn into_turn_model<'a>(self) -> TurnModel<'a> {
         TurnModel {
-            port: Box::new(self),
-            model: MODEL.to_owned(),
+            model: Arc::new(self),
         }
     }
 }
 
-impl port::ModelPort for Scripted {
-    fn wire(&self) -> &port::WireId {
-        &self.wire
+impl Model for Scripted {
+    fn provenance(&self) -> &Provenance {
+        &self.provenance
     }
 
-    fn turn(
-        &mut self,
-        request: &port::TurnRequest,
-        _sink: &mut dyn port::StreamSink,
-    ) -> Result<port::TurnOutcome, port::WireError> {
-        self.seen.lock().unwrap().push(request.clone());
-        let (tool, arguments) = self
-            .script
-            .pop_front()
-            .ok_or_else(|| port::WireError::protocol("the script has no further turn"))?;
-        Ok(port::TurnOutcome {
-            stop_reason: port::StopReason::ToolCalls,
-            items: vec![port::Item::ToolCall(port::ToolCall {
-                call_id: port::CallId::new(format!("call_{}", self.seen.lock().unwrap().len()))
-                    .expect("valid"),
-                name: port::ToolName::new(tool).expect("valid"),
-                arguments,
-            })],
-            usage: None,
-        })
+    fn capabilities(&self) -> &Capabilities {
+        &self.capabilities
+    }
+
+    fn turn<'a>(
+        &'a self,
+        request: &'a TurnRequest,
+        _sink: &'a mut dyn StreamSink,
+        _cancel: &'a Cancel,
+    ) -> BoxFuture<'a, Result<TurnOutcome, Error>> {
+        let call = {
+            let mut seen = self.seen.lock().unwrap();
+            seen.push(request.clone());
+            seen.len()
+        };
+        let tool = request
+            .tools
+            .first()
+            .map(|tool| tool.name.as_str().to_owned())
+            .unwrap_or_default();
+        let answer = {
+            let mut script = self.script.lock().unwrap();
+            match tool.as_str() {
+                SELECT_TOOL => script
+                    .front()
+                    .map(|(action, _)| json!({ "action": action })),
+                ARGUMENTS_TOOL => script.pop_front().map(|(_, arguments)| arguments),
+                _ => None,
+            }
+        };
+        let outcome = answer
+            .map(|arguments| called(call, &tool, arguments))
+            .ok_or_else(|| Error::invalid(format!("the script has no answer for `{tool}`")));
+        Box::pin(async move { outcome })
     }
 }
 
@@ -419,7 +454,7 @@ pub fn strings(value: &serde_json::Value, out: &mut String) {
 }
 
 /// Every string a turn request carries.
-pub fn request_text(request: &port::TurnRequest) -> String {
+pub fn request_text(request: &TurnRequest) -> String {
     let mut text = String::new();
     strings(
         &serde_json::to_value(request).expect("a request encodes"),
