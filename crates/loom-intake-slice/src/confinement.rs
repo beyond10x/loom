@@ -793,10 +793,13 @@ impl ChildCommand {
     ///
     /// - a bundle for a child with no egress aperture, which reaches no host to verify;
     /// - a path that is not UTF-8 or not absolute;
-    /// - beside an environment naming a variable that replaces or widens a TLS client's trust
-    ///   store, named in the refusal: `SSL_CERT_FILE`, `SSL_CERT_DIR`, `CURL_CA_BUNDLE`,
-    ///   `CURL_CA_PATH`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO` and
-    ///   `GIT_SSL_CAPATH`;
+    /// - beside an environment naming, each named in the refusal, `SSL_CERT_FILE`,
+    ///   `SSL_CERT_DIR`, `CURL_CA_BUNDLE`, `CURL_CA_PATH`, `CURL_HOME`, `REQUESTS_CA_BUNDLE`,
+    ///   `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`, `GIT_SSL_NO_VERIFY`,
+    ///   `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM` or `GIT_CONFIG_PARAMETERS`, or a
+    ///   `GIT_CONFIG_KEY_<n>` naming Git's `http.sslCAInfo`, `http.sslCAPath` or `http.sslVerify`
+    ///   (in any case, with or without a URL subsection); Git configuration naming other keys
+    ///   is allowed;
     /// - a path that does not exist, is a symbolic link, is no regular file, is empty or holds
     ///   more than 1 MiB, checked on the path and again on the file the launch opens, as Substrate
     ///   refuses its own bundle (name the file a link leads to);
@@ -1090,26 +1093,68 @@ fn check_host(name: &str, host: &str, pinned: Ipv4Addr) -> Result<(), Confinemen
 }
 
 /// The environment variables through which a TLS client takes another trust store than the bundle
-/// Substrate points `SSL_CERT_FILE` at, replacing it or adding to it, by the tools that read them:
-/// OpenSSL (`SSL_CERT_FILE`, which Substrate itself sets to the snapshot at
-/// [`APERTURE_CA_BUNDLE_PATH`], and `SSL_CERT_DIR`), curl (`CURL_CA_BUNDLE`, `CURL_CA_PATH`),
-/// Python's requests (`REQUESTS_CA_BUNDLE`), Node (`NODE_EXTRA_CA_CERTS`) and Git
-/// (`GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`). A child naming a bundle is refused when its environment
-/// names any of them ([`check_ca_bundle`]).
+/// Substrate points `SSL_CERT_FILE` at, replaces it, adds to it or turns verification off, by the
+/// tools that read them: OpenSSL (`SSL_CERT_FILE`, which Substrate itself sets to the snapshot at
+/// [`APERTURE_CA_BUNDLE_PATH`], and `SSL_CERT_DIR`), curl (`CURL_CA_BUNDLE`, `CURL_CA_PATH`, and
+/// `CURL_HOME`, where it reads a `.curlrc` that may name a `cacert`), Python's requests
+/// (`REQUESTS_CA_BUNDLE`), Node (`NODE_EXTRA_CA_CERTS`) and Git (`GIT_SSL_CAINFO`,
+/// `GIT_SSL_CAPATH`, `GIT_SSL_NO_VERIFY`, and `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM` and
+/// `GIT_CONFIG_PARAMETERS`, through which it takes configuration that may set `http.sslCAInfo`).
+/// A child naming a bundle is refused when its environment names any of them, or a
+/// `GIT_CONFIG_KEY_<n>` naming one of [`GIT_TRUST_KEYS`] ([`check_ca_bundle`]).
 ///
-/// The list keeps a host from undoing the bundle it names through the environment it names beside
-/// it. It does not bound what the child trusts: a program the child runs can still choose its own
-/// trust store or turn verification off, and what the child reaches is bounded by its aperture.
-const TRUST_STORE_VARIABLES: [&str; 8] = [
+/// The list keeps a host from overriding, by accident, the bundle it names through the
+/// environment it names beside it. It is no guarantee about what the child trusts: configuration
+/// under `HOME`, a program's own flags and variables not listed can still point a client
+/// elsewhere or turn verification off; what the child reaches is bounded by its aperture.
+const TRUST_STORE_VARIABLES: [&str; 13] = [
     "SSL_CERT_FILE",
     "SSL_CERT_DIR",
     "CURL_CA_BUNDLE",
     "CURL_CA_PATH",
+    "CURL_HOME",
     "REQUESTS_CA_BUNDLE",
     "NODE_EXTRA_CA_CERTS",
     "GIT_SSL_CAINFO",
     "GIT_SSL_CAPATH",
+    "GIT_SSL_NO_VERIFY",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_PARAMETERS",
 ];
+
+/// The keys of Git's `http` section through which Git takes another trust store or turns
+/// verification off. A `GIT_CONFIG_KEY_<n>` naming one, the section and the key in any case and
+/// with or without a URL subsection (`http.<url>.sslCAInfo`), is refused beside a bundle
+/// ([`names_git_trust_key`]); one naming any other key (`safe.directory`) is not.
+const GIT_TRUST_KEYS: [&str; 3] = ["sslCAInfo", "sslCAPath", "sslVerify"];
+
+/// Whether an environment variable `name` set to `value`, beside a certificate bundle, would
+/// override the trust store the child gets: a name in [`TRUST_STORE_VARIABLES`], or a
+/// `GIT_CONFIG_KEY_<n>` (`n` decimal digits, as Git reads them) whose value names one of
+/// [`GIT_TRUST_KEYS`].
+fn overrides_trust_store(name: &str, value: &str) -> bool {
+    let git_config_key = name
+        .strip_prefix("GIT_CONFIG_KEY_")
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|byte| byte.is_ascii_digit()));
+    TRUST_STORE_VARIABLES.contains(&name) || (git_config_key && names_git_trust_key(value))
+}
+
+/// Whether the Git configuration key `key` is one of [`GIT_TRUST_KEYS`] in the `http` section:
+/// its first dot-separated part is `http` and its last one the key, both compared without case,
+/// so `http.sslCAInfo`, `HTTP.SSLCAINFO` and `http.https://host.example/.sslCAInfo` all are.
+fn names_git_trust_key(key: &str) -> bool {
+    let key = key.trim();
+    match (key.split_once('.'), key.rsplit_once('.')) {
+        (Some((section, _)), Some((_, name))) => {
+            section.eq_ignore_ascii_case("http")
+                && GIT_TRUST_KEYS
+                    .iter()
+                    .any(|trust| name.eq_ignore_ascii_case(trust))
+        }
+        _ => false,
+    }
+}
 
 /// The largest certificate bundle a child is given, 1 MiB: the ceiling Substrate holds its own
 /// bundles to (`MAX_CA_BUNDLE_BYTES`, private to `b10x-substrate-sdk`'s transport and to
@@ -1124,9 +1169,10 @@ const MAX_CA_BUNDLE_BYTES: u64 = 1024 * 1024;
 ///    its aperture, and a child with none reaches no host the bundle could verify;
 /// 2. a path that is not UTF-8, or not absolute, which names no one file whatever the working
 ///    directory;
-/// 3. an environment naming any of [`TRUST_STORE_VARIABLES`] beside the bundle, each named in the
-///    refusal: it would replace or widen the trust store the child gets through `SSL_CERT_FILE`
-///    (whose own value Substrate would replace unseen);
+/// 3. an environment naming any of [`TRUST_STORE_VARIABLES`] beside the bundle, or a
+///    `GIT_CONFIG_KEY_<n>` naming one of [`GIT_TRUST_KEYS`] ([`overrides_trust_store`]), each
+///    named in the refusal: it would override the trust store the child gets through
+///    `SSL_CERT_FILE` (whose own value Substrate would replace unseen);
 /// 4. the path itself, its last component not followed: one that does not exist, is a symbolic
 ///    link, is no regular file, is empty or holds more than [`MAX_CA_BUNDLE_BYTES`], as Substrate
 ///    refuses a bundle of its own; an empty one would trust nothing while the child is pointed
@@ -1161,13 +1207,23 @@ fn check_ca_bundle(child: &ChildCommand) -> Result<Option<CaBundle>, Confinement
             "is a relative path; name it by an absolute path, so it names one file whatever the working directory",
         ));
     }
-    let variables: Vec<&str> = TRUST_STORE_VARIABLES
-        .into_iter()
-        .filter(|variable| child.environment.set.contains_key(*variable))
+    // In the environment's order (by name); a Git key is named with the key it sets.
+    let variables: Vec<String> = child
+        .environment
+        .set
+        .iter()
+        .filter(|(name, value)| overrides_trust_store(name, value))
+        .map(|(name, value)| {
+            if TRUST_STORE_VARIABLES.contains(&name.as_str()) {
+                name.clone()
+            } else {
+                format!("{name} ({value})")
+            }
+        })
         .collect();
     if !variables.is_empty() {
         return Err(refused(&format!(
-            "comes with an environment naming {}, which would replace or widen the trust store the child gets through SSL_CERT_FILE, the bundle's snapshot at {APERTURE_CA_BUNDLE_PATH}; leave {} out of the environment",
+            "comes with an environment naming {}, which would override the trust store the child gets through SSL_CERT_FILE, the bundle's snapshot at {APERTURE_CA_BUNDLE_PATH}; leave {} out of the environment",
             variables.join(", "),
             if variables.len() == 1 { "it" } else { "them" }
         )));
@@ -2732,6 +2788,13 @@ mod tests {
                 "the with_ca_bundle rustdoc names {variable}"
             );
         }
+        for key in GIT_TRUST_KEYS {
+            assert!(
+                doc.contains(&format!("`http.{key}`")),
+                "the with_ca_bundle rustdoc names http.{key}"
+            );
+        }
+        assert!(doc.contains("`GIT_CONFIG_KEY_<n>`"));
         let both = anchored(BTreeMap::from([
             ("CURL_CA_BUNDLE".to_owned(), "/x".to_owned()),
             ("SSL_CERT_DIR".to_owned(), "/x".to_owned()),
@@ -2740,13 +2803,67 @@ mod tests {
         assert!(
             error
                 .detail
-                .contains("naming SSL_CERT_DIR, CURL_CA_BUNDLE, "),
+                .contains("naming CURL_CA_BUNDLE, SSL_CERT_DIR, "),
+            "{error}"
+        );
+        let git = anchored(BTreeMap::from([
+            ("GIT_CONFIG_COUNT".to_owned(), "1".to_owned()),
+            ("GIT_CONFIG_KEY_0".to_owned(), "http.sslVerify".to_owned()),
+            ("GIT_CONFIG_VALUE_0".to_owned(), "false".to_owned()),
+        ]));
+        let error = check_ca_bundle(&git).unwrap_err();
+        assert!(
+            error
+                .detail
+                .contains("naming GIT_CONFIG_KEY_0 (http.sslVerify), "),
             "{error}"
         );
         // Another variable passes this step, so the absent path is what is refused.
         let other = anchored(BTreeMap::from([("FIRST".to_owned(), "one".to_owned())]));
         let error = check_ca_bundle(&other).unwrap_err();
         assert!(error.detail.contains("does not exist"), "{error}");
+    }
+
+    #[test]
+    fn only_a_git_config_key_naming_a_trust_key_overrides_the_trust_store() {
+        for key in [
+            "http.sslCAInfo",
+            "http.sslcapath",
+            "HTTP.SSLVERIFY",
+            " http.sslCAInfo ",
+            "http.https://model.example.test/.sslCAInfo",
+            "Http.https://model.example.test:443/a.b.SslVerify",
+        ] {
+            assert!(names_git_trust_key(key), "{key:?}");
+            assert!(overrides_trust_store("GIT_CONFIG_KEY_0", key), "{key:?}");
+            assert!(overrides_trust_store("GIT_CONFIG_KEY_12", key), "{key:?}");
+        }
+        for key in [
+            "safe.directory",
+            "http.sslBackend",
+            "http.sslCAInfoExtra",
+            "https.sslCAInfo",
+            "core.sslCAInfo",
+            "sslCAInfo",
+            "http",
+            "",
+        ] {
+            assert!(!names_git_trust_key(key), "{key:?}");
+            assert!(!overrides_trust_store("GIT_CONFIG_KEY_0", key), "{key:?}");
+        }
+        // Only a key Git reads: GIT_CONFIG_KEY_ and decimal digits, never a value or the count.
+        for name in [
+            "GIT_CONFIG_KEY_",
+            "GIT_CONFIG_KEY_X",
+            "GIT_CONFIG_KEY_0A",
+            "GIT_CONFIG_VALUE_0",
+            "GIT_CONFIG_COUNT",
+        ] {
+            assert!(!overrides_trust_store(name, "http.sslCAInfo"), "{name}");
+        }
+        for name in TRUST_STORE_VARIABLES {
+            assert!(overrides_trust_store(name, ""), "{name}");
+        }
     }
 
     #[test]
