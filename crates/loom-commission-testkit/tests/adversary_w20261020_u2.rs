@@ -23,14 +23,17 @@ use b10x_loom_commission::model::responsibility::{
     ActionRequestData, ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext,
     AuthorityVerdict, AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData,
     CommissionId, EffectOutcome, EffectOutcomePerformed, ExecutorOutcome,
-    ExecutorOutcomeProposedAction, FrontierAction, ObservationId, PrincipalId,
-    ProposedActionArguments, RunId, RunOutcome, RunOutcomeNeedsAuthority, SuspensionState, Unit,
-    commission_state,
+    ExecutorOutcomeProposedAction, FrontierAction, HoldSuspension, HoldSuspensionOutcome,
+    ObservationId, PrincipalId, ProposedActionArguments, ReleaseSuspension,
+    ReleaseSuspensionOutcome, RunId, RunOutcome, RunOutcomeNeedsAuthority, SuspensionSnapshot,
+    SuspensionState, TakeSuspension, TakeSuspensionOutcome, Unit, commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
-use b10x_loom_commission::ports::suspension::{SuspensionPort, SuspensionStore};
+use b10x_loom_commission::ports::suspension::{
+    SuspensionPort, SuspensionStore, SuspensionStoreError,
+};
 use b10x_loom_commission::runtime::{
     LoopContext, LoopEnd, resume_after_grant, run_until_blocked, run_with_suspension,
 };
@@ -239,6 +242,69 @@ impl AuthorityProvider for GrantWhileTheCaseMoves<'_> {
     }
 }
 
+/// The suspension store, with another writer moving the case once, just before the first `take`
+/// lands: the other process's turn between the resume's revision read after the allow and its
+/// `TakeSuspension`, as `adversary_w6_suspend_resume_pass2.rs`'s `Racing` gives one before a take.
+struct MovesBeforeTake<'a> {
+    inner: &'a SuspensionStore,
+    governor: &'a FakeGovernor,
+    case: CaseId,
+    moved: Answer,
+    took: Mutex<bool>,
+}
+
+impl<'a> MovesBeforeTake<'a> {
+    fn new(
+        inner: &'a SuspensionStore,
+        governor: &'a FakeGovernor,
+        case: &CaseId,
+        moved: Answer,
+    ) -> Self {
+        Self {
+            inner,
+            governor,
+            case: case.clone(),
+            moved,
+            took: Mutex::new(false),
+        }
+    }
+
+    /// Whether the resume reached its take.
+    fn took(&self) -> bool {
+        *self.took.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl SuspensionPort for MovesBeforeTake<'_> {
+    fn hold(&self, input: HoldSuspension) -> HoldSuspensionOutcome {
+        SuspensionPort::hold(self.inner, input)
+    }
+
+    fn take(&self, input: TakeSuspension) -> TakeSuspensionOutcome {
+        let first = {
+            let mut took = self.took.lock().unwrap_or_else(PoisonError::into_inner);
+            !std::mem::replace(&mut *took, true)
+        };
+        if first {
+            // Somebody else writes the case before the take lands.
+            self.governor
+                .script(self.case.clone(), [self.moved.clone()]);
+        }
+        SuspensionPort::take(self.inner, input)
+    }
+
+    fn release(&self, input: ReleaseSuspension) -> ReleaseSuspensionOutcome {
+        SuspensionPort::release(self.inner, input)
+    }
+
+    fn get(
+        &self,
+        commission: &CommissionId,
+    ) -> Result<Option<SuspensionSnapshot>, SuspensionStoreError> {
+        SuspensionPort::get(self.inner, commission)
+    }
+}
+
 /// Runs the commission on `case` with a suspension port, the merge proposed once at revision 7 and
 /// withheld, so the run ends holding a Suspension for the request at 7.
 fn suspend_at_seven(
@@ -360,5 +426,63 @@ fn adversary_a_resume_does_not_perform_a_request_whose_case_moved_while_the_prov
         stored.map(|stored| stored.state),
         Some(SuspensionState::Pending),
         "a resume that performed nothing leaves the Suspension pending"
+    );
+}
+
+/// Pass 2, against 7e5fb700 ("the runtime performs an allowed request only while the case is
+/// still at that revision", `CHANGELOG.md`): the resume reads the revision again once the provider
+/// allows the held request at 7, and finds 7. Then it resumes the Run and takes the Suspension,
+/// and just before the take lands somebody else moves the case to 8. The request bound to 7 is
+/// stale by the time the resume would invoke it, so it is not performed.
+#[test]
+fn adversary_a_resume_does_not_perform_a_request_whose_case_moved_before_its_suspension_was_taken()
+{
+    let case = CaseId("case-adversary-moved-before-take".to_owned());
+    let governor = FakeGovernor::new();
+    let effects = Effects::default();
+    let suspensions = SuspensionStore::new();
+    suspend_at_seven(&governor, &effects, &suspensions, &case);
+
+    governor.script(case.clone(), [gated_merge(7)]);
+    let racing = MovesBeforeTake::new(
+        &suspensions,
+        &governor,
+        &case,
+        gated_merge(8).complete("merged by somebody else"),
+    );
+    let granting = StaticAuthorityProvider::new().answer(CAPABILITY, allow());
+    let resumed = resume_after_grant(
+        &governor,
+        &ScriptedExecutor::new([]),
+        &granting,
+        &effects,
+        &commission(&case),
+        &mut runs(0x200),
+        &racing,
+        &mut Context::starting_at(0x500),
+    );
+
+    let revisions: Vec<i64> = granting
+        .requests()
+        .iter()
+        .map(|request| request.expected_case_revision)
+        .collect();
+    assert_eq!(
+        revisions,
+        [7],
+        "precondition: the provider is asked once, about the held request at 7; the resume \
+         answered {resumed:?}"
+    );
+    assert!(
+        racing.took(),
+        "precondition: the resume reached its take, past the revision read after the allow; it \
+         answered {resumed:?}"
+    );
+    let performed = effects.invoked();
+    assert!(
+        performed.is_empty(),
+        "the case moved to 8 before the resume's take landed; the held request allowed at 7 is \
+         stale and must not be performed, but the effect port was handed {performed:?} (the \
+         resume answered {resumed:?})"
     );
 }
