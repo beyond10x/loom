@@ -9,7 +9,8 @@
 //! turn runs, so a turn that failed or unwound is still a call; a turn that answered adds the
 //! tokens the provider reported for it, and one that failed or unwound adds none.
 //!
-//! The [`MeteredExecutor`] opens one step per [`AgentExecutor::run`] call, counted from 1, and every
+//! The [`MeteredExecutor`] opens one step per executor call ([`AgentExecutor::run_with_usage`], which
+//! the runtime makes, or [`AgentExecutor::run`]), counted from 1, and every
 //! call that executor call makes is counted in its step: a call on the thread the executor call
 //! runs on, and a call through a fork of a metered port made in it, on whichever thread the fork
 //! turns (delegates side by side). The step is carried by the executor call, not held by the
@@ -22,10 +23,12 @@
 //! took. Step 0 and a call that took no named step carry none.
 //!
 //! Each turn is priced once, with the run's [`RateCard`], and rounded once; a cost is the sum of its
-//! rounded turns, as [`RateCard::price`] holds. No price is reported as absent, never zero:
-//! without a rate card, for a model the card does not price, after a turn that answered without
-//! reporting its usage, or after a turn that failed or unwound (its tokens, and so its cost, are
-//! unknown), the step's cost is absent, and so is the run's.
+//! rounded turns, as [`RateCard::price`] holds. No price is reported as absent, never zero: after
+//! a turn without a rate card, for a model the card does not price, after a turn that answered
+//! without reporting its usage, or after a turn that failed or unwound (its tokens, and so its
+//! cost, are unknown), the step's cost is absent, and so is the run's. A step that made no model
+//! call needs no price: its cost is the cost its executor reported, and zero when it reported no
+//! usage, card or none.
 //!
 //! The report is the generated [`RunUsageReport`] ([`RunMeter::report`]). It covers what the meter
 //! saw: one process segment of the run, and the earlier segments it was resumed from. A meter
@@ -34,17 +37,29 @@
 //! it back ([`RunMeter::carry`]), so its report lists the carried steps first, numbered as they
 //! were, numbers its own after them, and sums the carried effect usage with its own.
 //!
+//! An executor that is not a model loop (an agent session, a remote executor) reports what each
+//! call spent ([`AgentExecutor::run_with_usage`], `story:executor-reports-usage`). The
+//! [`MeteredExecutor`] adds that usage to the call's step when it is called through
+//! `run_with_usage`, which hands the usage on to the runtime, and never through `run`, which hands
+//! on the outcome alone, so the meter shows only usage the run is charged: its input and output
+//! tokens, and its cost to the cost of the step's priced calls, so a step that made no model call
+//! takes the reported cost, with or without a rate card, and a usage with no cost leaves the
+//! step's cost absent. It is no model call, and the steps still sum to the totals. An executor
+//! whose model calls go through a metered port reports none of them, so nothing is counted twice.
+//!
 //! Beside the model-port usage, the report carries what the run's performed effects reported they
 //! spent on their own model calls, as Commission's runtime charged it to the run and to each
 //! action ([`b10x_loom_commission::runtime::LoopEnd::charges`]), once the host hands it to the
-//! meter ([`RunMeter::charge_effects`]). It is never summed into the model-port figures.
+//! meter ([`RunMeter::charge_effects`]). It is never summed into the model-port figures. Its
+//! totals are the actions' sums: the run's charge also holds the usage its executor calls
+//! reported, which the report holds in their steps instead.
 
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use b10x_loom_commission::model::responsibility::{
-    ChargedUsage, Commission, ExecutorOutcome, Frontier, RunCharges, RunId, commission_state,
-    frontier_state,
+    ChargedUsage, Commission, ExecutorOutcome, ExecutorStep, ExecutorUsage, Frontier, RunCharges,
+    RunId, commission_state, frontier_state,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
 
@@ -92,7 +107,8 @@ struct Tally {
     input_tokens: u64,
     output_tokens: u64,
     cached_input_tokens: u64,
-    /// The sum of the priced turns; `None` once a turn could not be priced, or without a card.
+    /// The sum of the priced turns and the reported costs; `None` once a turn could not be priced
+    /// (without a card among the reasons) or a reported usage carried no cost.
     cost_micro_usd: Option<u64>,
 }
 
@@ -112,9 +128,11 @@ impl Tally {
         }
     }
 
-    fn new(priced: bool) -> Self {
+    /// A step that has counted nothing yet: no call, and so a known cost of zero, card or none. A
+    /// turn without a price, a card's absence included, makes it absent once it is counted.
+    fn empty() -> Self {
         Self {
-            cost_micro_usd: priced.then_some(0),
+            cost_micro_usd: Some(0),
             ..Self::default()
         }
     }
@@ -137,7 +155,10 @@ fn figure(count: u64) -> i64 {
     i64::try_from(count).unwrap_or(i64::MAX)
 }
 
-/// The report's effect usage for `charges`: all zero, with no actions, when nothing was charged.
+/// The report's effect usage for `charges`: the totals over every action, and each action; all
+/// zero, with no actions, when nothing was charged. The totals are summed from the actions, not
+/// read from the run's charge, which also holds what the run's executor calls reported
+/// (`story:executor-reports-usage`): that usage is in its steps, so it is never counted here too.
 fn effects_usage(charges: Option<&RunCharges>) -> EffectsUsage {
     let line = |action: &str, charged: &ChargedUsage| ActionUsage {
         action: action.to_owned(),
@@ -157,19 +178,30 @@ fn effects_usage(charges: Option<&RunCharges>) -> EffectsUsage {
             actions: Vec::new(),
         };
     };
-    let run = line("", &charges.run);
-    EffectsUsage {
-        trials: run.trials,
-        input_tokens: run.input_tokens,
-        output_tokens: run.output_tokens,
-        duration_ms: run.duration_ms,
-        cost_micro_usd: run.cost_micro_usd,
-        actions: charges
-            .actions
-            .iter()
-            .map(|charge| line(&charge.action, &charge.charged))
-            .collect(),
+    let actions: Vec<ActionUsage> = charges
+        .actions
+        .iter()
+        .map(|charge| line(&charge.action, &charge.charged))
+        .collect();
+    let mut totals = EffectsUsage {
+        trials: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        duration_ms: 0,
+        cost_micro_usd: Some(0),
+        actions: Vec::new(),
+    };
+    for action in &actions {
+        totals.trials = totals.trials.saturating_add(action.trials);
+        totals.input_tokens = totals.input_tokens.saturating_add(action.input_tokens);
+        totals.output_tokens = totals.output_tokens.saturating_add(action.output_tokens);
+        totals.duration_ms = totals.duration_ms.saturating_add(action.duration_ms);
+        totals.cost_micro_usd = totals
+            .cost_micro_usd
+            .zip(action.cost_micro_usd)
+            .map(|(sum, cost)| sum.saturating_add(cost));
     }
+    EffectsUsage { actions, ..totals }
 }
 
 /// `carried` and `current` summed: every figure added, the cost absent when either is, and the
@@ -207,11 +239,10 @@ impl RunMeter {
     /// A meter for one run, pricing each turn with `prices` when there is a card.
     #[must_use]
     pub fn new(prices: Option<RateCard>) -> Self {
-        let priced = prices.is_some();
         Self {
             shared: Arc::new(Mutex::new(Ledger {
                 prices,
-                tallies: vec![Tally::new(priced)],
+                tallies: vec![Tally::empty()],
                 effects: None,
                 carried_effects: None,
             })),
@@ -224,15 +255,20 @@ impl RunMeter {
     #[must_use]
     pub fn report(&self, run: &RunId) -> RunUsageReport {
         let ledger = self.ledger();
-        let steps: Vec<StepUsage> = ledger
+        let listed: Vec<(usize, &Tally)> = ledger
             .tallies
             .iter()
             .enumerate()
             .filter(|(step, tally)| *step > 0 || tally.calls > 0)
-            .map(|(step, tally)| tally.usage(step))
             .collect();
-        let mut total = Tally::new(ledger.prices.is_some());
-        for tally in &ledger.tallies {
+        let steps: Vec<StepUsage> = listed
+            .iter()
+            .map(|(step, tally)| tally.usage(*step))
+            .collect();
+        // The totals are the listed steps' sums; a step whose cost is absent leaves the run's
+        // absent.
+        let mut total = Tally::empty();
+        for (_, tally) in &listed {
             total.calls = total.calls.saturating_add(tally.calls);
             total.input_tokens = total.input_tokens.saturating_add(tally.input_tokens);
             total.output_tokens = total.output_tokens.saturating_add(tally.output_tokens);
@@ -277,14 +313,13 @@ impl RunMeter {
     /// counted before is replaced.
     pub fn carry(&self, carried: &CarriedUsage) {
         let mut ledger = self.ledger();
-        let priced = ledger.prices.is_some();
         let last = carried
             .steps
             .iter()
             .filter_map(|step| usize::try_from(step.step).ok())
             .max()
             .unwrap_or(0);
-        let mut tallies = vec![Tally::new(priced); last + 1];
+        let mut tallies = vec![Tally::empty(); last + 1];
         for step in &carried.steps {
             if let Ok(at) = usize::try_from(step.step) {
                 tallies[at] = Tally::carried(step);
@@ -364,6 +399,26 @@ impl RunMeter {
         };
     }
 
+    /// Adds `usage`, what the executor call of `step` reported it spent
+    /// (`story:executor-reports-usage`), to that step: its input and output tokens, and its cost
+    /// to the cost of the step's priced calls, so a step that made no model call takes the
+    /// reported cost, with or without a rate card. A usage with no cost leaves the step's cost
+    /// absent; a negative figure counts nothing. It is no model call, and its wall time is not a
+    /// figure of the report.
+    fn record_reported(&self, step: usize, usage: &ExecutorUsage) {
+        let count = |figure: i64| u64::try_from(figure).unwrap_or(0);
+        let mut ledger = self.ledger();
+        let tally = &mut ledger.tallies[step];
+        tally.input_tokens = tally.input_tokens.saturating_add(count(usage.input_tokens));
+        tally.output_tokens = tally
+            .output_tokens
+            .saturating_add(count(usage.output_tokens));
+        tally.cost_micro_usd = tally
+            .cost_micro_usd
+            .zip(usage.cost_micro_usd.map(count))
+            .map(|(sum, cost)| sum.saturating_add(cost));
+    }
+
     /// Opens the next step for the executor call beginning on this thread, unless an executor call
     /// of this meter already runs here (a metered executor over another of the same meter): one
     /// executor call is one step. Returns the step it opened, to close when the call ends.
@@ -373,8 +428,7 @@ impl RunMeter {
         }
         let step = {
             let mut ledger = self.ledger();
-            let priced = ledger.prices.is_some();
-            ledger.tallies.push(Tally::new(priced));
+            ledger.tallies.push(Tally::empty());
             ledger.tallies.len() - 1
         };
         OPEN.with_borrow_mut(|open| open.push((self.id(), step)));
@@ -518,11 +572,17 @@ impl ModelPort for MeteredFork<'_> {
     }
 }
 
-/// An [`AgentExecutor`] that opens one step of a [`RunMeter`] per `run` call of `E`.
+/// An [`AgentExecutor`] that opens one step of a [`RunMeter`] per call of `E`, and adds to it the
+/// usage the call reports through [`AgentExecutor::run_with_usage`].
 ///
 /// Calls of several metered executors on one meter may overlap, each on its own thread, and each
 /// counts in its own step. Inside an executor call of the same meter (a `MeteredExecutor` over
 /// another) it opens no step of its own: one executor call is one step.
+///
+/// The meter shows a reported usage only where the runtime can be charged it: a call through
+/// `run_with_usage`, which hands the usage on with the outcome. A call through
+/// [`AgentExecutor::run`], as a wrapper that does not forward `run_with_usage` makes, hands on the
+/// outcome alone, so the usage reaches neither the run's charges nor the meter, and the two agree.
 #[derive(Debug)]
 pub struct MeteredExecutor<E> {
     inner: E,
@@ -530,7 +590,7 @@ pub struct MeteredExecutor<E> {
 }
 
 impl<E: AgentExecutor> MeteredExecutor<E> {
-    /// `inner`, each of its `run` calls one step of `meter`.
+    /// `inner`, each of its calls one step of `meter`.
     pub fn new(inner: E, meter: &RunMeter) -> Self {
         Self {
             inner,
@@ -556,18 +616,48 @@ impl Drop for OpenStep<'_> {
     }
 }
 
+impl<E: AgentExecutor> MeteredExecutor<E> {
+    /// Opens the step of the executor call beginning on this thread, unless one of this meter is
+    /// open here already; returns the step it opened, closed when the guard drops.
+    fn open(&self) -> (Option<usize>, Option<OpenStep<'_>>) {
+        let opened = self.meter.open_step();
+        let guard = opened.map(|step| OpenStep {
+            meter: &self.meter,
+            step,
+        });
+        (opened, guard)
+    }
+}
+
 impl<E: AgentExecutor> AgentExecutor for MeteredExecutor<E> {
-    /// `E`'s outcome, unchanged; every model call it makes is counted in a new step, or in the
-    /// step already open on this thread for an executor call of the same meter.
+    /// `E`'s outcome, unchanged; every model call `E::run` makes is counted in a new step, or in
+    /// the step already open on this thread for an executor call of the same meter. It records no
+    /// usage the call reports: whoever calls `run` gets the outcome alone, so the runtime is never
+    /// charged that usage, and the meter does not show it either.
     fn run(
         &self,
         commission: &Commission<commission_state::Assigned>,
         frontier: &Frontier<frontier_state::Issued>,
     ) -> ExecutorOutcome {
-        let _step = self.meter.open_step().map(|step| OpenStep {
-            meter: &self.meter,
-            step,
-        });
+        let _step = self.open();
         self.inner.run(commission, frontier)
+    }
+
+    /// `E`'s step, unchanged; every model call it makes is counted in a new step, or in the step
+    /// already open on this thread for an executor call of the same meter. The usage the call
+    /// reports, when it reports any, is added to the step it opened
+    /// (`story:executor-reports-usage`); inside an executor call of the same meter it opened none,
+    /// and the metered executor that opened the step adds it, once.
+    fn run_with_usage(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorStep {
+        let (opened, _step) = self.open();
+        let step = self.inner.run_with_usage(commission, frontier);
+        if let (Some(opened), Some(usage)) = (opened, &step.usage) {
+            self.meter.record_reported(opened, usage);
+        }
+        step
     }
 }

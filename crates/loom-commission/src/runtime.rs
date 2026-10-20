@@ -59,7 +59,7 @@
 //!    a case it completed ends the run completed. While a request is pending (8b) the gate is not
 //!    read: the step that admitted it is the one the gate is read after, once the port answered
 //!    it otherwise, as though it had answered so at once;
-//! 6. [`AgentExecutor::run`] on that frontier, less every action the effect port does not perform
+//! 6. [`AgentExecutor::run_with_usage`] on that frontier, less every action the effect port does not perform
 //!    and that needs no authority (`story:effect-invocation`), action by action: an action with an
 //!    entry listed `ApprovalRequired`, or an entry naming a capability, stays with all its entries,
 //!    performed or not, so a run still stops at its gate, and a kept action is admitted as the
@@ -71,7 +71,12 @@
 //!    [`LoopContext`], its source is `executor`, its subject is `<case>@<frontier revision>`, and
 //!    its payload names the outcome (`outcome`) and carries a proposal's `action` and `arguments`,
 //!    a fan-out's `reads` (each an `action` and its `arguments`, in the order proposed), a human
-//!    request's `request`, or a reported move's `expected_case_revision`. It is never evidence;
+//!    request's `request`, or a reported move's `expected_case_revision`, and, when the call
+//!    reported what it spent ([`ExecutorStep`]'s `usage`, `story:executor-reports-usage`), that
+//!    `usage` (input and output tokens, wall time, and the cost when it reported one). It is never
+//!    evidence. A reported usage is charged to the run before the step is observed, and once it is
+//!    observed the run budget's spending limits are checked (Run and action budgets, below): a
+//!    breach ends the run there, so the outcome is not acted on (7-10);
 //! 7. on `Suspended`, the Run is suspended through `SuspendRun` with the executor's reason and the
 //!    run ends suspended, carrying it. The Run is suspended with that reason even when delivering
 //!    the step's observation failed; the loop then returns that failure as a [`LoopError`] that
@@ -245,6 +250,19 @@
 //!   limit, or an unknown cost under a cost limit, ends the run there, before the case is loaded
 //!   again, so no further request is made.
 //!
+//! An executor call that reports what it spent ([`ExecutorStep`]'s `usage`, through
+//! [`AgentExecutor::run_with_usage`], `story:executor-reports-usage`: an executor that is not a
+//! model loop, such as an agent session) is charged to the run alone ([`LoopEnd::charges`]'s
+//! `run`): its input and output tokens, wall time and cost, as a `Performed` effect's usage is (a
+//! negative figure charges nothing, a usage with no cost leaves the run's cost unknown), with no
+//! trial and to no action. Once the step was observed (6), the spending limits are checked as
+//! after an effect, the run's being the only ones the charge moved: a breach suspends the Run for
+//! `RunBudget` and ends the run suspended with that reason before its outcome is acted on (7-10):
+//! no request is made from a proposal, and an executor's own `Suspended` is not the Run's. Nothing
+//! is pending while an executor runs (8b), so such a run never ends `Waiting`. An executor that
+//! reports no usage, as a model loop metered at its model port does, is charged nothing for its
+//! call, as before.
+//!
 //! A failure that leaves no run outcome is a [`LoopError`]. Once the Run is started, the error
 //! names it. When the governor, its observation port or the effect port fails after the Run
 //! started, the loop first suspends the Run (`SuspendRun`, `ExternalAvailability`) unless it
@@ -342,17 +360,18 @@ use crate::model::responsibility::{
     ActionNeedsAuthority, ActionNotAdmitted, ActionRequest, ActionRequestData, ActionRequestId,
     ActionRequestStale, ActionStatus, AnyRun, AuthorityVerdict, CaseId, Commission,
     CompletionDetermination, EffectOutcome, ExecutorOutcome, ExecutorOutcomeProposedAction,
-    Frontier, FrontierAction, FrontierData, GovernorError, HoldSuspension, HoldSuspensionOutcome,
-    JudgeBudgetStop, JudgeBudgetStopOutcome, JudgeEffectRefusal, JudgeEffectRefusalOutcome,
-    JudgeIdleIteration, JudgeIdleIterationOutcome, JudgePerformableActions,
-    JudgePerformableActionsOutcome, Observation, ObservationData, ObservationId, ReleaseSuspension,
-    ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome, RevalidateActionRequestOutcome, Run,
-    RunData, RunId, RunOutcome, RunOutcomeAwaitingApproval, RunOutcomeCaseMovedOn,
-    RunOutcomeCompleted, RunOutcomeEffectRefused, RunOutcomeIdleBound, RunOutcomeNeedsAuthority,
-    RunOutcomeNoPerformableAction, RunOutcomeSuspended, RunOutcomeWaiting, RunStarted,
-    RunStorageFailed, StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionKey,
-    SuspensionReason, SuspensionState, SuspensionStateConflict, TakeSuspension,
-    TakeSuspensionOutcome, Truth, Unit, commission_state, frontier_state, observation_state,
+    ExecutorStep, ExecutorUsage, Frontier, FrontierAction, FrontierData, GovernorError,
+    HoldSuspension, HoldSuspensionOutcome, JudgeBudgetStop, JudgeBudgetStopOutcome,
+    JudgeEffectRefusal, JudgeEffectRefusalOutcome, JudgeIdleIteration, JudgeIdleIterationOutcome,
+    JudgePerformableActions, JudgePerformableActionsOutcome, Observation, ObservationData,
+    ObservationId, ReleaseSuspension, ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome,
+    RevalidateActionRequestOutcome, Run, RunData, RunId, RunOutcome, RunOutcomeAwaitingApproval,
+    RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeEffectRefused, RunOutcomeIdleBound,
+    RunOutcomeNeedsAuthority, RunOutcomeNoPerformableAction, RunOutcomeSuspended,
+    RunOutcomeWaiting, RunStarted, RunStorageFailed, StartRun, StartRunOutcome, SuspendRun,
+    SuspendRunOutcome, SuspensionKey, SuspensionReason, SuspensionState, SuspensionStateConflict,
+    TakeSuspension, TakeSuspensionOutcome, Truth, Unit, commission_state, frontier_state,
+    observation_state,
 };
 use crate::outcome::{
     CapabilityVerdict, Derived, derive, judge_budget_stop, judge_idle, judge_performable,
@@ -433,7 +452,8 @@ pub struct LoopEnd {
     /// no iteration read one.
     pub last_frontier: Option<FrontierData>,
     /// What the run, and each action a request was handed to the effect port for, was charged:
-    /// the requests handed over and the usage their `Performed` effects reported.
+    /// the requests handed over and the usage their `Performed` effects reported, and, in the
+    /// run's alone, the usage its executor calls reported ([`ExecutorStep`]).
     pub charges: RunCharges,
 }
 
@@ -1295,8 +1315,23 @@ where
             return budget_ended(runs, run_id, exhausted_for, None, track);
         }
 
-        let outcome = executor.run(commission, &handed);
-        let observed = governor.observe(observation(context, &frontier, &outcome));
+        let ExecutorStep { outcome, usage } = executor.run_with_usage(commission, &handed);
+        if let Some(usage) = &usage {
+            charge_step(&mut track.charges, usage);
+        }
+        let observed = governor.observe(observation(context, &frontier, &outcome, usage.as_ref()));
+        // The step's own usage past a spending limit stops the run once the step is observed,
+        // before its outcome is acted on: no request is made from it, and an executor's own
+        // suspension is not the Run's.
+        if observed.is_ok()
+            && usage.is_some()
+            && let Some(breach) = run_budget
+                .as_ref()
+                .and_then(|limits| spent_past(limits, &track))
+        {
+            let reason = SuspensionReason::RunBudget(breach);
+            return budget_ended(runs, run_id, reason, None, track);
+        }
         if let ExecutorOutcome::Suspended(suspended) = &outcome {
             let reason = suspended.reason.clone();
             let suspension = suspend(runs, run_id, reason.clone()).err();
@@ -2622,15 +2657,17 @@ fn unchanged(before: &[FrontierAction], after: &[FrontierAction]) -> bool {
         })
 }
 
-/// The observation of one executor step, as the module documents.
+/// The observation of one executor step, as the module documents: `outcome`, and `usage`, what
+/// the call reported it spent, when it reported any.
 fn observation<C: LoopContext + ?Sized>(
     context: &mut C,
     frontier: &Frontier<frontier_state::Issued>,
     outcome: &ExecutorOutcome,
+    usage: Option<&ExecutorUsage>,
 ) -> Observation<observation_state::Reported> {
     let frontier = frontier.data();
     let text = |text: &str| Value::Text(text.to_owned());
-    let payload = match outcome {
+    let mut payload = match outcome {
         ExecutorOutcome::ProposedAction(proposed) => vec![
             ("outcome".to_owned(), text("ProposedAction")),
             ("action".to_owned(), text(&proposed.action)),
@@ -2671,6 +2708,17 @@ fn observation<C: LoopContext + ?Sized>(
             ),
         ],
     };
+    if let Some(usage) = usage {
+        payload.push((
+            "usage".to_owned(),
+            spent_value(
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.duration_ms,
+                usage.cost_micro_usd,
+            ),
+        ));
+    }
     Observation::new(ObservationData {
         observation_id: context.observation_id(),
         source: EXECUTOR_SOURCE.to_owned(),
@@ -2713,16 +2761,15 @@ fn effect_observation<C: LoopContext + ?Sized>(
                 payload.push(("audit".to_owned(), text(&audit.0)));
             }
             if let Some(usage) = &performed.usage {
-                let figure = |figure: i64| Value::Number(figure.to_string());
-                let mut spent = vec![
-                    ("input_tokens".to_owned(), figure(usage.input_tokens)),
-                    ("output_tokens".to_owned(), figure(usage.output_tokens)),
-                    ("duration_ms".to_owned(), figure(usage.duration_ms)),
-                ];
-                if let Some(cost) = usage.cost_micro_usd {
-                    spent.push(("cost_micro_usd".to_owned(), figure(cost)));
-                }
-                payload.push(("usage".to_owned(), Value::Object(spent)));
+                payload.push((
+                    "usage".to_owned(),
+                    spent_value(
+                        usage.input_tokens,
+                        usage.output_tokens,
+                        usage.duration_ms,
+                        usage.cost_micro_usd,
+                    ),
+                ));
             }
         }
         EffectOutcome::Refused(refused) => {
@@ -2739,6 +2786,26 @@ fn effect_observation<C: LoopContext + ?Sized>(
         observed_at: context.now(),
         payload: Value::Object(payload),
     })
+}
+
+/// A reported usage as an observation carries it: the input and output tokens, the wall time and,
+/// when one was reported, the cost.
+fn spent_value(
+    input_tokens: i64,
+    output_tokens: i64,
+    duration_ms: i64,
+    cost_micro_usd: Option<i64>,
+) -> Value {
+    let figure = |figure: i64| Value::Number(figure.to_string());
+    let mut spent = vec![
+        ("input_tokens".to_owned(), figure(input_tokens)),
+        ("output_tokens".to_owned(), figure(output_tokens)),
+        ("duration_ms".to_owned(), figure(duration_ms)),
+    ];
+    if let Some(cost) = cost_micro_usd {
+        spent.push(("cost_micro_usd".to_owned(), figure(cost)));
+    }
+    Value::Object(spent)
 }
 
 /// Nothing charged: no trial, no usage, and a known cost of zero.
@@ -2772,19 +2839,46 @@ fn charge(charges: &mut RunCharges, action: &str, effect: &EffectOutcome) {
     for charged in [&mut charges.run, &mut charges.actions[index].charged] {
         charged.trials = charged.trials.saturating_add(1);
         if let Some(usage) = usage {
-            charged.input_tokens = charged
-                .input_tokens
-                .saturating_add(usage.input_tokens.max(0));
-            charged.output_tokens = charged
-                .output_tokens
-                .saturating_add(usage.output_tokens.max(0));
-            charged.duration_ms = charged.duration_ms.saturating_add(usage.duration_ms.max(0));
-            charged.cost_micro_usd = match (charged.cost_micro_usd, usage.cost_micro_usd) {
-                (Some(sum), Some(cost)) => Some(sum.saturating_add(cost.max(0))),
-                _ => None,
-            };
+            add_usage(
+                charged,
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.duration_ms,
+                usage.cost_micro_usd,
+            );
         }
     }
+}
+
+/// Charges `usage`, what one executor call reported it spent, to the run alone
+/// (`story:executor-reports-usage`): no trial and no action, the figures as [`charge`] adds an
+/// effect's.
+fn charge_step(charges: &mut RunCharges, usage: &ExecutorUsage) {
+    add_usage(
+        &mut charges.run,
+        usage.input_tokens,
+        usage.output_tokens,
+        usage.duration_ms,
+        usage.cost_micro_usd,
+    );
+}
+
+/// Adds one reported usage to `charged`. A negative figure charges nothing, and a usage that
+/// reports no cost leaves the cost unknown from then on.
+fn add_usage(
+    charged: &mut ChargedUsage,
+    input_tokens: i64,
+    output_tokens: i64,
+    duration_ms: i64,
+    cost_micro_usd: Option<i64>,
+) {
+    charged.input_tokens = charged.input_tokens.saturating_add(input_tokens.max(0));
+    charged.output_tokens = charged.output_tokens.saturating_add(output_tokens.max(0));
+    charged.duration_ms = charged.duration_ms.saturating_add(duration_ms.max(0));
+    charged.cost_micro_usd = match (charged.cost_micro_usd, cost_micro_usd) {
+        (Some(sum), Some(cost)) => Some(sum.saturating_add(cost.max(0))),
+        _ => None,
+    };
 }
 
 /// The first spending limit of `limits` that `charged` passed, for `action` (`None` for the run's):

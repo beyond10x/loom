@@ -132,6 +132,15 @@ and per step.
 - Each turn is priced once at the rate card. Without a card, for a model the card does not list,
   after a turn that reported no usage, or after a turn that failed or unwound, the cost is absent,
   never zero.
+- An executor that is not a model loop, such as one over an agent session, makes no turn through a
+  metered port. It reports what each call spent by implementing `run_with_usage` (an
+  `ExecutorStep`: the outcome and an optional `ExecutorUsage` of input and output tokens, wall
+  time and cost), and its `run` returns that call's outcome. The runtime charges the usage to the
+  run's budget, and the `MeteredExecutor` adds its tokens and cost to the call's step; it is no
+  model call. A step's cost needs no card for that: without one, the step's cost is the cost the
+  executor reported, absent when its usage carried none, and zero for a step that reported no
+  usage and made no model call. An executor of yours that wraps another forwards `run_with_usage`,
+  or the inner executor's usage reaches neither the run nor the meter.
 - The report covers what the meter saw: one process segment of the run. A `WorkflowExecutor` with a
   run store (`.with_store(store)`, then `begin(&run_id)`) carries the usage in its run record, and
   `resume(&run_id)` in the next process, called after `.with_meter(&meter)`, carries it into that

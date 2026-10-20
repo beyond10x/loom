@@ -235,6 +235,22 @@ Tagged by `kind`.
 |---|---|
 | `reason` | [`SuspensionReason`](#suspensionreason) |
 
+### ExecutorStep
+
+| Field | Type |
+|---|---|
+| `outcome` | [`ExecutorOutcome`](#executoroutcome) |
+| `usage` | optional [`ExecutorUsage`](#executorusage) |
+
+### ExecutorUsage
+
+| Field | Type |
+|---|---|
+| `input_tokens` | `integer` |
+| `output_tokens` | `integer` |
+| `duration_ms` | `integer` |
+| `cost_micro_usd` | optional `integer` |
+
 ### FrontierAction
 
 | Field | Type |

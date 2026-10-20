@@ -19,8 +19,28 @@ pub trait AgentExecutor {
         commission: &Commission<commission_state::Assigned>,
         frontier: &Frontier<frontier_state::Issued>,
     ) -> ExecutorOutcome;
+
+    fn run_with_usage(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorStep {
+        ExecutorStep {
+            outcome: self.run(commission, frontier),
+            usage: None,
+        }
+    }
 }
 ```
+
+The runtime takes each call through `run_with_usage` (`story:executor-reports-usage`): an
+`ExecutorStep` holds the outcome and `usage`, an optional `ExecutorUsage` (input and output tokens,
+wall time in milliseconds, cost in micro-US-dollars where known) for what the call spent. The
+default reports none, as a model loop metered at its model port should, since the port counts its
+calls. An executor that is not a model loop (an agent session, a remote executor) returns its
+usage there, and an executor over another forwards it. The runtime charges a reported usage to the
+run's charges and budget, never to an action and never as a trial; a charge past a spending limit
+suspends the Run with `RunBudget` once the step was observed, before its outcome is acted on.
 
 `run` is synchronous and has no error channel: an executor that fails returns
 `Suspended(ExecutorOutcomeSuspended { reason: SuspensionReason::ExternalAvailability(..) })`.

@@ -2,8 +2,8 @@
   "provenance": {
     "system": "commission",
     "specification_version": "v1",
-    "source_digest": "3b3d3d9548ab5fbe6c639f4928c9136fce6fc3039ca9711b1dd9a4fccb975c22",
-    "contract_digest": "6fa3d582b4640078931da19526d7a7f46a311ce6f1d689702a9914b3cd6adb85"
+    "source_digest": "1eb97b29712f8ce7682700aab77f3279a6d6d85b6187180b19319fcda157e6ff",
+    "contract_digest": "3c0b0ffff72e2a32c66772373ad527b6a3de8105a781c0c45ab02c70d11ffc1c"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -349,6 +349,20 @@
     {
       "kind": "domain_type",
       "source": "commission.responsibility.ExecutorOutcomeSuspended",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "commission.responsibility.ExecutorStep",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "commission.responsibility.ExecutorUsage",
       "disposition": {
         "disposition": "generated"
       }

@@ -122,6 +122,28 @@ Breaking: a host that matches `EffectOutcome` or `RunOutcome` exhaustively handl
 pending once per invocation, and one that reads `LoopEnd::steps` as executor calls reads them plus
 the invocations again.
 
+An executor that is not a model loop reports its usage into the run's charges, budget and meter
+(`story:executor-reports-usage`). `AgentExecutor` gains `run_with_usage`, a provided method that
+returns an `ExecutorStep`: the outcome, and `usage`, an optional `ExecutorUsage` (input and output
+tokens, wall time, cost where known) for what the call spent. The default is `run`'s outcome with
+no usage, so every executor Loom ships, a model loop metered at its model port among them, keeps
+what it reported before; an executor over an agent session or a remote executor overrides it. The
+runtime takes each step through it and charges a reported usage to the run, as it charges a
+performed effect's usage, never to an action and never as a trial: `LoopEnd::charges`'s `run` holds
+it, a usage with no cost leaves the run's cost absent, and the step's observation carries it as
+`usage`. Once the step is observed, a charge past a spending limit of the run budget suspends the
+Run with `RunBudget` and ends the run before the step's outcome is acted on. `MeteredExecutor`,
+called through `run_with_usage`, adds the usage to its step's tokens and cost (no model call);
+called through `run`, which hands on no usage, it adds none, so the meter and the run's charges
+agree. A step that made no model call needs no price: its cost is the cost its executor reported,
+or zero when it reported no usage, with or without a rate card, where 0.28.0 left every step of a
+run without a card at no cost. The meter's `effects` totals are now the actions' sums, so the
+executor's usage is counted once, in its steps.
+Breaking: a host whose executor wraps another forwards `run_with_usage`, or the inner executor's
+usage reaches neither the run nor its meter; a host that read `LoopEnd::charges.run` as the sum of
+its actions reads executor usage in it too; and a host that read an absent cost from a step with
+no model call in a run without a rate card reads zero, or the reported cost.
+
 ## [0.28.0] - 2026-10-20
 
 Loom 0.28.0 lets an effect port end a run, names the idle bound, and confines a child process a
