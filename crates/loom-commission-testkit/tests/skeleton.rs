@@ -367,12 +367,22 @@ fn skeleton_lands_port_vocabulary_and_modules() {
             ("EffectRefused", "RunOutcomeEffectRefused"),
             // story:idle-bound-outcome: the idle bound ended a run that made no progress.
             ("IdleBound", "RunOutcomeIdleBound"),
+            // story:pending-effect: a budget ended the run while a request was pending.
+            ("Waiting", "RunOutcomeWaiting"),
         ],
     );
     assert_struct(
         &model,
         "RunOutcomeIdleBound",
         &[("idle_iterations", "Integer")],
+    );
+    assert_struct(
+        &model,
+        "RunOutcomeWaiting",
+        &[
+            ("action_request_ids", "List<ActionRequestId>"),
+            ("reason", "SuspensionReason"),
+        ],
     );
     assert_struct(
         &model,

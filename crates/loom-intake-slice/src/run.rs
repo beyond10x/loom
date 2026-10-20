@@ -934,9 +934,7 @@ fn finish(
             StopReason::Refused,
             Some(refused.reason),
         ),
-        RunOutcome::Waiting(waiting) => {
-            Err(SliceError::Unexpected(format!("Waiting {waiting:?}")))
-        }
+        RunOutcome::Waiting(waiting) => Err(SliceError::Unexpected(format!("Waiting {waiting:?}"))),
     }
 }
 
@@ -1479,10 +1477,12 @@ fn push_json(out: &mut String, value: &json::Value) {
 
 #[cfg(test)]
 mod tests {
+    use b10x_loom_commission::model::json::Value;
     use b10x_loom_commission::model::primitives::Uuid;
     use b10x_loom_commission::model::responsibility::{
         ActionRequestId, ChargedUsage, RunCharges, RunId, RunOutcome, RunOutcomeCaseMovedOn,
-        RunOutcomeEffectRefused, RunOutcomeIdleBound, RunOutcomeNoPerformableAction, Unit,
+        RunOutcomeEffectRefused, RunOutcomeIdleBound, RunOutcomeNoPerformableAction,
+        RunOutcomeSuspended, RunOutcomeWaiting, SuspensionReason, Unit,
     };
     use b10x_loom_commission::runtime::LoopEnd;
 
@@ -1592,6 +1592,58 @@ mod tests {
             idle,
             stopped(RunOutcome::NoAdmissibleAction(Unit(true))),
             "the stop the idle bound ended a run with on 0.26.0"
+        );
+    }
+
+    /// story:pending-effect: a run a budget ended while an effect's answer for a request was
+    /// pending (`Waiting`) stops `StepBudget`, as a run its step budget suspended does: the same
+    /// `SliceRun` and the same stop line, with no detail, so neither `b10x-loom`'s output nor the
+    /// `run --output jsonl` contract changes.
+    #[test]
+    fn a_run_waiting_on_a_pending_request_stops_step_budget() {
+        let stopped = |outcome: RunOutcome| {
+            let mut out = Vec::new();
+            let run = finish(
+                &mut out,
+                "software-change@1".to_owned(),
+                ended(outcome, 3),
+                ApprovalGate::Approvable,
+            )
+            .unwrap_or_else(|error| panic!("the stop failed: {error}"));
+            (run, String::from_utf8_lossy(&out).into_owned())
+        };
+        let budget = SuspensionReason::Budget(Value::Object(vec![(
+            "max_steps".to_owned(),
+            Value::Number("3".to_owned()),
+        )]));
+
+        let waiting = stopped(RunOutcome::Waiting(RunOutcomeWaiting {
+            action_request_ids: vec![ActionRequestId(Uuid(
+                "00000000-0000-4000-8000-000000000002".to_owned(),
+            ))],
+            reason: budget.clone(),
+        }));
+
+        assert_eq!(
+            waiting,
+            (
+                SliceRun {
+                    protocol: "software-change@1".to_owned(),
+                    steps: 3,
+                    stop_reason: StopReason::StepBudget,
+                    approvals: Vec::new(),
+                    unperformed: Vec::new(),
+                    gate: ApprovalGate::Approvable,
+                },
+                "stopped: StepBudget\n".to_owned()
+            )
+        );
+        assert_eq!(
+            waiting,
+            stopped(RunOutcome::Suspended(RunOutcomeSuspended {
+                reason: budget
+            })),
+            "the stop a run its step budget suspended makes"
         );
     }
 
