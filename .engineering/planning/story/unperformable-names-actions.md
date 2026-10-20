@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:unperformable-names-actions
 kind: story
-status: active
+status: implemented
 title: NoPerformableAction names the actions and the open claim no effect performs
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -35,10 +35,11 @@ scope:
   path: website/docs/reference/commission
 - confidence: cited
   path: website/docs/reference/run-events.md
-revision: 7
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T04:14:24Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":1}}}
 - {from: "proposed", to: "active", at: "2026-10-20T04:14:24Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":1}}}
+- {from: "active", to: "implemented", at: "2026-10-20T15:47:26Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":2}}}
 ---
 ## Outcome
 
@@ -91,3 +92,17 @@ Crates: `loom-commission`, `loom-commission-testkit`, `loom-intake-slice`, `loom
 - `website/docs/reference/commission/`, `website/docs/reference/run-events.md`, `CHANGELOG.md`
 
 Shared with `story:idle-bound-outcome` (before) and `story:pending-effect` (after).
+
+## Correction at close (wave 2026-10-20-w3)
+
+- What shipped: `RunOutcomeNoPerformableAction { actions, open_claims }`. The open claims are the
+  frontier's claims whose value is not true, in frontier order; they belong to the frontier, not to
+  one action, because `FrontierAction` carries no claim link. The per-action form is
+  `story:frontier-action-names-its-claims`.
+- A new command, `JudgePerformableActions`, gives the payload a conformance scenario; a payload
+  alone produced none.
+- Raised on every path, including a move found after a stale proposal (runtime item 2), which ended
+  `NoAdmissibleAction` before (adversary pass 1, fixed in 769947e).
+- The binary reaches the slice's `NoLocalExecutor` stop through the catalog route before a case
+  opens (`intent.rs`), so `unperformed_actions` there lists the protocol's unperformed actions in
+  protocol order; after a case opened, the runtime's frontier order.

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:child-egress-ca-bundle
 kind: story
-status: active
+status: implemented
 title: A confined child under an egress aperture trusts the CA bundle the host names
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -17,10 +17,11 @@ scope:
   path: crates/loom-intake-slice/src/confinement.rs
 - confidence: cited
   path: crates/loom-intake-slice/tests/confined_child.rs
-revision: 4
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T08:57:07Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-20T08:57:08Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-20T15:47:26Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 
@@ -58,3 +59,17 @@ story:harness-child-egress-profile.
 
 - `crates/loom-intake-slice/src/confinement.rs`, `crates/loom-intake-slice/tests/confined_child.rs`
 - `CHANGELOG.md`, `AGENTS.md`
+
+## Correction at close (wave 2026-10-20-w3)
+
+- What shipped: `ChildCommand::with_ca_bundle`. Loom reads the bundle once (its last component not
+  followed, a regular file, at most 1 MiB) and hands Substrate a private read-only copy, which the
+  child gets as `SSL_CERT_FILE`; the bundle's path and bytes are part of the shared driver's key.
+  `b10x-loom-intake-slice` gained a `libc` dependency for the no-follow open.
+- Refused before launch, besides the Acceptance's cases: a bundle with no aperture, relative, not
+  UTF-8, a link, no regular file, empty, unreadable or over 1 MiB, and one beside an environment
+  naming a listed trust-store variable (13 names) or a `GIT_CONFIG_KEY_<n>` naming a Git trust key.
+- Two adversary passes (a blocker and five lesser findings, all fixed). The list keeps a host from
+  overriding its bundle by accident; it is no guarantee about what the child trusts (configuration
+  under `HOME`, a program's own flags); the aperture bounds what the child reaches.
+- Still open: Substrate serves one aperture per run.

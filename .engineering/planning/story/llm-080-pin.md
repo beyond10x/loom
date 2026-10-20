@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:llm-080-pin
 kind: story
-status: active
+status: implemented
 title: Loom links llm 0.8.0
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -22,10 +22,11 @@ scope:
   path: crates/loom-plugin-slack/tests/support/mod.rs
 - confidence: cited
   path: crates/loom-plugin/tests/support/mod.rs
-revision: 4
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T08:57:06Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-20T08:57:07Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-20T15:47:26Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 
@@ -59,3 +60,12 @@ story names the test that shows it as the red step.
 - every `crates/*/Cargo.toml` naming `b10x-llm-*`, `Cargo.lock`
 - the four test files above
 - `AGENTS.md`, `README.md`, `website/docs/` lines naming the llm tag, `CHANGELOG.md`
+
+## Correction at close (wave 2026-10-20-w3)
+
+- What shipped: llm 0.8.1, not 0.8.0. The unit pinned 0.8.0 (227b553, a4b75fb); llm 0.8.1 came out
+  during the wave and was pinned by the coordinator (54eccd5), because 0.8.0 refuses the `container`
+  field the live Messages route now sends. `Cargo.lock` moved only the ten `b10x-llm-*` packages
+  both times.
+- The AGENTS.md line naming the llm tag was line 810 and said 0.4.0, not line 748; README and the
+  site name no llm tag.

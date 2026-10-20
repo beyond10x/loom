@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-20T15:47:24Z",
+  "actor": "human:timo",
+  "artifact": "story:unperformable-names-actions",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adv-w20261020w3-u1-pass-1",
+    "reference": "087496c, 769947e, 76c9273",
+    "review": "review-result:adv-w20261020w3-u1-pass-1",
+    "outcome": "fixed"
+  }
+}

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:executor-reports-usage
 kind: story
-status: active
+status: implemented
 title: An executor that is not a model loop reports its usage into the run charges, budget and meter
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -29,10 +29,11 @@ scope:
   path: generated/rust/commission
 - confidence: cited
   path: generated/rust/loom
-revision: 7
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T08:57:05Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":1}}}
 - {from: "proposed", to: "active", at: "2026-10-20T08:57:06Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":1}}}
+- {from: "active", to: "implemented", at: "2026-10-20T15:47:26Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":2}}}
 ---
 ## Outcome
 
@@ -90,3 +91,17 @@ Crates: `loom-commission`, `loom-commission-testkit`, `loom-executor`.
 - `CHANGELOG.md`, `AGENTS.md` (§ Checks that hold the rules, the metering row)
 
 Shared with `story:pending-effect` (before) and `story:metering-on-llm-model` (after).
+
+## Correction at close (wave 2026-10-20-w3)
+
+- What shipped: the usage travels beside the outcome, `ExecutorStep { outcome, usage }`, through a
+  provided `AgentExecutor::run_with_usage` whose default reports none; no existing executor breaks.
+  Putting it on `ExecutorOutcome` would have touched about 300 constructors in about 90 files.
+- No new command: the change is types only, so the red step was `task commission:drift` and then the
+  story's tests, not a synthesized scenario.
+- A spending-limit breach from executor usage ends the run once the step is observed, before its
+  outcome is acted on; wall time is charged to the run budget only (the meter's step usage has no
+  duration, which would change the stored workflow run record).
+- Adversary pass 1 (fixed): `MeteredExecutor` called through plain `run` records no reported usage,
+  so the meter and the run's charges agree; a step with no model call costs what its executor
+  reported, or zero, with or without a rate card.

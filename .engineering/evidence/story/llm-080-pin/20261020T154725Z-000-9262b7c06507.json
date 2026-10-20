@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-20T15:47:25Z",
+  "actor": "human:timo",
+  "artifact": "story:llm-080-pin",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "merged in 636cbba (a4b75fb), llm 0.8.1 in 54eccd5; full gate on 08ef011 (task check's steps one by one, task plan, release-check 0.29.0, task website): 23 of 23 exit 0; cargo test --workspace --no-fail-fast 2133 passed, 0 failed, 14 ignored",
+    "reference": "~/.cache/loom-wave-2026-10-20-w3/full-gate.log"
+  }
+}

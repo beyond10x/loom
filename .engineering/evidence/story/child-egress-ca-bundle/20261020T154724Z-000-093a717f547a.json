@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-20T15:47:24Z",
+  "actor": "human:timo",
+  "artifact": "story:child-egress-ca-bundle",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adv-w20261020w3-u5-pass-2",
+    "reference": "2e50c77, a35108f, 9af5b20",
+    "review": "review-result:adv-w20261020w3-u5-pass-2",
+    "outcome": "fixed"
+  }
+}

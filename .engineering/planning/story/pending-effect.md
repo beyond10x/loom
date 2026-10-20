@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:pending-effect
 kind: story
-status: active
+status: implemented
 title: An effect can answer pending and be invoked again within the budget without counting idle
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -37,10 +37,11 @@ scope:
   path: generated/rust/commission
 - confidence: cited
   path: website/docs/reference/commission
-revision: 10
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T08:57:05Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":3}}}
 - {from: "proposed", to: "active", at: "2026-10-20T08:57:05Z", actor: "human:timo", revision: 10, decided_on: {"recorded":{"review_outcome":3}}}
+- {from: "active", to: "implemented", at: "2026-10-20T15:47:26Z", actor: "human:timo", revision: 12, decided_on: {"recorded":{"test_result":1,"review_outcome":4}}}
 ---
 ## Outcome
 
@@ -102,3 +103,18 @@ Crates: `loom-commission`, `loom-commission-testkit`, `loom-connectors`, `loom-p
 Shared with `story:unperformable-names-actions` (before) and `story:executor-reports-usage` (after).
 The slice's `EffectPort` files are not edited by `story:chooser-executor-for-plugin-turns`, which
 leaves their `crate::selector` imports as they are.
+
+## Correction at close (wave 2026-10-20-w3)
+
+- What shipped: `EffectOutcomePending` (with the port's report, no usage), `RunOutcomeWaiting`
+  naming every pending request and the budget's reason (a list, because the reads of one fan-out can
+  be pending together), and `JudgeBudgetStop` for the conformance scenarios, with an authored
+  scenario naming two requests in order.
+- The Scope was wrong: `crates/loom-connectors/src/lib.rs` implements `ConnectorInvoker`, not
+  `EffectPort`; the production ports a `Pending` reaches are `crates/loom-commission/src/ports/connector.rs`
+  (passes it through) and `crates/loom-executor/src/workflow.rs` (`RecordingEffects`, advances on a
+  later `Performed`). No `EffectPort` in the workspace needed a change.
+- Adversary pass 1 (fixed): a pending read is invoked again only while the fan-out rule still holds
+  for it; approval required on a re-ask ends the run `NeedsAuthority` holding a Suspension, so under
+  the slice's `GrantAuthority` a resumed request answered `Pending` asks for approval again;
+  `LoopEnd::steps` counts the invocations again.
