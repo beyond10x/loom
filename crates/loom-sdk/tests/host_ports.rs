@@ -9,7 +9,9 @@
 //! list exactly what this file implements and imports, so the page cannot name a path that does
 //! not exist, nor leave one out.
 //!
-//! Nothing here reaches a model or the network; no port body is ever called.
+//! Nothing here reaches a model or the network. No port body is called, except the host
+//! executor's `run`, which [`a_host_executor_implementing_run_alone_keeps_the_provided_run_with_usage`]
+//! reaches through the one call of the provided `AgentExecutor::run_with_usage`.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -53,6 +55,7 @@ host_ports! {
     loom_sdk::commission::ports::connector::ConnectorInvoker => hosts::Connectors;
     loom_sdk::commission::ports::evidence::ObservationPort => hosts::Observations;
     loom_sdk::commission::ports::evidence::EvidencePort => hosts::Evidence;
+    loom_sdk::commission::ports::executor::AgentExecutor => hosts::Executor;
     loom_sdk::loom::selection::ActionSelector => hosts::Selector;
     loom_sdk::loom::workflow::WorkflowRunStore => hosts::RunRecords;
     loom_sdk::loom::arguments::ArgumentGenerator => hosts::Arguments;
@@ -73,10 +76,10 @@ mod hosts {
     use loom_sdk::commission::model::primitives::Timestamp;
     use loom_sdk::commission::model::responsibility::{
         ActionBindingData, ActionRequestId, AuthorityVerdict, CaseId, Commission, CommissionData,
-        CommissionId, EffectOutcome, GovernorError, HoldSuspension, HoldSuspensionOutcome,
-        Observation, ObservationData, ObservationId, ReleaseSuspension, ReleaseSuspensionOutcome,
-        SuspensionSnapshot, TakeSuspension, TakeSuspensionOutcome, commission_state,
-        observation_state,
+        CommissionId, EffectOutcome, ExecutorOutcome, Frontier, GovernorError, HoldSuspension,
+        HoldSuspensionOutcome, Observation, ObservationData, ObservationId, ReleaseSuspension,
+        ReleaseSuspensionOutcome, SuspensionSnapshot, TakeSuspension, TakeSuspensionOutcome, Unit,
+        commission_state, frontier_state, observation_state,
     };
     use loom_sdk::commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
     use loom_sdk::commission::ports::connector::ConnectorInvoker;
@@ -84,6 +87,7 @@ mod hosts {
     use loom_sdk::commission::ports::evidence::{
         AttributedEvidence, EvidencePort, ObservationPort,
     };
+    use loom_sdk::commission::ports::executor::AgentExecutor;
     use loom_sdk::commission::ports::suspension::{SuspensionPort, SuspensionStoreError};
     use loom_sdk::commission::runtime::LoopContext;
     use loom_sdk::governor::{CaseState, CaseStore, EvaluationTime, FallibleCaseStore};
@@ -262,6 +266,23 @@ mod hosts {
     impl EvidencePort for Evidence {
         fn receive(&self, _evidence: AttributedEvidence) -> Result<(), GovernorError> {
             unreachable!("{NEVER_CALLED}")
+        }
+    }
+
+    /// The outcome the host executor's `run` proposes for every frontier.
+    pub const EXECUTOR_OUTCOME: ExecutorOutcome = ExecutorOutcome::NoUsefulAction(Unit(true));
+
+    /// Implements `run` alone and keeps the provided `run_with_usage`, the call the runtime makes.
+    /// Its `run` is the one port body here that runs: the provided method reaches it.
+    pub struct Executor;
+
+    impl AgentExecutor for Executor {
+        fn run(
+            &self,
+            _commission: &Commission<commission_state::Assigned>,
+            _frontier: &Frontier<frontier_state::Issued>,
+        ) -> ExecutorOutcome {
+            EXECUTOR_OUTCOME
         }
     }
 
@@ -583,6 +604,7 @@ fn a_host_implements_every_port_through_loom_sdk_alone() {
         "ConnectorInvoker",
         "ObservationPort",
         "EvidencePort",
+        "AgentExecutor",
         "ActionSelector",
         "WorkflowRunStore",
         "ArgumentGenerator",
@@ -608,6 +630,49 @@ fn a_host_implements_every_port_through_loom_sdk_alone() {
             "{path} is named through loom_sdk"
         );
     }
+}
+
+/// A host executor that implements `run` alone, through
+/// `loom_sdk::commission::ports::executor::AgentExecutor`, keeps the provided `run_with_usage`,
+/// the call the runtime makes: it returns `run`'s outcome and reports no usage. The page's
+/// `AgentExecutor` row names both methods.
+#[test]
+fn a_host_executor_implementing_run_alone_keeps_the_provided_run_with_usage() {
+    use loom_sdk::commission::model::json::Value;
+    use loom_sdk::commission::model::primitives::Uuid;
+    use loom_sdk::commission::model::responsibility::{
+        AgentRevisionId, AuthorityContext, CaseId, Commission, CommissionData, CommissionId,
+        ExecutorStep, Frontier, FrontierData, FrontierId, PrincipalId,
+    };
+    use loom_sdk::commission::ports::executor::AgentExecutor;
+
+    let case = CaseId("case-1".into());
+    let commission = Commission::new(CommissionData {
+        commission_id: CommissionId(Uuid("00000000-0000-4000-8000-000000000001".into())),
+        agent_revision_id: AgentRevisionId(Uuid("00000000-0000-4000-8000-000000000002".into())),
+        case_id: case.clone(),
+        principal: PrincipalId("principal-a".into()),
+        authority_context: AuthorityContext(Value::Null),
+    });
+    let frontier = Frontier::new(FrontierData {
+        frontier_id: FrontierId(Uuid("00000000-0000-4000-8000-000000000003".into())),
+        case_id: case,
+        case_revision: 1,
+        claims: Vec::new(),
+        obligations: Vec::new(),
+        actions: Vec::new(),
+    });
+
+    let step: ExecutorStep =
+        AgentExecutor::run_with_usage(&hosts::Executor, &commission, &frontier);
+    assert_eq!(
+        step,
+        ExecutorStep {
+            outcome: hosts::EXECUTOR_OUTCOME,
+            usage: None,
+        },
+        "the provided run_with_usage returns run's outcome with no usage"
+    );
 }
 
 #[test]
