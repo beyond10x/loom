@@ -257,7 +257,7 @@ It declares no moves, so nothing changes its state once it exists.
 
 It has one state, so there is no move to permit or to forbid.
 
-No view projects it, so nothing outside this context is promised a way to observe one.
+One view projects it: [`MergeHandoffs`](#mergehandoffs).
 
 ### `ProtocolPick`
 
@@ -333,7 +333,7 @@ It declares no moves, so nothing changes its state once it exists.
 
 It has one state, so there is no move to permit or to forbid.
 
-No view projects it, so nothing outside this context is promised a way to observe one.
+One view projects it: [`ResumeContexts`](#resumecontexts).
 
 ### `SliceEvidence`
 
@@ -409,6 +409,64 @@ It has one state, so there is no move to permit or to forbid.
 
 No view projects it, so nothing outside this context is promised a way to observe one.
 
+## Views
+
+A view is what the outside world is promised it can observe. Each one says which instances it contains and how soon it reflects a command that has already returned, because "you can read this" without "how soon" is the promise every flaky suite is built on.
+
+### `MergeHandoffs`
+
+`intake.routing.MergeHandoffs`.
+
+It reads [`MergeHandoff`](#mergehandoff).
+
+It contains every instance of that entity: no filter narrows it, which is a decision somebody made and not a line somebody omitted.
+
+It exposes:
+
+- `action_request_id` — `intake.routing.ActionRequestId`
+- `commission_id` — `intake.routing.CommissionId`
+- `workspace` — `String`
+- `head` — `String`
+- `state` — `intake.routing.MergeHandoff.State`
+
+It declares no order, so the rows come back in whatever order the implementation has, and two reads may disagree.
+
+**Read-your-writes**: it is current the moment the command that changed it returns. A caller that has just created an invoice and cannot see it in here has been told a lie about what it did.
+
+A generated scenario asserts it once, immediately after the command: a view promising this and not keeping the promise has to fail the suite rather than be retried until it passes.
+
+### `ResumeContexts`
+
+`intake.routing.ResumeContexts`.
+
+It reads [`ResumeContext`](#resumecontext).
+
+It contains every instance of that entity: no filter narrows it, which is a decision somebody made and not a line somebody omitted.
+
+It exposes:
+
+- `commission_id` — `intake.routing.CommissionId`
+- `case_id` — `intake.routing.CaseId`
+- `agent_revision_id` — `intake.routing.AgentRevisionId`
+- `intent` — `String`
+- `workspace` — `Optional<String>`, which may be absent
+- `test_command` — `List<String>`
+- `test_paths` — `List<String>`
+- `regression_test_command` — `Optional<String>`, which may be absent
+- `max_steps` — `Integer`
+- `confinement` — `intake.confinement.Backend`
+- `cgroup_root` — `Optional<String>`, which may be absent
+- `model` — `String`
+- `catalog` — `Optional<String>`, which may be absent
+- `config` — `Optional<String>`, which may be absent
+- `state` — `intake.routing.ResumeContext.State`
+
+It declares no order, so the rows come back in whatever order the implementation has, and two reads may disagree.
+
+**Read-your-writes**: it is current the moment the command that changed it returns. A caller that has just created an invoice and cannot see it in here has been told a lie about what it did.
+
+A generated scenario asserts it once, immediately after the command: a view promising this and not keeping the promise has to fail the suite rather than be retried until it passes.
+
 ## Commands
 
 ### `DropResumeContext`
@@ -426,6 +484,38 @@ It has three outcomes.
 **`not-found`** — Taken when the identity the command names is one no record carries, before any other answer for it. No entity in this specification changes. It reports `intake.routing.ResumeContextNotFound`, carrying `commission_id`. It emits nothing. A test reaches it by sending an identity no record carries, arranging nothing.
 
 **`storage-failed`** — Decided outside the input: the resume context store cannot remove the context. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `intake.routing.ResumeContextStorageFailed`, carrying `reason`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+### `KeepResumeContext`
+
+`intake.routing.KeepResumeContext`.
+
+It takes:
+
+- `commission_id` — `intake.routing.CommissionId`
+- `case_id` — `intake.routing.CaseId`
+- `agent_revision_id` — `intake.routing.AgentRevisionId`
+- `intent` — `String`
+- `route` — `intake.routing.AcceptedRoute`
+- `workspace` — `Optional<String>`, which may be absent
+- `test_command` — `List<String>`
+- `test_paths` — `List<String>`
+- `regression_test_command` — `Optional<String>`, which may be absent
+- `max_steps` — `Integer`
+- `confinement` — `intake.confinement.Backend`
+- `cgroup_root` — `Optional<String>`, which may be absent
+- `model` — `String`
+- `catalog` — `Optional<String>`, which may be absent
+- `config` — `Optional<String>`, which may be absent
+
+It has four outcomes.
+
+**`config-and-catalog`** — Taken when `(defined(config) and defined(catalog))` holds of the input. No entity in this specification changes. It reports `intake.routing.ResumeContextConfigAndCatalog`, carrying `commission_id`. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`already-kept`** — Taken when a record already carries the identity the command's creating branch would create, and no input-guarded refusal applies. No entity in this specification changes. It reports `intake.routing.ResumeContextAlreadyKept`, carrying `commission_id`. It emits nothing. A test reaches it by sending the command twice with one identity: the first call creates the record, the second is answered by this branch.
+
+**`kept`** — The default branch, taken when no other outcome's condition matched. It creates a `intake.routing.ResumeContext`, which starts in `Kept`. The new instance's identity is published as `commission_id` on `intake.routing.ResumeContextKept`. It emits `intake.routing.ResumeContextKept`. It sets `case_id` from `input.case_id`, `agent_revision_id` from `input.agent_revision_id`, `intent` from `input.intent`, `route` from `input.route`, `workspace` from `input.workspace`, `test_command` from `input.test_command`, `test_paths` from `input.test_paths`, `regression_test_command` from `input.regression_test_command`, `max_steps` from `input.max_steps`, `confinement` from `input.confinement`, `cgroup_root` from `input.cgroup_root`, `model` from `input.model`, `catalog` from `input.catalog` and `config` from `input.config`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+**`storage-failed`** — Decided outside the input: the resume context store cannot keep the context. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `intake.routing.ResumeContextStorageFailed`, carrying `reason`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
 
 ### `RecordMergeHandoff`
 
@@ -465,6 +555,19 @@ Emitted by `intake.routing.RecordMergeHandoff` on its `recorded` outcome.
 
 Nothing in this system reacts to it.
 
+### `ResumeContextKept`
+
+`intake.routing.ResumeContextKept`.
+
+It carries:
+
+- `commission_id` — `intake.routing.CommissionId`
+- `case_id` — `intake.routing.CaseId`
+
+Emitted by `intake.routing.KeepResumeContext` on its `kept` outcome.
+
+Nothing in this system reacts to it.
+
 ## Errors
 
 ### `HeadAlreadyHandedOff`
@@ -492,6 +595,22 @@ It carries:
 
 Reported by `intake.routing.RecordMergeHandoff` on its `storage-failed` outcome.
 
+### `ResumeContextAlreadyKept`
+
+It carries:
+
+- `commission_id` — `intake.routing.CommissionId`
+
+Reported by `intake.routing.KeepResumeContext` on its `already-kept` outcome.
+
+### `ResumeContextConfigAndCatalog`
+
+It carries:
+
+- `commission_id` — `intake.routing.CommissionId`
+
+Reported by `intake.routing.KeepResumeContext` on its `config-and-catalog` outcome.
+
 ### `ResumeContextNotFound`
 
 It carries:
@@ -508,7 +627,9 @@ It carries:
 
 Reported by `intake.routing.DropResumeContext` on its `storage-failed` outcome.
 
+Reported by `intake.routing.KeepResumeContext` on its `storage-failed` outcome.
+
 
 ---
 
-Generated from intake v1 · model digest `04c180bd51b47a13b3848f21e849c765b36b48b6b4ca1bf5684b50f2f134945c` · contract digest `slice-sha256/2:5ef7d7fa13c8f7230dc363c1c9ce5b191e9446e29e533c4ae0f4624779d523b3`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from intake v1 · model digest `c84aa29378709c1ea1503e3e4c3d7e60aad1a5fbb842d04434c53da098633521` · contract digest `slice-sha256/2:bba367ad520e0475ffcc01d5831cc05ddb31b33a3a30946e695329b9c7bf5bc9`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

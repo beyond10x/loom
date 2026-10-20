@@ -1,0 +1,15 @@
+[package]
+name = "b10x-loom-intake-conformance"
+description = "The Rust ESS conformance target that holds b10x-loom-intake-slice to the suite synthesized from intake's specification."
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+b10x-loom-intake-slice = { path = "../loom-intake-slice" }
+intake_model = { package = "intake", path = "../../generated/rust/intake" }
+ess-conformance = { git = "https://github.com/beyond10x/ess.git", tag = "0.60.0" }
+ess-primitives = { git = "https://github.com/beyond10x/ess.git", tag = "0.60.0" }
+serde_json = "1"

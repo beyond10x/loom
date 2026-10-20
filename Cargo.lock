@@ -456,6 +456,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "b10x-loom-intake-conformance"
+version = "0.29.0"
+dependencies = [
+ "b10x-loom-intake-slice",
+ "ess-conformance",
+ "ess-primitives",
+ "intake",
+ "serde_json",
+]
+
+[[package]]
 name = "b10x-loom-intake-references"
 version = "0.29.0"
 dependencies = [

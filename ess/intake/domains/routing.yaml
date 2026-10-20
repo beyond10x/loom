@@ -514,13 +514,26 @@ entities:
       terminal: [Recorded]
 
 errors:
+  # A resume context is already kept for the commission: it is kept once, and not again.
+  - name: intake.routing.ResumeContextAlreadyKept
+    fields:
+      - name: commission_id
+        type: intake.routing.CommissionId
+
+  # The context names both a models configuration (`config`) and an llm catalog (`catalog`); it
+  # names at most one, so it is not kept.
+  - name: intake.routing.ResumeContextConfigAndCatalog
+    fields:
+      - name: commission_id
+        type: intake.routing.CommissionId
+
   # No resume context is kept for the commission.
   - name: intake.routing.ResumeContextNotFound
     fields:
       - name: commission_id
         type: intake.routing.CommissionId
 
-  # The resume context store could not remove the context: why, as the store reports it.
+  # The resume context store could not keep or remove the context: why, as the store reports it.
   - name: intake.routing.ResumeContextStorageFailed
     fields:
       - name: reason
@@ -548,6 +561,84 @@ errors:
         type: String
 
 commands:
+  # `run --state` keeps the commission's resume context before the commission runs
+  # (`ResumeContextStore::keep`), once: a second context for the same commission is refused and
+  # changes nothing. A context naming both `config` and `catalog` would not read back as written,
+  # so it is refused before the store is read; a directory the store cannot lock or write keeps
+  # nothing.
+  - name: intake.routing.KeepResumeContext
+    input:
+      - name: commission_id
+        type: intake.routing.CommissionId
+      - name: case_id
+        type: intake.routing.CaseId
+      - name: agent_revision_id
+        type: intake.routing.AgentRevisionId
+      - name: intent
+        type: String
+      - name: route
+        type: intake.routing.AcceptedRoute
+      - name: workspace
+        type: Optional<String>
+      - name: test_command
+        type: List<String>
+      - name: test_paths
+        type: List<String>
+      - name: regression_test_command
+        type: Optional<String>
+      - name: max_steps
+        type: Integer
+      - name: confinement
+        type: intake.confinement.Backend
+      - name: cgroup_root
+        type: Optional<String>
+      - name: model
+        type: String
+      - name: catalog
+        type: Optional<String>
+      - name: config
+        type: Optional<String>
+    outcomes:
+      - name: config-and-catalog
+        when:
+          all: ["defined(config)", "defined(catalog)"]
+        error: intake.routing.ResumeContextConfigAndCatalog
+        payload:
+          intake.routing.ResumeContextConfigAndCatalog:
+            commission_id: input.commission_id
+      - name: already-kept
+        existing_instance: true
+        error: intake.routing.ResumeContextAlreadyKept
+        payload:
+          intake.routing.ResumeContextAlreadyKept:
+            commission_id: input.commission_id
+      - name: kept
+        creates: intake.routing.ResumeContext
+        instance: commission_id
+        sets:
+          case_id: input.case_id
+          agent_revision_id: input.agent_revision_id
+          intent: input.intent
+          route: input.route
+          workspace: input.workspace
+          test_command: input.test_command
+          test_paths: input.test_paths
+          regression_test_command: input.regression_test_command
+          max_steps: input.max_steps
+          confinement: input.confinement
+          cgroup_root: input.cgroup_root
+          model: input.model
+          catalog: input.catalog
+          config: input.config
+        emits: [intake.routing.ResumeContextKept]
+        payload:
+          intake.routing.ResumeContextKept:
+            commission_id: input.commission_id
+            case_id: input.case_id
+      - name: storage-failed
+        external: the resume context store cannot keep the context
+        error: intake.routing.ResumeContextStorageFailed
+
   # A run that ends without the commission's Suspension held removes the commission's resume
   # context: nothing can resume the commission. A run that holds the Suspension keeps it.
   - name: intake.routing.DropResumeContext
@@ -617,7 +708,71 @@ commands:
         external: the state directory cannot record the hand-off
         error: intake.routing.MergeHandoffStorageFailed
 
+views:
+  # Every resume context the state directory keeps, one row per commission, as
+  # `ResumeContextStore::list` reads it back. The route is not published: its threshold is a
+  # Decimal, which a conformance observation cannot compare exactly.
+  - name: intake.routing.ResumeContexts
+    source: intake.routing.ResumeContext
+    consistency: read_your_writes
+    fields:
+      - name: commission_id
+        type: intake.routing.CommissionId
+      - name: case_id
+        type: intake.routing.CaseId
+      - name: agent_revision_id
+        type: intake.routing.AgentRevisionId
+      - name: intent
+        type: String
+      - name: workspace
+        type: Optional<String>
+      - name: test_command
+        type: List<String>
+      - name: test_paths
+        type: List<String>
+      - name: regression_test_command
+        type: Optional<String>
+      - name: max_steps
+        type: Integer
+      - name: confinement
+        type: intake.confinement.Backend
+      - name: cgroup_root
+        type: Optional<String>
+      - name: model
+        type: String
+      - name: catalog
+        type: Optional<String>
+      - name: config
+        type: Optional<String>
+      - name: state
+        type: intake.routing.ResumeContext.State
+
+  # Every merge hand-off the state directory records, one row per request, as
+  # `MergeHandoffStore` reads it back.
+  - name: intake.routing.MergeHandoffs
+    source: intake.routing.MergeHandoff
+    consistency: read_your_writes
+    fields:
+      - name: action_request_id
+        type: intake.routing.ActionRequestId
+      - name: commission_id
+        type: intake.routing.CommissionId
+      - name: workspace
+        type: String
+      - name: head
+        type: String
+      - name: state
+        type: intake.routing.MergeHandoff.State
+
 events:
+  # A commission's resume context was kept: it names the commission and the case it is about.
+  - name: intake.routing.ResumeContextKept
+    fields:
+      - name: commission_id
+        type: intake.routing.CommissionId
+      - name: case_id
+        type: intake.routing.CaseId
+
   # A granted merge was handed off: its record names the request, the commission, the workspace
   # and its `HEAD`.
   - name: intake.routing.MergeHandedOff

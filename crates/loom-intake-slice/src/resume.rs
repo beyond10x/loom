@@ -10,7 +10,9 @@
 //! (`.tmp-…`, which those stores remove when a dead process left one), is synced, and is renamed
 //! over its target, so a reader sees no document or the whole one. Before anything is written it
 //! is read back and compared with what was meant. A context is kept once: a second one for the
-//! same commission is refused and changes nothing. A document naming a member its declaration does
+//! same commission is refused and changes nothing ([`ResumeContextStore::keep`], and
+//! [`ResumeContextStore::keep_context`], which answers `intake.routing.KeepResumeContext` with its
+//! declared outcome). A document naming a member its declaration does
 //! not, missing one, or holding another commission's context is refused on read, except that one
 //! without `regression_test_command` (kept before that field was declared) reads it as absent; a
 //! listing holds
@@ -42,10 +44,12 @@ use intake_model::confinement::Backend;
 use intake_model::context::ContextPolicy;
 use intake_model::obligation::UnmetObligation;
 use intake_model::primitives::{Decimal, Uuid};
-use intake_model::routing::obligations::DropResumeContextBehavior;
+use intake_model::routing::obligations::{DropResumeContextBehavior, KeepResumeContextBehavior};
 pub use intake_model::routing::{
     AcceptedRoute, AgentRevisionId, CaseId, CatalogDigest, CommissionId, DropResumeContext,
-    DropResumeContextOutcome, ResumeContextData, ResumeContextNotFound, ResumeContextStorageFailed,
+    DropResumeContextOutcome, KeepResumeContext, KeepResumeContextOutcome,
+    ResumeContextAlreadyKept, ResumeContextConfigAndCatalog, ResumeContextData, ResumeContextKept,
+    ResumeContextNotFound, ResumeContextStorageFailed,
 };
 use serde_json::{Map, Value, json};
 
@@ -184,20 +188,83 @@ impl ResumeContextStore {
     /// [`ResumeStoreError`] when a context is already kept for the commission, the context would
     /// not read back as written, or the file cannot be written; nothing is kept then.
     pub fn keep(&self, context: &ResumeContextData) -> Result<(), ResumeStoreError> {
-        let path = self.path(&context.commission_id)?;
+        self.keeping(context).map_err(|refused| match refused {
+            NotKept::AlreadyKept(error) | NotKept::Failed(error) => error,
+        })
+    }
+
+    /// Keeps `input`'s context for its commission (`intake.routing.KeepResumeContext`): `Kept`,
+    /// with the `ResumeContextKept` it publishes, once it is written; `ConfigAndCatalog`, before
+    /// the store is read, when it names both a models configuration and an llm catalog, which no
+    /// kept context may; `AlreadyKept`, changing nothing, when a context is already kept for the
+    /// commission; and `StorageFailed`, with the store's reason, when the context would not read
+    /// back as written or the directory cannot be locked or written. Nothing is kept then.
+    pub fn keep_context(&self, input: &KeepResumeContext) -> KeepResumeContextOutcome {
+        let context = ResumeContextData {
+            commission_id: input.commission_id.clone(),
+            case_id: input.case_id.clone(),
+            agent_revision_id: input.agent_revision_id.clone(),
+            intent: input.intent.clone(),
+            route: input.route.clone(),
+            workspace: input.workspace.clone(),
+            test_command: input.test_command.clone(),
+            test_paths: input.test_paths.clone(),
+            regression_test_command: input.regression_test_command.clone(),
+            max_steps: input.max_steps,
+            confinement: input.confinement,
+            cgroup_root: input.cgroup_root.clone(),
+            model: input.model.clone(),
+            catalog: input.catalog.clone(),
+            config: input.config.clone(),
+        };
+        if names_config_and_catalog(&context) {
+            return KeepResumeContextOutcome::ConfigAndCatalog {
+                error: ResumeContextConfigAndCatalog {
+                    commission_id: context.commission_id,
+                },
+            };
+        }
+        match self.keeping(&context) {
+            Ok(()) => KeepResumeContextOutcome::Kept {
+                resume_context_kept: ResumeContextKept {
+                    commission_id: context.commission_id,
+                    case_id: context.case_id,
+                },
+            },
+            Err(NotKept::AlreadyKept(_)) => KeepResumeContextOutcome::AlreadyKept {
+                error: ResumeContextAlreadyKept {
+                    commission_id: context.commission_id,
+                },
+            },
+            Err(NotKept::Failed(error)) => KeepResumeContextOutcome::StorageFailed {
+                error: ResumeContextStorageFailed {
+                    reason: error.to_string(),
+                },
+            },
+        }
+    }
+
+    /// Keeps `context`, or says why nothing was kept.
+    fn keeping(&self, context: &ResumeContextData) -> Result<(), NotKept> {
+        let path = self.path(&context.commission_id).map_err(NotKept::Failed)?;
         let text = encode(context);
         if decode(&text, &context.commission_id).as_ref() != Ok(context) {
-            return Err(failed(&path, "the context would not read back as written"));
+            return Err(NotKept::Failed(failed(
+                &path,
+                "the context would not read back as written",
+            )));
         }
-        self.dir.locked(|| {
-            if path.exists() {
-                return Err(failed(
-                    &path,
-                    "a context is already kept for this commission",
-                ));
-            }
-            self.dir.replace(&path, &text)
-        })?
+        self.dir
+            .locked(|| {
+                if path.exists() {
+                    return Err(NotKept::AlreadyKept(failed(
+                        &path,
+                        "a context is already kept for this commission",
+                    )));
+                }
+                self.dir.replace(&path, &text).map_err(NotKept::Failed)
+            })
+            .map_err(NotKept::Failed)?
     }
 
     /// The context kept for `commission`, or `None` when none is.
@@ -283,6 +350,25 @@ impl ResumeContextStore {
     /// The file that holds `commission`'s context, named so no id names a file outside the store.
     fn path(&self, commission: &CommissionId) -> Result<PathBuf, ResumeStoreError> {
         self.dir.file(PREFIX, "a commission id", &commission.0.0)
+    }
+}
+
+/// Why [`ResumeContextStore::keeping`] kept nothing.
+enum NotKept {
+    /// A context is already kept for the commission.
+    AlreadyKept(ResumeStoreError),
+    /// The context would not read back as written, or the directory cannot be locked or written.
+    Failed(ResumeStoreError),
+}
+
+/// `intake.routing.KeepResumeContext`, the obligation the specification leaves to the store: the
+/// store decides `storage-failed` by whether it can lock its directory and write the file.
+impl KeepResumeContextBehavior for ResumeContextStore {
+    fn keep_resume_context(
+        &mut self,
+        input: KeepResumeContext,
+    ) -> Result<KeepResumeContextOutcome, UnmetObligation> {
+        Ok(self.keep_context(&input))
     }
 }
 
@@ -430,7 +516,7 @@ fn decode(text: &str, commission: &CommissionId) -> Result<ResumeContextData, St
         catalog: optional_text(object, "catalog")?,
         config: optional_text(object, "config")?,
     };
-    if context.config.is_some() && context.catalog.is_some() {
+    if names_config_and_catalog(&context) {
         return Err(
             "names both a models configuration (`config`) and an llm catalog \
                     (`catalog`); a context names at most one"
@@ -444,6 +530,12 @@ fn decode(text: &str, commission: &CommissionId) -> Result<ResumeContextData, St
         ));
     }
     Ok(context)
+}
+
+/// Whether `context` names both a models configuration (`config`) and an llm catalog (`catalog`):
+/// a context names at most one, so the store neither keeps nor reads such a context.
+fn names_config_and_catalog(context: &ResumeContextData) -> bool {
+    context.config.is_some() && context.catalog.is_some()
 }
 
 /// `value` as an object naming exactly `members`, of which it may lack those in `optional`.

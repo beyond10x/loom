@@ -131,6 +131,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | A slack-handler run describes and invokes only the three configured Slack reads and the turns' data-source reads, and records one line per item it proposes for; nothing is sent | `crates/loom-plugin-slack/tests/run.rs` (`fixture_run_invokes_no_write`, `fixture_run_records_three_proposals`) |
 | A read through Connectors is performed naming its audit record; a write without a recorded attempt is an error | `crates/loom-connectors/tests/connectors_invoker.rs` (`an_admitted_read_is_performed_with_its_result_and_names_its_audit_record`, `a_write_without_a_recorded_attempt_is_still_an_error`), `crates/loom-commission-testkit/tests/effect_invocation.rs` (`a_performed_that_names_another_record_than_its_binding_requires_is_not_answered`) |
 | The executor answers the commands of `ess/` as their synthesized scenarios specify, except `not-in-frontier`, which the conformance target answers | `task conform` (`crates/loom-conformance/tests/conform.rs`, `ess_conformance_report`); the membership rule: `crates/loom-executor/tests/adversary_run_revalidation.rs` (`not_in_frontier_follows_the_frontier_actions`) |
+| The intake slice answers the commands of `ess/intake/` as their synthesized scenarios specify: a resume context is kept once (`KeepResumeContext`) and dropped (`DropResumeContext`), a merge hand-off is recorded once per request and per `HEAD` (`RecordMergeHandoff`), and the stores read back what the views `ResumeContexts` and `MergeHandoffs` publish | `task intake-conform` (`crates/loom-intake-conformance/tests/conform.rs`, `ess_conformance_report`) |
 | The router refuses a pick outside the registry or below the threshold | `crates/loom-intake-router/tests/adversary_classify.rs` |
 | A metered run reports one model call per `ModelPort::turn`, failed turns included, one step per executor call, and tokens and cost per step that sum to the run's; a cost no rate card priced is absent, never zero; the usage an executor that is not a model loop reports (`AgentExecutor::run_with_usage`) is its step's usage and no model call, never in the report's effects, and is in the meter only when the call came through `run_with_usage`, so the meter and the run's charges agree; an executor metered at its model port reports none, so nothing is counted twice | `crates/loom-executor/tests/run_metering.rs` (`the_reported_calls_equal_the_turns_the_model_port_saw`, `a_step_counts_the_selector_and_argument_calls_made_in_it`, `cost_is_absent_without_a_rate_card_and_for_an_unlisted_model`, `a_non_model_executor_usage_is_its_step_usage`, `a_step_sums_its_metered_turns_and_the_usage_its_executor_reports`, `an_executor_metered_at_its_model_port_reports_no_usage_and_is_counted_once`), `crates/loom-executor/tests/adversary_w20261020w3_u3.rs` (`a_wrapper_that_does_not_forward_leaves_the_meter_and_the_budget_agreeing`) |
 | An executor call's reported usage (`ExecutorStep.usage`) is charged to the run, never to an action or as a trial, and delivered in the step's observation; a usage with no cost leaves the run's cost absent; a charge past a spending limit suspends the Run with `RunBudget` once the step was observed, before its outcome is acted on | `crates/loom-commission-testkit/tests/executor_usage.rs` (`an_executor_usage_is_charged_to_the_run`, `a_run_budget_breach_by_executor_usage_suspends_the_run`, `an_unknown_cost_stays_unknown`) |
@@ -167,7 +168,10 @@ the ESS release that refuses open entries (beyond10x/ess `epic:typed-open-questi
 Commission's specification is its own ESS system under `ess/commission/`, held to the same four
 conditions with `--path ess/commission` by `task commission:ess-gate`
 (`crates/loom-commission/tests/ess_gate.rs`), which `task check` also runs. Intake's
-`intake.routing` domain is `ess/intake/`, validated by `task intake-spec`. The governor's nouns are
+`intake.routing` domain is `ess/intake/`, validated by `task intake-spec` and held to the suite
+synthesized from it by `task intake-conform` (`crates/loom-intake-conformance/tests/conform.rs`),
+which runs it against `b10x-loom-intake-slice`'s own stores over a real state directory and
+reads the verdict from the report by Commission's rules. The governor's nouns are
 Commission's and Canon's, except its stateless evaluation request, decision and refusal, which are
 the `loom.evaluation` domain (`ess/domains/evaluation.yaml`), and its held case as a durable store
 writes it, which is the `loom.governor` domain (`ess/domains/governor.yaml`); a noun it introduces
@@ -195,7 +199,7 @@ the offline dependency guard inspects the full graph, including platform-specifi
 Before a change is reported done, in this order:
 
 1. `task check`: the three specification validations, both ESS gates, all three drift checks, both
-   no-hand-model checks, Loom's and Commission's conformance suites, the dependency guard,
+   no-hand-model checks, Loom's, Commission's and intake's conformance suites, the dependency guard,
    `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
    `cargo test --workspace --locked`, `task consumer-check`, then `task docs-check` and
    `task commission:docs-drift`. CI runs exactly this (`check.yml`, job `loom / task check`).
@@ -729,7 +733,8 @@ verified evidence. The store expires with its briefing and grants no cross-run a
 - `run --state <DIR>` puts the case in a `FileCaseStore` and the commission's Suspension in a
   `FileSuspensionStore` over `<DIR>`, keeps the commission's resume context
   (`intake.routing.ResumeContext`, `b10x_loom_intake_slice::resume::ResumeContextStore`, under
-  the same lock and atomic write) before the commission runs, and runs it through
+  the same lock and atomic write; once per commission, as `intake.routing.KeepResumeContext`
+  declares) before the commission runs, and runs it through
   `run_with_suspension` (`run_prepared_intent_with_state`). A run that ends without the
   Suspension held removes its context (`intake.routing.DropResumeContext`); a process that dies
   first leaves one, so a reader pairs each context with its commission's Suspension. Before any
