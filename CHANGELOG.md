@@ -9,6 +9,22 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-20
+
+Loom 0.28.0 lets an effect port end a run, names the idle bound, and confines a child process a
+host names. An effect port marks a refusal final (`EffectOutcomeRefused.ends_run`) and the run
+ends `EffectRefused`, naming the request and the reason. A run the idle bound ends says so,
+`IdleBound`, apart from a frontier that admits nothing. `SubstrateRunner::run_child` confines a
+child the host names (program, arguments, directory, environment), with the egress aperture it
+names (`ChildCommand::with_egress`) and the workspace directories it may write
+(`ChildCommand::with_writable`). An egress child gets no CA bundle yet, and Substrate serves one
+aperture per run.
+Breaking: a host that builds `EffectOutcomeRefused` sets `ends_run`; a host that matches `RunOutcome`
+exhaustively handles `EffectRefused` and `IdleBound`; a run the idle bound ends is `IdleBound`, no
+longer `NoAdmissibleAction`; a test command or child whose program contains `=` or starts with `-`
+is refused before anything starts; a launch needing another directory's Substrate driver is refused
+while one runs under the same cgroup root.
+
 A host confines a child process it names (`story:sdk-confines-any-child`).
 `SubstrateRunner::run_child(&ChildCommand)` runs a program with its arguments, never a shell line,
 in a directory the host names, adopted as Substrate's workspace and the child's working directory,
