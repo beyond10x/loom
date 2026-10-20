@@ -19,7 +19,8 @@
 //! [`LoopContext`], [`LoopEnd`], [`EffectPort`], [`Loom`], [`ActionSelector`],
 //! [`ArgumentGenerator`], [`CanonGovernor`], [`CaseStore`] and [`MemoryCaseStore`].
 //! [`RunMeter`], [`MeteredModelPort`] and [`MeteredExecutor`] report a run's model calls, tokens
-//! and cost per executor call (`loom::metering`).
+//! and cost per executor call (`loom::metering`): a [`MeteredModelPort`] is an llm `Model` over
+//! the one a host built, each of its turns one call, priced with the run's [`RateCard`].
 //!
 //! `examples/software_change.rs` embeds the runtime end to end: it opens a case on
 //! `software-change@1`, runs the loop over scripted fake models and stops at
@@ -73,7 +74,7 @@ pub use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked}
 /// `ProtocolEntry::actions` of the protocol it names.
 pub use b10x_loom_executor::workflow::{RecordingEffects, WorkflowExecutor};
 pub use b10x_loom_executor::{ActionSelector, ArgumentGenerator, Loom};
-pub use b10x_loom_executor::{MeteredExecutor, MeteredModelPort, RunMeter};
+pub use b10x_loom_executor::{MeteredExecutor, MeteredModelPort, RateCard, RunMeter};
 /// A child process a host names, run confined by [`SubstrateRunner::run_child`] with the guarantees
 /// a test has; Substrate's types it is named with are at `loom_sdk::intake::slice::confinement`.
 pub use b10x_loom_intake_slice::confinement::ChildCommand;

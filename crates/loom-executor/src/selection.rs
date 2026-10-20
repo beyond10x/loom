@@ -7,26 +7,21 @@
 //! confidence (`loom.run.SelectAction`, outcome `not-in-catalogue`), and only an accepted choice
 //! becomes the synthesized `loom.run.Selection`.
 //!
-//! [`ReasoningModelSelector`] is the selector whose strategy is `ReasoningModel`: it asks a model
-//! through the provider-neutral [`ModelPort`] to choose among exactly the candidates it was given.
-//! [`HybridSelector`] is the selector whose strategy is `Hybrid`: it returns a fast selector's
-//! choice only at or above a confidence threshold the host supplies, and otherwise the stronger
-//! selector's. Its [`ActionSelector::resolve`] also names the fast pick it overruled, so Loom
-//! records a fallback as two selections, each with its own selector's strategy ([`resolve`]).
+//! The selector whose strategy is `ReasoningModel` is [`crate::model_selector::ModelSelector`]: it
+//! asks an llm `Model` to choose among exactly the candidates it was given, and Loom's membership
+//! rule ([`select`]) refuses any other answer, so an action outside them is a selection error and
+//! never a selection. [`HybridSelector`] is the selector whose strategy is `Hybrid`: it returns a
+//! fast selector's choice only at or above a confidence threshold the host supplies, and otherwise
+//! the stronger selector's. Its [`ActionSelector::resolve`] also names the fast pick it overruled,
+//! so Loom records a fallback as two selections, each with its own selector's strategy
+//! ([`resolve`]).
 //!
 //! [`select_action`] is `loom.run.SelectAction` as a command over stored catalogues and
 //! selections: the one behaviour ESS leaves to Loom (`generated/rust/loom/PLAN.md`), answered by
 //! the same membership rule as [`select`].
 
-use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
 
-use serde_json::json;
-
-use crate::harness::wire::{
-    Approval, Envelope, Item, ModelPort, Sampling, ToolChoice, ToolName, ToolSpec, TurnRequest,
-    Usage, VecSink,
-};
 use crate::model::behaviour::{ActionCatalogueStorage, SelectionStorage};
 use crate::model::json::{Value, decimal_at};
 use crate::model::primitives::Decimal;
@@ -116,8 +111,8 @@ pub trait ActionSelector {
     /// [`ActionSelector::select`]'s choice as a pick made with this selector's strategy, and the
     /// pick it overruled, if any. By default nothing is overruled, the pick's latency is the time
     /// `select` took and it reports no tokens; [`HybridSelector`] answers with the pick of the
-    /// selector that made its choice and, on a fallback, the fast pick, and
-    /// [`ReasoningModelSelector`] reports the tokens of its turn.
+    /// selector that made its choice and, on a fallback, the fast pick, and a selector that knows
+    /// what its pick spent reports those tokens.
     fn resolve(
         &self,
         context: &SelectionContext,
@@ -169,184 +164,6 @@ impl ActionSelector for FirstAdmissibleSelector {
 
     fn strategy(&self) -> SelectionStrategy {
         SelectionStrategy::Rule
-    }
-}
-
-/// The one tool a reasoning-model selection turn publishes and holds the model to.
-const SELECT_TOOL: &str = "select_action";
-
-/// What the reasoning model is told a selection turn is for.
-const SELECT_INSTRUCTIONS: &str = "Choose the one action, of the candidates listed, that best \
-advances the instruction. Answer only by calling `select_action` with that action's id. You \
-choose; you do not supply arguments, run anything or grant authority.";
-
-/// The selector whose strategy is `ReasoningModel`: the stronger path fast selection falls back to
-/// (Atlas ADR 0073 § Fallback).
-///
-/// Each selection is one turn of the model behind `P`, the provider-neutral [`ModelPort`]. The turn
-/// publishes one tool, `select_action`, and is held to it ([`ToolChoice::Named`]); the tool's only
-/// argument is `action`, a fixed choice of exactly the candidate ids it was handed. The model
-/// chooses; it is told no arguments are wanted, and nothing it answers executes or decides
-/// authority.
-///
-/// The `action` the model names is returned as it is, without confidence. Whether it is a
-/// candidate is decided by Loom's membership rule ([`select`]), the same for every selector, so an
-/// action outside the set is refused as `not-in-catalogue` and never becomes a selection. An answer
-/// that names no action (a wire failure, prose, another tool, more than one call, an `action` that
-/// is not a string) is [`SelectorError::Unavailable`], never a guess.
-///
-/// [`ActionSelector::select`] takes `&self` and [`ModelPort::turn`] `&mut self`, so the port is held
-/// behind a mutex: one selection turn at a time.
-pub struct ReasoningModelSelector<P> {
-    model: Mutex<P>,
-    model_name: String,
-}
-
-impl<P: ModelPort> ReasoningModelSelector<P> {
-    /// A selector that asks `model_name` through `model`.
-    pub fn new(model: P, model_name: impl Into<String>) -> Self {
-        Self {
-            model: Mutex::new(model),
-            model_name: model_name.into(),
-        }
-    }
-
-    /// The turn that asks the model to choose one of `candidates` in `context`.
-    fn request(&self, context: &SelectionContext, candidates: &[CatalogueEntry]) -> TurnRequest {
-        let mut ids: Vec<&str> = Vec::with_capacity(candidates.len());
-        for entry in candidates {
-            if !ids.contains(&entry.action.as_str()) {
-                ids.push(&entry.action);
-            }
-        }
-        let listed = candidates
-            .iter()
-            .map(|entry| {
-                let status = match entry.status {
-                    CatalogueEntryStatus::Admissible => "admissible",
-                    CatalogueEntryStatus::ApprovalRequired => "admissible once authorized",
-                };
-                format!("- `{}` ({status})", entry.action)
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        let name = ToolName::new(SELECT_TOOL).expect("the selection tool's name is a valid id");
-        TurnRequest {
-            model: self.model_name.clone(),
-            instructions: SELECT_INSTRUCTIONS.to_owned(),
-            items: vec![
-                Item::user(context.prompt.clone()),
-                Item::user(format!("Candidates:\n{listed}")),
-            ],
-            tools: vec![ToolSpec {
-                name: name.clone(),
-                description: "Selects the next action: one of the candidate ids, and no other."
-                    .to_owned(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "action": { "type": "string", "enum": ids },
-                    },
-                    "required": ["action"],
-                    "additionalProperties": false,
-                }),
-                approval: Approval::NotRequired,
-                envelope: Envelope::default(),
-            }],
-            max_output_tokens: None,
-            sampling: Sampling::default(),
-            tool_choice: ToolChoice::Named(name),
-        }
-    }
-}
-
-impl<P: ModelPort> ActionSelector for ReasoningModelSelector<P> {
-    fn select(
-        &self,
-        context: &SelectionContext,
-        candidates: &[CatalogueEntry],
-    ) -> Result<Choice, SelectorError> {
-        self.ask(context, candidates).map(|(choice, _)| choice)
-    }
-
-    fn strategy(&self) -> SelectionStrategy {
-        SelectionStrategy::ReasoningModel
-    }
-
-    /// The pick [`ActionSelector::select`] makes, with the time the selection turn took and the
-    /// input and output tokens the provider reported for it; 0 for a count it did not report.
-    fn resolve(
-        &self,
-        context: &SelectionContext,
-        candidates: &[CatalogueEntry],
-    ) -> Result<Resolution, SelectorError> {
-        let started = Instant::now();
-        let (choice, usage) = self.ask(context, candidates)?;
-        let latency_ms = elapsed_ms(started);
-        let (input_tokens, output_tokens) = usage.map_or((0, 0), |usage| {
-            (tokens(usage.input_tokens), tokens(usage.output_tokens))
-        });
-        Ok(Resolution {
-            chosen: Pick {
-                choice,
-                strategy: self.strategy(),
-                latency_ms,
-                input_tokens,
-                output_tokens,
-            },
-            overruled: None,
-        })
-    }
-}
-
-impl<P: ModelPort> ReasoningModelSelector<P> {
-    /// One selection turn: the action the model named, and the usage the provider reported for the
-    /// turn, when it reported one.
-    fn ask(
-        &self,
-        context: &SelectionContext,
-        candidates: &[CatalogueEntry],
-    ) -> Result<(Choice, Option<Usage>), SelectorError> {
-        if candidates.is_empty() {
-            return Err(SelectorError::NothingAdmissible);
-        }
-        let request = self.request(context, candidates);
-        let outcome = self
-            .model
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .turn(&request, &mut VecSink::new())
-            .map_err(|error| {
-                SelectorError::Unavailable(format!("the reasoning model did not answer: {error}"))
-            })?;
-        let mut calls = outcome.tool_calls();
-        let (Some(call), None) = (calls.next(), calls.next()) else {
-            return Err(SelectorError::Unavailable(
-                "the reasoning model did not answer with exactly one selection call".to_owned(),
-            ));
-        };
-        if call.name.as_str() != SELECT_TOOL {
-            return Err(SelectorError::Unavailable(format!(
-                "the reasoning model called `{}`, not `{SELECT_TOOL}`",
-                call.name
-            )));
-        }
-        let action = call
-            .arguments
-            .get("action")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| {
-                SelectorError::Unavailable(
-                    "the reasoning model's selection call names no action".to_owned(),
-                )
-            })?;
-        Ok((
-            Choice {
-                action: action.to_owned(),
-                confidence: None,
-            },
-            outcome.usage.clone(),
-        ))
     }
 }
 

@@ -1,31 +1,37 @@
-//! Acceptance for `story:reasoning-model-selector`: with a scripted model client and a
-//! three-candidate set, the reasoning-model selector returns the candidate the script names, and
-//! returns a selection error rather than a selection when the script names an action outside the
-//! set (Atlas ADR 0073 § Decision; `docs/contracts/loom-action-selection.md`, safety rules 1 and 2).
+//! Acceptance for `story:reasoning-model-selector`, held against the selector whose strategy is
+//! `ReasoningModel` since `story:metering-on-llm-model`: the model selector over an llm `Model`
+//! (`b10x_loom_executor::model_selector::ModelSelector`). With a scripted model and a
+//! three-candidate set, it returns the candidate the script names, and Loom returns a selection
+//! error rather than a selection when the script names an action outside the set (Atlas ADR 0073
+//! § Decision; `docs/contracts/loom-action-selection.md`, safety rules 1 and 2).
 //!
-//! The model is reached through the provider-neutral `ModelPort` only. The script answers each turn
-//! by calling the one tool the turn is held to, with the action it was given, so what it names is
-//! the script's and the tool it calls is the selector's. No model or network call is made.
+//! The model is reached through llm's `Model` only. The script answers each turn by calling the
+//! one tool the turn is held to, with the action it was given, so what it names is the script's
+//! and the tool it calls is the selector's. No model or network call is made.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
+use llm_core::{
+    BoxFuture, CallId, Cancel, Capabilities, Error, Id, Item, Model, Protocol, Provenance,
+    StopReason, StreamSink, ToolCall, ToolChoice, TurnObservation, TurnOutcome, TurnRequest,
+};
 use serde_json::{Value, json};
 
-use b10x_loom_executor::harness::wire::{
-    CallId, Item, ModelPort, StopReason, StreamSink, ToolCall, ToolChoice, TurnOutcome,
-    TurnRequest, WireError, WireId,
-};
 use b10x_loom_executor::model::primitives::Uuid;
 use b10x_loom_executor::model::run::{
     ActionCatalogue, ActionCatalogueData, ActionNotInCatalogue, CatalogueEntry,
     CatalogueEntryStatus, CatalogueId, SelectionId, SelectionStrategy, TurnId,
     action_catalogue_state,
 };
+use b10x_loom_executor::model_selector::{Briefing, ModelSelector};
 use b10x_loom_executor::selection::{SelectionContext, SelectionRefusal, select};
-use b10x_loom_executor::{ActionSelector, ReasoningModelSelector, SelectorError};
+use b10x_loom_executor::{ActionSelector, SelectorError};
 
 const PROMPT: &str = "the build on main is red; find out why";
+
+/// The model the scripted binding serves, which every request names.
+const MODEL: &str = "reasoning-model";
 
 const INSPECT: &str = "repository.inspect";
 
@@ -46,61 +52,114 @@ enum Answer {
     Prose,
 }
 
-/// A `ModelPort` that replays its script and keeps every request it was sent.
+/// An llm `Model` that replays its script and keeps every request it was sent.
 struct Scripted {
-    wire: WireId,
-    answers: VecDeque<Answer>,
-    requests: Arc<Mutex<Vec<TurnRequest>>>,
+    provenance: Provenance,
+    capabilities: Capabilities,
+    answers: Mutex<VecDeque<Answer>>,
+    requests: Mutex<Vec<TurnRequest>>,
 }
 
 impl Scripted {
-    fn new(answers: Vec<Answer>) -> (Self, Arc<Mutex<Vec<TurnRequest>>>) {
-        let requests = Arc::new(Mutex::new(Vec::new()));
-        let model = Self {
-            wire: WireId::new("scripted").expect("valid wire id"),
-            answers: answers.into(),
-            requests: requests.clone(),
+    fn new(answers: Vec<Answer>) -> Self {
+        let id = |value: &str| Id::new(value).expect("a fixture id");
+        Self {
+            provenance: Provenance {
+                protocol: Protocol::Responses,
+                provider: id("scripted"),
+                account: id("fixture"),
+                endpoint: id("in-process"),
+                model: id(MODEL),
+                binding_revision: id("scripted-1"),
+            },
+            capabilities: Capabilities {
+                tools: true,
+                tool_choice: true,
+                ..Capabilities::text(128_000, 8_192)
+            },
+            answers: Mutex::new(answers.into()),
+            requests: Mutex::default(),
+        }
+    }
+
+    fn requests(&self) -> Vec<TurnRequest> {
+        self.requests.lock().expect("lock").clone()
+    }
+
+    fn answer(&self, request: &TurnRequest) -> Result<TurnOutcome, Error> {
+        let observation = TurnObservation {
+            final_usage: true,
+            ..TurnObservation::new(self.provenance.clone())
         };
-        (model, requests)
-    }
-}
-
-impl ModelPort for Scripted {
-    fn wire(&self) -> &WireId {
-        &self.wire
-    }
-
-    fn turn(
-        &mut self,
-        request: &TurnRequest,
-        _sink: &mut dyn StreamSink,
-    ) -> Result<TurnOutcome, WireError> {
-        self.requests.lock().expect("lock").push(request.clone());
-        match self.answers.pop_front() {
+        match self.answers.lock().expect("lock").pop_front() {
             Some(Answer::Names(action)) => {
-                let name = request
-                    .tool_choice
-                    .named()
-                    .cloned()
-                    .ok_or_else(|| WireError::protocol("the turn is held to no tool"))?;
+                let ToolChoice::Named(name) = &request.tool_choice else {
+                    return Err(Error::protocol("the turn is held to no tool"));
+                };
                 Ok(TurnOutcome {
                     stop_reason: StopReason::ToolCalls,
                     items: vec![Item::ToolCall(ToolCall {
                         call_id: CallId::new("call-1").expect("valid call id"),
-                        name,
+                        name: name.clone(),
                         arguments: json!({ "action": action }),
                     })],
-                    usage: None,
+                    observation,
                 })
             }
             Some(Answer::Prose) => Ok(TurnOutcome {
                 stop_reason: StopReason::EndTurn,
                 items: vec![Item::assistant("I would run the tests.")],
-                usage: None,
+                observation,
             }),
-            None => Err(WireError::protocol("the script has no further turn")),
+            None => Err(Error::protocol("the script has no further turn")),
         }
     }
+}
+
+impl Model for Scripted {
+    fn provenance(&self) -> &Provenance {
+        &self.provenance
+    }
+
+    fn capabilities(&self) -> &Capabilities {
+        &self.capabilities
+    }
+
+    fn turn<'a>(
+        &'a self,
+        request: &'a TurnRequest,
+        _sink: &'a mut dyn StreamSink,
+        _cancel: &'a Cancel,
+    ) -> BoxFuture<'a, Result<TurnOutcome, Error>> {
+        self.requests.lock().expect("lock").push(request.clone());
+        let answered = self.answer(request);
+        Box::pin(async move { answered })
+    }
+}
+
+/// What the selector tells the model: the run's instruction.
+struct Brief;
+
+impl Briefing for Brief {
+    fn text(&self) -> String {
+        format!("Instruction: {PROMPT}\n")
+    }
+
+    fn selection_instructions(&self) -> String {
+        "Choose the one candidate action that best advances the instruction.".to_owned()
+    }
+
+    fn argument_instructions(&self) -> String {
+        "Write the selected action's arguments.".to_owned()
+    }
+
+    fn arguments_schema(&self, _action: &str) -> Value {
+        json!({"type": "object"})
+    }
+}
+
+fn selector(model: &Scripted) -> ModelSelector<'_, Brief> {
+    ModelSelector::new(model, Brief)
 }
 
 fn entry(action: &str, status: CatalogueEntryStatus) -> CatalogueEntry {
@@ -137,12 +196,16 @@ fn selection_id() -> SelectionId {
 
 /// The ids the request held the model to: the `enum` of the forced tool's `action` property.
 fn offered(request: &TurnRequest) -> Vec<String> {
-    let name = request
-        .tool_choice
-        .named()
-        .expect("the selection turn is held to one tool");
+    let ToolChoice::Named(name) = &request.tool_choice else {
+        panic!(
+            "the selection turn is held to one tool: {:?}",
+            request.tool_choice
+        );
+    };
     let tool = request
-        .tool(name)
+        .tools
+        .iter()
+        .find(|tool| tool.name == *name)
         .expect("the turn publishes the tool it is held to");
     tool.input_schema["properties"]["action"]["enum"]
         .as_array()
@@ -154,8 +217,8 @@ fn offered(request: &TurnRequest) -> Vec<String> {
 
 #[test]
 fn the_reasoning_model_selector_returns_the_candidate_the_script_names() {
-    let (model, requests) = Scripted::new(vec![Answer::Names(json!(TESTS_RUN))]);
-    let selector = ReasoningModelSelector::new(model, "reasoning-model");
+    let model = Scripted::new(vec![Answer::Names(json!(TESTS_RUN))]);
+    let selector = selector(&model);
     assert_eq!(selector.strategy(), SelectionStrategy::ReasoningModel);
 
     let catalogue = catalogue();
@@ -172,12 +235,12 @@ fn the_reasoning_model_selector_returns_the_candidate_the_script_names() {
 
     // One turn, held to one tool whose only argument is a fixed choice of exactly the three
     // candidate ids, in the order they were given; the instruction is the run's.
-    let requests = requests.lock().expect("lock");
+    let requests = model.requests();
     assert_eq!(requests.len(), 1);
     let request = &requests[0];
     assert!(matches!(request.tool_choice, ToolChoice::Named(_)));
     assert_eq!(request.tools.len(), 1);
-    assert_eq!(request.model, "reasoning-model");
+    assert_eq!(request.model, MODEL);
     assert_eq!(offered(request), [INSPECT, TESTS_RUN, MERGE]);
     assert!(
         request
@@ -190,8 +253,8 @@ fn the_reasoning_model_selector_returns_the_candidate_the_script_names() {
 
 #[test]
 fn an_action_outside_the_candidate_set_is_a_selection_error_and_never_a_selection() {
-    let (model, requests) = Scripted::new(vec![Answer::Names(json!(OUTSIDE))]);
-    let selector = ReasoningModelSelector::new(model, "reasoning-model");
+    let model = Scripted::new(vec![Answer::Names(json!(OUTSIDE))]);
+    let selector = selector(&model);
 
     let refusal = select(&selector, &context(), &catalogue(), selection_id())
         .map(|selection| selection.into_data())
@@ -204,11 +267,10 @@ fn an_action_outside_the_candidate_set_is_a_selection_error_and_never_a_selectio
         })
     );
     // The model was offered the three candidates and not the action it named.
-    let requests = requests.lock().expect("lock");
-    assert_eq!(offered(&requests[0]), [INSPECT, TESTS_RUN, MERGE]);
+    assert_eq!(offered(&model.requests()[0]), [INSPECT, TESTS_RUN, MERGE]);
 }
 
-/// An answer that names no action — prose, a non-string `action`, a wire failure — is the selector
+/// An answer that names no action — prose, a non-string `action`, a failed turn — is the selector
 /// failing to answer, never a guess at one.
 #[test]
 fn an_answer_naming_no_action_is_a_selector_error() {
@@ -217,9 +279,8 @@ fn an_answer_naming_no_action_is_a_selector_error() {
         vec![Answer::Names(json!(3))],
         Vec::new(),
     ] {
-        let (model, _requests) = Scripted::new(answers);
-        let selector = ReasoningModelSelector::new(model, "reasoning-model");
-        let refusal = select(&selector, &context(), &catalogue(), selection_id())
+        let model = Scripted::new(answers);
+        let refusal = select(&selector(&model), &context(), &catalogue(), selection_id())
             .map(|selection| selection.into_data())
             .expect_err("no action was named");
         assert!(
@@ -235,11 +296,10 @@ fn an_answer_naming_no_action_is_a_selector_error() {
 /// With no candidates there is nothing to choose, and the model is not asked.
 #[test]
 fn an_empty_candidate_set_asks_no_model() {
-    let (model, requests) = Scripted::new(vec![Answer::Names(json!(TESTS_RUN))]);
-    let selector = ReasoningModelSelector::new(model, "reasoning-model");
+    let model = Scripted::new(vec![Answer::Names(json!(TESTS_RUN))]);
     assert_eq!(
-        selector.select(&context(), &[]),
+        selector(&model).select(&context(), &[]),
         Err(SelectorError::NothingAdmissible)
     );
-    assert_eq!(requests.lock().expect("lock").len(), 0);
+    assert_eq!(model.requests().len(), 0);
 }

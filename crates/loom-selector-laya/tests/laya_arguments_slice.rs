@@ -4,11 +4,11 @@
 //! Loom runs as Commission's `AgentExecutor` on the frontier Commission's scripted fake governor
 //! serves: `metrics.inspect`, `logs.search`, `release.inspect` (`docs/examples/laya-fast-selection.md`).
 //! It selects with a `HybridSelector` whose fast selector is the Laya selector, against a loopback
-//! stub of a Laya endpoint, and whose stronger path is the reasoning-model selector over a scripted
-//! `ModelPort`; the threshold is the test's own. A counting `ArgumentGenerator` stands in for the
-//! reasoning model's argument turn. With the governor, Loom revalidates the selection against the
-//! case's current frontier before it proposes it (Atlas ADR 0073 § Decision;
-//! `docs/integrations/laya-fast-selection.md` § Flow).
+//! stub of a Laya endpoint, and whose stronger path is the reasoning-model selector, the executor's
+//! `ModelSelector` over a scripted llm `Model`; the threshold is the test's own. A counting
+//! `ArgumentGenerator` stands in for the reasoning model's argument turn. With the governor, Loom
+//! revalidates the selection against the case's current frontier before it proposes it (Atlas ADR
+//! 0073 § Decision; `docs/integrations/laya-fast-selection.md` § Flow).
 //!
 //! Three runs differ only in what the stub answers:
 //!
@@ -43,19 +43,18 @@ use b10x_loom_commission::model::responsibility::{
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_commission_testkit::fake_governor::{Answer, FakeGovernor, GovernorCall};
-use b10x_loom_executor::harness::wire::{
-    CallId, Item, ModelPort, StopReason, StreamSink, ToolCall, TurnOutcome, TurnRequest, WireError,
-    WireId,
-};
 use b10x_loom_executor::model::primitives::{Decimal, Uuid};
 use b10x_loom_executor::model::run::{
     CatalogueEntry, RevalidateSelectionOutcome, SelectionAdmitted, SelectionId, SelectionState,
     SelectionStrategy,
 };
-use b10x_loom_executor::{
-    ArgumentContext, ArgumentGenerator, HybridSelector, Loom, ReasoningModelSelector,
-};
+use b10x_loom_executor::model_selector::{Briefing, ModelSelector};
+use b10x_loom_executor::{ArgumentContext, ArgumentGenerator, HybridSelector, Loom};
 use b10x_loom_selector_laya::{LayaSelector, QUESTION};
+use llm_core::{
+    BoxFuture, CallId, Cancel, Capabilities, Error, Id, Item, Model, Protocol, Provenance,
+    StopReason, StreamSink, ToolCall, ToolChoice, TurnObservation, TurnOutcome, TurnRequest,
+};
 use serde_json::{Value, json};
 
 const CASE: &str = "CASE-I-004";
@@ -193,53 +192,113 @@ fn serve(stream: TcpStream, received: &Mutex<Vec<Value>>, body: &str) {
 // ---------------------------------------------------------------------------------------------
 // The scripted reasoning model and the counting argument generator.
 
-/// A `ModelPort` that answers every turn by calling the tool the turn is held to with `action`,
+/// An llm `Model` that answers every turn by calling the tool the turn is held to with `action`,
 /// and keeps every request it was sent.
 struct ScriptedModel {
-    wire: WireId,
+    provenance: Provenance,
+    capabilities: Capabilities,
     action: &'static str,
     requests: Arc<Mutex<Vec<TurnRequest>>>,
 }
 
-impl ModelPort for ScriptedModel {
-    fn wire(&self) -> &WireId {
-        &self.wire
+impl ScriptedModel {
+    fn new(action: &'static str, requests: Arc<Mutex<Vec<TurnRequest>>>) -> Self {
+        let id = |value: &str| Id::new(value).expect("a fixture id");
+        Self {
+            provenance: Provenance {
+                protocol: Protocol::Responses,
+                provider: id("scripted"),
+                account: id("fixture"),
+                endpoint: id("in-process"),
+                model: id("reasoning-model"),
+                binding_revision: id("scripted-1"),
+            },
+            capabilities: Capabilities {
+                tools: true,
+                tool_choice: true,
+                ..Capabilities::text(128_000, 8_192)
+            },
+            action,
+            requests,
+        }
     }
 
-    fn turn(
-        &mut self,
-        request: &TurnRequest,
-        _sink: &mut dyn StreamSink,
-    ) -> Result<TurnOutcome, WireError> {
+    fn answer(&self, request: &TurnRequest) -> Result<TurnOutcome, Error> {
         self.requests
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(request.clone());
-        let name = request
-            .tool_choice
-            .named()
-            .cloned()
-            .ok_or_else(|| WireError::protocol("the turn is held to no tool"))?;
+        let ToolChoice::Named(name) = &request.tool_choice else {
+            return Err(Error::protocol("the turn is held to no tool"));
+        };
         Ok(TurnOutcome {
             stop_reason: StopReason::ToolCalls,
             items: vec![Item::ToolCall(ToolCall {
                 call_id: CallId::new("call-1").expect("valid call id"),
-                name,
+                name: name.clone(),
                 arguments: json!({ "action": self.action }),
             })],
-            usage: None,
+            observation: TurnObservation {
+                final_usage: true,
+                ..TurnObservation::new(self.provenance.clone())
+            },
         })
+    }
+}
+
+impl Model for ScriptedModel {
+    fn provenance(&self) -> &Provenance {
+        &self.provenance
+    }
+
+    fn capabilities(&self) -> &Capabilities {
+        &self.capabilities
+    }
+
+    fn turn<'a>(
+        &'a self,
+        request: &'a TurnRequest,
+        _sink: &'a mut dyn StreamSink,
+        _cancel: &'a Cancel,
+    ) -> BoxFuture<'a, Result<TurnOutcome, Error>> {
+        let answered = self.answer(request);
+        Box::pin(async move { answered })
+    }
+}
+
+/// What the reasoning model is told: the run's goal.
+struct Brief;
+
+impl Briefing for Brief {
+    fn text(&self) -> String {
+        format!("Goal: {PROMPT}\n")
+    }
+
+    fn selection_instructions(&self) -> String {
+        "Choose the one candidate action that best advances the goal.".to_owned()
+    }
+
+    fn argument_instructions(&self) -> String {
+        "Write the selected action's arguments.".to_owned()
+    }
+
+    fn arguments_schema(&self, _action: &str) -> Value {
+        json!({"type": "object"})
     }
 }
 
 /// The ids a selection turn held the model to: the `enum` of the forced tool's `action`.
 fn offered_to_model(request: &TurnRequest) -> BTreeSet<String> {
-    let name = request
-        .tool_choice
-        .named()
-        .expect("the selection turn is held to one tool");
+    let ToolChoice::Named(name) = &request.tool_choice else {
+        panic!(
+            "the selection turn is held to one tool: {:?}",
+            request.tool_choice
+        );
+    };
     request
-        .tool(name)
+        .tools
+        .iter()
+        .find(|tool| tool.name == *name)
         .expect("the turn publishes the tool it is held to")
         .input_schema["properties"]["action"]["enum"]
         .as_array()
@@ -356,14 +415,10 @@ struct Observed {
 fn run(laya_choice: &str, laya_probability: &str, model_choice: &'static str) -> Observed {
     let stub = StubLaya::choosing(laya_choice, laya_probability);
     let model_requests = Arc::new(Mutex::new(Vec::new()));
-    let model = ScriptedModel {
-        wire: WireId::new("scripted").expect("valid wire id"),
-        action: model_choice,
-        requests: Arc::clone(&model_requests),
-    };
+    let model = ScriptedModel::new(model_choice, Arc::clone(&model_requests));
     let selector = HybridSelector::new(
         LayaSelector::new(&stub.url()).expect("a loopback endpoint is accepted"),
-        ReasoningModelSelector::new(model, "reasoning-model"),
+        ModelSelector::new(&model, Brief),
         &Decimal(THRESHOLD.to_owned()),
     )
     .expect("the supplied threshold is a decimal in [0, 1]");

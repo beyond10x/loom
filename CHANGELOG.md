@@ -63,6 +63,42 @@ harness `ModelPort` and a model name, so a plugin that supplies its own turn mod
 `Model`; a turn's requests are a selection and an argument request per step instead of one request
 publishing every action as a tool. `loom_sdk` paths are unchanged.
 
+The run meter and the reasoning-model selector run on llm's `Model` instead of the harness
+`ModelPort` (`story:metering-on-llm-model`). `MeteredModelPort` is an llm `Model` over the model a
+host built (an `Arc<dyn Model>`, a `Box`, a reference, or an `Arc` of its own model), answering
+with that model's provenance and capabilities; each `turn` is one call, counted before it runs,
+whichever thread drives its future, of the step of the executor call on the thread that called
+it, else of the executor call of the meter running on another thread (a turn on a thread the
+executor call spawned, or the host's, while it runs; the one that started last when executor
+calls overlap), else of step 0, so a turn that failed, unwound or was dropped unfinished is a call with unknown tokens. A metered
+model wrapped again on the same meter, reached when the outer one calls its inner model or while
+that turn runs, passes the turn through, so each turn is counted once. An answer
+adds its usage when that usage is final and names its input and output tokens (unnamed cached
+tokens count as none), priced against the model the provider reported serving it, else the bound
+model; any other answer leaves the cost absent, never zero, as before for a turn without usage.
+The rate card moves out of the ported loop to `b10x_loom_executor::metering::RateCard` (also
+`b10x_loom_executor::RateCard` and `loom_sdk::RateCard`), with `ModelRates` and `RateCardError`
+beside it; `RateCard::price` takes the served model and an llm `Usage`. The loop keeps its own
+`harness::turn_loop::RateCard` for its configuration, and a `MeteredModelPort` over the loop's
+`ModelPort` still meters it, by the same rules, until the port is deleted.
+`ReasoningModelSelector` is removed: the executor's `model_selector::ModelSelector` holds its
+contract (the model is offered only its candidates, and an answer outside them is a selection
+error, never a selection) and is the selector whose strategy is `ReasoningModel`;
+`reasoning_model_selector.rs` and the Laya slice now run against it. As the removed selector did,
+it takes an answer that calls the selection tool more than once as no answer: `model_selector`'s
+`answer` returns `AskError::Unusable` for more than one call of the forced tool, the argument tool
+too, so two named actions, one outside the candidates or not, are never resolved to one; the
+intake slice and the Laya slice report the selector unavailable, and a plugin turn ends `stopped`,
+as for any answer without a usable call. It reports no tokens on its pick, so a `ReasoningModel`
+selection record's tokens are 0; the meter still counts its turns.
+Breaking: `MeteredModelPort` now meters an llm `Model` (`MeteredModelPort::new` takes any value,
+and it implements `llm_core::Model` for one that dereferences to a `Model`), and a host meters a
+selector or generator by handing it the metered model; `RunMeter::new` takes the new
+`b10x_loom_executor::metering::RateCard`, not `harness::turn_loop::RateCard`, and
+`RateCard::price` takes `(model, &llm_core::Usage)`; `ReasoningModelSelector` is removed from
+`b10x_loom_executor` and `b10x_loom_executor::selection`, replaced by
+`model_selector::ModelSelector` told a host's `Briefing`.
+
 ## [0.29.0] - 2026-10-20
 
 Loom 0.29.0 says what stopped a run and lets effects and executors report more. A run that ends

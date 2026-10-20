@@ -114,26 +114,33 @@ requests with their revalidation, the effects, and the last frontier. The exampl
 
 `RunMeter`, `MeteredModelPort` and `MeteredExecutor` (top-level in the SDK, from
 `loom_sdk::loom::metering`) report what one run spent on its model. Create one `RunMeter`, with
-the run's `RateCard` or none; wrap every `ModelPort` the run uses in a `MeteredModelPort` on that
-meter (the loop's, the reasoning-model selector's, an argument generator's), and the executor you
-hand `run_until_blocked` in a `MeteredExecutor` on it. When the loop returns,
+the run's `RateCard` (`loom_sdk::RateCard`) or none; wrap every llm `Model` the run uses in a
+`MeteredModelPort` on that meter and hand the metered model to whatever asks it (the model
+selector, an argument generator, your own requests), and the executor you hand
+`run_until_blocked` in a `MeteredExecutor` on it. When the loop returns,
 `meter.report(&end.run_id)` is a `loom.metering.RunUsageReport`: the model calls, the input,
 output and cached input tokens the provider reported and the cost in micro-US-dollars, in total
 and per step.
 
-- Every `turn` through a metered port is one call, counted before the turn runs, so a turn that
-  fails or unwinds is a call too; it adds no tokens.
-- A step is one executor call, counted from 1. Calls made while no executor call runs are step 0,
-  listed only when there were any, so the steps always sum to the totals. Executor calls on one
-  meter must not overlap, and an executor is wrapped by one `MeteredExecutor`.
+- Every `turn` of a metered model is one call, counted before the turn runs, so a turn that
+  fails, unwinds or is dropped unfinished is a call too; it adds no tokens. A metered model
+  wrapped again on the same meter counts each turn once.
+- A step is one executor call, counted from 1, and holds the calls made while it ran: a `turn`
+  called on the executor call's own thread, or on another thread (one it spawned, or yours) while
+  it runs, whichever thread then drives the turn's future. Calls made while no executor call runs
+  are step 0, listed only when there were any, so the steps always sum to the totals. When
+  executor calls on one meter overlap, each holds the calls made on its own thread, and a call
+  made on a thread that runs none of them is counted in the one that started last. An executor
+  is wrapped by one `MeteredExecutor`.
 - A step's `label` names what its executor call did: a `WorkflowExecutor` built
   `.with_meter(&meter)` labels each call with the workflow step it took, so a judgement step's
   model calls read under its name. Step 0 and a call that took no step carry no label.
-- Each turn is priced once at the rate card. Without a card, for a model the card does not list,
-  after a turn that reported no usage, or after a turn that failed or unwound, the cost is absent,
-  never zero.
-- An executor that is not a model loop, such as one over an agent session, makes no turn through a
-  metered port. It reports what each call spent by implementing `run_with_usage` (an
+- Each turn is priced once at the rate card, against the model the provider reported serving
+  it, else the bound one. Without a card, for a model the card does not list, after a turn whose
+  usage is missing, not final or names no input or output tokens, or after a turn that failed
+  or unwound, the cost is absent, never zero.
+- An executor that is not a model loop, such as one over an agent session, makes no turn of a
+  metered model. It reports what each call spent by implementing `run_with_usage` (an
   `ExecutorStep`: the outcome and an optional `ExecutorUsage` of input and output tokens, wall
   time and cost), and its `run` returns that call's outcome. The runtime charges the usage to the
   run's budget, and the `MeteredExecutor` adds its tokens and cost to the call's step; it is no
@@ -148,7 +155,7 @@ and per step.
   effect usage with this segment's. Call `executor.save()` after `meter.charge_effects(…)` so the
   record holds the segment's effects.
 
-`crates/loom-executor/tests/run_metering.rs` drives these over scripted ports.
+`crates/loom-executor/tests/run_metering.rs` drives these over scripted llm models.
 
 ## What holds whatever you supply
 

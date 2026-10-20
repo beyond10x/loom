@@ -1,34 +1,49 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! What one Commission run spent on its model, counted at the [`ModelPort`] boundary
+//! What one Commission run spent on its model, counted at llm's [`Model`] boundary
 //! (`ess/domains/metering.yaml`, `loom.metering`).
 //!
 //! A [`RunMeter`] is shared by the [`MeteredModelPort`]s and the [`MeteredExecutor`] of one run.
-//! Each `turn` through a metered port is one model call, whoever made it: the loop, the
-//! reasoning-model selector, an argument generator or compaction. The call is counted before the
-//! turn runs, so a turn that failed or unwound is still a call; a turn that answered adds the
-//! tokens the provider reported for it, and one that failed or unwound adds none.
+//! A [`MeteredModelPort`] is an llm [`Model`] over the model a host built, and each `turn` of it is
+//! one model call, whoever made it: the model selector, an argument generator, a host's own
+//! request. The call is counted when `turn` is called, before the turn runs, so a turn that failed,
+//! unwound or was dropped unfinished is still a call; a turn that answered adds the tokens the
+//! provider reported for it, and one that failed, unwound or was dropped adds none. A metered
+//! model wrapped again on the same meter counts each turn once: while a metered turn of a meter
+//! calls its inner model, or its inner turn is polled, on a thread, a metered model of that meter
+//! reached there passes the turn through uncounted.
 //!
-//! The [`MeteredExecutor`] opens one step per executor call ([`AgentExecutor::run_with_usage`], which
-//! the runtime makes, or [`AgentExecutor::run`]), counted from 1, and every
-//! call that executor call makes is counted in its step: a call on the thread the executor call
-//! runs on, and a call through a fork of a metered port made in it, on whichever thread the fork
-//! turns (delegates side by side). The step is carried by the executor call, not held by the
-//! meter, so executor calls on one meter may overlap on several threads, each counting its own
-//! calls, and a [`MeteredExecutor`] inside an executor call of the same meter opens no second step.
-//! A call made while no executor call runs is counted in step 0, which the report lists only when
-//! there was one, so the steps always sum to the totals. A step carries the label its executor gave the call
-//! ([`RunMeter::label_step`]): a [`crate::workflow::WorkflowExecutor`] metered with
+//! The [`MeteredExecutor`] opens one step per executor call ([`AgentExecutor::run_with_usage`],
+//! which the runtime makes, or [`AgentExecutor::run`]), counted from 1, and a step holds the model
+//! calls made while its executor call ran: a `turn` called on the thread the executor call runs on,
+//! and one called on another thread (a thread the executor call spawned, or the host's) while it
+//! runs, on whichever thread the turn's future is then driven. Executor calls on one meter may
+//! overlap on several threads: each holds the calls made on its own thread, and a call made on a
+//! thread that runs none of them is counted in the one opened last, since which of them it serves
+//! is not known; Commission's runtime makes one executor call of a run at a time. A
+//! [`MeteredExecutor`] inside an executor call of the same meter opens no second step. A call made
+//! while no executor call of the meter runs is counted in step 0, which the report lists only when
+//! there was one, so the steps always sum to the totals. A step carries
+//! the label its executor gave the call ([`RunMeter::label_step`]): a
+//! [`crate::workflow::WorkflowExecutor`] metered with
 //! [`crate::workflow::WorkflowExecutor::with_meter`] labels each call with the workflow step it
 //! took. Step 0 and a call that took no named step carry none.
 //!
-//! Each turn is priced once, with the run's [`RateCard`], and rounded once; a cost is the sum of its
-//! rounded turns, as [`RateCard::price`] holds. No price is reported as absent, never zero: after
-//! a turn without a rate card, for a model the card does not price, after a turn that answered
-//! without reporting its usage, or after a turn that failed or unwound (its tokens, and so its
-//! cost, are unknown), the step's cost is absent, and so is the run's. A step that made no model
-//! call needs no price: its cost is the cost its executor reported, and zero when it reported no
-//! usage, card or none.
+//! A turn's tokens are its usage as llm reports it ([`TurnObservation`]), taken only when the
+//! usage is final and names both its input and its output tokens; cached input tokens it does not
+//! name count as none. Each turn is priced once, with the run's [`RateCard`], against the model the
+//! provider reported serving it (the observation's `upstream_model`, else the model it is bound
+//! to), and rounded once; a cost is the sum of its rounded turns, as [`RateCard::price`] holds. No
+//! price is reported as absent, never zero: after a turn without a rate card, for a model the card
+//! does not price, after a turn that answered without a usage the meter takes (none, one that is
+//! not final, or one that does not name its input or output tokens), or after a turn that failed,
+//! unwound or was dropped (its tokens, and so its cost, are unknown, whatever usage an error
+//! carries), the step's cost is absent, and so is the run's. A step that made no model call needs
+//! no price: its cost is the cost its executor reported, and zero when it reported no usage, card
+//! or none.
+//!
+//! The ported model loop's own model port is metered by a [`MeteredModelPort`] too, by the same
+//! rules, until that port is deleted; that implementation lives beside the loop.
 //!
 //! The report is the generated [`RunUsageReport`] ([`RunMeter::report`]). It covers what the meter
 //! saw: one process segment of the run, and the earlier segments it was resumed from. A meter
@@ -45,33 +60,271 @@
 //! tokens, and its cost to the cost of the step's priced calls, so a step that made no model call
 //! takes the reported cost, with or without a rate card, and a usage with no cost leaves the
 //! step's cost absent. It is no model call, and the steps still sum to the totals. An executor
-//! whose model calls go through a metered port reports none of them, so nothing is counted twice.
+//! whose model calls go through a metered model reports none of them, so nothing is counted twice.
 //!
-//! Beside the model-port usage, the report carries what the run's performed effects reported they
+//! Beside the model usage, the report carries what the run's performed effects reported they
 //! spent on their own model calls, as Commission's runtime charged it to the run and to each
 //! action ([`b10x_loom_commission::runtime::LoopEnd::charges`]), once the host hands it to the
-//! meter ([`RunMeter::charge_effects`]). It is never summed into the model-port figures. Its
-//! totals are the actions' sums: the run's charge also holds the usage its executor calls
-//! reported, which the report holds in their steps instead.
+//! meter ([`RunMeter::charge_effects`]). It is never summed into the model figures. Its totals are
+//! the actions' sums: the run's charge also holds the usage its executor calls reported, which the
+//! report holds in their steps instead.
+//!
+//! # The rate card
+//!
+//! Rates are not compiled in: the operator points the run at a [`RateCard`], a small JSON
+//! document that names its own source and the day it was read, so every figure the run reports
+//! can be traced back to it.
+//!
+//! ```json
+//! {
+//!   "source": "openai.com/api/pricing, read by hand",
+//!   "as_of": "2026-08-24",
+//!   "models": {
+//!     "gpt-5.6-sol": {
+//!       "input_usd_per_mtok": 1.25,
+//!       "cached_input_usd_per_mtok": 0.125,
+//!       "output_usd_per_mtok": 10.0
+//!     }
+//!   }
+//! }
+//! ```
+//!
+//! Every figure is an integer count of micro-US-dollars. Arithmetic happens in pico-dollars per
+//! token, so no rate is rounded before it is multiplied, and each turn is rounded to a micro-dollar
+//! exactly once; the run total is the sum of the rounded turns, so a reader's addition of the
+//! per-step figures agrees with the total printed beside them.
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
+use std::ops::Deref;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::task::{Context as TaskContext, Poll};
 
 use b10x_loom_commission::model::responsibility::{
     ChargedUsage, Commission, ExecutorOutcome, ExecutorStep, ExecutorUsage, Frontier, RunCharges,
     RunId, commission_state, frontier_state,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
-
-use crate::harness::turn_loop::RateCard;
-use crate::harness::wire::{
-    ModelPort, StreamSink, TurnOutcome, TurnRequest, Usage, WireError, WireId,
+use llm_core::{
+    BoxFuture, Cancel, Capabilities, Error, Model, Provenance, StreamSink, TurnObservation,
+    TurnOutcome, TurnRequest, Usage,
 };
+use serde::{Deserialize, Serialize};
+
 use crate::model::metering::{ActionUsage, CarriedUsage, EffectsUsage, RunUsageReport, StepUsage};
 use crate::model::primitives::Uuid;
 use crate::model::run::CommissionRunId;
 
-/// The usage of one run, shared by every metered port and the metered executor of the run.
+/// Pico-dollars in one micro-dollar.
+const PICO_PER_MICRO: u128 = 1_000_000;
+/// Pico-dollars per token, for a rate written as dollars per million tokens.
+const PICO_PER_USD_PER_MTOK: f64 = 1_000_000.0;
+
+/// A rate as an operator wrote it: US dollars per million tokens.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelRates {
+    /// Input tokens the provider did **not** serve from its cache: llm's cache counts partition a
+    /// turn's input tokens, so the uncached count this rate applies to is the difference (see
+    /// [`RateCard::price`]).
+    pub input_usd_per_mtok: f64,
+    /// Input tokens the provider served from its prompt cache.
+    pub cached_input_usd_per_mtok: f64,
+    /// Input tokens the provider wrote into its prompt cache, when that route reports them as a
+    /// separately billed class.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_creation_input_usd_per_mtok: Option<f64>,
+    /// Output tokens, including any reasoning tokens the provider billed as output.
+    pub output_usd_per_mtok: f64,
+}
+
+/// Rates for one model, converted once into pico-dollars per token: integers, so a run's cost is
+/// exact arithmetic rather than a float sum whose result depends on the order the turns arrived in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Rates {
+    input: u64,
+    cached_input: u64,
+    cache_creation_input: Option<u64>,
+    output: u64,
+}
+
+/// Rates for some set of models, and where they came from: what a [`RunMeter`] prices each turn
+/// with.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RateCard {
+    /// Where these rates came from, in the operator's own words. Required: a price with no
+    /// provenance is a number nobody can check.
+    pub source: String,
+    /// The day the rates were read, as `YYYY-MM-DD`.
+    pub as_of: String,
+    /// One entry per model. A model with no entry is a model this card does not price.
+    pub models: BTreeMap<String, ModelRates>,
+}
+
+/// Why a rate card was refused. Every variant refuses the run rather than pricing part of it.
+///
+/// No `Eq`: [`RateCardError::BadRate`] carries the rate as it was written, a float.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum RateCardError {
+    #[error("the rate card is not readable JSON: {0}")]
+    Unreadable(String),
+    #[error("the rate card names no `source`; a price with no provenance cannot be checked")]
+    MissingSource,
+    #[error("`as_of` is `{0}`, which is not a `YYYY-MM-DD` date")]
+    BadDate(String),
+    #[error("`{model}.{field}` is `{value}`, which is not a rate this card can hold")]
+    BadRate {
+        model: String,
+        field: &'static str,
+        value: f64,
+    },
+}
+
+impl RateCard {
+    /// Reads a card, refusing every rate it cannot hold exactly.
+    ///
+    /// # Errors
+    ///
+    /// [`RateCardError`] for unreadable JSON, a missing source, a malformed date, or a rate that is
+    /// negative, not finite, too large to convert or not a whole pico-dollar per token. Nothing is
+    /// priced from a card that failed here: a partly valid card would report a figure for some
+    /// turns and silence for others, and the silence would read as free.
+    pub fn parse(text: &str) -> Result<Self, RateCardError> {
+        let card: Self = serde_json::from_str(text)
+            .map_err(|error| RateCardError::Unreadable(error.to_string()))?;
+        if card.source.trim().is_empty() {
+            return Err(RateCardError::MissingSource);
+        }
+        if !is_iso_date(&card.as_of) {
+            return Err(RateCardError::BadDate(card.as_of.clone()));
+        }
+        for (model, rates) in &card.models {
+            for (field, value) in [
+                ("input_usd_per_mtok", Some(rates.input_usd_per_mtok)),
+                (
+                    "cached_input_usd_per_mtok",
+                    Some(rates.cached_input_usd_per_mtok),
+                ),
+                (
+                    "cache_creation_input_usd_per_mtok",
+                    rates.cache_creation_input_usd_per_mtok,
+                ),
+                ("output_usd_per_mtok", Some(rates.output_usd_per_mtok)),
+            ] {
+                if let Some(value) = value
+                    && pico_per_token(value).is_none()
+                {
+                    return Err(RateCardError::BadRate {
+                        model: model.clone(),
+                        field,
+                        value,
+                    });
+                }
+            }
+        }
+        Ok(card)
+    }
+
+    /// Every model this card prices, in order.
+    pub fn priced_models(&self) -> impl Iterator<Item = &str> {
+        self.models.keys().map(String::as_str)
+    }
+
+    /// What one turn of `model` cost, in millionths of a US dollar, for the tokens `usage` reports.
+    ///
+    /// `model` is the model the provider reported serving the turn, not the one the run asked
+    /// for: an endpoint that served a different model billed for the one it served. Cached and
+    /// cache-creation tokens are parts of the input tokens, each billed at its own rate, and an
+    /// unnamed cached count is none.
+    ///
+    /// `None` when this card does not price `model`, when `usage` does not name its input or its
+    /// output tokens, and when it names cache-creation tokens the card holds no rate for. Never
+    /// `Some(0)` for a turn it cannot price: a zero is a claim that the turn was free.
+    #[must_use]
+    pub fn price(&self, model: &str, usage: &Usage) -> Option<u64> {
+        let rates = self.rates_for(model)?;
+        let input = usage.input_tokens?;
+        let output = usage.output_tokens?;
+        let cached = usage.cached_input_tokens.unwrap_or(0);
+        let created = usage.cache_creation_input_tokens.unwrap_or(0);
+        let creation_rate = match (created, rates.cache_creation_input) {
+            (0, _) => 0,
+            (_, Some(rate)) => rate,
+            (_, None) => return None,
+        };
+        // An inconsistent report is the provider's: the uncached share clamps at nothing rather
+        // than wrapping into an enormous charge.
+        let uncached = u128::from(input.saturating_sub(cached).saturating_sub(created));
+        let pico = uncached * u128::from(rates.input)
+            + u128::from(cached) * u128::from(rates.cached_input)
+            + u128::from(created) * u128::from(creation_rate)
+            + u128::from(output) * u128::from(rates.output);
+        Some(to_micro(pico))
+    }
+
+    /// The rates this card holds for `model`, or `None` when it holds none.
+    fn rates_for(&self, model: &str) -> Option<Rates> {
+        let written = self.models.get(model)?;
+        Some(Rates {
+            input: pico_per_token(written.input_usd_per_mtok)?,
+            cached_input: pico_per_token(written.cached_input_usd_per_mtok)?,
+            cache_creation_input: match written.cache_creation_input_usd_per_mtok {
+                Some(rate) => Some(pico_per_token(rate)?),
+                None => None,
+            },
+            output: pico_per_token(written.output_usd_per_mtok)?,
+        })
+    }
+}
+
+/// A rate in dollars per million tokens, as pico-dollars per token: `None` for anything not
+/// finite, negative, beyond what the conversion holds exactly, or not landing on a pico-dollar.
+fn pico_per_token(usd_per_mtok: f64) -> Option<u64> {
+    if !usd_per_mtok.is_finite() || usd_per_mtok < 0.0 {
+        return None;
+    }
+    let pico = usd_per_mtok * PICO_PER_USD_PER_MTOK;
+    if pico > 1e18 || (pico - pico.round()).abs() > 1e-6 {
+        return None;
+    }
+    // Through the decimal rather than through `as`, which reports nothing when it loses something.
+    format!("{pico:.0}").parse().ok()
+}
+
+/// Rounds pico-dollars to the nearest micro-dollar, half away from zero.
+fn to_micro(pico: u128) -> u64 {
+    let micro = (pico + PICO_PER_MICRO / 2) / PICO_PER_MICRO;
+    u64::try_from(micro).unwrap_or(u64::MAX)
+}
+
+/// `YYYY-MM-DD`, checked for shape only.
+fn is_iso_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && [0, 1, 2, 3, 5, 6, 8, 9]
+            .iter()
+            .all(|&index| bytes[index].is_ascii_digit())
+}
+
+/// What a turn that answered reported it spent, as the meter takes it: the model the provider
+/// reported serving it, else the model it is bound to, and its usage, when that usage is final and
+/// names both its input and its output tokens. `None` is an answer without its usage.
+fn reported(observation: &TurnObservation) -> Option<(&str, &Usage)> {
+    let usage = observation.usage.as_ref().filter(|usage| {
+        observation.final_usage && usage.input_tokens.is_some() && usage.output_tokens.is_some()
+    })?;
+    let model = observation
+        .upstream_model
+        .as_ref()
+        .unwrap_or(&observation.binding.model);
+    Some((model.as_str(), usage))
+}
+
+/// The usage of one run, shared by every metered model and the metered executor of the run.
 ///
 /// Cloning it is cheap and every clone counts into the same run.
 #[derive(Debug, Clone)]
@@ -89,6 +342,8 @@ struct Ledger {
     effects: Option<RunCharges>,
     /// What earlier segments' effects were charged, as [`RunMeter::carry`] took it.
     carried_effects: Option<EffectsUsage>,
+    /// The steps whose executor calls are running, on any thread, in the order they opened.
+    running: Vec<usize>,
 }
 
 thread_local! {
@@ -96,6 +351,12 @@ thread_local! {
     /// the index into its `tallies`. An executor call pushes its step when it begins and removes
     /// it when it returns or unwinds, so a step is open exactly while its executor call runs.
     static OPEN: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
+
+    /// The meters a metered `turn` is running for on this thread, innermost last: each meter's
+    /// identity ([`RunMeter::id`]) while its metered model calls its inner model's `turn` and
+    /// while that turn's future is polled here. A metered model of the same meter reached then is
+    /// inside the one that counts the call, and passes the turn through uncounted.
+    static TURNING: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
 }
 
 /// One step's figures as the meter counts them.
@@ -245,6 +506,7 @@ impl RunMeter {
                 tallies: vec![Tally::empty()],
                 effects: None,
                 carried_effects: None,
+                running: Vec::new(),
             })),
         }
     }
@@ -362,38 +624,73 @@ impl RunMeter {
         })
     }
 
-    /// The step a call made now on this thread is counted in: its executor call's step, else
-    /// `outside`, the step of the executor call a fork was made in (0 for a port of its own).
-    fn step_here(&self, outside: usize) -> usize {
-        self.open_here().unwrap_or(outside)
+    /// The step a call made now on this thread is counted in: the step of the executor call
+    /// running on this thread; else `outside` when it names one (for a fork of the ported loop's
+    /// port, the step it was made in); else the step of the executor call of this meter running on
+    /// another thread, a thread it spawned or the host's, the one opened last when several run;
+    /// else step 0, made while no executor call ran.
+    pub(crate) fn step_here(&self, outside: usize) -> usize {
+        if let Some(step) = self.open_here() {
+            return step;
+        }
+        if outside != 0 {
+            return outside;
+        }
+        self.ledger().running.last().copied().unwrap_or(0)
     }
 
-    /// Counts one call in `step`, before its `turn` runs, so a turn that fails or unwinds is
-    /// still a call. Returns the step the call's usage belongs to.
-    fn call(&self, step: usize) -> usize {
-        let mut ledger = self.ledger();
-        let tally = &mut ledger.tallies[step];
-        tally.calls = tally.calls.saturating_add(1);
-        step
+    /// Whether a metered turn of this meter is running on this thread: a metered model reached
+    /// inside another of the same meter, whose call that one counts once.
+    pub(crate) fn turning_here(&self) -> bool {
+        let id = self.id();
+        TURNING.with_borrow(|turning| turning.contains(&id))
     }
 
-    /// Adds the usage a counted call reported to its `step`. Without one (a turn that failed or
-    /// unwound, or an answer without usage) the tokens are unknown, so no price can be stated.
-    fn record(&self, step: usize, reported: Option<&Usage>) {
+    /// Marks a metered turn of this meter as running on this thread until the guard drops.
+    pub(crate) fn turning(&self) -> Turning {
+        let id = self.id();
+        TURNING.with_borrow_mut(|turning| turning.push(id));
+        Turning { id }
+    }
+
+    /// Counts one call in `step` now, before its turn runs, so a turn that fails, unwinds or is
+    /// dropped unfinished is still a call. The call is settled with what the turn reported.
+    pub(crate) fn begin(&self, step: usize) -> Call {
+        {
+            let mut ledger = self.ledger();
+            let tally = &mut ledger.tallies[step];
+            tally.calls = tally.calls.saturating_add(1);
+        }
+        Call {
+            meter: self.clone(),
+            step,
+            settled: false,
+        }
+    }
+
+    /// Adds what a counted call's turn reported to its `step`: the model it was served by and its
+    /// usage. Without one (a turn that failed, unwound or was dropped, or an answer without a usage
+    /// the meter takes) the tokens are unknown, so no price can be stated.
+    fn record(&self, step: usize, reported: Option<(&str, &Usage)>) {
         let mut guard = self.ledger();
         let ledger = &mut *guard;
         let card = ledger.prices.as_ref();
         let tally = &mut ledger.tallies[step];
-        let Some(usage) = reported else {
+        let Some((model, usage, input, output)) = reported.and_then(|(model, usage)| {
+            Some((model, usage, usage.input_tokens?, usage.output_tokens?))
+        }) else {
             tally.cost_micro_usd = None;
             return;
         };
-        tally.input_tokens = tally.input_tokens.saturating_add(usage.input_tokens);
-        tally.output_tokens = tally.output_tokens.saturating_add(usage.output_tokens);
+        tally.input_tokens = tally.input_tokens.saturating_add(input);
+        tally.output_tokens = tally.output_tokens.saturating_add(output);
         tally.cached_input_tokens = tally
             .cached_input_tokens
-            .saturating_add(usage.cached_input_tokens);
-        tally.cost_micro_usd = match (tally.cost_micro_usd, card.and_then(|c| c.price(usage))) {
+            .saturating_add(usage.cached_input_tokens.unwrap_or(0));
+        tally.cost_micro_usd = match (
+            tally.cost_micro_usd,
+            card.and_then(|card| card.price(model, usage)),
+        ) {
             (Some(sum), Some(cost)) => Some(sum.saturating_add(cost)),
             _ => None,
         };
@@ -429,13 +726,16 @@ impl RunMeter {
         let step = {
             let mut ledger = self.ledger();
             ledger.tallies.push(Tally::empty());
-            ledger.tallies.len() - 1
+            let step = ledger.tallies.len() - 1;
+            ledger.running.push(step);
+            step
         };
         OPEN.with_borrow_mut(|open| open.push((self.id(), step)));
         Some(step)
     }
 
-    /// Closes `step` on this thread: calls made here later are no longer counted in it.
+    /// Closes `step`, on this thread and among the running: calls made later are no longer
+    /// counted in it.
     fn close_step(&self, step: usize) {
         let id = self.id();
         OPEN.with_borrow_mut(|open| {
@@ -443,6 +743,10 @@ impl RunMeter {
                 open.remove(at);
             }
         });
+        let mut ledger = self.ledger();
+        if let Some(at) = ledger.running.iter().rposition(|open| *open == step) {
+            ledger.running.remove(at);
+        }
     }
 
     fn ledger(&self) -> MutexGuard<'_, Ledger> {
@@ -450,14 +754,82 @@ impl RunMeter {
     }
 }
 
-/// A [`ModelPort`] that counts every `turn` of `M` into a [`RunMeter`].
-#[derive(Debug)]
-pub struct MeteredModelPort<M> {
-    inner: M,
+/// A call counted before its turn ran ([`RunMeter::begin`]). Settled, it adds what the turn
+/// reported; dropped unsettled (the turn unwound, or its future was dropped unfinished), its
+/// tokens, and so its cost, are unknown.
+pub(crate) struct Call {
     meter: RunMeter,
+    step: usize,
+    settled: bool,
 }
 
-impl<M: ModelPort> MeteredModelPort<M> {
+impl Call {
+    /// Adds what the turn reported: the model that served it and its usage, or `None` for a turn
+    /// that failed or answered without a usage the meter takes.
+    pub(crate) fn settle(mut self, reported: Option<(&str, &Usage)>) {
+        self.settled = true;
+        self.meter.record(self.step, reported);
+    }
+}
+
+impl Drop for Call {
+    fn drop(&mut self) {
+        if !self.settled {
+            self.meter.record(self.step, None);
+        }
+    }
+}
+
+/// A metered turn of a meter running on this thread ([`RunMeter::turning`]), until it drops,
+/// returning or unwinding.
+pub(crate) struct Turning {
+    id: usize,
+}
+
+impl Drop for Turning {
+    fn drop(&mut self) {
+        TURNING.with_borrow_mut(|turning| {
+            if let Some(at) = turning.iter().rposition(|id| *id == self.id) {
+                turning.remove(at);
+            }
+        });
+    }
+}
+
+/// The inner model's turn as a metered model drives it: each poll is marked as a metered turn of
+/// `meter` on the thread that polls it, so a metered model of the same meter that the inner model
+/// reaches only while it runs passes through uncounted too.
+struct Inner<'a> {
+    meter: &'a RunMeter,
+    turn: BoxFuture<'a, Result<TurnOutcome, Error>>,
+}
+
+impl Future for Inner<'_> {
+    type Output = Result<TurnOutcome, Error>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let _turning = this.meter.turning();
+        this.turn.as_mut().poll(cx)
+    }
+}
+
+/// An llm [`Model`] that counts every `turn` of the model it holds into a [`RunMeter`].
+///
+/// `M` is how the model is held: the `Arc<dyn Model>` or `Box<dyn Model>` a host built, a
+/// reference to one, or an `Arc` of a model of its own. The metered model answers with the inner
+/// model's provenance and capabilities, so an answer llm checks against the metered model's
+/// binding is checked against the inner one's. Each `turn` is one call, counted before the inner
+/// turn runs, of the step of the executor call running on the thread `turn` is called on, else of
+/// the executor call of the meter running elsewhere (the one opened last), else of step 0,
+/// whichever thread then drives its future.
+#[derive(Debug)]
+pub struct MeteredModelPort<M> {
+    pub(crate) inner: M,
+    pub(crate) meter: RunMeter,
+}
+
+impl<M> MeteredModelPort<M> {
     /// `inner`, its turns counted into `meter`.
     pub fn new(inner: M, meter: &RunMeter) -> Self {
         Self {
@@ -466,109 +838,58 @@ impl<M: ModelPort> MeteredModelPort<M> {
         }
     }
 
-    /// The port this one meters.
+    /// The model this one meters.
     pub fn into_inner(self) -> M {
         self.inner
     }
 }
 
-/// One metered `turn` of `port`, counted in `step`.
-fn metered_turn(
-    port: &mut (impl ModelPort + ?Sized),
-    meter: &RunMeter,
-    step: usize,
-    request: &TurnRequest,
-    sink: &mut dyn StreamSink,
-) -> Result<TurnOutcome, WireError> {
-    let mut call = Call {
-        meter,
-        step: meter.call(step),
-        settled: false,
-    };
-    let outcome = port.turn(request, sink);
-    call.settled = true;
-    meter.record(
-        call.step,
-        outcome
-            .as_ref()
-            .ok()
-            .and_then(|answer| answer.usage.as_ref()),
-    );
-    outcome
-}
+impl<M> Model for MeteredModelPort<M>
+where
+    M: Deref + Send + Sync,
+    M::Target: Model,
+{
+    fn provenance(&self) -> &Provenance {
+        self.inner.provenance()
+    }
 
-/// A call counted before its `turn`: when the turn unwinds, its cost is unknown.
-struct Call<'m> {
-    meter: &'m RunMeter,
-    step: usize,
-    settled: bool,
-}
+    fn capabilities(&self) -> &Capabilities {
+        self.inner.capabilities()
+    }
 
-impl Drop for Call<'_> {
-    fn drop(&mut self) {
-        if !self.settled {
-            self.meter.record(self.step, None);
+    /// The inner model's turn, counted as one call before it runs. An answer adds its usage when
+    /// that usage is final and names its input and output tokens; an error, an unwind or a future
+    /// dropped unfinished adds none. Inside a metered turn of the same meter on this thread (a
+    /// metered model wrapped again on its meter), the turn is that one's call: it is passed
+    /// through and not counted again.
+    fn turn<'a>(
+        &'a self,
+        request: &'a TurnRequest,
+        sink: &'a mut dyn StreamSink,
+        cancel: &'a Cancel,
+    ) -> BoxFuture<'a, Result<TurnOutcome, Error>> {
+        if self.meter.turning_here() {
+            return self.inner.turn(request, sink, cancel);
         }
-    }
-}
-
-impl<M: ModelPort> ModelPort for MeteredModelPort<M> {
-    fn wire(&self) -> &WireId {
-        self.inner.wire()
-    }
-
-    /// A call of the executor call running on this thread, or of step 0 when none runs.
-    fn turn(
-        &mut self,
-        request: &TurnRequest,
-        sink: &mut dyn StreamSink,
-    ) -> Result<TurnOutcome, WireError> {
-        let step = self.meter.step_here(0);
-        metered_turn(&mut self.inner, &self.meter, step, request, sink)
-    }
-
-    /// The inner port's fork, metered into the same run: a turn through a fork is a call too, of
-    /// the executor call the fork was made in, on whichever thread it turns.
-    fn fork(&self) -> Option<Box<dyn ModelPort + Send + '_>> {
-        let fork = self.inner.fork()?;
-        Some(Box::new(MeteredFork {
-            inner: fork,
-            meter: self.meter.clone(),
-            step: self.meter.step_here(0),
-        }))
-    }
-}
-
-/// A fork of a metered port, metered into the same run.
-struct MeteredFork<'a> {
-    inner: Box<dyn ModelPort + Send + 'a>,
-    meter: RunMeter,
-    /// The step of the executor call the fork was made in: 0 when none ran.
-    step: usize,
-}
-
-impl ModelPort for MeteredFork<'_> {
-    fn wire(&self) -> &WireId {
-        self.inner.wire()
-    }
-
-    /// A call of the executor call running on this thread, else of the one the fork was made in.
-    fn turn(
-        &mut self,
-        request: &TurnRequest,
-        sink: &mut dyn StreamSink,
-    ) -> Result<TurnOutcome, WireError> {
-        let step = self.meter.step_here(self.step);
-        metered_turn(&mut *self.inner, &self.meter, step, request, sink)
-    }
-
-    fn fork(&self) -> Option<Box<dyn ModelPort + Send + '_>> {
-        let fork = self.inner.fork()?;
-        Some(Box::new(MeteredFork {
-            inner: fork,
-            meter: self.meter.clone(),
-            step: self.meter.step_here(self.step),
-        }))
+        let call = self.meter.begin(self.meter.step_here(0));
+        let turn = {
+            let _turning = self.meter.turning();
+            self.inner.turn(request, sink, cancel)
+        };
+        let turn = Inner {
+            meter: &self.meter,
+            turn,
+        };
+        Box::pin(async move {
+            let outcome = turn.await;
+            call.settle(
+                outcome
+                    .as_ref()
+                    .ok()
+                    .and_then(|answer| reported(&answer.observation)),
+            );
+            outcome
+        })
     }
 }
 
@@ -659,5 +980,215 @@ impl<E: AgentExecutor> AgentExecutor for MeteredExecutor<E> {
             self.meter.record_reported(opened, usage);
         }
         step
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn card() -> RateCard {
+        RateCard::parse(
+            r#"{
+                "source": "a table the operator read",
+                "as_of": "2026-08-24",
+                "models": {
+                    "m": {
+                        "input_usd_per_mtok": 1.25,
+                        "cached_input_usd_per_mtok": 0.125,
+                        "output_usd_per_mtok": 10.0
+                    }
+                }
+            }"#,
+        )
+        .expect("a valid card")
+    }
+
+    fn usage(input: u64, cached: u64, output: u64) -> Usage {
+        Usage {
+            input_tokens: Some(input),
+            output_tokens: Some(output),
+            cached_input_tokens: Some(cached),
+            ..Usage::default()
+        }
+    }
+
+    #[test]
+    fn a_rate_becomes_an_exact_count_of_pico_dollars_per_token() {
+        assert_eq!(pico_per_token(1.25), Some(1_250_000));
+        assert_eq!(pico_per_token(0.0), Some(0));
+        assert_eq!(pico_per_token(-1.0), None, "a negative rate is not a rate");
+        assert_eq!(pico_per_token(f64::NAN), None);
+        assert_eq!(pico_per_token(f64::INFINITY), None);
+        assert_eq!(pico_per_token(0.000_000_1), None, "not a whole pico-dollar");
+    }
+
+    #[test]
+    fn a_million_tokens_costs_exactly_what_the_card_says_a_million_tokens_costs() {
+        assert_eq!(card().price("m", &usage(1_000_000, 0, 0)), Some(1_250_000));
+        assert_eq!(card().price("m", &usage(0, 0, 1_000_000)), Some(10_000_000));
+    }
+
+    #[test]
+    fn cached_tokens_are_billed_once_and_at_the_cache_rate() {
+        let priced = card()
+            .price("m", &usage(1_000_000, 800_000, 0))
+            .expect("priced");
+        assert_eq!(priced, 350_000, "$0.35, not $1.35");
+    }
+
+    #[test]
+    fn an_unnamed_cached_count_is_none() {
+        let reported = Usage {
+            cached_input_tokens: None,
+            ..usage(1_000_000, 0, 0)
+        };
+        assert_eq!(card().price("m", &reported), Some(1_250_000));
+    }
+
+    #[test]
+    fn cache_creation_tokens_require_and_use_their_own_declared_rate() {
+        let reported = Usage {
+            cache_creation_input_tokens: Some(400_000),
+            ..usage(1_000_000, 100_000, 0)
+        };
+        assert_eq!(
+            card().price("m", &reported),
+            None,
+            "a distinct billed class with no declared rate is not charged as ordinary input"
+        );
+        let card = RateCard::parse(
+            r#"{
+                "source": "a table the operator read",
+                "as_of": "2026-08-24",
+                "models": {"m": {
+                    "input_usd_per_mtok": 1.0,
+                    "cached_input_usd_per_mtok": 0.1,
+                    "cache_creation_input_usd_per_mtok": 2.0,
+                    "output_usd_per_mtok": 10.0
+                }}
+            }"#,
+        )
+        .expect("a card with a cache-creation rate");
+        assert_eq!(card.price("m", &reported), Some(500_000 + 10_000 + 800_000));
+    }
+
+    #[test]
+    fn a_provider_reporting_more_cache_than_input_bills_the_cache_and_nothing_negative() {
+        assert_eq!(
+            card().price("m", &usage(10, 99, 0)),
+            Some(12),
+            "99 * $0.125/Mtok"
+        );
+        assert_eq!(
+            card().price("m", &usage(0, 0, 0)),
+            Some(0),
+            "a turn with no tokens"
+        );
+    }
+
+    #[test]
+    fn a_turn_without_its_input_or_output_tokens_is_absent_rather_than_free() {
+        for reported in [
+            Usage {
+                input_tokens: None,
+                ..usage(100, 0, 10)
+            },
+            Usage {
+                output_tokens: None,
+                ..usage(100, 0, 10)
+            },
+        ] {
+            assert_eq!(card().price("m", &reported), None, "{reported:?}");
+        }
+    }
+
+    #[test]
+    fn a_model_the_card_does_not_price_is_absent_rather_than_free() {
+        assert_eq!(
+            card().price("somebody-elses-model", &usage(1_000_000, 0, 1_000_000)),
+            None
+        );
+    }
+
+    #[test]
+    fn a_card_with_no_source_or_date_is_refused() {
+        assert_eq!(
+            RateCard::parse(r#"{"source": "  ", "as_of": "2026-08-24", "models": {}}"#),
+            Err(RateCardError::MissingSource)
+        );
+        assert_eq!(
+            RateCard::parse(r#"{"source": "s", "as_of": "last tuesday", "models": {}}"#),
+            Err(RateCardError::BadDate("last tuesday".to_owned()))
+        );
+        assert!(is_iso_date("2026-08-24"));
+        assert!(!is_iso_date("2026-8-24"));
+    }
+
+    #[test]
+    fn one_bad_rate_refuses_the_whole_card_rather_than_pricing_the_rest() {
+        for (field, rates) in [
+            (
+                "input_usd_per_mtok",
+                serde_json::json!({
+                    "input_usd_per_mtok": -1.0,
+                    "cached_input_usd_per_mtok": 0.0,
+                    "output_usd_per_mtok": 0.0,
+                }),
+            ),
+            (
+                "cache_creation_input_usd_per_mtok",
+                serde_json::json!({
+                    "input_usd_per_mtok": 1.0,
+                    "cached_input_usd_per_mtok": 0.0,
+                    "cache_creation_input_usd_per_mtok": -2.0,
+                    "output_usd_per_mtok": 0.0,
+                }),
+            ),
+        ] {
+            let card = serde_json::json!({
+                "source": "s",
+                "as_of": "2026-08-24",
+                "models": {"m": rates},
+            });
+            let refused = RateCard::parse(&card.to_string()).expect_err("refused");
+            let RateCardError::BadRate {
+                model,
+                field: named,
+                ..
+            } = &refused
+            else {
+                panic!("not a bad rate: {refused:?}");
+            };
+            assert_eq!((model.as_str(), *named), ("m", field), "{refused:?}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_field_is_refused_so_a_typo_is_not_a_silent_zero() {
+        let refused = RateCard::parse(
+            r#"{"source": "s", "as_of": "2026-08-24", "models": {"m": {
+                "input_usd_per_mtok": 1.0,
+                "cached_input_usd_per_mtok": 0.0,
+                "output_usd_per_mtok": 1.0,
+                "reasoning_usd_per_mtok": 5.0
+            }}}"#,
+        )
+        .expect_err("refused");
+        assert!(
+            matches!(refused, RateCardError::Unreadable(_)),
+            "{refused:?}"
+        );
+    }
+
+    #[test]
+    fn the_card_lists_what_it_prices() {
+        assert_eq!(card().priced_models().collect::<Vec<_>>(), vec!["m"]);
+    }
+
+    #[test]
+    fn rounding_lands_on_the_nearer_micro_dollar() {
+        assert_eq!(to_micro(1_499_999), 1);
+        assert_eq!(to_micro(1_500_000), 2);
     }
 }

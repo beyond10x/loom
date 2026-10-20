@@ -13,8 +13,10 @@
 //!   ([`Briefing::arguments_schema`]), and returns the call's arguments as the briefing gives them
 //!   ([`Briefing::arguments`]).
 //!
-//! Whatever else the model says, text beside the call included, is dropped: a model answer is
-//! never evidence. Every request is sent through [`Briefing::send`]: one attempt, unless the host
+//! An answer that calls the tool more than once is unusable ([`AskError::Unusable`]): which of its
+//! calls the model meant is not stated, so neither is taken, and a selection naming two actions,
+//! one of them outside the candidates or not, is no selection. Whatever else the model says, text
+//! beside the call included, is dropped: a model answer is never evidence. Every request is sent through [`Briefing::send`]: one attempt, unless the host
 //! retries. The intake slice's briefing (`b10x_loom_intake_slice::selector::Briefing`) tells the
 //! model the intent and the transcript of a software change; a plugin turn's tells it the item and
 //! what the turn read.
@@ -340,12 +342,16 @@ pub fn request(
     Ok(request)
 }
 
-/// The arguments of the model's call of `tool` in its answer to `request`, sent through
+/// The arguments of the model's one call of `tool` in its answer to `request`, sent through
 /// `briefing` on a current-thread runtime made for it. The stream is dropped.
+///
+/// An answer that calls `tool` more than once names more than one choice, and which it meant is
+/// not stated: it is unusable, never a guess at one of them, whatever each call names.
 ///
 /// # Errors
 /// [`AskError::Unanswered`] for a tool name that is no valid id, no runtime, or the model's error;
-/// [`AskError::Unusable`] for an outcome llm refuses for `request` or no call of `tool`.
+/// [`AskError::Unusable`] for an outcome llm refuses for `request`, no call of `tool`, or more
+/// than one.
 pub fn answer<B: Briefing + ?Sized>(
     model: &dyn Model,
     briefing: &B,
@@ -365,11 +371,16 @@ pub fn answer<B: Briefing + ?Sized>(
     outcome
         .validate_for(request, model.provenance())
         .map_err(|error| AskError::Unusable(error.to_string()))?;
-    outcome
-        .tool_calls()
-        .find(|call| call.name == name)
-        .map(|call| call.arguments.clone())
-        .ok_or_else(|| AskError::Unusable(format!("the model did not call `{tool}`")))
+    let mut calls = outcome.tool_calls().filter(|call| call.name == name);
+    match (calls.next(), calls.next()) {
+        (Some(call), None) => Ok(call.arguments.clone()),
+        (None, _) => Err(AskError::Unusable(format!(
+            "the model did not call `{tool}`"
+        ))),
+        (Some(_), Some(_)) => Err(AskError::Unusable(format!(
+            "the model called `{tool}` more than once"
+        ))),
+    }
 }
 
 /// A sink that drops the stream: only the turn's outcome is read.
