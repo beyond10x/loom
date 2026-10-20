@@ -64,12 +64,15 @@ run while a request is pending ends it `RunOutcome::Waiting` (`RunOutcomeWaiting
 requests and the budget's reason) where it would otherwise be `Suspended`; the Run is suspended for
 the budget either way. The runtime decides it with `outcome::judge_budget_stop`, the behaviour ESS
 generates for the new command `JudgeBudgetStop`. `LoopEnd::requests`, `admitted` and `effects` list
-a request once for each invocation. The intake slice stops a `Waiting` run `StepBudget`, so the
+a request once for each invocation, and `LoopEnd::steps` counts every invocation again as a step
+beside the executor calls, so a run with pending answers reports more steps than executor calls
+(the slice prints `steps` as it is). The intake slice stops a `Waiting` run `StepBudget`, so the
 `run --output jsonl` contract does not change, and every effect port Loom ships keeps answering
 `Performed` or `Refused`.
 Breaking: a host that matches `EffectOutcome` or `RunOutcome` exhaustively handles `Pending` and
-`Waiting`, and a host that reads `LoopEnd::admitted` as one entry per request reads a request
-answered pending once per invocation.
+`Waiting`; a host that reads `LoopEnd::admitted` as one entry per request reads a request answered
+pending once per invocation, and one that reads `LoopEnd::steps` as executor calls reads them plus
+the invocations again.
 
 ## [0.28.0] - 2026-10-20
 

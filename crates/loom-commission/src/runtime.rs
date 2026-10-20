@@ -417,7 +417,10 @@ pub struct LoopEnd {
     pub admitted: Vec<ActionRequestData>,
     /// What the effect port answered for each admitted request, in the same order.
     pub effects: Vec<EffectOutcome>,
-    /// The executor calls whose iteration did not end the run.
+    /// The steps the run took, which the step budget bounds: every executor call whose iteration
+    /// did not end the run, every invocation of a pending request again (item 8b) whose iteration
+    /// did not end it, and a resumed Run's resumed request. A run whose effect port never answers
+    /// `Pending` counts its executor calls alone, as before.
     pub steps: usize,
     /// The frontier the last iteration that got so far read before its executor step; `None` when
     /// no iteration read one.

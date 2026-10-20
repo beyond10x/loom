@@ -8,7 +8,10 @@
 //! performs exactly the actions they bind, and nothing else; which Connection serves an operation
 //! is Connectors' choice.
 //!
-//! An admitted request is handed to the [`ConnectorInvoker`] port once, with its binding. What the
+//! An admitted request is handed to the [`ConnectorInvoker`] port once each time the runtime hands
+//! it to this port, with its binding: once, unless the invoker answered `Pending` and the runtime
+//! invokes the same request again (`story:pending-effect`); this port passes a `Pending` on as it
+//! came, and no invoker in Loom answers one. What the
 //! invoker's `Performed` names depends on the binding's effect (`story:connector-read-performed`):
 //! for a `Write` binding, the one Connector attempt the invocation produced
 //! (`decision-blocker:invocation-attempt-record`, A) and no audit record; for a `Read` binding,
