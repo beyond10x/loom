@@ -223,6 +223,53 @@ fn adv_a_child_its_byte_ceiling_stopped_is_reported_as_such() {
     );
 }
 
+/// A listener on the loopback address `ip` of this machine (any of 127.0.0.0/8), and its address.
+fn host_at(ip: Ipv4Addr) -> (TcpListener, SocketAddr) {
+    let listener = TcpListener::bind((ip, 0)).unwrap();
+    let address = listener.local_addr().unwrap();
+    (listener, address)
+}
+
+/// The story's acceptance (`a_child_reaches_only_the_named_egress`): under the egress profile a
+/// connection to the named host is allowed. `with_egress` admits an IPv4 literal as the host when
+/// it is the pinned address (`check_host`), and Substrate maps only a host *name* to its in-sandbox
+/// listener on 127.0.0.1; so a child that dials the literal it names reaches it only when that
+/// literal happens to be 127.0.0.1, the one address the story's case uses. Here the named host is
+/// 127.0.0.2, still loopback: the declaration is either refused before anything starts, or the
+/// child reaches the host at the address it names.
+#[test]
+fn adv_a_child_reaches_an_ipv4_literal_host_at_the_address_it_names() {
+    delegated(
+        "adv_a_child_reaches_an_ipv4_literal_host_at_the_address_it_names",
+        |runner, workspace| {
+            let (named, address) = host_at(Ipv4Addr::new(127, 0, 0, 2));
+            let served = serve(named, b"named-host\n".to_vec(), 1);
+            let script = format!(
+                "read -r line < /dev/tcp/127.0.0.2/{}; printf 'named:%s\\n' \"$line\"",
+                address.port()
+            );
+            let child = ChildCommand::new(BASH, ["-c", script.as_str()], workspace)
+                .with_egress(model_aperture(address))
+                .with_timeout(Duration::from_secs(60));
+            let Some(result) = egress(runner.run_child(&child)) else {
+                return;
+            };
+            match result {
+                Err(error) if error.reason == ConfinementRefusal::ScopeInvalid => {}
+                Err(error) => panic!("refused, but not before anything started: {error}"),
+                Ok(result) => {
+                    assert_eq!(
+                        result.output, "named:named-host\n",
+                        "the child reached the IPv4 literal it names (exit {:?})",
+                        result.exit_code
+                    );
+                    assert_eq!(served.join().unwrap(), 1, "the named host was reached");
+                }
+            }
+        },
+    );
+}
+
 /// `AGENTS.md` and the CHANGELOG promise that an aperture naming no host or port, or one
 /// Substrate's daemon would not declare, is refused `ScopeInvalid` before anything starts. The
 /// daemon declares an aperture only from `name=host:port/tcp` whose host resolves, and pins it at
