@@ -120,8 +120,9 @@ its catalogue offered, the action it chose, its confidence as the selection reco
 selector took in milliseconds, and the input and output tokens the selector reported spending on it
 (0 where it reports none). On a fallback, `fell_back_to` is on the record of the overruled fast
 selection and names the strategy of the selector that replaced it; the replacement's record has
-none. A selector reports latency and tokens on its `Pick`; `ReasoningModelSelector` reports the
-usage its provider gave for the selection turn. In a governed run the model's tool call is the
+none. A selector reports latency and tokens on its `Pick`; the reasoning-model selector
+(`model_selector::ModelSelector`) reports no tokens, so its records hold 0, and a run's meter
+counts its turns instead. In a governed run the model's tool call is the
 selection, so the first selection of a turn carries that turn's latency and tokens and a later one
 of the same turn records 0, and a turn's totals are not counted twice.
 
