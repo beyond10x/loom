@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 22e4f2a529e6c0fca03f4ec58015ca8a05779db65158e508c18edf8c6030121e
-// contract digest 170b2b60f0518f937b6647a9e0d22ca806145af5cce1b938696720af5ba78996
+// model digest 3b3d3d9548ab5fbe6c639f4928c9136fce6fc3039ca9711b1dd9a4fccb975c22
+// contract digest 6fa3d582b4640078931da19526d7a7f46a311ce6f1d689702a9914b3cd6adb85
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! How the specification's primitives are spelled in this workspace.

@@ -2173,6 +2173,7 @@ fn effect_observation<C: LoopContext + ?Sized>(
             text(match effect {
                 EffectOutcome::Performed(_) => "Performed",
                 EffectOutcome::Refused(_) => "Refused",
+                EffectOutcome::Pending(_) => "Pending",
             }),
         ),
         (
@@ -2207,6 +2208,9 @@ fn effect_observation<C: LoopContext + ?Sized>(
         EffectOutcome::Refused(refused) => {
             payload.push(("reason".to_owned(), text(&refused.reason)));
         }
+        EffectOutcome::Pending(pending) => {
+            payload.push(("report".to_owned(), pending.report.clone()));
+        }
     }
     Observation::new(ObservationData {
         observation_id: context.observation_id(),
@@ -2234,7 +2238,7 @@ fn uncharged() -> ChargedUsage {
 fn charge(charges: &mut RunCharges, action: &str, effect: &EffectOutcome) {
     let usage = match effect {
         EffectOutcome::Performed(performed) => performed.usage.as_ref(),
-        EffectOutcome::Refused(_) => None,
+        EffectOutcome::Refused(_) | EffectOutcome::Pending(_) => None,
     };
     let index = if let Some(index) = charges.actions.iter().position(|c| c.action == action) {
         index

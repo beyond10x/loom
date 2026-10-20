@@ -52,6 +52,7 @@ Tagged by `kind`.
 
 | Variant | Payload |
 |---|---|
+| `Pending` | [`EffectOutcomePending`](#effectoutcomepending) |
 | `Performed` | [`EffectOutcomePerformed`](#effectoutcomeperformed) |
 | `Refused` | [`EffectOutcomeRefused`](#effectoutcomerefused) |
 
@@ -86,6 +87,7 @@ Tagged by `kind`.
 | `NoAdmissibleAction` | none |
 | `NoPerformableAction` | [`RunOutcomeNoPerformableAction`](#runoutcomenoperformableaction) |
 | `Suspended` | [`RunOutcomeSuspended`](#runoutcomesuspended) |
+| `Waiting` | [`RunOutcomeWaiting`](#runoutcomewaiting) |
 
 ### SuspensionReason
 
@@ -170,6 +172,12 @@ Tagged by `kind`.
 | Field | Type |
 |---|---|
 | `outcome` | `string` |
+
+### EffectOutcomePending
+
+| Field | Type |
+|---|---|
+| `report` | `json` |
 
 ### EffectOutcomePerformed
 
@@ -338,6 +346,13 @@ Tagged by `kind`.
 
 | Field | Type |
 |---|---|
+| `reason` | [`SuspensionReason`](#suspensionreason) |
+
+### RunOutcomeWaiting
+
+| Field | Type |
+|---|---|
+| `action_request_ids` | list of [`ActionRequestId`](#actionrequestid) |
 | `reason` | [`SuspensionReason`](#suspensionreason) |
 
 ### SuspensionKey

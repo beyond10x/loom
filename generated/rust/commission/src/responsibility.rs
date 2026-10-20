@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 22e4f2a529e6c0fca03f4ec58015ca8a05779db65158e508c18edf8c6030121e
-// contract digest 170b2b60f0518f937b6647a9e0d22ca806145af5cce1b938696720af5ba78996
+// model digest 3b3d3d9548ab5fbe6c639f4928c9136fce6fc3039ca9711b1dd9a4fccb975c22
+// contract digest 6fa3d582b4640078931da19526d7a7f46a311ce6f1d689702a9914b3cd6adb85
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Responsibility — `commission.responsibility`.
@@ -299,10 +299,19 @@ pub struct ConnectorOperationId(pub String);
 /// EffectOutcome — `commission.responsibility.EffectOutcome`: one of a fixed set of shapes, tagged on the wire by `kind`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EffectOutcome {
+    /// Tagged `Pending` — `commission.responsibility.EffectOutcomePending`.
+    Pending(EffectOutcomePending),
     /// Tagged `Performed` — `commission.responsibility.EffectOutcomePerformed`.
     Performed(EffectOutcomePerformed),
     /// Tagged `Refused` — `commission.responsibility.EffectOutcomeRefused`.
     Refused(EffectOutcomeRefused),
+}
+
+/// EffectOutcomePending — `commission.responsibility.EffectOutcomePending`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectOutcomePending {
+    /// `report` — `Json`.
+    pub report: crate::json::Value,
 }
 
 /// EffectOutcomePerformed — `commission.responsibility.EffectOutcomePerformed`.
@@ -570,6 +579,8 @@ pub enum RunOutcome {
     NoPerformableAction(RunOutcomeNoPerformableAction),
     /// Tagged `Suspended` — `commission.responsibility.RunOutcomeSuspended`.
     Suspended(RunOutcomeSuspended),
+    /// Tagged `Waiting` — `commission.responsibility.RunOutcomeWaiting`.
+    Waiting(RunOutcomeWaiting),
 }
 
 /// RunOutcomeAwaitingApproval — `commission.responsibility.RunOutcomeAwaitingApproval`.
@@ -644,6 +655,15 @@ pub struct RunOutcomeNoPerformableAction {
 /// RunOutcomeSuspended — `commission.responsibility.RunOutcomeSuspended`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunOutcomeSuspended {
+    /// `reason` — `commission.responsibility.SuspensionReason`.
+    pub reason: SuspensionReason,
+}
+
+/// RunOutcomeWaiting — `commission.responsibility.RunOutcomeWaiting`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunOutcomeWaiting {
+    /// `action_request_ids` — `List<commission.responsibility.ActionRequestId>`.
+    pub action_request_ids: Vec<ActionRequestId>,
     /// `reason` — `commission.responsibility.SuspensionReason`.
     pub reason: SuspensionReason,
 }
@@ -2601,6 +2621,33 @@ pub enum HoldSuspensionOutcome {
     },
 }
 
+/// JudgeBudgetStop — the input of `commission.responsibility.JudgeBudgetStop`.
+///
+/// Everything it can result in is [`JudgeBudgetStopOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JudgeBudgetStop {
+    /// `pending` — `List<commission.responsibility.ActionRequestId>`.
+    pub pending: Vec<ActionRequestId>,
+    /// `reason` — `commission.responsibility.SuspensionReason`.
+    pub reason: SuspensionReason,
+}
+
+/// Everything `commission.responsibility.JudgeBudgetStop` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JudgeBudgetStopOutcome {
+    /// `waiting` — when `pending.count >= 1`.
+    Waiting {
+        /// Why it was refused: `commission.responsibility.RequestsWaiting`.
+        error: RequestsWaiting,
+    },
+    /// `suspended` — otherwise.
+    Suspended,
+}
+
 /// JudgeEffectRefusal — the input of `commission.responsibility.JudgeEffectRefusal`.
 ///
 /// Everything it can result in is [`JudgeEffectRefusalOutcome`].
@@ -3033,6 +3080,15 @@ pub struct IdleBoundReached {
     pub idle_iterations: i64,
 }
 
+/// The declared error `commission.responsibility.RequestsWaiting`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestsWaiting {
+    /// `action_request_ids` — `List<commission.responsibility.ActionRequestId>`.
+    pub action_request_ids: Vec<ActionRequestId>,
+    /// `reason` — `commission.responsibility.SuspensionReason`.
+    pub reason: SuspensionReason,
+}
+
 /// The declared error `commission.responsibility.RunStateConflict`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunStateConflict {
@@ -3152,6 +3208,17 @@ pub mod obligations {
         /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
         /// implementation never returns it.
         fn hold_suspension(&mut self, input: super::HoldSuspension) -> Result<super::HoldSuspensionOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `commission.responsibility.JudgeBudgetStop` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait JudgeBudgetStopBehavior {
+        /// Decides and enacts exactly one declared outcome of `commission.responsibility.JudgeBudgetStop`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn judge_budget_stop(&mut self, input: super::JudgeBudgetStop) -> Result<super::JudgeBudgetStopOutcome, crate::obligation::UnmetObligation>;
     }
 
     /// The behaviour `commission.responsibility.JudgeEffectRefusal` — generated.

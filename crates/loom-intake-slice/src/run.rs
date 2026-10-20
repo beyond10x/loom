@@ -934,6 +934,9 @@ fn finish(
             StopReason::Refused,
             Some(refused.reason),
         ),
+        RunOutcome::Waiting(waiting) => {
+            Err(SliceError::Unexpected(format!("Waiting {waiting:?}")))
+        }
     }
 }
 

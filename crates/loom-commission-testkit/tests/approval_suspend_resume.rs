@@ -875,6 +875,7 @@ fn outcome_name(outcome: &RunOutcome) -> &'static str {
         RunOutcome::CaseMovedOn(_) => "CaseMovedOn",
         RunOutcome::EffectRefused(_) => "EffectRefused",
         RunOutcome::IdleBound(_) => "IdleBound",
+        RunOutcome::Waiting(_) => "Waiting",
     }
 }
 
