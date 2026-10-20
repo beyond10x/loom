@@ -262,6 +262,103 @@ fn one_call_asks_for_one_evaluation() {
     );
 }
 
+/// Under a trusted time that moves at every evaluation, the document of the most recent
+/// evaluation (a frontier's, a completion's) is read without another one while the case is held as
+/// that evaluation found it; evidence received, a decision another governor recorded over the same
+/// store and a new artifact revision each make the next read evaluate the case once again.
+#[test]
+fn a_kept_document_is_read_without_an_evaluation_until_the_case_moves() {
+    let asked = Arc::new(AtomicUsize::new(0));
+    let clock = Arc::clone(&asked);
+    let store = Arc::new(MemoryCaseStore::default());
+    let governor = admitted(CanonGovernor::new(Shared(Arc::clone(&store)))).with_evaluation_time(
+        move |_: &CaseId| -> Result<Option<String>, GovernorError> {
+            let second = clock.fetch_add(1, Ordering::SeqCst);
+            Ok(Some(format!("2026-10-04T12:00:{second:02}Z")))
+        },
+    );
+    let other = admitted(CanonGovernor::new(Shared(Arc::clone(&store))));
+    let case = open(&governor);
+    let evaluations = || asked.load(Ordering::SeqCst);
+
+    let frontier = governor.frontier(&case).expect("a frontier").into_data();
+    let before = evaluations();
+    let issued = governor.decision_document(&case).expect("a document");
+    assert_eq!(
+        frontier_id(CASE, frontier.case_revision, &canonical(&issued)),
+        frontier.frontier_id.0.0,
+        "the document read after the frontier is the one its id hashes"
+    );
+    assert_eq!(
+        governor.decision_document(&case),
+        Ok(issued.clone()),
+        "read again, the same document"
+    );
+    assert_eq!(evaluations(), before, "no read evaluated the case");
+
+    governor.completion(&case).expect("a completion");
+    let before = evaluations();
+    let completed = governor.decision_document(&case).expect("a document");
+    assert_eq!(
+        evaluations(),
+        before,
+        "the completion's document is read as kept"
+    );
+    assert_ne!(
+        completed, issued,
+        "the completion's evaluation, at a later instant, is the most recent"
+    );
+
+    submit(&governor, &case, 0, &fixture_records()[2]);
+    let before = evaluations();
+    let received = governor.decision_document(&case).expect("a document");
+    assert_eq!(
+        evaluations() - before,
+        1,
+        "evidence received: evaluated once"
+    );
+    assert!(
+        compact(&received).contains(r#""tests.pass":{"value":"true"}"#),
+        "the document holds the evidence received: {}",
+        compact(&received)
+    );
+
+    other
+        .decide(&case, "declined", "explicitly_declined", "lead-reviewer")
+        .expect("the other governor records the decision");
+    let before = evaluations();
+    let decided = governor.decision_document(&case).expect("a document");
+    assert_eq!(
+        evaluations() - before,
+        1,
+        "a decision recorded: evaluated once"
+    );
+    assert!(
+        compact(&decided).contains(r#""principals":["lead-reviewer"]"#),
+        "the document holds the decision the other governor recorded: {}",
+        compact(&decided)
+    );
+    assert_eq!(
+        governor.current_revision(&case),
+        Ok(1),
+        "neither moved the case revision"
+    );
+
+    governor
+        .update_revision(&case, "implementation", "R3")
+        .expect("the implementation moves");
+    let before = evaluations();
+    governor.decision_document(&case).expect("a document");
+    assert_eq!(
+        evaluations() - before,
+        1,
+        "an artifact moved: evaluated once"
+    );
+    let before = evaluations();
+    governor.decision_document(&case).expect("a document");
+    assert_eq!(evaluations(), before, "and kept again");
+}
+
 /// A change to a held case that leaves it unusable under its protocol.
 type Unusable = fn(&mut CaseState);
 
