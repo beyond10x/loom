@@ -9,6 +9,19 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-10-20
+
+Loom 0.27.1 links Substrate 0.7.17: `b10x-substrate-host` and `b10x-substrate-wire` are pinned
+together at `rev = "00fa634cb24eb307946bfe3bbe40142f4b7a469a"`, the commit tagged `0.7.17`. One
+type a host sees changes: the `substrate_wire::AppliedConfinement` in `TestExecution::driver_record`
+gains `read_only_files` (Substrate 0.7.13), which the slice's runner leaves empty and which the
+record's JSON omits while it is empty.
+Loom 0.27.0 and earlier, on Substrate below 0.7.13: a confined child could write the read-only workspace and outside it through inherited descriptors; fixed by Substrate 0.7.13.
+Breaking: a host that links `b10x-substrate-host` or `b10x-substrate-wire` itself moves to 0.7.17,
+at the same `rev`, to resolve one copy; a host that builds a `substrate_wire::AppliedConfinement`
+with a struct literal, as a `TestRunner` of its own returning a `TestExecution` does, adds
+`read_only_files`.
+
 ## [0.27.0] - 2026-10-20
 
 Loom 0.27.0 links engineering-protocols 0.9.0, tells an authority provider the action request it

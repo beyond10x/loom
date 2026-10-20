@@ -529,6 +529,7 @@ impl RustClosure {
             scratch: None,
             measurements: Default::default(),
             read_only_roots: self.roots.clone(),
+            read_only_files: Vec::new(),
             secret_slots: Vec::new(),
             capsule: None,
             lease_ttl_ms: None,
