@@ -63,4 +63,6 @@ needs approval the provider does not give stops the run.
 
 The runtime hands the admitted request to the `EffectPort` once and records what happened as an
 observation, never as evidence. The case moves to a new revision only after an effect the port
-reports as `Performed`. Loom does not make this call; see [where Loom ends](./where-loom-ends.md).
+reports as `Performed`. A port whose work has not finished, such as a CI job, answers `Pending`:
+the runtime hands it the same request again at the next step, revalidated first, until it answers
+otherwise or a budget ends the run `Waiting`. Loom does not make this call; see [where Loom ends](./where-loom-ends.md).
