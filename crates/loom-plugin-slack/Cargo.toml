@@ -13,7 +13,7 @@ name = "b10x_loom_plugin_slack"
 [dependencies]
 b10x-loom-plugin = { path = "../loom-plugin" }
 b10x-loom-sdk = { path = "../loom-sdk" }
-llm-core = { package = "b10x-llm-core", git = "https://github.com/beyond10x/llm", tag = "0.8.0" }
+llm-core = { package = "b10x-llm-core", git = "https://github.com/beyond10x/llm", tag = "0.8.1" }
 loom = { path = "../../generated/rust/loom" }
 
 [dev-dependencies]

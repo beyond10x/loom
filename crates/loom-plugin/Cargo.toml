@@ -12,9 +12,9 @@ name = "b10x_loom_plugin"
 
 [dependencies]
 b10x-loom-sdk = { path = "../loom-sdk" }
-b10x-llm-tool-call = { git = "https://github.com/beyond10x/llm", tag = "0.8.0" }
+b10x-llm-tool-call = { git = "https://github.com/beyond10x/llm", tag = "0.8.1" }
 chrono = "0.4"
-llm-core = { package = "b10x-llm-core", git = "https://github.com/beyond10x/llm", tag = "0.8.0" }
+llm-core = { package = "b10x-llm-core", git = "https://github.com/beyond10x/llm", tag = "0.8.1" }
 loom = { path = "../../generated/rust/loom" }
 serde_json = "1"
 tokio = { version = "1.53", features = ["rt"] }

@@ -8,15 +8,16 @@
 //! and runs the case there. Where bubblewrap, a user systemd manager or the Substrate driver is
 //! absent, the case prints `skipped: missing prerequisite: …` and returns; such a skip establishes
 //! no qualification. The egress cases also skip naming what is missing where `bash` is absent or
-//! Substrate does not serve an egress aperture on this machine. Their hosts are loopback listeners
-//! the test starts; nothing connects past loopback.
+//! Substrate does not serve an egress aperture on this machine, and the trust-anchor case where
+//! `openssl` or `curl` is. Their hosts are loopback listeners the test starts; nothing connects
+//! past loopback.
 
 use std::collections::BTreeMap;
-use std::io::Write as _;
+use std::io::{BufRead as _, BufReader, Write as _};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener};
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use b10x_loom_intake_slice::confinement::{
@@ -25,7 +26,7 @@ use b10x_loom_intake_slice::confinement::{
     prepare_delegated_cgroup,
 };
 use b10x_loom_intake_slice::executor::TestCommand;
-use substrate_wire::{ApertureMechanism, AppliedNetwork};
+use substrate_wire::{APERTURE_CA_BUNDLE_PATH, ApertureMechanism, AppliedNetwork};
 
 /// Set in the test binary started inside the delegated scope, so it runs the case instead of
 /// starting itself again.
@@ -719,6 +720,497 @@ fn the_applied_record_names_the_egress() {
                 Some(&AppliedNetwork::None)
             );
             assert_ne!(plain.applied.profile_digest, result.applied.profile_digest);
+        },
+    );
+}
+
+/// The machine's TLS tools the trust-anchor case needs: `openssl` makes its test CAs and serves its
+/// host, and `curl` is the child that verifies that host's certificate.
+const OPENSSL: &str = "/usr/bin/openssl";
+const CURL: &str = "/usr/bin/curl";
+
+/// Make, in `directory`, two test CAs, `trusted.crt` and `other.crt`, each a CA bundle of one
+/// certificate, and `host.crt` with `host.key`, a certificate for [`NAMED_HOST`] signed by
+/// `trusted`. Each is valid for a day, and no key leaves the directory.
+fn make_test_cas(directory: &Path) {
+    let openssl = |args: &[&str]| {
+        let output = Command::new(OPENSSL)
+            .args(args)
+            .current_dir(directory)
+            .stdin(Stdio::null())
+            .output()
+            .expect("openssl starts");
+        assert!(
+            output.status.success(),
+            "openssl {}: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    // A self-signed certificate with a new P-256 key, valid for a day.
+    let new = [
+        "req",
+        "-x509",
+        "-nodes",
+        "-days",
+        "1",
+        "-newkey",
+        "ec",
+        "-pkeyopt",
+        "ec_paramgen_curve:prime256v1",
+    ];
+    for ca in ["trusted", "other"] {
+        let (key, certificate) = (format!("{ca}.key"), format!("{ca}.crt"));
+        let subject = format!("/CN=loom test CA {ca}");
+        let mut args = new.to_vec();
+        args.extend([
+            "-keyout",
+            key.as_str(),
+            "-out",
+            certificate.as_str(),
+            "-subj",
+            subject.as_str(),
+        ]);
+        args.extend(["-addext", "basicConstraints=critical,CA:TRUE"]);
+        args.extend(["-addext", "keyUsage=critical,keyCertSign"]);
+        openssl(&args);
+    }
+    let subject = format!("/CN={NAMED_HOST}");
+    let names = format!("subjectAltName=DNS:{NAMED_HOST}");
+    let mut args = new.to_vec();
+    args.extend([
+        "-keyout",
+        "host.key",
+        "-out",
+        "host.crt",
+        "-subj",
+        subject.as_str(),
+    ]);
+    args.extend(["-addext", names.as_str()]);
+    args.extend(["-addext", "basicConstraints=critical,CA:FALSE"]);
+    args.extend(["-addext", "extendedKeyUsage=serverAuth"]);
+    // Signed by `trusted` instead of by itself.
+    args.extend(["-CA", "trusted.crt", "-CAkey", "trusted.key"]);
+    openssl(&args);
+}
+
+/// `openssl s_server` answering HTTPS with `host.crt` on the loopback address `ip`, at the port the
+/// kernel picked and the server reports; killed and reaped when dropped.
+struct TlsHost {
+    server: std::process::Child,
+    address: SocketAddr,
+}
+
+impl TlsHost {
+    fn start(directory: &Path, ip: Ipv4Addr) -> Self {
+        let mut server = Command::new(OPENSSL)
+            .args(["s_server", "-www", "-cert", "host.crt", "-key", "host.key"])
+            .arg("-accept")
+            .arg(format!("{ip}:0"))
+            .current_dir(directory)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("openssl s_server starts");
+        let stdout = server.stdout.take().expect("the server's output is piped");
+        let (port, reported) = std::sync::mpsc::channel();
+        let accept = format!("ACCEPT {ip}:");
+        // Read on until the server ends, so it never blocks on a full pipe.
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                if let Some(number) = line.strip_prefix(&accept).and_then(|p| p.parse().ok()) {
+                    let _ = port.send(number);
+                }
+            }
+        });
+        match reported.recv_timeout(Duration::from_secs(30)) {
+            Ok(port) => Self {
+                server,
+                address: SocketAddr::from((ip, port)),
+            },
+            Err(error) => {
+                let _ = server.kill();
+                let _ = server.wait();
+                panic!("openssl s_server reported no port it accepts on: {error}");
+            }
+        }
+    }
+}
+
+impl Drop for TlsHost {
+    fn drop(&mut self) {
+        let _ = self.server.kill();
+        let _ = self.server.wait();
+    }
+}
+
+/// A `curl` child fetching `https://model.example.test:<port>/`, verifying the host's certificate
+/// against whatever bundle it trusts and printing the HTTP status, `000` when there was none.
+fn curl_child(workspace: &Path, port: u16) -> ChildCommand {
+    let url = format!("https://{NAMED_HOST}:{port}/");
+    let args = [
+        "--silent",
+        "--show-error",
+        "--max-time",
+        "20",
+        "--output",
+        "/dev/null",
+        "--write-out",
+        "status:%{http_code}\n",
+        url.as_str(),
+    ];
+    ChildCommand::new(CURL, args, workspace)
+}
+
+/// The story's case: a child under an egress aperture verifies its host's certificate against the
+/// CA bundle the host names, and against no other. The host, `model.example.test` on 127.0.0.2,
+/// serves a certificate a test CA signed; `curl` reaches it through the aperture and verifies it
+/// when the host names that CA's bundle, and fails certificate verification (curl's exit status
+/// 60) when the host names another CA's bundle. Every run is in one workspace directory through one
+/// runner, so the second can fail only on a driver of its own: two children naming different
+/// bundles never share a driver. A child naming no bundle has no trust anchor and fails too, and
+/// the first bundle, named again, is trusted again.
+#[test]
+fn a_child_under_an_aperture_trusts_the_named_ca_bundle() {
+    delegated(
+        "a_child_under_an_aperture_trusts_the_named_ca_bundle",
+        |runner, workspace| {
+            for tool in [OPENSSL, CURL] {
+                if !Path::new(tool).is_file() {
+                    return skip(&format!("executable {tool}"));
+                }
+            }
+            let anchors = tempfile::tempdir().unwrap();
+            make_test_cas(anchors.path());
+            let trusted = anchors.path().join("trusted.crt");
+            let other = anchors.path().join("other.crt");
+            let host = TlsHost::start(anchors.path(), Ipv4Addr::new(127, 0, 0, 2));
+            let aperture = EgressAperture {
+                host: NAMED_HOST.to_owned(),
+                ..model_aperture(host.address)
+            };
+            let child = curl_child(workspace, host.address.port()).with_egress(aperture);
+
+            let named = child.clone().with_ca_bundle(&trusted);
+            assert_eq!(named.ca_bundle(), Some(trusted.as_path()));
+            let Some(verified) = egress_result(runner.run_child(&named)) else {
+                return;
+            };
+            assert_eq!(verified.exit_code, Some(0), "{}", verified.output);
+            assert_eq!(verified.output, "status:200\n");
+
+            let refused = runner
+                .run_child(&child.clone().with_ca_bundle(&other))
+                .expect("the child runs confined with its egress");
+            assert_eq!(
+                refused.exit_code,
+                Some(60),
+                "certificate verification fails: {}",
+                refused.output
+            );
+            assert!(
+                refused.output.starts_with("status:000\ncurl: (60) "),
+                "{}",
+                refused.output
+            );
+
+            assert_eq!(child.ca_bundle(), None);
+            let unanchored = runner
+                .run_child(&child)
+                .expect("the child runs confined with its egress");
+            // 77: no bundle to read; 60: none that verifies the host.
+            assert!(
+                matches!(unanchored.exit_code, Some(60 | 77)),
+                "a child with no trust anchor fails to verify: {:?} {}",
+                unanchored.exit_code,
+                unanchored.output
+            );
+            assert!(
+                unanchored.output.starts_with("status:000\n"),
+                "{}",
+                unanchored.output
+            );
+
+            let again = runner
+                .run_child(&child.with_ca_bundle(&trusted))
+                .expect("the child runs confined with its egress");
+            assert_eq!(
+                (again.exit_code, again.output.as_str()),
+                (Some(0), "status:200\n")
+            );
+        },
+    );
+}
+
+/// A child naming a CA bundle finds it where `SSL_CERT_FILE` says, the one variable it gets beside
+/// the environment the host named: a read-only snapshot of the host's file, taken when the child
+/// starts, so the next child sees the file as it is then and the host's file is never written.
+#[test]
+fn a_child_finds_the_snapshot_of_its_ca_bundle_through_ssl_cert_file() {
+    delegated(
+        "a_child_finds_the_snapshot_of_its_ca_bundle_through_ssl_cert_file",
+        |runner, workspace| {
+            let (_host, address) = loopback_host();
+            let anchors = tempfile::tempdir().unwrap();
+            let bundle = anchors.path().join("bundle.pem");
+            std::fs::write(&bundle, "first anchor\n").unwrap();
+            let anchored = |child: ChildCommand| {
+                child
+                    .with_environment(named())
+                    .with_egress(model_aperture(address))
+                    .with_ca_bundle(&bundle)
+            };
+            let env = anchored(ChildCommand::new("env", [] as [&str; 0], workspace));
+            let Some(environment) = egress_result(runner.run_child(&env)) else {
+                return;
+            };
+            assert_eq!(environment.exit_code, Some(0), "{}", environment.output);
+            assert_eq!(
+                environment.output,
+                format!("FIRST=one\nSECOND=two\nSSL_CERT_FILE={APERTURE_CA_BUNDLE_PATH}\n")
+            );
+
+            let script = "cat \"$SSL_CERT_FILE\"; \
+                          if (printf changed >> \"$SSL_CERT_FILE\") 2>/dev/null; \
+                          then echo writable; else echo read-only; fi";
+            let read = anchored(ChildCommand::new("sh", ["-c", script], workspace));
+            let first = runner.run_child(&read).expect("the child runs confined");
+            assert_eq!(
+                (first.exit_code, first.output.as_str()),
+                (Some(0), "first anchor\nread-only\n")
+            );
+            std::fs::write(&bundle, "second anchor\n").unwrap();
+            let second = runner.run_child(&read).expect("the child runs confined");
+            assert_eq!(
+                (second.exit_code, second.output.as_str()),
+                (Some(0), "second anchor\nread-only\n")
+            );
+            assert_eq!(std::fs::read_to_string(&bundle).unwrap(), "second anchor\n");
+        },
+    );
+}
+
+/// The variables through which a TLS client takes another trust store than the bundle Substrate
+/// points `SSL_CERT_FILE` at, replacing or widening it; a child naming a bundle is refused when its
+/// environment names any of them.
+const TRUST_STORE_VARIABLES: [&str; 13] = [
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "CURL_CA_BUNDLE",
+    "CURL_CA_PATH",
+    "CURL_HOME",
+    "REQUESTS_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+    "GIT_SSL_CAINFO",
+    "GIT_SSL_CAPATH",
+    "GIT_SSL_NO_VERIFY",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_PARAMETERS",
+];
+
+/// Git configuration keys a `GIT_CONFIG_KEY_<n>` may name beside a bundle and be refused for:
+/// `http.sslCAInfo`, `http.sslCAPath` and `http.sslVerify`, section and key in any case, with
+/// or without a URL subsection.
+const GIT_TRUST_KEYS: [&str; 5] = [
+    "http.sslCAInfo",
+    "HTTP.SSLCAPATH",
+    "http.sslverify",
+    "http.https://model.example.test/.sslCAInfo",
+    "Http.https://model.example.test:443/a.b.SslVerify",
+];
+
+/// Substrate's ceiling on a certificate bundle, 1 MiB.
+const BUNDLE_CEILING: usize = 1024 * 1024;
+
+/// A CA bundle the host cannot name is refused `ScopeInvalid` before anything starts, naming the
+/// path: a relative path, one that does not exist, a symbolic link (to a regular file too, as
+/// Substrate's daemon refuses one), a directory, a socket, a FIFO (refused without waiting for a
+/// writer), an empty file, one larger than Substrate's 1 MiB and one this process cannot read; a
+/// bundle named without an egress aperture, which would trust nothing the child can reach; and a
+/// bundle beside an environment naming any variable that replaces or widens a TLS client's trust
+/// store ([`TRUST_STORE_VARIABLES`]), or a `GIT_CONFIG_KEY_<n>` naming one of Git's
+/// ([`GIT_TRUST_KEYS`]), the refusal naming the variable. Each refusal leaves the workspace as it
+/// was, without `target`. A well-named bundle beside an aperture, one of exactly 1 MiB included,
+/// and one beside Git configuration naming other keys, get past every check, to the missing
+/// backend.
+#[test]
+fn a_ca_bundle_the_host_cannot_name_is_refused_before_anything_starts() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let fixture = tempfile::tempdir().unwrap();
+    let workspace = fixture.path().join("workspace");
+    std::fs::create_dir(&workspace).unwrap();
+    let anchors = fixture.path().join("anchors");
+    std::fs::create_dir(&anchors).unwrap();
+    let bundle = anchors.join("bundle.pem");
+    std::fs::write(&bundle, "anchor\n").unwrap();
+    let largest = anchors.join("largest.pem");
+    std::fs::write(&largest, vec![b'a'; BUNDLE_CEILING]).unwrap();
+    std::fs::write(anchors.join("large.pem"), vec![b'a'; BUNDLE_CEILING + 1]).unwrap();
+    let fifo = anchors.join("fifo.pem");
+    let fifo_made = Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .is_ok_and(|status| status.success());
+    std::fs::write(anchors.join("empty.pem"), "").unwrap();
+    std::os::unix::fs::symlink(&bundle, anchors.join("link.pem")).unwrap();
+    let _socket = UnixListener::bind(anchors.join("socket")).unwrap();
+    let unreadable = anchors.join("unreadable.pem");
+    std::fs::write(&unreadable, "anchor\n").unwrap();
+    std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
+    // A process that reads it anyway (root) has nothing to refuse.
+    let unreadable_here = std::fs::File::open(&unreadable).is_err();
+
+    let ran = fixture.path().join("ran");
+    let script = format!("touch '{}'", ran.display());
+    let plain = || ChildCommand::new("sh", ["-c", script.as_str()], &workspace);
+    let address = SocketAddr::from((Ipv4Addr::LOCALHOST, 9));
+    let child = || plain().with_egress(model_aperture(address));
+    // A directory that is no cgroup: a launch that got past the refusal would be refused for it.
+    let runner = SubstrateRunner::new(Some(fixture.path().to_owned()));
+    let mut refused = vec![
+        (PathBuf::from("anchors/bundle.pem"), child(), "relative"),
+        (anchors.join("absent.pem"), child(), "does not exist"),
+        (anchors.join("link.pem"), child(), "symbolic link"),
+        (anchors.clone(), child(), "no regular file"),
+        (anchors.join("socket"), child(), "no regular file"),
+        (anchors.join("empty.pem"), child(), "empty"),
+        (anchors.join("large.pem"), child(), "more than"),
+        (bundle.clone(), plain(), "no egress aperture"),
+    ];
+    for variable in TRUST_STORE_VARIABLES {
+        let environment = ExecEnvironment {
+            allow: Vec::new(),
+            set: BTreeMap::from([(variable.to_owned(), "/workspace/ca.pem".to_owned())]),
+        };
+        refused.push((
+            bundle.clone(),
+            child().with_environment(environment),
+            variable,
+        ));
+    }
+    let git_config = |pairs: &[(&str, &str)]| ExecEnvironment {
+        allow: Vec::new(),
+        set: pairs
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+            .collect(),
+    };
+    for key in GIT_TRUST_KEYS {
+        let environment = git_config(&[
+            ("GIT_CONFIG_COUNT", "1"),
+            ("GIT_CONFIG_KEY_0", key),
+            ("GIT_CONFIG_VALUE_0", "/workspace/ca.pem"),
+        ]);
+        refused.push((
+            bundle.clone(),
+            child().with_environment(environment),
+            "GIT_CONFIG_KEY_0",
+        ));
+    }
+    if fifo_made {
+        refused.push((fifo.clone(), child(), "no regular file"));
+    }
+    if unreadable_here {
+        refused.push((unreadable.clone(), child(), "cannot be read"));
+    }
+    for (path, child, named) in refused {
+        let error = runner.run_child(&child.with_ca_bundle(&path)).unwrap_err();
+        assert_eq!(
+            error.reason,
+            ConfinementRefusal::ScopeInvalid,
+            "{path:?}: {error}"
+        );
+        assert!(
+            error.detail.contains(&format!("`{}`", path.display())),
+            "{path:?}: {error}"
+        );
+        assert!(error.detail.contains(named), "{path:?}: {error}");
+        assert!(
+            !workspace.join("target").exists(),
+            "{path:?}: a refused bundle leaves the workspace as it was"
+        );
+    }
+    assert!(!ran.exists(), "nothing ran");
+
+    let expected = if bubblewrap_present() {
+        ConfinementRefusal::CgroupUndelegated
+    } else {
+        ConfinementRefusal::BackendMissing
+    };
+    for accepted in [&bundle, &largest] {
+        let error = runner
+            .run_child(&child().with_ca_bundle(accepted))
+            .unwrap_err();
+        assert_eq!(error.reason, expected, "{accepted:?}: {error}");
+    }
+    // Git configuration naming other keys stays allowed, a value naming a trust key included.
+    let other_keys = git_config(&[
+        ("GIT_CONFIG_COUNT", "2"),
+        ("GIT_CONFIG_KEY_0", "safe.directory"),
+        ("GIT_CONFIG_VALUE_0", "http.sslCAInfo"),
+        ("GIT_CONFIG_KEY_1", "http.sslBackend"),
+        ("GIT_CONFIG_VALUE_1", "openssl"),
+    ]);
+    let error = runner
+        .run_child(&child().with_environment(other_keys).with_ca_bundle(&bundle))
+        .unwrap_err();
+    assert_eq!(error.reason, expected, "{error}");
+    assert!(!ran.exists(), "nothing ran");
+}
+
+/// A bundle path the host named and then swapped for a symbolic link before the launch is never
+/// followed: the launch reads the bundle once, through an open with its last component not
+/// followed, so it is refused `ScopeInvalid` and nothing starts. The child never sees the link's target, either in
+/// that launch or in the next one, which reads the regular file put back and trusts its bytes as
+/// read then.
+#[test]
+fn a_bundle_swapped_for_a_link_after_it_was_named_is_never_followed() {
+    delegated(
+        "a_bundle_swapped_for_a_link_after_it_was_named_is_never_followed",
+        |runner, workspace| {
+            let (_host, address) = loopback_host();
+            let anchors = tempfile::tempdir().unwrap();
+            let bundle = anchors.path().join("bundle.pem");
+            let elsewhere = anchors.path().join("elsewhere.pem");
+            std::fs::write(&bundle, "named anchor\n").unwrap();
+            std::fs::write(&elsewhere, "link target\n").unwrap();
+            let read = ChildCommand::new("sh", ["-c", "cat \"$SSL_CERT_FILE\""], workspace)
+                .with_egress(model_aperture(address))
+                .with_ca_bundle(&bundle);
+            let Some(first) = egress_result(runner.run_child(&read)) else {
+                return;
+            };
+            assert_eq!(
+                (first.exit_code, first.output.as_str()),
+                (Some(0), "named anchor\n")
+            );
+
+            std::fs::remove_file(&bundle).unwrap();
+            std::os::unix::fs::symlink(&elsewhere, &bundle).unwrap();
+            let marker = workspace.join("target/ran");
+            let swapped = ChildCommand::new(
+                "sh",
+                ["-c", "cat \"$SSL_CERT_FILE\"; touch target/ran"],
+                workspace,
+            )
+            .with_egress(model_aperture(address))
+            .with_ca_bundle(&bundle);
+            let error = runner
+                .run_child(&swapped)
+                .expect_err("a bundle swapped for a link is refused");
+            assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
+            assert!(error.detail.contains("symbolic link"), "{error}");
+            assert!(!marker.exists(), "nothing started");
+
+            std::fs::remove_file(&bundle).unwrap();
+            std::fs::write(&bundle, "put back\n").unwrap();
+            let after = runner.run_child(&read).expect("the child runs confined");
+            assert_eq!(
+                (after.exit_code, after.output.as_str()),
+                (Some(0), "put back\n")
+            );
         },
     );
 }

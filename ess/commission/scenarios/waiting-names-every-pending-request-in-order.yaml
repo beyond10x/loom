@@ -1,0 +1,24 @@
+# story:pending-effect: the scenario synthesized for `JudgeBudgetStop` `waiting` names one pending
+# request, so a target that keeps only the first, or puts them in another order, passes it. This
+# one names two, the later id first, and the error must name both in the order given.
+type: ess-scenario/1
+domain: commission.responsibility
+scenario: waiting-names-every-pending-request-in-order
+summary: A budget stop with two requests pending is Waiting, naming both, in the order given.
+
+timeline:
+  - at: 2026-10-20T15:00:00Z
+    command: commission.responsibility.JudgeBudgetStop
+    input:
+      pending:
+        - 00000000-0000-4000-8000-000000000303
+        - 00000000-0000-4000-8000-000000000301
+      reason: {kind: Budget, value: {max_steps: 1}}
+    outcome: waiting
+    error:
+      name: commission.responsibility.RequestsWaiting
+      fields:
+        action_request_ids:
+          - 00000000-0000-4000-8000-000000000303
+          - 00000000-0000-4000-8000-000000000301
+        reason: {kind: Budget, value: {max_steps: 1}}

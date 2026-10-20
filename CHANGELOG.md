@@ -9,7 +9,7 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
-Loom links llm 0.8.0 (`story:llm-080-pin`): every `b10x-llm-*` dependency names tag `0.8.0`, and
+Loom links llm 0.8.1 (`story:llm-080-pin`): every `b10x-llm-*` dependency names tag `0.8.1`, and
 `Cargo.lock` holds one version of each. Loom's own code does not change, and the requests it sends
 do not change byte for byte: llm 0.8.0 changes no request encoder, and the two new capability
 declarations are not written at their defaults. What a Loom host sees of llm 0.8.0: `Capabilities`
@@ -25,8 +25,13 @@ the first, and through an llm-gateway that already retried it the slice may retr
 streamed Responses turn's assistant text is the text the sink was shown, with a `shown-text-kept`
 or `shown-text-unpaired` warning when the server's message said otherwise; text a Messages `text`
 block opens with reaches the sink as a `TextDelta` when the block opens; and `response.queued` is
-ignored, no longer an `unknown-stream-event` warning.
-Breaking: a host that links llm itself moves to llm 0.8.0 so it resolves one copy of each
+ignored, no longer an `unknown-stream-event` warning. llm 0.8.1 adds what Loom needs against the
+live Messages route: a response carrying `container` (on the message, on `message_start.message`
+or on `message_delta.delta`), which 0.8.0 refused as `Unsupported`, is accepted, and so are the
+documented `diagnostics`, `stop_details`, `usage.speed`, `toolset_name` and a `direct` `caller`
+in the shapes a request that asked for none of them gets; any other value of those fields is
+refused as `protocol`.
+Breaking: a host that links llm itself moves to llm 0.8.1 so it resolves one copy of each
 `b10x-llm-*` crate, and a full `Capabilities { … }` literal in it sets `output_streaming` and
 `input_during_output` or ends with `..Capabilities::text(…)`.
 
@@ -49,6 +54,44 @@ Breaking: a host that builds or matches `RunOutcome::NoPerformableAction` with `
 `RunOutcomeNoPerformableAction`, a host that builds `SliceRun` sets `unperformed`, and a host that
 read `NoAdmissibleAction` after a found move onto such a frontier reads `NoPerformableAction`.
 
+A confined child under an egress aperture trusts the CA bundle the host names
+(`story:child-egress-ca-bundle`), so a child reaching an HTTPS vendor API through the aperture
+verifies its certificate. `ChildCommand::with_ca_bundle(path)` names a file of the host. Each
+launch reads it once, through an open with its last component not followed, and the child trusts
+the bytes read then: the runner opens the child's driver with a private read-only copy of them in
+the driver's own state directory as Substrate's `HostConfig::ca_bundle`, never with the named
+path, so a link or another file put at that path after the read is never read. Substrate binds a
+snapshot of that copy, taken when the child starts, at `/etc/ssl/certs/ca-certificates.crt` and
+sets `SSL_CERT_FILE` to it, the one variable the child gets beside the environment the host names.
+The bundle is part of the shared driver's key, as its path and the bytes read: children in
+workspaces of one directory naming different bundles, one naming a bundle and one naming none, and
+a bundle whose bytes changed since a driver opened for it never share a driver. The bundle is the
+trust store the child gets through `SSL_CERT_FILE`; beside it, the environment may not name the
+listed variables, so a host does not override by accident the bundle it named. That is no
+guarantee about what the child trusts: configuration under `HOME`, a program's own flags and
+variables not listed can still point a client elsewhere or turn verification off; what the child
+reaches is bounded by the aperture. A bundle for a child with no egress aperture, which reaches no
+host to verify, a path that is not UTF-8 or not absolute, a bundle beside an environment naming a
+listed variable (`SSL_CERT_FILE`, `SSL_CERT_DIR`, `CURL_CA_BUNDLE`, `CURL_CA_PATH`, `CURL_HOME`,
+`REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`,
+`GIT_SSL_NO_VERIFY`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_PARAMETERS`, or a
+`GIT_CONFIG_KEY_<n>` naming Git's `http.sslCAInfo`, `http.sslCAPath` or `http.sslVerify` in any
+case and with or without a URL subsection, each named in the refusal; Git configuration naming
+other keys stays allowed), and a path that does not exist, is a symbolic link, is no regular file,
+is empty, holds more than 1 MiB or cannot be read, on the path and again on the file opened (as
+Substrate refuses its own bundle), are refused `ScopeInvalid` before anything starts or `target` is
+created, naming the path. The profile digest covers the bundle's path and the digest of its bytes;
+a child naming none keeps its digest. Substrate's record of the applied confinement names no
+bundle, so the bundle is not checked after the child ran.
+`crates/loom-intake-slice/tests/confined_child.rs` holds it against a loopback TLS host the test
+serves with `openssl`, under a test CA it makes: a `curl` child verifies the host when the host
+names that CA's bundle and fails certificate verification when it names another CA's, in one
+directory through one runner, and a bundle path swapped for a link before a launch is refused and
+never followed; the delegated cases skip naming the missing prerequisite where `openssl` or `curl`
+is absent. `b10x-loom-intake-slice` now depends on `libc` (already in `Cargo.lock`) for
+`O_NOFOLLOW`.
+Breaking: none.
+
 An effect can answer pending and be invoked again within the budgets
 (`story:pending-effect`). `EffectOutcome::Pending` (`EffectOutcomePending`, carrying the port's
 report) says the work an admitted request started, such as a CI job or a review, has not finished.
@@ -56,20 +99,28 @@ The runtime invokes the same request again at the next iteration, under its own 
 revision, with no executor call between and no wait or timer, until the port answers `Performed` or
 `Refused`. Each invocation is revalidated as the first was: a request that needs authority is asked
 about again and the case's revision read again after the allow, and a request whose case moved, or
-that the frontier or the provider no longer admits, is not invoked again. A pending read of a
-fan-out is invoked again alone, through `invoke_reads`. Each invocation is a step and one trial on
+that the frontier no longer admits or the provider denies, is not invoked again. A provider that
+answers `ApprovalRequired` at that ask ends the run `NeedsAuthority`, as at a first ask, the Run
+suspended and a Suspension held for the request under `run_with_suspension`. So a resumed request
+answered pending is asked about again at its next invocation, and a provider that allows only
+while the Suspension is pending, as the intake slice's grant authority does, asks for approval
+again: the run holds a new Suspension for the same request. A pending read of a fan-out is invoked
+again alone, through `invoke_reads`, and only while the fan-out rule still admits it. Each invocation is a step and one trial on
 the run budget, each answer is recorded and delivered as one observation, never evidence, and a
 pending answer is no idle iteration and leaves the idle count where it was. A budget that stops the
 run while a request is pending ends it `RunOutcome::Waiting` (`RunOutcomeWaiting`: the pending
 requests and the budget's reason) where it would otherwise be `Suspended`; the Run is suspended for
 the budget either way. The runtime decides it with `outcome::judge_budget_stop`, the behaviour ESS
 generates for the new command `JudgeBudgetStop`. `LoopEnd::requests`, `admitted` and `effects` list
-a request once for each invocation. The intake slice stops a `Waiting` run `StepBudget`, so the
+a request once for each invocation, and `LoopEnd::steps` counts every invocation again as a step
+beside the executor calls, so a run with pending answers reports more steps than executor calls
+(the slice prints `steps` as it is). The intake slice stops a `Waiting` run `StepBudget`, so the
 `run --output jsonl` contract does not change, and every effect port Loom ships keeps answering
 `Performed` or `Refused`.
 Breaking: a host that matches `EffectOutcome` or `RunOutcome` exhaustively handles `Pending` and
-`Waiting`, and a host that reads `LoopEnd::admitted` as one entry per request reads a request
-answered pending once per invocation.
+`Waiting`; a host that reads `LoopEnd::admitted` as one entry per request reads a request answered
+pending once per invocation, and one that reads `LoopEnd::steps` as executor calls reads them plus
+the invocations again.
 
 An executor that is not a model loop reports its usage into the run's charges, budget and meter
 (`story:executor-reports-usage`). `AgentExecutor` gains `run_with_usage`, a provided method that

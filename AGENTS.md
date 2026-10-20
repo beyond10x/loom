@@ -106,7 +106,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | With `--mandate`, a resume performs the held request only when Mandate's `check_with_approval` clears and consumes the approval the grant names, kept in the state directory's log before anything is performed: a second resume with it, an expired approval, one naming another subject, action or resource, one recorded for another commission however its id is written, and a grant naming none are refused and perform nothing; without `--mandate`, a grant naming an approval is refused and performs nothing; the approver is neither the verified subject nor its actor; only `b10x-loom-cli` links `b10x-loom-mandate`, and only it and `loom-docs` reach Mandate over `Cargo.lock` | `crates/loom-cli/tests/resume_after_grant.rs` (`a_recorded_approval_clears_the_held_request_once`, `a_second_resume_with_the_same_approval_is_refused_and_performs_nothing`, `an_expired_approval_is_refused_and_performs_nothing`, `the_grant_names_its_mandate_approval`), `crates/loom-cli/tests/adversary_w10_u3.rs` (`adversary_a_resume_without_mandate_does_not_perform_a_grant_naming_a_mandate_approval`), `crates/loom-cli/tests/security_w10_u3.rs` (`security_an_approval_is_bound_to_its_commission_however_its_id_is_written`), `crates/loom-mandate/tests/mandate_approval.rs` (`an_approval_naming_another_subject_action_or_resource_is_refused`), `crates/loom-mandate/tests/adversary_w10_u3.rs` (`adversary_a_host_file_whose_approver_is_the_acting_actor_is_refused`), `crates/loom-mandate/tests/security_w10_u2.rs` |
 | An executor's report that the case moved is decided by the governor and judged on the case's current frontier, reloaded once | `crates/loom-commission-testkit/tests/moved_case_outcome.rs`, `crates/loom-executor/tests/adversary_w1_runtime_stale.rs`, `crates/loom-executor/tests/adversary_w1p2_runtime_windows.rs` |
 | An executor is never handed an unperformed action that needs no authority; an effect is invoked once, through its binding, and again only after the port answered `Pending` | `crates/loom-commission-testkit/tests/effect_invocation.rs` (`effect_invoked_only_through_its_binding`) |
-| An effect port's `Pending` answer gets its request invoked again at the next iteration, under its own id and at its own revision, with no executor call between, revalidated before each invocation as before the first (authority asked again, the revision read again after an allow), until the port answers otherwise: a request whose case moved, that the frontier no longer admits or the provider no longer allows is not invoked again; a pending read of a fan-out is invoked again alone; each invocation is a step and one trial, each answer one observation and never evidence; a pending answer neither joins nor restarts the idle count; a budget that ends the run while a request is pending ends it `Waiting`, naming the requests and the budget's reason, the Run suspended for it; the slice stops it `StepBudget` | `crates/loom-commission-testkit/tests/pending_effect.rs` (`a_pending_answer_is_invoked_again_and_not_counted_idle`, `a_pending_answer_leaves_the_idle_count_where_it_was`, `each_reinvocation_is_revalidated`, `a_budget_reached_while_pending_ends_the_run_waiting`, `each_answer_is_charged_and_observed`), `crates/loom-intake-slice/src/run.rs` (`a_run_waiting_on_a_pending_request_stops_step_budget`), `task commission:conform` (`JudgeBudgetStop`) |
+| An effect port's `Pending` answer gets its request invoked again at the next iteration, under its own id and at its own revision, with no executor call between, revalidated before each invocation as before the first (authority asked again, the revision read again after an allow), until the port answers otherwise: a request whose case moved, that the frontier no longer admits or the provider denies is not invoked again, and one the provider answers `ApprovalRequired` for ends the run `NeedsAuthority`, holding a Suspension under `run_with_suspension`; a pending read of a fan-out is invoked again alone, and only while the fan-out rule still admits it; each invocation is a step and one trial, each answer one observation and never evidence; a pending answer neither joins nor restarts the idle count; a budget that ends the run while a request is pending ends it `Waiting`, naming the requests and the budget's reason, the Run suspended for it; the slice stops it `StepBudget` | `crates/loom-commission-testkit/tests/pending_effect.rs` (`a_pending_answer_is_invoked_again_and_not_counted_idle`, `a_pending_answer_leaves_the_idle_count_where_it_was`, `each_reinvocation_is_revalidated`, `a_budget_reached_while_pending_ends_the_run_waiting`, `each_answer_is_charged_and_observed`, `approval_required_when_a_pending_request_is_asked_again_ends_the_run_needing_authority`), `crates/loom-commission-testkit/tests/adversary_w20261020w3_u2.rs`, `crates/loom-intake-slice/src/run.rs` (`a_run_waiting_on_a_pending_request_stops_step_budget`), `task commission:conform` (`JudgeBudgetStop`) |
 | An effect refusal marked final (`ends_run`) ends the run at once with `EffectRefused`, naming the request and the reason, once it was recorded and observed: after a proposal, after a fan-out once every read was recorded (beside a stale read it is kept until the move is judged, and ends the run when the next load finds no move), and after a resumed request, whose Suspension is released; an ordinary refusal still counts idle | `crates/loom-commission-testkit/tests/refused_effect_outcome.rs` (`a_final_refusal_ends_the_run_naming_request_and_reason`, `an_ordinary_refusal_still_counts_idle`, `the_refusal_is_observed_once_and_recorded`), `crates/loom-commission-testkit/tests/adversary_w20261020w2_u1.rs`, `task commission:conform` (`JudgeEffectRefusal`) |
 | Without a step budget, two idle iterations in a row end the run `IdleBound`, naming them, whatever kind of idle iteration they are, a repeated admission included, and a new admission starts the count again; a case the last one's performed effect completed ends the run completed instead, the case loaded first as at the step budget; a frontier that admits nothing still ends `NoAdmissibleAction`; the slice stops `IdleBound` `NothingAdmissible`, as before | `crates/loom-commission-testkit/tests/idle_bound_outcome.rs` (`two_idle_iterations_end_the_run_as_the_idle_bound`, `a_frontier_that_admits_nothing_ends_as_no_admissible_action`, `a_repeated_admission_counts_toward_the_idle_bound`, `a_case_its_repeated_reads_completed_ends_the_run_completed`), `crates/loom-commission-testkit/tests/adversary_w20261020w2_u2.rs`, `crates/loom-intake-slice/src/run.rs` (`an_idle_bound_run_stops_nothing_admissible_as_before`), `task commission:conform` (`JudgeIdleIteration`) |
 | A run the effect port performs nothing for ends `NoPerformableAction` naming the actions it does not perform, each once, in frontier order, and the frontier's open claims (its claims not `True`, which the frontier relates to no action): before the executor runs, after an admitted proposal (that action alone) and after a move, one the governor bears out or one the runtime finds after a stale proposal; the slice's `NoLocalExecutor` stop carries the actions, and its `run --output jsonl` terminal record names them as `unperformed_actions` | `crates/loom-commission-testkit/tests/unperformable_names.rs` (`the_outcome_names_each_unperformed_action_and_its_claim`, `a_proposed_unperformed_action_is_named`, `an_action_listed_twice_is_named_once`, `a_moved_case_whose_frontier_performs_nothing_names_its_actions`), `crates/loom-commission-testkit/tests/adversary_w20261020w3_u1.rs` (`adversary_a_found_move_onto_nothing_performable_names_the_actions`), `crates/loom-cli/tests/run_events.rs` (`a_no_local_executor_stop_names_its_actions`), `task commission:conform` (`JudgePerformableActions`) |
@@ -275,7 +275,10 @@ slice stops both `NothingAdmissible` (`crates/loom-commission-testkit/tests/idle
 An effect port's `Pending` (`EffectOutcomePending`) says the work its request started has not
 finished: the next iteration invokes the same request again instead of running the executor,
 revalidated as before the first invocation, and a request whose case moved, or that the frontier
-or the provider no longer admits, is not invoked again. Each invocation is a step and one trial on
+no longer admits or the provider denies, is not invoked again; one the provider answers
+`ApprovalRequired` for ends the run `NeedsAuthority` and, under `run_with_suspension`, holds a
+Suspension, so a resumed request answered `Pending` under the slice's `GrantAuthority`, which
+allows only while the Suspension is `Pending`, asks for approval again. Each invocation is a step and one trial on
 the run budget, each answer one observation; a pending answer is no idle iteration and leaves the
 idle count where it was. A budget that stops the run while a request is pending ends it `Waiting`,
 naming the requests and the budget's reason, as `outcome::judge_budget_stop` decides with the
@@ -785,13 +788,14 @@ a skip with a named missing prerequisite establishes no qualification.
 arguments, the directory adopted as the workspace, the workspace directories it may write beside
 `target/` (`with_writable`), and Substrate's `ExecEnvironment`,
 `SandboxProfile` and `NetworkMode`, `NetworkMode::None` by default, or with `with_egress` the one
-Substrate `EgressAperture` it may reach) on the same launch path:
+Substrate `EgressAperture` it may reach, and with `with_ca_bundle` the certificate bundle it
+trusts there) on the same launch path:
 writes only under `target/` and the directories named (Substrate's `WorkspaceAccess::Scoped`;
 `.git` only when named; a path that is absolute, climbs out with `..`, passes a symlink, is absent
 or no directory, holds a special file or a hard link from outside, or overlaps another is refused
 `ScopeInvalid` before launch; `TestRunner::run` keeps `target/` alone, and the applied
 confinement's `writable_scopes` lists them, a record naming another set refused), no toolchain or
-cache mounted, exactly the named environment, a typed
+cache mounted, exactly the named environment (with a bundle, plus `SSL_CERT_FILE`), a typed
 refusal for a missing guarantee, only the requested network accepted as applied, no network or
 exactly the named aperture (name, pinned destination, mechanism, ceiling), checked after the child
 ran and refusing its result as a test's is refused, a result with no exit status refused unless
@@ -804,11 +808,33 @@ byte ceiling, a host that is no host name or IPv4 literal, an IPv4 literal other
 address, a pinned address that is no IPv4 one or not at the named port), and an IPv4 literal host
 other than `127.0.0.1`, which the child could not reach the host by, are refused `ScopeInvalid`
 before anything starts, the refusal naming the host; one Substrate did not publish when the driver opened (its mechanism unproven) is refused
-`CapabilityUnserved`. An egress child gets no certificate bundle yet, and Substrate gives a run at
-most one aperture. A program containing `=` or starting with `-` (test or child)
+`CapabilityUnserved`. Substrate gives a run at most one aperture. A certificate bundle
+(`with_ca_bundle`) is read once per launch through an open with its last component not followed
+(`O_NOFOLLOW`), and the child trusts the bytes read then: the driver is given a private
+read-only copy of them in its own state directory (`CaBundle::write_private_copy`, removed with
+the driver) as Substrate's `HostConfig::ca_bundle`, never the named path, and Substrate binds a
+snapshot of that copy at `/etc/ssl/certs/ca-certificates.crt`, which `SSL_CERT_FILE` names;
+Substrate's record names no bundle, so it is not checked after the run. The bundle is the trust
+store the child gets through `SSL_CERT_FILE`; beside it, the environment may not name the listed
+variables, so a host does not override by accident the bundle it named. That is no guarantee
+about what the child trusts: configuration under `HOME`, a program's own flags and variables not
+listed can still point a client elsewhere or turn verification off; what the child reaches is
+bounded by the aperture. A bundle for a child with no aperture, a path that is not UTF-8 or not
+absolute, one beside an environment naming a listed variable (`TRUST_STORE_VARIABLES`:
+`SSL_CERT_FILE`, `SSL_CERT_DIR`, `CURL_CA_BUNDLE`, `CURL_CA_PATH`, `CURL_HOME`,
+`REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`,
+`GIT_SSL_NO_VERIFY`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_PARAMETERS`; or a
+`GIT_CONFIG_KEY_<n>` naming `http.sslCAInfo`, `http.sslCAPath` or `http.sslVerify`, any case, URL
+subsection or not, `GIT_TRUST_KEYS`; each named in the refusal; Git configuration naming other
+keys stays allowed), and one that does not exist, is a symbolic link, is no regular file, is
+empty, holds more than 1 MiB (`MAX_CA_BUNDLE_BYTES`, Substrate's ceiling) or cannot be read,
+on the path and again on the file opened, are refused `ScopeInvalid` before anything starts,
+naming the path (`check_ca_bundle`). A program containing `=` or starting with `-` (test or child)
 is refused before anything starts: Substrate execs through `/usr/bin/env`, which reads it as an
-assignment or an option. A runner and its clones share one driver per workspace directory and
-egress aperture (Substrate fixes a driver's apertures when it opens),
+assignment or an option. A runner and its clones share one driver per workspace directory, egress
+aperture and certificate bundle, the bundle compared as its path and the bytes read
+(`DriverEgress`: Substrate fixes a driver's apertures and bundle when it opens), so children naming
+different bundles, or a bundle whose bytes changed, never share one,
 because opening a driver kills every `substrate-ex_*` cgroup under its root; each launch discards
 its finished execution from the driver (`discard_superseded_exec`), which tracks at most 128; no
 driver opens on a root while a launch of this process runs there (the process-wide count in
@@ -816,7 +842,9 @@ driver opens on a root while a launch of this process runs there (the process-wi
 `crates/loom-intake-slice/tests/confined_child.rs` holds it; its delegated
 cases start their own test binary under `systemd-run --user --scope -p Delegate=yes` and skip
 naming the missing prerequisite where bubblewrap, a user systemd manager or the driver is absent,
-and the egress cases where `bash` or Substrate's aperture is; their hosts are loopback listeners.
+the egress cases where `bash` or Substrate's aperture is, and the trust-anchor case where
+`openssl` or `curl` is; their hosts are loopback listeners, the TLS one signed by a CA the test
+makes.
 The slice's own git calls
 go through one helper, `crates/loom-intake-slice/src/git.rs`: no workspace hook, `core.fsmonitor`
 command or signing program runs, a case does not open on a workspace whose own configuration
@@ -826,7 +854,7 @@ other Git call sites except the separately hardened pinned-source helper at
 `crates/loom-protocols/src/git.rs`. That helper fetches into a private bare repository, never a
 run workspace, with hooks, fsmonitor, helpers and global/system configuration disabled. Gates still run when the operator or the bot commits and pushes.
 
-Model calls go through llm's crates at release tag `0.8.0`, never a hand-written HTTP client.
+Model calls go through llm's crates at release tag `0.8.1`, never a hand-written HTTP client.
 `model_retry.rs` owns caller retries using llm's retry
 classification and `RetryPolicy`: three identical attempts, no retry after a sink event,
 cancellation-aware backoff and per-attempt context metrics. Model ports stay single-attempt;
