@@ -33,6 +33,10 @@
 //!
 //! [`wire`] holds Loom's own model ports that run something: [`wire::ClaudeCodePort`] runs a turn
 //! through the `claude` command on an operator's Claude Code login.
+//!
+//! [`model_selector`] holds the selector and argument generator over an llm `Model` that the
+//! intake slice and a plugin turn run Loom's chooser path on, each told a host's
+//! [`model_selector::Briefing`].
 
 /// The run model, synthesized from the ESS specification.
 pub use loom as model;
@@ -42,6 +46,7 @@ pub mod compaction;
 pub mod credentials;
 pub mod harness;
 pub mod metering;
+pub mod model_selector;
 pub mod projection;
 pub mod recovery;
 pub mod revalidation;

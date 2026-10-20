@@ -506,15 +506,35 @@ build time implementing `Plugin` (`poll`, `classify`, `project`, `turn`, `result
 run by `run_plugin(plugin, config, state, stop)`. Its nouns are the `loom.plugin` domain
 (`ess/domains/plugin.yaml`); a plugin's own configuration extends `PluginConfig`. The plugin hooks
 sit outside a run and grant nothing. A turn is a thin caller of `run_until_blocked` through
-`loom_sdk`, on `inbound-answer@1` from `ProtocolCatalog::plugins()`, with Loom's governed model loop
-(`LoopExecutor`), `PluginAuthority` (grants `datasource.read` and `reply.propose`, denies every
-other capability) and `DataSourceEffects`, which reads through `loom_connectors::cli`, refuses a
-`{source, kind}` outside the projection before any command, and submits one `source_read` evidence
-per performed read. A turn is one Run, bounded by `TURN_STEP_BUDGET`: a step Commission performed
-under a grant passes its approval gate (`docs/commission/design/approval-gate.md`), so the Run goes
-on after each granted read, and an `AwaitingApproval` ends the turn `stopped`. Model requests are
-bounded per turn: `TURN_MODEL_BUDGET` counts every request sent, wire retries included; the port
-the turn lends refuses any past it. A classifier hint that
+`loom_sdk`, on `inbound-answer@1` from `ProtocolCatalog::plugins()`, with Loom's chooser path (a
+`Loom` over `b10x_loom_executor::model_selector`'s `ModelSelector` and `ModelArguments`, on the
+turn's llm `Model`, revalidating against the governor), `PluginAuthority` (grants `datasource.read`
+and `reply.propose`, denies every other capability) and `DataSourceEffects`, which reads through
+`loom_connectors::cli`, refuses a `{source, kind}` outside the projection before any command, and
+submits one `source_read` evidence per performed read. Each step offers the frontier's catalogue,
+narrowed to the projection's actions, in one forced `select_action` request, then asks for the
+selected action's arguments in one forced `action_arguments` request whose schema is the action's;
+both carry what the turn did so far, the reports of its reads included, as one data block
+(`<earlier-steps>` around a JSON list of strings, `<`, `>` and `&` written as `\u` escapes) no value
+can close, introduced as data and never as instructions; every other value a request quotes (the
+item's text, id and revision, what `operations describe` reports) has those escaped too, so none
+opens or closes a block (`crates/loom-plugin/tests/earlier_reads.rs`,
+`a_later_step_sees_an_earlier_read_as_data`, `no_value_a_turn_quotes_spells_the_data_block`). A
+turn is one Run, bounded by `TURN_STEP_BUDGET`: a step Commission performed under a grant passes
+its approval gate (`docs/commission/design/approval-gate.md`), so the Run goes on after each
+granted read, and an `AwaitingApproval` ends the turn `stopped`. Model requests are bounded per
+turn: `TURN_MODEL_BUDGET` (two per step) counts every request sent, each attempt of Loom's caller
+retries (`loom_sdk::intake::slice::selector::send_with_retries`) included; the model the turn lends
+refuses any past it. A model that answered a request without a usable call is about the item, and
+one that could not answer is not: an answer with no call of the forced tool (a provider's refusal
+or content filter, which llm decodes as `Incomplete`, or text only), an answer llm refuses for the
+request, a selection naming no action and arguments Commission's JSON cannot carry
+(`model_selector::AskError::Unusable`) end the Run as no useful action, with no further request,
+and the turn `stopped`, naming the answer, so the item is recorded and the cycle goes on; only a
+request never answered (it could not be sent, or the model failed it after every retry;
+`AskError::Unanswered`) is `PluginError::Unavailable`. A selection outside the candidates stays a
+selection error, never a selection (`crates/loom-plugin/tests/unusable_answer.rs`,
+`crates/loom-plugin/tests/adversary_w20261020w4_u3.rs`). A classifier hint that
 names no configured source is dropped before anything prints it. Nothing is sent: a reply is a
 proposal in the record. A task gets no turn: the router's pick from `ProtocolCatalog::bundled()`
 is recorded as a proposed case. An attempt on an item is counted in the state, which keeps the
@@ -535,8 +555,8 @@ truth for handled items, whose torn last line is dropped under the lock. One hos
 time: `run_plugin` takes an exclusive lock on the record before anything else, and a second host
 is refused once the lock stayed held for `LOCK_WAIT`. One inside a configured workspace root or
 checkout is refused by comparing paths, with no git command. The tests in
-`crates/loom-plugin/tests/` use a recorded classifier, a scripted model port and the fake
-`connectors` of `loom-connectors`. The command line hosts registered plugins through
+`crates/loom-plugin/tests/` use a recorded classifier, a scripted turn model answering each step's
+selection and arguments, and the fake `connectors` of `loom-connectors`. The command line hosts registered plugins through
 `b10x-loom plugin run|report` (§ Slack handler).
 
 ## Slack handler
@@ -559,11 +579,13 @@ reuse `crates/loom-plugin/tests/support/mod.rs` by path and answer Slack-shaped 
 `tests/fixtures/` through the fake `connectors`; ids there are synthetic.
 
 `b10x-loom plugin run` settles both models before any read: with `--catalog` from route aliases
-(`model_catalog`), otherwise Codex models, as `run` does. A turn runs on
-`loom_sdk::llm::LlmModelPort` (`crates/loom-sdk/src/llm.rs`), the bridge from an llm `Model` to
-the harness `ModelPort`: one `Model::turn` per port turn, no retry and no other target, an opaque
-item carried back under the wire id `llm-model` only. The CLI defines no model port of its own
-(`crates/loom-sdk/tests/llm_model_port.rs`). Without `--once`, the first SIGTERM or SIGINT sets the host's stop, so
+(`model_catalog`), otherwise Codex models, as `run` does. A turn runs on the agent's llm `Model`
+itself (`b10x_loom_cli::plugin::turn_models`): the chooser path sends each selection and argument
+request to it, with no model port between and no other target; the CLI builds no
+`LlmModelPort` and defines no model port of its own (`crates/loom-sdk/tests/llm_model_port.rs`).
+`loom_sdk::llm::LlmModelPort` (`crates/loom-sdk/src/llm.rs`) stays the bridge from an llm `Model`
+to the harness `ModelPort` for a host that runs the ported loop: one `Model::turn` per port turn,
+no retry and no other target, an opaque item carried back under the wire id `llm-model` only. Without `--once`, the first SIGTERM or SIGINT sets the host's stop, so
 a systemd stop ends it after the item being handled; a second one exits at once with 130
 (`plugin_run_stops_on_sigterm`). `plugin report` reads `record.jsonl` without the lock and drops a torn
 last line. `crates/loom-cli/tests/plugin.rs` runs the binary against the fake `connectors` and the

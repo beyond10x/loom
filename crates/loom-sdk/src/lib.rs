@@ -3,16 +3,16 @@
 //! The Loom SDK: one crate an application depends on to embed a governed agent.
 //!
 //! It re-exports the crates an embedder needs, under stable module names. Its one module of its
-//! own is [`llm`], the model port over an llm `Model`, kept here because the executor does not
-//! depend on llm's model crates.
+//! own is [`llm`], the harness model port over an llm `Model`; the executor's own selector and
+//! argument generator over an llm `Model` are [`loom::model_selector`].
 //!
 //! | Module | Crate | What it is for |
 //! | --- | --- | --- |
 //! | [`commission`] | `b10x-loom-commission` | The contracts and the runtime: the generated responsibility model ([`commission::model`]), the ports an embedder implements or calls ([`commission::ports`]), and the loop that drives a commission until it is blocked ([`commission::runtime`]). |
 //! | [`connectors`] | `b10x-loom-connectors` | Commission's `ConnectorInvoker` over a Connectors service: [`connectors::ConnectorsInvoker`] invokes the operation an action is bound to once, on the host's endpoint for its instance, and reports the attempt Connectors recorded; [`connectors::cli::ConnectorsCli`] reads through the operator's `connectors` command line and performs one governed write for an admitted request, and [`connectors::evidence::WriteEvidenceAdapter`] records an applied write as the protocol's evidence. |
-//! | [`loom`] | `b10x-loom-executor` | The executor: [`Loom`] proposes one action per frontier through an [`ActionSelector`] and an [`ArgumentGenerator`] the embedder supplies. |
+//! | [`loom`] | `b10x-loom-executor` | The executor: [`Loom`] proposes one action per frontier through an [`ActionSelector`] and an [`ArgumentGenerator`] the embedder supplies, or the ones over an llm `Model` in [`loom::model_selector`], told the embedder's `Briefing`, on which a plugin turn runs. |
 //! | [`governor`] | `b10x-loom-governor` | The governor: [`CanonGovernor`] evaluates a case's protocol with Canon over a [`CaseStore`] and issues its frontier. |
-//! | [`llm`] | `b10x-llm-core` | [`llm::LlmModelPort`], a harness `ModelPort` over an llm `Model`: one `Model::turn` per turn, the port `b10x-loom` runs a plugin turn on. |
+//! | [`llm`] | `b10x-llm-core` | [`llm::LlmModelPort`], a harness `ModelPort` over an llm `Model`: one `Model::turn` per turn, for a host that runs the ported loop. |
 //! | [`intake`] | `b10x-loom-intake-router`, `b10x-loom-intake-slice` | Intake: the router that proposes a protocol for an intent ([`intake::router`]), and the slice's case opening, local executor, test-result verifier and local effect adapter ([`intake::slice`]). |
 //!
 //! The items an embedding always touches are also re-exported at the top: [`run_until_blocked`],

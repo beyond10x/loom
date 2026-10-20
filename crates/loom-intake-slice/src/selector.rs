@@ -1,8 +1,11 @@
-//! Loom's action selector and argument generator over a model (story `selector-executor`).
+//! The slice's briefing for Loom's action selector and argument generator over a model (story
+//! `selector-executor`).
 //!
-//! [`ModelSelector`] implements Loom's `ActionSelector` and [`ModelArguments`] its
-//! `ArgumentGenerator`, each over a `&dyn llm_core::Model`. Each turn asks for one forced call
-//! of one named tool (`ToolChoice::Named`):
+//! [`ModelSelector`] and [`ModelArguments`] are the executor's
+//! (`b10x_loom_executor::model_selector`, where `story:chooser-executor-for-plugin-turns` moved
+//! them), told this module's [`Briefing`]: this module keeps their paths as aliases over it, and
+//! those of [`ArgumentsError`], [`SELECT_TOOL`], [`ARGUMENTS_TOOL`] and [`NO_ACTION`] as
+//! re-exports. Each turn asks for one forced call of one named tool (`ToolChoice::Named`):
 //!
 //! - the selector publishes `select_action`, `{"action": <id>}`, whose `action` is one of the
 //!   catalogue entries it was handed. Loom refuses any other id; the selector does not check it.
@@ -12,7 +15,8 @@
 //! Both are told the [`Briefing`]: the intent, its extracted references and the transcript so far,
 //! which the caller extends with [`Briefing::record`] after each performed action and with
 //! [`Briefing::record_refusal`] after each action that was not performed. Whatever else the
-//! model says, text beside the call included, is dropped: a model answer is never evidence.
+//! model says, text beside the call included, is dropped: a model answer is never evidence. Every
+//! request is sent with the slice's caller retries ([`send_with_retries`]).
 //!
 //! The transcript keeps the last [`TRANSCRIPT_LIMIT`] entries, each cut at 16 KiB, numbered from the
 //! first entry ever recorded. An entry quotes what the executor reported, and that includes file
@@ -32,21 +36,20 @@
 //! so neither may be called from inside a Tokio runtime.
 
 use std::collections::VecDeque;
-use std::fmt::{self, Write as _};
+use std::fmt::Write as _;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use b10x_loom_commission::model::json;
 use b10x_loom_commission::model::responsibility::ExecutorOutcomeProposedAction;
-use b10x_loom_executor::model::run::{CatalogueEntry, CatalogueEntryStatus, SelectionStrategy};
-use b10x_loom_executor::selection::{Choice, SelectionContext, SelectorError};
-use b10x_loom_executor::{ActionSelector, ArgumentContext, ArgumentGenerator};
+use b10x_loom_executor::model_selector::{self as chooser, select_once};
 use b10x_loom_intake_references::ExtractedReference;
 use intake_model::results::{Capture, StoredResult};
-use llm_core::{
-    BoxFuture, Cancel, Error, Item, Model, StreamEvent, StreamSink, ToolChoice, ToolName, ToolSpec,
-    TurnRequest,
-};
+use llm_core::{BoxFuture, Cancel, Error, Model, StreamSink, TurnOutcome, TurnRequest};
 use serde_json::Value;
+
+pub use b10x_loom_executor::model_selector::{
+    ARGUMENTS_TOOL, ArgumentsError, NO_ACTION, SELECT_TOOL,
+};
 
 use crate::context::{
     CHECKPOINT_TARGET, CHECKPOINT_TRIGGER, ContextPolicy, REQUEST_CEILING, WorkingContext,
@@ -55,14 +58,28 @@ use crate::context_metrics::ContextMetrics;
 use crate::executor::{Report, WRITES, arguments_schema};
 use crate::results::{ResultStore, reference_schema};
 
-/// The tool the selector publishes.
-pub const SELECT_TOOL: &str = "select_action";
-/// The tool the generator publishes.
-pub const ARGUMENTS_TOOL: &str = "action_arguments";
+/// Loom's selector, choosing with a model told the slice's [`Briefing`].
+pub type ModelSelector<'m> = chooser::ModelSelector<'m, Briefing>;
 
-/// The selector's `Unavailable` message for a selection call that names no action: the model
-/// answered, unusably, rather than failing to answer.
-pub const NO_ACTION: &str = "the model's selection names no action";
+/// Loom's argument generator, writing arguments with a model told the slice's [`Briefing`]: its
+/// [`arguments`](chooser::ModelArguments::arguments) answers every stored-result lookup the model
+/// makes within the exchange, and expands edit contents ([`Briefing::resolve_arguments`]) before
+/// it returns.
+pub type ModelArguments<'m> = chooser::ModelArguments<'m, Briefing>;
+
+/// Sends `request` to `model` with the slice's caller retries: at most three identical attempts,
+/// on llm's retry classification, none after the turn offered a stream event, the backoff
+/// cancellation-aware. Every request of the slice's selector and generator is sent through it.
+pub fn send_with_retries<'a>(
+    model: &'a dyn Model,
+    request: &'a TurnRequest,
+    sink: &'a mut dyn StreamSink,
+    cancel: &'a Cancel,
+) -> BoxFuture<'a, Result<TurnOutcome, Error>> {
+    Box::pin(crate::model_retry::turn_with_retries(
+        model, request, sink, cancel,
+    ))
+}
 
 /// The most bytes of one transcript entry the model is shown.
 const ENTRY_LIMIT: usize = 16 * 1024;
@@ -169,7 +186,7 @@ impl Briefing {
         self
     }
 
-    fn selection_instructions(&self) -> &'static str {
+    fn select_prompt(&self) -> &'static str {
         if self.brief().query {
             "Choose the next read-only system query action from the admitted candidates. Call select_action. Only a tool observation can answer the query; never invent a clock reading."
         } else {
@@ -177,7 +194,7 @@ impl Briefing {
         }
     }
 
-    fn argument_instructions(&self) -> &'static str {
+    fn argument_prompt(&self) -> &'static str {
         if self.brief().query {
             "Generate arguments for the selected read-only system query tool. system.time.read takes exactly an empty object. Never supply an observation, timestamp or evidence as an argument."
         } else {
@@ -386,7 +403,7 @@ impl Briefing {
             return Err(error);
         }
         let build = |brief: &Brief| {
-            make_request(
+            chooser::request(
                 model,
                 instructions,
                 format!("{}{suffix}{views}", Self::text_of_brief(brief)),
@@ -448,7 +465,8 @@ impl Briefing {
             let request = self
                 .bounded_request(model, &instructions, suffix, tool, &schema, &views)
                 .map_err(ArgumentsError::Unavailable)?;
-            let answer = ask_request(model, request, tool).map_err(ArgumentsError::Unavailable)?;
+            let answer = chooser::answer(model, self, &request, tool)
+                .map_err(|error| ArgumentsError::Unavailable(error.to_string()))?;
             if !is_lookup(&answer) {
                 return Ok(answer);
             }
@@ -531,12 +549,6 @@ impl Briefing {
         Ok(arguments)
     }
 
-    /// The briefing as text for the model.
-    fn text(&self) -> String {
-        let brief = self.brief();
-        Self::text_of_brief(&brief)
-    }
-
     fn text_of_brief(brief: &Brief) -> String {
         let mut text = format!("Intent:\n{}\n\nReferences in the intent:\n", brief.intent);
         if brief.references.is_empty() {
@@ -564,181 +576,91 @@ impl Briefing {
     }
 }
 
-/// Loom's selector, choosing with a model.
-pub struct ModelSelector<'m> {
-    model: &'m dyn Model,
-    briefing: Briefing,
-}
-
-impl<'m> ModelSelector<'m> {
-    /// A selector that asks `model`, telling it `briefing`.
-    pub fn new(model: &'m dyn Model, briefing: Briefing) -> Self {
-        Self { model, briefing }
+impl chooser::Briefing for Briefing {
+    /// The intent, its references, and the transcript so far or, with bounded context, the
+    /// working context.
+    fn text(&self) -> String {
+        let brief = self.brief();
+        Self::text_of_brief(&brief)
     }
-}
 
-impl ActionSelector for ModelSelector<'_> {
-    fn select(
-        &self,
-        _context: &SelectionContext,
-        candidates: &[CatalogueEntry],
-    ) -> Result<Choice, SelectorError> {
-        if candidates.is_empty() {
-            return Err(SelectorError::NothingAdmissible);
+    fn selection_instructions(&self) -> String {
+        self.select_prompt().to_owned()
+    }
+
+    fn argument_instructions(&self) -> String {
+        self.argument_prompt().to_owned()
+    }
+
+    /// The action's own schema, its edit contents also taking a composition of stored results,
+    /// or a stored-result lookup instead.
+    fn arguments_schema(&self, action: &str) -> Value {
+        reference_arguments_schema(action)
+    }
+
+    /// [`send_with_retries`].
+    fn send<'a>(
+        &'a self,
+        model: &'a dyn Model,
+        request: &'a TurnRequest,
+        sink: &'a mut dyn StreamSink,
+        cancel: &'a Cancel,
+    ) -> BoxFuture<'a, Result<TurnOutcome, Error>> {
+        send_with_retries(model, request, sink, cancel)
+    }
+
+    /// One selection request; with bounded context, an exchange in which every history or result
+    /// lookup the model makes is answered.
+    fn select(&self, model: &dyn Model, candidates: &str, schema: Value) -> Result<Value, String> {
+        if self.bounded() {
+            return self
+                .exchange(model, self.select_prompt(), candidates, SELECT_TOOL, schema)
+                .map_err(|error| error.to_string());
         }
-        let mut suffix = "\nCandidate actions:\n".to_owned();
-        for candidate in candidates {
-            let status = match candidate.status {
-                CatalogueEntryStatus::Admissible => "admissible",
-                CatalogueEntryStatus::ApprovalRequired => "needs approval",
-            };
-            let _ = writeln!(suffix, "- {} ({status})", candidate.action);
-        }
-        let actions: Vec<&str> = candidates
-            .iter()
-            .map(|entry| entry.action.as_str())
-            .collect();
-        let schema = serde_json::json!({
-            "type": "object",
-            "properties": {"action": {"type": "string", "enum": actions}},
-            "required": ["action"],
-            "additionalProperties": false
-        });
-        let answer = if self.briefing.bounded() {
-            self.briefing
-                .exchange(
-                    self.model,
-                    self.briefing.selection_instructions(),
-                    &suffix,
-                    SELECT_TOOL,
-                    schema,
-                )
-                .map_err(|error| SelectorError::Unavailable(error.to_string()))?
-        } else {
-            ask(
-                self.model,
-                self.briefing.selection_instructions(),
-                format!("{}{suffix}", self.briefing.text()),
-                SELECT_TOOL,
-                "Choose the next action from the candidates.",
-                schema,
-            )
-            .map_err(SelectorError::Unavailable)?
-        };
-        let action = answer
-            .get("action")
-            .and_then(Value::as_str)
-            .ok_or_else(|| SelectorError::Unavailable(NO_ACTION.to_owned()))?;
-        Ok(Choice {
-            action: action.to_owned(),
-            confidence: None,
-        })
+        select_once(self, model, candidates, schema).map_err(|error| error.to_string())
     }
 
-    fn strategy(&self) -> SelectionStrategy {
-        SelectionStrategy::ReasoningModel
-    }
-}
-
-/// Loom's argument generator, writing arguments with a model.
-pub struct ModelArguments<'m> {
-    model: &'m dyn Model,
-    briefing: Briefing,
-}
-
-impl<'m> ModelArguments<'m> {
-    /// A generator that asks `model`, telling it `briefing`.
-    pub fn new(model: &'m dyn Model, briefing: Briefing) -> Self {
-        Self { model, briefing }
-    }
-}
-
-/// Why [`ModelArguments`] has no arguments for the selected action.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ArgumentsError {
-    /// The model could not be asked or gave no usable call: Loom suspends for external
-    /// availability.
-    Unavailable(String),
-    /// The model answered, and its answer cannot become the action's arguments: edit contents
-    /// that do not resolve, or a stored-result lookup after the last one allowed. Nothing is
-    /// proposed. [`crate::run`] refuses the step and records the reason in the briefing.
-    Refused(String),
-}
-
-impl fmt::Display for ArgumentsError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Unavailable(why) | Self::Refused(why) => f.write_str(why),
-        }
-    }
-}
-
-impl ModelArguments<'_> {
-    /// The arguments of `entry`, or why there are none. Every lookup the model makes is answered
+    /// The arguments of `action`, or why there are none. Every lookup the model makes is answered
     /// within this exchange, a failed one as `lookup_failed`. The answer that is not a lookup is
     /// expanded ([`Briefing::resolve_arguments`]) before it is returned.
     ///
     /// # Errors
     /// [`ArgumentsError::Refused`] when edit contents do not resolve or the model asks for a
-    /// ninth lookup; [`ArgumentsError::Unavailable`] when the model cannot be asked, gives no
-    /// call, or writes arguments Commission's JSON cannot carry.
-    pub fn arguments(
-        &self,
-        _context: &ArgumentContext,
-        entry: &CatalogueEntry,
-    ) -> Result<json::Value, ArgumentsError> {
-        if self.briefing.bounded() {
-            let answer = self.briefing.exchange(
-                self.model,
-                self.briefing.argument_instructions(),
-                &format!("\nSelected action: {}\n", entry.action),
+    /// ninth lookup; [`ArgumentsError::Unavailable`] when the model cannot be asked or gives no
+    /// call.
+    fn arguments(&self, model: &dyn Model, action: &str) -> Result<Value, ArgumentsError> {
+        if self.bounded() {
+            let answer = self.exchange(
+                model,
+                self.argument_prompt(),
+                &format!("\nSelected action: {action}\n"),
                 ARGUMENTS_TOOL,
-                reference_arguments_schema(&entry.action),
+                reference_arguments_schema(action),
             )?;
-            let resolved = self
-                .briefing
-                .resolve_arguments(&entry.action, answer)
-                .map_err(|error| {
-                    ArgumentsError::Refused(format!("the edit contents do not resolve: {error}"))
-                })?;
-            return json::parse(&resolved.to_string()).map_err(|error| {
-                ArgumentsError::Unavailable(format!(
-                    "the model's arguments are not JSON: {error:?}"
-                ))
+            return self.resolve_arguments(action, answer).map_err(|error| {
+                ArgumentsError::Refused(format!("the edit contents do not resolve: {error}"))
             });
         }
-        let mut text = self.briefing.text();
-        let _ = writeln!(text, "\nSelected action: {}", entry.action);
+        let mut text = chooser::Briefing::text(self);
+        let _ = writeln!(text, "\nSelected action: {action}");
         let base = text;
         let mut selected_views = String::new();
         let mut data_bytes = 0;
         let mut lookup = 0;
         loop {
-            let answer = ask(
-                self.model,
-                self.briefing.argument_instructions(),
+            let answer = chooser::ask(
+                model,
+                self,
+                self.argument_prompt(),
                 format!("{base}{selected_views}"),
                 ARGUMENTS_TOOL,
-                &format!(
-                    "The arguments of `{}`, or a stored-result lookup.",
-                    entry.action
-                ),
-                reference_arguments_schema(&entry.action),
+                &format!("The arguments of `{action}`, or a stored-result lookup."),
+                reference_arguments_schema(action),
             )
-            .map_err(ArgumentsError::Unavailable)?;
+            .map_err(|error| ArgumentsError::Unavailable(error.to_string()))?;
             if answer.get("$read_result").is_none() && answer.get("$list_results").is_none() {
-                let resolved = self
-                    .briefing
-                    .resolve_arguments(&entry.action, answer)
-                    .map_err(|error| {
-                        ArgumentsError::Refused(format!(
-                            "the edit contents do not resolve: {error}"
-                        ))
-                    })?;
-                return json::parse(&resolved.to_string()).map_err(|error| {
-                    ArgumentsError::Unavailable(format!(
-                        "the model's arguments are not JSON: {error:?}"
-                    ))
+                return self.resolve_arguments(action, answer).map_err(|error| {
+                    ArgumentsError::Refused(format!("the edit contents do not resolve: {error}"))
                 });
             }
             if lookup == MAX_LOOKUPS {
@@ -747,7 +669,7 @@ impl ModelArguments<'_> {
                      {MAX_LOOKUPS} allowed"
                 )));
             }
-            self.briefing.brief().metrics.retrieval();
+            self.brief().metrics.retrieval();
             let view = match self.look_up(&answer, lookup) {
                 Ok((view, bytes)) if data_bytes + bytes <= LOOKUP_DATA_BYTES => {
                     data_bytes += bytes;
@@ -768,7 +690,9 @@ impl ModelArguments<'_> {
             lookup += 1;
         }
     }
+}
 
+impl Briefing {
     /// One lookup's answer and the bytes of its data after JSON escaping: the selected text for
     /// `$read_result`, the catalogue page for `$list_results`. Errors echo no model input.
     fn look_up(&self, request: &Value, lookup: usize) -> Result<(Value, usize), String> {
@@ -776,7 +700,7 @@ impl ModelArguments<'_> {
             return Err("a result lookup must contain only $read_result or $list_results".into());
         }
         if let Some(reference) = request.get("$read_result") {
-            let text = self.briefing.read_result(reference)?;
+            let text = self.read_result(reference)?;
             let bytes = Value::from(text.as_str()).to_string().len() - 2;
             return Ok((
                 serde_json::json!({"lookup": lookup, "selected_text": text}),
@@ -787,22 +711,9 @@ impl ModelArguments<'_> {
             .as_u64()
             .and_then(|offset| usize::try_from(offset).ok())
             .ok_or("result listing offset must be a nonnegative integer")?;
-        let page = self.briefing.brief().results.list_results(offset, 8);
+        let page = self.brief().results.list_results(offset, 8);
         let bytes = page.to_string().len();
         Ok((page, bytes))
-    }
-}
-
-impl ArgumentGenerator for ModelArguments<'_> {
-    /// [`ModelArguments::arguments`], its error as text: Loom suspends on either kind.
-    /// [`crate::run`] calls `arguments` itself to refuse the step on a refused answer instead.
-    fn generate(
-        &self,
-        context: &ArgumentContext,
-        entry: &CatalogueEntry,
-    ) -> Result<json::Value, String> {
-        self.arguments(context, entry)
-            .map_err(|error| error.to_string())
     }
 }
 
@@ -908,65 +819,6 @@ fn recorded_arguments(proposal: &ExecutorOutcomeProposedAction) -> String {
     value.to_string()
 }
 
-/// The arguments of the model's forced call of `tool`, asked with `instructions` and `text`.
-fn ask(
-    model: &dyn Model,
-    instructions: &str,
-    text: String,
-    tool: &str,
-    description: &str,
-    schema: Value,
-) -> Result<Value, String> {
-    ask_request(
-        model,
-        make_request(model, instructions, text, tool, description, schema)?,
-        tool,
-    )
-}
-
-fn make_request(
-    model: &dyn Model,
-    instructions: &str,
-    text: String,
-    tool: &str,
-    description: &str,
-    schema: Value,
-) -> Result<TurnRequest, String> {
-    let name = ToolName::new(tool).map_err(|error| error.to_string())?;
-    let mut request = TurnRequest::new(model.provenance().model.as_str(), vec![Item::user(text)]);
-    instructions.clone_into(&mut request.instructions);
-    request.tools = vec![ToolSpec {
-        name: name.clone(),
-        description: description.to_owned(),
-        input_schema: schema,
-    }];
-    request.tool_choice = ToolChoice::Named(name.clone());
-    Ok(request)
-}
-
-fn ask_request(model: &dyn Model, request: TurnRequest, tool: &str) -> Result<Value, String> {
-    let name = ToolName::new(tool).map_err(|error| error.to_string())?;
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| format!("no runtime for the model turn: {error}"))?;
-    let cancel = Cancel::new();
-    let mut sink = Discard;
-    let outcome = runtime
-        .block_on(crate::model_retry::turn_with_retries(
-            model, &request, &mut sink, &cancel,
-        ))
-        .map_err(|error| error.to_string())?;
-    outcome
-        .validate_for(&request, model.provenance())
-        .map_err(|error| error.to_string())?;
-    outcome
-        .tool_calls()
-        .find(|call| call.name == name)
-        .map(|call| call.arguments.clone())
-        .ok_or_else(|| format!("the model did not call `{tool}`"))
-}
-
 /// The arguments as compact JSON text.
 fn text_of(value: &json::Value) -> String {
     match value {
@@ -988,19 +840,11 @@ fn text_of(value: &json::Value) -> String {
     }
 }
 
-/// A sink that drops the stream: only the turn's outcome is read.
-struct Discard;
-
-impl StreamSink for Discard {
-    fn emit(&mut self, _event: StreamEvent) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Ok(()) })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use b10x_loom_commission::model::responsibility::ProposedActionArguments;
+    use b10x_loom_executor::model_selector::Briefing as _;
 
     #[test]
     fn retention_failure_keeps_a_readable_non_referenceable_preview() {

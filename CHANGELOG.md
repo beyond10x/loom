@@ -40,6 +40,29 @@ unchanged. The new `b10x-loom-intake-conformance` runs that suite against
 story also asks for is not declared yet.
 Breaking: none.
 
+A plugin turn runs on Loom's chooser path over an llm `Model` instead of the ported harness loop
+(`story:chooser-executor-for-plugin-turns`). Each step selects one action from the frontier,
+narrowed to the projection's actions, with one forced `select_action` request, then writes its
+arguments with one forced `action_arguments` request, and `DataSourceEffects` performs it after
+Commission's revalidation as before. Both requests carry what the turn did so far, its reads'
+answers included, as one `<earlier-steps>` data block no value can close; the item's text, id and
+revision and what `operations describe` reports are quoted with `<`, `>` and `&` escaped, so none
+opens or closes one. The llm-backed selector
+and argument generator move from the intake slice to `b10x_loom_executor::model_selector`
+(`ModelSelector`, `ModelArguments`, `ArgumentsError`), told a host's `Briefing`; the executor now
+links `b10x-llm-core`. `b10x_loom_intake_slice::selector` keeps every path it had, `ModelSelector`
+and `ModelArguments` as aliases over its own `Briefing`, and adds `send_with_retries`, the slice's
+caller retries a plugin turn now sends with. `b10x-loom plugin run` hands each turn the agent's llm
+`Model` and builds no `LlmModelPort`. `TURN_MODEL_BUDGET` is 16, two requests per step. A model
+that answers a turn's request without a usable call (a refusal, a content filter, text only, an
+answer llm refuses) ends the turn `stopped`, as the ported loop did, and the host goes on to the
+next item; only a request the model never answered is `PluginError::Unavailable`. The executor's
+`model_selector::answer`, `ask`, `select_once` and `arguments_once` say which with `AskError`.
+Breaking: `b10x_loom_plugin::TurnModel` holds `model: Arc<dyn llm_core::Model>` instead of a
+harness `ModelPort` and a model name, so a plugin that supplies its own turn model hands an llm
+`Model`; a turn's requests are a selection and an argument request per step instead of one request
+publishing every action as a tool. `loom_sdk` paths are unchanged.
+
 ## [0.29.0] - 2026-10-20
 
 Loom 0.29.0 says what stopped a run and lets effects and executors report more. A run that ends

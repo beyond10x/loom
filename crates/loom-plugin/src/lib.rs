@@ -27,7 +27,8 @@
 //!
 //! The turn is a thin caller of Commission's `run_until_blocked` through `loom_sdk`: a
 //! `CanonGovernor` over [`ProtocolCatalog::plugins`](loom_sdk::ProtocolCatalog::plugins) on
-//! [`PROTOCOL`], Loom's governed model loop selecting from the frontier, [`PluginAuthority`]
+//! [`PROTOCOL`], Loom's chooser path selecting from the frontier and then writing the selected
+//! action's arguments, each with one request to the turn's llm `Model`, [`PluginAuthority`]
 //! granting `datasource.read` and `reply.propose` and nothing else, and [`DataSourceEffects`]
 //! reading the projection's sources through the Connectors command line. Nothing is sent: a reply
 //! is a proposal in the record.
@@ -48,12 +49,12 @@ mod authority;
 use std::ffi::OsString;
 use std::fmt;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use llm_core::Model;
 use loom_sdk::connectors::cli::ConnectorsCli;
-use loom_sdk::loom::harness::wire::ModelPort;
 
 pub use authority::{GRANTED, PluginAuthority};
 pub use codec::{decode_record_line, encode_record_line};
@@ -134,12 +135,11 @@ impl fmt::Display for PluginError {
 
 impl std::error::Error for PluginError {}
 
-/// The model a turn runs on: a port of Loom's model loop and the model name its requests carry.
+/// The model a turn runs on: every selection and argument request of the turn is sent to it,
+/// naming its own model.
 pub struct TurnModel<'a> {
-    /// The model port.
-    pub port: Box<dyn ModelPort + 'a>,
-    /// The model name every request of the turn carries.
-    pub model: String,
+    /// The llm model.
+    pub model: Arc<dyn Model + 'a>,
 }
 
 /// What the host hands each hook: the configuration and a Connectors read client over its
