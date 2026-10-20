@@ -9,6 +9,18 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+A refused protocol registration names the registration its protocol id takes
+(`story:registration-name-protocol-id`). A catalog keeps one registration form, `name@major`, with
+lowercase letters, digits and hyphens before `@`, so
+`ProtocolCatalog::add_yaml("self.improvement@1", …)` is still refused; its refusal now says why and
+that protocol id `self.improvement/1` registers as `self-improvement@1`, dots and underscores as
+hyphens and `/<major>` as `@<major>`, the mapping the bundled catalog follows (`software.change/1`
+is `software-change@1`, `eval.gated_change/1` is `eval-gated-change@1`). The name is derived from
+the id and revision the definition declares when it parses, else from the registration given, and
+`protocols add` and `protocols remove`, which refuse before reading a definition, name it from the
+registration given. No bundled or stored registration changes.
+Breaking: none.
+
 ## [0.29.0] - 2026-10-20
 
 Loom 0.29.0 says what stopped a run and lets effects and executors report more. A run that ends

@@ -158,6 +158,11 @@ impl ProtocolCatalog {
         Ok(catalog)
     }
     /// Validate and add one host-selected definition. Duplicate identities always refuse.
+    ///
+    /// `name` is the registration, `name@major`: lowercase letters, digits and hyphens before `@`,
+    /// and the document's revision after it. A protocol id is not one; `self.improvement/1`
+    /// registers as `self-improvement@1`, as the bundled `software-change@1` holds
+    /// `software.change/1`, and a refused registration names the one its protocol id takes.
     pub fn add_yaml(
         &mut self,
         name: &str,
@@ -167,7 +172,17 @@ impl ProtocolCatalog {
         if self.entries.contains_key(name) {
             return Err(format!("duplicate protocol registration: {name}"));
         }
-        let major = registration_major(name)?;
+        let Some(major) = parse_registration(name) else {
+            let declared = (yaml.len() <= MAX_PROTOCOL_BYTES)
+                .then(|| b10x_canon::model::parse(yaml).ok())
+                .flatten();
+            return Err(registration_refusal(
+                name,
+                declared
+                    .as_ref()
+                    .map(|model| (model.protocol.id.as_str(), model.protocol.revision)),
+            ));
+        };
         if yaml.len() > MAX_PROTOCOL_BYTES {
             return Err("protocol document exceeds 1 MiB".into());
         }
@@ -205,11 +220,15 @@ impl ProtocolCatalog {
         self.entries.get(name)
     }
 }
+/// The major of `name`, refusing a registration that is not `name@major`. The refusal can read
+/// no definition, so it derives the registration it names from `name` itself.
 fn registration_major(name: &str) -> Result<u64, String> {
-    let invalid = || {
-        "protocol registration must be name@major (lowercase letters, digits and hyphens; positive canonical major)".to_owned()
-    };
-    let (stem, version) = name.split_once('@').ok_or_else(invalid)?;
+    parse_registration(name).ok_or_else(|| registration_refusal(name, None))
+}
+/// The major of a well-formed registration: lowercase letters, digits and hyphens before `@`,
+/// starting with a letter, at most 100 bytes, then a positive canonical major.
+fn parse_registration(name: &str) -> Option<u64> {
+    let (stem, version) = name.split_once('@')?;
     if stem.is_empty()
         || stem.len() > 100
         || !stem.as_bytes()[0].is_ascii_lowercase()
@@ -217,13 +236,44 @@ fn registration_major(name: &str) -> Result<u64, String> {
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
     {
-        return Err(invalid());
+        return None;
     }
-    let major: u64 = version.parse().map_err(|_| invalid())?;
-    if major == 0 || major.to_string() != version {
-        return Err(invalid());
+    let major: u64 = version.parse().ok()?;
+    (major != 0 && major.to_string() == version).then_some(major)
+}
+/// The registration the catalog gives protocol `id` at `revision`, as the bundled catalog does
+/// (`software.change/1` is `software-change@1`): dots and underscores become hyphens and
+/// `/<major>` becomes `@<major>`. `None` when the result is still no registration.
+fn registration_for(id: &str, revision: &str) -> Option<String> {
+    let name = format!("{}@{revision}", id.replace(['.', '_'], "-"));
+    parse_registration(&name).map(|_| name)
+}
+/// Why `name` is no registration, naming the registration its protocol id takes: the id and
+/// revision the definition declares when it was read (`declared`), else the id `name` spells
+/// before its last `@` (or `/`) with the major after it.
+fn registration_refusal(name: &str, declared: Option<(&str, u64)>) -> String {
+    let (id, revision) = match declared {
+        Some((id, revision)) => (id.to_owned(), revision.to_string()),
+        None => {
+            let (id, revision) = name
+                .rsplit_once('@')
+                .or_else(|| name.rsplit_once('/'))
+                .unwrap_or((name, ""));
+            (id.to_owned(), revision.to_owned())
+        }
+    };
+    let rule = format!(
+        "protocol registration must be name@major (lowercase letters, digits and hyphens before @; \
+         a positive canonical major after it), not {name:?}"
+    );
+    let mapping = "its dots and underscores as hyphens and /<major> as @<major>, as the bundled \
+                   software-change@1 holds software.change/1";
+    match registration_for(&id, &revision) {
+        Some(expected) => {
+            format!("{rule}: protocol id {id}/{revision} registers as {expected}, {mapping}")
+        }
+        None => format!("{rule}: a protocol id registers with {mapping}"),
     }
-    Ok(major)
 }
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
