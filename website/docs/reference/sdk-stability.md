@@ -65,6 +65,7 @@ implements it through.
 | `ConnectorInvoker` | `loom_sdk::commission::ports::connector::ConnectorInvoker` | Invoking the connector operation an action is bound to |
 | `ObservationPort` | `loom_sdk::commission::ports::evidence::ObservationPort` | Receiving the observations a run reports |
 | `EvidencePort` | `loom_sdk::commission::ports::evidence::EvidencePort` | Receiving evidence attributed to its producer |
+| `AgentExecutor` | `loom_sdk::commission::ports::executor::AgentExecutor` | What an executor proposes for one frontier of its commission (`run`); the runtime calls the provided `run_with_usage`, which returns `run`'s outcome with no usage unless the host overrides it to report what the call spent |
 | `ActionSelector` | `loom_sdk::loom::selection::ActionSelector` | Picking one action from the catalogue |
 | `WorkflowRunStore` | `loom_sdk::loom::workflow::WorkflowRunStore` | Durable storage of a workflow run's record, so the run resumes after a restart |
 | `ArgumentGenerator` | `loom_sdk::loom::arguments::ArgumentGenerator` | Arguments for the selected action only |
@@ -136,7 +137,7 @@ Rows marked *generated* are generated model types or modules, outside the promis
 | `loom_sdk::commission::ports::effect::EffectError` | type |
 | `loom_sdk::commission::ports::effect::EffectPort` | port |
 | `loom_sdk::commission::ports::evidence::submit_evidence` | function |
-| `loom_sdk::commission::ports::executor::AgentExecutor` | trait |
+| `loom_sdk::commission::ports::executor::AgentExecutor` | port |
 | `loom_sdk::commission::ports::governor::Governor` | trait |
 | `loom_sdk::governor::CaseState` | type |
 | `loom_sdk::governor::FallibleCaseStore` | port |

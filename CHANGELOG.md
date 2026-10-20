@@ -99,6 +99,15 @@ selector or generator by handing it the metered model; `RunMeter::new` takes the
 `b10x_loom_executor` and `b10x_loom_executor::selection`, replaced by
 `model_selector::ModelSelector` told a host's `Briefing`.
 
+The SDK stability page lists `AgentExecutor` among the ports a host implements
+(`story:agent-executor-host-port`), at `loom_sdk::commission::ports::executor::AgentExecutor`: a
+host implements `run`, and the runtime calls the provided `run_with_usage`, which returns `run`'s
+outcome with no usage unless the host overrides it. `crates/loom-sdk/tests/host_ports.rs`
+implements it through `loom_sdk` alone and calls `run_with_usage` once, so a release that changes
+either method names it under `Breaking:`. Its row among the paths control-plane imports stays, its
+kind now `port` as for the other ports there. The trait does not change.
+Breaking: none.
+
 ## [0.29.0] - 2026-10-20
 
 Loom 0.29.0 says what stopped a run and lets effects and executors report more. A run that ends
