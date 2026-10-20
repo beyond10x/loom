@@ -267,8 +267,10 @@ fn registration_refusal(name: &str, declared: Option<(&str, u64)>) -> String {
             (id.to_owned(), revision.to_owned())
         }
     };
-    let rule =
-        format!("protocol registration must be name@major ({REGISTRATION_RULE}), not {name:?}");
+    let rule = format!(
+        "protocol registration must be name@major ({REGISTRATION_RULE}), not {}",
+        echo(name)
+    );
     let mapping = "its dots and underscores as hyphens and /<major> as @<major>, as the bundled \
                    software-change@1 holds software.change/1";
     match registration_for(&id, &revision) {
@@ -277,6 +279,24 @@ fn registration_refusal(name: &str, declared: Option<(&str, u64)>) -> String {
         }
         None => format!("{rule}: a protocol id registers with {mapping}"),
     }
+}
+/// How many bytes of a refused name its refusal echoes.
+const ECHOED_BYTES: usize = 120;
+/// `text` quoted with its control and format characters escaped, at most [`ECHOED_BYTES`] of it,
+/// cut on a character boundary and marked when cut, so a refusal's length is bounded.
+fn echo(text: &str) -> String {
+    if text.len() <= ECHOED_BYTES {
+        return format!("{text:?}");
+    }
+    let mut end = ECHOED_BYTES;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!(
+        "{:?}… (cut to its first {end} of {} bytes)",
+        &text[..end],
+        text.len()
+    )
 }
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
