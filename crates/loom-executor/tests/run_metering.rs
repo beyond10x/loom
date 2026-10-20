@@ -7,6 +7,11 @@
 //! Every model here is a scripted `ModelPort` that counts its own `turn` calls; nothing calls a
 //! live model or the network. The case is open at revision 1 and lists one admissible action,
 //! `repository.edit`, which the effect port performs; the step budget ends the run.
+//!
+//! An executor that is not a model loop reports what each call spent
+//! (`AgentExecutor::run_with_usage`, `story:executor-reports-usage`): the meter shows it as that
+//! step's usage, the steps still sum to the run, and an executor metered at its model port reports
+//! none, so nothing is counted twice.
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -20,8 +25,9 @@ use b10x_loom_commission::model::primitives::{Timestamp, Uuid as CommissionUuid}
 use b10x_loom_commission::model::responsibility::{
     ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, CaseId, Commission,
     CommissionData, CommissionId, CompletionDetermination, EffectOutcome, EffectOutcomePerformed,
-    ExecutorOutcome, Frontier, FrontierAction, FrontierData, FrontierId, FrontierObligation,
-    GovernorError, Observation, ObservationId, PrincipalId, RunId, Unit, commission_state,
+    ExecutorOutcome, ExecutorOutcomeProposedAction, ExecutorStep, ExecutorUsage, Frontier,
+    FrontierAction, FrontierData, FrontierId, FrontierObligation, GovernorError, Observation,
+    ObservationId, PrincipalId, ProposedActionArguments, RunId, Unit, commission_state,
     frontier_state, observation_state,
 };
 use b10x_loom_commission::outcome::RunStore;
@@ -642,4 +648,178 @@ fn a_failed_turn_is_a_call_without_usage() {
         (0, 0, 0),
         "and it adds no tokens: {report:?}"
     );
+}
+
+/// What each call of [`Session`] reports it spent: 1,000 input and 50 output tokens over two
+/// seconds, at a cost of 300 micro-US-dollars.
+fn session_usage() -> ExecutorUsage {
+    ExecutorUsage {
+        input_tokens: 1000,
+        output_tokens: 50,
+        duration_ms: 2000,
+        cost_micro_usd: Some(300),
+    }
+}
+
+/// An executor over an agent session, not a model loop: it calls no model port of the run, proposes
+/// the edit, and reports [`session_usage`] as what each call spent. With `port`, each call also
+/// makes one turn through it, which the meter counts as a model call.
+struct Session {
+    port: Option<Mutex<MeteredModelPort<Port>>>,
+}
+
+impl AgentExecutor for Session {
+    fn run(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorOutcome {
+        self.run_with_usage(commission, frontier).outcome
+    }
+
+    fn run_with_usage(
+        &self,
+        _commission: &Commission<commission_state::Assigned>,
+        _frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorStep {
+        if let Some(port) = &self.port {
+            let request = turn_request("Answer.", "go");
+            let answered = port
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .turn(&request, &mut VecSink::new());
+            assert!(answered.is_ok(), "the scripted turn answers");
+        }
+        ExecutorStep {
+            outcome: ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
+                action: EDIT.to_owned(),
+                arguments: ProposedActionArguments(CommissionValue::Object(Vec::new())),
+            }),
+            usage: Some(session_usage()),
+        }
+    }
+}
+
+#[test]
+fn a_non_model_executor_usage_is_its_step_usage() {
+    // No rate card: the session priced its own calls, and nothing else needed a price.
+    let meter = RunMeter::new(None);
+    let executor = MeteredExecutor::new(Session { port: None }, &meter);
+
+    let end = run(&executor, 2);
+    meter.charge_effects(&end.charges);
+    let report = meter.report(&end.run_id);
+
+    assert_eq!(
+        report
+            .steps
+            .iter()
+            .map(|step| (
+                step.step,
+                step.model_calls,
+                step.input_tokens,
+                step.output_tokens,
+                step.cached_input_tokens,
+                step.cost_micro_usd
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (1, 0, 1000, 50, 0, Some(300)),
+            (2, 0, 1000, 50, 0, Some(300))
+        ],
+        "each executor call's usage is its step's usage, and no model call: {report:?}"
+    );
+    assert_eq!(
+        (
+            report.model_calls,
+            report.input_tokens,
+            report.output_tokens,
+            report.cost_micro_usd
+        ),
+        (0, 2000, 100, Some(600)),
+        "the steps sum to the run: {report:?}"
+    );
+    assert_eq!(
+        end.charges.run.input_tokens, 2000,
+        "the runtime charged the same usage to the run"
+    );
+    assert_eq!(
+        (
+            report.effects.input_tokens,
+            report.effects.output_tokens,
+            report.effects.cost_micro_usd
+        ),
+        (0, 0, Some(0)),
+        "the report's effect usage holds what the effects reported, so the executor's usage is \
+         counted once, in its steps: {report:?}"
+    );
+}
+
+#[test]
+fn a_step_sums_its_metered_turns_and_the_usage_its_executor_reports() {
+    let port = Port::new([], |_| Ok(prose()));
+    let meter = RunMeter::new(Some(card(MODEL)));
+    let executor = MeteredExecutor::new(
+        Session {
+            port: Some(Mutex::new(MeteredModelPort::new(port.clone(), &meter))),
+        },
+        &meter,
+    );
+
+    let end = run(&executor, 1);
+    let report = meter.report(&end.run_id);
+
+    assert_eq!(port.seen(), 1);
+    assert_eq!(report.steps.len(), 1, "{report:?}");
+    let step = &report.steps[0];
+    assert_eq!(step.model_calls, 1, "only the metered turn is a model call");
+    assert_eq!(
+        (
+            step.input_tokens,
+            step.output_tokens,
+            step.cached_input_tokens
+        ),
+        (
+            i64::try_from(INPUT).expect("small") + 1000,
+            i64::try_from(OUTPUT).expect("small") + 50,
+            i64::try_from(CACHED).expect("small")
+        ),
+        "the turn's tokens and the reported ones: {step:?}"
+    );
+    assert_eq!(
+        step.cost_micro_usd,
+        Some(TURN_MICRO_USD + 300),
+        "the priced turn and the reported cost: {step:?}"
+    );
+    assert_eq!(report.cost_micro_usd, step.cost_micro_usd);
+}
+
+#[test]
+fn an_executor_metered_at_its_model_port_reports_no_usage_and_is_counted_once() {
+    let port = Port::new([], selects_edit);
+    let meter = RunMeter::new(Some(card(MODEL)));
+    let executor = MeteredExecutor::new(reasoning_loom(&port, &meter), &meter);
+
+    let end = run(&executor, 2);
+    meter.charge_effects(&end.charges);
+    let report = meter.report(&end.run_id);
+
+    let seen = i64::try_from(port.seen()).expect("a small count");
+    assert_eq!(report.model_calls, seen, "{report:?}");
+    assert_eq!(
+        report.input_tokens,
+        seen * i64::try_from(INPUT).expect("small"),
+        "each turn's tokens are counted once, at the port: {report:?}"
+    );
+    assert_eq!(report.cost_micro_usd, Some(seen * TURN_MICRO_USD));
+    assert_eq!(
+        (
+            end.charges.run.input_tokens,
+            end.charges.run.output_tokens,
+            end.charges.run.cost_micro_usd
+        ),
+        (0, 0, Some(0)),
+        "the executor reports no usage, so its turns are charged nowhere a second time"
+    );
+    assert_eq!(report.effects.input_tokens, 0, "{report:?}");
 }
