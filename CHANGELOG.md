@@ -25,6 +25,21 @@ registration for one input and the named registration installs; `protocols remov
 No bundled or stored registration changes.
 Breaking: none.
 
+Loom's ESS counts metering at llm's `Model` and holds intake to a conformance suite
+(`story:ess-covers-agent-sessions-and-intake`). `ess/domains/metering.yaml` counts a call as one
+`turn` of the llm `Model` the run's executor and selectors call, through the metered wrapper in
+`crates/loom-executor/src/metering.rs`, and names no harness path; its types, and so the generated
+model, do not change. `ess/intake/` declares what keeping a resume context does
+(`intake.routing.KeepResumeContext`: kept once, `already-kept` on a second, `config-and-catalog`
+for a context naming both, `storage-failed`) and the views `ResumeContexts` and `MergeHandoffs`,
+so synthesis over it writes 11 scenarios with 0 refusals where it refused 2.
+`ResumeContextStore::keep_context` answers the command with its declared outcome; `keep` is
+unchanged. The new `b10x-loom-intake-conformance` runs that suite against
+`b10x-loom-intake-slice`'s stores and reads the verdict from the report by Commission's rules;
+`task intake-conform` runs it, and `task check` runs that task. The `loom.session` domain this
+story also asks for is not declared yet.
+Breaking: none.
+
 ## [0.29.0] - 2026-10-20
 
 Loom 0.29.0 says what stopped a run and lets effects and executors report more. A run that ends
