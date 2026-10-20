@@ -737,3 +737,19 @@ fn every_connectors_path_on_the_page_resolves() {
         assert!(listed.contains(path), "the page lists {path}");
     }
 }
+
+/// A host reads the `canon-decision/1` document behind a case's frontier through
+/// `loom_sdk::CanonGovernor` alone; the page's `loom_sdk::CanonGovernor` row covers the method.
+#[test]
+fn a_host_reads_the_decision_document_through_loom_sdk() {
+    use loom_sdk::commission::model::responsibility::{CaseId, GovernorError};
+
+    let governor = loom_sdk::CanonGovernor::new(loom_sdk::MemoryCaseStore::default());
+    let document: Result<loom_sdk::governor::model::json::Value, GovernorError> =
+        loom_sdk::CanonGovernor::decision_document(&governor, &CaseId("case-1".into()));
+    assert_eq!(
+        document,
+        Err(GovernorError::UnknownCase),
+        "a case the governor does not hold has no document"
+    );
+}
