@@ -9,6 +9,27 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+Loom links llm 0.8.0 (`story:llm-080-pin`): every `b10x-llm-*` dependency names tag `0.8.0`, and
+`Cargo.lock` holds one version of each. Loom's own code does not change, and the requests it sends
+do not change byte for byte: llm 0.8.0 changes no request encoder, and the two new capability
+declarations are not written at their defaults. What a Loom host sees of llm 0.8.0: `Capabilities`
+has two more public fields, `output_streaming` and `input_during_output`, so a full
+`Capabilities { … }` literal no longer compiles (Loom's four test doubles that wrote one now end
+with `..Capabilities::text(…)`); an `llm.routes/1` document or catalog that `run --config`,
+`run --catalog`, `loom_sdk::models::from_config` or `from_routes` reads may declare both, and one
+declaring `input_during_output: true` or `output_streaming: false` is refused (in a routes
+document, naming the route); a Responses failure `server_error` or `rate_limit_exceeded`, and a
+Messages stream error `overloaded_error` or `api_error`, that arrives before any output is now
+retriable, so the slice's model retry tries such a call up to three times where it stopped after
+the first, and through an llm-gateway that already retried it the slice may retry it again; a
+streamed Responses turn's assistant text is the text the sink was shown, with a `shown-text-kept`
+or `shown-text-unpaired` warning when the server's message said otherwise; text a Messages `text`
+block opens with reaches the sink as a `TextDelta` when the block opens; and `response.queued` is
+ignored, no longer an `unknown-stream-event` warning.
+Breaking: a host that links llm itself moves to llm 0.8.0 so it resolves one copy of each
+`b10x-llm-*` crate, and a full `Capabilities { … }` literal in it sets `output_streaming` and
+`input_during_output` or ends with `..Capabilities::text(…)`.
+
 ## [0.28.0] - 2026-10-20
 
 Loom 0.28.0 lets an effect port end a run, names the idle bound, and confines a child process a
