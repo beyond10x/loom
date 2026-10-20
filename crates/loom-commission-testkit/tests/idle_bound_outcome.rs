@@ -16,12 +16,14 @@ use b10x_loom_commission::model::responsibility::{
     ActionRequestData, ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext,
     AuthorityVerdict, AuthorityVerdictDeny, CaseId, Commission, CommissionData, CommissionId,
     EffectOutcome, EffectOutcomePerformed, ExecutorOutcome, ExecutorOutcomeCaseMoved,
-    ExecutorOutcomeProposedAction, FrontierAction, ObservationId, PrincipalId,
-    ProposedActionArguments, RunId, RunOutcome, RunOutcomeIdleBound, RunState, Unit,
-    commission_state,
+    ExecutorOutcomeProposedAction, ExecutorOutcomeProposedReads, FrontierAction, ObservationId,
+    PrincipalId, ProposedActionArguments, RunId, RunOutcome, RunOutcomeCompleted,
+    RunOutcomeIdleBound, RunState, Unit, commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
-use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
+use b10x_loom_commission::ports::effect::{
+    AdmittedRequest, EffectError, EffectPort, invoke_concurrently,
+};
 use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked};
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
 use b10x_loom_commission_testkit::fake_executor::ScriptedExecutor;
@@ -115,6 +117,22 @@ fn revalidation(case: &CaseId) -> Vec<GovernorCall> {
     ]
 }
 
+/// The governor calls that load the case after an idle iteration whose effect was performed,
+/// before the idle bound ends the run.
+fn after_a_performed_effect(case: &CaseId) -> Vec<GovernorCall> {
+    vec![
+        GovernorCall::CurrentRevision(case.clone()),
+        GovernorCall::Completion(case.clone()),
+    ]
+}
+
+/// A fan-out of the reads `search` and `fetch`, each with its own arguments.
+fn fan_out() -> ExecutorOutcome {
+    ExecutorOutcome::ProposedReads(ExecutorOutcomeProposedReads {
+        reads: vec![proposed("search"), proposed("fetch")],
+    })
+}
+
 /// New ids from counters starting at `0x500` and `0x600`, the one trusted time [`NOW`], and no
 /// step budget: the idle bound applies.
 #[derive(Debug)]
@@ -152,8 +170,9 @@ impl LoopContext for Context {
     }
 }
 
-/// A fake effect port that performs every action, moves no case, answers every invocation
-/// `Performed` with report `done <action>`, and records each request it was handed.
+/// A fake effect port that performs every action, reads `search` and `fetch`, moves no case,
+/// answers every invocation `Performed` with report `done <action>`, and records each request it
+/// was handed.
 #[derive(Default)]
 struct Effects {
     invoked: Mutex<Vec<ActionRequestData>>,
@@ -171,6 +190,18 @@ impl Effects {
 impl EffectPort for Effects {
     fn performs(&self, _action: &str) -> bool {
         true
+    }
+
+    fn reads(&self, action: &str) -> bool {
+        matches!(action, "search" | "fetch")
+    }
+
+    fn invoke_reads(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        requests: &[AdmittedRequest],
+    ) -> Option<Vec<Result<EffectOutcome, EffectError>>> {
+        Some(invoke_concurrently(self, commission, requests))
     }
 
     fn invoke(
@@ -321,7 +352,8 @@ fn a_frontier_that_admits_nothing_ends_as_no_admissible_action() {
 /// A request with the action and arguments of one already admitted in the Run is no progress,
 /// whatever the effect port answered for it: after the first, new, admission, two such
 /// iterations in a row end the run with the idle-bound outcome. Each request is admitted and
-/// performed once; nothing is refused.
+/// performed once; nothing is refused. The last repeat was performed, so the case is loaded once
+/// more before the bound ends the run, and it is still open.
 #[test]
 fn a_repeated_admission_counts_toward_the_idle_bound() {
     let case = CaseId("case-repeated-admission".to_owned());
@@ -364,11 +396,72 @@ fn a_repeated_admission_counts_toward_the_idle_bound() {
             revalidation(&case),
             iteration(&case),
             revalidation(&case),
+            after_a_performed_effect(&case),
         ]
-        .concat()
+        .concat(),
+        "the case is loaded after the last performed repeat, before the bound ends the run"
     );
     assert_eq!(end.steps, 2, "the third, idle, iteration ends the run");
     assert_eq!(stored_state(&runs, &end.run_id), RunState::Running);
+}
+
+/// A completed case comes before the idle bound across a fan-out too: an admitted fan-out of two
+/// reads, an idle step and the same fan-out again, a repeated admission and the second idle
+/// iteration in a row, whose performed reads complete the case, end the run completed, after the
+/// case is loaded once more. Control: the same run on a case that stays open ends `IdleBound`
+/// after that same load.
+#[test]
+fn a_case_its_repeated_reads_completed_ends_the_run_completed() {
+    for (name, completes) in [("completed", true), ("still open", false)] {
+        let case = CaseId(format!("case-repeated-reads-{name}"));
+        let reads = || vec![admissible("search"), admissible("fetch")];
+        // A fan-out of two reads makes 7 calls (load, completion, frontier, and each read's
+        // revalidation load and frontier), an idle step 3; the 17 calls up to the repeated
+        // fan-out's revalidations find the case open, and from then on the repeat has completed
+        // it, or it stays open.
+        let after = if completes {
+            listing(5, Vec::new()).complete("reads-done")
+        } else {
+            listing(4, reads())
+        };
+        let governor = FakeGovernor::new();
+        governor.script(
+            case.clone(),
+            std::iter::repeat_n(listing(4, reads()), 17).chain([after]),
+        );
+        let executor = ScriptedExecutor::new([fan_out(), idle(), fan_out()]);
+        let effects = Effects::default();
+
+        let (end, _) = run(
+            &governor,
+            &executor,
+            &StaticAuthorityProvider::new(),
+            &effects,
+            &case,
+        );
+
+        let expected = if completes {
+            RunOutcome::Completed(RunOutcomeCompleted {
+                outcome: "reads-done".to_owned(),
+            })
+        } else {
+            idle_bound(2)
+        };
+        assert_eq!(end.outcome, expected, "{name}");
+        assert_eq!(
+            effects.invoked().len(),
+            4,
+            "{name}: every read is performed"
+        );
+        assert_eq!(executor.calls().len(), 3, "{name}");
+        let calls = governor.calls();
+        assert_eq!(calls.len(), 19, "{name}: {calls:?}");
+        assert_eq!(
+            calls[17..].to_vec(),
+            after_a_performed_effect(&case),
+            "{name}: the case is loaded before the bound ends the run"
+        );
+    }
 }
 
 /// A newly admitted request starts the count again: an idle iteration, a new admission and then
