@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:metering-on-llm-model
 kind: story
-status: active
+status: implemented
 title: The run meter and the reasoning-model selector run on llm Model, not the harness ModelPort
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -34,10 +34,11 @@ scope:
   path: crates/loom-executor/tests/selection_telemetry.rs
 - confidence: cited
   path: crates/loom-selector-laya/tests/laya_arguments_slice.rs
-revision: 10
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T17:46:11Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":1}}}
 - {from: "proposed", to: "active", at: "2026-10-20T17:46:12Z", actor: "human:timo", revision: 10, decided_on: {"recorded":{"review_outcome":1}}}
+- {from: "active", to: "implemented", at: "2026-10-20T23:18:25Z", actor: "human:timo", revision: 12, decided_on: {"recorded":{"test_result":1,"review_outcome":2}}}
 ---
 ## Outcome
 
@@ -111,3 +112,16 @@ Crates: `loom-executor`, `loom-sdk`, `loom-selector-laya` (test only).
 - `crates/loom-selector-laya/tests/laya_arguments_slice.rs`
 - `crates/loom-sdk/src/lib.rs` if the meter is re-exported
 - `CHANGELOG.md`, `AGENTS.md` (the metering and selector rows)
+
+## Correction at close (wave 2026-10-20-w4)
+
+- `MeteredModelPort<M>` is an llm `Model` for any `M` that dereferences to one; `RateCard` is at
+  `metering::RateCard` (`loom_sdk::RateCard`), a non-harness copy beside `harness::turn_loop::RateCard`
+  until the port is deleted; a temporary harness `ModelPort` adapter keeps the ported loop metered
+  until `story:delete-harness-port`.
+- `ReasoningModelSelector` is removed; `ModelSelector` holds its contract, and `ReasoningModel`
+  selection records now carry no tokens (the meter counts those turns).
+- Adversary pass 1 (four warnings, fixed): `ModelSelector` answers more than one call of the forced
+  tool as unusable, never a guess (it took the first call, on every path); a model wrapped twice on
+  one meter counts once; a turn on a thread with no step of its own counts in the running step; the
+  harness adapter's fork metering has its test back. `model_selector.rs` joined this story's scope.

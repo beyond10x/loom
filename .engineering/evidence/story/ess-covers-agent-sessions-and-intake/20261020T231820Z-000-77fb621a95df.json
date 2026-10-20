@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-20T23:18:20Z",
+  "actor": "human:timo",
+  "artifact": "story:ess-covers-agent-sessions-and-intake",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "merged in 945363df (36480a83); full gate on 81ec979 under ESS 0.66.0 (task check's steps one by one, intake-conform included, task plan, release-check 0.30.0, task website): 24 of 24 exit 0; cargo test --workspace --no-fail-fast 2184 passed, 0 failed, 14 ignored",
+    "reference": "~/.cache/loom-wave-2026-10-20-w4/full-gate.log"
+  }
+}

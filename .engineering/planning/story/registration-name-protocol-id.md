@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:registration-name-protocol-id
 kind: story
-status: active
+status: implemented
 title: A protocol id with a dot registers, or its refusal names the registration form
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -16,10 +16,11 @@ scope:
   path: crates/loom-protocols/src/lib.rs
 - confidence: cited
   path: crates/loom-protocols/tests/catalog.rs
-revision: 4
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T17:46:04Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-20T17:46:05Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-20T23:18:23Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 
@@ -58,3 +59,13 @@ No noun the specification lacks; the registration name is not declared in `ess/`
 
 - `crates/loom-protocols/src/lib.rs`, `crates/loom-protocols/tests/catalog.rs`
 - `CHANGELOG.md`, `AGENTS.md` (§ Protocol composition and system queries)
+
+## Correction at close (wave 2026-10-20-w4)
+
+- Decision taken: one registration form stays. A refused registration names the one its protocol id
+  takes (dots and underscores as hyphens, `/<major>` as `@<major>`, as the bundled catalog holds
+  `eval.gated_change/1` as `eval-gated-change@1`), derived from the id the YAML declares.
+- Adversary pass 1 (five warnings, fixed): `protocols add` reads the file to name the same
+  registration `add_yaml` names; the refusal states the whole rule (a lowercase letter first, at most
+  100 bytes before `@`), quotes at most 120 bytes of the name, and says when an id has no
+  registration under the mapping.

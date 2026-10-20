@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:agent-executor-host-port
 kind: story
-status: active
+status: implemented
 title: AgentExecutor is listed among the ports a host implements
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -17,10 +17,11 @@ scope:
   path: crates/loom-sdk/tests/host_ports.rs
 - confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 6
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T17:46:13Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"review_outcome":2}}}
 - {from: "proposed", to: "active", at: "2026-10-20T17:46:14Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":2}}}
+- {from: "active", to: "implemented", at: "2026-10-20T23:18:25Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"test_result":1,"review_outcome":3}}}
 ---
 ## Outcome
 
@@ -68,3 +69,12 @@ Crates: `loom-sdk` (test only).
 
 `host_ports.rs` and the page are also edited by `story:delete-harness-port` and
 `story:metaharness-session-executor`, which land after this story.
+
+## Correction at close (wave 2026-10-20-w4)
+
+- Adversary pass 1 found the ports table left out four more traits a host supplies; `Governor`,
+  `CredentialResolver`, `TestRunner` and `Briefing` are now rows, each implemented through `loom_sdk`
+  alone in `host_ports.rs`, and `loom_sdk` re-exports `serde_json` for `Briefing::arguments_schema`.
+  `Briefing`'s provided methods take llm types no `loom_sdk` path reaches.
+- The adversary's cases guard what the unit-struct witness missed: a `Sync` or `'static` supertrait
+  on `AgentExecutor`, a dyn-incompatible provided method, and the control-plane table's kind column.

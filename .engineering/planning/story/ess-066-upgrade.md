@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:ess-066-upgrade
 kind: story
-status: active
+status: implemented
 title: Loom builds, generates and gates on ESS 0.66.0
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -52,10 +52,11 @@ scope:
   path: generated/rust
 - confidence: inferred
   path: website/docs/reference
-revision: 5
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T20:09:53Z", actor: "human:timo", revision: 4}
 - {from: "proposed", to: "active", at: "2026-10-20T20:09:53Z", actor: "human:timo", revision: 5}
+- {from: "active", to: "implemented", at: "2026-10-20T23:18:25Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 
@@ -104,3 +105,12 @@ No noun changes; the specifications stay at their formats.
 ## Source
 
 Release notes of beyond10x/ess 0.61.0-0.66.0; `story:ess-059-upgrade` (the same procedure).
+
+## Correction at close (wave 2026-10-20-w4)
+
+- The move needed nothing beyond the pins and regeneration: only the commission domain graph and
+  intake's output changed. `ess/intake` also moved from format `ess/24` to `ess/26`, and a planted
+  `DropResumeContext` that removes the context and answers `storage-failed` failed `task
+  intake-conform` at `ess/26` where it passed at `ess/24`. `ess/` stays at `ess/24` and
+  `ess/commission` at `ess/20`.
+- No adversary pass: the coordinator read the unit; the planted defect is its check.

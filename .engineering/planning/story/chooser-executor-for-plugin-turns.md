@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:chooser-executor-for-plugin-turns
 kind: story
-status: active
+status: implemented
 title: Plugin turns run on the chooser executor over llm Model, not the ported harness loop
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -40,10 +40,11 @@ scope:
   path: crates/loom-plugin/tests/support/mod.rs
 - confidence: cited
   path: crates/loom-sdk/src/lib.rs
-revision: 10
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T17:46:08Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":2}}}
 - {from: "proposed", to: "active", at: "2026-10-20T17:46:10Z", actor: "human:timo", revision: 10, decided_on: {"recorded":{"review_outcome":2}}}
+- {from: "active", to: "implemented", at: "2026-10-20T23:18:24Z", actor: "human:timo", revision: 12, decided_on: {"recorded":{"test_result":1,"review_outcome":3}}}
 ---
 ## Outcome
 
@@ -112,3 +113,15 @@ Crates: `loom-plugin`, `loom-cli`, `loom-intake-slice`, `loom-executor`, `loom-s
 
 `crates/loom-intake-slice/src/run.rs` is also edited by `story:authority-sees-the-request` and the
 Commission outcome stories (other regions); this story is later in the epic's order.
+
+## Correction at close (wave 2026-10-20-w4)
+
+- `Briefing` did not move: it holds the slice's result store, working context and metrics, so the
+  executor gained a `Briefing` trait the slice's struct implements, and the slice keeps
+  `ModelSelector` and `ModelArguments` at their paths as aliases (`run.rs` and `lib.rs` untouched).
+- A turn sends a selection and an argument request per step, so `TURN_MODEL_BUDGET` is 16; plugin
+  turns retry through the slice's `send_with_retries`; earlier reads reach later steps as escaped
+  strings in one block.
+- Adversary pass 1 (a blocker, fixed): a model answer without a usable call (a refusal or
+  content-filter stop, a text-only answer, an answer llm refuses) ended the turn `Unavailable` and
+  stalled the host; it now ends the turn `stopped`, and only an unanswered request is `Unavailable`.

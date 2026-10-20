@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:ess-covers-agent-sessions-and-intake
 kind: story
-status: active
+status: implemented
 title: Loom's ESS counts metering at llm's Model, models the agent session executor and runs a conformance suite for ess/intake
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -32,10 +32,11 @@ scope:
   path: generated/rust/intake
 - confidence: cited
   path: website/docs/reference
-revision: 7
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T17:46:06Z", actor: "human:timo", revision: 5}
 - {from: "proposed", to: "active", at: "2026-10-20T17:46:07Z", actor: "human:timo", revision: 6}
+- {from: "active", to: "implemented", at: "2026-10-20T23:18:23Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 
@@ -143,3 +144,18 @@ Specifications, generated output, one new conformance crate.
 - `crates/loom-intake-slice/src/resume.rs` only where the declared outcome needs a handler
 - `Taskfile.yml` (the intake conformance task inside `check`)
 - `AGENTS.md` (the task list and the specification rows), `CHANGELOG.md`
+
+## Correction at close (wave 2026-10-20-w4)
+
+- Shipped: the metering domain counts one call per turn of llm's `Model` (no harness path), and
+  `ess/intake` runs a conformance suite (`task intake-conform` in `task check`, 11 of 11 scenarios)
+  after declaring what keeping a resume context does (`KeepResumeContext`) and identity views of
+  resume contexts and hand-offs.
+- Not shipped here: the session domain. A domain declared before its implementation fails `task
+  conform` by design and `task ess-gate` refuses its eight open `UNMAPPED:` markers, so it moved to
+  `story:metaharness-session-executor` with the draft and the questions (plan commit 16029092).
+- ESS limits hit (ess 0.60.0, still the same in 0.66.0 except where said): a `Decimal` field cannot be
+  published in a view (`ResumeContexts` leaves out `route`); a view read after a `when_related`
+  refusal (`head-already-handed-off`) is not synthesized; after an `external:` refusal on an existing
+  row (`DropResumeContext/storage-failed`) it is, from format `ess/26`, which `story:ess-066-upgrade`
+  moved `ess/intake` to.

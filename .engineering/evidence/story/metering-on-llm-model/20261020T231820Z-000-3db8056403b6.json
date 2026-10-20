@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-20T23:18:20Z",
+  "actor": "human:timo",
+  "artifact": "story:metering-on-llm-model",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adv-w20261020w4-u4-pass-1",
+    "reference": "f0f94626, a914dc4c, f2572f8e, d3b9b209",
+    "review": "review-result:adv-w20261020w4-u4-pass-1",
+    "outcome": "fixed"
+  }
+}
