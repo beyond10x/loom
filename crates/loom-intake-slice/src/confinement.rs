@@ -1030,14 +1030,18 @@ fn check_ca_bundle(child: &ChildCommand) -> Result<(), ConfinementError> {
     let Some(path) = child.ca_bundle.as_deref() else {
         return Ok(());
     };
-    let Some(text) = path.to_str() else {
-        return Err(scope_error(format!("the CA bundle {path:?} is not UTF-8")));
-    };
-    let refused = |why: String| Err(scope_error(format!("the CA bundle `{text}` {why}")));
+    // The path as every refusal names it: verbatim in backticks, or escaped when not UTF-8.
+    let named = path
+        .to_str()
+        .map_or_else(|| format!("{path:?}"), |text| format!("`{text}`"));
+    let refused = |why: String| Err(scope_error(format!("the CA bundle {named} {why}")));
     if child.egress.is_none() {
         return refused(
             "is named for a child with no egress aperture, which reaches no host to verify; name the aperture with ChildCommand::with_egress".to_owned(),
         );
+    }
+    if path.to_str().is_none() {
+        return refused("is not UTF-8".to_owned());
     }
     if !path.is_absolute() {
         return refused(
