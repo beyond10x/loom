@@ -133,10 +133,10 @@ impl DriverEgress {
 }
 
 /// A certificate bundle as one launch read it ([`check_ca_bundle`]): the path the host named and
-/// the bytes read from it once, through an open that follows no symbolic link. Those bytes are
-/// what the child trusts: the driver opened for them hands Substrate a private copy of them
-/// ([`CaBundle::write_private_copy`]), never the named path, so a link or another file put at
-/// that path after the read is never followed.
+/// the bytes read from it once, through an open with its last component not followed. Those
+/// bytes are what the child trusts: the driver opened for them hands Substrate a private copy of
+/// them ([`CaBundle::write_private_copy`]), never the named path, so a link or another file put
+/// at that path after the read is never read.
 #[derive(Clone, PartialEq, Eq)]
 struct CaBundle {
     named: PathBuf,
@@ -722,8 +722,9 @@ impl ChildCommand {
     }
 
     /// The same child with exactly `environment` and no other variable, except `SSL_CERT_FILE`
-    /// when it names a certificate bundle ([`ChildCommand::with_ca_bundle`]), beside which the
-    /// environment names no variable that replaces or widens a TLS client's trust store.
+    /// when it names a certificate bundle ([`ChildCommand::with_ca_bundle`]). Beside a bundle the
+    /// environment may not name the variables `with_ca_bundle` lists, so a host does not override
+    /// by accident the bundle it named; that is no guarantee about what the child trusts.
     #[must_use]
     pub fn with_environment(self, environment: ExecEnvironment) -> Self {
         Self {
@@ -769,10 +770,10 @@ impl ChildCommand {
 
     /// The same child trusting the certificate bundle at `path`, a file of the host, where it
     /// reaches its egress aperture ([`ChildCommand::with_egress`]) over TLS. Each launch reads the
-    /// file once, through an open that follows no symbolic link, and the child trusts the bytes
-    /// read then: the runner opens the driver with a private read-only copy of them (Substrate's
-    /// `HostConfig::ca_bundle`), never with the named path, so a link or another file put at that
-    /// path after the read is never followed. Substrate binds a snapshot of that copy, taken when
+    /// file once, through an open with its last component not followed, and the child trusts the
+    /// bytes read then: the runner opens the driver with a private read-only copy of them
+    /// (Substrate's `HostConfig::ca_bundle`), never with the named path, so a link or another file
+    /// put at that path after the read is never read. Substrate binds a snapshot of that copy, taken when
     /// the child starts, at `/etc/ssl/certs/ca-certificates.crt` and sets `SSL_CERT_FILE` to that
     /// path, the one variable the child gets beside its environment.
     ///
@@ -784,9 +785,12 @@ impl ChildCommand {
     /// [`ConfinementRefusal::CapabilityUnserved`]. Substrate's record of the applied confinement
     /// names no bundle, so the bundle is not checked after the child ran.
     ///
-    /// The bundle is the trust store the child gets through `SSL_CERT_FILE`, not a bound on what
-    /// it trusts: a program the child runs can still choose its own trust store or turn
-    /// verification off. What the child reaches is bounded by its aperture, not by the bundle.
+    /// The bundle is the trust store the child gets through `SSL_CERT_FILE`. Beside it, the
+    /// environment may not name the variables listed below, so a host does not override by
+    /// accident the bundle it named. That is no guarantee about what the child trusts:
+    /// configuration under `HOME`, a program's own flags and variables not listed can still point
+    /// a client elsewhere or turn verification off. What the child reaches is bounded by its
+    /// aperture.
     ///
     /// Refused [`ConfinementRefusal::ScopeInvalid`] before anything starts or `target` is created,
     /// naming the path:
@@ -1177,10 +1181,10 @@ const MAX_CA_BUNDLE_BYTES: u64 = 1024 * 1024;
 ///    link, is no regular file, is empty or holds more than [`MAX_CA_BUNDLE_BYTES`], as Substrate
 ///    refuses a bundle of its own; an empty one would trust nothing while the child is pointed
 ///    at it;
-/// 5. the file, opened once without following a symbolic link (`O_NOFOLLOW`) or waiting for a
-///    writer (`O_NONBLOCK`): the rules of step 4 again on that open file, so a link put at the
-///    path since is refused as a link, then its bytes read through it, at most one past the
-///    ceiling, refused when they cannot be read, are empty or pass the ceiling.
+/// 5. the file, opened once with its last component not followed (`O_NOFOLLOW`) and without
+///    waiting for a writer (`O_NONBLOCK`): the rules of step 4 again on that open file, so a link
+///    put at the path since is refused as a link, then its bytes read through it, at most one past
+///    the ceiling, refused when they cannot be read, are empty or pass the ceiling.
 ///
 /// A child naming no bundle passes with `None`.
 fn check_ca_bundle(child: &ChildCommand) -> Result<Option<CaBundle>, ConfinementError> {

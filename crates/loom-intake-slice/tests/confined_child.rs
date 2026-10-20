@@ -1161,8 +1161,8 @@ fn a_ca_bundle_the_host_cannot_name_is_refused_before_anything_starts() {
 }
 
 /// A bundle path the host named and then swapped for a symbolic link before the launch is never
-/// followed: the launch reads the bundle once, through an open that follows no link, so it is
-/// refused `ScopeInvalid` and nothing starts. The child never sees the link's target, either in
+/// followed: the launch reads the bundle once, through an open with its last component not
+/// followed, so it is refused `ScopeInvalid` and nothing starts. The child never sees the link's target, either in
 /// that launch or in the next one, which reads the regular file put back and trusts its bytes as
 /// read then.
 #[test]
