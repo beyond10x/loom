@@ -174,15 +174,7 @@ impl ProtocolCatalog {
             return Err(format!("duplicate protocol registration: {name}"));
         }
         let Some(major) = parse_registration(name) else {
-            let declared = (yaml.len() <= MAX_PROTOCOL_BYTES)
-                .then(|| b10x_canon::model::parse(yaml).ok())
-                .flatten();
-            return Err(registration_refusal(
-                name,
-                declared
-                    .as_ref()
-                    .map(|model| (model.protocol.id.as_str(), model.protocol.revision)),
-            ));
+            return Err(refuse_registration(name, Some(yaml)));
         };
         if yaml.len() > MAX_PROTOCOL_BYTES {
             return Err("protocol document exceeds 1 MiB".into());
@@ -221,10 +213,10 @@ impl ProtocolCatalog {
         self.entries.get(name)
     }
 }
-/// The major of `name`, refusing a registration that is not `name@major`. The refusal can read
-/// no definition, so it derives the registration it names from `name` itself.
+/// The major of `name`, refusing a registration that is not `name@major`. The refusal reads no
+/// definition, so it derives the registration it names from `name` itself.
 fn registration_major(name: &str) -> Result<u64, String> {
-    parse_registration(name).ok_or_else(|| registration_refusal(name, None))
+    parse_registration(name).ok_or_else(|| refuse_registration(name, None))
 }
 /// The rule [`parse_registration`] holds a registration to, as a refusal states it.
 const REGISTRATION_RULE: &str = "lowercase letters, digits and hyphens before @, starting with a \
@@ -255,6 +247,21 @@ fn registration_for(id: &str, revision: &str) -> Option<String> {
     }
     let name = format!("{}@{revision}", id.replace(['.', '_'], "-"));
     parse_registration(&name).map(|_| name)
+}
+/// The refusal of `name`, which [`parse_registration`] refused, for the definition `yaml` the
+/// host handed with it: the id and revision it declares when it is within
+/// [`MAX_PROTOCOL_BYTES`] and parses, else `name` itself, name the registration. `add_yaml` and
+/// the install store's `install_file` both refuse through it, so one input gets one answer.
+fn refuse_registration(name: &str, yaml: Option<&str>) -> String {
+    let declared = yaml
+        .filter(|yaml| yaml.len() <= MAX_PROTOCOL_BYTES)
+        .and_then(|yaml| b10x_canon::model::parse(yaml).ok());
+    registration_refusal(
+        name,
+        declared
+            .as_ref()
+            .map(|model| (model.protocol.id.as_str(), model.protocol.revision)),
+    )
 }
 /// Why `name` is no registration, naming the registration its protocol id takes: the id and
 /// revision the definition declares when it was read (`declared`), else the id `name` spells

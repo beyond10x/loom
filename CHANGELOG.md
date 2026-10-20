@@ -18,10 +18,11 @@ registers as `self-improvement@1`, dots and underscores as hyphens and `/<major>
 the mapping the bundled catalog follows (`software.change/1` is `software-change@1`,
 `eval.gated_change/1` is `eval-gated-change@1`). An id the mapping gives no registration for
 (`3d.render/1`) is refused with the rule alone, saying so. A refusal quotes at most 120 bytes of
-the refused name. The name is derived from the id and revision the definition declares when it
-parses, else from the registration given, and `protocols add` and `protocols remove`, which refuse
-before reading a definition, name it from the registration given. No bundled or stored
-registration changes.
+the refused name. `add_yaml` and `protocols add --file` derive the name from the id and revision
+the definition declares when it parses, else from the registration given, so both name the same
+registration for one input and the named registration installs; `protocols remove` and
+`protocols add --source`, which have no definition to read, name it from the registration given.
+No bundled or stored registration changes.
 Breaking: none.
 
 ## [0.29.0] - 2026-10-20
