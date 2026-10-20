@@ -9,6 +9,24 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-10-21
+
+Loom 0.30.0 moves plugin turns and the run meter onto llm's `Model` and runs on ESS 0.66.0. A
+plugin turn runs on the chooser executor (select, then arguments) over an llm `Model` instead of the
+ported harness loop, with the reads made earlier in the turn given to later steps as data; a model
+answer without a usable call ends the turn `stopped`. The llm-backed model selector and argument
+generator now live in `b10x-loom-executor`, and answer more than one call of the forced tool as
+unusable. The run meter wraps an llm `Model` and prices with `loom_sdk::RateCard`;
+`ReasoningModelSelector` is removed. A refused protocol registration names the registration its id
+takes. `ess/intake` runs a conformance suite in `task check` and is at format `ess/26`. The SDK
+stability page lists `AgentExecutor`, `Governor`, `CredentialResolver`, `TestRunner` and `Briefing`
+among the ports a host implements.
+Breaking: `b10x_loom_plugin::TurnModel` holds an llm `Model` instead of a harness `ModelPort`, and a
+turn sends a selection and an argument request per step (`TURN_MODEL_BUDGET` 16);
+`MeteredModelPort` meters an llm `Model`, `RunMeter::new` takes `metering::RateCard` and
+`RateCard::price` takes `(model, &Usage)`; `ReasoningModelSelector` is removed; specifications built
+with Loom's tasks need ESS 0.66.0.
+
 A refused protocol registration names the registration its protocol id takes
 (`story:registration-name-protocol-id`). A catalog keeps one registration form, `name@major`:
 lowercase letters, digits and hyphens before `@`, starting with a lowercase letter and at most 100
