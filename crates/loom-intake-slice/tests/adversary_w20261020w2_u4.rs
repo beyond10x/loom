@@ -1,6 +1,6 @@
 //! Adversary cases for `story:sdk-confines-any-child` (wave 2026-10-20-w2, U4).
 //!
-//! Both cases run against the real backend in a delegated cgroup v2 scope, the way
+//! Every case runs against the real backend in a delegated cgroup v2 scope, the way
 //! `tests/confined_child.rs` does: the test binary starts itself again under
 //! `systemd-run --user --scope -p Delegate=yes` and runs the case there. Where bubblewrap, a user
 //! systemd manager or the Substrate driver is absent, the case prints
@@ -12,8 +12,10 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use b10x_loom_intake_slice::confinement::{
-    ChildCommand, ExecEnvironment, SubstrateRunner, prepare_delegated_cgroup,
+    ChildCommand, ConfinementRefusal, ExecEnvironment, SubstrateRunner, TestRunner as _,
+    discover_cgroup_root, prepare_delegated_cgroup,
 };
+use b10x_loom_intake_slice::executor::TestCommand;
 
 const DELEGATED: &str = "LOOM_ADV_W20261020W2_U4_DELEGATED";
 const REPORT: &str = "LOOM_ADV_W20261020W2_U4_REPORT";
@@ -195,6 +197,117 @@ fn adv_a_program_that_reads_as_an_assignment_sets_no_variable() {
                      GH_TOKEN set: exit {:?}, output {:?}",
                     result.exit_code,
                     result.output
+                ),
+            }
+        },
+    );
+}
+
+/// Pass 2. A runner and its clones now keep one Substrate driver per workspace directory for as
+/// long as they live (CHANGELOG, `SubstrateRunner` rustdoc). A host that keeps its runner, as
+/// `b10x-loom` keeps one for a whole run, launches in the same workspace many times: every one of
+/// those launches runs, the 129th, a test, as much as the first.
+#[test]
+fn adv_a_runner_serves_more_than_128_launches_in_one_workspace() {
+    delegated(
+        "adv_a_runner_serves_more_than_128_launches_in_one_workspace",
+        |runner, workspace| {
+            for index in 0..128 {
+                let result = runner
+                    .run_child(&ChildCommand::new("true", [] as [&str; 0], workspace))
+                    .unwrap_or_else(|error| panic!("launch {} is refused: {error}", index + 1));
+                assert_eq!(result.exit_code, Some(0), "launch {}", index + 1);
+            }
+            let test = runner.run(
+                &TestCommand::new("sh", ["-c", "printf test-done"]),
+                workspace,
+            );
+            let test = test.expect("launch 129, a test through TestRunner::run, runs");
+            assert_eq!(
+                (test.exit_code, test.output.as_str()),
+                (Some(0), "test-done")
+            );
+        },
+    );
+}
+
+/// Pass 2. "No driver is opened on a root while a launch of this process runs under it"
+/// (CHANGELOG, `SubstrateRunner` rustdoc). The count is the process's, over every runner; a second
+/// runner naming the same cgroup root by another path must not open a driver that ends the first
+/// runner's running child.
+#[test]
+fn adv_a_root_named_another_way_opens_no_driver_over_a_running_child() {
+    delegated(
+        "adv_a_root_named_another_way_opens_no_driver_over_a_running_child",
+        |runner, workspace| {
+            let root = discover_cgroup_root().expect("the delegated root");
+            let same_root = root
+                .join("..")
+                .join(root.file_name().expect("the root has a name"));
+            let elsewhere = workspace.parent().unwrap().join("other/elsewhere");
+            std::fs::create_dir_all(&elsewhere).unwrap();
+            let started = workspace.join("target/started");
+            let first = ChildCommand::new(
+                "sh",
+                ["-c", "touch target/started; sleep 3; printf first-done"],
+                workspace,
+            )
+            .with_timeout(Duration::from_secs(60));
+            let first_runner = runner.clone();
+            let handle = std::thread::spawn(move || first_runner.run_child(&first));
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while !started.exists() && !handle.is_finished() {
+                assert!(
+                    Instant::now() < deadline,
+                    "the first child started within 30 s"
+                );
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            assert!(
+                started.exists(),
+                "the first child started: {:?}",
+                handle.join().unwrap()
+            );
+
+            let other = SubstrateRunner::new(Some(same_root.clone()))
+                .run_child(&ChildCommand::new("true", [] as [&str; 0], &elsewhere));
+            let first = handle.join().unwrap();
+            eprintln!("root {}, named {}", root.display(), same_root.display());
+            eprintln!("first child: {first:?}");
+            eprintln!("second runner: {other:?}");
+
+            let first = first.expect("the first child runs on");
+            assert_eq!(
+                (first.exit_code, first.output.as_str()),
+                (Some(0), "first-done")
+            );
+            assert_eq!(
+                other
+                    .expect_err("no driver is opened over the running child")
+                    .reason,
+                ConfinementRefusal::CapabilityUnserved
+            );
+        },
+    );
+}
+
+/// Pass 2. The program a host names is the program that runs, never read by Substrate's
+/// `/usr/bin/env` as one of its own operands (`ChildCommand` rustdoc: refused programs are those
+/// env would reinterpret). A lone `-` is such an operand: env takes it as `-i` and runs the next
+/// word instead.
+#[test]
+fn adv_a_program_env_reads_as_an_operand_is_not_replaced_by_its_first_argument() {
+    delegated(
+        "adv_a_program_env_reads_as_an_operand_is_not_replaced_by_its_first_argument",
+        |runner, workspace| {
+            let child = ChildCommand::new("-", ["/usr/bin/printf", "replaced"], workspace);
+            assert_eq!(child.program(), "-");
+            match runner.run_child(&child) {
+                Err(error) => eprintln!("refused: {error}"),
+                Ok(result) => assert_ne!(
+                    result.output, "replaced",
+                    "the program `-` ran its first argument `/usr/bin/printf`: exit {:?}",
+                    result.exit_code
                 ),
             }
         },
