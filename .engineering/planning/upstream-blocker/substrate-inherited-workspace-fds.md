@@ -2,11 +2,13 @@
 format: aep.planning-md/3
 id: upstream-blocker:substrate-inherited-workspace-fds
 kind: upstream-blocker
-status: open
+status: cleared
 title: Substrate leaves its workspace descriptors open in a confined process
 relations:
 - blocks: story:child-writable-workspace
-revision: 1
+revision: 2
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-20T13:38:59Z", actor: "human:timo", revision: 2}
 ---
 ## Waiting on
 
