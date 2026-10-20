@@ -50,8 +50,9 @@ not model output; only Canon completion makes a query successful. The integratio
 `crates/loom-intake-slice/tests/system_query.rs::clock_query_runs_in_both_policies_without_workspace_resources`
 holds this path in both context modes. `protocols add/list/remove` manage user installations;
 `--replace` is explicit and bundled definitions cannot be shadowed. The SDK exports the catalog.
-A registration has one form, `name@major`, with lowercase letters, digits and hyphens before `@`;
-a protocol id is not one. `self.improvement/1` registers as `self-improvement@1`, its dots and
+A registration has one form, `name@major`: lowercase letters, digits and hyphens before `@`,
+starting with a lowercase letter and at most 100 bytes, then a positive canonical major; a
+protocol id is not one. `self.improvement/1` registers as `self-improvement@1`, its dots and
 underscores as hyphens and `/<major>` as `@<major>`, as the bundled `software-change@1` holds
 `software.change/1`. A refusal of any other form names the registration its protocol id takes:
 `ProtocolCatalog::add_yaml` derives it from the id the definition declares when it parses, else

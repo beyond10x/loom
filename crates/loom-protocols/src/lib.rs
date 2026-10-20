@@ -160,7 +160,8 @@ impl ProtocolCatalog {
     /// Validate and add one host-selected definition. Duplicate identities always refuse.
     ///
     /// `name` is the registration, `name@major`: lowercase letters, digits and hyphens before `@`,
-    /// and the document's revision after it. A protocol id is not one; `self.improvement/1`
+    /// starting with a lowercase letter and at most 100 bytes, then a positive canonical major,
+    /// the document's revision. A protocol id is not one; `self.improvement/1`
     /// registers as `self-improvement@1`, as the bundled `software-change@1` holds
     /// `software.change/1`, and a refused registration names the one its protocol id takes.
     pub fn add_yaml(
@@ -225,8 +226,12 @@ impl ProtocolCatalog {
 fn registration_major(name: &str) -> Result<u64, String> {
     parse_registration(name).ok_or_else(|| registration_refusal(name, None))
 }
+/// The rule [`parse_registration`] holds a registration to, as a refusal states it.
+const REGISTRATION_RULE: &str = "lowercase letters, digits and hyphens before @, starting with a \
+                                 lowercase letter and at most 100 bytes, then a positive canonical \
+                                 major";
 /// The major of a well-formed registration: lowercase letters, digits and hyphens before `@`,
-/// starting with a letter, at most 100 bytes, then a positive canonical major.
+/// starting with a lowercase letter and at most 100 bytes, then a positive canonical major.
 fn parse_registration(name: &str) -> Option<u64> {
     let (stem, version) = name.split_once('@')?;
     if stem.is_empty()
@@ -262,10 +267,8 @@ fn registration_refusal(name: &str, declared: Option<(&str, u64)>) -> String {
             (id.to_owned(), revision.to_owned())
         }
     };
-    let rule = format!(
-        "protocol registration must be name@major (lowercase letters, digits and hyphens before @; \
-         a positive canonical major after it), not {name:?}"
-    );
+    let rule =
+        format!("protocol registration must be name@major ({REGISTRATION_RULE}), not {name:?}");
     let mapping = "its dots and underscores as hyphens and /<major> as @<major>, as the bundled \
                    software-change@1 holds software.change/1";
     match registration_for(&id, &revision) {

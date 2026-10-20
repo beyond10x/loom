@@ -10,9 +10,10 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 ## [Unreleased]
 
 A refused protocol registration names the registration its protocol id takes
-(`story:registration-name-protocol-id`). A catalog keeps one registration form, `name@major`, with
-lowercase letters, digits and hyphens before `@`, so
-`ProtocolCatalog::add_yaml("self.improvement@1", …)` is still refused; its refusal now says why and
+(`story:registration-name-protocol-id`). A catalog keeps one registration form, `name@major`:
+lowercase letters, digits and hyphens before `@`, starting with a lowercase letter and at most 100
+bytes, then a positive canonical major. `ProtocolCatalog::add_yaml("self.improvement@1", …)` is
+still refused; its refusal now states that whole rule and
 that protocol id `self.improvement/1` registers as `self-improvement@1`, dots and underscores as
 hyphens and `/<major>` as `@<major>`, the mapping the bundled catalog follows (`software.change/1`
 is `software-change@1`, `eval.gated_change/1` is `eval-gated-change@1`). The name is derived from
