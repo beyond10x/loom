@@ -37,12 +37,17 @@ opens the child's driver with it as Substrate's `HostConfig::ca_bundle`, and Sub
 read-only snapshot of the file, taken when the child starts, at `/etc/ssl/certs/ca-certificates.crt`
 and sets `SSL_CERT_FILE` to it, the one variable the child gets beside the environment the host
 names. The bundle is part of the shared driver's key: children in workspaces of one directory
-naming different bundles, or one naming a bundle and one naming none, never share a driver. A
-bundle for a child with no egress aperture, which reaches no host to verify, a path that is not
-UTF-8 or not absolute, a bundle beside an environment naming `SSL_CERT_FILE`, which Substrate would
-replace, and a path that does not exist, is a symbolic link, is no regular file, is empty or cannot
-be read (as Substrate's daemon refuses its own bundle) are refused `ScopeInvalid` before anything
-starts or `target` is created, naming the path. The profile digest covers the bundle's path; a
+naming different bundles, or one naming a bundle and one naming none, never share a driver. The
+bundle is the trust store the child gets through `SSL_CERT_FILE`: a program the child runs can
+still choose its own trust or turn verification off, and what the child reaches is bounded by the
+aperture, not by the bundle. A bundle for a child with no egress aperture, which reaches no host
+to verify, a path that is not UTF-8 or not absolute, a bundle beside an environment naming a
+variable that replaces or widens a TLS client's trust store (`SSL_CERT_FILE`, `SSL_CERT_DIR`,
+`CURL_CA_BUNDLE`, `CURL_CA_PATH`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO`,
+`GIT_SSL_CAPATH`, each named in the refusal), and a path that does not exist, is a symbolic link,
+is no regular file, is empty or cannot be read (as Substrate's daemon refuses its own bundle) are
+refused `ScopeInvalid` before anything starts or `target` is created, naming the path. The
+profile digest covers the bundle's path; a
 child naming none keeps its digest. Substrate's record of the applied confinement names no bundle,
 so the bundle is not checked after the child ran. `crates/loom-intake-slice/tests/confined_child.rs`
 holds it against a loopback TLS host the test serves with `openssl`, under a test CA it makes: a

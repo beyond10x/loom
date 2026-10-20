@@ -789,11 +789,16 @@ before anything starts, the refusal naming the host; one Substrate did not publi
 `CapabilityUnserved`. Substrate gives a run at most one aperture. A certificate bundle
 (`with_ca_bundle`, Substrate's `HostConfig::ca_bundle`) reaches the child as a read-only snapshot
 of the host's file, taken when it starts, at `/etc/ssl/certs/ca-certificates.crt`, which
-`SSL_CERT_FILE` names; Substrate's record names no bundle, so it is not checked after the run. A
-bundle for a child with no aperture, a path that is not UTF-8 or not absolute, one beside an
-environment naming `SSL_CERT_FILE`, and one that does not exist, is a symbolic link, is no regular
-file, is empty or cannot be read are refused `ScopeInvalid` before anything starts, naming the
-path (`check_ca_bundle`). A program containing `=` or starting with `-` (test or child)
+`SSL_CERT_FILE` names; Substrate's record names no bundle, so it is not checked after the run. The
+bundle is the trust store the child gets through `SSL_CERT_FILE`: a program the child runs can
+still choose its own trust or turn verification off, and what the child reaches is bounded by the
+aperture, not by the bundle. A bundle for a child with no aperture, a path that is not UTF-8 or
+not absolute, one beside an environment naming a variable that replaces or widens a TLS client's
+trust store (`TRUST_STORE_VARIABLES`: `SSL_CERT_FILE`, `SSL_CERT_DIR`, `CURL_CA_BUNDLE`,
+`CURL_CA_PATH`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`,
+each named in the refusal), and one that does not exist, is a symbolic link, is no regular file,
+is empty or cannot be read are refused `ScopeInvalid` before anything starts, naming the path
+(`check_ca_bundle`). A program containing `=` or starting with `-` (test or child)
 is refused before anything starts: Substrate execs through `/usr/bin/env`, which reads it as an
 assignment or an option. A runner and its clones share one driver per workspace directory, egress
 aperture and certificate bundle (`DriverEgress`: Substrate fixes a driver's apertures and bundle

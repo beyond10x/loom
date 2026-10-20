@@ -649,7 +649,8 @@ impl ChildCommand {
     }
 
     /// The same child with exactly `environment` and no other variable, except `SSL_CERT_FILE`
-    /// when it names a certificate bundle ([`ChildCommand::with_ca_bundle`]).
+    /// when it names a certificate bundle ([`ChildCommand::with_ca_bundle`]), beside which the
+    /// environment names no variable that replaces or widens a TLS client's trust store.
     #[must_use]
     pub fn with_environment(self, environment: ExecEnvironment) -> Self {
         Self {
@@ -703,12 +704,19 @@ impl ChildCommand {
     /// record of the applied confinement names no bundle, so the bundle is not checked after the
     /// child ran.
     ///
+    /// The bundle is the trust store the child gets through `SSL_CERT_FILE`, not a bound on what
+    /// it trusts: a program the child runs can still choose its own trust store or turn
+    /// verification off. What the child reaches is bounded by its aperture, not by the bundle.
+    ///
     /// Refused [`ConfinementRefusal::ScopeInvalid`] before anything starts or `target` is created,
     /// naming the path:
     ///
     /// - a bundle for a child with no egress aperture, which reaches no host to verify;
     /// - a path that is not UTF-8 or not absolute;
-    /// - beside an environment naming `SSL_CERT_FILE`, which Substrate would replace;
+    /// - beside an environment naming a variable that replaces or widens a TLS client's trust
+    ///   store, named in the refusal: `SSL_CERT_FILE`, `SSL_CERT_DIR`, `CURL_CA_BUNDLE`,
+    ///   `CURL_CA_PATH`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO` and
+    ///   `GIT_SSL_CAPATH`;
     /// - a path that does not exist, is a symbolic link, is no regular file or is empty, as
     ///   Substrate's daemon refuses its own bundle (name the file a link leads to);
     /// - a file this process cannot read, which Substrate could not snapshot.
@@ -1008,8 +1016,27 @@ fn check_host(name: &str, host: &str, pinned: Ipv4Addr) -> Result<(), Confinemen
     }
 }
 
-/// The variable Substrate sets to [`APERTURE_CA_BUNDLE_PATH`] in a run given a certificate bundle.
-const SSL_CERT_FILE: &str = "SSL_CERT_FILE";
+/// The environment variables through which a TLS client takes another trust store than the bundle
+/// Substrate points `SSL_CERT_FILE` at, replacing it or adding to it, by the tools that read them:
+/// OpenSSL (`SSL_CERT_FILE`, which Substrate itself sets to the snapshot at
+/// [`APERTURE_CA_BUNDLE_PATH`], and `SSL_CERT_DIR`), curl (`CURL_CA_BUNDLE`, `CURL_CA_PATH`),
+/// Python's requests (`REQUESTS_CA_BUNDLE`), Node (`NODE_EXTRA_CA_CERTS`) and Git
+/// (`GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`). A child naming a bundle is refused when its environment
+/// names any of them ([`check_ca_bundle`]).
+///
+/// The list keeps a host from undoing the bundle it names through the environment it names beside
+/// it. It does not bound what the child trusts: a program the child runs can still choose its own
+/// trust store or turn verification off, and what the child reaches is bounded by its aperture.
+const TRUST_STORE_VARIABLES: [&str; 8] = [
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "CURL_CA_BUNDLE",
+    "CURL_CA_PATH",
+    "REQUESTS_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+    "GIT_SSL_CAINFO",
+    "GIT_SSL_CAPATH",
+];
 
 /// Refuse, before anything starts, a certificate bundle the child cannot be given as named
 /// ([`ChildCommand::with_ca_bundle`]), each refusal naming the path, in this order:
@@ -1018,8 +1045,9 @@ const SSL_CERT_FILE: &str = "SSL_CERT_FILE";
 ///    its aperture, and a child with none reaches no host the bundle could verify;
 /// 2. a path that is not UTF-8, or not absolute, which names no one file whatever the working
 ///    directory;
-/// 3. an environment naming `SSL_CERT_FILE` beside the bundle: Substrate sets that variable to
-///    the snapshot's path after the host's, so the host's value would be replaced unseen;
+/// 3. an environment naming any of [`TRUST_STORE_VARIABLES`] beside the bundle, each named in the
+///    refusal: it would replace or widen the trust store the child gets through `SSL_CERT_FILE`
+///    (whose own value Substrate would replace unseen);
 /// 4. a path that does not exist, is a symbolic link, is no regular file or is empty: Substrate's
 ///    daemon refuses such a bundle of its own, and an empty one would trust nothing while the
 ///    child is pointed at it;
@@ -1048,9 +1076,15 @@ fn check_ca_bundle(child: &ChildCommand) -> Result<(), ConfinementError> {
             "is a relative path; name it by an absolute path, so it names one file whatever the working directory".to_owned(),
         );
     }
-    if child.environment.set.contains_key(SSL_CERT_FILE) {
+    let variables: Vec<&str> = TRUST_STORE_VARIABLES
+        .into_iter()
+        .filter(|variable| child.environment.set.contains_key(*variable))
+        .collect();
+    if !variables.is_empty() {
         return refused(format!(
-            "comes with an environment naming {SSL_CERT_FILE}, which Substrate sets to the bundle's snapshot at {APERTURE_CA_BUNDLE_PATH} and would replace; leave {SSL_CERT_FILE} out of the environment"
+            "comes with an environment naming {}, which would replace or widen the trust store the child gets through SSL_CERT_FILE, the bundle's snapshot at {APERTURE_CA_BUNDLE_PATH}; leave {} out of the environment",
+            variables.join(", "),
+            if variables.len() == 1 { "it" } else { "them" }
         ));
     }
     let metadata = match std::fs::symlink_metadata(path) {
@@ -2502,6 +2536,60 @@ mod tests {
             bare,
             format!("{:x}", Sha256::digest(before.to_string().as_bytes()))
         );
+    }
+
+    #[test]
+    fn every_trust_store_variable_beside_a_ca_bundle_is_refused_naming_it_and_documented() {
+        let anchored = |set: BTreeMap<String, String>| {
+            ChildCommand::new("true", [] as [&str; 0], "/work/space")
+                .with_egress(model())
+                .with_environment(ExecEnvironment {
+                    allow: Vec::new(),
+                    set,
+                })
+                .with_ca_bundle("/anchors/absent.pem")
+        };
+        // The public rustdoc of `with_ca_bundle` names every variable the constant holds.
+        let source = include_str!("confinement.rs");
+        let lines: Vec<&str> = source.lines().collect();
+        let method = lines
+            .iter()
+            .position(|line| line.contains("pub fn with_ca_bundle("))
+            .expect("with_ca_bundle is defined here");
+        let doc: String = lines[..method]
+            .iter()
+            .rev()
+            .take_while(|line| {
+                let line = line.trim_start();
+                line.starts_with("///") || line.starts_with("#[")
+            })
+            .copied()
+            .collect();
+        for variable in TRUST_STORE_VARIABLES {
+            let child = anchored(BTreeMap::from([(variable.to_owned(), "/x".to_owned())]));
+            let error = check_ca_bundle(&child).unwrap_err();
+            assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{variable}");
+            assert!(error.detail.contains(variable), "{variable}: {error}");
+            assert!(
+                doc.contains(&format!("`{variable}`")),
+                "the with_ca_bundle rustdoc names {variable}"
+            );
+        }
+        let both = anchored(BTreeMap::from([
+            ("CURL_CA_BUNDLE".to_owned(), "/x".to_owned()),
+            ("SSL_CERT_DIR".to_owned(), "/x".to_owned()),
+        ]));
+        let error = check_ca_bundle(&both).unwrap_err();
+        assert!(
+            error
+                .detail
+                .contains("naming SSL_CERT_DIR, CURL_CA_BUNDLE, "),
+            "{error}"
+        );
+        // Another variable passes this step, so the absent path is what is refused.
+        let other = anchored(BTreeMap::from([("FIRST".to_owned(), "one".to_owned())]));
+        let error = check_ca_bundle(&other).unwrap_err();
+        assert!(error.detail.contains("does not exist"), "{error}");
     }
 
     #[test]
