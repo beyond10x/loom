@@ -1306,7 +1306,8 @@ where
 /// of the step of the executor call running on this thread, else of step 0, and a turn through a
 /// fork is a call of the step the fork was made in, on whichever thread it turns. An answer's
 /// usage is priced against the model it names, as an llm usage whose counts are all known and
-/// final; a turn that failed or unwound adds no tokens and leaves the cost absent.
+/// final; a turn that failed or unwound adds no tokens and leaves the cost absent. A metered port
+/// wrapped again on the same meter counts each turn once.
 impl<M: ModelPort> ModelPort for MeteredModelPort<M> {
     fn wire(&self) -> &WireId {
         self.inner.wire()
@@ -1331,7 +1332,8 @@ impl<M: ModelPort> ModelPort for MeteredModelPort<M> {
     }
 }
 
-/// One metered `turn` of `port`, counted in `step`.
+/// One metered `turn` of `port`, counted in `step`; inside a metered turn of the same meter on this
+/// thread, that turn's call, passed through uncounted.
 fn metered_turn(
     port: &mut (impl ModelPort + ?Sized),
     meter: &RunMeter,
@@ -1339,8 +1341,14 @@ fn metered_turn(
     request: &TurnRequest,
     sink: &mut dyn StreamSink,
 ) -> Result<TurnOutcome, WireError> {
+    if meter.turning_here() {
+        return port.turn(request, sink);
+    }
     let call = meter.begin(step);
-    let outcome = port.turn(request, sink);
+    let outcome = {
+        let _turning = meter.turning();
+        port.turn(request, sink)
+    };
     let reported = outcome
         .as_ref()
         .ok()

@@ -68,7 +68,9 @@ The run meter and the reasoning-model selector run on llm's `Model` instead of t
 host built (an `Arc<dyn Model>`, a `Box`, a reference, or an `Arc` of its own model), answering
 with that model's provenance and capabilities; each `turn` is one call, counted before it runs, of
 the step of the executor call on the thread that called it, whichever thread drives its future,
-so a turn that failed, unwound or was dropped unfinished is a call with unknown tokens. An answer
+so a turn that failed, unwound or was dropped unfinished is a call with unknown tokens. A metered
+model wrapped again on the same meter, reached when the outer one calls its inner model or while
+that turn runs, passes the turn through, so each turn is counted once. An answer
 adds its usage when that usage is final and names its input and output tokens (unnamed cached
 tokens count as none), priced against the model the provider reported serving it, else the bound
 model; any other answer leaves the cost absent, never zero, as before for a turn without usage.

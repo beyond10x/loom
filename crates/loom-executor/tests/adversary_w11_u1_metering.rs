@@ -655,3 +655,71 @@ fn a_shared_model_a_host_built_is_metered_as_it_is() {
     assert_eq!(steps(&report), vec![(0, 1)], "{report:?}");
     assert_eq!(report.cost_micro_usd, Some(180), "{report:?}");
 }
+
+/// A host's own model over a metered one that reaches it only while its turn's future runs, as a
+/// retrying wrapper does.
+struct Lazy<M> {
+    inner: M,
+}
+
+impl<M: Model> Model for Lazy<M> {
+    fn provenance(&self) -> &Provenance {
+        self.inner.provenance()
+    }
+
+    fn capabilities(&self) -> &Capabilities {
+        self.inner.capabilities()
+    }
+
+    fn turn<'a>(
+        &'a self,
+        request: &'a TurnRequest,
+        sink: &'a mut dyn StreamSink,
+        cancel: &'a Cancel,
+    ) -> BoxFuture<'a, Result<TurnOutcome, Error>> {
+        Box::pin(async move { self.inner.turn(request, sink, cancel).await })
+    }
+}
+
+/// A metered model wrapped again on its meter counts each turn once, whether the outer one reaches
+/// it when `turn` is called or only while the turn runs, here through a host's wrapper between
+/// them.
+#[test]
+fn a_model_metered_again_on_one_meter_counts_each_turn_once_however_it_is_reached() {
+    let model = Scripted::new([]);
+    let meter = RunMeter::new(Some(card(MODEL)));
+    let at_call = MeteredModelPort::new(Arc::new(metered(&model, &meter)), &meter);
+    let while_running = MeteredModelPort::new(
+        Arc::new(Lazy {
+            inner: metered(&model, &meter),
+        }),
+        &meter,
+    );
+    assert!(turn(&at_call).is_ok());
+    assert!(turn(&while_running).is_ok());
+
+    let report = meter.report(&run_id());
+    assert_eq!(model.seen(), 2);
+    assert_eq!(steps(&report), vec![(0, 2)], "{report:?}");
+    assert_eq!(report.input_tokens, 200, "{report:?}");
+    assert_eq!(report.cost_micro_usd, Some(2 * 180), "{report:?}");
+}
+
+/// A model metered on one meter and wrapped by a metered model of another counts its turn in
+/// each: the guard is per meter, so two runs that share a model each see their call.
+#[test]
+fn a_model_metered_on_two_meters_counts_its_turn_in_each() {
+    let model = Scripted::new([]);
+    let (first, second) = (RunMeter::new(None), RunMeter::new(None));
+    let outer = MeteredModelPort::new(Arc::new(metered(&model, &first)), &second);
+    assert!(turn(&outer).is_ok());
+
+    for meter in [&first, &second] {
+        let report = meter.report(&run_id());
+        assert_eq!(
+            (report.model_calls, report.input_tokens),
+            (1, 100),
+            "{report:?}"
+        );
+    }
+}

@@ -8,7 +8,10 @@
 //! one model call, whoever made it: the model selector, an argument generator, a host's own
 //! request. The call is counted when `turn` is called, before the turn runs, so a turn that failed,
 //! unwound or was dropped unfinished is still a call; a turn that answered adds the tokens the
-//! provider reported for it, and one that failed, unwound or was dropped adds none.
+//! provider reported for it, and one that failed, unwound or was dropped adds none. A metered
+//! model wrapped again on the same meter counts each turn once: while a metered turn of a meter
+//! calls its inner model, or its inner turn is polled, on a thread, a metered model of that meter
+//! reached there passes the turn through uncounted.
 //!
 //! The [`MeteredExecutor`] opens one step per executor call ([`AgentExecutor::run_with_usage`],
 //! which the runtime makes, or [`AgentExecutor::run`]), counted from 1, and every call that
@@ -91,7 +94,9 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ops::Deref;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::task::{Context as TaskContext, Poll};
 
 use b10x_loom_commission::model::responsibility::{
     ChargedUsage, Commission, ExecutorOutcome, ExecutorStep, ExecutorUsage, Frontier, RunCharges,
@@ -341,6 +346,12 @@ thread_local! {
     /// the index into its `tallies`. An executor call pushes its step when it begins and removes
     /// it when it returns or unwinds, so a step is open exactly while its executor call runs.
     static OPEN: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
+
+    /// The meters a metered `turn` is running for on this thread, innermost last: each meter's
+    /// identity ([`RunMeter::id`]) while its metered model calls its inner model's `turn` and
+    /// while that turn's future is polled here. A metered model of the same meter reached then is
+    /// inside the one that counts the call, and passes the turn through uncounted.
+    static TURNING: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
 }
 
 /// One step's figures as the meter counts them.
@@ -613,6 +624,20 @@ impl RunMeter {
         self.open_here().unwrap_or(outside)
     }
 
+    /// Whether a metered turn of this meter is running on this thread: a metered model reached
+    /// inside another of the same meter, whose call that one counts once.
+    pub(crate) fn turning_here(&self) -> bool {
+        let id = self.id();
+        TURNING.with_borrow(|turning| turning.contains(&id))
+    }
+
+    /// Marks a metered turn of this meter as running on this thread until the guard drops.
+    pub(crate) fn turning(&self) -> Turning {
+        let id = self.id();
+        TURNING.with_borrow_mut(|turning| turning.push(id));
+        Turning { id }
+    }
+
     /// Counts one call in `step` now, before its turn runs, so a turn that fails, unwinds or is
     /// dropped unfinished is still a call. The call is settled with what the turn reported.
     pub(crate) fn begin(&self, step: usize) -> Call {
@@ -733,6 +758,40 @@ impl Drop for Call {
     }
 }
 
+/// A metered turn of a meter running on this thread ([`RunMeter::turning`]), until it drops,
+/// returning or unwinding.
+pub(crate) struct Turning {
+    id: usize,
+}
+
+impl Drop for Turning {
+    fn drop(&mut self) {
+        TURNING.with_borrow_mut(|turning| {
+            if let Some(at) = turning.iter().rposition(|id| *id == self.id) {
+                turning.remove(at);
+            }
+        });
+    }
+}
+
+/// The inner model's turn as a metered model drives it: each poll is marked as a metered turn of
+/// `meter` on the thread that polls it, so a metered model of the same meter that the inner model
+/// reaches only while it runs passes through uncounted too.
+struct Inner<'a> {
+    meter: &'a RunMeter,
+    turn: BoxFuture<'a, Result<TurnOutcome, Error>>,
+}
+
+impl Future for Inner<'_> {
+    type Output = Result<TurnOutcome, Error>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let _turning = this.meter.turning();
+        this.turn.as_mut().poll(cx)
+    }
+}
+
 /// An llm [`Model`] that counts every `turn` of the model it holds into a [`RunMeter`].
 ///
 /// `M` is how the model is held: the `Arc<dyn Model>` or `Box<dyn Model>` a host built, a
@@ -777,15 +836,27 @@ where
 
     /// The inner model's turn, counted as one call before it runs. An answer adds its usage when
     /// that usage is final and names its input and output tokens; an error, an unwind or a future
-    /// dropped unfinished adds none.
+    /// dropped unfinished adds none. Inside a metered turn of the same meter on this thread (a
+    /// metered model wrapped again on its meter), the turn is that one's call: it is passed
+    /// through and not counted again.
     fn turn<'a>(
         &'a self,
         request: &'a TurnRequest,
         sink: &'a mut dyn StreamSink,
         cancel: &'a Cancel,
     ) -> BoxFuture<'a, Result<TurnOutcome, Error>> {
+        if self.meter.turning_here() {
+            return self.inner.turn(request, sink, cancel);
+        }
         let call = self.meter.begin(self.meter.step_here(0));
-        let turn = self.inner.turn(request, sink, cancel);
+        let turn = {
+            let _turning = self.meter.turning();
+            self.inner.turn(request, sink, cancel)
+        };
+        let turn = Inner {
+            meter: &self.meter,
+            turn,
+        };
         Box::pin(async move {
             let outcome = turn.await;
             call.settle(
