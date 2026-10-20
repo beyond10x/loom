@@ -30,6 +30,27 @@ Breaking: a host that links llm itself moves to llm 0.8.0 so it resolves one cop
 `b10x-llm-*` crate, and a full `Capabilities { … }` literal in it sets `output_streaming` and
 `input_during_output` or ends with `..Capabilities::text(…)`.
 
+A confined child under an egress aperture trusts the CA bundle the host names
+(`story:child-egress-ca-bundle`), so a child reaching an HTTPS vendor API through the aperture
+verifies its certificate. `ChildCommand::with_ca_bundle(path)` names a file of the host; the runner
+opens the child's driver with it as Substrate's `HostConfig::ca_bundle`, and Substrate binds a
+read-only snapshot of the file, taken when the child starts, at `/etc/ssl/certs/ca-certificates.crt`
+and sets `SSL_CERT_FILE` to it, the one variable the child gets beside the environment the host
+names. The bundle is part of the shared driver's key: children in workspaces of one directory
+naming different bundles, or one naming a bundle and one naming none, never share a driver. A
+bundle for a child with no egress aperture, which reaches no host to verify, a path that is not
+UTF-8 or not absolute, a bundle beside an environment naming `SSL_CERT_FILE`, which Substrate would
+replace, and a path that does not exist, is a symbolic link, is no regular file, is empty or cannot
+be read (as Substrate's daemon refuses its own bundle) are refused `ScopeInvalid` before anything
+starts or `target` is created, naming the path. The profile digest covers the bundle's path; a
+child naming none keeps its digest. Substrate's record of the applied confinement names no bundle,
+so the bundle is not checked after the child ran. `crates/loom-intake-slice/tests/confined_child.rs`
+holds it against a loopback TLS host the test serves with `openssl`, under a test CA it makes: a
+`curl` child verifies the host when the host names that CA's bundle and fails certificate
+verification when it names another CA's, in one directory through one runner; the case skips naming
+the missing prerequisite where `openssl` or `curl` is absent.
+Breaking: none.
+
 ## [0.28.0] - 2026-10-20
 
 Loom 0.28.0 lets an effect port end a run, names the idle bound, and confines a child process a
