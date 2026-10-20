@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:authority-sees-the-request
 kind: story
-status: active
+status: implemented
 title: 'AuthorityProvider::decide receives the action request it decides: action, case revision and artifact revisions'
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -13,11 +13,21 @@ scope:
 - confidence: cited
   path: CHANGELOG.md
 - confidence: cited
+  path: crates/loom-cli/tests/security_w10_u3.rs
+- confidence: cited
   path: crates/loom-commission-testkit/src/fake_authority.rs
+- confidence: cited
+  path: crates/loom-commission-testkit/src/kits/authority.rs
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/effect_invocation.rs
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/runtime_effect.rs
 - confidence: cited
   path: crates/loom-commission/src/ports/authority.rs
 - confidence: cited
   path: crates/loom-commission/src/runtime.rs
+- confidence: cited
+  path: crates/loom-executor/tests/interruption_recovery.rs
 - confidence: cited
   path: crates/loom-intake-slice/src/grant.rs
 - confidence: cited
@@ -25,7 +35,11 @@ scope:
 - confidence: cited
   path: crates/loom-mandate/src/lib.rs
 - confidence: cited
+  path: crates/loom-mandate/tests
+- confidence: cited
   path: crates/loom-plugin/src/authority.rs
+- confidence: cited
+  path: crates/loom-plugin/tests/hooks.rs
 - confidence: cited
   path: crates/loom-sdk/examples/software_change.rs
 - confidence: cited
@@ -33,11 +47,16 @@ scope:
 - confidence: cited
   path: crates/loom-sdk/tests/sdk_model_ports.rs
 - confidence: cited
+  path: docs/commission/design/approval-gate.md
+- confidence: cited
+  path: ess/commission/domains/responsibility.yaml
+- confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 5
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T01:24:51Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"review_outcome":1}}}
 - {from: "proposed", to: "active", at: "2026-10-20T01:24:51Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"review_outcome":1}}}
+- {from: "active", to: "implemented", at: "2026-10-20T03:29:52Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"test_result":1,"review_outcome":7,"verification":1}}}
 ---
 ## Outcome
 
@@ -106,3 +125,24 @@ Shared files: the stability page with `story:engineering-protocols-090` (pin lin
 with `story:governor-exposes-canon-decision` (another test body); `runtime.rs` and
 `crates/loom-intake-slice/src/run.rs` with the Commission outcome stories, which depend on this one
 (`story:refused-effect-ends-run` first).
+
+## Correction at close (wave 2026-10-20-w1)
+
+- "Artifact revisions" in the Outcome and the first acceptance line are not part of what shipped:
+  Commission's `ActionRequest` carries none (`ess/commission/domains/responsibility.yaml:938-952`:
+  run, case, `expected_case_revision`, action, arguments). The provider receives that request as
+  declared; `ess/` was not changed for it. Whether the case revision moves with every artifact
+  revision is inferred, not checked.
+- The security review and the adversary found that a request the provider allowed was invoked even
+  when the case moved during the decision (pre-existing on the base). The unit closed it: the
+  runtime reads the case revision again after an allow and once more right before a resumed request
+  is invoked; on a move it sees, the run loop records the request `Stale`, a resume before its take
+  is refused `CaseMoved`, and a resume after its take releases the Suspension. A move while the
+  effect itself runs is not seen; an effect port that must refuse such a write binds it to
+  `expected_case_revision` (`7e5fb700`, `64dc06b1`, `ea03fef6`).
+- Files touched beyond the Scope below, call-site updates only: `crates/loom-commission-testkit/src/kits/authority.rs`,
+  testkit `authority_port.rs`, `run_outcomes.rs`, `adversary_run_outcomes.rs`, `effect_invocation.rs`,
+  `runtime_effect.rs`; `crates/loom-mandate/tests/{mandate_authority,adversary_w10_u2,security_w10_u2}.rs`;
+  `crates/loom-plugin/tests/hooks.rs`; `crates/loom-cli/tests/security_w10_u3.rs`;
+  `crates/loom-executor/tests/interruption_recovery.rs`; `docs/commission/design/approval-gate.md`;
+  `ess/commission/domains/responsibility.yaml` (comments only).

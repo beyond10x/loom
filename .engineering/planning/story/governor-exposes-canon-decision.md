@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:governor-exposes-canon-decision
 kind: story
-status: active
+status: implemented
 title: CanonGovernor exposes the canon-decision/1 it already computes
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -16,13 +16,16 @@ scope:
 - confidence: cited
   path: crates/loom-governor/src/lib.rs
 - confidence: cited
+  path: crates/loom-governor/tests/adversary_w20261020_u3.rs
+- confidence: cited
   path: crates/loom-governor/tests/decision_document.rs
 - confidence: cited
   path: crates/loom-sdk/tests/host_ports.rs
-revision: 7
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T01:24:52Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":2}}}
 - {from: "proposed", to: "active", at: "2026-10-20T01:24:52Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":2}}}
+- {from: "active", to: "implemented", at: "2026-10-20T03:29:52Z", actor: "human:timo", revision: 10, decided_on: {"recorded":{"test_result":1,"review_outcome":5,"verification":1}}}
 ---
 ## Outcome
 
@@ -85,3 +88,17 @@ Crates: `loom-governor`, `loom-sdk` (test only).
 Shared with `story:engineering-protocols-090` (`crates/loom-governor/src/lib.rs:127`, a doc line)
 and `story:authority-sees-the-request` (`crates/loom-sdk/tests/host_ports.rs`, a different test
 body).
+
+## Correction at close (wave 2026-10-20-w1)
+
+- The method that shipped is `CanonGovernor::decision_document(&self, case: &CaseId, frontier: &FrontierId) -> Result<Option<Value>, GovernorError>`,
+  not `decision_document(&self, case)` as the Outcome says. Two adversary passes showed that a
+  second evaluation, and then a keep of only the most recent one, return another document than the
+  one behind the frontier when the trusted time moves (`b10x-loom` evaluates at the host clock) and
+  when Commission's revalidation evaluates after the frontier it reports.
+- What holds now: `frontier` keeps the rendered document under the id it issues; a lookup never
+  evaluates; it answers `None` for an id the governor did not issue or no longer keeps; at most 16
+  documents (`KEPT_DOCUMENTS_PER_CASE`) are kept per case, for the case as it is held now; a case the
+  store no longer holds loses them; refusals are `frontier`'s (`b91af11e`, `6feccac2`, `e196fccc`).
+- Return type: the generated JSON value `evaluate` returns in `canon` (`ess/domains/evaluation.yaml:116`),
+  not the whole `EvaluationDecision`. `ess/` is unchanged.

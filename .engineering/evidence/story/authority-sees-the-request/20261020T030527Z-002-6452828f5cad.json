@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-20T03:05:27Z",
+  "actor": "human:timo",
+  "artifact": "story:authority-sees-the-request",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "the security reviewer's case-moved cases (f287061e, f47c6ec9) and the adversary's (828e0003, 85c591e2): red on an archive of 1265444a and at 3182fbcf, green at ea03fef6; authority_request.rs (provider sees the revalidated request; a grant at revision N does not allow N+1): fails to compile at 1265444a, green at ea03fef6",
+    "reference": "~/.cache/loom-wave-2026-10-20-w1/u2/sec/p2-base-cases.log vs ~/.cache/loom-wave-2026-10-20-w1/u2/gate3.log"
+  }
+}

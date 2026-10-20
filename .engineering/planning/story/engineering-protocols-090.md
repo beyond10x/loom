@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:engineering-protocols-090
 kind: story
-status: active
+status: implemented
 title: Loom builds on engineering-protocols 0.9.0, one copy beside takt
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -14,6 +14,8 @@ scope:
   path: CHANGELOG.md
 - confidence: cited
   path: Cargo.lock
+- confidence: cited
+  path: crates/loom-cli/tests/catalog_route.rs
 - confidence: cited
   path: crates/loom-governor/Cargo.toml
 - confidence: cited
@@ -29,19 +31,24 @@ scope:
 - confidence: cited
   path: crates/loom-intake-slice/Cargo.toml
 - confidence: cited
+  path: crates/loom-intake-slice/tests/adversary_w20261020_u1.rs
+- confidence: cited
   path: crates/loom-protocols/Cargo.toml
 - confidence: cited
   path: crates/loom-protocols/src/lib.rs
 - confidence: cited
   path: crates/loom-protocols/tests
 - confidence: cited
+  path: crates/loom-protocols/tests/adversary_w8_pin.rs
+- confidence: cited
   path: website/docs/guides/move-to-loom.md
 - confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 9
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T01:24:51Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":3}}}
 - {from: "proposed", to: "active", at: "2026-10-20T01:24:51Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":3}}}
+- {from: "active", to: "implemented", at: "2026-10-20T03:29:52Z", actor: "human:timo", revision: 12, decided_on: {"recorded":{"test_result":1,"review_outcome":5,"verification":1}}}
 ---
 ## Outcome
 
@@ -111,3 +118,19 @@ Crates: `loom-governor`, `loom-protocols`, `loom-intake-slice`, `loom-intake-rou
 Shared with `story:governor-exposes-canon-decision` (`crates/loom-governor/src/lib.rs`, a different
 region; it depends on this story) and `story:authority-sees-the-request` (the stability page, a
 different row).
+
+## Correction at close (wave 2026-10-20-w1)
+
+- The adversary found two more breaks the new bundled protocol makes, both now in the `Breaking:`
+  sentence: `b10x-loom resume` refuses a commission `run --state` kept under 0.26.0 (its kept route
+  names the catalog without `eval-gated-change@1`), and a user-store definition named
+  `eval-gated-change@1` fails every command that reads the store (`3bf691bc`).
+- `website/docs/guides/move-to-loom.md:57` named Canon `0.4.0`; corrected to `0.6.0` in the same
+  commit (pre-existing).
+- The pin table at `website/docs/reference/sdk-stability.md:48` got an `Unreleased` row, renamed
+  `0.27.0` by the release commit; `adversary_w8_pin.rs` lists `eval-gated-change@1` in the exact set.
+- `Cargo.lock` moves only the three engineering-protocols packages; `cargo update -p` also moved
+  unrelated edges (`windows-sys`, `getrandom`), which the implementor reverted.
+- Found, not fixed here: llm's tag is stale in `AGENTS.md:748` (`0.4.0`) and
+  `website/docs/guides/move-to-loom.md:48` (`0.3.1`); `Cargo.lock` holds `0.7.0`. Filed as
+  `story:doc-dependency-tags-match-lock`.

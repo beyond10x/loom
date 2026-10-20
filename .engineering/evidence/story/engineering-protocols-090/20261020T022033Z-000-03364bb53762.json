@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-20T02:20:33Z",
+  "actor": "human:timo",
+  "artifact": "story:engineering-protocols-090",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "Cargo.lock at 1265444a vs 3bf691bc (b10x-canon-engineering, -assertions and one more engineering-protocols package 0.8.0 -> 0.9.0, b10x-canon 0.6.0 unchanged); cargo test -p b10x-loom-protocols --test catalog the_bundled_catalog_lists_eval_gated_change: exit 101 on base, exit 0 on 07c5ee16",
+    "reference": "~/.cache/loom-wave-2026-10-20-w1/u1/red.log vs ~/.cache/loom-wave-2026-10-20-w1/u1/gate-1.log"
+  }
+}

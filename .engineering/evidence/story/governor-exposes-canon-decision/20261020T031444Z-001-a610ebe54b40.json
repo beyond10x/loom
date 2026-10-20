@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-20T03:14:44Z",
+  "actor": "human:timo",
+  "artifact": "story:governor-exposes-canon-decision",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "decision_document.rs and the adversary's host-clock cases (02e186c9, 76a9f354): no method at de1fb681 (E0599, exit 101), the run case red at 6feccac2, all green at e196fccc; the document returned for LoopEnd::last_frontier's id renders to that id under a trusted time that moves",
+    "reference": "~/.cache/loom-wave-2026-10-20-w1/u3/red-fix2.log vs ~/.cache/loom-wave-2026-10-20-w1/u3/gate-fix2.log"
+  }
+}
