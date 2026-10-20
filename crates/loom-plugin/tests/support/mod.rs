@@ -277,11 +277,7 @@ impl Recorded {
             capabilities: Capabilities {
                 tools: true,
                 tool_choice: true,
-                temperature: false,
-                top_p: false,
-                reasoning_efforts: Vec::new(),
-                context_window: 32_768,
-                max_output_tokens: 2_048,
+                ..Capabilities::text(32_768, 2_048)
             },
             answers: answers
                 .into_iter()
