@@ -153,10 +153,14 @@
 //!    capability an entry names (otherwise as not admitted) and, as one the frontier no longer
 //!    admits, is not invoked again. A stale one is not invoked again, and the iteration is as a
 //!    stale proposal:
-//!    a step, after which the next iteration judges the move. One the frontier no longer admits,
-//!    or the provider no longer allows (a deny is remembered as in 8), is not invoked again and is
-//!    no longer pending; when none is admitted and none is stale, the iteration goes on to the
-//!    gate (5) and the executor (6) as any other. The admitted ones, unless their actions' trial
+//!    a step, after which the next iteration judges the move. A request the provider answers
+//!    `ApprovalRequired` for when asked again ends the run `NeedsAuthority`, naming the provider's
+//!    request, as at a first `ApprovalRequired` (8): with a suspension port the Run is suspended
+//!    and the commission's Suspension holds the request, at its revision, for a resume to perform;
+//!    it is never dropped. One the frontier no longer admits, or the provider denies (remembered as
+//!    in 8) or fails to decide for, is not invoked again and is no longer pending; when none is
+//!    admitted and none is stale, the iteration goes on to the gate (5) and the executor (6) as any
+//!    other. The admitted ones, unless their actions' trial
 //!    limits stop the run first, are recorded as admitted and handed to the port again, a read
 //!    through [`EffectPort::invoke_reads`], the one request otherwise through
 //!    [`EffectPort::invoke`], and every answer is recorded and observed as in 8, the run budget's
@@ -258,8 +262,8 @@
 //! the port: a commission that holds a Suspension, `Pending` or `Resuming`, starts no Run
 //! ([`LoopFailure::CommissionSuspended`], naming its state and request; a port that cannot be read
 //! is [`LoopFailure::SuspensionStore`]), and nothing is performed. And when a step's request needs
-//! authority and the provider answers `ApprovalRequired`, so the run ends `NeedsAuthority` (8), the
-//! Run is first suspended through `SuspendRun` with `SuspensionReason::Authority`, whose payload
+//! authority and the provider answers `ApprovalRequired`, so the run ends `NeedsAuthority` (8), or
+//! answers so when a pending request is asked about again (8b), the Run is first suspended through `SuspendRun` with `SuspensionReason::Authority`, whose payload
 //! names the `capability` and the provider's `request`, and the commission's Suspension — the Run,
 //! the pending request and that reason — is held `Pending` through the port (`HoldSuspension`).
 //! The caller sees the same [`LoopEnd`] as without a port. A `SuspendRun` that fails ends the loop
@@ -301,7 +305,10 @@
 //! does (8), and the Suspension is released for that request (`ReleaseSuspension`), removed; a
 //! refusal the port marks final then ends the resumed Run `EffectRefused`, as in 8, and a
 //! `Pending` answer leaves the request pending, invoked again from the loop's first iteration on
-//! as in 8b, revalidated and asked about again, never from the released Suspension. At
+//! as in 8b, revalidated and asked about again, never from the released Suspension. A provider that
+//! allows the request only while its Suspension is `Pending` (the intake slice's grant authority)
+//! answers `ApprovalRequired` at that ask, so the resumed Run ends `NeedsAuthority` and holds a new
+//! Suspension for the same request, which an approval and a resume perform again. At
 //! another revision the request can never be performed: it is recorded `Stale` in
 //! [`LoopEnd::requests`], the Suspension is released for it all the same, nothing is invoked, and
 //! the loop goes on as after a stale proposal (8), so its first iteration judges the move (2). A
@@ -341,7 +348,7 @@ use crate::model::responsibility::{
     JudgePerformableActionsOutcome, Observation, ObservationData, ObservationId, ReleaseSuspension,
     ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome, RevalidateActionRequestOutcome, Run,
     RunData, RunId, RunOutcome, RunOutcomeAwaitingApproval, RunOutcomeCaseMovedOn,
-    RunOutcomeCompleted, RunOutcomeEffectRefused, RunOutcomeIdleBound,
+    RunOutcomeCompleted, RunOutcomeEffectRefused, RunOutcomeIdleBound, RunOutcomeNeedsAuthority,
     RunOutcomeNoPerformableAction, RunOutcomeSuspended, RunOutcomeWaiting, RunStarted,
     RunStorageFailed, StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionKey,
     SuspensionReason, SuspensionState, SuspensionStateConflict, TakeSuspension,
@@ -1188,6 +1195,26 @@ where
                 &mut track,
                 &mut denied,
             )?;
+            // The provider withholds the pending request now: the run ends needing authority as
+            // at a first `ApprovalRequired` (8), and with a suspension port the Run is suspended
+            // and the commission's Suspension holds the request, for a resume to perform.
+            if let Some(Withheld {
+                request,
+                capability,
+                approval,
+            }) = again.withheld
+            {
+                if let Some(suspending) = suspensions {
+                    let reason = SuspensionReason::Authority(Value::Object(vec![
+                        ("capability".to_owned(), Value::Text(capability)),
+                        ("request".to_owned(), Value::Text(approval.clone())),
+                    ]));
+                    suspend_for_approval(runs, suspending, run, &request, reason)?;
+                }
+                let outcome =
+                    RunOutcome::NeedsAuthority(RunOutcomeNeedsAuthority { request: approval });
+                return Ok(track.end(run_id, outcome));
+            }
             if let Some(breach) = again.over_budget {
                 // Nothing was invoked: the requests admitted are still pending.
                 let still = Waiting {
@@ -2212,6 +2239,19 @@ struct InvokedAgain {
     pending: Vec<ActionRequestData>,
     /// How the run ends when the port refused one as final ([`refusal_end`]).
     ended: Option<RunOutcome>,
+    /// The one request the provider answered `ApprovalRequired` for when asked again: the run
+    /// ends needing authority, as at a first `ApprovalRequired` (8).
+    withheld: Option<Withheld>,
+}
+
+/// A pending request whose authority the provider withheld when it was asked again (item 8b).
+struct Withheld {
+    /// The pending request, as the run made it.
+    request: ActionRequestData,
+    /// The capability the frontier names for its action.
+    capability: String,
+    /// What the provider's `ApprovalRequired` asks to be approved.
+    approval: String,
 }
 
 /// Invokes `waiting`'s requests again, as item 8b documents. Each is revalidated first, as before
@@ -2253,6 +2293,7 @@ where
         performed: false,
         pending: Vec::new(),
         ended: None,
+        withheld: None,
     };
     for data in &waiting.requests {
         let mut answer = revalidate(governor, &ActionRequest::new(data.clone()))?;
@@ -2287,7 +2328,14 @@ where
                             }
                         }
                         AuthorityVerdict::Deny(_) => denied.push(error.action.clone()),
-                        _ => {}
+                        AuthorityVerdict::ApprovalRequired(required) => {
+                            again.withheld = Some(Withheld {
+                                request: data.clone(),
+                                capability: error.capability.clone(),
+                                approval: required.request,
+                            });
+                        }
+                        AuthorityVerdict::Allow(_) => {}
                     }
                 }
             }

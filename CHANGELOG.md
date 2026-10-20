@@ -56,8 +56,13 @@ The runtime invokes the same request again at the next iteration, under its own 
 revision, with no executor call between and no wait or timer, until the port answers `Performed` or
 `Refused`. Each invocation is revalidated as the first was: a request that needs authority is asked
 about again and the case's revision read again after the allow, and a request whose case moved, or
-that the frontier or the provider no longer admits, is not invoked again. A pending read of a
-fan-out is invoked again alone, through `invoke_reads`. Each invocation is a step and one trial on
+that the frontier no longer admits or the provider denies, is not invoked again. A provider that
+answers `ApprovalRequired` at that ask ends the run `NeedsAuthority`, as at a first ask, the Run
+suspended and a Suspension held for the request under `run_with_suspension`. So a resumed request
+answered pending is asked about again at its next invocation, and a provider that allows only
+while the Suspension is pending, as the intake slice's grant authority does, asks for approval
+again: the run holds a new Suspension for the same request. A pending read of a fan-out is invoked
+again alone, through `invoke_reads`, and only while the fan-out rule still admits it. Each invocation is a step and one trial on
 the run budget, each answer is recorded and delivered as one observation, never evidence, and a
 pending answer is no idle iteration and leaves the idle count where it was. A budget that stops the
 run while a request is pending ends it `RunOutcome::Waiting` (`RunOutcomeWaiting`: the pending
