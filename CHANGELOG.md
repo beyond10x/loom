@@ -18,7 +18,7 @@ Substrate `ExecEnvironment` the host names, empty unless it names one; it asks S
 `SandboxProfile` and `NetworkMode` the host names, `Workspace` with `None` by default, always
 required; a guarantee Substrate does not serve is a `ConfinementError` and nothing runs, never an
 unconfined fall-back; the applied confinement is compared with the request after the child ran,
-and a result whose applied confinement differs (only no network is accepted as applied), or that
+and a result whose applied confinement differs (only the requested network is accepted as applied), or that
 Substrate reports with no exit status and no timeout, is refused as a `ConfinementError`; any
 other result is the `TestExecution` it returns, carrying the applied confinement and the driver's
 record. A program that Substrate's `/usr/bin/env` would read as one of its own operands is
@@ -57,6 +57,39 @@ idle bound. The intake slice maps `EffectRefused` to `StopReason::Refused` with 
 final.
 Breaking: a host that builds an `EffectOutcomeRefused` sets `ends_run` (`false` keeps today's
 behaviour), and a host that matches `RunOutcome` exhaustively handles `EffectRefused`.
+
+A confined child reaches one host it names and nothing else (`story:harness-child-egress-profile`),
+as a harness child must reach its vendor's API. `ChildCommand::with_egress(EgressAperture)` names
+Substrate's own aperture declaration, re-exported at `loom_sdk::intake::slice::confinement`: a
+name, the host and port, the IPv4 address the host resolved it to (`pinned`) and an optional byte
+ceiling. The child then asks Substrate for `NetworkMode::Aperture` with that name only, and every
+other guarantee of the workspace profile holds. `NetworkMode::Aperture` without an aperture, a
+mode and an aperture that disagree, and a declaration Substrate's daemon never makes are refused
+`ScopeInvalid` before anything starts: no host or port, a name it refuses, a byte ceiling of
+zero, a host that is no host name or IPv4 literal (whitespace, a second line, a port, a URL), an
+IPv4 literal other than the pinned address, and a pinned address that is no IPv4 one or not at the
+named port. The child reaches the aperture by the host's name, which Substrate maps to its
+forwarder on `127.0.0.1` inside the sandbox, so an IPv4 literal host other than `127.0.0.1`,
+which the child would dial and never reach, is refused `ScopeInvalid` too, naming the host: name
+such a host by its name. The runner opens a driver declaring the aperture, shared like any other by directory
+and aperture, and an aperture that Substrate did not publish when that driver opened, because its
+mechanism did not prove itself there, is refused `CapabilityUnserved` and nothing runs. After the
+child ran, its result is accepted only when Substrate's record is exactly the declared aperture
+(name, pinned destination, loopback forwarder, ceiling); a record reporting another or a wider
+network is refused as a test's is. A child its declared byte ceiling ended is a result, as a
+timed-out child is: no exit status, not timed out, its output naming `exec.aperture-byte-limit`
+and its driver record counting the bytes that crossed. The applied confinement names the
+aperture, `network` `aperture:<name>@<destination>`, and the profile digest covers the
+declaration; a test's and a plain child's are unchanged.
+`crates/loom-intake-slice/tests/confined_child.rs` holds it against loopback listeners the test
+starts: the one named `model.example.test` and listening on 127.0.0.2 is reached by its name,
+while another loopback port, and 127.0.0.2 dialled directly, are not. An egress child gets no
+certificate bundle yet, so a child that verifies TLS certificates cannot verify its host's; and
+one aperture per run is Substrate's limit, so a child that must reach several hosts cannot be
+served. Credentials for the vendor's API never pass through Loom, and the host chooses the hosts.
+Breaking: a `ChildCommand` asking for `NetworkMode::Aperture` without an aperture, which Substrate
+refused `CapabilityUnserved` once the driver had opened, is refused `ScopeInvalid` before anything
+starts.
 
 ## [0.27.0] - 2026-10-20
 

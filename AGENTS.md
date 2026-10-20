@@ -758,20 +758,34 @@ no test observation or passing evidence. Real delegated tests must run to qualif
 a skip with a named missing prerequisite establishes no qualification.
 `SubstrateRunner::run_child` confines a child process the host names (`ChildCommand`: program and
 arguments, the directory adopted as the workspace, and Substrate's `ExecEnvironment`,
-`SandboxProfile` and `NetworkMode`, `NetworkMode::None` by default) on the same launch path:
+`SandboxProfile` and `NetworkMode`, `NetworkMode::None` by default, or with `with_egress` the one
+Substrate `EgressAperture` it may reach) on the same launch path:
 writes only under `target/`, no toolchain or cache mounted, exactly the named environment, a typed
-refusal for a missing guarantee, only no network accepted as applied (checked after the child
-ran, refusing its result), a result with no exit status and no timeout refused, and the applied
-confinement in its `TestExecution`. A program containing `=` or starting with `-` (test or child)
+refusal for a missing guarantee, only the requested network accepted as applied, no network or
+exactly the named aperture (name, pinned destination, mechanism, ceiling), checked after the child
+ran and refusing its result as a test's is refused, a result with no exit status refused unless
+its timeout or its aperture's byte ceiling (`exec.aperture-byte-limit`, named in its output, its
+driver record counting the bytes) ended it, and the applied confinement in its `TestExecution`,
+whose `network` names an aperture `aperture:<name>@<destination>`. The child reaches the aperture
+by the host's name, which Substrate maps to its forwarder on `127.0.0.1` inside the sandbox. An
+aperture declaration Substrate's daemon never makes (no host or port, a name it refuses, a zero
+byte ceiling, a host that is no host name or IPv4 literal, an IPv4 literal other than the pinned
+address, a pinned address that is no IPv4 one or not at the named port), and an IPv4 literal host
+other than `127.0.0.1`, which the child could not reach the host by, are refused `ScopeInvalid`
+before anything starts, the refusal naming the host; one Substrate did not publish when the driver opened (its mechanism unproven) is refused
+`CapabilityUnserved`. An egress child gets no certificate bundle yet, and Substrate gives a run at
+most one aperture. A program containing `=` or starting with `-` (test or child)
 is refused before anything starts: Substrate execs through `/usr/bin/env`, which reads it as an
-assignment or an option. A runner and its clones share one driver per workspace directory,
+assignment or an option. A runner and its clones share one driver per workspace directory and
+egress aperture (Substrate fixes a driver's apertures when it opens),
 because opening a driver kills every `substrate-ex_*` cgroup under its root; each launch discards
 its finished execution from the driver (`discard_superseded_exec`), which tracks at most 128; no
 driver opens on a root while a launch of this process runs there (the process-wide count in
 `confinement.rs`, keyed by the canonical root), so the launch needing it is refused instead.
 `crates/loom-intake-slice/tests/confined_child.rs` holds it; its delegated
 cases start their own test binary under `systemd-run --user --scope -p Delegate=yes` and skip
-naming the missing prerequisite where bubblewrap, a user systemd manager or the driver is absent.
+naming the missing prerequisite where bubblewrap, a user systemd manager or the driver is absent,
+and the egress cases where `bash` or Substrate's aperture is; their hosts are loopback listeners.
 The slice's own git calls
 go through one helper, `crates/loom-intake-slice/src/git.rs`: no workspace hook, `core.fsmonitor`
 command or signing program runs, a case does not open on a workspace whose own configuration
