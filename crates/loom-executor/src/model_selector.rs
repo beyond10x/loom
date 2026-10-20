@@ -81,18 +81,41 @@ pub trait Briefing {
     /// [`select_once`].
     ///
     /// # Errors
-    /// Why the model gave no usable call.
+    /// Why the model gave no usable call, either kind of [`AskError`] as text.
     fn select(&self, model: &dyn Model, candidates: &str, schema: Value) -> Result<Value, String> {
-        select_once(self, model, candidates, schema)
+        select_once(self, model, candidates, schema).map_err(|error| error.to_string())
     }
 
     /// The arguments of `action`, as they are proposed: by default [`arguments_once`].
     ///
     /// # Errors
-    /// [`ArgumentsError::Unavailable`] when the model cannot be asked or gives no call;
-    /// [`ArgumentsError::Refused`] when its answer cannot become the action's arguments.
+    /// [`ArgumentsError::Unavailable`] when the model cannot be asked or gives no call, either
+    /// kind of [`AskError`] as text; [`ArgumentsError::Refused`] when its answer cannot become the
+    /// action's arguments.
     fn arguments(&self, model: &dyn Model, action: &str) -> Result<Value, ArgumentsError> {
         arguments_once(self, model, action)
+            .map_err(|error| ArgumentsError::Unavailable(error.to_string()))
+    }
+}
+
+/// Why a forced call gave no arguments: the request got no answer, or the model's answer holds no
+/// usable call. A host that tells the two apart overrides [`Briefing::select`] or
+/// [`Briefing::arguments`] on [`select_once`], [`arguments_once`] or [`ask`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AskError {
+    /// The request was not answered: it could not be built or sent, or the model failed it, after
+    /// every attempt [`Briefing::send`] makes.
+    Unanswered(String),
+    /// The model answered without a usable call of the tool: no call at all (a refusal, a content
+    /// filter, text only), or an outcome llm refuses for the request.
+    Unusable(String),
+}
+
+impl fmt::Display for AskError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unanswered(why) | Self::Unusable(why) => f.write_str(why),
+        }
     }
 }
 
@@ -100,13 +123,13 @@ pub trait Briefing {
 /// `candidates`, forcing [`SELECT_TOOL`] with `schema`.
 ///
 /// # Errors
-/// Why the model gave no usable call.
+/// Why the model gave no usable call ([`ask`]).
 pub fn select_once<B: Briefing + ?Sized>(
     briefing: &B,
     model: &dyn Model,
     candidates: &str,
     schema: Value,
-) -> Result<Value, String> {
+) -> Result<Value, AskError> {
     ask(
         model,
         briefing,
@@ -123,12 +146,12 @@ pub fn select_once<B: Briefing + ?Sized>(
 /// [`Briefing::arguments_schema`]. The call's arguments are returned as they are.
 ///
 /// # Errors
-/// [`ArgumentsError::Unavailable`] when the model cannot be asked or gives no call.
+/// Why the model gave no usable call ([`ask`]).
 pub fn arguments_once<B: Briefing + ?Sized>(
     briefing: &B,
     model: &dyn Model,
     action: &str,
-) -> Result<Value, ArgumentsError> {
+) -> Result<Value, AskError> {
     let mut text = briefing.text();
     // Writing to a String cannot fail.
     let _ = writeln!(text, "\nSelected action: {action}");
@@ -141,7 +164,6 @@ pub fn arguments_once<B: Briefing + ?Sized>(
         &format!("The arguments of `{action}`."),
         briefing.arguments_schema(action),
     )
-    .map_err(ArgumentsError::Unavailable)
 }
 
 /// Loom's selector, choosing with a model.
@@ -274,7 +296,7 @@ impl<B: Briefing> ArgumentGenerator for ModelArguments<'_, B> {
 /// sent through `briefing` ([`request`], then [`answer`]).
 ///
 /// # Errors
-/// A tool name that is no valid id, or why the model gave no usable call.
+/// [`AskError::Unanswered`] for a tool name that is no valid id; otherwise [`answer`]'s.
 pub fn ask<B: Briefing + ?Sized>(
     model: &dyn Model,
     briefing: &B,
@@ -283,11 +305,12 @@ pub fn ask<B: Briefing + ?Sized>(
     tool: &str,
     description: &str,
     schema: Value,
-) -> Result<Value, String> {
+) -> Result<Value, AskError> {
     answer(
         model,
         briefing,
-        &request(model, instructions, text, tool, description, schema)?,
+        &request(model, instructions, text, tool, description, schema)
+            .map_err(AskError::Unanswered)?,
         tool,
     )
 }
@@ -321,31 +344,32 @@ pub fn request(
 /// `briefing` on a current-thread runtime made for it. The stream is dropped.
 ///
 /// # Errors
-/// The model's error, an outcome llm refuses for `request`, or no call of `tool`.
+/// [`AskError::Unanswered`] for a tool name that is no valid id, no runtime, or the model's error;
+/// [`AskError::Unusable`] for an outcome llm refuses for `request` or no call of `tool`.
 pub fn answer<B: Briefing + ?Sized>(
     model: &dyn Model,
     briefing: &B,
     request: &TurnRequest,
     tool: &str,
-) -> Result<Value, String> {
-    let name = ToolName::new(tool).map_err(|error| error.to_string())?;
+) -> Result<Value, AskError> {
+    let name = ToolName::new(tool).map_err(|error| AskError::Unanswered(error.to_string()))?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|error| format!("no runtime for the model turn: {error}"))?;
+        .map_err(|error| AskError::Unanswered(format!("no runtime for the model turn: {error}")))?;
     let cancel = Cancel::new();
     let mut sink = Discard;
     let outcome = runtime
         .block_on(briefing.send(model, request, &mut sink, &cancel))
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| AskError::Unanswered(error.to_string()))?;
     outcome
         .validate_for(request, model.provenance())
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| AskError::Unusable(error.to_string()))?;
     outcome
         .tool_calls()
         .find(|call| call.name == name)
         .map(|call| call.arguments.clone())
-        .ok_or_else(|| format!("the model did not call `{tool}`"))
+        .ok_or_else(|| AskError::Unusable(format!("the model did not call `{tool}`")))
 }
 
 /// A sink that drops the stream: only the turn's outcome is read.

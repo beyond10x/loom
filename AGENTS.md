@@ -525,7 +525,16 @@ its approval gate (`docs/commission/design/approval-gate.md`), so the Run goes o
 granted read, and an `AwaitingApproval` ends the turn `stopped`. Model requests are bounded per
 turn: `TURN_MODEL_BUDGET` (two per step) counts every request sent, each attempt of Loom's caller
 retries (`loom_sdk::intake::slice::selector::send_with_retries`) included; the model the turn lends
-refuses any past it. A classifier hint that
+refuses any past it. A model that answered a request without a usable call is about the item, and
+one that could not answer is not: an answer with no call of the forced tool (a provider's refusal
+or content filter, which llm decodes as `Incomplete`, or text only), an answer llm refuses for the
+request, a selection naming no action and arguments Commission's JSON cannot carry
+(`model_selector::AskError::Unusable`) end the Run as no useful action, with no further request,
+and the turn `stopped`, naming the answer, so the item is recorded and the cycle goes on; only a
+request never answered (it could not be sent, or the model failed it after every retry;
+`AskError::Unanswered`) is `PluginError::Unavailable`. A selection outside the candidates stays a
+selection error, never a selection (`crates/loom-plugin/tests/unusable_answer.rs`,
+`crates/loom-plugin/tests/adversary_w20261020w4_u3.rs`). A classifier hint that
 names no configured source is dropped before anything prints it. Nothing is sent: a reply is a
 proposal in the record. A task gets no turn: the router's pick from `ProtocolCatalog::bundled()`
 is recorded as a proposed case. An attempt on an item is counted in the state, which keeps the

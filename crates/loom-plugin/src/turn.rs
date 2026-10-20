@@ -22,6 +22,16 @@
 //! `AwaitingApproval` ends the turn `stopped`. Its model requests are bounded by
 //! [`TURN_MODEL_BUDGET`].
 //!
+//! A model that answers a request without a usable call is about the item, and a model that could
+//! not answer is not. An answer with no call of the forced tool (a provider's refusal or content
+//! filter, which llm decodes as `Incomplete`, or text only), an answer llm refuses for the
+//! request, a selection naming no action and arguments Commission's JSON cannot carry end the
+//! Run as no useful action: no further request is sent, and the turn ends `stopped`, naming the
+//! answer, so the host records the item and goes on. A request that was never answered (it could
+//! not be sent, or the model failed it after every retry) leaves the Run suspended for an external
+//! availability, and the turn is [`PluginError::Unavailable`]. A selection outside the candidates
+//! stays a selection error, never a selection: Loom proposes nothing for it.
+//!
 //! The case's outcome is the turn's: `proposed` with the proposal's text, `declined` with the
 //! decline's reason. Any other end of the run is `stopped`, naming it. A task gets no turn:
 //! [`propose_case`] records the protocol the router picks for it from the bundled catalog.
@@ -29,6 +39,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use chrono::{SecondsFormat, Utc};
 use llm_core::{
@@ -46,7 +57,7 @@ use loom_sdk::commission::model::primitives::{Timestamp, Uuid};
 use loom_sdk::commission::model::responsibility::{
     ActionRequestId, AgentRevisionId, AuthorityContext, Commission, CommissionData, CommissionId,
     ExecutorOutcome, ExecutorOutcomeSuspended, Frontier, FrontierData, ObservationId, PrincipalId,
-    RunId, RunOutcome, SuspensionReason, commission_state, frontier_state,
+    RunId, RunOutcome, SuspensionReason, Unit, commission_state, frontier_state,
 };
 use loom_sdk::commission::outcome::RunStore;
 use loom_sdk::commission::ports::executor::AgentExecutor;
@@ -54,7 +65,10 @@ use loom_sdk::connectors::cli::SourceEntities;
 use loom_sdk::governor::FallibleCaseStore;
 use loom_sdk::intake::router::{RouterError, classify_with_catalog};
 use loom_sdk::intake::slice::selector::send_with_retries;
-use loom_sdk::loom::model_selector::{Briefing, ModelArguments, ModelSelector};
+use loom_sdk::loom::model_selector::{
+    ARGUMENTS_TOOL, ArgumentsError, AskError, Briefing, ModelArguments, ModelSelector, NO_ACTION,
+    SELECT_TOOL, arguments_once, select_once,
+};
 use loom_sdk::{
     CanonGovernor, Loom, LoopContext, MemoryCaseStore, ProtocolCatalog, run_until_blocked,
 };
@@ -161,13 +175,18 @@ pub fn propose_case(
 
 /// One governed turn on `item` over `projection`, on `model` (see the module documentation).
 ///
+/// A model that answered a request without a usable call ends the turn `stopped`, naming the
+/// answer, after that request: the item is handled. Only a request it never answered is
+/// [`PluginError::Unavailable`].
+///
 /// # Errors
 /// [`PluginError::Unavailable`], counted against no item, for a source that cannot be described,
 /// a read that found Connectors or the connection down (the connectors program timed out, or
-/// `not_granted`), or a Run suspended for an external availability (a model or wire that could
-/// not answer) within the model budget. [`PluginError::Turn`], counted against the item, for a plugin catalog or
-/// governor that cannot be assembled or a loop that failed (an effect, the governor or the run
-/// store). Every other end of the run, a case that does not open and an exhausted budget
+/// `not_granted`), or a Run suspended for an external availability (a request the model could not
+/// answer, or a wire that failed, after every retry) within the model budget.
+/// [`PluginError::Turn`], counted against the item, for a plugin catalog or governor that cannot be
+/// assembled or a loop that failed (an effect, the governor or the run store). Every other end of
+/// the run, a case that does not open, an answer without a usable call and an exhausted budget
 /// included, is a `stopped` turn.
 pub fn turn(
     host: &Host<'_>,
@@ -225,10 +244,12 @@ pub fn turn(
         .iter()
         .map(|(source, _)| source.name.0.clone())
         .collect();
+    let unusable = Unusable::default();
     let briefing = TurnBriefing {
         context: &context,
         effects: &effects,
         sources: &readable,
+        unusable: &unusable,
     };
     let executor = Steps {
         loom: Loom::new(
@@ -239,6 +260,7 @@ pub fn turn(
         .with_governor(&governor),
         admits: &projection.actions,
         asked: &asked,
+        unusable: &unusable,
     };
     let commission = Commission::<commission_state::Assigned>::new(CommissionData {
         commission_id: CommissionId(ids.next('c')),
@@ -273,6 +295,9 @@ pub fn turn(
         Ok(end) => end,
         Err(error) => return Err(PluginError::Turn(format!("the run failed: {error}"))),
     };
+    if let Some(answer) = unusable.answer() {
+        return Ok(stopped(reads, &answer));
+    }
     Ok(match end.outcome {
         RunOutcome::Completed(completed) if completed.outcome == "proposed" => TurnResult {
             outcome: RecordOutcome::Proposed,
@@ -471,11 +496,14 @@ fn inert(text: &str) -> String {
 
 /// What the turn's selector and argument generator tell the model: the turn's context, then what
 /// the turn did so far as data ([`earlier`]); each action's argument schema names the sources this
-/// turn may read. Every request is sent with Loom's caller retries.
+/// turn may read. Every request is sent with Loom's caller retries, and an answer without a
+/// usable call is kept ([`Unusable`]).
 struct TurnBriefing<'b, S> {
     context: &'b str,
     effects: &'b DataSourceEffects<'b, S>,
     sources: &'b [String],
+    /// Where an answer without a usable call is kept.
+    unusable: &'b Unusable,
 }
 
 impl<S> Clone for TurnBriefing<'_, S> {
@@ -512,15 +540,97 @@ impl<S: FallibleCaseStore> Briefing for TurnBriefing<'_, S> {
     ) -> BoxFuture<'a, Result<TurnOutcome, Error>> {
         send_with_retries(model, request, sink, cancel)
     }
+
+    /// One selection request; an answer without a usable call of `select_action`, or one naming
+    /// no action, is kept as unusable.
+    fn select(
+        &self,
+        model: &dyn Model,
+        candidates: &str,
+        schema: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        match select_once(self, model, candidates, schema) {
+            Ok(answer) => {
+                if answer
+                    .get("action")
+                    .and_then(serde_json::Value::as_str)
+                    .is_none()
+                {
+                    self.unusable.keep(NO_ACTION.to_owned());
+                }
+                Ok(answer)
+            }
+            Err(AskError::Unusable(why)) => {
+                self.unusable.keep(format!(
+                    "the model answered `{SELECT_TOOL}` without a usable call: {why}"
+                ));
+                Err(why)
+            }
+            Err(unanswered) => Err(unanswered.to_string()),
+        }
+    }
+
+    /// One argument request; an answer without a usable call of `action_arguments`, or arguments
+    /// Commission's JSON cannot carry, is kept as unusable.
+    fn arguments(
+        &self,
+        model: &dyn Model,
+        action: &str,
+    ) -> Result<serde_json::Value, ArgumentsError> {
+        match arguments_once(self, model, action) {
+            Ok(answer) => {
+                if loom_sdk::commission::model::json::parse(&answer.to_string()).is_err() {
+                    self.unusable.keep(format!(
+                        "the model's arguments of `{action}` are not Commission's JSON"
+                    ));
+                }
+                Ok(answer)
+            }
+            Err(AskError::Unusable(why)) => {
+                self.unusable.keep(format!(
+                    "the model answered `{ARGUMENTS_TOOL}` for `{action}` without a usable call: \
+                     {why}"
+                ));
+                Err(ArgumentsError::Refused(why))
+            }
+            Err(unanswered) => Err(ArgumentsError::Unavailable(unanswered.to_string())),
+        }
+    }
+}
+
+/// The first answer of the turn's model that held no usable call, once one did: the turn sends no
+/// further request and ends `stopped`, naming it.
+#[derive(Default)]
+struct Unusable {
+    answer: Mutex<Option<String>>,
+}
+
+impl Unusable {
+    /// Keeps `why`, unless an earlier answer is kept.
+    fn keep(&self, why: String) {
+        self.slot().get_or_insert(why);
+    }
+
+    /// The answer kept, if any.
+    fn answer(&self) -> Option<String> {
+        self.slot().clone()
+    }
+
+    fn slot(&self) -> MutexGuard<'_, Option<String>> {
+        self.answer.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 }
 
 /// The turn's executor: Loom's chooser path on the frontier narrowed to the projection's actions,
-/// while the turn has model requests left.
+/// while the turn has model requests left and its model has answered every request with a usable
+/// call. Once one held none, every call is no useful action and asks no model: Commission ends the
+/// Run as it ends one on that outcome.
 struct Steps<'s, L> {
     loom: L,
     admits: &'s [String],
     /// The model requests the turn sent so far.
     asked: &'s AtomicU64,
+    unusable: &'s Unusable,
 }
 
 impl<L: AgentExecutor> AgentExecutor for Steps<'_, L> {
@@ -529,6 +639,9 @@ impl<L: AgentExecutor> AgentExecutor for Steps<'_, L> {
         commission: &Commission<commission_state::Assigned>,
         frontier: &Frontier<frontier_state::Issued>,
     ) -> ExecutorOutcome {
+        if self.unusable.answer().is_some() {
+            return ExecutorOutcome::NoUsefulAction(Unit(true));
+        }
         if self.asked.load(Ordering::SeqCst) >= TURN_MODEL_BUDGET {
             return ExecutorOutcome::Suspended(ExecutorOutcomeSuspended {
                 reason: SuspensionReason::Budget(Value::Object(vec![(
@@ -547,7 +660,13 @@ impl<L: AgentExecutor> AgentExecutor for Steps<'_, L> {
                 .collect(),
             ..issued.clone()
         });
-        self.loom.run(commission, &narrowed)
+        let outcome = self.loom.run(commission, &narrowed);
+        if self.unusable.answer().is_some() {
+            // Loom suspends on the unusable answer as on a model out of reach; the answer is about
+            // the item, so nothing is proposed and the run ends as on no useful action.
+            return ExecutorOutcome::NoUsefulAction(Unit(true));
+        }
+        outcome
     }
 }
 

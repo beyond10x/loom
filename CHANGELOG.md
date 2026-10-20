@@ -53,7 +53,11 @@ and argument generator move from the intake slice to `b10x_loom_executor::model_
 links `b10x-llm-core`. `b10x_loom_intake_slice::selector` keeps every path it had, `ModelSelector`
 and `ModelArguments` as aliases over its own `Briefing`, and adds `send_with_retries`, the slice's
 caller retries a plugin turn now sends with. `b10x-loom plugin run` hands each turn the agent's llm
-`Model` and builds no `LlmModelPort`. `TURN_MODEL_BUDGET` is 16, two requests per step.
+`Model` and builds no `LlmModelPort`. `TURN_MODEL_BUDGET` is 16, two requests per step. A model
+that answers a turn's request without a usable call (a refusal, a content filter, text only, an
+answer llm refuses) ends the turn `stopped`, as the ported loop did, and the host goes on to the
+next item; only a request the model never answered is `PluginError::Unavailable`. The executor's
+`model_selector::answer`, `ask`, `select_once` and `arguments_once` say which with `AskError`.
 Breaking: `b10x_loom_plugin::TurnModel` holds `model: Arc<dyn llm_core::Model>` instead of a
 harness `ModelPort` and a model name, so a plugin that supplies its own turn model hands an llm
 `Model`; a turn's requests are a selection and an argument request per step instead of one request

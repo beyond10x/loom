@@ -466,7 +466,7 @@ impl Briefing {
                 .bounded_request(model, &instructions, suffix, tool, &schema, &views)
                 .map_err(ArgumentsError::Unavailable)?;
             let answer = chooser::answer(model, self, &request, tool)
-                .map_err(ArgumentsError::Unavailable)?;
+                .map_err(|error| ArgumentsError::Unavailable(error.to_string()))?;
             if !is_lookup(&answer) {
                 return Ok(answer);
             }
@@ -617,7 +617,7 @@ impl chooser::Briefing for Briefing {
                 .exchange(model, self.select_prompt(), candidates, SELECT_TOOL, schema)
                 .map_err(|error| error.to_string());
         }
-        select_once(self, model, candidates, schema)
+        select_once(self, model, candidates, schema).map_err(|error| error.to_string())
     }
 
     /// The arguments of `action`, or why there are none. Every lookup the model makes is answered
@@ -657,7 +657,7 @@ impl chooser::Briefing for Briefing {
                 &format!("The arguments of `{action}`, or a stored-result lookup."),
                 reference_arguments_schema(action),
             )
-            .map_err(ArgumentsError::Unavailable)?;
+            .map_err(|error| ArgumentsError::Unavailable(error.to_string()))?;
             if answer.get("$read_result").is_none() && answer.get("$list_results").is_none() {
                 return self.resolve_arguments(action, answer).map_err(|error| {
                     ArgumentsError::Refused(format!("the edit contents do not resolve: {error}"))
