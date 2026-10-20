@@ -83,7 +83,9 @@ impl EventStream {
 
     /// Ends the stream: an approval record when the run stopped for approval, then the one
     /// terminal record. Answers the exit status the process returns: [`run_exit_status`] of the
-    /// run, or [`FAILED`] for a run that failed with the given message.
+    /// run, or [`FAILED`] for a run that failed with the given message. The terminal record of a
+    /// `NoLocalExecutor` stop carries the actions no local executor performs
+    /// ([`SliceRun::unperformed`]) as `unperformed_actions`; every other record leaves it absent.
     ///
     /// # Errors
     /// The stream cannot be written, now or at an earlier record.
@@ -101,7 +103,9 @@ impl EventStream {
                     protocol: Some(run.protocol.clone()),
                     steps: Some(i64::try_from(run.steps).unwrap_or(i64::MAX)),
                     error: None,
-                    unperformed_actions: None,
+                    unperformed_actions: (run.stop_reason == StopReason::NoLocalExecutor
+                        && !run.unperformed.is_empty())
+                    .then(|| run.unperformed.clone()),
                 }
             }
             Err(error) => TerminalEvent {
@@ -194,6 +198,7 @@ pub fn line(line: &RunEventLine) -> Value {
                 "protocol": event.protocol,
                 "steps": event.steps,
                 "error": event.error,
+                "unperformed_actions": event.unperformed_actions,
             }),
         ),
     };

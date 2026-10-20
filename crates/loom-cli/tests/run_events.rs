@@ -297,7 +297,8 @@ fn a_no_local_executor_stop_names_its_actions() {
     assert_eq!(run.stop_reason, StopReason::NoLocalExecutor, "{human}");
     stream.finish(Ok(&run)).unwrap();
     let text = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
-    let last: Value = serde_json::from_str(text.lines().last().expect("a terminal record")).unwrap();
+    let last: Value =
+        serde_json::from_str(text.lines().last().expect("a terminal record")).unwrap();
     let listed: Vec<String> = human
         .lines()
         .rev()
@@ -310,7 +311,10 @@ fn a_no_local_executor_stop_names_its_actions() {
     sorted.sort_unstable();
     let mut declared = INCIDENT_ACTIONS.map(str::to_owned).to_vec();
     declared.sort_unstable();
-    assert_eq!(sorted, declared, "the frontier lists each action once: {human}");
+    assert_eq!(
+        sorted, declared,
+        "the frontier lists each action once: {human}"
+    );
     assert_eq!(
         last["unperformed_actions"],
         json!(listed),

@@ -103,7 +103,7 @@ The last line, exactly once per run.
 | `protocol` | string, optional | The protocol the run worked |
 | `steps` | integer, optional | The actions performed, refused ones included |
 | `error` | string, optional | Why the run failed; present only when it did |
-| `unperformed_actions` | list of strings, optional | On a `NoLocalExecutor` stop that read the case's frontier, the actions it lists that no local executor performs, each once, in frontier order; absent on every other stop |
+| `unperformed_actions` | list of strings, optional | On a `NoLocalExecutor` stop, the actions no local executor performs, each once: every action of the picked protocol the run has no executor for, in the protocol's order, or, once a case opened, the actions of the frontier it stopped on, in frontier order; absent on every other stop |
 
 ## The terminal record
 

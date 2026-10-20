@@ -233,7 +233,11 @@ fn the_outcome_names_each_unperformed_action_and_its_claim() {
             3,
             vec![
                 admissible("publish"),
-                action("open_pr", ActionStatus::ApprovalRequired, Some("forge.write")),
+                action(
+                    "open_pr",
+                    ActionStatus::ApprovalRequired,
+                    Some("forge.write"),
+                ),
             ],
         )],
     );

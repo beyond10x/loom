@@ -236,7 +236,8 @@ pub fn prepare_intent(
                 _ => unreachable!(),
             };
             writeln!(out, "refused: {}", printable(&error.to_string()))?;
-            return stop(out, protocol, StopReason::Refused, detail).map(Preparation::Stopped);
+            return stop(out, protocol, StopReason::Refused, detail, Vec::new())
+                .map(Preparation::Stopped);
         }
         Err(error) => return Err(SliceError::Router(error)),
     };
@@ -255,14 +256,34 @@ pub fn prepare_intent(
     if let Some(bound) = bound(request, &pick.protocol) {
         if let Some(action) = bindings::unbound(bound, entry) {
             let reason = format!("no command is bound to {action}");
-            return stop(out, pick.protocol, StopReason::NoLocalExecutor, &reason)
-                .map(Preparation::Stopped);
+            // Every action with no command, in the protocol's order: none has a local executor.
+            let unbound = entry
+                .actions()
+                .into_iter()
+                .filter(|declared| !bound.bindings.iter().any(|b| &b.action == declared))
+                .collect();
+            return stop(
+                out,
+                pick.protocol,
+                StopReason::NoLocalExecutor,
+                &reason,
+                unbound,
+            )
+            .map(Preparation::Stopped);
         }
     } else if pick.protocol != LOCAL_PROTOCOL
         && let Err(reason) = entry.clock_compatible()
     {
-        return stop(out, pick.protocol, StopReason::NoLocalExecutor, &reason)
-            .map(Preparation::Stopped);
+        // The slice executes `software.change/1` and the clock contract only: no action of this
+        // protocol has a local executor.
+        return stop(
+            out,
+            pick.protocol,
+            StopReason::NoLocalExecutor,
+            &reason,
+            entry.actions(),
+        )
+        .map(Preparation::Stopped);
     }
     Ok(Preparation::Ready(PreparedIntent {
         protocol: pick.protocol,
@@ -283,6 +304,7 @@ fn stop(
     protocol: String,
     reason: StopReason,
     detail: &str,
+    unperformed: Vec<String>,
 ) -> Result<SliceRun, SliceError> {
     writeln!(out, "stopped: {reason:?} ({})", printable(detail))?;
     Ok(SliceRun {
@@ -290,6 +312,7 @@ fn stop(
         steps: 0,
         stop_reason: reason,
         approvals: Vec::new(),
+        unperformed,
         gate: ApprovalGate::Approvable,
     })
 }

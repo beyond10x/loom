@@ -31,8 +31,7 @@ use b10x_loom_commission::model::responsibility::{
     ObservationData, ObservationId, PrincipalId, ProposedActionArguments,
     RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeAwaitingApproval,
     RunOutcomeCompleted, RunOutcomeIdleBound, RunOutcomeNeedsAuthority,
-    RunOutcomeNoPerformableAction, Unit, commission_state,
-    frontier_state,
+    RunOutcomeNoPerformableAction, Unit, commission_state, frontier_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::authority::{AuthorityProvider, AuthorityProviderError};

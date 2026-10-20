@@ -35,7 +35,11 @@
 //!    carries the held revision;
 //! 4. a frontier that lists actions, none of which the effect port performs
 //!    ([`EffectPort::performs`]), ends the run with `NoPerformableAction`, and the executor is not
-//!    run. A frontier that lists no action at all goes on: the outcome is derived from it;
+//!    run. The outcome names every action the frontier lists, each once, in frontier order, and
+//!    the frontier's open claims, its claims whose value is not `True`, in frontier order, as
+//!    [`judge_performable`] answers `unperformable` (`story:unperformable-names-actions`); the
+//!    frontier relates no action to a claim, so the claims are the frontier's. A frontier that
+//!    lists no action at all goes on (`performable`): the outcome is derived from it;
 //! 5. the approval gate, read on the frontier the executor is handed (6): when the previous
 //!    iteration was a step on a handed frontier listing actions that need approval, and this
 //!    handed frontier lists the same actions, each with the same status and reasons, the run ends
@@ -74,9 +78,10 @@
 //!    recorded in [`LoopEnd::requests`] with that answer in place of `NeedsAuthority`, and never
 //!    handed to the port. Admitted, or needing authority the provider allows on a case still at
 //!    the request's revision: when the port does not perform
-//!    its action ([`EffectPort::performs`]), the run ends with `NoPerformableAction`, the request
-//!    recorded with its revalidation in [`LoopEnd::requests`] but not admitted, and the port is
-//!    never handed it. Otherwise the request is recorded as admitted and handed to
+//!    its action ([`EffectPort::performs`]), the run ends with `NoPerformableAction`, naming that
+//!    action alone and the open claims of the frontier the request was made on, as in 4, the
+//!    request recorded with its revalidation in [`LoopEnd::requests`] but not admitted, and the
+//!    port is never handed it. Otherwise the request is recorded as admitted and handed to
 //!    [`EffectPort::invoke`] once, as an [`AdmittedRequest`]. Its
 //!    [`EffectOutcome`] is recorded ([`LoopEnd::effects`]) and delivered as one observation: id and
 //!    time from the context, source [`EFFECT_SOURCE`], subject `<case>@<request revision>`, payload
@@ -130,7 +135,8 @@
 //!    executor is not run again ([`Governor::completion`], then [`Governor::frontier`]): a case the
 //!    governor holds complete ends the run completed, with no frontier read; a frontier for another
 //!    revision than the one just loaded ends it with no admissible action; one that lists actions,
-//!    none of which the effect port performs, with `NoPerformableAction` (4). Otherwise the outcome
+//!    none of which the effect port performs, with `NoPerformableAction`, naming them and that
+//!    frontier's open claims as in 4. Otherwise the outcome
 //!    is derived from that frontier as the executor would be handed it (6), and where it would let
 //!    the run go on, the run ends `CaseMovedOn` (`story:moved-run-named-outcome`), naming the Run's
 //!    revision (`bound_case_revision`) and the one just loaded (`current_case_revision`): a Run
@@ -283,16 +289,19 @@ use crate::model::responsibility::{
     AuthorityVerdict, CaseId, Commission, CompletionDetermination, EffectOutcome, ExecutorOutcome,
     ExecutorOutcomeProposedAction, Frontier, FrontierAction, FrontierData, GovernorError,
     HoldSuspension, HoldSuspensionOutcome, JudgeEffectRefusal, JudgeEffectRefusalOutcome,
-    JudgeIdleIteration, JudgeIdleIterationOutcome, Observation, ObservationData, ObservationId,
-    ReleaseSuspension, ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome,
-    RevalidateActionRequestOutcome, Run, RunData, RunId, RunOutcome, RunOutcomeAwaitingApproval,
-    RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeEffectRefused, RunOutcomeIdleBound,
-    RunOutcomeNoPerformableAction, RunOutcomeSuspended, RunStarted, RunStorageFailed, StartRun, StartRunOutcome, SuspendRun,
-    SuspendRunOutcome, SuspensionKey, SuspensionReason, SuspensionState, SuspensionStateConflict,
-    TakeSuspension, TakeSuspensionOutcome, Unit, commission_state, frontier_state,
-    observation_state,
+    JudgeIdleIteration, JudgeIdleIterationOutcome, JudgePerformableActions,
+    JudgePerformableActionsOutcome, Observation, ObservationData, ObservationId, ReleaseSuspension,
+    ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome, RevalidateActionRequestOutcome, Run,
+    RunData, RunId, RunOutcome, RunOutcomeAwaitingApproval, RunOutcomeCaseMovedOn,
+    RunOutcomeCompleted, RunOutcomeEffectRefused, RunOutcomeIdleBound,
+    RunOutcomeNoPerformableAction, RunOutcomeSuspended, RunStarted, RunStorageFailed, StartRun,
+    StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionKey, SuspensionReason,
+    SuspensionState, SuspensionStateConflict, TakeSuspension, TakeSuspensionOutcome, Truth, Unit,
+    commission_state, frontier_state, observation_state,
 };
-use crate::outcome::{CapabilityVerdict, Derived, derive, judge_idle, judge_refusal};
+use crate::outcome::{
+    CapabilityVerdict, Derived, derive, judge_idle, judge_performable, judge_refusal,
+};
 use crate::ports::authority::{AuthorityCheck, AuthorityProvider, check_authority};
 use crate::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use crate::ports::evidence::ObservationPort;
@@ -1060,8 +1069,10 @@ where
             return Ok(track.end(run_id, RunOutcome::NoAdmissibleAction(Unit(true))));
         }
         track.last_frontier = Some(frontier.data().clone());
-        if performs_none(&frontier, effects) {
-            return Ok(track.end(run_id, unnamed_unperformable()));
+        if let Some(ended) =
+            unperformable_end(listed_actions(frontier.data()), frontier.data(), effects)?
+        {
+            return Ok(track.end(run_id, ended));
         }
         // The frontier the executor is handed; the gate and the outcome read it too.
         let handed = offered(&frontier, effects);
@@ -1182,9 +1193,12 @@ where
                 RevalidateActionRequestOutcome::NotAdmitted { .. } => {}
             }
             if admitted {
-                // Never hand the port an action it says it does not perform.
-                if !effects.performs(&data.action) {
-                    return Ok(track.end(run_id, unnamed_unperformable()));
+                // Never hand the port an action it says it does not perform: the run ends naming
+                // it, with the open claims of the frontier the request was made on.
+                if let Some(ended) =
+                    unperformable_end([data.action.as_str()], frontier.data(), effects)?
+                {
+                    return Ok(track.end(run_id, ended));
                 }
                 // An action at its trial limit is not handed to the port again.
                 if let Some(breach) = run_budget
@@ -1645,16 +1659,59 @@ where
     finish(runs, run_id, result).map_err(ResumeError::Loop)
 }
 
-/// Whether `frontier` lists actions and the effect port performs none of them (item 4).
-fn performs_none<F: EffectPort + ?Sized>(
-    frontier: &Frontier<frontier_state::Issued>,
+/// How a run ends when the effect port performs none of the actions it needs
+/// (`JudgePerformableActions`, `story:unperformable-names-actions`): `NoPerformableAction` when
+/// [`judge_performable`] answers `unperformable`, naming the needed actions the port does not
+/// perform, each once, in the order given, and the claims of `frontier` whose value is not `True`,
+/// in frontier order; `None` when it answers `performable`, and the run goes on. `needed` are every
+/// action `frontier` lists, in frontier order, before the executor runs (items 4 and 9), or the
+/// action of an admitted request (item 8). A judgement the generated behaviour cannot make is
+/// [`LoopFailure::Obligation`].
+fn unperformable_end<'a, F: EffectPort + ?Sized>(
+    needed: impl IntoIterator<Item = &'a str>,
+    frontier: &FrontierData,
     effects: &F,
-) -> bool {
-    let actions = &frontier.data().actions;
-    !actions.is_empty()
-        && !actions
-            .iter()
-            .any(|listed| effects.performs(&listed.action))
+) -> Result<Option<RunOutcome>, LoopFailure> {
+    let mut seen: Vec<&str> = Vec::new();
+    let mut performed: i64 = 0;
+    let mut unperformed = Vec::new();
+    for action in needed {
+        if seen.contains(&action) {
+            continue;
+        }
+        seen.push(action);
+        if effects.performs(action) {
+            performed = performed.saturating_add(1);
+        } else {
+            unperformed.push(action.to_owned());
+        }
+    }
+    let open_claims = frontier
+        .claims
+        .iter()
+        .filter(|listed| listed.value != Truth::True)
+        .map(|listed| listed.claim.clone())
+        .collect();
+    Ok(
+        match judge_performable(JudgePerformableActions {
+            performed,
+            unperformed,
+            open_claims,
+        })? {
+            JudgePerformableActionsOutcome::Unperformable { error } => Some(
+                RunOutcome::NoPerformableAction(RunOutcomeNoPerformableAction {
+                    actions: error.actions,
+                    open_claims: error.open_claims,
+                }),
+            ),
+            JudgePerformableActionsOutcome::Performable => None,
+        },
+    )
+}
+
+/// Every action `frontier` lists, in frontier order, an action listed more than once each time.
+fn listed_actions(frontier: &FrontierData) -> impl Iterator<Item = &str> {
+    frontier.actions.iter().map(|listed| listed.action.as_str())
 }
 
 /// Whether a fan-out of `reads` is admitted (item 8a): it lists at least one and at most
@@ -1891,7 +1948,7 @@ fn moved_outcome<G, F>(
     held: i64,
     bound: i64,
     reported: &ExecutorOutcome,
-) -> Result<Option<RunOutcome>, GovernorError>
+) -> Result<Option<RunOutcome>, LoopFailure>
 where
     G: Governor + ?Sized,
     F: EffectPort + ?Sized,
@@ -1947,15 +2004,6 @@ where
     })
 }
 
-/// `NoPerformableAction` naming no action and no claim yet: the specification gave the outcome its
-/// payload (`story:unperformable-names-actions`), and the runtime fills it in a later commit.
-fn unnamed_unperformable() -> RunOutcome {
-    RunOutcome::NoPerformableAction(RunOutcomeNoPerformableAction {
-        actions: Vec::new(),
-        open_claims: Vec::new(),
-    })
-}
-
 /// `CaseMovedOn` from the Run's revision `bound` to `loaded`.
 fn case_moved_on(bound: i64, loaded: i64) -> RunOutcome {
     RunOutcome::CaseMovedOn(RunOutcomeCaseMovedOn {
@@ -1979,7 +2027,7 @@ fn moved_judged<G, F>(
     loaded: i64,
     determination: &CompletionDetermination,
     reported: &ExecutorOutcome,
-) -> Result<RunOutcome, GovernorError>
+) -> Result<RunOutcome, LoopFailure>
 where
     G: Governor + ?Sized,
     F: EffectPort + ?Sized,
@@ -1993,8 +2041,10 @@ where
     if frontier.data().case_revision != loaded {
         return Ok(RunOutcome::NoAdmissibleAction(Unit(true)));
     }
-    if performs_none(&frontier, effects) {
-        return Ok(unnamed_unperformable());
+    if let Some(ended) =
+        unperformable_end(listed_actions(frontier.data()), frontier.data(), effects)?
+    {
+        return Ok(ended);
     }
     let handed = offered(&frontier, effects);
     Ok(match derive(determination, &handed, reported, None) {

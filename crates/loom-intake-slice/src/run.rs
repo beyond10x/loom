@@ -44,8 +44,8 @@
 //! | [`StopReason::NothingAdmissible`] | `IdleBound` | Commission's idle bound ended the run: with no step budget, two iterations in a row made no progress. The slice's runs always take `max_steps` as their step budget, so they never end so; the stop is the one above, with no detail |
 //! | [`StopReason::NothingAdmissible`] | `CaseMovedOn` | the case moved to another revision while the run worked, and its frontier there still admits an action; the run, bound to the revision it left, stops, and the detail names both revisions (`case moved on from revision <bound> to <current>`) |
 //! | [`StopReason::StepBudget`] | `Suspended` for `Budget` | the steps taken reach the request's `max_steps` |
-//! | [`StopReason::NoLocalExecutor`] | `NoPerformableAction` | the pick is not `software-change@1`; the case opens and one frontier is read |
-//! | [`StopReason::NoLocalExecutor`] | none: no case is opened | the pick is a protocol the request's action bindings bind ([`crate::bindings`]) and one of its actions has no command; the detail names it |
+//! | [`StopReason::NoLocalExecutor`] | `NoPerformableAction` | the pick is not `software-change@1`; the case opens and one frontier is read. [`SliceRun::unperformed`] carries the actions the outcome names, each once, in frontier order |
+//! | [`StopReason::NoLocalExecutor`] | none: no case is opened | the pick is a protocol the request's action bindings bind ([`crate::bindings`]) and one of its actions has no command; the detail names it, and [`SliceRun::unperformed`] carries every action with no command, in the protocol's order |
 //! | [`StopReason::Refused`] | none: no case is opened | the router refuses the pick: outside the registry, or unsure |
 //! | [`StopReason::Refused`] | `EffectRefused` | an effect port refused an admitted request as final; the detail is its reason. The slice's own effect ports never mark a refusal final |
 //!
@@ -234,6 +234,12 @@ pub struct SliceRun {
     /// The actions the run awaits approval for, in frontier order; empty unless it stopped
     /// [`StopReason::ApprovalRequired`].
     pub approvals: Vec<String>,
+    /// The actions no local executor performs, each once; empty unless it stopped
+    /// [`StopReason::NoLocalExecutor`] (`story:unperformable-names-actions`). After a case opened,
+    /// the ones Commission's `NoPerformableAction` names, in frontier order; before, every action
+    /// the picked protocol declares that the run cannot perform, in the protocol's order (see
+    /// [`crate::intent`]).
+    pub unperformed: Vec<String>,
     /// What a run with a state directory that stopped [`StopReason::ApprovalRequired`] left to
     /// approve; [`ApprovalGate::Approvable`] for every other run.
     pub gate: ApprovalGate,
@@ -909,11 +915,14 @@ fn finish(
                 Some(detail),
             )
         }
-        RunOutcome::NoPerformableAction(_) => {
+        RunOutcome::NoPerformableAction(unperformable) => {
             if let Some(frontier) = &end.last_frontier {
                 print_frontier(out, frontier)?;
             }
-            stop(out, protocol, steps, StopReason::NoLocalExecutor, None)
+            stop(out, protocol, steps, StopReason::NoLocalExecutor, None).map(|run| SliceRun {
+                unperformed: unperformable.actions,
+                ..run
+            })
         }
         RunOutcome::NeedsHumanJudgment(needs) => Err(SliceError::Unexpected(format!(
             "NeedsHumanJudgment {needs:?}"
@@ -1279,6 +1288,7 @@ fn gated_stop(
         steps,
         stop_reason: reason,
         approvals,
+        unperformed: Vec::new(),
         gate,
     })
 }
@@ -1300,6 +1310,7 @@ fn stop(
         steps,
         stop_reason,
         approvals: Vec::new(),
+        unperformed: Vec::new(),
         gate: ApprovalGate::Approvable,
     })
 }
@@ -1468,7 +1479,7 @@ mod tests {
     use b10x_loom_commission::model::primitives::Uuid;
     use b10x_loom_commission::model::responsibility::{
         ActionRequestId, ChargedUsage, RunCharges, RunId, RunOutcome, RunOutcomeCaseMovedOn,
-        RunOutcomeEffectRefused, RunOutcomeIdleBound, Unit,
+        RunOutcomeEffectRefused, RunOutcomeIdleBound, RunOutcomeNoPerformableAction, Unit,
     };
     use b10x_loom_commission::runtime::LoopEnd;
 
@@ -1528,6 +1539,7 @@ mod tests {
                 steps: 1,
                 stop_reason: StopReason::Refused,
                 approvals: Vec::new(),
+                unperformed: Vec::new(),
                 gate: ApprovalGate::Approvable,
             }
         );
@@ -1567,6 +1579,7 @@ mod tests {
                     steps: 1,
                     stop_reason: StopReason::NothingAdmissible,
                     approvals: Vec::new(),
+                    unperformed: Vec::new(),
                     gate: ApprovalGate::Approvable,
                 },
                 "stopped: NothingAdmissible\n".to_owned()
@@ -1577,6 +1590,40 @@ mod tests {
             stopped(RunOutcome::NoAdmissibleAction(Unit(true))),
             "the stop the idle bound ended a run with on 0.26.0"
         );
+    }
+
+    /// story:unperformable-names-actions: a run Commission ended `NoPerformableAction` stops
+    /// `NoLocalExecutor` carrying the actions it names, in its order, for the `run --output jsonl`
+    /// terminal record; its stop line is the one it printed before, with no detail.
+    #[test]
+    fn a_run_with_nothing_performable_stops_no_local_executor_carrying_its_actions() {
+        let mut out = Vec::new();
+        let run = finish(
+            &mut out,
+            "incident-response@1".to_owned(),
+            ended(
+                RunOutcome::NoPerformableAction(RunOutcomeNoPerformableAction {
+                    actions: vec!["metrics.inspect".to_owned(), "logs.search".to_owned()],
+                    open_claims: vec!["service.healthy".to_owned()],
+                }),
+                0,
+            ),
+            ApprovalGate::Approvable,
+        )
+        .unwrap_or_else(|error| panic!("the stop failed: {error}"));
+
+        assert_eq!(
+            run,
+            SliceRun {
+                protocol: "incident-response@1".to_owned(),
+                steps: 0,
+                stop_reason: StopReason::NoLocalExecutor,
+                approvals: Vec::new(),
+                unperformed: vec!["metrics.inspect".to_owned(), "logs.search".to_owned()],
+                gate: ApprovalGate::Approvable,
+            }
+        );
+        assert_eq!(String::from_utf8_lossy(&out), "stopped: NoLocalExecutor\n");
     }
 
     /// story:moved-run-named-outcome: a run whose case moved on to a frontier that still admits an
@@ -1623,6 +1670,7 @@ mod tests {
                 steps: 2,
                 stop_reason: StopReason::NothingAdmissible,
                 approvals: Vec::new(),
+                unperformed: Vec::new(),
                 gate: ApprovalGate::Approvable,
             }
         );

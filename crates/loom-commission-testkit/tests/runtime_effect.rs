@@ -60,8 +60,8 @@ use b10x_loom_commission::model::responsibility::{
     FrontierObligation, ObservationId, PrincipalId, ProposedActionArguments,
     RevalidateActionRequestOutcome, RunId, RunOutcome, RunOutcomeAwaitingApproval,
     RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeIdleBound, RunOutcomeNeedsAuthority,
-    RunOutcomeNeedsExternalEvidence, RunOutcomeNoPerformableAction, RunOutcomeSuspended, RunState, SuspensionReason, Unit,
-    commission_state, frontier_state,
+    RunOutcomeNeedsExternalEvidence, RunOutcomeNoPerformableAction, RunOutcomeSuspended, RunState,
+    SuspensionReason, Unit, commission_state, frontier_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
