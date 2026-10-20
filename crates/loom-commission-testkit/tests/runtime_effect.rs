@@ -182,6 +182,16 @@ fn revalidation(case: &CaseId) -> Vec<GovernorCall> {
     ]
 }
 
+/// The governor calls of a revalidation that is not stale, of a request needing authority the
+/// provider allowed: the case's revision is read once more after the allow.
+fn granted_revalidation(case: &CaseId) -> Vec<GovernorCall> {
+    [
+        revalidation(case),
+        vec![GovernorCall::CurrentRevision(case.clone())],
+    ]
+    .concat()
+}
+
 /// The governor calls of an iteration that loads the case and judges its completion, and reads no
 /// frontier: one that finds it complete, or one at a used-up budget after a performed step.
 fn loaded(case: &CaseId) -> Vec<GovernorCall> {
@@ -1278,7 +1288,7 @@ fn a_step_performed_under_a_grant_passes_the_gate() {
     let governor = FakeGovernor::new();
     governor.script(
         case.clone(),
-        repeat_n(open(), 11).chain([open().complete("answered")]),
+        repeat_n(open(), 12).chain([open().complete("answered")]),
     );
     let executor = Sequenced::new(&governor, [proposal("read"), proposal("propose")]);
     let effects = Effects::new(&governor);
@@ -1298,9 +1308,9 @@ fn a_step_performed_under_a_grant_passes_the_gate() {
         governor.calls(),
         [
             iteration(&case),
-            revalidation(&case),
+            granted_revalidation(&case),
             iteration(&case),
-            revalidation(&case),
+            granted_revalidation(&case),
             completed(&case),
         ]
         .concat(),
@@ -1308,7 +1318,7 @@ fn a_step_performed_under_a_grant_passes_the_gate() {
     );
     assert_eq!(
         executor.at(),
-        [3, 8],
+        [3, 9],
         "{name}: the executor ran after the grant"
     );
     let asked: Vec<String> = authority
@@ -1406,7 +1416,7 @@ fn a_step_performed_under_a_grant_passes_the_gate() {
     let end = ended(name, result);
     assert_eq!(
         governor.calls(),
-        [iteration(&case), revalidation(&case), loaded(&case)].concat(),
+        [iteration(&case), granted_revalidation(&case), loaded(&case)].concat(),
         "{name}: the case is loaded and no gate is read after the granted step"
     );
     assert_eq!(effects.invoked().len(), 1, "{name}: the read was performed");

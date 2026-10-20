@@ -67,8 +67,13 @@
 //!    the step's observation failed; the loop then returns that failure as a [`LoopError`] that
 //!    carries the reason;
 //! 8. on `ProposedAction`, the proposal becomes an action request bound to the frontier's revision
-//!    ([`request`], its id from the context) and is revalidated ([`revalidate`]). Admitted, or
-//!    needing authority the provider allows ([`check_authority`]): when the port does not perform
+//!    ([`request`], its id from the context) and is revalidated ([`revalidate`]). A request needing
+//!    authority is asked about ([`check_authority`]); once the provider allows it, the case is
+//!    loaded again ([`Governor::current_revision`]), since somebody else may have moved it while
+//!    the provider decided: at another revision than the request's, the request is stale,
+//!    recorded in [`LoopEnd::requests`] with that answer in place of `NeedsAuthority`, and never
+//!    handed to the port. Admitted, or needing authority the provider allows on a case still at
+//!    the request's revision: when the port does not perform
 //!    its action ([`EffectPort::performs`]), the run ends with `NoPerformableAction`, the request
 //!    recorded with its revalidation in [`LoopEnd::requests`] but not admitted, and the port is
 //!    never handed it. Otherwise the request is recorded as admitted and handed to
@@ -206,7 +211,9 @@
 //! request, when it is `Resuming`); it must be the commission's, on its case; the case is loaded,
 //! and a revision other than the request's ends it with [`ResumeRefusal::CaseMoved`]; the request
 //! is revalidated as the loop revalidates one (8), and a request that still needs authority is
-//! resumed only on the provider's allow ([`ResumeRefusal::NotGranted`]); the effect port must
+//! resumed only on the provider's allow ([`ResumeRefusal::NotGranted`]), after which the case is
+//! loaded again, and a revision other than the request's, the case moved while the provider
+//! decided, ends it with [`ResumeRefusal::CaseMoved`]; the effect port must
 //! perform its action. Then the Run is put back into a run store that does not hold it,
 //! `Suspended` at the case revision it started at, and resumed through `ResumeRun`. The Suspension
 //! is then taken through the port for the request read and revalidated (`TakeSuspension`,
@@ -246,8 +253,8 @@ use crate::model::responsibility::{
     ActionCharge, BudgetLimit, ChargedUsage, RunBudget, RunBudgetBreach, RunCharges,
 };
 use crate::model::responsibility::{
-    ActionRequest, ActionRequestData, ActionRequestId, ActionStatus, AnyRun, AuthorityVerdict,
-    CaseId, Commission, CompletionDetermination, EffectOutcome, ExecutorOutcome,
+    ActionRequest, ActionRequestData, ActionRequestId, ActionRequestStale, ActionStatus, AnyRun,
+    AuthorityVerdict, CaseId, Commission, CompletionDetermination, EffectOutcome, ExecutorOutcome,
     ExecutorOutcomeProposedAction, Frontier, FrontierAction, FrontierData, GovernorError,
     HoldSuspension, HoldSuspensionOutcome, Observation, ObservationData, ObservationId,
     ReleaseSuspension, ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome,
@@ -304,7 +311,8 @@ pub const MAX_FAN_OUT: usize = 16;
 pub struct Revalidated {
     /// The request, bound to the frontier it was chosen from.
     pub request: ActionRequestData,
-    /// Its revalidation outcome.
+    /// Its revalidation outcome; `Stale` for a request the provider allowed on a case that moved
+    /// while it decided.
     pub outcome: RevalidateActionRequestOutcome,
 }
 
@@ -481,7 +489,8 @@ pub enum ResumeRefusal {
     /// The stored Suspension, or the run the run store holds under its run id, names another
     /// commission, case or run revision than the one given.
     OtherCommission,
-    /// The case is no longer at the revision the request was suspended at.
+    /// The case is no longer at the revision the request was suspended at: when the resume first
+    /// loads it, or once the provider allowed the request.
     CaseMoved {
         /// The revision the request was suspended at.
         expected_case_revision: i64,
@@ -1104,6 +1113,24 @@ where
                         }
                         verdict = Some((error.capability, answer));
                     }
+                    // The provider allowed the request at its revision. A case somebody else
+                    // moved while it decided is at another one by now: the request is stale,
+                    // recorded so, and not invoked, and the next iteration judges the move (8).
+                    if admitted {
+                        let current = governor.current_revision(&data.case_id)?;
+                        if current != data.expected_case_revision {
+                            admitted = false;
+                            stale = true;
+                            if let Some(recorded) = track.requests.last_mut() {
+                                recorded.outcome = RevalidateActionRequestOutcome::Stale {
+                                    error: ActionRequestStale {
+                                        expected_case_revision: data.expected_case_revision,
+                                        current_case_revision: current,
+                                    },
+                                };
+                            }
+                        }
+                    }
                 }
                 RevalidateActionRequestOutcome::NotAdmitted { .. } => {}
             }
@@ -1391,6 +1418,17 @@ where
             let check = check_authority(authority, commission, &request, &error.capability);
             if !check.allows() {
                 return refused(ResumeRefusal::NotGranted(check));
+            }
+            // The provider allowed the request at its revision. A case somebody else moved while
+            // it decided is at another one by now: nothing is taken or performed.
+            let current = governor
+                .current_revision(&held.case_id)
+                .map_err(ResumeError::Governor)?;
+            if current != request.expected_case_revision {
+                return refused(ResumeRefusal::CaseMoved {
+                    expected_case_revision: request.expected_case_revision,
+                    current_case_revision: current,
+                });
             }
         }
     }

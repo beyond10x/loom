@@ -8,7 +8,10 @@
 //! The request is the [`ActionRequestData`] the runtime made and revalidated: its id, Run and case
 //! are the runtime's, and its `expected_case_revision` is the revision of the frontier the
 //! proposal was chosen from, never one the executor wrote. So a provider can allow one request at
-//! one case revision and refuse the same action at the next. Its `action` and `arguments` are the
+//! one case revision and refuse the same action at the next, and the runtime performs an allowed
+//! request only while the case is still at that revision: it loads the case again after the allow,
+//! and a case that moved while the provider decided makes the request stale
+//! ([`runtime`](crate::runtime), item 8 and `resume_after_grant`). Its `action` and `arguments` are the
 //! executor's proposal as written: model output, which a provider never takes identity or
 //! authority from (`AGENTS.md` § Rules).
 //!

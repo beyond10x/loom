@@ -419,8 +419,8 @@ fn effect_invoked_only_through_its_binding() {
 }
 
 /// 1. An admitted request for a bound action is invoked exactly once, through its bound
-///    (`instance_id`, `operation_id`), after the governor and authority calls, and its `Performed`
-///    outcome names exactly one attempt.
+///    (`instance_id`, `operation_id`), after the governor and authority calls and the case's
+///    revision read again after the allow, and its `Performed` outcome names exactly one attempt.
 fn bound_request_invoked_once_through_its_binding_after_the_recheck() {
     let name = "1: bound, gated, allowed";
     let case = CaseId("case-deploy".to_owned());
@@ -429,7 +429,7 @@ fn bound_request_invoked_once_through_its_binding_after_the_recheck() {
         &case,
         &commission(&case),
         &commission(&case),
-        repeat_n(open(3), 5)
+        repeat_n(open(3), 6)
             .chain([open(4), open(4).complete("deployed")])
             .collect(),
         vec![proposal(DEPLOY)],
@@ -439,13 +439,18 @@ fn bound_request_invoked_once_through_its_binding_after_the_recheck() {
 
     assert_eq!(
         ran.journal,
-        vec![Step::Executor(3), Step::Authority(5), Step::Invoke(5)],
-        "{name}: executor after the iteration's reads, authority after the revalidation's, then \
-         the invocation"
+        vec![Step::Executor(3), Step::Authority(5), Step::Invoke(6)],
+        "{name}: executor after the iteration's reads, authority after the revalidation's, the \
+         revision read again after the allow, then the invocation"
     );
     assert_eq!(
-        ran.calls[..5],
-        [iteration(&case), revalidation(&case)].concat(),
+        ran.calls[..6],
+        [
+            iteration(&case),
+            revalidation(&case),
+            vec![GovernorCall::CurrentRevision(case.clone())]
+        ]
+        .concat(),
         "{name}: the governor calls before the invocation"
     );
     assert_eq!(ran.asked.len(), 1, "{name}: {:?}", ran.asked);

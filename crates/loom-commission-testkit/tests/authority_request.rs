@@ -350,10 +350,11 @@ fn the_provider_sees_the_request_it_decides() {
 fn a_grant_bound_to_one_revision_does_not_allow_the_next() {
     let case = CaseId("case-revision-bound-grant".to_owned());
     let governor = FakeGovernor::new();
-    // The first iteration's three calls and its revalidation's two at 4, then the case at 5.
+    // The first iteration's three calls, its revalidation's two and the load after the allow at 4,
+    // then the case at 5.
     governor.script(
         case.clone(),
-        repeat_n(gated_merge(4), 5).chain([gated_merge(5)]),
+        repeat_n(gated_merge(4), 6).chain([gated_merge(5)]),
     );
     let executor = ScriptedExecutor::new([propose_merge(), propose_merge()]);
     let grant = RevisionBoundGrant::at(4);
