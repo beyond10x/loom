@@ -77,11 +77,16 @@ The rate card moves out of the ported loop to `b10x_loom_executor::metering::Rat
 beside it; `RateCard::price` takes the served model and an llm `Usage`. The loop keeps its own
 `harness::turn_loop::RateCard` for its configuration, and a `MeteredModelPort` over the loop's
 `ModelPort` still meters it, by the same rules, until the port is deleted.
-`ReasoningModelSelector` is removed: the executor's `model_selector::ModelSelector` already holds
-its contract (the model is offered only its candidates, and an answer outside them is a selection
+`ReasoningModelSelector` is removed: the executor's `model_selector::ModelSelector` holds its
+contract (the model is offered only its candidates, and an answer outside them is a selection
 error, never a selection) and is the selector whose strategy is `ReasoningModel`;
-`reasoning_model_selector.rs` and the Laya slice now run against it. It reports no tokens on its
-pick, so a `ReasoningModel` selection record's tokens are 0; the meter still counts its turns.
+`reasoning_model_selector.rs` and the Laya slice now run against it. As the removed selector did,
+it takes an answer that calls the selection tool more than once as no answer: `model_selector`'s
+`answer` returns `AskError::Unusable` for more than one call of the forced tool, the argument tool
+too, so two named actions, one outside the candidates or not, are never resolved to one; the
+intake slice and the Laya slice report the selector unavailable, and a plugin turn ends `stopped`,
+as for any answer without a usable call. It reports no tokens on its pick, so a `ReasoningModel`
+selection record's tokens are 0; the meter still counts its turns.
 Breaking: `MeteredModelPort` now meters an llm `Model` (`MeteredModelPort::new` takes any value,
 and it implements `llm_core::Model` for one that dereferences to a `Model`), and a host meters a
 selector or generator by handing it the metered model; `RunMeter::new` takes the new
