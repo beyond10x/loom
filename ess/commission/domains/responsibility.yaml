@@ -137,7 +137,8 @@ types:
       RunBudget: commission.responsibility.RunBudgetBreach
 
   # docs/commission/contracts/commission-executor.md: what an executor may hand back. It proposes; it never
-  # completes a case.
+  # completes a case. story:executor-reports-usage: the runtime takes it in an ExecutorStep, beside
+  # what the call reports it spent.
   - name: commission.responsibility.ExecutorOutcome
     kind: union
     tag: kind
@@ -202,6 +203,40 @@ types:
     fields:
       - name: expected_case_revision
         type: Integer
+
+  # story:executor-reports-usage: what one executor call reports it spent, as a performed effect
+  # reports its usage (EffectUsage): the input and output tokens, the wall time in milliseconds and
+  # the cost in millionths of a US dollar. A cost the executor could not price is absent, never
+  # zero. An executor that is not a model loop (an agent session, a remote executor) reports it. One
+  # whose model calls go through a metered model port of the run reports none of them, since the
+  # port counted them already, so nothing is counted twice.
+  - name: commission.responsibility.ExecutorUsage
+    kind: struct
+    fields:
+      - name: input_tokens
+        type: Integer
+      - name: output_tokens
+        type: Integer
+      - name: duration_ms
+        type: Integer
+      - name: cost_micro_usd
+        type: Optional<Integer>
+
+  # story:executor-reports-usage: one executor call as the runtime takes it, the step: what the
+  # executor proposes (`outcome`) and what the call reports it spent (`usage`, absent when it
+  # reports nothing). The runtime charges the usage to the run as it charges a performed effect's
+  # usage (a negative figure charges nothing, and a usage with no cost leaves the run's cost
+  # unknown), never to an action and never as a trial, and delivers it in the step's observation as
+  # `usage`. Once the step was observed, the run budget's spending limits are checked: a charge past
+  # one ends the run there, before the outcome is acted on (no request is made from it, and an
+  # executor's own suspension is not the Run's), the Run suspended for `RunBudget` naming the limit.
+  - name: commission.responsibility.ExecutorStep
+    kind: struct
+    fields:
+      - name: outcome
+        type: commission.responsibility.ExecutorOutcome
+      - name: usage
+        type: Optional<commission.responsibility.ExecutorUsage>
 
   # story:authority-provider-port: what an AuthorityProvider answers at the call. Distinct from the
   # stored AuthorityDecision entity.
@@ -451,7 +486,8 @@ types:
   # story:run-and-action-budgets: the limits of one run, every one optional (absent is no limit),
   # and the limits of each action it lists, at most one entry per action. `max_steps` bounds the
   # executor calls as the step budget does; the others bound what every performed effect of the
-  # run reported it spent. The host supplies it; the model never does.
+  # run reported it spent, and, for the run's own limits, what its executor calls reported they
+  # spent (story:executor-reports-usage, ExecutorStep). The host supplies it; the model never does.
   - name: commission.responsibility.RunBudget
     kind: struct
     fields:
@@ -476,6 +512,8 @@ types:
   # story:run-and-action-budgets: what one run, or one action of it, was charged: the requests
   # handed to the effect port (`trials`), and the sums of the usage its performed effects reported.
   # The cost is absent once a charged usage reported none. A run's steps are counted by the loop.
+  # story:executor-reports-usage: a run's sums also hold the usage its executor calls reported
+  # (ExecutorStep), which no action's do and which takes no trial.
   - name: commission.responsibility.ChargedUsage
     kind: struct
     fields:
@@ -501,7 +539,8 @@ types:
 
   # story:run-and-action-budgets: what one run was charged against its budget, in total and for
   # each action a request was handed to the effect port for, in the order each was first handed.
-  # It covers one process segment of the run.
+  # It covers one process segment of the run. story:executor-reports-usage: `run` is the actions'
+  # sums and the usage the run's executor calls reported.
   - name: commission.responsibility.RunCharges
     kind: struct
     fields:
@@ -515,7 +554,9 @@ types:
   # limit, its value and what was charged against it (absent for a cost limit whose charge is
   # unknown, since an effect reported usage without a cost). A count limit (steps, trials) stops
   # the run before the step or request that would pass it; a spending limit stops it once an
-  # effect's reported usage took the charge past it, after that effect was recorded and observed.
+  # effect's reported usage took the charge past it, after that effect was recorded and observed,
+  # or once an executor call's reported usage did, after that step was observed and before its
+  # outcome is acted on (story:executor-reports-usage, ExecutorStep).
   - name: commission.responsibility.RunBudgetBreach
     kind: struct
     fields:

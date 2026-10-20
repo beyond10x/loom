@@ -27,6 +27,13 @@ types:
   # The cost is absent when the run has no rate card, when the card does not price the model a
   # turn reported, when a turn that answered reported no usage, or when a turn failed (its tokens,
   # and so its cost, are unknown).
+  # story:executor-reports-usage: an executor call that reports what it spent
+  # (`commission.responsibility.ExecutorStep.usage`, an executor that is not a model loop) adds the
+  # reported input and output tokens to its step, and the reported cost to the cost of the step's
+  # priced calls; a step that made no model call takes the reported cost, with or without a rate
+  # card. A reported usage with no cost leaves the step's cost absent. It is no model call, and
+  # its wall time is charged to the run's budget only. An executor whose calls the meter counts
+  # reports none of them, so no usage is counted twice.
   # `label` is the name the executor gave its call: the workflow step it took
   # (story dw-workflow-definition-executor, `loom.workflow.WorkflowStep.name`). It is absent for
   # step 0 and for a call that took no named step.
@@ -57,6 +64,8 @@ types:
   # with this segment's.
   # story:run-and-action-budgets: `effects` is what the run's performed effects reported they spent
   # on their own model calls, beside the model-port usage above and never summed into it.
+  # story:executor-reports-usage: the usage an executor call reported is in its step, and so in
+  # the totals, never in `effects`, though the runtime charges both to the run.
   - name: loom.metering.RunUsageReport
     kind: struct
     fields:
