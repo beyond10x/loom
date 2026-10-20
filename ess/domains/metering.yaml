@@ -1,9 +1,9 @@
 # What one Commission run spent on its model (story dw-run-model-meter): the model calls, the
-# tokens the provider reported and the cost at a declared rate card, in total and per step. Calls
-# are counted at the `ModelPort` boundary (crates/loom-executor/src/harness/wire/port.rs), one per
-# `turn`, whether the turn answered or failed; a step is one executor call of the run, which the
-# runtime makes through `AgentExecutor::run_with_usage` (crates/loom-commission/src/runtime.rs,
-# module docs item 6), counted from 1. The report is a
+# tokens the provider reported and the cost at a declared rate card, in total and per step. A call
+# is one `turn` of the llm `Model` the run's executor and selectors call, counted by the metered
+# wrapper in crates/loom-executor/src/metering.rs whether the turn answered or failed; a step is
+# one executor call of the run, which the runtime makes through `AgentExecutor::run_with_usage`
+# (crates/loom-commission/src/runtime.rs, module docs item 6), counted from 1. The report is a
 # value a host reads when the run ends: it has no lifecycle, so the domain declares types only.
 # A workflow run record (`loom.workflow.WorkflowRunRecord`) carries the usage so far as
 # CarriedUsage, so a run resumed in another process reports every segment.
@@ -24,7 +24,7 @@ types:
   # (step 0, listed only when there was such a call, holds the calls made while no executor call
   # ran, so the steps always sum to the totals),
   # the tokens the provider reported for the calls that answered, and their cost in micro-US-
-  # dollars, each turn priced and rounded once (crates/loom-executor/src/harness/turn_loop/price.rs).
+  # dollars, each turn priced once by the run's rate card and rounded once.
   # The cost is absent when a turn was made without a rate card, when the card does not price the
   # model a turn reported, when a turn that answered reported no usage, or when a turn failed (its
   # tokens, and so its cost, are unknown).
