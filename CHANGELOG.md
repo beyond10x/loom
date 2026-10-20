@@ -49,6 +49,44 @@ Breaking: a host that builds or matches `RunOutcome::NoPerformableAction` with `
 `RunOutcomeNoPerformableAction`, a host that builds `SliceRun` sets `unperformed`, and a host that
 read `NoAdmissibleAction` after a found move onto such a frontier reads `NoPerformableAction`.
 
+A confined child under an egress aperture trusts the CA bundle the host names
+(`story:child-egress-ca-bundle`), so a child reaching an HTTPS vendor API through the aperture
+verifies its certificate. `ChildCommand::with_ca_bundle(path)` names a file of the host. Each
+launch reads it once, through an open with its last component not followed, and the child trusts
+the bytes read then: the runner opens the child's driver with a private read-only copy of them in
+the driver's own state directory as Substrate's `HostConfig::ca_bundle`, never with the named
+path, so a link or another file put at that path after the read is never read. Substrate binds a
+snapshot of that copy, taken when the child starts, at `/etc/ssl/certs/ca-certificates.crt` and
+sets `SSL_CERT_FILE` to it, the one variable the child gets beside the environment the host names.
+The bundle is part of the shared driver's key, as its path and the bytes read: children in
+workspaces of one directory naming different bundles, one naming a bundle and one naming none, and
+a bundle whose bytes changed since a driver opened for it never share a driver. The bundle is the
+trust store the child gets through `SSL_CERT_FILE`; beside it, the environment may not name the
+listed variables, so a host does not override by accident the bundle it named. That is no
+guarantee about what the child trusts: configuration under `HOME`, a program's own flags and
+variables not listed can still point a client elsewhere or turn verification off; what the child
+reaches is bounded by the aperture. A bundle for a child with no egress aperture, which reaches no
+host to verify, a path that is not UTF-8 or not absolute, a bundle beside an environment naming a
+listed variable (`SSL_CERT_FILE`, `SSL_CERT_DIR`, `CURL_CA_BUNDLE`, `CURL_CA_PATH`, `CURL_HOME`,
+`REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`,
+`GIT_SSL_NO_VERIFY`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_PARAMETERS`, or a
+`GIT_CONFIG_KEY_<n>` naming Git's `http.sslCAInfo`, `http.sslCAPath` or `http.sslVerify` in any
+case and with or without a URL subsection, each named in the refusal; Git configuration naming
+other keys stays allowed), and a path that does not exist, is a symbolic link, is no regular file,
+is empty, holds more than 1 MiB or cannot be read, on the path and again on the file opened (as
+Substrate refuses its own bundle), are refused `ScopeInvalid` before anything starts or `target` is
+created, naming the path. The profile digest covers the bundle's path and the digest of its bytes;
+a child naming none keeps its digest. Substrate's record of the applied confinement names no
+bundle, so the bundle is not checked after the child ran.
+`crates/loom-intake-slice/tests/confined_child.rs` holds it against a loopback TLS host the test
+serves with `openssl`, under a test CA it makes: a `curl` child verifies the host when the host
+names that CA's bundle and fails certificate verification when it names another CA's, in one
+directory through one runner, and a bundle path swapped for a link before a launch is refused and
+never followed; the delegated cases skip naming the missing prerequisite where `openssl` or `curl`
+is absent. `b10x-loom-intake-slice` now depends on `libc` (already in `Cargo.lock`) for
+`O_NOFOLLOW`.
+Breaking: none.
+
 ## [0.28.0] - 2026-10-20
 
 Loom 0.28.0 lets an effect port end a run, names the idle bound, and confines a child process a

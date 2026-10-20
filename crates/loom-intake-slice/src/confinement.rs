@@ -25,9 +25,10 @@ use sha2::{Digest as _, Sha256};
 pub use substrate_host::EgressAperture;
 use substrate_host::{DispatchOutcome, Driver as _, HostConfig, HostDriver};
 use substrate_wire::{
-    APERTURE_LOOPBACK_ADDRESS, ApertureMechanism, ApertureMode, AppliedNetwork, ConfinementRequest,
-    ExecLimits, ExecStartInput, MAX_WORKSPACE_WRITABLE_SUBTREES, ReadOnlyRoot, WorkspaceAccess,
-    validate_relative_path, validate_workspace_access,
+    APERTURE_CA_BUNDLE_PATH, APERTURE_LOOPBACK_ADDRESS, ApertureMechanism, ApertureMode,
+    AppliedNetwork, ConfinementRequest, ExecLimits, ExecStartInput,
+    MAX_WORKSPACE_WRITABLE_SUBTREES, ReadOnlyRoot, WorkspaceAccess, validate_relative_path,
+    validate_workspace_access,
 };
 /// Substrate's own wire types a host names a [`ChildCommand`] with.
 pub use substrate_wire::{BaselineEnvironment, ExecEnvironment, NetworkMode, SandboxProfile};
@@ -78,14 +79,15 @@ fn scope_error(detail: impl fmt::Display) -> ConfinementError {
 /// The Substrate runner: tests ([`TestRunner`]) and children the host names
 /// ([`SubstrateRunner::run_child`]) run through it confined.
 ///
-/// A runner and its clones share one Substrate driver per directory that holds their workspaces
-/// and egress aperture they name (Substrate fixes a driver's apertures when it opens), opened at
-/// the first launch that needs it, so their launches in workspaces of one directory run side by
-/// side; each launch releases its execution from the driver once it ended. Opening a driver ends
-/// every confined run under its cgroup root (Substrate reconciles them as orphans), so no driver is
-/// opened on a root, however its path is spelled, while a launch of this process runs under it: a
-/// launch that needs a driver for another directory, or for another egress aperture, then is
-/// refused with [`ConfinementRefusal::CapabilityUnserved`] instead.
+/// A runner and its clones share one Substrate driver per directory that holds their workspaces,
+/// egress aperture and certificate bundle they name (Substrate fixes a driver's apertures and
+/// bundle when it opens), opened at the first launch that needs it, so their launches in
+/// workspaces of one directory run side by side; each launch releases its execution from the
+/// driver once it ended. Opening a driver ends every confined run under its cgroup root (Substrate
+/// reconciles them as orphans), so no driver is opened on a root, however its path is spelled,
+/// while a launch of this process runs under it: a launch that needs a driver for another
+/// directory, egress aperture or certificate bundle then is refused with
+/// [`ConfinementRefusal::CapabilityUnserved`] instead.
 #[derive(Debug, Clone, Default)]
 pub struct SubstrateRunner {
     cgroup_root: Option<PathBuf>,
@@ -93,7 +95,7 @@ pub struct SubstrateRunner {
 }
 
 /// The drivers a runner and its clones opened, by the directory holding their workspaces, each
-/// declaring the egress aperture it was opened for, if any.
+/// with the [`DriverEgress`] it was opened for.
 #[derive(Default)]
 struct Drivers(Mutex<BTreeMap<PathBuf, Vec<Arc<OpenDriver>>>>);
 impl fmt::Debug for Drivers {
@@ -103,12 +105,109 @@ impl fmt::Debug for Drivers {
     }
 }
 
-/// One opened driver, the cgroup root it reconciled, the egress aperture it declares, and its
-/// private state directory.
+/// The rest of a shared driver's key, beside the directory holding its workspaces: what Substrate
+/// fixes when the driver opens. A launch shares a driver only with launches in workspaces of the
+/// same directory whose `DriverEgress` is equal, every field compared:
+///
+/// - `aperture`: the egress aperture the driver declares (`HostConfig::egress_apertures`), the
+///   whole declaration, or none;
+/// - `ca_bundle`: the certificate bundle a run with that aperture trusts, as the launch read it
+///   ([`CaBundle`]), compared as the path the host named and the bytes read from it, or none.
+///   The driver hands Substrate a private copy of those bytes (`HostConfig::ca_bundle`).
+///
+/// So two children naming different bundles, one naming a bundle and one naming none, and a
+/// bundle whose bytes changed since a driver opened for it, never share a driver, whatever else
+/// they share. A test, and a child naming neither, use [`DriverEgress::NONE`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DriverEgress {
+    aperture: Option<EgressAperture>,
+    ca_bundle: Option<CaBundle>,
+}
+
+impl DriverEgress {
+    /// No egress aperture and no certificate bundle.
+    const NONE: Self = Self {
+        aperture: None,
+        ca_bundle: None,
+    };
+}
+
+/// A certificate bundle as one launch read it ([`check_ca_bundle`]): the path the host named and
+/// the bytes read from it once, through an open with its last component not followed. Those
+/// bytes are what the child trusts: the driver opened for them hands Substrate a private copy of
+/// them ([`CaBundle::write_private_copy`]), never the named path, so a link or another file put
+/// at that path after the read is never read.
+#[derive(Clone, PartialEq, Eq)]
+struct CaBundle {
+    named: PathBuf,
+    bytes: Vec<u8>,
+}
+
+impl fmt::Debug for CaBundle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CaBundle")
+            .field("named", &self.named)
+            .field("bytes", &self.bytes.len())
+            .field("sha256", &format!("{:x}", Sha256::digest(&self.bytes)))
+            .finish()
+    }
+}
+
+impl CaBundle {
+    /// Write the bytes read to `ca-bundle.pem` in `directory`, a driver's private state directory
+    /// (created by this process for itself, owner-only, removed with the driver): a new file,
+    /// never one already there or a link, read-only. Substrate snapshots this copy when a child
+    /// starts, so every child of the driver trusts exactly these bytes.
+    fn write_private_copy(&self, directory: &Path) -> Result<PathBuf, ConfinementError> {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let copy = directory.join("ca-bundle.pem");
+        let failed = |e: std::io::Error| {
+            refuse(
+                ConfinementRefusal::BackendMissing,
+                format!(
+                    "the private copy of the CA bundle `{}` could not be written: {e}",
+                    self.named.display()
+                ),
+            )
+        };
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o400)
+            .open(&copy)
+            .map_err(failed)?;
+        file.write_all(&self.bytes).map_err(failed)?;
+        Ok(copy)
+    }
+}
+
+/// The configuration of a driver for the workspaces in `parent`, opened for `egress`, before its
+/// cgroup root is chosen: its capsules in `state`, its private state directory, the aperture it
+/// declares, and for a certificate bundle the private copy written to `state`, never the path the
+/// host named.
+fn driver_config(
+    parent: &Path,
+    state: &Path,
+    egress: &DriverEgress,
+) -> Result<HostConfig, ConfinementError> {
+    let mut config = HostConfig::minimum(parent);
+    config.capsule_root = state.join("capsules");
+    config.egress_apertures = egress.aperture.iter().cloned().collect();
+    config.ca_bundle = egress
+        .ca_bundle
+        .as_ref()
+        .map(|bundle| bundle.write_private_copy(state))
+        .transpose()?;
+    Ok(config)
+}
+
+/// One opened driver, the cgroup root it reconciled, the egress it was opened for, and its private
+/// state directory.
 struct OpenDriver {
     driver: Arc<HostDriver>,
     cgroup_root: PathBuf,
-    egress: Option<EgressAperture>,
+    egress: DriverEgress,
     _state: tempfile::TempDir,
 }
 
@@ -164,17 +263,17 @@ impl SubstrateRunner {
     /// Probe the real backend before opening a model session. No test is launched.
     pub fn preflight(&self, root: &Path) -> Result<(), ConfinementError> {
         let root = validate_workspace(root, &[])?;
-        self.driver(&root, None)?;
+        self.driver(&root, &DriverEgress::NONE)?;
         Ok(())
     }
 
-    /// The driver for the workspace `root` declaring `egress`: the one this runner or a clone
-    /// opened for its directory and that aperture, or a new one. The workspace is adopted on it
-    /// either way.
+    /// The driver for the workspace `root` opened for `egress`: the one this runner or a clone
+    /// opened for its directory and an equal [`DriverEgress`], or a new one. The workspace is
+    /// adopted on it either way.
     fn driver(
         &self,
         root: &Path,
-        egress: Option<&EgressAperture>,
+        egress: &DriverEgress,
     ) -> Result<Arc<OpenDriver>, ConfinementError> {
         let parent = root
             .parent()
@@ -186,7 +285,7 @@ impl SubstrateRunner {
             .unwrap_or_else(PoisonError::into_inner);
         let opened = drivers
             .get(parent)
-            .and_then(|opened| opened.iter().find(|open| open.egress.as_ref() == egress))
+            .and_then(|opened| opened.iter().find(|open| open.egress == *egress))
             .map(Arc::clone);
         let open = match opened {
             Some(open) => open,
@@ -211,18 +310,12 @@ impl SubstrateRunner {
         Ok(open)
     }
 
-    fn open(
-        &self,
-        parent: &Path,
-        egress: Option<&EgressAperture>,
-    ) -> Result<OpenDriver, ConfinementError> {
+    fn open(&self, parent: &Path, egress: &DriverEgress) -> Result<OpenDriver, ConfinementError> {
         let state = tempfile::Builder::new()
             .prefix("loom-substrate-")
             .tempdir()
             .map_err(|e| refuse(ConfinementRefusal::BackendMissing, e))?;
-        let mut config = HostConfig::minimum(parent);
-        config.capsule_root = state.path().join("capsules");
-        config.egress_apertures = egress.into_iter().cloned().collect();
+        let mut config = driver_config(parent, state.path(), egress)?;
         validate_backend(&config.bubblewrap)?;
         // One root has one name: the count of running launches is keyed by it, however the host
         // spelled the root.
@@ -281,7 +374,7 @@ impl SubstrateRunner {
         }
         // Substrate publishes the declared apertures only once its mechanism worked in a
         // throwaway sandbox; a declared one it does not publish is never served.
-        if let Some(aperture) = egress {
+        if let Some(aperture) = &egress.aperture {
             let Some(served) = facts.exec_egress_apertures.as_ref() else {
                 return Err(refuse(
                     ConfinementRefusal::CapabilityUnserved,
@@ -308,7 +401,7 @@ impl SubstrateRunner {
         Ok(OpenDriver {
             driver,
             cgroup_root,
-            egress: egress.cloned(),
+            egress: egress.clone(),
             _state: state,
         })
     }
@@ -318,19 +411,28 @@ impl SubstrateRunner {
     /// an unconfined fall-back. The child's environment is exactly [`ChildCommand::environment`],
     /// it writes only under `target` and the workspace paths the host named
     /// ([`ChildCommand::with_writable`]), and its network is none or exactly the egress aperture
-    /// it names ([`ChildCommand::with_egress`]); an aperture naming no host, or a writable path
-    /// that names no directory of the workspace by itself, is refused before anything starts.
+    /// it names ([`ChildCommand::with_egress`]), where it trusts the certificate bundle the host
+    /// names ([`ChildCommand::with_ca_bundle`]); an aperture naming no host, a bundle the child
+    /// cannot be given as named, or a writable path that names no directory of the workspace by
+    /// itself, is refused before anything starts.
     /// Once the child has run, its result is refused as a [`ConfinementError`] when the
     /// confinement Substrate applied is not the one requested, a wider network or writable set
     /// included, or when Substrate reports no exit status unless the child's timeout or its
     /// aperture's byte ceiling ended it; otherwise it carries the applied confinement, listing the
-    /// writable paths, and the driver's own record of it.
+    /// writable paths, and the driver's own record of it. Substrate's record names no certificate
+    /// bundle, so the bundle is not checked after the child ran.
     pub fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
         check_program(&child.program)?;
         check_network(child.network, child.egress.as_ref())?;
+        // Read once, here: the child trusts these bytes, whatever the path holds later.
+        let ca_bundle = check_ca_bundle(child)?;
         let writable = check_writable(&child.writable)?;
         let root = validate_workspace(&child.directory, &writable)?;
-        let open = self.driver(&root, child.egress.as_ref())?;
+        let egress = DriverEgress {
+            aperture: child.egress.clone(),
+            ca_bundle,
+        };
+        let open = self.driver(&root, &egress)?;
         let workspace = workspace_name(&root)?;
         let input = child.input(workspace, open.driver.machine().snapshot);
         child_result(Self::launch(&open, workspace, &input)?)
@@ -349,10 +451,15 @@ impl SubstrateRunner {
             check_program(program)?;
         }
         let driver = &open.driver;
-        let egress = open.egress.as_ref();
+        let egress = open.egress.aperture.as_ref();
         let _running = Running::enter(&open.cgroup_root);
         let profile = requested_profile(input, egress);
-        let digest = profile_digest(&profile, &input.env.allow, egress);
+        let digest = profile_digest(
+            &profile,
+            &input.env.allow,
+            egress,
+            open.egress.ca_bundle.as_ref(),
+        );
         let root_identity = driver
             .workspace_root_identity(workspace)
             .map_err(|e| scope_error(format!("Substrate adopt: {e:?}")))?;
@@ -518,7 +625,7 @@ impl TestRunner for SubstrateRunner {
         check_program(&command.program().to_string_lossy())?;
         // A test writes only under `target`: no host names it another writable path.
         let root = validate_workspace(root, &[])?;
-        let open = self.driver(&root, None)?;
+        let open = self.driver(&root, &DriverEgress::NONE)?;
         let closure = RustClosure::discover(&root)?;
         let snapshot = open.driver.machine();
         let workspace = workspace_name(&root)?;
@@ -550,6 +657,8 @@ impl TestRunner for SubstrateRunner {
 /// A child that must reach one host, such as a harness and its vendor's API, names it as the
 /// Substrate [`EgressAperture`] it may reach ([`ChildCommand::with_egress`]): its network is then
 /// that aperture alone, every other guarantee kept. Substrate gives one run at most one aperture.
+/// A child reaching that host over TLS also names the certificate bundle it trusts there
+/// ([`ChildCommand::with_ca_bundle`]); without one it cannot verify the host's certificate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChildCommand {
     program: String,
@@ -560,6 +669,7 @@ pub struct ChildCommand {
     profile: SandboxProfile,
     network: NetworkMode,
     egress: Option<EgressAperture>,
+    ca_bundle: Option<PathBuf>,
     timeout: Duration,
 }
 
@@ -586,6 +696,7 @@ impl ChildCommand {
             profile: SandboxProfile::Workspace,
             network: NetworkMode::None,
             egress: None,
+            ca_bundle: None,
             timeout: Self::DEFAULT_TIMEOUT,
         }
     }
@@ -610,7 +721,10 @@ impl ChildCommand {
         self
     }
 
-    /// The same child with exactly `environment` and no other variable.
+    /// The same child with exactly `environment` and no other variable, except `SSL_CERT_FILE`
+    /// when it names a certificate bundle ([`ChildCommand::with_ca_bundle`]). Beside a bundle the
+    /// environment may not name the variables `with_ca_bundle` lists, so a host does not override
+    /// by accident the bundle it named; that is no guarantee about what the child trusts.
     #[must_use]
     pub fn with_environment(self, environment: ExecEnvironment) -> Self {
         Self {
@@ -642,13 +756,62 @@ impl ChildCommand {
     /// the refusal; name such a host by its name), an IPv4 literal other than the pinned address,
     /// and a pinned address that is no IPv4 one or not at the named port. A child its byte ceiling
     /// ends is a result with no exit status, not timed out, whose output names
-    /// `exec.aperture-byte-limit`. It gets no certificate bundle: a child that verifies TLS
-    /// certificates cannot verify the host's.
+    /// `exec.aperture-byte-limit`. It gets no certificate bundle unless the host names one
+    /// ([`ChildCommand::with_ca_bundle`]): without one, a child that verifies TLS certificates
+    /// cannot verify the host's.
     #[must_use]
     pub fn with_egress(self, aperture: EgressAperture) -> Self {
         Self {
             network: NetworkMode::Aperture,
             egress: Some(aperture),
+            ..self
+        }
+    }
+
+    /// The same child trusting the certificate bundle at `path`, a file of the host, where it
+    /// reaches its egress aperture ([`ChildCommand::with_egress`]) over TLS. Each launch reads the
+    /// file once, through an open with its last component not followed, and the child trusts the
+    /// bytes read then: the runner opens the driver with a private read-only copy of them
+    /// (Substrate's `HostConfig::ca_bundle`), never with the named path, so a link or another file
+    /// put at that path after the read is never read. Substrate binds a snapshot of that copy, taken when
+    /// the child starts, at `/etc/ssl/certs/ca-certificates.crt` and sets `SSL_CERT_FILE` to that
+    /// path, the one variable the child gets beside its environment.
+    ///
+    /// The bundle is part of the shared driver's key, as the path and the bytes read: children
+    /// naming different bundles, one naming a bundle and one naming none, and a bundle whose
+    /// bytes changed since a driver opened for it, never share a driver. Like any other new
+    /// driver, the one a changed bundle needs cannot open while a launch of this process runs
+    /// under the same cgroup root, and the launch is refused
+    /// [`ConfinementRefusal::CapabilityUnserved`]. Substrate's record of the applied confinement
+    /// names no bundle, so the bundle is not checked after the child ran.
+    ///
+    /// The bundle is the trust store the child gets through `SSL_CERT_FILE`. Beside it, the
+    /// environment may not name the variables listed below, so a host does not override by
+    /// accident the bundle it named. That is no guarantee about what the child trusts:
+    /// configuration under `HOME`, a program's own flags and variables not listed can still point
+    /// a client elsewhere or turn verification off. What the child reaches is bounded by its
+    /// aperture.
+    ///
+    /// Refused [`ConfinementRefusal::ScopeInvalid`] before anything starts or `target` is created,
+    /// naming the path:
+    ///
+    /// - a bundle for a child with no egress aperture, which reaches no host to verify;
+    /// - a path that is not UTF-8 or not absolute;
+    /// - beside an environment naming, each named in the refusal, `SSL_CERT_FILE`,
+    ///   `SSL_CERT_DIR`, `CURL_CA_BUNDLE`, `CURL_CA_PATH`, `CURL_HOME`, `REQUESTS_CA_BUNDLE`,
+    ///   `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`, `GIT_SSL_NO_VERIFY`,
+    ///   `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM` or `GIT_CONFIG_PARAMETERS`, or a
+    ///   `GIT_CONFIG_KEY_<n>` naming Git's `http.sslCAInfo`, `http.sslCAPath` or `http.sslVerify`
+    ///   (in any case, with or without a URL subsection); Git configuration naming other keys
+    ///   is allowed;
+    /// - a path that does not exist, is a symbolic link, is no regular file, is empty or holds
+    ///   more than 1 MiB, checked on the path and again on the file the launch opens, as Substrate
+    ///   refuses its own bundle (name the file a link leads to);
+    /// - a file this process cannot read.
+    #[must_use]
+    pub fn with_ca_bundle(self, path: impl Into<PathBuf>) -> Self {
+        Self {
+            ca_bundle: Some(path.into()),
             ..self
         }
     }
@@ -697,6 +860,11 @@ impl ChildCommand {
     /// The egress aperture the child may reach, if it names one.
     pub fn egress(&self) -> Option<&EgressAperture> {
         self.egress.as_ref()
+    }
+
+    /// The certificate bundle the child trusts at its egress aperture, as named, if it names one.
+    pub fn ca_bundle(&self) -> Option<&Path> {
+        self.ca_bundle.as_deref()
     }
 
     /// The maximum duration of one run of the child.
@@ -926,6 +1094,199 @@ fn check_host(name: &str, host: &str, pinned: Ipv4Addr) -> Result<(), Confinemen
             "egress aperture `{name}` names the host {host:?}, which is no host name or IPv4 literal"
         )))
     }
+}
+
+/// The environment variables through which a TLS client takes another trust store than the bundle
+/// Substrate points `SSL_CERT_FILE` at, replaces it, adds to it or turns verification off, by the
+/// tools that read them: OpenSSL (`SSL_CERT_FILE`, which Substrate itself sets to the snapshot at
+/// [`APERTURE_CA_BUNDLE_PATH`], and `SSL_CERT_DIR`), curl (`CURL_CA_BUNDLE`, `CURL_CA_PATH`, and
+/// `CURL_HOME`, where it reads a `.curlrc` that may name a `cacert`), Python's requests
+/// (`REQUESTS_CA_BUNDLE`), Node (`NODE_EXTRA_CA_CERTS`) and Git (`GIT_SSL_CAINFO`,
+/// `GIT_SSL_CAPATH`, `GIT_SSL_NO_VERIFY`, and `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM` and
+/// `GIT_CONFIG_PARAMETERS`, through which it takes configuration that may set `http.sslCAInfo`).
+/// A child naming a bundle is refused when its environment names any of them, or a
+/// `GIT_CONFIG_KEY_<n>` naming one of [`GIT_TRUST_KEYS`] ([`check_ca_bundle`]).
+///
+/// The list keeps a host from overriding, by accident, the bundle it names through the
+/// environment it names beside it. It is no guarantee about what the child trusts: configuration
+/// under `HOME`, a program's own flags and variables not listed can still point a client
+/// elsewhere or turn verification off; what the child reaches is bounded by its aperture.
+const TRUST_STORE_VARIABLES: [&str; 13] = [
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "CURL_CA_BUNDLE",
+    "CURL_CA_PATH",
+    "CURL_HOME",
+    "REQUESTS_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+    "GIT_SSL_CAINFO",
+    "GIT_SSL_CAPATH",
+    "GIT_SSL_NO_VERIFY",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_PARAMETERS",
+];
+
+/// The keys of Git's `http` section through which Git takes another trust store or turns
+/// verification off. A `GIT_CONFIG_KEY_<n>` naming one, the section and the key in any case and
+/// with or without a URL subsection (`http.<url>.sslCAInfo`), is refused beside a bundle
+/// ([`names_git_trust_key`]); one naming any other key (`safe.directory`) is not.
+const GIT_TRUST_KEYS: [&str; 3] = ["sslCAInfo", "sslCAPath", "sslVerify"];
+
+/// Whether an environment variable `name` set to `value`, beside a certificate bundle, would
+/// override the trust store the child gets: a name in [`TRUST_STORE_VARIABLES`], or a
+/// `GIT_CONFIG_KEY_<n>` (`n` decimal digits, as Git reads them) whose value names one of
+/// [`GIT_TRUST_KEYS`].
+fn overrides_trust_store(name: &str, value: &str) -> bool {
+    let git_config_key = name
+        .strip_prefix("GIT_CONFIG_KEY_")
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|byte| byte.is_ascii_digit()));
+    TRUST_STORE_VARIABLES.contains(&name) || (git_config_key && names_git_trust_key(value))
+}
+
+/// Whether the Git configuration key `key` is one of [`GIT_TRUST_KEYS`] in the `http` section:
+/// its first dot-separated part is `http` and its last one the key, both compared without case,
+/// so `http.sslCAInfo`, `HTTP.SSLCAINFO` and `http.https://host.example/.sslCAInfo` all are.
+fn names_git_trust_key(key: &str) -> bool {
+    let key = key.trim();
+    match (key.split_once('.'), key.rsplit_once('.')) {
+        (Some((section, _)), Some((_, name))) => {
+            section.eq_ignore_ascii_case("http")
+                && GIT_TRUST_KEYS
+                    .iter()
+                    .any(|trust| name.eq_ignore_ascii_case(trust))
+        }
+        _ => false,
+    }
+}
+
+/// The largest certificate bundle a child is given, 1 MiB: the ceiling Substrate holds its own
+/// bundles to (`MAX_CA_BUNDLE_BYTES`, private to `b10x-substrate-sdk`'s transport and to
+/// `substrate-daemon`'s hosted admission, so not importable here).
+const MAX_CA_BUNDLE_BYTES: u64 = 1024 * 1024;
+
+/// Refuse, before anything starts, a certificate bundle the child cannot be given as named
+/// ([`ChildCommand::with_ca_bundle`]), each refusal naming the path, in this order, and otherwise
+/// return the bundle as read: the bytes the child trusts.
+///
+/// 1. a bundle for a child with no egress aperture: Substrate gives a run the bundle only with
+///    its aperture, and a child with none reaches no host the bundle could verify;
+/// 2. a path that is not UTF-8, or not absolute, which names no one file whatever the working
+///    directory;
+/// 3. an environment naming any of [`TRUST_STORE_VARIABLES`] beside the bundle, or a
+///    `GIT_CONFIG_KEY_<n>` naming one of [`GIT_TRUST_KEYS`] ([`overrides_trust_store`]), each
+///    named in the refusal: it would override the trust store the child gets through
+///    `SSL_CERT_FILE` (whose own value Substrate would replace unseen);
+/// 4. the path itself, its last component not followed: one that does not exist, is a symbolic
+///    link, is no regular file, is empty or holds more than [`MAX_CA_BUNDLE_BYTES`], as Substrate
+///    refuses a bundle of its own; an empty one would trust nothing while the child is pointed
+///    at it;
+/// 5. the file, opened once with its last component not followed (`O_NOFOLLOW`) and without
+///    waiting for a writer (`O_NONBLOCK`): the rules of step 4 again on that open file, so a link
+///    put at the path since is refused as a link, then its bytes read through it, at most one past
+///    the ceiling, refused when they cannot be read, are empty or pass the ceiling.
+///
+/// A child naming no bundle passes with `None`.
+fn check_ca_bundle(child: &ChildCommand) -> Result<Option<CaBundle>, ConfinementError> {
+    use std::io::Read as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let Some(path) = child.ca_bundle.as_deref() else {
+        return Ok(None);
+    };
+    // The path as every refusal names it: verbatim in backticks, or escaped when not UTF-8.
+    let named = path
+        .to_str()
+        .map_or_else(|| format!("{path:?}"), |text| format!("`{text}`"));
+    let refused = |why: &str| scope_error(format!("the CA bundle {named} {why}"));
+    if child.egress.is_none() {
+        return Err(refused(
+            "is named for a child with no egress aperture, which reaches no host to verify; name the aperture with ChildCommand::with_egress",
+        ));
+    }
+    if path.to_str().is_none() {
+        return Err(refused("is not UTF-8"));
+    }
+    if !path.is_absolute() {
+        return Err(refused(
+            "is a relative path; name it by an absolute path, so it names one file whatever the working directory",
+        ));
+    }
+    // In the environment's order (by name); a Git key is named with the key it sets.
+    let variables: Vec<String> = child
+        .environment
+        .set
+        .iter()
+        .filter(|(name, value)| overrides_trust_store(name, value))
+        .map(|(name, value)| {
+            if TRUST_STORE_VARIABLES.contains(&name.as_str()) {
+                name.clone()
+            } else {
+                format!("{name} ({value})")
+            }
+        })
+        .collect();
+    if !variables.is_empty() {
+        return Err(refused(&format!(
+            "comes with an environment naming {}, which would override the trust store the child gets through SSL_CERT_FILE, the bundle's snapshot at {APERTURE_CA_BUNDLE_PATH}; leave {} out of the environment",
+            variables.join(", "),
+            if variables.len() == 1 { "it" } else { "them" }
+        )));
+    }
+    let link = "is a symbolic link, which Substrate's daemon refuses as a bundle; name the file it leads to";
+    let empty = "is empty: it would trust nothing, and Substrate's daemon refuses an empty bundle";
+    // Step 4's rules, held on the path and again on the file opened.
+    let bundle_file = |metadata: &std::fs::Metadata| {
+        if metadata.file_type().is_symlink() {
+            Err(refused(link))
+        } else if !metadata.is_file() {
+            Err(refused(
+                "is no regular file (a directory, socket, device or FIFO)",
+            ))
+        } else if metadata.len() == 0 {
+            Err(refused(empty))
+        } else if metadata.len() > MAX_CA_BUNDLE_BYTES {
+            Err(refused(&format!(
+                "holds {} bytes, more than the {MAX_CA_BUNDLE_BYTES} (1 MiB) Substrate admits for a certificate bundle",
+                metadata.len()
+            )))
+        } else {
+            Ok(())
+        }
+    };
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => bundle_file(&metadata)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(refused("does not exist"));
+        }
+        Err(e) => return Err(refused(&format!("cannot be inspected: {e}"))),
+    }
+    let unreadable = |e: std::io::Error| refused(&format!("cannot be read: {e}"));
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .map_err(|e| match e.raw_os_error() {
+            Some(libc::ELOOP) => refused(link),
+            _ if e.kind() == std::io::ErrorKind::NotFound => refused("does not exist"),
+            _ => unreadable(e),
+        })?;
+    bundle_file(&file.metadata().map_err(unreadable)?)?;
+    let mut bytes = Vec::new();
+    file.take(MAX_CA_BUNDLE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(unreadable)?;
+    if bytes.is_empty() {
+        return Err(refused(empty));
+    }
+    if bytes.len() as u64 > MAX_CA_BUNDLE_BYTES {
+        return Err(refused(&format!(
+            "grew past the {MAX_CA_BUNDLE_BYTES} bytes (1 MiB) Substrate admits for a certificate bundle while it was read"
+        )));
+    }
+    Ok(Some(CaBundle {
+        named: path.to_owned(),
+        bytes,
+    }))
 }
 
 /// Accept Substrate's record of what it applied only when it is the confinement `input` required:
@@ -1404,6 +1765,7 @@ fn profile_digest(
     profile: &ConfinementProfile,
     inherited: &[BaselineEnvironment],
     egress: Option<&EgressAperture>,
+    ca_bundle: Option<&CaBundle>,
 ) -> String {
     // Generated ESS model types deliberately have no serialization dependency.
     let mut json = serde_json::json!({ "backend":"substrate", "network":profile.network, "writable_scopes":profile.writable_scopes,
@@ -1419,6 +1781,12 @@ fn profile_digest(
     if let Some(aperture) = egress {
         json["egress"] = serde_json::json!({ "name":aperture.name, "host":aperture.host, "port":aperture.port,
             "pinned":aperture.pinned.to_string(), "max_bytes":aperture.max_bytes });
+    }
+    // The certificate bundle: its path as the host named it (UTF-8, `check_ca_bundle`) and the
+    // digest of the bytes the child trusts, absent without one for the same reason.
+    if let Some(bundle) = ca_bundle {
+        json["ca_bundle"] = serde_json::json!({ "path":bundle.named.to_string_lossy(),
+            "sha256":format!("{:x}", Sha256::digest(&bundle.bytes)) });
     }
     format!("{:x}", Sha256::digest(json.to_string().as_bytes()))
 }
@@ -1575,8 +1943,8 @@ mod tests {
         let bare = ChildCommand::new("true", [] as [&str; 0], "/work/space");
         let plain = requested_profile(&bare.input("space", "snapshot".to_owned()), None);
         assert_ne!(
-            profile_digest(&profile, &[], None),
-            profile_digest(&plain, &[], None)
+            profile_digest(&profile, &[], None, None),
+            profile_digest(&plain, &[], None, None)
         );
         let named = 63;
         let most = (0..named).fold(bare.clone(), |child, n| {
@@ -1761,7 +2129,7 @@ mod tests {
         let launch = Running::enter(&cgroup.canonicalize().unwrap());
         let spelled = cgroup.join("..").join("cgroup");
         let error = SubstrateRunner::new(Some(spelled))
-            .open(fixture.path(), None)
+            .open(fixture.path(), &DriverEgress::NONE)
             .err()
             .expect("nothing is opened");
         let expected = if Path::new("/usr/bin/bwrap").is_file() {
@@ -1785,7 +2153,7 @@ mod tests {
         assert!(Arc::ptr_eq(&runner.drivers, &runner.clone().drivers));
         let launch = Running::enter(&cgroup);
         let error = runner
-            .open(fixture.path(), None)
+            .open(fixture.path(), &DriverEgress::NONE)
             .err()
             .expect("nothing is opened");
         let expected = if Path::new("/usr/bin/bwrap").is_file() {
@@ -2240,8 +2608,8 @@ mod tests {
             profile.network
         );
         assert_eq!(applied_network_name(&AppliedNetwork::None), "none");
-        let digest = profile_digest(&profile, &[], Some(&model()));
-        assert_ne!(digest, profile_digest(&profile, &[], None));
+        let digest = profile_digest(&profile, &[], Some(&model()), None);
+        assert_ne!(digest, profile_digest(&profile, &[], None, None));
         for other in [
             EgressAperture {
                 host: "other.example.test".to_owned(),
@@ -2252,7 +2620,7 @@ mod tests {
                 ..model()
             },
         ] {
-            assert_ne!(digest, profile_digest(&profile, &[], Some(&other)));
+            assert_ne!(digest, profile_digest(&profile, &[], Some(&other), None));
         }
     }
 
@@ -2264,16 +2632,257 @@ mod tests {
         assert_eq!(profile.network, "none");
         assert_eq!(profile.writable_scopes, ["target"]);
         assert_ne!(
-            profile_digest(&profile, &[], None),
-            profile_digest(&profile, &[BaselineEnvironment::Path], None)
+            profile_digest(&profile, &[], None, None),
+            profile_digest(&profile, &[BaselineEnvironment::Path], None, None)
         );
         // With no inherited name the digest is the one a test's profile always had.
         let before = serde_json::json!({ "backend":"substrate", "network":"none", "writable_scopes":["target"],
             "read_only_roots":[], "environment":[],
             "timeout_ms":300_000, "memory_bytes":8_589_934_592_i64, "processes":2048, "cpu_millis":3_600_000 });
         assert_eq!(
-            profile_digest(&profile, &[], None),
+            profile_digest(&profile, &[], None, None),
             format!("{:x}", Sha256::digest(before.to_string().as_bytes()))
+        );
+    }
+
+    /// A bundle as a launch would have read it from `named`.
+    fn read_as(named: &str, bytes: &[u8]) -> Option<CaBundle> {
+        Some(CaBundle {
+            named: PathBuf::from(named),
+            bytes: bytes.to_vec(),
+        })
+    }
+
+    #[test]
+    fn drivers_differ_by_the_bundle_path_and_the_bytes_read_from_it() {
+        let key = |ca_bundle| DriverEgress {
+            aperture: Some(model()),
+            ca_bundle,
+        };
+        let first = key(read_as("/anchors/first.pem", b"one"));
+        assert_eq!(
+            first,
+            key(read_as("/anchors/first.pem", b"one")),
+            "one path and one content, one driver"
+        );
+        for other in [
+            key(read_as("/anchors/second.pem", b"one")),
+            key(read_as("/anchors/first.pem", b"two")),
+            key(None),
+            DriverEgress::NONE,
+        ] {
+            assert_ne!(first, other, "{other:?}");
+        }
+        // The bundle is the driver's, never the start request's.
+        let egress = ChildCommand::new("true", [] as [&str; 0], "/work/space").with_egress(model());
+        let named = egress.clone().with_ca_bundle("/anchors/first.pem");
+        assert_eq!(named.ca_bundle(), Some(Path::new("/anchors/first.pem")));
+        assert_eq!(
+            named.input("space", "snapshot".to_owned()),
+            egress.input("space", "snapshot".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_driver_hands_substrate_a_private_read_only_copy_of_the_bytes_read() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let fixture = tempfile::tempdir().unwrap();
+        let named = fixture.path().join("bundle.pem");
+        let elsewhere = fixture.path().join("elsewhere.pem");
+        std::fs::write(&named, "anchor\n").unwrap();
+        std::fs::write(&elsewhere, "link target\n").unwrap();
+        let child = ChildCommand::new("true", [] as [&str; 0], "/work/space")
+            .with_egress(model())
+            .with_ca_bundle(&named);
+        let bundle = check_ca_bundle(&child).unwrap();
+        assert_eq!(bundle, read_as(named.to_str().unwrap(), b"anchor\n"));
+
+        let state = tempfile::tempdir().unwrap();
+        let egress = DriverEgress {
+            aperture: Some(model()),
+            ca_bundle: bundle,
+        };
+        let config = driver_config(fixture.path(), state.path(), &egress).unwrap();
+        let copy = config.ca_bundle.expect("Substrate is handed a bundle");
+        assert_ne!(copy, named, "never the named path");
+        assert_eq!(copy.parent(), Some(state.path()), "in the private state");
+        let metadata = std::fs::symlink_metadata(&copy).unwrap();
+        assert!(metadata.is_file(), "a regular file, no link");
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o400);
+        assert_eq!(std::fs::read(&copy).unwrap(), b"anchor\n");
+        // The named path swapped for a link after the read changes nothing Substrate copies.
+        std::fs::remove_file(&named).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &named).unwrap();
+        assert_eq!(std::fs::read(&copy).unwrap(), b"anchor\n");
+        let error = check_ca_bundle(&child).unwrap_err();
+        assert!(error.detail.contains("symbolic link"), "{error}");
+        // A copy is written once: a second one in the same state is refused, never overwritten.
+        assert_eq!(
+            driver_config(fixture.path(), state.path(), &egress)
+                .unwrap_err()
+                .reason,
+            ConfinementRefusal::BackendMissing
+        );
+        let none = tempfile::tempdir().unwrap();
+        let plain = driver_config(fixture.path(), none.path(), &DriverEgress::NONE).unwrap();
+        assert!(plain.ca_bundle.is_none());
+        assert!(!none.path().join("ca-bundle.pem").exists());
+    }
+
+    #[test]
+    fn a_ca_bundle_changes_the_digest_and_its_absence_leaves_an_egress_childs_as_it_was() {
+        let input = ChildCommand::new("true", [] as [&str; 0], "/work/space")
+            .with_egress(model())
+            .input("space", "snapshot".to_owned());
+        let profile = requested_profile(&input, Some(&model()));
+        let digest = |bundle: Option<CaBundle>| {
+            profile_digest(&profile, &[], Some(&model()), bundle.as_ref())
+        };
+        let bare = digest(None);
+        let first = digest(read_as("/anchors/first.pem", b"one"));
+        assert_ne!(first, bare);
+        assert_ne!(first, digest(read_as("/anchors/second.pem", b"one")));
+        assert_ne!(first, digest(read_as("/anchors/first.pem", b"two")));
+        // With no bundle the digest is the one an egress child had before bundles existed.
+        let mut before = serde_json::json!({ "backend":"substrate", "network":"aperture:model@10.0.0.1:443",
+            "writable_scopes":["target"], "read_only_roots":[], "environment":[],
+            "timeout_ms":300_000, "memory_bytes":8_589_934_592_i64, "processes":2048, "cpu_millis":3_600_000 });
+        before["egress"] = serde_json::json!({ "name":"model", "host":"api.example.test", "port":443,
+            "pinned":PINNED, "max_bytes":null });
+        assert_eq!(
+            bare,
+            format!("{:x}", Sha256::digest(before.to_string().as_bytes()))
+        );
+    }
+
+    #[test]
+    fn every_trust_store_variable_beside_a_ca_bundle_is_refused_naming_it_and_documented() {
+        let anchored = |set: BTreeMap<String, String>| {
+            ChildCommand::new("true", [] as [&str; 0], "/work/space")
+                .with_egress(model())
+                .with_environment(ExecEnvironment {
+                    allow: Vec::new(),
+                    set,
+                })
+                .with_ca_bundle("/anchors/absent.pem")
+        };
+        // The public rustdoc of `with_ca_bundle` names every variable the constant holds.
+        let source = include_str!("confinement.rs");
+        let lines: Vec<&str> = source.lines().collect();
+        let method = lines
+            .iter()
+            .position(|line| line.contains("pub fn with_ca_bundle("))
+            .expect("with_ca_bundle is defined here");
+        let doc: String = lines[..method]
+            .iter()
+            .rev()
+            .take_while(|line| {
+                let line = line.trim_start();
+                line.starts_with("///") || line.starts_with("#[")
+            })
+            .copied()
+            .collect();
+        for variable in TRUST_STORE_VARIABLES {
+            let child = anchored(BTreeMap::from([(variable.to_owned(), "/x".to_owned())]));
+            let error = check_ca_bundle(&child).unwrap_err();
+            assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{variable}");
+            assert!(error.detail.contains(variable), "{variable}: {error}");
+            assert!(
+                doc.contains(&format!("`{variable}`")),
+                "the with_ca_bundle rustdoc names {variable}"
+            );
+        }
+        for key in GIT_TRUST_KEYS {
+            assert!(
+                doc.contains(&format!("`http.{key}`")),
+                "the with_ca_bundle rustdoc names http.{key}"
+            );
+        }
+        assert!(doc.contains("`GIT_CONFIG_KEY_<n>`"));
+        let both = anchored(BTreeMap::from([
+            ("CURL_CA_BUNDLE".to_owned(), "/x".to_owned()),
+            ("SSL_CERT_DIR".to_owned(), "/x".to_owned()),
+        ]));
+        let error = check_ca_bundle(&both).unwrap_err();
+        assert!(
+            error
+                .detail
+                .contains("naming CURL_CA_BUNDLE, SSL_CERT_DIR, "),
+            "{error}"
+        );
+        let git = anchored(BTreeMap::from([
+            ("GIT_CONFIG_COUNT".to_owned(), "1".to_owned()),
+            ("GIT_CONFIG_KEY_0".to_owned(), "http.sslVerify".to_owned()),
+            ("GIT_CONFIG_VALUE_0".to_owned(), "false".to_owned()),
+        ]));
+        let error = check_ca_bundle(&git).unwrap_err();
+        assert!(
+            error
+                .detail
+                .contains("naming GIT_CONFIG_KEY_0 (http.sslVerify), "),
+            "{error}"
+        );
+        // Another variable passes this step, so the absent path is what is refused.
+        let other = anchored(BTreeMap::from([("FIRST".to_owned(), "one".to_owned())]));
+        let error = check_ca_bundle(&other).unwrap_err();
+        assert!(error.detail.contains("does not exist"), "{error}");
+    }
+
+    #[test]
+    fn only_a_git_config_key_naming_a_trust_key_overrides_the_trust_store() {
+        for key in [
+            "http.sslCAInfo",
+            "http.sslcapath",
+            "HTTP.SSLVERIFY",
+            " http.sslCAInfo ",
+            "http.https://model.example.test/.sslCAInfo",
+            "Http.https://model.example.test:443/a.b.SslVerify",
+        ] {
+            assert!(names_git_trust_key(key), "{key:?}");
+            assert!(overrides_trust_store("GIT_CONFIG_KEY_0", key), "{key:?}");
+            assert!(overrides_trust_store("GIT_CONFIG_KEY_12", key), "{key:?}");
+        }
+        for key in [
+            "safe.directory",
+            "http.sslBackend",
+            "http.sslCAInfoExtra",
+            "https.sslCAInfo",
+            "core.sslCAInfo",
+            "sslCAInfo",
+            "http",
+            "",
+        ] {
+            assert!(!names_git_trust_key(key), "{key:?}");
+            assert!(!overrides_trust_store("GIT_CONFIG_KEY_0", key), "{key:?}");
+        }
+        // Only a key Git reads: GIT_CONFIG_KEY_ and decimal digits, never a value or the count.
+        for name in [
+            "GIT_CONFIG_KEY_",
+            "GIT_CONFIG_KEY_X",
+            "GIT_CONFIG_KEY_0A",
+            "GIT_CONFIG_VALUE_0",
+            "GIT_CONFIG_COUNT",
+        ] {
+            assert!(!overrides_trust_store(name, "http.sslCAInfo"), "{name}");
+        }
+        for name in TRUST_STORE_VARIABLES {
+            assert!(overrides_trust_store(name, ""), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_ca_bundle_path_that_is_not_utf8_is_refused() {
+        use std::os::unix::ffi::OsStrExt as _;
+        let child = ChildCommand::new("true", [] as [&str; 0], "/work/space")
+            .with_egress(model())
+            .with_ca_bundle(std::ffi::OsStr::from_bytes(b"/anchors/bundle\xff.pem"));
+        let error = check_ca_bundle(&child).unwrap_err();
+        assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid);
+        assert!(error.detail.contains("not UTF-8"), "{error}");
+        assert!(error.detail.contains("bundle\\xFF.pem"), "{error}");
+        assert_eq!(
+            check_ca_bundle(&ChildCommand::new("true", [] as [&str; 0], "/work/space")).unwrap(),
+            None
         );
     }
 

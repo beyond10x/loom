@@ -774,13 +774,14 @@ a skip with a named missing prerequisite establishes no qualification.
 arguments, the directory adopted as the workspace, the workspace directories it may write beside
 `target/` (`with_writable`), and Substrate's `ExecEnvironment`,
 `SandboxProfile` and `NetworkMode`, `NetworkMode::None` by default, or with `with_egress` the one
-Substrate `EgressAperture` it may reach) on the same launch path:
+Substrate `EgressAperture` it may reach, and with `with_ca_bundle` the certificate bundle it
+trusts there) on the same launch path:
 writes only under `target/` and the directories named (Substrate's `WorkspaceAccess::Scoped`;
 `.git` only when named; a path that is absolute, climbs out with `..`, passes a symlink, is absent
 or no directory, holds a special file or a hard link from outside, or overlaps another is refused
 `ScopeInvalid` before launch; `TestRunner::run` keeps `target/` alone, and the applied
 confinement's `writable_scopes` lists them, a record naming another set refused), no toolchain or
-cache mounted, exactly the named environment, a typed
+cache mounted, exactly the named environment (with a bundle, plus `SSL_CERT_FILE`), a typed
 refusal for a missing guarantee, only the requested network accepted as applied, no network or
 exactly the named aperture (name, pinned destination, mechanism, ceiling), checked after the child
 ran and refusing its result as a test's is refused, a result with no exit status refused unless
@@ -793,11 +794,33 @@ byte ceiling, a host that is no host name or IPv4 literal, an IPv4 literal other
 address, a pinned address that is no IPv4 one or not at the named port), and an IPv4 literal host
 other than `127.0.0.1`, which the child could not reach the host by, are refused `ScopeInvalid`
 before anything starts, the refusal naming the host; one Substrate did not publish when the driver opened (its mechanism unproven) is refused
-`CapabilityUnserved`. An egress child gets no certificate bundle yet, and Substrate gives a run at
-most one aperture. A program containing `=` or starting with `-` (test or child)
+`CapabilityUnserved`. Substrate gives a run at most one aperture. A certificate bundle
+(`with_ca_bundle`) is read once per launch through an open with its last component not followed
+(`O_NOFOLLOW`), and the child trusts the bytes read then: the driver is given a private
+read-only copy of them in its own state directory (`CaBundle::write_private_copy`, removed with
+the driver) as Substrate's `HostConfig::ca_bundle`, never the named path, and Substrate binds a
+snapshot of that copy at `/etc/ssl/certs/ca-certificates.crt`, which `SSL_CERT_FILE` names;
+Substrate's record names no bundle, so it is not checked after the run. The bundle is the trust
+store the child gets through `SSL_CERT_FILE`; beside it, the environment may not name the listed
+variables, so a host does not override by accident the bundle it named. That is no guarantee
+about what the child trusts: configuration under `HOME`, a program's own flags and variables not
+listed can still point a client elsewhere or turn verification off; what the child reaches is
+bounded by the aperture. A bundle for a child with no aperture, a path that is not UTF-8 or not
+absolute, one beside an environment naming a listed variable (`TRUST_STORE_VARIABLES`:
+`SSL_CERT_FILE`, `SSL_CERT_DIR`, `CURL_CA_BUNDLE`, `CURL_CA_PATH`, `CURL_HOME`,
+`REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`,
+`GIT_SSL_NO_VERIFY`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_PARAMETERS`; or a
+`GIT_CONFIG_KEY_<n>` naming `http.sslCAInfo`, `http.sslCAPath` or `http.sslVerify`, any case, URL
+subsection or not, `GIT_TRUST_KEYS`; each named in the refusal; Git configuration naming other
+keys stays allowed), and one that does not exist, is a symbolic link, is no regular file, is
+empty, holds more than 1 MiB (`MAX_CA_BUNDLE_BYTES`, Substrate's ceiling) or cannot be read,
+on the path and again on the file opened, are refused `ScopeInvalid` before anything starts,
+naming the path (`check_ca_bundle`). A program containing `=` or starting with `-` (test or child)
 is refused before anything starts: Substrate execs through `/usr/bin/env`, which reads it as an
-assignment or an option. A runner and its clones share one driver per workspace directory and
-egress aperture (Substrate fixes a driver's apertures when it opens),
+assignment or an option. A runner and its clones share one driver per workspace directory, egress
+aperture and certificate bundle, the bundle compared as its path and the bytes read
+(`DriverEgress`: Substrate fixes a driver's apertures and bundle when it opens), so children naming
+different bundles, or a bundle whose bytes changed, never share one,
 because opening a driver kills every `substrate-ex_*` cgroup under its root; each launch discards
 its finished execution from the driver (`discard_superseded_exec`), which tracks at most 128; no
 driver opens on a root while a launch of this process runs there (the process-wide count in
@@ -805,7 +828,9 @@ driver opens on a root while a launch of this process runs there (the process-wi
 `crates/loom-intake-slice/tests/confined_child.rs` holds it; its delegated
 cases start their own test binary under `systemd-run --user --scope -p Delegate=yes` and skip
 naming the missing prerequisite where bubblewrap, a user systemd manager or the driver is absent,
-and the egress cases where `bash` or Substrate's aperture is; their hosts are loopback listeners.
+the egress cases where `bash` or Substrate's aperture is, and the trust-anchor case where
+`openssl` or `curl` is; their hosts are loopback listeners, the TLS one signed by a CA the test
+makes.
 The slice's own git calls
 go through one helper, `crates/loom-intake-slice/src/git.rs`: no workspace hook, `core.fsmonitor`
 command or signing program runs, a case does not open on a workspace whose own configuration
