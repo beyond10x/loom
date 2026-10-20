@@ -111,16 +111,17 @@ impl fmt::Debug for Drivers {
 ///
 /// - `aperture`: the egress aperture the driver declares (`HostConfig::egress_apertures`), the
 ///   whole declaration, or none;
-/// - `ca_bundle`: the certificate bundle a run with that aperture gets a snapshot of
-///   (`HostConfig::ca_bundle`), compared as the path the host named, or none.
+/// - `ca_bundle`: the certificate bundle a run with that aperture trusts, as the launch read it
+///   ([`CaBundle`]), compared as the path the host named and the bytes read from it, or none.
+///   The driver hands Substrate a private copy of those bytes (`HostConfig::ca_bundle`).
 ///
-/// So two children naming different bundles, or one naming a bundle and one naming none, never
-/// share a driver, whatever else they share. A test, and a child naming neither, use
-/// [`DriverEgress::NONE`].
+/// So two children naming different bundles, one naming a bundle and one naming none, and a
+/// bundle whose bytes changed since a driver opened for it, never share a driver, whatever else
+/// they share. A test, and a child naming neither, use [`DriverEgress::NONE`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DriverEgress {
     aperture: Option<EgressAperture>,
-    ca_bundle: Option<PathBuf>,
+    ca_bundle: Option<CaBundle>,
 }
 
 impl DriverEgress {
@@ -129,6 +130,76 @@ impl DriverEgress {
         aperture: None,
         ca_bundle: None,
     };
+}
+
+/// A certificate bundle as one launch read it ([`check_ca_bundle`]): the path the host named and
+/// the bytes read from it once, through an open that follows no symbolic link. Those bytes are
+/// what the child trusts: the driver opened for them hands Substrate a private copy of them
+/// ([`CaBundle::write_private_copy`]), never the named path, so a link or another file put at
+/// that path after the read is never followed.
+#[derive(Clone, PartialEq, Eq)]
+struct CaBundle {
+    named: PathBuf,
+    bytes: Vec<u8>,
+}
+
+impl fmt::Debug for CaBundle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CaBundle")
+            .field("named", &self.named)
+            .field("bytes", &self.bytes.len())
+            .field("sha256", &format!("{:x}", Sha256::digest(&self.bytes)))
+            .finish()
+    }
+}
+
+impl CaBundle {
+    /// Write the bytes read to `ca-bundle.pem` in `directory`, a driver's private state directory
+    /// (created by this process for itself, owner-only, removed with the driver): a new file,
+    /// never one already there or a link, read-only. Substrate snapshots this copy when a child
+    /// starts, so every child of the driver trusts exactly these bytes.
+    fn write_private_copy(&self, directory: &Path) -> Result<PathBuf, ConfinementError> {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let copy = directory.join("ca-bundle.pem");
+        let failed = |e: std::io::Error| {
+            refuse(
+                ConfinementRefusal::BackendMissing,
+                format!(
+                    "the private copy of the CA bundle `{}` could not be written: {e}",
+                    self.named.display()
+                ),
+            )
+        };
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o400)
+            .open(&copy)
+            .map_err(failed)?;
+        file.write_all(&self.bytes).map_err(failed)?;
+        Ok(copy)
+    }
+}
+
+/// The configuration of a driver for the workspaces in `parent`, opened for `egress`, before its
+/// cgroup root is chosen: its capsules in `state`, its private state directory, the aperture it
+/// declares, and for a certificate bundle the private copy written to `state`, never the path the
+/// host named.
+fn driver_config(
+    parent: &Path,
+    state: &Path,
+    egress: &DriverEgress,
+) -> Result<HostConfig, ConfinementError> {
+    let mut config = HostConfig::minimum(parent);
+    config.capsule_root = state.join("capsules");
+    config.egress_apertures = egress.aperture.iter().cloned().collect();
+    config.ca_bundle = egress
+        .ca_bundle
+        .as_ref()
+        .map(|bundle| bundle.write_private_copy(state))
+        .transpose()?;
+    Ok(config)
 }
 
 /// One opened driver, the cgroup root it reconciled, the egress it was opened for, and its private
@@ -244,10 +315,7 @@ impl SubstrateRunner {
             .prefix("loom-substrate-")
             .tempdir()
             .map_err(|e| refuse(ConfinementRefusal::BackendMissing, e))?;
-        let mut config = HostConfig::minimum(parent);
-        config.capsule_root = state.path().join("capsules");
-        config.egress_apertures = egress.aperture.iter().cloned().collect();
-        config.ca_bundle = egress.ca_bundle.clone();
+        let mut config = driver_config(parent, state.path(), egress)?;
         validate_backend(&config.bubblewrap)?;
         // One root has one name: the count of running launches is keyed by it, however the host
         // spelled the root.
@@ -356,10 +424,15 @@ impl SubstrateRunner {
     pub fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
         check_program(&child.program)?;
         check_network(child.network, child.egress.as_ref())?;
-        check_ca_bundle(child)?;
+        // Read once, here: the child trusts these bytes, whatever the path holds later.
+        let ca_bundle = check_ca_bundle(child)?;
         let writable = check_writable(&child.writable)?;
         let root = validate_workspace(&child.directory, &writable)?;
-        let open = self.driver(&root, &child.driver_egress())?;
+        let egress = DriverEgress {
+            aperture: child.egress.clone(),
+            ca_bundle,
+        };
+        let open = self.driver(&root, &egress)?;
         let workspace = workspace_name(&root)?;
         let input = child.input(workspace, open.driver.machine().snapshot);
         child_result(Self::launch(&open, workspace, &input)?)
@@ -385,7 +458,7 @@ impl SubstrateRunner {
             &profile,
             &input.env.allow,
             egress,
-            open.egress.ca_bundle.as_deref(),
+            open.egress.ca_bundle.as_ref(),
         );
         let root_identity = driver
             .workspace_root_identity(workspace)
@@ -695,14 +768,21 @@ impl ChildCommand {
     }
 
     /// The same child trusting the certificate bundle at `path`, a file of the host, where it
-    /// reaches its egress aperture ([`ChildCommand::with_egress`]) over TLS. The runner opens the
-    /// driver with it (Substrate's `HostConfig::ca_bundle`), and Substrate binds a read-only
-    /// snapshot of the file, taken when the child starts, at `/etc/ssl/certs/ca-certificates.crt`
-    /// and sets `SSL_CERT_FILE` to that path, the one variable the child gets beside its
-    /// environment. The bundle is part of the shared driver's key: children naming different
-    /// bundles, or one naming a bundle and one naming none, never share a driver. Substrate's
-    /// record of the applied confinement names no bundle, so the bundle is not checked after the
-    /// child ran.
+    /// reaches its egress aperture ([`ChildCommand::with_egress`]) over TLS. Each launch reads the
+    /// file once, through an open that follows no symbolic link, and the child trusts the bytes
+    /// read then: the runner opens the driver with a private read-only copy of them (Substrate's
+    /// `HostConfig::ca_bundle`), never with the named path, so a link or another file put at that
+    /// path after the read is never followed. Substrate binds a snapshot of that copy, taken when
+    /// the child starts, at `/etc/ssl/certs/ca-certificates.crt` and sets `SSL_CERT_FILE` to that
+    /// path, the one variable the child gets beside its environment.
+    ///
+    /// The bundle is part of the shared driver's key, as the path and the bytes read: children
+    /// naming different bundles, one naming a bundle and one naming none, and a bundle whose
+    /// bytes changed since a driver opened for it, never share a driver. Like any other new
+    /// driver, the one a changed bundle needs cannot open while a launch of this process runs
+    /// under the same cgroup root, and the launch is refused
+    /// [`ConfinementRefusal::CapabilityUnserved`]. Substrate's record of the applied confinement
+    /// names no bundle, so the bundle is not checked after the child ran.
     ///
     /// The bundle is the trust store the child gets through `SSL_CERT_FILE`, not a bound on what
     /// it trusts: a program the child runs can still choose its own trust store or turn
@@ -718,8 +798,9 @@ impl ChildCommand {
     ///   `CURL_CA_PATH`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO` and
     ///   `GIT_SSL_CAPATH`;
     /// - a path that does not exist, is a symbolic link, is no regular file, is empty or holds
-    ///   more than 1 MiB, as Substrate refuses its own bundle (name the file a link leads to);
-    /// - a file this process cannot read, which Substrate could not snapshot.
+    ///   more than 1 MiB, checked on the path and again on the file the launch opens, as Substrate
+    ///   refuses its own bundle (name the file a link leads to);
+    /// - a file this process cannot read.
     #[must_use]
     pub fn with_ca_bundle(self, path: impl Into<PathBuf>) -> Self {
         Self {
@@ -777,14 +858,6 @@ impl ChildCommand {
     /// The certificate bundle the child trusts at its egress aperture, as named, if it names one.
     pub fn ca_bundle(&self) -> Option<&Path> {
         self.ca_bundle.as_deref()
-    }
-
-    /// What the child's driver is opened for beside its directory: its aperture and its bundle.
-    fn driver_egress(&self) -> DriverEgress {
-        DriverEgress {
-            aperture: self.egress.clone(),
-            ca_bundle: self.ca_bundle.clone(),
-        }
     }
 
     /// The maximum duration of one run of the child.
@@ -1044,7 +1117,8 @@ const TRUST_STORE_VARIABLES: [&str; 8] = [
 const MAX_CA_BUNDLE_BYTES: u64 = 1024 * 1024;
 
 /// Refuse, before anything starts, a certificate bundle the child cannot be given as named
-/// ([`ChildCommand::with_ca_bundle`]), each refusal naming the path, in this order:
+/// ([`ChildCommand::with_ca_bundle`]), each refusal naming the path, in this order, and otherwise
+/// return the bundle as read: the bytes the child trusts.
 ///
 /// 1. a bundle for a child with no egress aperture: Substrate gives a run the bundle only with
 ///    its aperture, and a child with none reaches no host the bundle could verify;
@@ -1053,76 +1127,106 @@ const MAX_CA_BUNDLE_BYTES: u64 = 1024 * 1024;
 /// 3. an environment naming any of [`TRUST_STORE_VARIABLES`] beside the bundle, each named in the
 ///    refusal: it would replace or widen the trust store the child gets through `SSL_CERT_FILE`
 ///    (whose own value Substrate would replace unseen);
-/// 4. a path that does not exist, is a symbolic link, is no regular file, is empty or holds more
-///    than [`MAX_CA_BUNDLE_BYTES`]: Substrate refuses such a bundle of its own, and an empty one
-///    would trust nothing while the child is pointed at it;
-/// 5. a file this process cannot read, which Substrate, copying it at each start, could not.
+/// 4. the path itself, its last component not followed: one that does not exist, is a symbolic
+///    link, is no regular file, is empty or holds more than [`MAX_CA_BUNDLE_BYTES`], as Substrate
+///    refuses a bundle of its own; an empty one would trust nothing while the child is pointed
+///    at it;
+/// 5. the file, opened once without following a symbolic link (`O_NOFOLLOW`) or waiting for a
+///    writer (`O_NONBLOCK`): the rules of step 4 again on that open file, so a link put at the
+///    path since is refused as a link, then its bytes read through it, at most one past the
+///    ceiling, refused when they cannot be read, are empty or pass the ceiling.
 ///
-/// A child naming no bundle passes unchanged.
-fn check_ca_bundle(child: &ChildCommand) -> Result<(), ConfinementError> {
+/// A child naming no bundle passes with `None`.
+fn check_ca_bundle(child: &ChildCommand) -> Result<Option<CaBundle>, ConfinementError> {
+    use std::io::Read as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
     let Some(path) = child.ca_bundle.as_deref() else {
-        return Ok(());
+        return Ok(None);
     };
     // The path as every refusal names it: verbatim in backticks, or escaped when not UTF-8.
     let named = path
         .to_str()
         .map_or_else(|| format!("{path:?}"), |text| format!("`{text}`"));
-    let refused = |why: String| Err(scope_error(format!("the CA bundle {named} {why}")));
+    let refused = |why: &str| scope_error(format!("the CA bundle {named} {why}"));
     if child.egress.is_none() {
-        return refused(
-            "is named for a child with no egress aperture, which reaches no host to verify; name the aperture with ChildCommand::with_egress".to_owned(),
-        );
+        return Err(refused(
+            "is named for a child with no egress aperture, which reaches no host to verify; name the aperture with ChildCommand::with_egress",
+        ));
     }
     if path.to_str().is_none() {
-        return refused("is not UTF-8".to_owned());
+        return Err(refused("is not UTF-8"));
     }
     if !path.is_absolute() {
-        return refused(
-            "is a relative path; name it by an absolute path, so it names one file whatever the working directory".to_owned(),
-        );
+        return Err(refused(
+            "is a relative path; name it by an absolute path, so it names one file whatever the working directory",
+        ));
     }
     let variables: Vec<&str> = TRUST_STORE_VARIABLES
         .into_iter()
         .filter(|variable| child.environment.set.contains_key(*variable))
         .collect();
     if !variables.is_empty() {
-        return refused(format!(
+        return Err(refused(&format!(
             "comes with an environment naming {}, which would replace or widen the trust store the child gets through SSL_CERT_FILE, the bundle's snapshot at {APERTURE_CA_BUNDLE_PATH}; leave {} out of the environment",
             variables.join(", "),
             if variables.len() == 1 { "it" } else { "them" }
-        ));
+        )));
     }
-    let metadata = match std::fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return refused("does not exist".to_owned());
+    let link = "is a symbolic link, which Substrate's daemon refuses as a bundle; name the file it leads to";
+    let empty = "is empty: it would trust nothing, and Substrate's daemon refuses an empty bundle";
+    // Step 4's rules, held on the path and again on the file opened.
+    let bundle_file = |metadata: &std::fs::Metadata| {
+        if metadata.file_type().is_symlink() {
+            Err(refused(link))
+        } else if !metadata.is_file() {
+            Err(refused(
+                "is no regular file (a directory, socket, device or FIFO)",
+            ))
+        } else if metadata.len() == 0 {
+            Err(refused(empty))
+        } else if metadata.len() > MAX_CA_BUNDLE_BYTES {
+            Err(refused(&format!(
+                "holds {} bytes, more than the {MAX_CA_BUNDLE_BYTES} (1 MiB) Substrate admits for a certificate bundle",
+                metadata.len()
+            )))
+        } else {
+            Ok(())
         }
-        Err(e) => return refused(format!("cannot be inspected: {e}")),
     };
-    if metadata.file_type().is_symlink() {
-        return refused(
-            "is a symbolic link, which Substrate's daemon refuses as a bundle; name the file it leads to".to_owned(),
-        );
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => bundle_file(&metadata)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(refused("does not exist"));
+        }
+        Err(e) => return Err(refused(&format!("cannot be inspected: {e}"))),
     }
-    if !metadata.is_file() {
-        return refused("is no regular file (a directory, socket, device or FIFO)".to_owned());
+    let unreadable = |e: std::io::Error| refused(&format!("cannot be read: {e}"));
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .map_err(|e| match e.raw_os_error() {
+            Some(libc::ELOOP) => refused(link),
+            _ if e.kind() == std::io::ErrorKind::NotFound => refused("does not exist"),
+            _ => unreadable(e),
+        })?;
+    bundle_file(&file.metadata().map_err(unreadable)?)?;
+    let mut bytes = Vec::new();
+    file.take(MAX_CA_BUNDLE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(unreadable)?;
+    if bytes.is_empty() {
+        return Err(refused(empty));
     }
-    if metadata.len() == 0 {
-        return refused(
-            "is empty: it would trust nothing, and Substrate's daemon refuses an empty bundle"
-                .to_owned(),
-        );
+    if bytes.len() as u64 > MAX_CA_BUNDLE_BYTES {
+        return Err(refused(&format!(
+            "grew past the {MAX_CA_BUNDLE_BYTES} bytes (1 MiB) Substrate admits for a certificate bundle while it was read"
+        )));
     }
-    if metadata.len() > MAX_CA_BUNDLE_BYTES {
-        return refused(format!(
-            "holds {} bytes, more than the {MAX_CA_BUNDLE_BYTES} (1 MiB) Substrate admits for a certificate bundle",
-            metadata.len()
-        ));
-    }
-    if let Err(e) = std::fs::File::open(path) {
-        return refused(format!("cannot be read: {e}"));
-    }
-    Ok(())
+    Ok(Some(CaBundle {
+        named: path.to_owned(),
+        bytes,
+    }))
 }
 
 /// Accept Substrate's record of what it applied only when it is the confinement `input` required:
@@ -1601,7 +1705,7 @@ fn profile_digest(
     profile: &ConfinementProfile,
     inherited: &[BaselineEnvironment],
     egress: Option<&EgressAperture>,
-    ca_bundle: Option<&Path>,
+    ca_bundle: Option<&CaBundle>,
 ) -> String {
     // Generated ESS model types deliberately have no serialization dependency.
     let mut json = serde_json::json!({ "backend":"substrate", "network":profile.network, "writable_scopes":profile.writable_scopes,
@@ -1618,10 +1722,11 @@ fn profile_digest(
         json["egress"] = serde_json::json!({ "name":aperture.name, "host":aperture.host, "port":aperture.port,
             "pinned":aperture.pinned.to_string(), "max_bytes":aperture.max_bytes });
     }
-    // The certificate bundle's path as the host named it (UTF-8, `check_ca_bundle`), absent
-    // without one for the same reason.
+    // The certificate bundle: its path as the host named it (UTF-8, `check_ca_bundle`) and the
+    // digest of the bytes the child trusts, absent without one for the same reason.
     if let Some(bundle) = ca_bundle {
-        json["ca_bundle"] = bundle.to_string_lossy().into();
+        json["ca_bundle"] = serde_json::json!({ "path":bundle.named.to_string_lossy(),
+            "sha256":format!("{:x}", Sha256::digest(&bundle.bytes)) });
     }
     format!("{:x}", Sha256::digest(json.to_string().as_bytes()))
 }
@@ -2480,40 +2585,88 @@ mod tests {
         );
     }
 
+    /// A bundle as a launch would have read it from `named`.
+    fn read_as(named: &str, bytes: &[u8]) -> Option<CaBundle> {
+        Some(CaBundle {
+            named: PathBuf::from(named),
+            bytes: bytes.to_vec(),
+        })
+    }
+
     #[test]
-    fn children_naming_different_ca_bundles_never_ask_for_one_driver() {
-        let bare = ChildCommand::new("true", [] as [&str; 0], "/work/space");
-        let egress = bare.clone().with_egress(model());
-        let first = egress.clone().with_ca_bundle("/anchors/first.pem");
-        assert_eq!(first.ca_bundle(), Some(Path::new("/anchors/first.pem")));
+    fn drivers_differ_by_the_bundle_path_and_the_bytes_read_from_it() {
+        let key = |ca_bundle| DriverEgress {
+            aperture: Some(model()),
+            ca_bundle,
+        };
+        let first = key(read_as("/anchors/first.pem", b"one"));
         assert_eq!(
-            first.driver_egress(),
-            DriverEgress {
-                aperture: Some(model()),
-                ca_bundle: Some(PathBuf::from("/anchors/first.pem")),
-            }
-        );
-        assert_eq!(
-            first.driver_egress(),
-            egress
-                .clone()
-                .with_ca_bundle("/anchors/first.pem")
-                .driver_egress(),
-            "one bundle, one driver"
+            first,
+            key(read_as("/anchors/first.pem", b"one")),
+            "one path and one content, one driver"
         );
         for other in [
-            egress.clone().with_ca_bundle("/anchors/second.pem"),
-            egress.clone(),
-            bare.clone(),
+            key(read_as("/anchors/second.pem", b"one")),
+            key(read_as("/anchors/first.pem", b"two")),
+            key(None),
+            DriverEgress::NONE,
         ] {
-            assert_ne!(first.driver_egress(), other.driver_egress(), "{other:?}");
+            assert_ne!(first, other, "{other:?}");
         }
-        assert_eq!(bare.driver_egress(), DriverEgress::NONE);
         // The bundle is the driver's, never the start request's.
+        let egress = ChildCommand::new("true", [] as [&str; 0], "/work/space").with_egress(model());
+        let named = egress.clone().with_ca_bundle("/anchors/first.pem");
+        assert_eq!(named.ca_bundle(), Some(Path::new("/anchors/first.pem")));
         assert_eq!(
-            first.input("space", "snapshot".to_owned()),
+            named.input("space", "snapshot".to_owned()),
             egress.input("space", "snapshot".to_owned())
         );
+    }
+
+    #[test]
+    fn the_driver_hands_substrate_a_private_read_only_copy_of_the_bytes_read() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let fixture = tempfile::tempdir().unwrap();
+        let named = fixture.path().join("bundle.pem");
+        let elsewhere = fixture.path().join("elsewhere.pem");
+        std::fs::write(&named, "anchor\n").unwrap();
+        std::fs::write(&elsewhere, "link target\n").unwrap();
+        let child = ChildCommand::new("true", [] as [&str; 0], "/work/space")
+            .with_egress(model())
+            .with_ca_bundle(&named);
+        let bundle = check_ca_bundle(&child).unwrap();
+        assert_eq!(bundle, read_as(named.to_str().unwrap(), b"anchor\n"));
+
+        let state = tempfile::tempdir().unwrap();
+        let egress = DriverEgress {
+            aperture: Some(model()),
+            ca_bundle: bundle,
+        };
+        let config = driver_config(fixture.path(), state.path(), &egress).unwrap();
+        let copy = config.ca_bundle.expect("Substrate is handed a bundle");
+        assert_ne!(copy, named, "never the named path");
+        assert_eq!(copy.parent(), Some(state.path()), "in the private state");
+        let metadata = std::fs::symlink_metadata(&copy).unwrap();
+        assert!(metadata.is_file(), "a regular file, no link");
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o400);
+        assert_eq!(std::fs::read(&copy).unwrap(), b"anchor\n");
+        // The named path swapped for a link after the read changes nothing Substrate copies.
+        std::fs::remove_file(&named).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &named).unwrap();
+        assert_eq!(std::fs::read(&copy).unwrap(), b"anchor\n");
+        let error = check_ca_bundle(&child).unwrap_err();
+        assert!(error.detail.contains("symbolic link"), "{error}");
+        // A copy is written once: a second one in the same state is refused, never overwritten.
+        assert_eq!(
+            driver_config(fixture.path(), state.path(), &egress)
+                .unwrap_err()
+                .reason,
+            ConfinementRefusal::BackendMissing
+        );
+        let none = tempfile::tempdir().unwrap();
+        let plain = driver_config(fixture.path(), none.path(), &DriverEgress::NONE).unwrap();
+        assert!(plain.ca_bundle.is_none());
+        assert!(!none.path().join("ca-bundle.pem").exists());
     }
 
     #[test]
@@ -2522,21 +2675,14 @@ mod tests {
             .with_egress(model())
             .input("space", "snapshot".to_owned());
         let profile = requested_profile(&input, Some(&model()));
-        let bare = profile_digest(&profile, &[], Some(&model()), None);
-        let first = profile_digest(
-            &profile,
-            &[],
-            Some(&model()),
-            Some(Path::new("/anchors/first.pem")),
-        );
-        let second = profile_digest(
-            &profile,
-            &[],
-            Some(&model()),
-            Some(Path::new("/anchors/second.pem")),
-        );
+        let digest = |bundle: Option<CaBundle>| {
+            profile_digest(&profile, &[], Some(&model()), bundle.as_ref())
+        };
+        let bare = digest(None);
+        let first = digest(read_as("/anchors/first.pem", b"one"));
         assert_ne!(first, bare);
-        assert_ne!(first, second);
+        assert_ne!(first, digest(read_as("/anchors/second.pem", b"one")));
+        assert_ne!(first, digest(read_as("/anchors/first.pem", b"two")));
         // With no bundle the digest is the one an egress child had before bundles existed.
         let mut before = serde_json::json!({ "backend":"substrate", "network":"aperture:model@10.0.0.1:443",
             "writable_scopes":["target"], "read_only_roots":[], "environment":[],
@@ -2613,7 +2759,10 @@ mod tests {
         assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid);
         assert!(error.detail.contains("not UTF-8"), "{error}");
         assert!(error.detail.contains("bundle\\xFF.pem"), "{error}");
-        check_ca_bundle(&ChildCommand::new("true", [] as [&str; 0], "/work/space")).unwrap();
+        assert_eq!(
+            check_ca_bundle(&ChildCommand::new("true", [] as [&str; 0], "/work/space")).unwrap(),
+            None
+        );
     }
 
     #[test]

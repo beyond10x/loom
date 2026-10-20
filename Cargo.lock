@@ -493,6 +493,7 @@ dependencies = [
  "chrono",
  "intake",
  "jiff",
+ "libc",
  "serde",
  "serde_json",
  "sha2 0.10.9",

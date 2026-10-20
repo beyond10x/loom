@@ -787,9 +787,12 @@ address, a pinned address that is no IPv4 one or not at the named port), and an 
 other than `127.0.0.1`, which the child could not reach the host by, are refused `ScopeInvalid`
 before anything starts, the refusal naming the host; one Substrate did not publish when the driver opened (its mechanism unproven) is refused
 `CapabilityUnserved`. Substrate gives a run at most one aperture. A certificate bundle
-(`with_ca_bundle`, Substrate's `HostConfig::ca_bundle`) reaches the child as a read-only snapshot
-of the host's file, taken when it starts, at `/etc/ssl/certs/ca-certificates.crt`, which
-`SSL_CERT_FILE` names; Substrate's record names no bundle, so it is not checked after the run. The
+(`with_ca_bundle`) is read once per launch through an open that follows no symbolic link
+(`O_NOFOLLOW`), and the child trusts the bytes read then: the driver is given a private
+read-only copy of them in its own state directory (`CaBundle::write_private_copy`, removed with
+the driver) as Substrate's `HostConfig::ca_bundle`, never the named path, and Substrate binds a
+snapshot of that copy at `/etc/ssl/certs/ca-certificates.crt`, which `SSL_CERT_FILE` names;
+Substrate's record names no bundle, so it is not checked after the run. The
 bundle is the trust store the child gets through `SSL_CERT_FILE`: a program the child runs can
 still choose its own trust or turn verification off, and what the child reaches is bounded by the
 aperture, not by the bundle. A bundle for a child with no aperture, a path that is not UTF-8 or
@@ -797,13 +800,14 @@ not absolute, one beside an environment naming a variable that replaces or widen
 trust store (`TRUST_STORE_VARIABLES`: `SSL_CERT_FILE`, `SSL_CERT_DIR`, `CURL_CA_BUNDLE`,
 `CURL_CA_PATH`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`,
 each named in the refusal), and one that does not exist, is a symbolic link, is no regular file,
-is empty, holds more than 1 MiB (`MAX_CA_BUNDLE_BYTES`, Substrate's ceiling) or cannot be read are
-refused `ScopeInvalid` before anything starts, naming the path
-(`check_ca_bundle`). A program containing `=` or starting with `-` (test or child)
+is empty, holds more than 1 MiB (`MAX_CA_BUNDLE_BYTES`, Substrate's ceiling) or cannot be read,
+on the path and again on the file opened, are refused `ScopeInvalid` before anything starts,
+naming the path (`check_ca_bundle`). A program containing `=` or starting with `-` (test or child)
 is refused before anything starts: Substrate execs through `/usr/bin/env`, which reads it as an
 assignment or an option. A runner and its clones share one driver per workspace directory, egress
-aperture and certificate bundle (`DriverEgress`: Substrate fixes a driver's apertures and bundle
-when it opens), so children naming different bundles never share one,
+aperture and certificate bundle, the bundle compared as its path and the bytes read
+(`DriverEgress`: Substrate fixes a driver's apertures and bundle when it opens), so children naming
+different bundles, or a bundle whose bytes changed, never share one,
 because opening a driver kills every `substrate-ex_*` cgroup under its root; each launch discards
 its finished execution from the driver (`discard_superseded_exec`), which tracks at most 128; no
 driver opens on a root while a launch of this process runs there (the process-wide count in
