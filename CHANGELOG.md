@@ -116,6 +116,16 @@ returns as an action's argument schema and which no `loom_sdk` path reached befo
 as for the other ports there. No trait changes.
 Breaking: none.
 
+Loom requires ESS 0.66.0, the newest release (`story:ess-066-upgrade`): the Loom, Commission and
+intake specifications require it, the three conformance targets build on the 0.66.0
+`ess-conformance` and `ess-primitives`, and CI installs the 0.66.0 `ess`; every specification
+validates unchanged and synthesis still writes 61, 39 and 11 scenarios with no refusal, and a
+release now moves the ess pin to the newest ESS release. Intake's specification moves to format
+`ess/26`, whose `DropResumeContext` `storage-failed` scenario keeps a context first and reads it
+back unchanged after the refusal, so a store that removes the context and still answers
+`storage-failed` fails `task intake-conform`.
+Breaking: specifications built with Loom's tasks need ESS 0.66.0.
+
 ## [0.29.0] - 2026-10-20
 
 Loom 0.29.0 says what stopped a run and lets effects and executors report more. A run that ends

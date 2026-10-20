@@ -188,7 +188,7 @@ changing `ess/`. Every story names that change and that test in its `## ESS firs
 change with no behaviour change is exempt, and its story says so.
 
 `ess_gate.rs` (both copies) reads this section and fails when a phrase it checks is gone; reword
-with the tests open. CI installs `ess` 0.60.0 (`.github/workflows/check.yml`); move that pin when a
+with the tests open. CI installs `ess` 0.66.0 (`.github/workflows/check.yml`); move that pin when a
 newer ESS ships.
 
 ## Gate
@@ -946,7 +946,8 @@ workspace version and nothing is on a registry. Consumers pin `tag = "<version>"
 1. A release commit on `main` (through a wave or a bot pull request): `[workspace.package] version`
    in `Cargo.toml`, `Cargo.lock`, and **Unreleased** turned into `## [<version>] - <date>` under an
    empty **Unreleased**, opening with a one-paragraph summary fit for the release notes. README,
-   AGENTS.md and the site pages that name the version or a dependency line move with it.
+   AGENTS.md and the site pages that name the version or a dependency line move with it. A
+   release moves the `ess` pin (§ ESS) to the newest ESS release in that same release.
    `cargo run -q --locked -p loom-xtask -- release-check --tag <version>` passes on it.
 2. `check` and `Shared source gates` green on that commit.
 3. An annotated tag by `b10x-bot[bot]` on that commit: `b10x-gates bot … -- tag -a <version> -m
