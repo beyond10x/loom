@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-20T06:23:41Z",
+  "actor": "human:timo",
+  "artifact": "story:harness-child-egress-profile",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adv-w20261020w2-u5-pass-2",
+    "review": "review-result:adv-w20261020w2-u5-pass-2",
+    "outcome": "fixed"
+  }
+}

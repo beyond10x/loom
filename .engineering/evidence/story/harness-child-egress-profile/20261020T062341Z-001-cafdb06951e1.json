@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-20T06:23:41Z",
+  "actor": "human:timo",
+  "artifact": "story:harness-child-egress-profile",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "confined_child.rs a_child_reaches_only_the_named_egress: no EgressAperture or with_egress at bb9cf35 (E0432, E0599, exit 101); at cdbf593 a child reaches model.example.test through its aperture and is refused an unnamed port and the pinned address, delegated, not skipped; the adversary's three cases (0c7b72c, 631354b) red at fbea187 and f3b3010, green at cdbf593",
+    "reference": "~/.cache/loom-wave-2026-10-20-w2/u5/red.log vs ~/.cache/loom-wave-2026-10-20-w2/u5/fix2-gate.log"
+  }
+}

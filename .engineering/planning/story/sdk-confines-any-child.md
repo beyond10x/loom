@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:sdk-confines-any-child
 kind: story
-status: active
+status: implemented
 title: 'loom-sdk confines a child process the host names: program, arguments, directory, environment, profile'
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -20,10 +20,11 @@ scope:
   path: crates/loom-sdk/src/lib.rs
 - confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 8
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T04:14:24Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":2}}}
 - {from: "proposed", to: "active", at: "2026-10-20T04:14:24Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":2}}}
+- {from: "active", to: "implemented", at: "2026-10-20T08:39:25Z", actor: "human:timo", revision: 10, decided_on: {"recorded":{"test_result":1,"review_outcome":4,"verification":1}}}
 ---
 ## Outcome
 
@@ -82,3 +83,7 @@ which both depend on this story. `crates/loom-sdk/src/lib.rs` is also edited by
 `story:chooser-executor-for-plugin-turns` (another re-export), and the stability page by
 `story:engineering-protocols-090` and `story:authority-sees-the-request` (other rows);
 `story:agent-executor-host-port` and `story:delete-harness-port` land after this story.
+
+## Correction at close (wave 2026-10-20-w2)
+
+- What shipped: SubstrateRunner::run_child(&ChildCommand), loom_sdk::ChildCommand; children and tests through one runner share one Substrate driver per workspace directory and release each execution once read; a launch needing another directory's driver is refused while one runs under the same (canonical) cgroup root; a program containing '=' or starting with '-' is refused before anything starts, for test commands too (a named break).

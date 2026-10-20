@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-20T05:28:09Z",
+  "actor": "human:timo",
+  "artifact": "story:refused-effect-ends-run",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "task commission:conform: 35 of 37 scenarios on e6bb0ac (JudgeEffectRefusal final and ordinary errored), all on 66d86cc; refused_effect_outcome.rs a_final_refusal_ends_the_run_naming_request_and_reason: NoAdmissibleAction before the runtime change, EffectRefused naming the request and reason at 6c2e84d; the adversary's fan-out cases (b41b64d, e741357) red at 66d86cc and a349ee2, green at 6c2e84d",
+    "reference": "~/.cache/loom-wave-2026-10-20-w2/u1/red-fix2.log vs ~/.cache/loom-wave-2026-10-20-w2/u1/gate-fix2.log"
+  }
+}

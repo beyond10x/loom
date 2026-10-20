@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:idle-bound-outcome
 kind: story
-status: active
+status: implemented
 title: A run ended by the idle bound says so, apart from a frontier that admits nothing
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -25,10 +25,11 @@ scope:
   path: generated/rust/commission
 - confidence: cited
   path: website/docs/reference/commission
-revision: 7
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T04:14:24Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":2}}}
 - {from: "proposed", to: "active", at: "2026-10-20T04:14:24Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":2}}}
+- {from: "active", to: "implemented", at: "2026-10-20T08:39:24Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":3,"verification":1}}}
 ---
 ## Outcome
 
@@ -83,3 +84,7 @@ Crates: `loom-commission`, `loom-commission-testkit`, `loom-intake-slice`.
 
 Shared with `story:refused-effect-ends-run` (before), `story:unperformable-names-actions` and
 `story:pending-effect` (after).
+
+## Correction at close (wave 2026-10-20-w2)
+
+- When the last idle iteration's own effect completed the case, the run ends Completed, as at the step budget (cfe37ee). A run-budget breach right after a performed effect still ends suspended before the case is loaded, as the runtime documents.

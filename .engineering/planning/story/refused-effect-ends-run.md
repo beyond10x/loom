@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:refused-effect-ends-run
 kind: story
-status: active
+status: implemented
 title: A host ends a run on an effect refusal, and the outcome names the request and the reason
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -27,10 +27,11 @@ scope:
   path: generated/rust/commission
 - confidence: cited
   path: website/docs/reference/commission
-revision: 7
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T04:14:23Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":2}}}
 - {from: "proposed", to: "active", at: "2026-10-20T04:14:24Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":2}}}
+- {from: "active", to: "implemented", at: "2026-10-20T08:39:23Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":4,"verification":1}}}
 ---
 ## Outcome
 
@@ -89,3 +90,7 @@ Crates: `loom-commission`, `loom-commission-testkit`, `loom-intake-slice`.
 The same declarations, generated code, `runtime.rs`, `outcome.rs` and `run.rs` mapping are changed
 by `story:idle-bound-outcome`, `story:unperformable-names-actions`, `story:pending-effect` and
 `story:executor-reports-usage`, which land after this story in that order.
+
+## Correction at close (wave 2026-10-20-w2)
+
+- In a fan-out, a stale read is judged first; a final refusal beside it is kept and ends the run when the next load finds no move (a349ee2, 6c2e84d), from two adversary passes.

@@ -9,6 +9,7 @@ relations:
 - serves: vision:governed-autonomy
 - depends_on: story:chooser-executor-for-plugin-turns
 - depends_on: story:executor-reports-usage
+- depends_on: story:llm-080-pin
 scope:
 - confidence: cited
   path: AGENTS.md

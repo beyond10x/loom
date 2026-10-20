@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-20T06:32:46Z",
+  "actor": "human:timo",
+  "artifact": "story:idle-bound-outcome",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "task commission:conform: 37 of 39 scenarios on 0dbf61b (JudgeIdleIteration below and bound errored), 39 of 39 at cfe37ee; idle_bound_outcome.rs: NoAdmissibleAction before a392c4e, IdleBound { idle_iterations: 2 } after; the adversary's completed-case case (b5bcc75) red at 34e75f8, green at cfe37ee",
+    "reference": "~/.cache/loom-wave-2026-10-20-w2/u2/red-01-conform.txt vs ~/.cache/loom-wave-2026-10-20-w2/u2/gate-fix1.log"
+  }
+}

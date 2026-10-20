@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-20T05:18:25Z",
+  "actor": "human:timo",
+  "artifact": "story:sdk-confines-any-child",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "confined_child.rs (a named child runs confined and reports what was applied): no ChildCommand or run_child at 8dd825a5 (E0432, E0599, exit 101); the adversary's five delegated cases (735ff41, 58f68cb) red at 4171be5 and a6c7627, all green at d29594b with every delegated case run, none skipped",
+    "reference": "~/.cache/loom-wave-2026-10-20-w2/u4/red.log vs ~/.cache/loom-wave-2026-10-20-w2/u4/fix2-gate.log"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-20T08:39:22Z",
+  "actor": "human:timo",
+  "artifact": "story:child-writable-workspace",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "merged in 871b564 (076251a); full gate on 7e34072 (task check's 20 steps one by one, task plan, release-check 0.28.0): 22 of 22 exit 0; cargo test --workspace --no-fail-fast 2107 passed, 0 failed, 14 ignored; task website exit 0 (a first run was stopped with TERM at the test step for disk and rerun from the start)",
+    "reference": "~/.cache/loom-wave-2026-10-20-w2/full-gate-2.log, ~/.cache/loom-wave-2026-10-20-w2/website.log"
+  }
+}

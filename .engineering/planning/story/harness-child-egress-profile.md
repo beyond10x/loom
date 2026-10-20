@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:harness-child-egress-profile
 kind: story
-status: active
+status: implemented
 title: A confinement profile with named egress runs a harness child that must reach its vendor API
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -17,10 +17,11 @@ scope:
   path: crates/loom-intake-slice/src/confinement.rs
 - confidence: cited
   path: crates/loom-intake-slice/tests/confined_child.rs
-revision: 8
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-20T04:14:24Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":1}}}
 - {from: "proposed", to: "active", at: "2026-10-20T04:14:24Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":1}}}
+- {from: "active", to: "implemented", at: "2026-10-20T08:39:26Z", actor: "human:timo", revision: 10, decided_on: {"recorded":{"test_result":1,"review_outcome":4,"verification":1}}}
 ---
 ## Outcome
 
@@ -69,3 +70,7 @@ Crates: `loom-intake-slice`.
 - `CHANGELOG.md`, `AGENTS.md`
 
 Shared with `story:sdk-confines-any-child` (before) and `story:python-test-profile` (`confinement.rs`).
+
+## Correction at close (wave 2026-10-20-w2)
+
+- What shipped: ChildCommand::with_egress(EgressAperture), one aperture per run (Substrate's limit), reached by the host's name; an IPv4 literal other than 127.0.0.1 is refused; a child its byte ceiling ended is a result. Not yet: a CA bundle (story:child-egress-ca-bundle).
