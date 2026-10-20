@@ -150,3 +150,162 @@ fn frontier_id(case: &str, revision: i64, rendered: &str) -> String {
         &hex[20..32]
     )
 }
+
+// Pass 2. The governor now keeps, per case, the document of its most recent evaluation and returns
+// it while the held case is unchanged. Commission's loop evaluates again after it reads the frontier
+// it hands the executor: `revalidate` reads a frontier of its own (`action_request.rs`), so the
+// document kept when a run ends is not the one behind `LoopEnd::last_frontier`.
+
+use b10x_loom_commission::model::behaviour::Generated;
+use b10x_loom_commission::model::json as commission_json;
+use b10x_loom_commission::model::primitives::{Timestamp as LoopInstant, Uuid};
+use b10x_loom_commission::model::responsibility::{
+    ActionRequestId, AgentRevisionId, AuthorityContext, AuthorityVerdict,
+    AuthorityVerdictApprovalRequired, Commission, CommissionData, CommissionId, EffectOutcome,
+    ExecutorOutcome, ExecutorOutcomeProposedAction, ObservationId, PrincipalId,
+    ProposedActionArguments, RunId, RunOutcome, commission_state,
+};
+use b10x_loom_commission::outcome::RunStore;
+use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
+use b10x_loom_commission::runtime::{LoopContext, run_until_blocked};
+use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
+use b10x_loom_commission_testkit::fake_executor::ScriptedExecutor;
+
+const ROLLBACK: &str = "release.rollback";
+
+/// A host runs the case through Commission's `run_until_blocked` on a governor under the same
+/// stand-in host clock. The executor proposes `release.rollback`, which the opened case's frontier
+/// marks approval-required, and the provider answers that approval is required, so the run ends
+/// `NeedsAuthority` with the case where it was. Right after, the host reads the decision document
+/// for the frontier the run ended on (`LoopEnd::last_frontier`, the frontier as the governor issued
+/// it): its rendering gives that frontier's id.
+#[test]
+fn the_document_read_after_a_run_is_the_one_its_last_frontier_was_issued_from_under_a_host_clock() {
+    let readings = Arc::new(AtomicUsize::new(0));
+    let clock = Arc::clone(&readings);
+    let governor = CanonGovernor::new(MemoryCaseStore::default())
+        .with_catalog(&ProtocolCatalog::bundled().expect("the bundled catalog"))
+        .expect("the catalog is admitted")
+        .with_evaluation_time(move |_: &CaseId| -> Result<Option<String>, GovernorError> {
+            let second = clock.fetch_add(1, Ordering::SeqCst);
+            Ok(Some(format!("2026-10-04T12:00:{second:02}Z")))
+        });
+    let case = CaseId(CASE.into());
+    governor
+        .open_case(
+            case.clone(),
+            PROTOCOL,
+            fixture_revisions(),
+            fixture_inputs(),
+        )
+        .expect("the case opens");
+    let commission = Commission::new(CommissionData {
+        commission_id: CommissionId(uuid(0x80)),
+        agent_revision_id: AgentRevisionId(uuid(0x90)),
+        case_id: case.clone(),
+        principal: PrincipalId("principal-release".to_owned()),
+        authority_context: AuthorityContext(commission_json::Value::Null),
+    });
+    let executor = ScriptedExecutor::new([ExecutorOutcome::ProposedAction(
+        ExecutorOutcomeProposedAction {
+            action: ROLLBACK.to_owned(),
+            arguments: ProposedActionArguments(commission_json::Value::Null),
+        },
+    )]);
+    let authority = StaticAuthorityProvider::new().answer(
+        ROLLBACK,
+        AuthorityVerdict::ApprovalRequired(AuthorityVerdictApprovalRequired {
+            request: "approval-1".to_owned(),
+        }),
+    );
+    let mut issued = 0u64;
+    let mut runs = Generated::new(RunStore::new(move || {
+        issued += 1;
+        RunId(uuid(0x100 + issued))
+    }));
+
+    let end = run_until_blocked(
+        &governor,
+        &executor,
+        &authority,
+        &PerformsEverything,
+        &commission,
+        &mut runs,
+        &mut Context::default(),
+    )
+    .expect("the run ends");
+
+    assert!(
+        matches!(end.outcome, RunOutcome::NeedsAuthority(_)),
+        "the run ends needing authority: {:?}",
+        end.outcome
+    );
+    let frontier = end.last_frontier.expect("the run read a frontier");
+    assert_eq!(
+        governor.current_revision(&case),
+        Ok(frontier.case_revision),
+        "the case did not move during the run"
+    );
+    let document = governor.decision_document(&case).expect("a document");
+    assert_eq!(
+        frontier_id(CASE, frontier.case_revision, &canonical(&document)),
+        frontier.frontier_id.0.0,
+        "the document read right after the run is the one its last frontier was issued from; it \
+         was decided at {:?}",
+        document
+            .member("explanation")
+            .and_then(|explanation| explanation.member("computed_from"))
+            .and_then(|computed| computed.member("at")),
+    );
+}
+
+/// An effect port that performs every action and is never handed one here: no request is admitted.
+struct PerformsEverything;
+
+impl EffectPort for PerformsEverything {
+    fn performs(&self, _: &str) -> bool {
+        true
+    }
+
+    fn invoke(
+        &self,
+        _: &Commission<commission_state::Assigned>,
+        request: &AdmittedRequest,
+    ) -> Result<EffectOutcome, EffectError> {
+        Err(EffectError::new(format!(
+            "{} is not performed in this case",
+            request.data().action
+        )))
+    }
+}
+
+/// New ids from counters and one loop instant; no step budget.
+#[derive(Debug, Default)]
+struct Context {
+    requests: u64,
+    observations: u64,
+}
+
+impl LoopContext for Context {
+    fn action_request_id(&mut self) -> ActionRequestId {
+        self.requests += 1;
+        ActionRequestId(uuid(0x300 + self.requests))
+    }
+
+    fn observation_id(&mut self) -> ObservationId {
+        self.observations += 1;
+        ObservationId(uuid(0x400 + self.observations))
+    }
+
+    fn now(&mut self) -> LoopInstant {
+        LoopInstant("2026-10-04T12:00:00Z".to_owned())
+    }
+
+    fn step_budget(&self) -> Option<usize> {
+        None
+    }
+}
+
+fn uuid(n: u64) -> Uuid {
+    Uuid(format!("00000000-0000-4000-8000-{n:012x}"))
+}
