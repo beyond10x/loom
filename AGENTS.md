@@ -747,7 +747,24 @@ are invalid scopes; internal Cargo hardlinks remain supported.
 The CLI attempts one delegated user systemd scope and guards against re-exec loops.
 Every executed test observation includes the actual applied confinement; refused launches produce
 no test observation or passing evidence. Real delegated tests must run to qualify confinement;
-a skip with a named missing prerequisite establishes no qualification. The slice's own git calls
+a skip with a named missing prerequisite establishes no qualification.
+`SubstrateRunner::run_child` confines a child process the host names (`ChildCommand`: program and
+arguments, the directory adopted as the workspace, and Substrate's `ExecEnvironment`,
+`SandboxProfile` and `NetworkMode`, `NetworkMode::None` by default) on the same launch path:
+writes only under `target/`, no toolchain or cache mounted, exactly the named environment, a typed
+refusal for a missing guarantee, only no network accepted as applied (checked after the child
+ran, refusing its result), a result with no exit status and no timeout refused, and the applied
+confinement in its `TestExecution`. A program containing `=` or starting with `-` (test or child)
+is refused before anything starts: Substrate execs through `/usr/bin/env`, which reads it as an
+assignment or an option. A runner and its clones share one driver per workspace directory,
+because opening a driver kills every `substrate-ex_*` cgroup under its root; each launch discards
+its finished execution from the driver (`discard_superseded_exec`), which tracks at most 128; no
+driver opens on a root while a launch of this process runs there (the process-wide count in
+`confinement.rs`, keyed by the canonical root), so the launch needing it is refused instead.
+`crates/loom-intake-slice/tests/confined_child.rs` holds it; its delegated
+cases start their own test binary under `systemd-run --user --scope -p Delegate=yes` and skip
+naming the missing prerequisite where bubblewrap, a user systemd manager or the driver is absent.
+The slice's own git calls
 go through one helper, `crates/loom-intake-slice/src/git.rs`: no workspace hook, `core.fsmonitor`
 command or signing program runs, a case does not open on a workspace whose own configuration
 names a program, and a call is refused once that configuration, its includes or the git directory

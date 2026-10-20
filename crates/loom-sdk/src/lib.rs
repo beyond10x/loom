@@ -74,6 +74,9 @@ pub use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked}
 pub use b10x_loom_executor::workflow::{RecordingEffects, WorkflowExecutor};
 pub use b10x_loom_executor::{ActionSelector, ArgumentGenerator, Loom};
 pub use b10x_loom_executor::{MeteredExecutor, MeteredModelPort, RunMeter};
+/// A child process a host names, run confined by [`SubstrateRunner::run_child`] with the guarantees
+/// a test has; Substrate's types it is named with are at `loom_sdk::intake::slice::confinement`.
+pub use b10x_loom_intake_slice::confinement::ChildCommand;
 pub use b10x_loom_intake_slice::confinement::{
     ConfinementError, SubstrateRunner, TestExecution, TestRunner,
 };
