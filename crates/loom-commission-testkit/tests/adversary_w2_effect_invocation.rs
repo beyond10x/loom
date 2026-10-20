@@ -437,6 +437,7 @@ fn an_unbound_request_reaching_connector_effects_is_refused_and_invokes_nothing(
         end.effects,
         vec![EffectOutcome::Refused(EffectOutcomeRefused {
             reason: format!("`{SEARCH}` has no binding"),
+            ends_run: false,
         })]
     );
     assert!(invoker.calls().is_empty(), "{:?}", invoker.calls());

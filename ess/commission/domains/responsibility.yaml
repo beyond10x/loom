@@ -233,7 +233,8 @@ types:
   # frontier goes to the executor; only a non-empty frontier none of whose actions the effect port
   # performs ends NoPerformableAction. story:moved-run-named-outcome adds CaseMovedOn (the case
   # moved to a revision whose frontier still admits an action; the run stays bound to its own
-  # revision, and the caller starts a new run at the current one).
+  # revision, and the caller starts a new run at the current one). story:refused-effect-ends-run adds
+  # EffectRefused (the effect port refused an admitted request as final, `ends_run`).
   - name: commission.responsibility.RunOutcome
     kind: union
     tag: kind
@@ -247,6 +248,7 @@ types:
       AwaitingApproval: commission.responsibility.RunOutcomeAwaitingApproval
       NoPerformableAction: commission.responsibility.Unit
       CaseMovedOn: commission.responsibility.RunOutcomeCaseMovedOn
+      EffectRefused: commission.responsibility.RunOutcomeEffectRefused
 
   # The governor's outcome identifier, as the governor reports it.
   - name: commission.responsibility.RunOutcomeCompleted
@@ -289,6 +291,16 @@ types:
         type: Integer
       - name: current_case_revision
         type: Integer
+
+  # story:refused-effect-ends-run: the admitted request the effect port refused as final and the
+  # reason it gave, as `JudgeEffectRefusal` answers `final` for it.
+  - name: commission.responsibility.RunOutcomeEffectRefused
+    kind: struct
+    fields:
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
+      - name: reason
+        type: String
 
   # story:runtime-merge: the actions that need approval, in frontier order, on a frontier a step
   # left unchanged; none of them was denied by an authority verdict in the run.
@@ -449,11 +461,17 @@ types:
         type: Optional<Integer>
 
   # The effect port did not perform the request, and changed nothing; why.
+  # story:refused-effect-ends-run: `ends_run` marks the refusal final: the port says no later step
+  # of the run can succeed where this request failed, so the run ends at once with `EffectRefused`
+  # naming the request and this reason (`JudgeEffectRefusal`, `final`). False is an ordinary
+  # refusal, an idle iteration as before; nothing is ever retried.
   - name: commission.responsibility.EffectOutcomeRefused
     kind: struct
     fields:
       - name: reason
         type: String
+      - name: ends_run
+        type: Boolean
 
   # story:effect-invocation: a Connector operation is the pair (instance_id, operation_id), as
   # Connectors names it. Which Connection serves it is Connectors' choice and is not modelled here.
@@ -1075,6 +1093,15 @@ errors:
       - name: reason
         type: String
 
+  # story:refused-effect-ends-run: the run cannot go on past this request, which the effect port
+  # refused as final. It names the request and the port's reason.
+  - name: commission.responsibility.EffectRefusedFinal
+    fields:
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
+      - name: reason
+        type: String
+
 commands:
   - name: commission.responsibility.StartRun
     input:
@@ -1339,6 +1366,30 @@ commands:
           commission.responsibility.ActionNeedsAuthority:
             action: input.action
       - name: admitted
+        accepts: nothing
+
+  # story:refused-effect-ends-run: whether a run goes on after the effect port refused one of its
+  # admitted requests, decided once the refusal was recorded and observed. A refusal the port marks
+  # final (`ends_run`) ends the run at once, and the run outcome is `EffectRefused`, naming the
+  # request and the port's reason as `final` does; an ordinary one changes nothing, and the
+  # iteration counts toward the idle bound as before.
+  - name: commission.responsibility.JudgeEffectRefusal
+    input:
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
+      - name: reason
+        type: String
+      - name: ends_run
+        type: Boolean
+    outcomes:
+      - name: final
+        when: ends_run == true
+        error: commission.responsibility.EffectRefusedFinal
+        payload:
+          commission.responsibility.EffectRefusedFinal:
+            action_request_id: input.action_request_id
+            reason: input.reason
+      - name: ordinary
         accepts: nothing
 
 events:

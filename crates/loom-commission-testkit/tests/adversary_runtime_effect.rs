@@ -210,6 +210,7 @@ fn adversary_a_refused_effect_does_not_adopt_a_foreign_move() {
     ]);
     let refused = EffectOutcome::Refused(EffectOutcomeRefused {
         reason: "no such path".to_owned(),
+        ends_run: false,
     });
     let effects = Effects::new(None, vec![refused]);
 

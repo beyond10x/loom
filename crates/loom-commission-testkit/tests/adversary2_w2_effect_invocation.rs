@@ -156,6 +156,7 @@ impl EffectPort for Performs {
         if !self.performs(&request.data().action) {
             return Ok(EffectOutcome::Refused(EffectOutcomeRefused {
                 reason: "not performed".to_owned(),
+                ends_run: false,
             }));
         }
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {

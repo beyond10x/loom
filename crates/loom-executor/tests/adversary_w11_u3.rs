@@ -224,6 +224,7 @@ impl EffectPort for ScriptedEffects<'_> {
         match reply {
             Reply::Refused => Ok(EffectOutcome::Refused(EffectOutcomeRefused {
                 reason: format!("{action} refused by the test"),
+                ends_run: false,
             })),
             Reply::Performed(report) => {
                 self.case

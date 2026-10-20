@@ -403,6 +403,7 @@ fn refused(
     if answered && nothing_changed && !read {
         Ok(EffectOutcome::Refused(EffectOutcomeRefused {
             reason: said,
+            ends_run: false,
         }))
     } else {
         Err(EffectError::new(said))

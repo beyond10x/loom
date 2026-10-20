@@ -156,7 +156,10 @@ impl<'a, S: FallibleCaseStore> DataSourceEffects<'a, S> {
 
     fn refused(&self, reason: String) -> EffectOutcome {
         self.log().transcript.push(format!("refused: {reason}"));
-        EffectOutcome::Refused(EffectOutcomeRefused { reason })
+        EffectOutcome::Refused(EffectOutcomeRefused {
+            reason,
+            ends_run: false,
+        })
     }
 
     /// `source.read`.

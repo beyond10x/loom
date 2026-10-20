@@ -106,6 +106,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | With `--mandate`, a resume performs the held request only when Mandate's `check_with_approval` clears and consumes the approval the grant names, kept in the state directory's log before anything is performed: a second resume with it, an expired approval, one naming another subject, action or resource, one recorded for another commission however its id is written, and a grant naming none are refused and perform nothing; without `--mandate`, a grant naming an approval is refused and performs nothing; the approver is neither the verified subject nor its actor; only `b10x-loom-cli` links `b10x-loom-mandate`, and only it and `loom-docs` reach Mandate over `Cargo.lock` | `crates/loom-cli/tests/resume_after_grant.rs` (`a_recorded_approval_clears_the_held_request_once`, `a_second_resume_with_the_same_approval_is_refused_and_performs_nothing`, `an_expired_approval_is_refused_and_performs_nothing`, `the_grant_names_its_mandate_approval`), `crates/loom-cli/tests/adversary_w10_u3.rs` (`adversary_a_resume_without_mandate_does_not_perform_a_grant_naming_a_mandate_approval`), `crates/loom-cli/tests/security_w10_u3.rs` (`security_an_approval_is_bound_to_its_commission_however_its_id_is_written`), `crates/loom-mandate/tests/mandate_approval.rs` (`an_approval_naming_another_subject_action_or_resource_is_refused`), `crates/loom-mandate/tests/adversary_w10_u3.rs` (`adversary_a_host_file_whose_approver_is_the_acting_actor_is_refused`), `crates/loom-mandate/tests/security_w10_u2.rs` |
 | An executor's report that the case moved is decided by the governor and judged on the case's current frontier, reloaded once | `crates/loom-commission-testkit/tests/moved_case_outcome.rs`, `crates/loom-executor/tests/adversary_w1_runtime_stale.rs`, `crates/loom-executor/tests/adversary_w1p2_runtime_windows.rs` |
 | An executor is never handed an unperformed action that needs no authority; an effect is invoked once, through its binding | `crates/loom-commission-testkit/tests/effect_invocation.rs` (`effect_invoked_only_through_its_binding`) |
+| An effect refusal marked final (`ends_run`) ends the run at once with `EffectRefused`, naming the request and the reason, once it was recorded and observed: after a proposal, after a fan-out once every read was recorded (beside a stale read it is kept until the move is judged, and ends the run when the next load finds no move), and after a resumed request, whose Suspension is released; an ordinary refusal still counts idle | `crates/loom-commission-testkit/tests/refused_effect_outcome.rs` (`a_final_refusal_ends_the_run_naming_request_and_reason`, `an_ordinary_refusal_still_counts_idle`, `the_refusal_is_observed_once_and_recorded`), `crates/loom-commission-testkit/tests/adversary_w20261020w2_u1.rs`, `task commission:conform` (`JudgeEffectRefusal`) |
 | Reads proposed together (`ProposedReads`) are admitted only when the effect port reads every one and the handed frontier lists each `Admissible` with no authority, else nothing is invoked; admitted reads are revalidated each, invoked concurrently, each once through its binding, joined, and recorded in proposal order; a stale read alone is not invoked; an effect error fails the loop after every read joined; a fan-out is one step | `crates/loom-commission-testkit/tests/read_fan_out.rs` (`admitted_reads_run_concurrently_and_join`, `effects_are_recorded_in_proposal_order`, `a_fan_out_with_a_write_or_an_approval_required_read_invokes_nothing`, `a_stale_read_is_refused_and_the_others_are_performed`, `an_effect_error_fails_the_loop_after_every_read_joined`), `crates/loom-connectors/tests/read_fan_out.rs` (`each_read_is_invoked_once_through_its_binding`) |
 | A consequential action leaves Loom only as a proposal, and the executor links no Connectors crate | `crates/loom-executor/tests/connector_boundary.rs` (`consequential_actions_leave_loom_only_as_a_proposal`) |
 | A Connector invocation is made once, and only Connectors' own "nothing changed" is a refusal | `crates/loom-connectors/tests/connectors_invoker.rs` |
@@ -254,7 +255,14 @@ puts the Run back `Running` (`ResumeRun`, so `run_with_suspension`'s run store i
 and the run ends as without a port, with no loop error. The production store is the governor's
 `FileSuspensionStore`.
 `crates/loom-commission-testkit/tests/approval_suspend_resume.rs` holds it across a real process
-restart. Design and contract notes are under
+restart. An effect port's `Refused` changed nothing, and an ordinary refusal is an idle iteration
+toward the idle bound. One the port marks final (`EffectOutcomeRefused.ends_run`) ends the run at
+once with `EffectRefused`, naming the request and the reason, once the refusal was recorded and
+observed: after a proposal, after a fan-out once every read answered (beside a stale read it is
+kept, the move is judged first, and it ends the run when the next load finds no move), and after a
+resumed request, whose Suspension is released first. `outcome::judge_refusal` decides it with the behaviour ESS
+generates for `JudgeEffectRefusal`; nothing is retried
+(`crates/loom-commission-testkit/tests/refused_effect_outcome.rs`). Design and contract notes are under
 `docs/commission/`. Its tasks are in `Taskfile.commission.yml`, included under the `commission:`
 namespace.
 
@@ -545,7 +553,7 @@ whose actions the frontier does not list as `Admissible` or `ApprovalRequired` e
 `NeedsHumanJudgment`, naming the step and the frontier's reasons, and nothing later is taken
 instead. `RecordingEffects` wraps the host's effect port into an `EffectLog` the executor reads: a
 step advances only once the request it proposed was `Performed`, and a refused or stale one is
-proposed again, bounded by Commission's idle rule. Commission revalidates every proposal, a
+proposed again, bounded by Commission's idle rule; a refusal the port marks final ends the run. Commission revalidates every proposal, a
 deterministic one included. `workflow::load` reads YAML into the generated types and checks it
 against the protocol's actions, which the host supplies (`loom_protocols::ProtocolEntry::actions`,
 so the executor does not depend on `loom-protocols`): every action is its protocol's, step names

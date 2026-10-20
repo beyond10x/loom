@@ -5,6 +5,10 @@
 //! governor completes a case: an executor's `CompletedLocalReasoning` never does
 //! (`docs/contracts/commission-executor.md`).
 //!
+//! [`judge_refusal`] decides whether a run goes on after the effect port refused one of its
+//! admitted requests (`JudgeEffectRefusal`, `story:refused-effect-ends-run`): a refusal the port
+//! marks final ends it with `RunOutcome::EffectRefused`, and an ordinary one changes nothing.
+//!
 //! [`RunStore`] holds runs for the `StartRun`, `SuspendRun` and `ResumeRun` commands through
 //! [`crate::model::behaviour::Generated`]: it implements the three obligations itself. Resume
 //! continues the same run: its id and case revision are kept, and no new run is created. The store
@@ -18,18 +22,19 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::admission::admit;
-use crate::model::behaviour::RunStorage;
+use crate::model::behaviour::{Generated, RunStorage};
 use crate::model::obligation::UnmetObligation;
 use crate::model::primitives::Uuid;
 use crate::model::responsibility::obligations::{
-    ResumeRunBehavior, StartRunBehavior, SuspendRunBehavior,
+    JudgeEffectRefusalBehavior, ResumeRunBehavior, StartRunBehavior, SuspendRunBehavior,
 };
 use crate::model::responsibility::{
     Admission, AnyRun, AuthorityVerdict, CompletionDetermination, ExecutorOutcome, Frontier,
-    ResumeRun, ResumeRunOutcome, Run, RunData, RunId, RunOutcome, RunOutcomeCompleted,
-    RunOutcomeNeedsAuthority, RunOutcomeNeedsExternalEvidence, RunOutcomeNeedsHumanJudgment,
-    RunOutcomeSuspended, RunResumed, RunSnapshot, RunStarted, RunStateConflict, RunSuspended,
-    StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome, Unit, frontier_state,
+    JudgeEffectRefusal, JudgeEffectRefusalOutcome, ResumeRun, ResumeRunOutcome, Run, RunData,
+    RunId, RunOutcome, RunOutcomeCompleted, RunOutcomeNeedsAuthority,
+    RunOutcomeNeedsExternalEvidence, RunOutcomeNeedsHumanJudgment, RunOutcomeSuspended, RunResumed,
+    RunSnapshot, RunStarted, RunStateConflict, RunSuspended, StartRun, StartRunOutcome, SuspendRun,
+    SuspendRunOutcome, Unit, frontier_state,
 };
 
 /// What [`derive`] decides for a run.
@@ -118,6 +123,23 @@ pub fn derive<S: frontier_state::Marker>(
         | ExecutorOutcome::ProposedReads(_) => {}
     }
     from_frontier(frontier)
+}
+
+/// Whether a run goes on after the effect port refused the admitted request `input` names
+/// (`JudgeEffectRefusal`), as the behaviour ESS generates from the specification decides it:
+/// `Final`, naming the request and the port's reason, when the port marked the refusal
+/// `ends_run`, and the run ends with `RunOutcome::EffectRefused` carrying both; `Ordinary`
+/// otherwise, which changes nothing, so the iteration counts toward the idle bound as before.
+/// The runtime ([`crate::runtime`]) and the conformance target both decide through it.
+///
+/// # Errors
+///
+/// The generated behaviour's typed refusal of an input the specification declares no outcome for.
+/// A `Boolean` `ends_run` always selects one, so it never answers it.
+pub fn judge_refusal(
+    input: JudgeEffectRefusal,
+) -> Result<JudgeEffectRefusalOutcome, UnmetObligation> {
+    Generated::new(()).judge_effect_refusal(input)
 }
 
 /// Rule 6 of [`derive`]: what the frontier alone decides.

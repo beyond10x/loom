@@ -83,8 +83,12 @@
 //!    `outcome` (`Performed` or `Refused`), `action_request`, `action`, `arguments`, and `report`
 //!    with, when the effect was invoked through a Connector, the one `attempt` a write produced or
 //!    the `audit` record of a read, or `reason`. It is never evidence.
-//!    The loop never retries an invocation. Stale: the iteration is a step, and the next iteration
-//!    loads the case, which has moved: it ends the run completed if the case is complete, else
+//!    The loop never retries an invocation. A `Refused` the port marks final
+//!    (`EffectOutcomeRefused.ends_run`, `story:refused-effect-ends-run`) then ends the run, once the
+//!    run budget's spending limits were checked: [`judge_refusal`] answers `final`, and the run
+//!    ends `EffectRefused`, naming the request and the port's reason, with no further load of the
+//!    case. An ordinary refusal changes nothing (`ordinary`). Stale: the iteration is a step, and
+//!    the next iteration loads the case, which has moved: it ends the run completed if the case is complete, else
 //!    `CaseMovedOn` or with no admissible action (2). Otherwise, and after an authority answer other than an allow, the run
 //!    outcome is derived ([`derive`]) from the frontier the executor was handed, and the case is
 //!    not loaded again;
@@ -104,7 +108,13 @@
 //!    them; a port that answers `None` fails the loop as an effect failure. Their effects are
 //!    recorded and observed as in 8, in the order proposed, not the order they finished. A
 //!    `Refused` read cancels nothing; an `Err` from any read fails the loop once every read has
-//!    answered and each that answered was recorded and observed, and nothing is retried. When a
+//!    answered and each that answered was recorded and observed, and nothing is retried. Without
+//!    one, and with the run budget not passed, a read the port refused as final ends the run
+//!    `EffectRefused` as in 8, naming the first such read in the order proposed, at once when no
+//!    read was stale. Beside a stale read the refusal is kept and the move is judged first, as
+//!    below: a case the governor holds complete ends the run completed, a move ends it as after a
+//!    stale proposal (2), and when the next iteration's load finds no move, the kept refusal ends
+//!    the run `EffectRefused` before any budget stop and before the executor runs. When a
 //!    read was stale, somebody else moved the case: once the admitted reads were recorded, the
 //!    iteration is as a stale proposal, so the next one loads the case and judges the move (2), and
 //!    no read of the fan-out makes the loaded revision the Run's (1). When no read was admitted and
@@ -141,7 +151,8 @@
 //! this Run, at whatever revision (a refused fan-out admits none): an effect that moved the case does not make the same proposal
 //! new. A newly admitted request starts the count again. Idle covers `NoUsefulAction`,
 //! `CompletedLocalReasoning`, a refused proposal, an authority answer other than an allow and a
-//! repeated admission alike, and a `CaseMoved` the governor does not bear out counts as
+//! repeated admission alike, whatever the effect port answered for it short of a final refusal,
+//! which ends the run (8), and a `CaseMoved` the governor does not bear out counts as
 //! `NoUsefulAction`; a stale proposal is not counted, since the next iteration ends the run, and a
 //! `CaseMoved` the governor bears out ends it at once (9). The idle bound ends a run whose
 //! derivation would let it go on, so the case is not loaded again before it (10). A loop that
@@ -228,7 +239,8 @@
 //! ([`Governor::current_revision`]), since somebody else may have moved it while the resume wrote
 //! the Run and took the Suspension. At the request's revision, the request, under its own id and
 //! at its own revision, is handed to [`EffectPort::invoke`] once, recorded and observed as the loop
-//! does (8), and the Suspension is released for that request (`ReleaseSuspension`), removed. At
+//! does (8), and the Suspension is released for that request (`ReleaseSuspension`), removed; a
+//! refusal the port marks final then ends the resumed Run `EffectRefused`, as in 8. At
 //! another revision the request can never be performed: it is recorded `Stale` in
 //! [`LoopEnd::requests`], the Suspension is released for it all the same, nothing is invoked, and
 //! the loop goes on as after a stale proposal (8), so its first iteration judges the move (2). A
@@ -262,15 +274,16 @@ use crate::model::responsibility::{
     ActionRequest, ActionRequestData, ActionRequestId, ActionRequestStale, ActionStatus, AnyRun,
     AuthorityVerdict, CaseId, Commission, CompletionDetermination, EffectOutcome, ExecutorOutcome,
     ExecutorOutcomeProposedAction, Frontier, FrontierAction, FrontierData, GovernorError,
-    HoldSuspension, HoldSuspensionOutcome, Observation, ObservationData, ObservationId,
-    ReleaseSuspension, ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome,
-    RevalidateActionRequestOutcome, Run, RunData, RunId, RunOutcome, RunOutcomeAwaitingApproval,
-    RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeSuspended, RunStarted, RunStorageFailed,
-    StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionKey, SuspensionReason,
+    HoldSuspension, HoldSuspensionOutcome, JudgeEffectRefusal, JudgeEffectRefusalOutcome,
+    Observation, ObservationData, ObservationId, ReleaseSuspension, ReleaseSuspensionOutcome,
+    ResumeRun, ResumeRunOutcome, RevalidateActionRequestOutcome, Run, RunData, RunId, RunOutcome,
+    RunOutcomeAwaitingApproval, RunOutcomeCaseMovedOn, RunOutcomeCompleted,
+    RunOutcomeEffectRefused, RunOutcomeSuspended, RunStarted, RunStorageFailed, StartRun,
+    StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionKey, SuspensionReason,
     SuspensionState, SuspensionStateConflict, TakeSuspension, TakeSuspensionOutcome, Unit,
     commission_state, frontier_state, observation_state,
 };
-use crate::outcome::{CapabilityVerdict, Derived, derive};
+use crate::outcome::{CapabilityVerdict, Derived, derive, judge_refusal};
 use crate::ports::authority::{AuthorityCheck, AuthorityProvider, check_authority};
 use crate::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use crate::ports::evidence::ObservationPort;
@@ -908,6 +921,9 @@ where
     // Whether the previous iteration's proposal was stale: the case has moved, and this iteration
     // loads it before any budget stop (0).
     let mut after_stale = false;
+    // How the run ends on a read the port refused as final in a fan-out beside a stale read, kept
+    // until the next iteration has judged the move (8a).
+    let mut kept_refusal: Option<RunOutcome> = None;
 
     let limit = budget.unwrap_or(UNBUDGETED_STEP_LIMIT);
     // Why the Run is suspended when its steps reach `limit`: the run budget's step limit when it
@@ -961,6 +977,10 @@ where
             {
                 return suspend_ended(runs, run_id, SuspensionReason::RunBudget(breach), track);
             }
+            // A refusal the port marks final ends the resumed Run, its Suspension released (8).
+            if let Some(ended) = refusal_end(&data, &effect)? {
+                return Ok(track.end(run_id, ended));
+            }
         } else {
             track.requests.push(Revalidated {
                 request: data.clone(),
@@ -1013,6 +1033,11 @@ where
                 loaded,
                 &determination,
             )?;
+            return Ok(track.end(run_id, ended));
+        }
+        // The move a stale read showed was judged and ended nothing: the final refusal kept beside
+        // it ends the run, before any budget stop and before the executor runs (8a).
+        if let Some(ended) = kept_refusal.take() {
             return Ok(track.end(run_id, ended));
         }
         // After a performed effect that left no gate pending, a case still open is suspended for
@@ -1175,6 +1200,11 @@ where
                 {
                     return suspend_ended(runs, run_id, SuspensionReason::RunBudget(breach), track);
                 }
+                // A refusal the port marks final ends the run once it is recorded and observed;
+                // the case is not loaded again (8).
+                if let Some(ended) = refusal_end(&data, &effect)? {
+                    return Ok(track.end(run_id, ended));
+                }
                 // Only an effect that took place may have moved the case; after a refusal, a move
                 // is somebody else's.
                 effected = matches!(effect, EffectOutcome::Performed(_));
@@ -1204,6 +1234,16 @@ where
                     .and_then(|limits| spent_past(limits, &track))
             }) {
                 return suspend_ended(runs, run_id, SuspensionReason::RunBudget(breach), track);
+            }
+            // A read the port refused as final ends the run once every read was recorded, unless a
+            // stale read showed the case moved: then the refusal is kept, the next iteration
+            // judges the move first, as after a stale proposal, and the kept refusal ends the run
+            // when that judgement ends nothing (8a).
+            if let Some(ended) = fanned.ended {
+                if !fanned.stale {
+                    return Ok(track.end(run_id, ended));
+                }
+                kept_refusal = Some(ended);
             }
             if fanned.admitted {
                 decided = true;
@@ -1636,6 +1676,9 @@ struct FannedOut {
     stale: bool,
     /// The trial limit the fan-out would have passed, so none of its reads was invoked.
     over_budget: Option<RunBudgetBreach>,
+    /// How the run ends when the port refused a read as final: the first such read, in the
+    /// order proposed ([`refusal_end`]). It ends the run only when no read was `stale`.
+    ended: Option<RunOutcome>,
 }
 
 /// Performs the fan-out `reads`, which [`fans_out`] admitted, as item 8a documents: each read
@@ -1692,6 +1735,7 @@ where
             performed: false,
             stale,
             over_budget: None,
+            ended: None,
         });
     }
     // A fan-out that would take an action past its trial limit invokes none of its reads.
@@ -1703,6 +1747,7 @@ where
             performed: false,
             stale,
             over_budget: Some(breach),
+            ended: None,
         });
     }
     let progressed = admitted.iter().any(|data| {
@@ -1733,12 +1778,16 @@ where
     };
     let mut performed = false;
     let mut failed: Option<EffectError> = None;
+    let mut ended: Option<RunOutcome> = None;
     for (data, answer) in admitted.iter().zip(answers) {
         match answer {
             Ok(effect) => {
                 performed |= matches!(effect, EffectOutcome::Performed(_));
                 track.record(data, &effect);
                 governor.observe(effect_observation(context, data, &effect))?;
+                if ended.is_none() {
+                    ended = refusal_end(data, &effect)?;
+                }
             }
             Err(error) => {
                 failed.get_or_insert(error);
@@ -1754,7 +1803,37 @@ where
         performed,
         stale,
         over_budget: None,
+        ended,
     })
+}
+
+/// How the run ends after the effect port answered `effect` for `request`: with `EffectRefused`,
+/// naming the request and the port's reason, when `effect` is a refusal [`judge_refusal`] answers
+/// `final` for, as the port marked it `ends_run`; `None` for a performed effect and an ordinary
+/// refusal, and the run goes on. Called once the answer was recorded and observed. A judgement the
+/// generated behaviour cannot make is [`LoopFailure::Obligation`].
+fn refusal_end(
+    request: &ActionRequestData,
+    effect: &EffectOutcome,
+) -> Result<Option<RunOutcome>, LoopFailure> {
+    let EffectOutcome::Refused(refused) = effect else {
+        return Ok(None);
+    };
+    Ok(
+        match judge_refusal(JudgeEffectRefusal {
+            action_request_id: request.action_request_id.clone(),
+            reason: refused.reason.clone(),
+            ends_run: refused.ends_run,
+        })? {
+            JudgeEffectRefusalOutcome::Final { error } => {
+                Some(RunOutcome::EffectRefused(RunOutcomeEffectRefused {
+                    action_request_id: error.action_request_id,
+                    reason: error.reason,
+                }))
+            }
+            JudgeEffectRefusalOutcome::Ordinary => None,
+        },
+    )
 }
 
 /// How a run ends after its executor reported `CaseMoved` (item 9), or proposed nothing on a

@@ -521,6 +521,7 @@ fn a_refused_effect_is_observed_and_the_loop_goes_on() {
     let executor = ScriptedExecutor::new([proposal("inspect")]);
     let refused = EffectOutcome::Refused(EffectOutcomeRefused {
         reason: "no such path".to_owned(),
+        ends_run: false,
     });
     let effects = Effects::new(&governor).answering(vec![Ok(refused.clone())]);
 

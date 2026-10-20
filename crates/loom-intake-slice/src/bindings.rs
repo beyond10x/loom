@@ -279,7 +279,10 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> CommandEffects<'a, 'o, S, 
         let refused = |reason: String| -> Result<EffectOutcome, SliceError> {
             self.console
                 .write(|out| refuse(out, &self.briefing, &request.action, &reason))?;
-            Ok(EffectOutcome::Refused(EffectOutcomeRefused { reason }))
+            Ok(EffectOutcome::Refused(EffectOutcomeRefused {
+                reason,
+                ends_run: false,
+            }))
         };
         let Some(binding) = self.binding(&request.action) else {
             return refused(format!("no command is bound to {}", request.action));

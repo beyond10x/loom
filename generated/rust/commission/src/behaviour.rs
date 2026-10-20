@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest f53571e132b2f71840edfe761bc401e64fb69f09c02e5231f9f99c89c76020a5
-// contract digest d8e6b1ede68b8946fc3b58215b93b34033de96d39a3f84cf8669f4b6e8966278
+// model digest fbc987193ce2337d53be5610bdd3340aff0f3e68872a482a1d5a8855cf1111a0
+// contract digest e679ebf85e98d2d040d787f1e5a953f9df198141e1508772547f007aec6e08a1
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -78,6 +78,20 @@ impl<P: crate::responsibility::obligations::HoldSuspensionBehavior> crate::respo
     }
 }
 
+/// `commission.responsibility.JudgeEffectRefusal`, generated: every outcome is one the specification fully determines.
+impl<P> crate::responsibility::obligations::JudgeEffectRefusalBehavior for Generated<P>
+{
+    fn judge_effect_refusal(&mut self, input: crate::responsibility::JudgeEffectRefusal) -> Result<crate::responsibility::JudgeEffectRefusalOutcome, UnmetObligation> {
+        let _ = &input;
+        // `final`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.ends_run).map(|value| *value), Some(true)), "commission.responsibility.JudgeEffectRefusal")? {
+            return Ok(crate::responsibility::JudgeEffectRefusalOutcome::Final { error: crate::responsibility::EffectRefusedFinal { action_request_id: input.action_request_id.clone(), reason: input.reason.clone() } });
+        }
+        // `ordinary`: the default.
+        return Ok(crate::responsibility::JudgeEffectRefusalOutcome::Ordinary);
+    }
+}
+
 impl<P: crate::responsibility::obligations::ReleaseSuspensionBehavior> crate::responsibility::obligations::ReleaseSuspensionBehavior for Generated<P> {
     fn release_suspension(&mut self, input: crate::responsibility::ReleaseSuspension) -> Result<crate::responsibility::ReleaseSuspensionOutcome, UnmetObligation> {
         crate::responsibility::obligations::ReleaseSuspensionBehavior::release_suspension(&mut self.ports, input)
@@ -151,4 +165,20 @@ where
             })
             .collect())
     }
+}
+
+/// The typed refusal of a request the model declares no outcome for.
+fn undeclared(source: &'static str) -> UnmetObligation {
+    let capability = "command behaviour";
+    UnmetObligation { capability, source }
+}
+
+/// A guard's truth, where it has one: Unknown selects no branch, so the model declares no outcome.
+fn decided(truth: Option<bool>, command: &'static str) -> Result<bool, UnmetObligation> {
+    truth.ok_or_else(|| undeclared(command))
+}
+
+/// Equality of two read values; an unread one is Unknown.
+fn equal<T: PartialEq>(left: Option<T>, right: Option<T>) -> Option<bool> {
+    Some(left? == right?)
 }

@@ -362,6 +362,16 @@ fn skeleton_lands_port_vocabulary_and_modules() {
             ("NoPerformableAction", "Unit"),
             // story:moved-run-named-outcome: the case moved on to a frontier that admits an action.
             ("CaseMovedOn", "RunOutcomeCaseMovedOn"),
+            // story:refused-effect-ends-run: the effect port refused a request as final.
+            ("EffectRefused", "RunOutcomeEffectRefused"),
+        ],
+    );
+    assert_struct(
+        &model,
+        "RunOutcomeEffectRefused",
+        &[
+            ("action_request_id", "ActionRequestId"),
+            ("reason", "String"),
         ],
     );
     assert_struct(
@@ -463,6 +473,7 @@ fn skeleton_lands_port_vocabulary_and_modules() {
         std::any::type_name::<model::RunOutcomeNeedsAuthority>(),
         std::any::type_name::<model::RunOutcomeNeedsHumanJudgment>(),
         std::any::type_name::<model::RunOutcomeNeedsExternalEvidence>(),
+        std::any::type_name::<model::RunOutcomeEffectRefused>(),
     ];
     for name in names {
         assert!(

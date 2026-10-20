@@ -42,6 +42,22 @@ which ran with that variable set under Substrate, or starts with `-`, is refused
 launch that needs a new driver while another launch of the process runs under the same cgroup
 root is refused `CapabilityUnserved`, where opening the driver used to end the running launch.
 
+An effect port can refuse an admitted request as final, and the run ends at once with the new
+run outcome `EffectRefused`, naming the request and the port's reason
+(`story:refused-effect-ends-run`). `EffectOutcomeRefused` gains `ends_run`; the runtime decides
+with `outcome::judge_refusal`, the behaviour ESS generates for the new command
+`JudgeEffectRefusal`, once the refusal was recorded and observed, wherever it hands the port a
+request: a proposal, a fan-out of reads once every read answered (beside a stale read the
+refusal is kept and the move is judged first, so a case the governor holds complete still ends the
+run completed, and the refusal ends it when the next load finds no move), and the request a resume
+performs, whose Suspension is released first. Nothing is retried. A refusal with `ends_run` false
+is an ordinary one and behaves as before: the loop goes on and the iteration counts toward the
+idle bound. The intake slice maps `EffectRefused` to `StopReason::Refused` with the reason, and the
+`run --output jsonl` contract does not change; the slice's own effect ports never mark a refusal
+final.
+Breaking: a host that builds an `EffectOutcomeRefused` sets `ends_run` (`false` keeps today's
+behaviour), and a host that matches `RunOutcome` exhaustively handles `EffectRefused`.
+
 ## [0.27.0] - 2026-10-20
 
 Loom 0.27.0 links engineering-protocols 0.9.0, tells an authority provider the action request it

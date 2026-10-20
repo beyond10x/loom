@@ -1,14 +1,14 @@
 <!--
   generated from commission v1
-  model digest f53571e132b2f71840edfe761bc401e64fb69f09c02e5231f9f99c89c76020a5
-  contract digest d8e6b1ede68b8946fc3b58215b93b34033de96d39a3f84cf8669f4b6e8966278
+  model digest fbc987193ce2337d53be5610bdd3340aff0f3e68872a482a1d5a8855cf1111a0
+  contract digest e679ebf85e98d2d040d787f1e5a953f9df198141e1508772547f007aec6e08a1
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — commission v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-125 capabilities: **118 generated**, **7 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+129 capabilities: **122 generated**, **7 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -82,6 +82,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `commission.responsibility.RunOutcomeAwaitingApproval` |
 | domain type | `commission.responsibility.RunOutcomeCaseMovedOn` |
 | domain type | `commission.responsibility.RunOutcomeCompleted` |
+| domain type | `commission.responsibility.RunOutcomeEffectRefused` |
 | domain type | `commission.responsibility.RunOutcomeNeedsAuthority` |
 | domain type | `commission.responsibility.RunOutcomeNeedsExternalEvidence` |
 | domain type | `commission.responsibility.RunOutcomeNeedsHumanJudgment` |
@@ -105,6 +106,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | entity lifecycle | `commission.responsibility.Run` |
 | entity lifecycle | `commission.responsibility.Suspension` |
 | command contract | `commission.responsibility.HoldSuspension` |
+| command contract | `commission.responsibility.JudgeEffectRefusal` |
+| command behaviour | `commission.responsibility.JudgeEffectRefusal` |
 | command contract | `commission.responsibility.ReleaseSuspension` |
 | command contract | `commission.responsibility.ResumeRun` |
 | command contract | `commission.responsibility.RevalidateActionRequest` |
@@ -120,6 +123,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | error type | `commission.responsibility.ActionNeedsAuthority` |
 | error type | `commission.responsibility.ActionNotAdmitted` |
 | error type | `commission.responsibility.ActionRequestStale` |
+| error type | `commission.responsibility.EffectRefusedFinal` |
 | error type | `commission.responsibility.RunStateConflict` |
 | error type | `commission.responsibility.RunStorageFailed` |
 | error type | `commission.responsibility.SuspensionAlreadyHeld` |

@@ -78,6 +78,7 @@ Tagged by `kind`.
 | `AwaitingApproval` | [`RunOutcomeAwaitingApproval`](#runoutcomeawaitingapproval) |
 | `CaseMovedOn` | [`RunOutcomeCaseMovedOn`](#runoutcomecasemovedon) |
 | `Completed` | [`RunOutcomeCompleted`](#runoutcomecompleted) |
+| `EffectRefused` | [`RunOutcomeEffectRefused`](#runoutcomeeffectrefused) |
 | `NeedsAuthority` | [`RunOutcomeNeedsAuthority`](#runoutcomeneedsauthority) |
 | `NeedsExternalEvidence` | [`RunOutcomeNeedsExternalEvidence`](#runoutcomeneedsexternalevidence) |
 | `NeedsHumanJudgment` | [`RunOutcomeNeedsHumanJudgment`](#runoutcomeneedshumanjudgment) |
@@ -183,6 +184,7 @@ Tagged by `kind`.
 | Field | Type |
 |---|---|
 | `reason` | `string` |
+| `ends_run` | `boolean` |
 
 ### EffectUsage
 
@@ -292,6 +294,13 @@ Tagged by `kind`.
 | Field | Type |
 |---|---|
 | `outcome` | `string` |
+
+### RunOutcomeEffectRefused
+
+| Field | Type |
+|---|---|
+| `action_request_id` | [`ActionRequestId`](#actionrequestid) |
+| `reason` | `string` |
 
 ### RunOutcomeNeedsAuthority
 

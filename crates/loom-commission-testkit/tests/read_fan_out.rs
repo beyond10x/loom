@@ -298,6 +298,7 @@ impl EffectPort for Reads {
                 }
                 Plan::Refuse => Ok(EffectOutcome::Refused(EffectOutcomeRefused {
                     reason: format!("{action} refused"),
+                    ends_run: false,
                 })),
                 Plan::Fail => Err(EffectError::new(format!("{action} failed"))),
             }

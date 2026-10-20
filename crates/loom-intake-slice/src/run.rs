@@ -46,6 +46,7 @@
 //! | [`StopReason::NoLocalExecutor`] | `NoPerformableAction` | the pick is not `software-change@1`; the case opens and one frontier is read |
 //! | [`StopReason::NoLocalExecutor`] | none: no case is opened | the pick is a protocol the request's action bindings bind ([`crate::bindings`]) and one of its actions has no command; the detail names it |
 //! | [`StopReason::Refused`] | none: no case is opened | the router refuses the pick: outside the registry, or unsure |
+//! | [`StopReason::Refused`] | `EffectRefused` | an effect port refused an admitted request as final; the detail is its reason. The slice's own effect ports never mark a refusal final |
 //!
 //! Any other end is a [`SliceError`]: a model that gives no usable pick, a workspace the case
 //! cannot open on, a governor that refuses, an executor or verifier failing on the workspace, Loom
@@ -914,6 +915,13 @@ fn finish(
         RunOutcome::NeedsHumanJudgment(needs) => Err(SliceError::Unexpected(format!(
             "NeedsHumanJudgment {needs:?}"
         ))),
+        RunOutcome::EffectRefused(refused) => stop(
+            out,
+            protocol,
+            steps,
+            StopReason::Refused,
+            Some(refused.reason),
+        ),
     }
 }
 
@@ -1456,11 +1464,75 @@ fn push_json(out: &mut String, value: &json::Value) {
 mod tests {
     use b10x_loom_commission::model::primitives::Uuid;
     use b10x_loom_commission::model::responsibility::{
-        ChargedUsage, RunCharges, RunId, RunOutcome, RunOutcomeCaseMovedOn,
+        ActionRequestId, ChargedUsage, RunCharges, RunId, RunOutcome, RunOutcomeCaseMovedOn,
+        RunOutcomeEffectRefused,
     };
     use b10x_loom_commission::runtime::LoopEnd;
 
     use super::{ApprovalGate, SliceRun, StopReason, finish};
+
+    /// The end of a run with `outcome` after `steps` steps, which made no request.
+    fn ended(outcome: RunOutcome, steps: usize) -> LoopEnd {
+        LoopEnd {
+            run_id: RunId(Uuid("00000000-0000-4000-8000-000000000001".to_owned())),
+            outcome,
+            requests: Vec::new(),
+            admitted: Vec::new(),
+            effects: Vec::new(),
+            steps,
+            last_frontier: None,
+            charges: RunCharges {
+                run: ChargedUsage {
+                    trials: 0,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    duration_ms: 0,
+                    cost_micro_usd: Some(0),
+                },
+                actions: Vec::new(),
+            },
+        }
+    }
+
+    /// story:refused-effect-ends-run: a run an effect port ended by refusing a request as final
+    /// stops `Refused`, a stop reason the specification already declares, and its stop line
+    /// carries the port's reason, so the `run --output jsonl` contract does not change.
+    #[test]
+    fn a_final_effect_refusal_stops_refused_with_its_reason() {
+        let end = ended(
+            RunOutcome::EffectRefused(RunOutcomeEffectRefused {
+                action_request_id: ActionRequestId(Uuid(
+                    "00000000-0000-4000-8000-000000000002".to_owned(),
+                )),
+                reason: "the step guard does not admit this change".to_owned(),
+            }),
+            1,
+        );
+        let mut out = Vec::new();
+
+        let run = finish(
+            &mut out,
+            "software-change@1".to_owned(),
+            end,
+            ApprovalGate::Approvable,
+        )
+        .unwrap_or_else(|error| panic!("the stop failed: {error}"));
+
+        assert_eq!(
+            run,
+            SliceRun {
+                protocol: "software-change@1".to_owned(),
+                steps: 1,
+                stop_reason: StopReason::Refused,
+                approvals: Vec::new(),
+                gate: ApprovalGate::Approvable,
+            }
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&out),
+            "stopped: Refused (the step guard does not admit this change)\n"
+        );
+    }
 
     /// story:moved-run-named-outcome: a run whose case moved on to a frontier that still admits an
     /// action stops as one with no admissible action does, a stop that is not a success, and its

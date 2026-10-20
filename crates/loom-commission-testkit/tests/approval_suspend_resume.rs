@@ -873,6 +873,7 @@ fn outcome_name(outcome: &RunOutcome) -> &'static str {
         RunOutcome::AwaitingApproval(_) => "AwaitingApproval",
         RunOutcome::NoPerformableAction(_) => "NoPerformableAction",
         RunOutcome::CaseMovedOn(_) => "CaseMovedOn",
+        RunOutcome::EffectRefused(_) => "EffectRefused",
     }
 }
 
