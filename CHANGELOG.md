@@ -30,13 +30,18 @@ its entry from `catalog.json` in that store (`$XDG_DATA_HOME/loom/protocols`, or
 
 A host reads the decision behind a held case's frontier (`story:governor-exposes-canon-decision`).
 `CanonGovernor::decision_document(&case)` returns the whole `canon-decision/1` document Canon wrote
-for the case at its current revision, explanation included, as the generated JSON value
-(`loom_sdk::governor::model::json::Value`) `evaluate` returns in `canon`: the document whose
-rendering the frontier id hashes and whose outcomes the completion reads, from one evaluation made
-as `frontier` and `completion` make theirs, never a second evaluator. For the same protocol,
-evidence, explicit decisions and time it equals what `evaluate` returns. A case the governor cannot
-decide (its held inputs or independence declarations do not satisfy its protocol) is refused
-`GovernorUnavailable`, and a case it does not hold `UnknownCase`, as `frontier` refuses them.
+for the case, explanation included, as the generated JSON value
+(`loom_sdk::governor::model::json::Value`) `evaluate` returns in `canon`. The governor keeps in
+memory, one per case, the document of its most recent evaluation of the case (the one `frontier`
+or `completion` last made), and the method returns it without evaluating while the case is still
+held as that evaluation found it: a document read right after a frontier is the one that
+frontier's id hashes, even when the trusted time moved in between, as the host clock `b10x-loom`
+evaluates at does. When nothing is kept, or the case moved since (a new artifact revision,
+evidence received, a decision recorded), it evaluates the case once, as `frontier` does, and keeps
+that; there is no second evaluator. For the same protocol, evidence, explicit decisions and time
+the document equals what `evaluate` returns. A case the governor cannot read or decide (its held
+inputs or independence declarations do not satisfy its protocol) is refused `GovernorUnavailable`,
+and a case it does not hold `UnknownCase`, as `frontier` refuses them, kept document or not.
 Breaking: none for callers; `CanonGovernor` only gains a method.
 
 ## [0.26.0] - 2026-10-17

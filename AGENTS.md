@@ -301,10 +301,13 @@ record that does not apply is set aside as `CanonGovernor` sets it aside; an unr
 a repeated id is refused. The time and the records are judged once each, never by re-running Canon
 on prefixes. `crates/loom-governor/tests/evaluate.rs` and `evaluate_adversary.rs` hold it against
 `CanonGovernor`; `crates/loom-cli/tests/evaluate.rs` holds the subcommand against the library.
-`CanonGovernor::decision_document` returns a held case's whole `canon-decision/1` document, the
-one its frontier id hashes, from one evaluation through the private `decided`, as the generated
-JSON value `evaluate` returns in `canon`, and refuses a case it cannot decide as `frontier` does
-(`crates/loom-governor/tests/decision_document.rs`).
+`CanonGovernor::decision_document` returns a held case's whole `canon-decision/1` document, as the
+generated JSON value `evaluate` returns in `canon`: the one the governor keeps in memory, one per
+case, from its most recent evaluation (`frontier`'s, `completion`'s or its own), so a read right
+after a frontier is the document that frontier's id hashes whatever the trusted time does; it
+evaluates once and keeps that only when nothing is kept or the held case changed since, and refuses
+a case it cannot read or decide as `frontier` does
+(`crates/loom-governor/tests/decision_document.rs`, `adversary_w20261020_u3.rs`).
 
 A case opens with the value of every case input its protocol declares (`CaseInputs`;
 `software.change/1` declares `risk`, `change_kind` and `affects_security_boundary`), given by the
