@@ -9,6 +9,26 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-20
+
+Loom 0.29.0 says what stopped a run and lets effects and executors report more. A run that ends
+`NoPerformableAction` names the frontier's actions no effect performs and the frontier's open
+claims, on every path that raises it, and the binary's terminal record carries them as
+`unperformed_actions`. An effect port may answer `Pending`: the runtime invokes the same request
+again, revalidated, within the run's budgets and without counting an idle iteration, and a budget
+that stops the run while a request is pending ends it `Waiting`, naming every pending request. An
+executor that is not a model loop reports what a call spent through
+`AgentExecutor::run_with_usage`; the runtime charges it to the run and its budget, and the run
+meter shows it as that step's usage. A child confined under an egress aperture trusts the CA
+bundle the host names (`ChildCommand::with_ca_bundle`). Loom links llm 0.8.1.
+Breaking: a host that matches `RunOutcome` or `EffectOutcome` exhaustively handles `Waiting` and
+`Pending`; `RunOutcome::NoPerformableAction` carries `RunOutcomeNoPerformableAction`, no longer
+`Unit`; `SliceRun` has `unperformed`; `LoopEnd::steps` and `LoopEnd::admitted` count a pending
+request's invocations again and `LoopEnd::charges.run` includes executor usage; a step with no model
+call costs what its executor reported, or zero; a host that links llm itself moves to llm 0.8.1,
+and a full `Capabilities { … }` literal in it names the two new fields or ends with
+`..Capabilities::text(…)`.
+
 Loom links llm 0.8.1 (`story:llm-080-pin`): every `b10x-llm-*` dependency names tag `0.8.1`, and
 `Cargo.lock` holds one version of each. Loom's own code does not change, and the requests it sends
 do not change byte for byte: llm 0.8.0 changes no request encoder, and the two new capability
