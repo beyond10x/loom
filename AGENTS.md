@@ -321,7 +321,7 @@ reports it `open`: one Canon reports `not_applicable` (the case's inputs do not 
 Canon is named by the reference `b10x-canon-engineering` uses (`tag = "0.6.0"`), pinned by
 `Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon with
 `cargo update -p b10x-canon -p b10x-canon-engineering` together with the `b10x-canon-engineering`
-tag (now `0.8.0`); any other crate that adds Canon uses the same reference.
+tag (now `0.9.0`); any other crate that adds Canon uses the same reference.
 
 ## Connectors
 

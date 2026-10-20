@@ -9,6 +9,25 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+Loom links engineering-protocols 0.9.0, the tag takt pins, so a crate depending on both resolves
+one `b10x-canon-engineering`: the four manifests that name it (`loom-governor`, `loom-protocols`,
+`loom-intake-slice`, `loom-intake-router`) name `tag = "0.9.0"`, and `Cargo.lock` holds one copy of
+it and one `b10x-canon`, still at tag `0.6.0`. engineering-protocols 0.9.0 adds the built-in
+protocol `eval.gated_change/1` and changes no existing one, so the bundled catalog the router and
+`b10x-loom protocols list` read gains `eval-gated-change@1`, recording revision `0.9.0` as every
+engineering protocol does. The slice does not perform it: a pick of it in `b10x-loom run` stops
+`NoLocalExecutor` naming it before a case opens, as a pick of `incident-response@1` does.
+Breaking: a host that links `b10x-canon-engineering` itself moves to tag `0.9.0` so it resolves one
+copy; the classifier is offered one more protocol, `eval-gated-change@1`; `b10x-loom resume`
+refuses a commission that `run --state` kept under 0.26.0, whose kept route names the catalog
+without `eval-gated-change@1`, so run that intent again; `eval-gated-change@1` is now a bundled
+name, so a definition of that name installed in the user protocol store under 0.26.0 fails every
+command that reads the store as a duplicate registration and `protocols remove` refuses it: delete
+its entry from `catalog.json` in that store (`$XDG_DATA_HOME/loom/protocols`, or
+`~/.local/share/loom/protocols`) by hand; a host that adds its own `eval-gated-change@1` to
+`ProtocolCatalog::bundled()` or `engineering()`, or registers one with
+`CanonGovernor::with_protocol`, is refused because the name is taken.
+
 ## [0.26.0] - 2026-10-17
 
 Loom 0.26.0 links llm 0.7.0, names the target in the routing record of a governed write, and

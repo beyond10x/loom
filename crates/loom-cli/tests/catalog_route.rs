@@ -269,6 +269,92 @@ fn a_catalog_pipe_with_a_writer_is_refused_naming_it() {
     assert_untouched(&listener);
 }
 
+/// engineering-protocols 0.9.0 bundles `eval-gated-change@1`: `protocols list` prints it, the
+/// classifier is offered it, and a routed pick of it stops `NoLocalExecutor` naming it, before a
+/// case opens or the agent is asked, exactly as a pick of `incident-response@1`, another
+/// protocol the slice does not perform, stops. The recorded classification is the fixture's with
+/// its pick replaced; the socket serves it alone, so an agent request would fail the run.
+#[test]
+fn a_routed_pick_of_eval_gated_change_stops_no_local_executor_naming_it() {
+    const EVAL_GATED_CHANGE: &str = "eval-gated-change@1";
+    let scratch = Scratch::new("eval-gated-change");
+    let home = scratch.root.join("home");
+    let listed = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+        .args(["protocols", "list"])
+        .env("HOME", &home)
+        .env("XDG_DATA_HOME", &home)
+        .output()
+        .expect("run b10x-loom");
+    let list = String::from_utf8_lossy(&listed.stdout);
+    assert!(listed.status.success(), "{list}");
+    let line = list
+        .lines()
+        .find(|line| line.starts_with(&format!("{EVAL_GATED_CHANGE}  ")))
+        .unwrap_or_else(|| panic!("`protocols list` prints {EVAL_GATED_CHANGE}: {list}"));
+    assert!(
+        line.contains("  Engineering engineering-protocols ")
+            && line.contains(&format!("  NoLocalExecutor: {EVAL_GATED_CHANGE} ")),
+        "{line}"
+    );
+
+    let mut stops = Vec::new();
+    for protocol in ["incident-response@1", EVAL_GATED_CHANGE] {
+        let recorded: &'static [u8] = Box::leak(
+            String::from_utf8_lossy(CLASSIFY)
+                .replace("system-query@1", protocol)
+                .into_bytes()
+                .into_boxed_slice(),
+        );
+        let (base_url, server) = serve(vec![recorded]);
+        let catalog = scratch.catalog(&base_url);
+        let report = scratch.root.join(format!("{protocol}-report.json"));
+        let output = scratch.run(&[
+            "--context-report",
+            report.to_str().unwrap(),
+            "--catalog",
+            catalog.to_str().unwrap(),
+            "--classifier-model",
+            "lab-classifier",
+            "--model",
+            "lab-agent",
+            QUERY,
+        ]);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stdout
+                .lines()
+                .any(|line| line.starts_with(&format!("picked {protocol} "))),
+            "{protocol}: {stdout}\n{stderr}"
+        );
+        let stop = stdout
+            .lines()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or_default()
+            .to_owned();
+        assert!(
+            stop.starts_with("stopped: NoLocalExecutor (") && stop.contains(protocol),
+            "the stop names {protocol}: {stdout}\n{stderr}"
+        );
+        assert_eq!(output.status.code(), Some(3), "{stdout}\n{stderr}");
+        assert!(
+            !stdout.lines().any(|line| line.starts_with("step ")),
+            "{stdout}"
+        );
+        let sent = server.join().expect("the server finished");
+        assert_eq!(sent.len(), 1, "the classification alone");
+        assert!(
+            sent[0].contains("\"pick_protocol\"") && sent[0].contains(protocol),
+            "the classifier is offered {protocol}: {}",
+            sent[0]
+        );
+        assert_eq!(model_calls(&report), 1, "{protocol}");
+        stops.push(stop.replace(protocol, "<protocol>"));
+    }
+    assert_eq!(stops[0], stops[1], "both stop alike");
+}
+
 /// `run --help` documents the flag.
 #[test]
 fn run_help_documents_the_catalog_flag() {
