@@ -20,6 +20,10 @@
 //! | the instant | the host's clock, through the builder |
 //! | the graph, policy, role catalog, challenge issuer, delegation records, decision ids, tenancy and topology | the host, through the builder; this crate configures no policy of its own |
 //!
+//! The action request Commission passes beside the capability is not read: Mandate is asked about
+//! the capability on the case, so it answers every request for that capability on that case
+//! alike, at whatever case revision.
+//!
 //! How each answer maps (`loom.authority.Outcome`):
 //!
 //! | Mandate answers | Commission is answered |
@@ -49,8 +53,8 @@ use std::sync::Mutex;
 
 use b10x_loom_commission::model::json as commission_json;
 use b10x_loom_commission::model::responsibility::{
-    AuthorityContext, AuthorityVerdict, AuthorityVerdictApprovalRequired, AuthorityVerdictDeny,
-    CaseId, CommissionData, Unit,
+    ActionRequestData, AuthorityContext, AuthorityVerdict, AuthorityVerdictApprovalRequired,
+    AuthorityVerdictDeny, CaseId, CommissionData, Unit,
 };
 use b10x_loom_commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
 use loom::authority::{Answer, HostContext, Outcome};
@@ -483,6 +487,7 @@ impl AuthorityProvider for MandateAuthority<'_> {
     fn decide(
         &self,
         commission: &CommissionData,
+        _request: &ActionRequestData,
         capability: &str,
     ) -> Result<AuthorityVerdict, AuthorityProviderError> {
         let decided = self.ask(commission, capability);

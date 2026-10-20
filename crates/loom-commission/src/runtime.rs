@@ -67,8 +67,13 @@
 //!    the step's observation failed; the loop then returns that failure as a [`LoopError`] that
 //!    carries the reason;
 //! 8. on `ProposedAction`, the proposal becomes an action request bound to the frontier's revision
-//!    ([`request`], its id from the context) and is revalidated ([`revalidate`]). Admitted, or
-//!    needing authority the provider allows ([`check_authority`]): when the port does not perform
+//!    ([`request`], its id from the context) and is revalidated ([`revalidate`]). A request needing
+//!    authority is asked about ([`check_authority`]); once the provider allows it, the case is
+//!    loaded again ([`Governor::current_revision`]), since somebody else may have moved it while
+//!    the provider decided: at another revision than the request's, the request is stale,
+//!    recorded in [`LoopEnd::requests`] with that answer in place of `NeedsAuthority`, and never
+//!    handed to the port. Admitted, or needing authority the provider allows on a case still at
+//!    the request's revision: when the port does not perform
 //!    its action ([`EffectPort::performs`]), the run ends with `NoPerformableAction`, the request
 //!    recorded with its revalidation in [`LoopEnd::requests`] but not admitted, and the port is
 //!    never handed it. Otherwise the request is recorded as admitted and handed to
@@ -206,7 +211,9 @@
 //! request, when it is `Resuming`); it must be the commission's, on its case; the case is loaded,
 //! and a revision other than the request's ends it with [`ResumeRefusal::CaseMoved`]; the request
 //! is revalidated as the loop revalidates one (8), and a request that still needs authority is
-//! resumed only on the provider's allow ([`ResumeRefusal::NotGranted`]); the effect port must
+//! resumed only on the provider's allow ([`ResumeRefusal::NotGranted`]), after which the case is
+//! loaded again, and a revision other than the request's, the case moved while the provider
+//! decided, ends it with [`ResumeRefusal::CaseMoved`]; the effect port must
 //! perform its action. Then the Run is put back into a run store that does not hold it,
 //! `Suspended` at the case revision it started at, and resumed through `ResumeRun`. The Suspension
 //! is then taken through the port for the request read and revalidated (`TakeSuspension`,
@@ -217,10 +224,16 @@
 //! first resumed it in full and the commission was suspended again), which is kept as it is; a take
 //! the port cannot record ends the resume with [`LoopFailure::RunStorage`]. On any answer but
 //! `taken` the Run is suspended again in the run store with its stored reason, no Suspension is
-//! held, and nothing is performed. The request, under its own id and at its own revision, is handed
-//! to [`EffectPort::invoke`] once, recorded and observed as the loop does (8), and the Suspension is
-//! released for that request (`ReleaseSuspension`), removed; a release the port refuses ends the
-//! loop with [`LoopFailure::SuspensionNotReleased`], naming the performed request. That is the resumed Run's
+//! held, and nothing is performed. Then the case is loaded once more
+//! ([`Governor::current_revision`]), since somebody else may have moved it while the resume wrote
+//! the Run and took the Suspension. At the request's revision, the request, under its own id and
+//! at its own revision, is handed to [`EffectPort::invoke`] once, recorded and observed as the loop
+//! does (8), and the Suspension is released for that request (`ReleaseSuspension`), removed. At
+//! another revision the request can never be performed: it is recorded `Stale` in
+//! [`LoopEnd::requests`], the Suspension is released for it all the same, nothing is invoked, and
+//! the loop goes on as after a stale proposal (8), so its first iteration judges the move (2). A
+//! release the port refuses ends the loop with [`LoopFailure::SuspensionNotReleased`], naming the
+//! request. Either is the resumed Run's
 //! first step ([`LoopEnd::steps`]); the loop holds no frontier an executor was handed for it, so
 //! the next iteration reads no approval gate (5), as after a step performed under a grant. The loop
 //! goes on from that iteration, holding the case at the revision the request was made at, or at the
@@ -246,8 +259,8 @@ use crate::model::responsibility::{
     ActionCharge, BudgetLimit, ChargedUsage, RunBudget, RunBudgetBreach, RunCharges,
 };
 use crate::model::responsibility::{
-    ActionRequest, ActionRequestData, ActionRequestId, ActionStatus, AnyRun, AuthorityVerdict,
-    CaseId, Commission, CompletionDetermination, EffectOutcome, ExecutorOutcome,
+    ActionRequest, ActionRequestData, ActionRequestId, ActionRequestStale, ActionStatus, AnyRun,
+    AuthorityVerdict, CaseId, Commission, CompletionDetermination, EffectOutcome, ExecutorOutcome,
     ExecutorOutcomeProposedAction, Frontier, FrontierAction, FrontierData, GovernorError,
     HoldSuspension, HoldSuspensionOutcome, Observation, ObservationData, ObservationId,
     ReleaseSuspension, ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome,
@@ -304,7 +317,8 @@ pub const MAX_FAN_OUT: usize = 16;
 pub struct Revalidated {
     /// The request, bound to the frontier it was chosen from.
     pub request: ActionRequestData,
-    /// Its revalidation outcome.
+    /// Its revalidation outcome; `Stale` for a request the provider allowed on a case that moved
+    /// while it decided.
     pub outcome: RevalidateActionRequestOutcome,
 }
 
@@ -360,15 +374,17 @@ pub enum LoopFailure {
     /// Suspension behind it.
     NotResumed(Box<ResumeRunOutcome>),
     /// `ReleaseSuspension` did not remove the Suspension a resume took, after the request it names
-    /// was performed. [`UnreleasedSuspension::outcome`] says what the port left stored.
+    /// was performed, or after the resume found the case moved off the request's revision and
+    /// performed nothing. [`UnreleasedSuspension::outcome`] says what the port left stored.
     SuspensionNotReleased(Box<UnreleasedSuspension>),
 }
 
-/// A release of the Suspension a resume took that did not remove it, after its request was
-/// performed: the effect port answered for it and the governor observed the answer.
+/// A release of the Suspension a resume took that did not remove it: after its request was
+/// performed (the effect port answered for it and the governor observed the answer), or after the
+/// resume found the case moved off the request's revision before invoking it, and invoked nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnreleasedSuspension {
-    /// The request that was performed, the one the resume took the Suspension for.
+    /// The request the resume took the Suspension for: performed, or stale and not performed.
     pub action_request_id: ActionRequestId,
     /// What `ReleaseSuspension` answered, and so what is stored for the commission:
     ///
@@ -404,7 +420,7 @@ impl fmt::Display for LoopFailure {
             }
             Self::SuspensionNotReleased(unreleased) => write!(
                 f,
-                "suspension not released after request {} was performed: {:?}",
+                "suspension not released after request {} was performed or found stale: {:?}",
                 unreleased.action_request_id.0.0, unreleased.outcome
             ),
         }
@@ -481,7 +497,8 @@ pub enum ResumeRefusal {
     /// The stored Suspension, or the run the run store holds under its run id, names another
     /// commission, case or run revision than the one given.
     OtherCommission,
-    /// The case is no longer at the revision the request was suspended at.
+    /// The case is no longer at the revision the request was suspended at: when the resume first
+    /// loads it, or once the provider allowed the request.
     CaseMoved {
         /// The revision the request was suspended at.
         expected_case_revision: i64,
@@ -906,11 +923,16 @@ where
         step_budget_reason(limit)
     };
 
-    // A resumed Run's suspended request is performed once, as an admitted request is (8). The loop
-    // holds no frontier an executor was handed for that step, so no gate is pending after it (5).
-    // Once the effect port answered and the governor observed its answer, the request is no
-    // longer in doubt and the Suspension the resume took is released. An effect port or a governor
-    // that fails first leaves it `Resuming`.
+    // A resumed Run's suspended request is performed once, as an admitted request is (8), when
+    // the case is still at the request's revision: the resume read it before it wrote the Run and
+    // took the Suspension, and somebody else may have moved it since, so it is loaded once more
+    // right before the invoke. The loop holds no frontier an executor was handed for that step, so
+    // no gate is pending after it (5). Once the effect port answered and the governor observed its
+    // answer, the request is no longer in doubt and the Suspension the resume took is released. An
+    // effect port or a governor that fails first leaves it `Resuming`. On a case that moved, the
+    // request bound to its revision can never be performed: it is recorded stale, the Suspension
+    // is released, nothing is invoked, and the next iteration judges the move, as after a stale
+    // proposal (8).
     if let Some(Resumed {
         request: data,
         answer,
@@ -918,40 +940,40 @@ where
     }) = resumed
     {
         first = false;
-        track.requests.push(Revalidated {
-            request: data.clone(),
-            outcome: answer,
-        });
-        track.admitted.push(data.clone());
-        let effect = effects
-            .invoke(commission, &AdmittedRequest::new(data.clone()))
-            .map_err(|error| Stopped::from(LoopFailure::Effect(error)))?;
-        track.record(&data, &effect);
-        governor.observe(effect_observation(context, &data, &effect))?;
-        if let Some(Suspensions { port, .. }) = suspensions {
-            match port.release(ReleaseSuspension {
-                suspension: taken,
-                action_request_id: data.action_request_id.clone(),
-            }) {
-                ReleaseSuspensionOutcome::Released { .. } => {}
-                outcome => {
-                    return Err(LoopFailure::SuspensionNotReleased(Box::new(
-                        UnreleasedSuspension {
-                            action_request_id: data.action_request_id,
-                            outcome,
-                        },
-                    ))
-                    .into());
-                }
+        let current = governor.current_revision(&data.case_id)?;
+        if current == data.expected_case_revision {
+            track.requests.push(Revalidated {
+                request: data.clone(),
+                outcome: answer,
+            });
+            track.admitted.push(data.clone());
+            let effect = effects
+                .invoke(commission, &AdmittedRequest::new(data.clone()))
+                .map_err(|error| Stopped::from(LoopFailure::Effect(error)))?;
+            track.record(&data, &effect);
+            governor.observe(effect_observation(context, &data, &effect))?;
+            release_taken(suspensions, taken, &data)?;
+            effected = matches!(effect, EffectOutcome::Performed(_));
+            track.steps += 1;
+            if let Some(breach) = run_budget
+                .as_ref()
+                .and_then(|limits| spent_past(limits, &track))
+            {
+                return suspend_ended(runs, run_id, SuspensionReason::RunBudget(breach), track);
             }
-        }
-        effected = matches!(effect, EffectOutcome::Performed(_));
-        track.steps += 1;
-        if let Some(breach) = run_budget
-            .as_ref()
-            .and_then(|limits| spent_past(limits, &track))
-        {
-            return suspend_ended(runs, run_id, SuspensionReason::RunBudget(breach), track);
+        } else {
+            track.requests.push(Revalidated {
+                request: data.clone(),
+                outcome: RevalidateActionRequestOutcome::Stale {
+                    error: ActionRequestStale {
+                        expected_case_revision: data.expected_case_revision,
+                        current_case_revision: current,
+                    },
+                },
+            });
+            release_taken(suspensions, taken, &data)?;
+            after_stale = true;
+            track.steps += 1;
         }
     }
 
@@ -1095,7 +1117,7 @@ where
                 RevalidateActionRequestOutcome::NeedsAuthority { error } => {
                     pending = Some(data.clone());
                     if let AuthorityCheck::Decided(answer) =
-                        check_authority(authority, commission, &error.capability)
+                        check_authority(authority, commission, &data, &error.capability)
                     {
                         match &answer {
                             AuthorityVerdict::Allow(Unit(true)) => admitted = true,
@@ -1103,6 +1125,24 @@ where
                             _ => {}
                         }
                         verdict = Some((error.capability, answer));
+                    }
+                    // The provider allowed the request at its revision. A case somebody else
+                    // moved while it decided is at another one by now: the request is stale,
+                    // recorded so, and not invoked, and the next iteration judges the move (8).
+                    if admitted {
+                        let current = governor.current_revision(&data.case_id)?;
+                        if current != data.expected_case_revision {
+                            admitted = false;
+                            stale = true;
+                            if let Some(recorded) = track.requests.last_mut() {
+                                recorded.outcome = RevalidateActionRequestOutcome::Stale {
+                                    error: ActionRequestStale {
+                                        expected_case_revision: data.expected_case_revision,
+                                        current_case_revision: current,
+                                    },
+                                };
+                            }
+                        }
                     }
                 }
                 RevalidateActionRequestOutcome::NotAdmitted { .. } => {}
@@ -1223,6 +1263,31 @@ where
         } else {
             Some(handed.data().actions.clone())
         };
+    }
+}
+
+/// Releases `taken`, the Suspension a resume took for `request` (`ReleaseSuspension`): once the
+/// request was performed, or once it was found stale and never will be. A release the port does
+/// not answer `released` is [`LoopFailure::SuspensionNotReleased`].
+fn release_taken<R: ?Sized>(
+    suspensions: Option<Suspensions<'_, R>>,
+    taken: SuspensionKey,
+    request: &ActionRequestData,
+) -> Result<(), LoopFailure> {
+    let Some(Suspensions { port, .. }) = suspensions else {
+        return Ok(());
+    };
+    match port.release(ReleaseSuspension {
+        suspension: taken,
+        action_request_id: request.action_request_id.clone(),
+    }) {
+        ReleaseSuspensionOutcome::Released { .. } => Ok(()),
+        outcome => Err(LoopFailure::SuspensionNotReleased(Box::new(
+            UnreleasedSuspension {
+                action_request_id: request.action_request_id.clone(),
+                outcome,
+            },
+        ))),
     }
 }
 
@@ -1388,9 +1453,20 @@ where
             return refused(ResumeRefusal::NotAdmitted(answer));
         }
         RevalidateActionRequestOutcome::NeedsAuthority { error } => {
-            let check = check_authority(authority, commission, &error.capability);
+            let check = check_authority(authority, commission, &request, &error.capability);
             if !check.allows() {
                 return refused(ResumeRefusal::NotGranted(check));
+            }
+            // The provider allowed the request at its revision. A case somebody else moved while
+            // it decided is at another one by now: nothing is taken or performed.
+            let current = governor
+                .current_revision(&held.case_id)
+                .map_err(ResumeError::Governor)?;
+            if current != request.expected_case_revision {
+                return refused(ResumeRefusal::CaseMoved {
+                    expected_case_revision: request.expected_case_revision,
+                    current_case_revision: current,
+                });
             }
         }
     }

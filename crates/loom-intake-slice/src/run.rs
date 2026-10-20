@@ -119,9 +119,9 @@ use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::json;
 use b10x_loom_commission::model::primitives::Timestamp;
 use b10x_loom_commission::model::responsibility::{
-    ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, AuthorityVerdict,
-    AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData, CommissionId,
-    CompletionDetermination, ExecutorOutcome, Frontier, FrontierAction, FrontierData,
+    ActionRequestData, ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext,
+    AuthorityVerdict, AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData,
+    CommissionId, CompletionDetermination, ExecutorOutcome, Frontier, FrontierAction, FrontierData,
     GovernorError, Observation, ObservationId, PrincipalId, RevalidateActionRequestOutcome, RunId,
     RunOutcome, SuspensionReason, Unit, commission_state, frontier_state, observation_state,
 };
@@ -1038,6 +1038,7 @@ impl AuthorityProvider for NoDelegatedAuthority {
     fn decide(
         &self,
         _commission: &CommissionData,
+        _request: &ActionRequestData,
         capability: &str,
     ) -> Result<AuthorityVerdict, AuthorityProviderError> {
         Ok(AuthorityVerdict::ApprovalRequired(

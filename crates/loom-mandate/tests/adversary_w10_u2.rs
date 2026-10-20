@@ -12,9 +12,9 @@ use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::json::{self, Value};
 use b10x_loom_commission::model::primitives::{Timestamp as CommissionTimestamp, Uuid as Id};
 use b10x_loom_commission::model::responsibility::{
-    ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, AuthorityVerdict, CaseId,
-    Commission, CommissionData, CommissionId, EffectOutcome, ExecutorOutcome,
-    ExecutorOutcomeProposedAction, FrontierAction, ObservationId, PrincipalId,
+    ActionRequestData, ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext,
+    AuthorityVerdict, CaseId, Commission, CommissionData, CommissionId, EffectOutcome,
+    ExecutorOutcome, ExecutorOutcomeProposedAction, FrontierAction, ObservationId, PrincipalId,
     ProposedActionArguments, RunId, Unit, commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
@@ -223,6 +223,18 @@ fn commission() -> Commission<commission_state::Assigned> {
     commission_with(CASE, host_context(&subject_context()))
 }
 
+/// The action request every decision here is about. `MandateAuthority` does not read it.
+fn request() -> ActionRequestData {
+    ActionRequestData {
+        action_request_id: ActionRequestId(id(0xe1)),
+        run_id: RunId(id(0xe2)),
+        case_id: CaseId(CASE.to_owned()),
+        expected_case_revision: 1,
+        action: "merge".to_owned(),
+        arguments: ProposedActionArguments(Value::Null),
+    }
+}
+
 struct Counting<'a> {
     asked: &'a Cell<usize>,
     inner: PolicyDouble,
@@ -243,13 +255,14 @@ fn a_case_id_spelled_in_upper_case_is_not_granted_the_lower_case_case() {
     let provider = authority(allowing());
     // The control: the case the grant is on is granted.
     assert_eq!(
-        provider.decide(commission().data(), CAPABILITY),
+        provider.decide(commission().data(), &request(), CAPABILITY),
         Ok(AuthorityVerdict::Allow(Unit(true)))
     );
     let other = CASE.to_uppercase();
     assert_ne!(other, CASE, "a different Commission case id");
     let decided = provider.decide(
         commission_with(&other, host_context(&subject_context())).data(),
+        &request(),
         CAPABILITY,
     );
     assert!(
@@ -279,12 +292,12 @@ fn a_poisoned_allocator_asks_mandate_nothing_and_grants_nothing() {
     );
     let commission = commission();
     let first = catch_unwind(AssertUnwindSafe(|| {
-        provider.decide(commission.data(), CAPABILITY)
+        provider.decide(commission.data(), &request(), CAPABILITY)
     }));
     assert!(first.is_err(), "the allocator panicked through decide");
     let before = asked.get();
 
-    let second = provider.decide(commission.data(), CAPABILITY);
+    let second = provider.decide(commission.data(), &request(), CAPABILITY);
     match &second {
         Err(error) => assert!(
             error.message.contains("Unavailable"),
@@ -293,7 +306,7 @@ fn a_poisoned_allocator_asks_mandate_nothing_and_grants_nothing() {
         ),
         Ok(verdict) => panic!("a poisoned allocator decides nothing, got {verdict:?}"),
     }
-    assert!(!check_authority(&provider, &commission, CAPABILITY).allows());
+    assert!(!check_authority(&provider, &commission, &request(), CAPABILITY).allows());
     assert_eq!(
         asked.get(),
         before,
@@ -331,6 +344,7 @@ fn a_verified_context_with_a_duplicated_member_grants_nothing() {
         });
         let decided = provider.decide(
             commission_with(CASE, context_from(&text)).data(),
+            &request(),
             CAPABILITY,
         );
         assert!(
@@ -355,7 +369,7 @@ fn a_verified_context_with_a_duplicated_member_grants_nothing() {
 fn the_case_resource_is_of_the_specified_type_loom_case() {
     let provider = authority(allowing());
     assert_eq!(
-        provider.decide(commission().data(), CAPABILITY),
+        provider.decide(commission().data(), &request(), CAPABILITY),
         Ok(AuthorityVerdict::Allow(Unit(true))),
         "a grant on a `{SPECIFIED_CASE_TYPE}` resource is the grant the provider asks about"
     );
@@ -369,6 +383,7 @@ fn a_grant_is_on_its_case_its_capability_and_its_subject_only() {
     let another_case = "0c5e0000-0000-4000-8000-00000000c45f";
     let decided = provider.decide(
         commission_with(another_case, host_context(&subject_context())).data(),
+        &request(),
         CAPABILITY,
     );
     assert!(
@@ -376,7 +391,7 @@ fn a_grant_is_on_its_case_its_capability_and_its_subject_only() {
         "another case: {decided:?}"
     );
 
-    let decided = provider.decide(commission().data(), "repository.delete");
+    let decided = provider.decide(commission().data(), &request(), "repository.delete");
     assert!(
         !matches!(decided, Ok(AuthorityVerdict::Allow(_))),
         "another capability: {decided:?}"
@@ -388,6 +403,7 @@ fn a_grant_is_on_its_case_its_capability_and_its_subject_only() {
     };
     let decided = provider.decide(
         commission_with(CASE, host_context(&stranger)).data(),
+        &request(),
         CAPABILITY,
     );
     assert!(

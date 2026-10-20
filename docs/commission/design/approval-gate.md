@@ -14,7 +14,12 @@ whichever actions the gate lists, and the gate forms again after the next step t
 granted.
 
 Every other step reads the gate as before: one that performed an action needing no authority, one
-that proposed nothing, and one whose request was refused, stale, denied or not performed. The step
+that proposed nothing, and one whose request was refused, stale, denied or not performed. After
+the provider allows a request, the case's revision is read again: on a move, which somebody else
+made while the provider decided, the request is stale, it is not performed and the step is no
+grant; the next iteration judges the move. A move after that read, while the effect itself runs,
+is not seen; an effect port that must refuse a write on a moved case binds it to the request's
+`expected_case_revision`. The step
 budget and the idle bound still end a Run that only repeats granted steps. With the budget used up
 after a granted step, the next iteration first loads the case: a case that step completed ends the
 Run `Completed`, and a case still open is suspended for its budget.
@@ -30,6 +35,7 @@ gate. A plugin turn is now one Run.
 | Performed an action needing authority the provider allowed | does not read the gate; runs the executor | `a_step_performed_under_a_grant_passes_the_gate` |
 | Proposed an action needing authority the provider denied | reads the gate; ends `AwaitingApproval` on the other actions, the denied one not awaited | `a_step_performed_under_a_grant_passes_the_gate` (control), `a_denied_action_is_not_awaited` |
 | Performed, on the last budgeted step, an action needing authority the provider allowed, which completes the case | loads the case; ends `Completed` | `a_granted_step_that_completes_the_case_at_the_budget_ends_completed` (`adversary_granted_gate.rs`) |
+| Proposed an action needing authority the provider allowed, on a case that moved while it decided | performs nothing; loads the case and judges the move | `adversary_the_run_loop_does_not_perform_a_request_whose_case_moved_while_the_provider_decided` (`adversary_w20261020_u2.rs`) |
 
 The first three tests are in `runtime_effect.rs`. The budget rule is held by
 `the_approval_gate_is_checked_before_the_step_budget` for an ungated step, by the budget case of

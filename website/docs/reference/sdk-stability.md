@@ -57,7 +57,7 @@ implements it through.
 
 | Port | Path | What the host supplies |
 |---|---|---|
-| `AuthorityProvider` | `loom_sdk::commission::ports::authority::AuthorityProvider` | Whether a commission holds a capability, from organizational authority |
+| `AuthorityProvider` | `loom_sdk::commission::ports::authority::AuthorityProvider` | Whether a commission holds a capability for the action request the runtime revalidated (its action, arguments and case revision), from organizational authority |
 | `SuspensionPort` | `loom_sdk::commission::ports::suspension::SuspensionPort` | Durable storage of a run suspended on a withheld approval |
 | `FallibleCaseStore` | `loom_sdk::governor::FallibleCaseStore` | A case store whose reads and writes can fail |
 | `CaseStore` | `loom_sdk::governor::CaseStore` | A case store that cannot fail |

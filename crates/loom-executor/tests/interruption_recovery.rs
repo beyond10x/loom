@@ -28,10 +28,11 @@ use std::time::Duration;
 use b10x_loom_commission::model::json::Value as CommissionValue;
 use b10x_loom_commission::model::primitives::Uuid as CommissionUuid;
 use b10x_loom_commission::model::responsibility::{
-    ActionStatus, AgentRevisionId, AuthorityContext, AuthorityVerdict,
-    AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData, CommissionId,
-    ExecutorOutcome, ExecutorOutcomeProposedAction, Frontier, FrontierAction, FrontierData,
-    FrontierId, PrincipalId, ProposedActionArguments, Unit, commission_state, frontier_state,
+    ActionRequestData, ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext,
+    AuthorityVerdict, AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData,
+    CommissionId, ExecutorOutcome, ExecutorOutcomeProposedAction, Frontier, FrontierAction,
+    FrontierData, FrontierId, PrincipalId, ProposedActionArguments, RunId, Unit, commission_state,
+    frontier_state,
 };
 use b10x_loom_commission::ports::authority::check_authority;
 use b10x_loom_commission::ports::governor::Governor;
@@ -244,7 +245,7 @@ fn suspended_at_the_merge_approval_and_resumed_once_granted() {
         }),
     );
     assert!(
-        !check_authority(&pending, &commission, WRITE).allows(),
+        !check_authority(&pending, &commission, &merge_request(&case), WRITE).allows(),
         "the merge awaits its approval"
     );
     let requests_at_suspension = requests.lock().expect("lock").len();
@@ -269,7 +270,7 @@ fn suspended_at_the_merge_approval_and_resumed_once_granted() {
         resumed.outcome, merge,
         "3. the resumed run returns the merge proposal"
     );
-    assert!(check_authority(&granted, &commission, WRITE).allows());
+    assert!(check_authority(&granted, &commission, &merge_request(&case), WRITE).allows());
     assert_eq!(
         requests.lock().expect("lock").len(),
         requests_at_suspension,
@@ -811,6 +812,24 @@ fn commission(case: &CaseId) -> Commission<commission_state::Assigned> {
         principal: PrincipalId("principal-a".to_owned()),
         authority_context: AuthorityContext(CommissionValue::Null),
     })
+}
+
+/// The request for the merge proposal (`merge_proposal("squash")`) on the case at revision 1,
+/// which the authority provider is asked about.
+fn merge_request(case: &CaseId) -> ActionRequestData {
+    ActionRequestData {
+        action_request_id: ActionRequestId(CommissionUuid(
+            "00000000-0000-4000-8000-00000000d0a1".to_owned(),
+        )),
+        run_id: RunId(CommissionUuid(RUN.to_owned())),
+        case_id: case.clone(),
+        expected_case_revision: 1,
+        action: MERGE.to_owned(),
+        arguments: ProposedActionArguments(CommissionValue::Object(vec![(
+            "strategy".to_owned(),
+            CommissionValue::Text("squash".to_owned()),
+        )])),
+    }
 }
 
 fn session(id: &str) -> SessionData {

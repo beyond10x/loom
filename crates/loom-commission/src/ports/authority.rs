@@ -1,9 +1,20 @@
 //! The `AuthorityProvider` port: the authority verdict at the call.
 //!
 //! Authority stays outside the model. Commission asks the provider at the moment of the call,
-//! passing the commission and the capability, and the provider answers with the generated
-//! [`AuthorityVerdict`]. The commission's [`AuthorityContext`](crate::model::responsibility::AuthorityContext)
+//! passing the commission, the action request it decides and the capability, and the provider
+//! answers with the generated [`AuthorityVerdict`]. The commission's [`AuthorityContext`](crate::model::responsibility::AuthorityContext)
 //! is opaque to Commission: it reaches the provider unchanged and the provider is its only reader.
+//!
+//! The request is the [`ActionRequestData`] the runtime made and revalidated: its id, Run and case
+//! are the runtime's, and its `expected_case_revision` is the revision of the frontier the
+//! proposal was chosen from, never one the executor wrote. So a provider can allow one request at
+//! one case revision and refuse the same action at the next. The runtime reads the case's
+//! revision again after the allow, and once more right before it invokes a resumed request, and
+//! performs nothing on a move it sees ([`runtime`](crate::runtime), item 8 and
+//! `resume_after_grant`). A move after its last read, while the effect itself runs, it cannot
+//! see: an effect port that must refuse a write on a moved case binds the write to the request's
+//! `expected_case_revision`. Its `action` and `arguments` are the executor's proposal as written:
+//! model output, which a provider never takes identity or authority from (`AGENTS.md` § Rules).
 //!
 //! A provider that fails does not decide. [`check_authority`] turns the failure into
 //! [`AuthorityCheck::Refused`], which never allows: authority fails toward less authority.
@@ -13,18 +24,23 @@
 
 use crate::model::json;
 use crate::model::responsibility::{
-    AuthorityContext, AuthorityVerdict, Commission, CommissionData, Unit, commission_state,
+    ActionRequestData, AuthorityContext, AuthorityVerdict, Commission, CommissionData, Unit,
+    commission_state,
 };
 use std::fmt;
 
-/// Decides whether a commission may use a capability, at the moment of the call.
+/// Decides whether a commission may use a capability for an action request, at the moment of the
+/// call.
 pub trait AuthorityProvider {
-    /// The verdict for `capability` under the commission's principal and authority context.
+    /// The verdict for `capability` under the commission's principal and authority context, for
+    /// `request`: the action request the runtime revalidated, bound to the case revision it was
+    /// made at (see the module documentation).
     ///
     /// An `Err` is a failure to decide, never a decision; Commission refuses on it.
     fn decide(
         &self,
         commission: &CommissionData,
+        request: &ActionRequestData,
         capability: &str,
     ) -> Result<AuthorityVerdict, AuthorityProviderError>;
 }
@@ -84,9 +100,10 @@ impl AuthorityCheck {
     }
 }
 
-/// Asks `provider` whether `commission` may use `capability`, at the call.
+/// Asks `provider` whether `commission` may use `capability` for `request`, at the call.
 ///
 /// The commission is passed as it holds itself; Commission does not read its authority context.
+/// The request is passed as the caller revalidated it.
 ///
 /// A provider failure becomes [`AuthorityCheck::Refused`], carrying the provider's message after
 /// three rules, applied in this order:
@@ -104,13 +121,14 @@ impl AuthorityCheck {
 pub fn check_authority<P, S>(
     provider: &P,
     commission: &Commission<S>,
+    request: &ActionRequestData,
     capability: &str,
 ) -> AuthorityCheck
 where
     P: AuthorityProvider + ?Sized,
     S: commission_state::Marker,
 {
-    match provider.decide(commission.data(), capability) {
+    match provider.decide(commission.data(), request, capability) {
         Ok(verdict) => AuthorityCheck::Decided(verdict),
         Err(error) => AuthorityCheck::Refused(AuthorityProviderError {
             message: sanitize(&error.message, &commission.data().authority_context),
@@ -151,9 +169,9 @@ mod tests {
     use crate::model::json;
     use crate::model::primitives::Uuid;
     use crate::model::responsibility::{
-        AgentRevisionId, AuthorityContext, AuthorityVerdict, AuthorityVerdictApprovalRequired,
-        AuthorityVerdictDeny, CaseId, Commission, CommissionData, CommissionId, PrincipalId, Unit,
-        commission_state,
+        ActionRequestData, ActionRequestId, AgentRevisionId, AuthorityContext, AuthorityVerdict,
+        AuthorityVerdictApprovalRequired, AuthorityVerdictDeny, CaseId, Commission, CommissionData,
+        CommissionId, PrincipalId, ProposedActionArguments, RunId, Unit, commission_state,
     };
 
     /// `allows()` is true for exactly one value: `Decided(Allow(Unit(true)))`. `Unit` is declared
@@ -186,6 +204,7 @@ mod tests {
         fn decide(
             &self,
             _commission: &CommissionData,
+            _request: &ActionRequestData,
             _capability: &str,
         ) -> Result<AuthorityVerdict, AuthorityProviderError> {
             Err(AuthorityProviderError::new(self.0.clone()))
@@ -206,8 +225,26 @@ mod tests {
         })
     }
 
+    fn request() -> ActionRequestData {
+        ActionRequestData {
+            action_request_id: ActionRequestId(Uuid(
+                "8a7b6c5d-4e3f-4a2b-9c1d-0e9f8a7b6c5d".to_owned(),
+            )),
+            run_id: RunId(Uuid("1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e".to_owned())),
+            case_id: CaseId("case-unit".to_owned()),
+            expected_case_revision: 3,
+            action: "ledger.post".to_owned(),
+            arguments: ProposedActionArguments(json::Value::Null),
+        }
+    }
+
     fn refused_message(provider_message: String) -> String {
-        match check_authority(&Fails(provider_message), &commission(), "ledger.write") {
+        match check_authority(
+            &Fails(provider_message),
+            &commission(),
+            &request(),
+            "ledger.write",
+        ) {
             AuthorityCheck::Refused(error) => error.message,
             other => panic!("a provider failure must be refused, got {other:?}"),
         }

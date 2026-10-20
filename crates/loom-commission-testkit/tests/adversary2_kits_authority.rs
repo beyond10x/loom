@@ -6,7 +6,9 @@
 use std::collections::BTreeMap;
 use std::sync::{Mutex, PoisonError};
 
-use b10x_loom_commission::model::responsibility::{AuthorityVerdict, CommissionData};
+use b10x_loom_commission::model::responsibility::{
+    ActionRequestData, AuthorityVerdict, CommissionData,
+};
 use b10x_loom_commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
 use b10x_loom_commission_testkit::kits::authority::{self, AuthorityFixture, Backing};
 
@@ -21,6 +23,7 @@ impl AuthorityProvider for CacheKeyedWithoutCapability {
     fn decide(
         &self,
         _commission: &CommissionData,
+        _request: &ActionRequestData,
         capability: &str,
     ) -> Result<AuthorityVerdict, AuthorityProviderError> {
         let mut cached = self.cached.lock().unwrap_or_else(PoisonError::into_inner);
@@ -60,6 +63,7 @@ impl AuthorityProvider for StaleOnFailure {
     fn decide(
         &self,
         _commission: &CommissionData,
+        _request: &ActionRequestData,
         capability: &str,
     ) -> Result<AuthorityVerdict, AuthorityProviderError> {
         let mut last = self.last.lock().unwrap_or_else(PoisonError::into_inner);

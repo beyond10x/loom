@@ -6,6 +6,7 @@
 //! frontier and determination, the executor runs on that frontier, and the provider is asked only
 //! when the proposal needs authority.
 
+use b10x_loom_commission::action_request::request;
 use b10x_loom_commission::admission::admit;
 use b10x_loom_commission::model::behaviour::{Generated, RunStorage};
 use b10x_loom_commission::model::json::Value;
@@ -14,12 +15,13 @@ use b10x_loom_commission::model::responsibility::obligations::{
     ResumeRunBehavior, RunStatesQuery, StartRunBehavior, SuspendRunBehavior,
 };
 use b10x_loom_commission::model::responsibility::{
-    ActionStatus, Admission, AgentRevisionId, AuthorityContext, AuthorityVerdict,
-    AuthorityVerdictDeny, CaseId, Commission, CommissionData, CommissionId, ExecutorOutcome,
-    ExecutorOutcomeProposedAction, ExecutorOutcomeSuspended, FrontierAction, FrontierObligation,
-    PrincipalId, ProposedActionArguments, ResumeRun, ResumeRunOutcome, RunId, RunOutcome,
-    RunOutcomeCompleted, RunOutcomeNeedsExternalEvidence, RunState, StartRun, StartRunOutcome,
-    SuspendRun, SuspendRunOutcome, SuspensionReason, Unit, commission_state,
+    ActionRequestData, ActionRequestId, ActionStatus, Admission, AgentRevisionId, AuthorityContext,
+    AuthorityVerdict, AuthorityVerdictDeny, CaseId, Commission, CommissionData, CommissionId,
+    ExecutorOutcome, ExecutorOutcomeProposedAction, ExecutorOutcomeSuspended, Frontier,
+    FrontierAction, FrontierObligation, PrincipalId, ProposedActionArguments, ResumeRun,
+    ResumeRunOutcome, RunId, RunOutcome, RunOutcomeCompleted, RunOutcomeNeedsExternalEvidence,
+    RunState, StartRun, StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionReason, Unit,
+    commission_state, frontier_state,
 };
 use b10x_loom_commission::outcome::{CapabilityVerdict, Derived, RunStore, derive};
 use b10x_loom_commission::ports::authority::{AuthorityCheck, check_authority};
@@ -45,6 +47,20 @@ fn commission() -> Commission<commission_state::Assigned> {
         principal: PrincipalId("principal-a".to_owned()),
         authority_context: AuthorityContext(Value::Null),
     })
+}
+
+/// The request the runtime makes for `proposed` on `frontier`, which the provider is asked about.
+fn request_for(
+    frontier: &Frontier<frontier_state::Issued>,
+    proposed: &ExecutorOutcomeProposedAction,
+) -> ActionRequestData {
+    request(
+        ActionRequestId(uuid(0xf1)),
+        RunId(uuid(0xf2)),
+        frontier,
+        proposed.clone(),
+    )
+    .into_data()
 }
 
 fn action(name: &str, status: ActionStatus, capability: Option<&str>) -> FrontierAction {
@@ -101,7 +117,12 @@ fn derived(
     let verdict = match &outcome {
         ExecutorOutcome::ProposedAction(proposed) => match admit(&frontier, &proposed.action) {
             Admission::NeedsAuthority(needs) => {
-                match check_authority(provider, &commission, &needs.capability) {
+                match check_authority(
+                    provider,
+                    &commission,
+                    &request_for(&frontier, proposed),
+                    &needs.capability,
+                ) {
                     AuthorityCheck::Decided(verdict) => Some((needs.capability, verdict)),
                     AuthorityCheck::Refused(_) => None,
                 }

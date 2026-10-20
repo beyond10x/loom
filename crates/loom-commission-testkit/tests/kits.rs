@@ -19,9 +19,9 @@ use std::collections::BTreeMap;
 use std::sync::{Mutex, PoisonError};
 
 use b10x_loom_commission::model::responsibility::{
-    ActionStatus, AuthorityVerdict, CaseId, CommissionData, CompletionDetermination, EvidenceData,
-    Frontier, FrontierAction, FrontierData, GovernorError, Observation, ObservationData, Unit,
-    frontier_state, observation_state,
+    ActionRequestData, ActionStatus, AuthorityVerdict, CaseId, CommissionData,
+    CompletionDetermination, EvidenceData, Frontier, FrontierAction, FrontierData, GovernorError,
+    Observation, ObservationData, Unit, frontier_state, observation_state,
 };
 use b10x_loom_commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
 use b10x_loom_commission::ports::evidence::{AttributedEvidence, EvidencePort, ObservationPort};
@@ -163,6 +163,7 @@ impl AuthorityProvider for LiveStaticAuthorityProvider {
     fn decide(
         &self,
         commission: &CommissionData,
+        request: &ActionRequestData,
         capability: &str,
     ) -> Result<AuthorityVerdict, AuthorityProviderError> {
         self.backing
@@ -175,7 +176,7 @@ impl AuthorityProvider for LiveStaticAuthorityProvider {
                     Err(error) => provider.fail(capability, error.message),
                 },
             )
-            .decide(commission, capability)
+            .decide(commission, request, capability)
     }
 }
 
@@ -196,6 +197,7 @@ impl AuthorityProvider for AllowsOnFailure {
     fn decide(
         &self,
         _commission: &CommissionData,
+        _request: &ActionRequestData,
         capability: &str,
     ) -> Result<AuthorityVerdict, AuthorityProviderError> {
         Ok(self
