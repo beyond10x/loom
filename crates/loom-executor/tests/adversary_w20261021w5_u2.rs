@@ -70,15 +70,10 @@ fn run_yaml_names(text: &str) -> BTreeSet<String> {
         .collect()
 }
 
-/// The `Loom::<method>` paths the `## [Unreleased]` entry of `CHANGELOG.md` names as removed, in
-/// its `**Breaking:**` bullets.
+/// The `Loom::<method>` paths `CHANGELOG.md` names as removed in the `**Breaking:**` bullets of
+/// any entry, so the check holds once the entry that removed them is released.
 fn removed_loom_methods(changelog: &str) -> BTreeSet<String> {
-    let unreleased = changelog
-        .split("## [Unreleased]")
-        .nth(1)
-        .and_then(|rest| rest.split("\n## [").next())
-        .expect("CHANGELOG.md has an [Unreleased] entry");
-    unreleased
+    changelog
         .lines()
         .filter(|line| line.starts_with("- **Breaking:**") && line.contains("removed"))
         .flat_map(|line| {
@@ -102,7 +97,7 @@ fn adversary_w20261021w5_u2_the_selection_contract_names_nothing_the_release_rem
     let removed = removed_loom_methods(&read("CHANGELOG.md"));
     assert!(
         removed.contains("Loom::run_loop") && removed.contains("Loom::sessions"),
-        "precondition: CHANGELOG.md's [Unreleased] entry removes Loom::run_loop and \
+        "precondition: a CHANGELOG.md entry removes Loom::run_loop and \
          Loom::sessions: {removed:?}"
     );
     assert!(
