@@ -33,7 +33,7 @@
 //! (<https://beyond10x.github.io/loom/docs/reference/sdk-stability>): the ports a host implements,
 //! the types and functions an embedding calls, and every `loom_sdk` path control-plane imports. It
 //! stays stable within a release line, and a release that breaks any of it names each break in its
-//! `CHANGELOG.md` entry under `Breaking:`. A consumer pins a bare-version tag
+//! `CHANGELOG.md` entry, in a bullet that starts `**Breaking:**`. A consumer pins a bare-version tag
 //! (`tag = "<version>"`) and moves by changing it. Items not on the page, `#[doc(hidden)]` items and
 //! generated model types are outside that promise; a generated type changes with its ESS
 //! declaration, and a release names such a change as a break. `tests/host_ports.rs` implements

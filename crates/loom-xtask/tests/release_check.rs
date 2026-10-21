@@ -8,12 +8,15 @@
 //! * `.github/workflows/release.yml` runs on a bare-version tag with read-only permissions, calls
 //!   only `release-check` in its own steps, and reuses `check.yml` on the tagged commit.
 //!
-//! `story:release-names-embedder-breaks`: the tag's entry carries a `Breaking:` sentence, and
-//! `Breaking: none.` is refused when a stable surface (`consumers/pinned/`,
+//! `story:release-names-embedder-breaks`, as `story:changelog-keep-a-changelog` moved it to Keep a
+//! Changelog: the tag's entry names each break in a `- **Breaking:** …` bullet or carries the line
+//! `No breaking changes.`, never both, and no `**Breaking:**` bullet names nothing or says `none`;
+//! `No breaking changes.` is refused when a stable surface (`consumers/pinned/`,
 //! `crates/loom-sdk/tests/host_ports.rs`, `docs/contracts/run-events-v1.json`) changed since the
-//! previous tag. The fixture repositories are built with `git` in a temporary directory, with a
-//! local identity on each command and no global or system configuration; nothing is tagged or
-//! committed in the working tree, and nothing reaches the network.
+//! previous tag. A `Breaking:` sentence in prose no longer counts. The fixture repositories are
+//! built with `git` in a temporary directory, with a local identity on each command and no global
+//! or system configuration; nothing is tagged or committed in the working tree, and nothing
+//! reaches the network.
 //!
 //! The repository is read from `CARGO_MANIFEST_DIR` at run time; fixtures land under
 //! `CARGO_TARGET_TMPDIR`.
@@ -23,7 +26,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const CHANGELOG: &str = "# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-10-05\n\nFirst. Breaking: everything is new.\n";
+const CHANGELOG: &str = "# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-10-05\n\n### Added\n\n- **Breaking:** everything is new.\n";
+/// The first release's entry in the fixture repositories.
+const FIRST: &str = "### Added\n\n- **Breaking:** everything is new.";
+/// An entry that names no break.
+const NO_BREAKS: &str = "No breaking changes.\n\n### Changed\n\n- `Port::call` is faster.";
 const RELEASE_TAGS: &str = "[0-9]+.[0-9]+.[0-9]+";
 
 fn repository() -> PathBuf {
@@ -134,11 +141,11 @@ fn changelog_with(entries: &[(&str, &str)]) -> String {
 }
 
 /// A git repository holding the three stable surfaces and a README, committed and tagged `0.1.0`
-/// with a `Breaking:` sentence in its entry. `change` names the files to edit before the second
+/// with a `**Breaking:**` bullet in its entry. `change` names the files to edit before the second
 /// commit, which sets the workspace version to `0.2.0` with `second` as its entry; `tag_second`
 /// tags that commit `0.2.0`.
 fn two_tag_fixture(name: &str, change: &[&str], second: &str, tag_second: bool) -> PathBuf {
-    let first = "First. Breaking: everything is new.";
+    let first = FIRST;
     let root = fixture(name, "0.1.0", &changelog_with(&[("0.1.0", first)]));
     for file in SURFACES.iter().chain(&["README.md"]) {
         let path = root.join(file);
@@ -171,43 +178,50 @@ fn two_tag_fixture(name: &str, change: &[&str], second: &str, tag_second: bool) 
     root
 }
 
+/// The message `release-check` names an entry with neither form by.
+const NEITHER: &str = "has no `**Breaking:**` bullet and no `No breaking changes.` line";
+
 #[test]
-fn release_check_names_an_entry_without_a_breaking_sentence() {
-    // A mention of the marker in backticks is not a sentence, nor is "Breaking" without its colon.
-    let second = "Second. A break is named under `Breaking:`.\n\n### Changed\n\n- Breaking for \
-                  nobody, a habit.";
-    let changelog = changelog_with(&[("0.1.0", "First. Breaking: none."), ("0.2.0", second)]);
+fn release_check_names_an_entry_without_a_breaking_bullet() {
+    // A `Breaking:` sentence in prose is the old form and no longer counts; a marker quoted in
+    // backticks, "Breaking" without its colon and the words inside a sentence are no statement.
+    let second = "Second. Breaking: `Port::call` takes a context.\n\n### Changed\n\n- A break is \
+                  named in a `**Breaking:**` bullet.\n- Breaking for nobody, a habit.\n- The \
+                  release has No breaking changes. Honest.";
+    let changelog = changelog_with(&[("0.1.0", FIRST), ("0.2.0", second)]);
     let root = fixture("no-breaking", "0.2.0", &changelog);
     let out = release_check(&root, "0.2.0");
     assert!(
         !out.status.success(),
-        "release-check passed an entry without a `Breaking:` sentence"
+        "release-check passed an entry with neither a `**Breaking:**` bullet nor \
+         `No breaking changes.`"
     );
     assert!(
-        stderr(&out).contains("CHANGELOG.md entry [0.2.0] has no `Breaking:` sentence"),
-        "release-check did not name the entry without a `Breaking:` sentence: {}",
+        stderr(&out).contains(&format!("CHANGELOG.md entry [0.2.0] {NEITHER}")),
+        "release-check did not name the entry with neither form: {}",
         stderr(&out)
     );
     let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
-fn release_check_refuses_breaking_none_when_a_stable_surface_changed_since_the_previous_tag() {
+fn release_check_refuses_no_breaking_changes_when_a_stable_surface_changed_since_the_previous_tag()
+{
     for (n, surface) in SURFACES.iter().enumerate() {
         let root = two_tag_fixture(
             &format!("surface-{n}"),
             &[surface, "README.md"],
-            "Second.\n\nBreaking:\nnone.",
+            NO_BREAKS,
             true,
         );
         let out = release_check(&root, "0.2.0");
         let err = stderr(&out);
         assert!(
             !out.status.success(),
-            "release-check passed `Breaking: none.` although {surface} changed since 0.1.0"
+            "release-check passed `No breaking changes.` although {surface} changed since 0.1.0"
         );
         assert!(
-            err.contains("CHANGELOG.md entry [0.2.0] says `Breaking: none.`")
+            err.contains("CHANGELOG.md entry [0.2.0] says `No breaking changes.`")
                 && err.contains("since 0.1.0")
                 && err.contains(surface),
             "release-check did not name the entry and the changed surface {surface}: {err}"
@@ -221,12 +235,12 @@ fn release_check_refuses_breaking_none_when_a_stable_surface_changed_since_the_p
 }
 
 #[test]
-fn release_check_refuses_breaking_none_before_the_tag_exists() {
+fn release_check_refuses_no_breaking_changes_before_the_tag_exists() {
     // On the release commit, before the tag is pushed, the diff runs to `HEAD`.
     let root = two_tag_fixture(
         "untagged",
         &["docs/contracts/run-events-v1.json"],
-        "Second. **Breaking:** None.",
+        NO_BREAKS,
         false,
     );
     let out = release_check(&root, "0.2.0");
@@ -241,23 +255,24 @@ fn release_check_refuses_breaking_none_before_the_tag_exists() {
 }
 
 #[test]
-fn release_check_accepts_breaking_none_when_no_stable_surface_changed() {
-    let root = two_tag_fixture("unchanged", &["README.md"], "Second. Breaking: none.", true);
+fn release_check_accepts_no_breaking_changes_when_no_stable_surface_changed() {
+    let root = two_tag_fixture("unchanged", &["README.md"], NO_BREAKS, true);
     let out = release_check(&root, "0.2.0");
     assert!(
         out.status.success(),
-        "release-check refused `Breaking: none.` although no stable surface changed: {}",
+        "release-check refused `No breaking changes.` although no stable surface changed: {}",
         stderr(&out)
     );
     let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
-fn release_check_accepts_a_named_break_when_a_stable_surface_changed() {
+fn release_check_accepts_a_breaking_bullet_when_a_stable_surface_changed() {
     let root = two_tag_fixture(
         "named",
         &SURFACES,
-        "Second. Breaking: `Port::call` takes a context.",
+        "### Changed\n\n- **Breaking:** `Port::call` takes a context (story:port-context).\n\
+         - `Port::name` is new.",
         true,
     );
     let out = release_check(&root, "0.2.0");
@@ -270,30 +285,77 @@ fn release_check_accepts_a_named_break_when_a_stable_surface_changed() {
 }
 
 #[test]
+fn release_check_refuses_a_breaking_bullet_that_names_no_break() {
+    // `- **Breaking:** none.` would slip past the stable-surface check `No breaking changes.` gets;
+    // an empty bullet names nothing. No stable surface changes here, so only the bullet can be
+    // refused.
+    for (n, bullet) in [
+        "- **Breaking:** none.",
+        "- **Breaking:** None",
+        "- **Breaking:**",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let second = format!("### Changed\n\n{bullet}\n- `Port::name` is new.");
+        let root = two_tag_fixture(&format!("empty-{n}"), &["README.md"], &second, true);
+        let out = release_check(&root, "0.2.0");
+        assert!(
+            !out.status.success()
+                && stderr(&out).contains(
+                    "CHANGELOG.md entry [0.2.0] has a `**Breaking:**` bullet that names no break"
+                )
+                && stderr(&out).contains(bullet),
+            "release-check did not refuse the bullet {bullet:?}: {}",
+            stderr(&out)
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+}
+
+#[test]
+fn release_check_refuses_an_entry_with_both_a_breaking_bullet_and_no_breaking_changes() {
+    let second = "No breaking changes.\n\n### Removed\n\n- **Breaking:** `Port::call` is removed.";
+    let root = two_tag_fixture("both", &["README.md"], second, true);
+    let out = release_check(&root, "0.2.0");
+    assert!(
+        !out.status.success()
+            && stderr(&out).contains(
+                "CHANGELOG.md entry [0.2.0] says `No breaking changes.` beside a \
+                 `**Breaking:**` bullet"
+            ),
+        "release-check passed an entry that both breaks and says it does not: {}",
+        stderr(&out)
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn release_check_passes_on_the_first_tag() {
-    let root = two_tag_fixture("first", &[], "Second. Breaking: none.", false);
-    // Check out the first tag: it has no previous tag, so only the sentence is required.
+    let root = two_tag_fixture("first", &[], NO_BREAKS, false);
+    // Check out the first tag: it has no previous tag, so only the statement is required.
     git(&root, &["checkout", "-q", "0.1.0"]);
     write(
         &root.join("CHANGELOG.md"),
-        &changelog_with(&[("0.1.0", "First. Breaking: none.")]),
+        &changelog_with(&[("0.1.0", NO_BREAKS)]),
     );
     let out = release_check(&root, "0.1.0");
     assert!(
         out.status.success(),
-        "release-check refused `Breaking: none.` on the first tag: {}",
+        "release-check refused `No breaking changes.` on the first tag: {}",
         stderr(&out)
     );
 
     write(
         &root.join("CHANGELOG.md"),
-        &changelog_with(&[("0.1.0", "First.")]),
+        &changelog_with(&[("0.1.0", "### Added\n\n- `Port` is new.")]),
     );
     let out = release_check(&root, "0.1.0");
     assert!(
         !out.status.success()
-            && stderr(&out).contains("CHANGELOG.md entry [0.1.0] has no `Breaking:` sentence"),
-        "release-check passed the first tag without a `Breaking:` sentence: {}",
+            && stderr(&out).contains(&format!("CHANGELOG.md entry [0.1.0] {NEITHER}")),
+        "release-check passed the first tag with neither a `**Breaking:**` bullet nor \
+         `No breaking changes.`: {}",
         stderr(&out)
     );
     let _ = fs::remove_dir_all(&root);

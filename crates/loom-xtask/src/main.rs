@@ -22,9 +22,9 @@
 //! (`SessionData`, `AnySession`, `SessionSnapshot`, …), as Commission's check reserves.
 //!
 //! `release-check --tag <tag>` fails unless the tag is the workspace version and `CHANGELOG.md`
-//! has its entry with a `Breaking:` sentence, which says `none` only when no stable surface changed
-//! since the previous tag; `.github/workflows/release.yml` runs it on every pushed tag (see
-//! `release`).
+//! has its entry with a `**Breaking:**` bullet or the line `No breaking changes.`, which it may
+//! say only when no stable surface changed since the previous tag;
+//! `.github/workflows/release.yml` runs it on every pushed tag (see `release`).
 
 use clap::{Parser, Subcommand};
 use std::collections::BTreeSet;
@@ -104,9 +104,11 @@ enum Command {
         generated: Option<PathBuf>,
     },
     /// Fail unless a release tag is a bare version equal to `[workspace.package] version` in
-    /// `<root>/Cargo.toml`, and `<root>/CHANGELOG.md` has a `## [<tag>]` entry with a `Breaking:`
-    /// sentence. `Breaking: none.` fails when `consumers/pinned/`,
-    /// `crates/loom-sdk/tests/host_ports.rs` or `docs/contracts/run-events-v1.json` differs
+    /// `<root>/Cargo.toml`, and `<root>/CHANGELOG.md` has a `## [<tag>]` entry with a
+    /// `**Breaking:**` bullet or the line `No breaking changes.`, not both, and no
+    /// `**Breaking:**` bullet that names nothing. `No breaking changes.` fails when
+    /// `consumers/pinned/`, `crates/loom-sdk/tests/host_ports.rs` or
+    /// `docs/contracts/run-events-v1.json` differs
     /// between the previous bare-version tag of `<root>`'s git repository and the tag (or `HEAD`
     /// before the tag exists).
     ReleaseCheck {
