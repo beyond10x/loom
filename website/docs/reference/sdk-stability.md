@@ -3,7 +3,7 @@ title: SDK stability
 sidebar_label: SDK stability
 sidebar_position: 4
 description: The stable surface of b10x-loom-sdk, the ports a host implements and the loom_sdk paths control-plane imports, with the promise Loom makes for them.
-source: crates/loom-sdk/src/lib.rs, crates/loom-sdk/src/models.rs, crates/loom-sdk/tests/host_ports.rs, control-plane's crates/control-plane-runtime (its loom_sdk imports), CHANGELOG.md
+source: crates/loom-sdk/src/lib.rs, crates/loom-sdk/src/models.rs, crates/loom-sdk/tests/host_ports.rs, crates/loom-session-executor/src/lib.rs, control-plane's crates/control-plane-runtime (its loom_sdk imports), CHANGELOG.md
 ---
 
 # SDK stability
@@ -31,7 +31,7 @@ control-plane path, and fails when either table here and the code disagree.
   - items not on this page, even where `loom_sdk` reaches them through a module;
   - `#[doc(hidden)]` items;
   - generated model types (`loom_sdk::commission::model`, `loom_sdk::loom::model`,
-    `loom_sdk::governor::model`). They change with their ESS declaration under `ess/`, and a
+    `loom_sdk::session::model`, `loom_sdk::governor::model`). They change with their ESS declaration under `ess/`, and a
     release names such a change as a break when it makes one.
 
 There is no 1.0 promise, deprecation window or version rule beyond the two lines above.
@@ -104,8 +104,11 @@ implements it through.
 | `loom_sdk::connectors::cli::WriteError` | Why a governed write was not invoked: refused (no absolute proof path, an operation not described as a write, a describe Connectors refused) or failed |
 | `loom_sdk::connectors::cli::datasource::WriteOperation`, `loom_sdk::connectors::cli::datasource::WriteApproval`, `loom_sdk::connectors::cli::datasource::WriteResult`, `loom_sdk::connectors::cli::datasource::MutationClassification`, `loom_sdk::connectors::cli::datasource::WriteRefusal` | The governed write's operation, approval proof path, result (Connectors' classification, `request_id` and audit record) and refusal, generated from `loom.datasource` under `ess/`; they change with that declaration |
 | `loom_sdk::connectors::evidence::WriteEvidenceAdapter`, `loom_sdk::connectors::evidence::WriteEvidenceError` | The host evidence adapter: an applied write of its action becomes the protocol's evidence for the step (for `support-triage@1`, a `routing_record` for `ticket.route` naming its target, the `queue` or `owner` the admitted arguments name, in its facts as `target`) through `submit_evidence`; a write not applied records none, nor does a route whose target cannot be read or whose answer names another one (`WriteEvidenceError::Unreadable`) |
+| `loom_sdk::session::SessionExecutor` | The session executor, an `AgentExecutor`: each call runs one harness, Claude Code or Codex session through metaharness in a scratch copy of the workspace's named files and returns the change as a proposed action whose arguments are `{files}` only, a removed file's content null; it never writes the workspace, which an effect changes once Commission admits the proposal. It mints a session id per call and records the session (`sessions`, `proposed`); the session's summary and transcript digest travel on the `ExecutorStep`, never as evidence, and `run_with_usage` reports its tokens, time and cost. A session that fails suspends with `ExternalAvailability` |
+| `loom_sdk::session::Proposal`, `loom_sdk::session::ProposedFile` | A proposal as an effect reads it back from the admitted request's arguments (`Proposal::from_outcome`), and one file of it |
+| `loom_sdk::session::Kind`, `loom_sdk::session::CredentialSource` | The harness a session runs, and where its credential comes from: metaharness's types |
 | `loom_sdk::serde_json` | The `serde_json` crate Loom links, re-exported for the `Value` a `Briefing` returns as an action's argument schema |
-| `loom_sdk::commission`, `loom_sdk::connectors`, `loom_sdk::loom`, `loom_sdk::governor`, `loom_sdk::protocols`, `loom_sdk::intake::router`, `loom_sdk::intake::slice` | The re-exported crates, under these module names |
+| `loom_sdk::commission`, `loom_sdk::connectors`, `loom_sdk::loom`, `loom_sdk::session`, `loom_sdk::governor`, `loom_sdk::protocols`, `loom_sdk::intake::router`, `loom_sdk::intake::slice` | The re-exported crates, under these module names |
 
 ## Used by control-plane
 

@@ -495,6 +495,22 @@ mod connectors {
     }
 }
 
+/// The `loom_sdk::session` paths the page's embedding table lists: the session executor, the
+/// proposal it returns, the harness it runs and where the session's credential comes from.
+///
+/// [`every_session_path_on_the_page_resolves`] reads these lines out of this file, between the two
+/// marker comments, so keep one path per `use` and nothing else between them.
+#[allow(unused_imports)]
+mod session {
+    // session paths: begin
+    use loom_sdk::session::CredentialSource;
+    use loom_sdk::session::Kind;
+    use loom_sdk::session::Proposal;
+    use loom_sdk::session::ProposedFile;
+    use loom_sdk::session::SessionExecutor;
+    // session paths: end
+}
+
 /// The stability page, read at run time.
 fn page() -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(PAGE);
@@ -761,6 +777,48 @@ fn every_connectors_path_on_the_page_resolves() {
     ] {
         assert!(listed.contains(path), "the page lists {path}");
     }
+}
+
+#[test]
+fn every_session_path_on_the_page_resolves() {
+    let imported = unique(used_paths("session paths"), "the session block");
+    assert!(!imported.is_empty(), "the session block holds the imports");
+
+    let page = page();
+    let listed = unique(
+        table_column(&page, EMBEDDING_HEADING, 0)
+            .iter()
+            .flat_map(|cell| cell.split(','))
+            .map(|path| path.trim().trim_matches('`').to_owned())
+            .filter(|path| path.starts_with("loom_sdk::session::"))
+            .collect(),
+        "the embedding table",
+    );
+    assert_eq!(
+        listed, imported,
+        "the page's embedding table lists exactly the `loom_sdk::session` paths that resolve here"
+    );
+    assert!(
+        listed.contains("loom_sdk::session::SessionExecutor"),
+        "the page lists the session executor"
+    );
+}
+
+/// A host reaches the session executor through `loom_sdk` alone and hands it to the runtime as
+/// its `AgentExecutor`: the bound is the witness. No session runs.
+#[test]
+fn a_host_reaches_the_session_executor_through_loom_sdk() {
+    use loom_sdk::commission::ports::executor::AgentExecutor;
+    use loom_sdk::session::{CredentialSource, Kind, SessionExecutor};
+
+    fn executor(_: &impl AgentExecutor) {}
+
+    let mut session = SessionExecutor::new("workspace", vec!["src/lib.rs".to_owned()], "fix it")
+        .of_kind(Kind::Codex);
+    session.credentials = CredentialSource::None;
+    executor(&session);
+    assert_eq!(session.kind, Kind::Codex);
+    assert!(session.sessions().is_empty(), "no session ran");
 }
 
 /// A host reads the `canon-decision/1` document behind a frontier the governor issued, by its id,

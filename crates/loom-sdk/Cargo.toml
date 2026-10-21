@@ -1,6 +1,6 @@
 [package]
 name = "b10x-loom-sdk"
-description = "One crate an application depends on to embed a governed agent: Commission's contracts and runtime, the Loom executor, the governor and intake, re-exported."
+description = "One crate an application depends on to embed a governed agent: Commission's contracts and runtime, the Loom executor, the session executor, the governor and intake, re-exported."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -18,6 +18,7 @@ b10x-loom-governor = { path = "../loom-governor" }
 b10x-loom-intake-router = { path = "../loom-intake-router" }
 b10x-loom-intake-slice = { path = "../loom-intake-slice" }
 b10x-loom-executor = { path = "../loom-executor" }
+b10x-loom-session-executor = { path = "../loom-session-executor" }
 b10x-llm-core = { git = "https://github.com/beyond10x/llm", tag = "0.8.1" }
 b10x-llm-models = { git = "https://github.com/beyond10x/llm", tag = "0.8.1", features = ["environment", "file"] }
 b10x-llm-credentials = { git = "https://github.com/beyond10x/llm", tag = "0.8.1" }

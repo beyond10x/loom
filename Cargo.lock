@@ -632,6 +632,7 @@ dependencies = [
  "b10x-loom-intake-router",
  "b10x-loom-intake-slice",
  "b10x-loom-protocols",
+ "b10x-loom-session-executor",
  "libc",
  "loom",
  "serde",
