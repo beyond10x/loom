@@ -1,13 +1,16 @@
-# Loom — Native Agent Harness
+# Loom — Native Executor
 
-**Proposed repo:** `beyond10x/loom`  
+**Repo:** `beyond10x/loom`  
 **Rust crate:** `b10x-loom-executor`  
-**Predecessor:** current Beyond10x Harness  
+**Started from:** Beyond10x Harness, whose port Loom carried until 0.30.0 and removed in 0.31.0
+(Atlas ADR 0098)  
 **Relationship:** native/default executor for Commission
 
 ## Purpose
 
-Loom is the batteries-included harness that makes a model behave like an agent for one bounded run.
+Loom makes a model act as an agent for one bounded run, one governed decision at a time: each
+decision is a structured request to an llm `Model`, and agent work in a harness goes through
+Metaharness.
 
 It is deliberately narrower than Commission.
 
@@ -22,18 +25,17 @@ Loom answers:
 ## Owns
 
 - prompt/context construction;
-- model API invocation;
-- model turn loop;
+- model API invocation, through llm;
 - dynamic model-visible action catalogue;
 - action selection strategy;
 - action argument generation;
-- tool round trips;
-- streaming;
-- compaction;
-- session/transcript state;
-- turn/token/time/cost budgets;
-- interruption/recovery;
+- budgets on its model requests;
 - model-facing approval/suspension mechanics.
+
+Until 0.30.0 Loom also owned a model turn loop, tool round trips, streaming, compaction,
+session/transcript state and interruption/recovery, through its port of Harness. The port was
+removed in 0.31.0 (Atlas ADR 0098): Loom runs no model loop of its own, and a session in a harness
+is Metaharness's to run behind an `AgentExecutor`.
 
 ## Does not own
 
