@@ -225,11 +225,18 @@ pub(crate) fn productions(entry: &ProtocolEntry) -> BTreeMap<String, Vec<String>
 /// How a command ended.
 enum Ended {
     Exited(ExitStatus, Vec<u8>, Vec<u8>),
-    /// Killed at its timeout, with the processes it started.
-    TimedOut,
+    /// Ran past its timeout: killed with the processes it started and reaped, unless `unkilled`
+    /// names why its process group could not be killed.
+    TimedOut {
+        unkilled: Option<std::io::Error>,
+    },
     NotStarted(std::io::Error),
-    /// Its status could not be read; it was killed with the processes it started and reaped.
-    Unobserved(std::io::Error),
+    /// Its status could not be read (`error`): killed with the processes it started and reaped,
+    /// unless `unkilled` names why its process group could not be killed.
+    Unobserved {
+        error: std::io::Error,
+        unkilled: Option<std::io::Error>,
+    },
 }
 
 /// The effect port that performs an admitted action through the command bound to it.
@@ -542,53 +549,84 @@ fn finish(
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() < deadline => thread::sleep(POLL),
             Ok(None) => {
-                stop(&mut child);
-                return Ended::TimedOut;
+                return Ended::TimedOut {
+                    unkilled: stop(&mut child).err(),
+                };
             }
             Err(error) => {
-                stop(&mut child);
-                return Ended::Unobserved(error);
+                return Ended::Unobserved {
+                    error,
+                    unkilled: stop(&mut child).err(),
+                };
             }
         }
     };
     let remaining = deadline.saturating_duration_since(Instant::now());
     let Ok(stdout) = stdout.recv_timeout(remaining) else {
-        stop(&mut child);
-        return Ended::TimedOut;
+        return Ended::TimedOut {
+            unkilled: stop(&mut child).err(),
+        };
     };
     let remaining = deadline.saturating_duration_since(Instant::now());
     let Ok(stderr) = stderr.recv_timeout(remaining) else {
-        stop(&mut child);
-        return Ended::TimedOut;
+        return Ended::TimedOut {
+            unkilled: stop(&mut child).err(),
+        };
     };
     Ended::Exited(status, stdout, stderr)
 }
 
 /// What `program` ended with when it exited, else the reason its action is refused: killed at
-/// `timeout`, never started, or its status unreadable, naming the error.
+/// `timeout`, never started, or its status unreadable, naming the error; a process group that
+/// could not be killed is named as such, never reported killed.
 fn exited(
     program: &str,
     timeout: Duration,
     ended: Ended,
 ) -> Result<(ExitStatus, Vec<u8>, Vec<u8>), String> {
+    let seconds = timeout.as_secs();
     match ended {
         Ended::Exited(status, stdout, stderr) => Ok((status, stdout, stderr)),
-        Ended::TimedOut => Err(format!(
-            "{program} was killed after {} s",
-            timeout.as_secs()
+        Ended::TimedOut { unkilled: None } => {
+            Err(format!("{program} was killed after {seconds} s"))
+        }
+        Ended::TimedOut {
+            unkilled: Some(why),
+        } => Err(format!(
+            "{program} ran past {seconds} s, and the processes it started could not be killed: \
+             {why}"
         )),
         Ended::NotStarted(error) => Err(format!("{program} did not start: {error}")),
-        Ended::Unobserved(error) => Err(format!(
+        Ended::Unobserved {
+            error,
+            unkilled: None,
+        } => Err(format!(
             "{program}'s status could not be read, so it was killed: {error}"
+        )),
+        Ended::Unobserved {
+            error,
+            unkilled: Some(why),
+        } => Err(format!(
+            "{program}'s status could not be read ({error}), and the processes it started could \
+             not be killed: {why}"
         )),
     }
 }
 
 /// Kills `child`, the leader of its own process group, with the processes it started
 /// ([`kill_group`], the test runner's), and reaps it, so no process and no zombie is left.
-fn stop(child: &mut Child) {
-    kill_group(child);
-    let _ = child.wait();
+///
+/// # Errors
+/// The group could not be killed; `child` is then reaped only if it already ended, since waiting
+/// for a process the signal did not reach could hold the run past its timeout.
+fn stop(child: &mut Child) -> std::io::Result<()> {
+    let killed = kill_group(child);
+    if killed.is_ok() {
+        let _ = child.wait();
+    } else {
+        let _ = child.try_wait();
+    }
+    killed
 }
 
 #[cfg(test)]
@@ -602,12 +640,48 @@ mod tests {
     impl Drop for Sleeping {
         fn drop(&mut self) {
             let proc = std::path::Path::new("/proc").join(self.0.to_string());
-            if std::fs::read(proc.join("cmdline")).is_ok_and(|line| line.starts_with(b"sleep\0")) {
-                let _ = Command::new("kill")
-                    .args(["-s", "KILL", "--", &self.0.to_string()])
-                    .status();
+            if std::fs::read(proc.join("cmdline")).is_ok_and(|line| line.starts_with(b"sleep\0"))
+                && let Ok(pid) = i32::try_from(self.0)
+            {
+                let _ = nix::sys::signal::kill(
+                    nix::unistd::Pid::from_raw(pid),
+                    nix::sys::signal::Signal::SIGKILL,
+                );
             }
         }
+    }
+
+    #[test]
+    fn a_group_that_could_not_be_killed_is_never_reported_killed() {
+        let unkilled = || Some(std::io::Error::from_raw_os_error(libc::EPERM));
+        let reason = exited(
+            "record-note",
+            Duration::from_secs(1),
+            Ended::TimedOut {
+                unkilled: unkilled(),
+            },
+        )
+        .unwrap_err();
+        assert!(
+            reason.starts_with(
+                "record-note ran past 1 s, and the processes it started could not be killed: "
+            ),
+            "{reason}"
+        );
+        assert!(reason.contains("Operation not permitted"), "{reason}");
+        assert!(!reason.contains("was killed"), "{reason}");
+        let reason = exited(
+            "record-note",
+            Duration::from_secs(1),
+            Ended::Unobserved {
+                error: std::io::Error::other("the fixture's wait failed"),
+                unkilled: unkilled(),
+            },
+        )
+        .unwrap_err();
+        assert!(reason.contains("the fixture's wait failed"), "{reason}");
+        assert!(reason.contains("could not be killed"), "{reason}");
+        assert!(!reason.contains("so it was killed"), "{reason}");
     }
 
     #[test]
@@ -627,7 +701,7 @@ mod tests {
         let ended = finish(child, Instant::now() + Duration::from_secs(30), |_| {
             Err(std::io::Error::other("the fixture's wait failed"))
         });
-        assert!(matches!(ended, Ended::Unobserved(_)));
+        assert!(matches!(ended, Ended::Unobserved { unkilled: None, .. }));
         let reason = exited("record-note", Duration::from_secs(30), ended).unwrap_err();
         assert_eq!(
             reason,

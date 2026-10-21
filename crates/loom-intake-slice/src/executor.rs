@@ -1277,12 +1277,24 @@ fn run_bounded(test: &TestCommand, root: &Path) -> Result<Finished, ExecuteError
             }
             Ok(None) => {
                 timed_out = true;
-                kill_group(&mut child);
+                if let Err(error) = kill_group(&mut child) {
+                    // What the command started may still run: never a timed-out result.
+                    let _ = child.try_wait();
+                    return Err(ExecuteError::Workspace {
+                        problem: format!(
+                            "the test command ran past its timeout and its process group could \
+                             not be killed: {error}"
+                        ),
+                    });
+                }
                 break child.wait().map_err(io)?;
             }
             Err(error) => {
-                kill_group(&mut child);
-                let _ = child.wait();
+                if kill_group(&mut child).is_ok() {
+                    let _ = child.wait();
+                } else {
+                    let _ = child.try_wait();
+                }
                 return Err(io(error));
             }
         }
@@ -1304,21 +1316,29 @@ fn run_bounded(test: &TestCommand, root: &Path) -> Result<Finished, ExecuteError
     })
 }
 
-/// Kills `child`, and on Unix the process group it leads, so what it started dies with it. The
-/// caller started `child` with `process_group(0)` and reaps it after. The group is killed even
-/// when `child` itself was already reaped: a process it started that is still running holds the
-/// group's id, so the id names that group and no other.
-pub(crate) fn kill_group(child: &mut Child) {
-    #[cfg(unix)]
-    {
-        let _ = Command::new("kill")
-            .args(["-s", "KILL", "--", &format!("-{}", child.id())])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
+/// Kills `child` and the process group it leads with `SIGKILL`, sent by `killpg` itself and never
+/// through a `kill` program, so what it started dies with it. The caller started `child` with
+/// `process_group(0)` and reaps it after. The group is killed even when `child` itself was
+/// already reaped: a process it started that is still running holds the group's id, so the id
+/// names that group and no other.
+///
+/// # Errors
+/// The group could not be signalled. A group with no process left (`ESRCH`) is no error: nothing
+/// it started still runs.
+pub(crate) fn kill_group(child: &mut Child) -> std::io::Result<()> {
+    use nix::errno::Errno;
+    use nix::sys::signal::{Signal, killpg};
+    use nix::unistd::Pid;
+    let group = i32::try_from(child.id())
+        .map_err(|_| std::io::Error::other(format!("pid {} is out of range", child.id())))
+        .and_then(
+            |leader| match killpg(Pid::from_raw(leader), Signal::SIGKILL) {
+                Ok(()) | Err(Errno::ESRCH) => Ok(()),
+                Err(errno) => Err(std::io::Error::from(errno)),
+            },
+        );
     let _ = child.kill();
+    group
 }
 
 /// The last [`OUTPUT_TAIL`] bytes of a pipe, read on a thread of its own.
