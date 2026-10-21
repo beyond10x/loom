@@ -366,6 +366,24 @@ types:
       - name: idle_iterations
         type: Integer
 
+  # story:stop-policy-gate-and-idle-bound: how a run stops where its frontier does not change. The
+  # host supplies it, per run; the model never does. `approval_gate` true, the default, keeps the
+  # approval gate: a step that leaves unchanged a frontier listing actions that need approval ends
+  # the run AwaitingApproval. False turns the gate off: such a step goes to the executor and is
+  # judged as any other step, idle when it admitted no new request; authority is untouched, so a
+  # request needing approval is still asked about and one the provider does not allow is never
+  # handed to the effect port. `idle_bound` is how many idle iterations in a row end the run
+  # IdleBound (`JudgeIdleIteration`, `bound`), with or without a step budget; a value below 1 is
+  # read as 1, so it never turns the bound off. Absent, the default, the bound is two and applies
+  # only to a run with no step budget.
+  - name: commission.responsibility.StopPolicy
+    kind: struct
+    fields:
+      - name: approval_gate
+        type: Boolean
+      - name: idle_bound
+        type: Optional<Integer>
+
   # story:unperformable-names-actions: what no effect performs, as `JudgePerformableActions`
   # answers `unperformable` for it. `actions` are the actions the run needed performed that the
   # effect port does not perform, each once, in frontier order: every action a frontier lists, when
@@ -1539,22 +1557,27 @@ commands:
   # no progress: it admitted no request, or only requests with the action and arguments of ones
   # already admitted in the Run, at whatever revision. `idle_iterations` counts such iterations in a
   # row, this one included; a newly admitted request starts the count again, and a stale proposal
-  # is not counted, since the next iteration judges the move. Two end the run (`bound`), and the
-  # run outcome is `IdleBound`, naming the count as `bound` does; fewer change nothing. A completed
-  # case comes first: when the iteration's own effect was performed, the case is loaded before the
-  # run ends, as at a step budget, and a case the governor holds complete ends the run completed,
-  # not `IdleBound`. A run with a step budget is bounded by its budget alone and is never judged
-  # here. story:pending-effect: an iteration whose request the effect port answered Pending, and
-  # each that invokes it again and is answered Pending, is not judged and leaves `idle_iterations`
-  # where it was; the iteration whose invocation is answered otherwise is judged as the one that
-  # admitted the request would have been.
+  # is not counted, since the next iteration judges the move. As many as the input `bound` end the
+  # run (outcome `bound`), and the run outcome is `IdleBound`, naming the count as `bound` does;
+  # fewer change nothing. A completed case comes first: when the iteration's own effect was
+  # performed, the case is loaded before the run ends, as at a step budget, and a case the governor
+  # holds complete ends the run completed, not `IdleBound`. story:stop-policy-gate-and-idle-bound:
+  # the input `bound` is the host's `StopPolicy.idle_bound`, read as 1 when below 1, and then the
+  # run is judged here whether or not it has a step budget. A policy that sets none makes it two,
+  # and a run with a step budget is then bounded by its budget alone and is never judged here.
+  # story:pending-effect: an iteration whose request the effect port answered Pending, and each
+  # that invokes it again and is answered Pending, is not judged and leaves `idle_iterations` where
+  # it was; the iteration whose invocation is answered otherwise is judged as the one that admitted
+  # the request would have been.
   - name: commission.responsibility.JudgeIdleIteration
     input:
       - name: idle_iterations
         type: Integer
+      - name: bound
+        type: Integer
     outcomes:
       - name: bound
-        when: idle_iterations >= 2
+        when: idle_iterations >= bound
         error: commission.responsibility.IdleBoundReached
         payload:
           commission.responsibility.IdleBoundReached:
