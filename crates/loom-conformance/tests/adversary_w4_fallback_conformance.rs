@@ -14,8 +14,6 @@ use ess_primitives::ids::CorrelationId;
 use ess_primitives::node::Node;
 use ess_primitives::time::Timestamp;
 
-const SESSION: &str = "00000000-0000-4000-8000-000000000001";
-const RUN: &str = "00000000-0000-4000-8000-000000000010";
 const TURN: &str = "00000000-0000-4000-8000-000000000020";
 const CATALOGUE: &str = "00000000-0000-4000-8000-000000000030";
 const FAST: &str = "00000000-0000-4000-8000-000000000041";
@@ -78,27 +76,6 @@ fn selections(target: &LoomTarget) -> Vec<BTreeMap<String, Node>> {
 /// A target holding two `Selected` selections, FAST and STRONGER, of one catalogue.
 fn two_selections() -> LoomTarget {
     let target = LoomTarget::default();
-    let (outcome, ..) = send(
-        &target,
-        "loom.run.OpenSession",
-        &[
-            ("session_id", text(SESSION)),
-            ("commission_run", text(RUN)),
-            ("wire", text("wire-a")),
-        ],
-    );
-    assert!(outcome.ends_with("opened"), "{outcome}");
-    let (outcome, ..) = send(
-        &target,
-        "loom.run.RecordTurn",
-        &[
-            ("turn_id", text(TURN)),
-            ("session_id", text(SESSION)),
-            ("index", int(1)),
-            ("items", Node::Seq(vec![text("item")])),
-        ],
-    );
-    assert!(outcome.ends_with("recorded"), "{outcome}");
     let entry = |action: &str| {
         Node::Map(BTreeMap::from([
             ("action".to_owned(), text(action)),

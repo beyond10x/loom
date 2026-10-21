@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 
 use b10x_loom_executor::model::primitives::{Decimal, Uuid};
 use b10x_loom_executor::model::run::{
-    ActionCatalogueState, CatalogueEntry, CatalogueEntryStatus, ReportedUsage, RunEnding,
-    SelectionRecordState, SelectionState, SelectionStrategy, SessionState,
+    ActionCatalogueState, CatalogueEntry, CatalogueEntryStatus, SelectionRecordState,
+    SelectionState, SelectionStrategy,
 };
 use ess_primitives::facts::{Number, is_canonical_uuid};
 use ess_primitives::node::Node;
@@ -62,16 +62,6 @@ pub fn optional_decimal(input: &Input, name: &str) -> Option<Option<Decimal>> {
     }
 }
 
-/// The `loom.run.RunEnding` field `name`.
-pub fn run_ending(input: &Input, name: &str) -> Option<RunEnding> {
-    Some(match input.get(name)?.as_text()? {
-        "Answered" => RunEnding::Answered,
-        "Stopped" => RunEnding::Stopped,
-        "Failed" => RunEnding::Failed,
-        _ => return None,
-    })
-}
-
 /// The `loom.run.SelectionStrategy` field `name`.
 pub fn strategy(input: &Input, name: &str) -> Option<SelectionStrategy> {
     Some(match input.get(name)?.as_text()? {
@@ -111,25 +101,6 @@ pub fn entries(input: &Input, name: &str) -> Option<Vec<CatalogueEntry>> {
         .collect()
 }
 
-/// The `Optional<loom.run.ReportedUsage>` field `name`.
-pub fn optional_usage(input: &Input, name: &str) -> Option<Option<ReportedUsage>> {
-    let members = match input.get(name) {
-        None | Some(Node::Null) => return Some(None),
-        Some(node) => node.as_map()?,
-    };
-    let required = |field: &str| members.get(field).and_then(integer_of);
-    Some(Some(ReportedUsage {
-        model: members.get("model")?.as_text()?.to_owned(),
-        input_tokens: required("input_tokens")?,
-        output_tokens: required("output_tokens")?,
-        cached_input_tokens: required("cached_input_tokens")?,
-        cache_creation_input_tokens: match members.get("cache_creation_input_tokens") {
-            None | Some(Node::Null) => None,
-            Some(node) => Some(integer_of(node)?),
-        },
-    }))
-}
-
 /// A `Uuid` (or a newtype of one) as a suite value.
 pub fn id(value: &Uuid) -> Node {
     Node::Text(value.0.clone())
@@ -140,15 +111,6 @@ pub fn number(value: i64) -> Node {
     Node::Number(Number::from(value))
 }
 
-/// The declared name of a run ending.
-pub fn run_ending_name(ending: RunEnding) -> Node {
-    name(match ending {
-        RunEnding::Answered => "Answered",
-        RunEnding::Stopped => "Stopped",
-        RunEnding::Failed => "Failed",
-    })
-}
-
 /// The declared name of a selection strategy.
 pub fn strategy_name(strategy: SelectionStrategy) -> Node {
     name(match strategy {
@@ -156,15 +118,6 @@ pub fn strategy_name(strategy: SelectionStrategy) -> Node {
         SelectionStrategy::FastTyped => "FastTyped",
         SelectionStrategy::Rule => "Rule",
         SelectionStrategy::Hybrid => "Hybrid",
-    })
-}
-
-/// The declared name of a session state.
-pub fn session_state(state: SessionState) -> Node {
-    name(match state {
-        SessionState::Active => "Active",
-        SessionState::Filed => "Filed",
-        SessionState::Interrupted => "Interrupted",
     })
 }
 
@@ -190,26 +143,6 @@ pub fn catalogue_state(state: ActionCatalogueState) -> Node {
     name(match state {
         ActionCatalogueState::Projected => "Projected",
     })
-}
-
-/// An `Optional<loom.run.ReportedUsage>` as a suite value.
-pub fn usage(usage: Option<&ReportedUsage>) -> Node {
-    let Some(usage) = usage else {
-        return Node::Null;
-    };
-    Node::Map(BTreeMap::from([
-        ("model".to_owned(), Node::Text(usage.model.clone())),
-        ("input_tokens".to_owned(), number(usage.input_tokens)),
-        ("output_tokens".to_owned(), number(usage.output_tokens)),
-        (
-            "cached_input_tokens".to_owned(),
-            number(usage.cached_input_tokens),
-        ),
-        (
-            "cache_creation_input_tokens".to_owned(),
-            usage.cache_creation_input_tokens.map_or(Node::Null, number),
-        ),
-    ]))
 }
 
 fn name(text: &str) -> Node {

@@ -1,10 +1,10 @@
 //! Adversary pass 2, wave 2026-10-07-w2: the `state` a wrong-state refusal carries.
 //!
-//! `ess/domains/run.yaml` declares `loom.run.SessionStateConflict` and
-//! `loom.run.SelectionStateConflict` with a `state` field: the state the subject is actually in.
-//! The synthesized suite's wrong-state scenarios check the error's name only (`expect_error`, no
-//! fields), so `task conform` stays green when `LoomTarget` drops or invents that field. These
-//! cases drive `LoomTarget` directly and require the field the executor reported.
+//! `ess/domains/run.yaml` declares `loom.run.SelectionStateConflict` with a `state` field: the
+//! state the subject is actually in. The synthesized suite's wrong-state scenarios check the
+//! error's name only (`expect_error`, no fields), so `task conform` stays green when `LoomTarget`
+//! drops or invents that field. This case drives `LoomTarget` directly and requires the field the
+//! executor reported. The session cases went with `loom.run.Session` (`story:delete-harness-port`).
 
 use std::collections::BTreeMap;
 
@@ -14,10 +14,6 @@ use ess_primitives::facts::Number;
 use ess_primitives::ids::CorrelationId;
 use ess_primitives::node::Node;
 
-const SESSION: &str = "00000000-0000-4000-8000-000000000001";
-const OTHER_SESSION: &str = "00000000-0000-4000-8000-000000000002";
-const UNKNOWN_SESSION: &str = "00000000-0000-4000-8000-0000000000ff";
-const RUN: &str = "00000000-0000-4000-8000-000000000010";
 const TURN: &str = "00000000-0000-4000-8000-000000000020";
 const CATALOGUE: &str = "00000000-0000-4000-8000-000000000030";
 const SELECTION: &str = "00000000-0000-4000-8000-000000000040";
@@ -60,84 +56,9 @@ fn send(
     (outcome, name, fields)
 }
 
-fn open(target: &LoomTarget, session: &str) {
-    let (outcome, ..) = send(
-        target,
-        "loom.run.OpenSession",
-        &[
-            ("session_id", text(session)),
-            ("commission_run", text(RUN)),
-            ("wire", text("wire-a")),
-        ],
-    );
-    assert!(outcome.ends_with("opened"), "{outcome}");
-}
-
-fn file(target: &LoomTarget, session: &str) -> (String, Option<String>, BTreeMap<String, Node>) {
-    send(
-        target,
-        "loom.run.FileSession",
-        &[("session_id", text(session)), ("ending", text("Answered"))],
-    )
-}
-
-#[test]
-fn adversary2_w2_a_session_wrong_state_carries_the_state_the_session_is_in() {
-    let target = LoomTarget::default();
-    open(&target, SESSION);
-    assert!(file(&target, SESSION).0.ends_with("filed"));
-    let (outcome, error, fields) = file(&target, SESSION);
-    assert!(outcome.ends_with("wrong-state"), "{outcome}");
-    assert_eq!(error.as_deref(), Some("loom.run.SessionStateConflict"));
-    assert_eq!(
-        fields,
-        BTreeMap::from([("state".to_owned(), text("Filed"))]),
-        "filing a Filed session"
-    );
-
-    open(&target, OTHER_SESSION);
-    let (outcome, ..) = send(
-        &target,
-        "loom.run.InterruptSession",
-        &[("session_id", text(OTHER_SESSION))],
-    );
-    assert!(outcome.ends_with("interrupted"), "{outcome}");
-    let (_, _, fields) = send(
-        &target,
-        "loom.run.ReleaseSession",
-        &[("session_id", text(OTHER_SESSION))],
-    );
-    assert_eq!(
-        fields,
-        BTreeMap::from([("state".to_owned(), text("Interrupted"))]),
-        "releasing an Interrupted session"
-    );
-}
-
-#[test]
-fn adversary2_w2_a_session_no_record_holds_is_refused_without_a_state() {
-    let target = LoomTarget::default();
-    let (outcome, error, fields) = file(&target, UNKNOWN_SESSION);
-    assert!(outcome.ends_with("wrong-state"), "{outcome}");
-    assert_eq!(error.as_deref(), Some("loom.run.SessionStateConflict"));
-    assert_eq!(fields, BTreeMap::new(), "no record holds the session");
-}
-
 #[test]
 fn adversary2_w2_a_selection_wrong_state_carries_the_state_the_selection_is_in() {
     let target = LoomTarget::default();
-    open(&target, SESSION);
-    let (outcome, ..) = send(
-        &target,
-        "loom.run.RecordTurn",
-        &[
-            ("turn_id", text(TURN)),
-            ("session_id", text(SESSION)),
-            ("index", int(1)),
-            ("items", Node::Seq(vec![text("item")])),
-        ],
-    );
-    assert!(outcome.ends_with("recorded"), "{outcome}");
     let (outcome, ..) = send(
         &target,
         "loom.run.ProjectCatalogue",
