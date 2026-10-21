@@ -305,13 +305,15 @@ fn encode_reason(out: &mut String, reason: &SuspensionReason) {
 }
 
 /// The names of `BudgetLimit`, as `ess/commission/` declares them.
-const LIMITS: [(BudgetLimit, &str); 6] = [
+const LIMITS: [(BudgetLimit, &str); 8] = [
     (BudgetLimit::MaxSteps, "MaxSteps"),
     (BudgetLimit::MaxTrials, "MaxTrials"),
     (BudgetLimit::MaxTokensIn, "MaxTokensIn"),
     (BudgetLimit::MaxTokensOut, "MaxTokensOut"),
     (BudgetLimit::MaxDurationMs, "MaxDurationMs"),
     (BudgetLimit::MaxCostMicroUsd, "MaxCostMicroUsd"),
+    (BudgetLimit::MaxTokens, "MaxTokens"),
+    (BudgetLimit::Deadline, "Deadline"),
 ];
 
 /// A `RunBudgetBreach` as an object of its fields, an absent optional field left out.

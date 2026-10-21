@@ -285,6 +285,8 @@ Tagged by `kind`.
 | `max_tokens_out` | optional `integer` |
 | `max_duration_ms` | optional `integer` |
 | `max_cost_micro_usd` | optional `integer` |
+| `max_tokens` | optional `integer` |
+| `deadline` | optional `timestamp` |
 | `per_action` | list of [`ActionBudget`](#actionbudget) |
 
 ### RunBudgetBreach
@@ -379,6 +381,7 @@ Tagged by `kind`.
 |---|---|
 | `approval_gate` | `boolean` |
 | `idle_bound` | optional `integer` |
+| `on_breach` | [`BreachStep`](#breachstep) |
 
 ### SuspensionKey
 
@@ -392,9 +395,13 @@ Tagged by `kind`.
 
 Variants: `Admissible`, `ApprovalRequired`, `Blocked`.
 
+### BreachStep
+
+Variants: `DiscardStep`, `KeepStep`.
+
 ### BudgetLimit
 
-Variants: `MaxSteps`, `MaxTrials`, `MaxTokensIn`, `MaxTokensOut`, `MaxDurationMs`, `MaxCostMicroUsd`.
+Variants: `MaxSteps`, `MaxTrials`, `MaxTokensIn`, `MaxTokensOut`, `MaxDurationMs`, `MaxCostMicroUsd`, `MaxTokens`, `Deadline`.
 
 ### ConnectorOperationEffect
 

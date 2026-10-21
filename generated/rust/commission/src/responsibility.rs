@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 42add0733a6199e5713b6313c3bbb5c5ce429071848e56c3791eb79c41e58ea9
-// contract digest e6ab0245b27b257f77bdd6fc228586d2882f8aabe21fbd73be09472e33cd45ab
+// model digest 110ce466d1465f27156ddee90a23c5c3abc02e24613044348bd9b6aab4fc474d
+// contract digest 897513a9f8ac1418fe5ce912275c08613edd0ec8f9de4f7ff603ba3a1abdb659
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Responsibility — `commission.responsibility`.
@@ -177,6 +177,15 @@ pub struct AuthorityVerdictDeny {
     pub reason: String,
 }
 
+/// BreachStep — `commission.responsibility.BreachStep`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BreachStep {
+    /// `DiscardStep`.
+    DiscardStep,
+    /// `KeepStep`.
+    KeepStep,
+}
+
 /// BudgetLimit — `commission.responsibility.BudgetLimit`: one of a closed set of names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BudgetLimit {
@@ -192,6 +201,10 @@ pub enum BudgetLimit {
     MaxDurationMs,
     /// `MaxCostMicroUsd`.
     MaxCostMicroUsd,
+    /// `MaxTokens`.
+    MaxTokens,
+    /// `Deadline`.
+    Deadline,
 }
 
 /// The states of `commission.responsibility.Case`, as runtime values.
@@ -550,6 +563,10 @@ pub struct RunBudget {
     pub max_duration_ms: Option<i64>,
     /// `max_cost_micro_usd` — `Optional<Integer>`.
     pub max_cost_micro_usd: Option<i64>,
+    /// `max_tokens` — `Optional<Integer>`.
+    pub max_tokens: Option<i64>,
+    /// `deadline` — `Optional<Timestamp>`.
+    pub deadline: Option<crate::primitives::Timestamp>,
     /// `per_action` — `List<commission.responsibility.ActionBudget>`.
     pub per_action: Vec<ActionBudget>,
 }
@@ -701,6 +718,8 @@ pub struct StopPolicy {
     pub approval_gate: bool,
     /// `idle_bound` — `Optional<Integer>`.
     pub idle_bound: Option<i64>,
+    /// `on_breach` — `commission.responsibility.BreachStep`.
+    pub on_breach: BreachStep,
 }
 
 /// The states of `commission.responsibility.Suspension`, as runtime values.

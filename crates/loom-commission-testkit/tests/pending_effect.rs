@@ -747,6 +747,8 @@ fn a_trial_limit_reached_while_pending_ends_the_run_waiting() {
         max_tokens_out: None,
         max_duration_ms: None,
         max_cost_micro_usd: None,
+        max_tokens: None,
+        deadline: None,
         per_action: vec![ActionBudget {
             action: CHECK.to_owned(),
             max_trials: Some(2),

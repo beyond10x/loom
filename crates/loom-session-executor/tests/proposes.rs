@@ -879,6 +879,8 @@ fn a_session_usage_is_charged_to_the_run() {
         max_tokens_out: None,
         max_duration_ms: None,
         max_cost_micro_usd: Some(500),
+        max_tokens: None,
+        deadline: None,
         per_action: Vec::new(),
     };
     let end = run(
