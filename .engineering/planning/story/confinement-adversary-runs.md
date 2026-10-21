@@ -2,11 +2,19 @@
 format: aep.planning-md/3
 id: story:confinement-adversary-runs
 kind: story
-status: draft
+status: active
 title: The confinement escape tests run under a delegated scope instead of being ignored
 relations:
 - serves: vision:governed-autonomy
-revision: 1
+scope:
+- confidence: inferred
+  path: crates/loom-intake-slice/src/confinement.rs
+- confidence: cited
+  path: crates/loom-intake-slice/tests/adversary_confinement.rs
+revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-21T13:40:13Z", actor: "human:timo", revision: 4}
+- {from: "proposed", to: "active", at: "2026-10-21T13:40:14Z", actor: "human:timo", revision: 5}
 ---
 ## Outcome
 

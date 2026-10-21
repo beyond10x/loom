@@ -2,11 +2,23 @@
 format: aep.planning-md/3
 id: story:bound-command-process-group
 kind: story
-status: draft
+status: active
 title: A timed-out bound command is killed with every process it started
 relations:
 - serves: vision:governed-autonomy
-revision: 1
+scope:
+- confidence: cited
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
+  path: crates/loom-intake-slice/src/bindings.rs
+- confidence: cited
+  path: crates/loom-intake-slice/src/executor.rs
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-21T13:40:12Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-10-21T13:40:12Z", actor: "human:timo", revision: 4}
 ---
 ## Outcome
 
