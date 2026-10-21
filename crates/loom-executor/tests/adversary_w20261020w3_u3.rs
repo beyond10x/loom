@@ -206,8 +206,8 @@ fn a_wrapper_that_does_not_forward_leaves_the_meter_and_the_budget_agreeing() {
     meter.charge_effects(&end.charges);
     let report = meter.report(&end.run_id);
 
-    // CHANGELOG (Unreleased): "a host whose executor wraps another forwards `run_with_usage`, or
-    // the inner executor's usage reaches neither the run nor its meter"; ess/domains/metering.yaml
+    // CHANGELOG 0.29.0: "an executor wrapping another forwards `run_with_usage`, or the inner
+    // usage reaches neither run nor meter"; ess/domains/metering.yaml
     // (RunUsageReport): the usage an executor call reported is in its step "though the runtime
     // charges both to the run". A step's reported usage the run was never charged for is spend
     // the report shows and the run budget never bounded.

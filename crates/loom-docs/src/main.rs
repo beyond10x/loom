@@ -501,8 +501,8 @@ fn run_events_contract(root: &Path, ess: &Path, check: bool) -> Result<()> {
     if found.iter().any(|difference| difference.breaking) {
         bail!(
             "the declared intake.events breaks the V1 contract in {}: {listed}. Within schema \
-             version 1 only an optional field may be added; name the break under `Breaking:` in \
-             CHANGELOG.md and move the schema version, or keep the declaration",
+             version 1 only an optional field may be added; name the break in a `**Breaking:**` \
+             bullet of CHANGELOG.md and move the schema version, or keep the declaration",
             run_events::CONTRACT
         );
     }

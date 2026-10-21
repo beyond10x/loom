@@ -8,7 +8,7 @@
 //! no existing protocol (byte-identical YAML) and `protocols/system-query/1.yaml` is untouched, so
 //! every other digest is the same. This change therefore refuses the resume of every commission
 //! `run --state` suspended under 0.26.0. The CHANGELOG entry that announces the new bundled protocol
-//! must name that break in its `Breaking:` sentence, as README's `0.20.0` entry named the state
+//! must name that break in a `**Breaking:**` bullet, as the `0.20.0` entry named the state
 //! directories it stopped resuming.
 
 use b10x_loom_intake_slice::case::{RUN_DEFAULTS, intent_revision};
@@ -59,26 +59,25 @@ fn route(catalog: &ProtocolCatalog, without: Option<&str>) -> AcceptedRoute {
     }
 }
 
-/// The paragraph whose `Breaking:` sentence names `protocol`, in the newest CHANGELOG section that
-/// has one: `[Unreleased]` while the change is unreleased, the release's own section once a release
-/// commit moved the entries under it. A later paragraph that only mentions `protocol` (an example in
-/// another change) is not the one announcing it.
-fn newest_paragraph_naming(protocol: &str) -> String {
+/// The `- **Breaking:**` bullets that name `protocol`, in the newest CHANGELOG section that has
+/// one: `[Unreleased]` while the change is unreleased, the release's own section once a release
+/// commit moved the entries under it. A bullet that only mentions `protocol` without
+/// `**Breaking:**` (an example in another change) is not one announcing it.
+fn newest_breaking_bullets_naming(protocol: &str) -> Vec<String> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../CHANGELOG.md");
     let text = std::fs::read_to_string(&path).expect("CHANGELOG.md");
     text.split("\n## [")
         .skip(1)
-        .find_map(|section| {
-            section.split("\n\n").find(|paragraph| {
-                paragraph
-                    .split_once("Breaking:")
-                    .is_some_and(|(_, breaking)| breaking.contains(protocol))
-            })
+        .map(|section| {
+            section
+                .lines()
+                .filter_map(|line| line.trim_start().strip_prefix("- **Breaking:**"))
+                .filter(|bullet| bullet.contains(protocol))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
         })
-        .unwrap_or_else(|| {
-            panic!("no CHANGELOG paragraph names {protocol} with a Breaking sentence")
-        })
-        .to_owned()
+        .find(|bullets| !bullets.is_empty())
+        .unwrap_or_else(|| panic!("no CHANGELOG `**Breaking:**` bullet names {protocol}"))
 }
 
 #[test]
@@ -101,14 +100,11 @@ fn adversary_a_commission_suspended_before_the_new_bundled_protocol_is_refused_b
         return;
     };
 
-    let paragraph = newest_paragraph_naming(ADDED);
-    let breaking = paragraph
-        .split_once("Breaking:")
-        .map(|(_, sentence)| sentence)
-        .unwrap_or_default();
+    let bullets = newest_breaking_bullets_naming(ADDED);
     assert!(
-        breaking.contains("resume"),
-        "a route kept before {ADDED} was bundled is refused on resume ({refusal}), and the \
-         CHANGELOG's Breaking sentence for this change does not name it:\nBreaking:{breaking}"
+        bullets.iter().any(|bullet| bullet.contains("resume")),
+        "a route kept before {ADDED} was bundled is refused on resume ({refusal}), and no \
+         CHANGELOG `**Breaking:**` bullet for this change names it:\n{}",
+        bullets.join("\n")
     );
 }

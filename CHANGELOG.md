@@ -126,7 +126,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Added
 
-- `SubstrateRunner::run_child(&ChildCommand)` confines a program the host names (story:sdk-confines-any-child)
+- `SubstrateRunner::run_child(&ChildCommand)` confines a program, never a shell line (story:sdk-confines-any-child)
 - `loom_sdk::ChildCommand`; `loom_sdk::intake::slice::confinement` re-exports the Substrate types it is named with
 - `ChildCommand::with_egress(EgressAperture)`: a child reaches one named host (story:harness-child-egress-profile)
 - `ChildCommand::with_writable(path)`: a workspace directory a child may write (story:child-writable-workspace)
@@ -136,7 +136,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Changed
 
 - A child runs on a test's launch path and guarantees; an unserved guarantee is a `ConfinementError`, never unconfined
-- Tests and children through one runner share one Substrate driver per workspace directory
+- Tests and children through one runner and its clones share one Substrate driver per workspace directory
+- An aperture Substrate's daemon would never declare (no host or port, a zero ceiling, …) is refused `ScopeInvalid`
 - An egress child's result counts only when Substrate's record is exactly the declared aperture
 - An egress child gets no CA bundle yet, and Substrate serves one aperture per run
 - A frontier that admits nothing still ends `NoAdmissibleAction`
@@ -606,6 +607,7 @@ No breaking changes.
 - `select` drops, for every selector, a confidence that is not a decimal in [0, 1]
 - A compaction of a declared context window leaves the session at or below its target (50 %) where eliding can reach it
 - A fold not replaced by a summary is elided behind one `ELISION_MARKER` item saying how many, how many bytes and why
+- What no compaction removes includes the instruction and tool schemas the provider counts in its input
 - **Breaking:** `LoopStop` gains `ContextAboveTrigger { window, target, occupied }`, in tokens
 - **Breaking:** a run whose session stays at or above its trigger (80 %) ends with it and sends no further request
 
