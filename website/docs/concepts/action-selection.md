@@ -50,8 +50,7 @@ frontier, is never proposed, whatever confidence the selector reported; the Comm
 revalidates every proposal before the effect port sees it. Rule 7 holds too: Loom writes one
 `SelectionRecord` per selection (its strategy, candidate count, chosen action, confidence, latency
 and the tokens the selector reported, and on an overruled fast selection the strategy it fell back
-to), and counts on each governed run's session the selections refused at the execution boundary
-after they were made. Rule 5 holds through `HybridSelector`, at a threshold the host supplies; rule
+to); a selection refused at the execution boundary adds no record. Rule 5 holds through `HybridSelector`, at a threshold the host supplies; rule
 6 is design.
 
 ## Beyond tool selection

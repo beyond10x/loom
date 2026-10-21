@@ -42,5 +42,4 @@ a bounded preview but explicitly have no reference; existing references remain u
 
 Test output is explicitly partial: the existing runner already retains a tail. Loom preserves that
 captured representation and its exit/timeout metadata; it cannot retrieve output discarded upstream.
-This integration affects the governed local slice, not the separately ported Harness loop or an
-installed Claude Code or Codex process.
+This integration affects the governed local slice, not an installed Claude Code or Codex process.
