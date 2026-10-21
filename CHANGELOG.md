@@ -12,6 +12,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-10-21
+
 ### Added
 
 - `LoopContext::stop_policy` returns a `StopPolicy`: the host turns the approval gate off and sets the idle bound (story:stop-policy-gate-and-idle-bound)
@@ -907,7 +909,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.31.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.32.0...HEAD
+[0.32.0]: https://github.com/beyond10x/loom/releases/tag/0.32.0
 [0.31.0]: https://github.com/beyond10x/loom/releases/tag/0.31.0
 [0.30.0]: https://github.com/beyond10x/loom/releases/tag/0.30.0
 [0.29.0]: https://github.com/beyond10x/loom/releases/tag/0.29.0
