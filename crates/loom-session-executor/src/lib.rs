@@ -230,7 +230,9 @@ pub struct SessionExecutor {
     pub kind: Kind,
     /// The workspace the copy is made from; never written.
     pub workspace: PathBuf,
-    /// The files copied, by their paths relative to the workspace.
+    /// The files copied, by their paths relative to the workspace, each spelled as one plain
+    /// relative path ([`plain_relative`]); a call naming any other spelling fails before the copy
+    /// is made.
     pub files: Vec<String>,
     /// The prompt the session is given, whole.
     pub brief: String,
@@ -420,6 +422,19 @@ impl SessionExecutor {
 
     /// One session: the copy made, the session run in it to its end, the proposal read.
     fn session(&self, report: &mut SessionReport) -> Result<Proposal, String> {
+        // One spelling per file: the copy's base and the walk of the copy key a file by the
+        // same string only when the embedder named it plainly.
+        let unplain: Vec<&str> = self
+            .files
+            .iter()
+            .map(String::as_str)
+            .filter(|file| !plain_relative(file))
+            .collect();
+        if !unplain.is_empty() {
+            return Err(format!(
+                "the named files {unplain:?} are not plain paths relative to the workspace"
+            ));
+        }
         let copy = ScratchCopy::make(&self.scratch, &self.workspace, &self.files)?;
         report.cwd = Some(copy.dir.clone());
         let builder = Metaharness::from_spec(self.spec(&copy.dir)?);
@@ -1322,14 +1337,14 @@ fn reply(text: &str) -> Result<(String, String), String> {
 }
 
 /// Whether `path` is one plain path relative to a root: no root, no `.` or `..` part, no part
-/// named `.git`, not empty.
+/// named `.git`, no empty part (`a//b`, a trailing `/`), not empty. Read by the string's own
+/// `/`-separated parts, so a file has one plain spelling only.
 #[must_use]
 pub fn plain_relative(path: &str) -> bool {
-    !path.is_empty()
-        && !path.contains('\0')
-        && Path::new(path)
-            .components()
-            .all(|part| matches!(part, Component::Normal(name) if name != ".git"))
+    !path.contains('\0')
+        && path
+            .split('/')
+            .all(|part| !matches!(part, "" | "." | ".." | ".git"))
 }
 
 /// Whether `path`, a plain relative path ([`plain_relative`]), reaches through a link inside
@@ -1975,6 +1990,37 @@ mod tests {
             .map(|file| file.path)
             .collect();
         assert_eq!(paths, ["src/new.rs"]);
+    }
+
+    /// A plain path is read by its own `/`-separated parts: a `.`, `..`, `.git` or empty part,
+    /// a root, a NUL or the empty string is not plain.
+    #[test]
+    fn a_file_has_one_plain_spelling() {
+        for plain in [
+            "src/lib.rs",
+            "README.md",
+            ".gitignore",
+            "a/.github/b",
+            "..a/b.",
+        ] {
+            assert!(plain_relative(plain), "{plain}");
+        }
+        for unplain in [
+            "",
+            "/",
+            "/src/lib.rs",
+            "src/./lib.rs",
+            "./src/lib.rs",
+            "src//lib.rs",
+            "src/",
+            "src/lib.rs/.",
+            "src/../lib.rs",
+            "a/.git/HEAD",
+            ".git",
+            "a\0b",
+        ] {
+            assert!(!plain_relative(unplain), "{unplain:?}");
+        }
     }
 
     /// A named directory turned into a link while the session ran: the copied file under it is

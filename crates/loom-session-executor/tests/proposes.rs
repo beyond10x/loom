@@ -668,6 +668,40 @@ fn a_concurrent_write_to_a_file_the_session_changed_suspends_the_step() {
     }
 }
 
+/// A named file spelled other than as one plain relative path (a `.` part, an empty part, a
+/// trailing `/`, a root) fails the step before any session starts: it suspends with
+/// `ExternalAvailability` naming the spelling, records nothing and leaves the workspace as it was.
+#[test]
+fn a_named_file_not_spelled_plainly_suspends_before_any_session() {
+    let fixture = Fixture::new("unplain");
+    let case = CaseId("case-unplain".to_owned());
+    let before = fixture.bytes();
+    for (spelling, frontier_id) in [
+        ("src/./lib.rs", 0xf1),
+        ("src//lib.rs", 0xf2),
+        ("src/", 0xf3),
+        ("/src/lib.rs", 0xf4),
+    ] {
+        let script = Script::fixing();
+        let mut executor = fixture.executor(&script);
+        executor.files.push(spelling.to_owned());
+
+        let step = executor.run_with_usage(&commission(&case), &frontier(&case, frontier_id));
+
+        let why = match &step.outcome {
+            ExecutorOutcome::Suspended(suspended) => match &suspended.reason {
+                SuspensionReason::ExternalAvailability(Value::Text(why)) => why.clone(),
+                other => panic!("{spelling}: suspended for {other:?}"),
+            },
+            other => panic!("{spelling}: the step was not refused: {other:?}"),
+        };
+        assert!(why.contains(spelling), "{spelling}: {why}");
+        assert_eq!(script.calls(), 0, "{spelling}: a session started");
+        assert!(executor.sessions().is_empty(), "{spelling}: recorded");
+        assert_eq!(fixture.bytes(), before, "{spelling}: the workspace changed");
+    }
+}
+
 /// With a test effect, the admitted proposal's files reach the workspace only through the
 /// effect: the effect finds the workspace as it was, and leaves it changed.
 #[test]
