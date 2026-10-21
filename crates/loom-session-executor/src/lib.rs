@@ -11,7 +11,7 @@
 //!
 //! | kind | harness | hermetic | calls |
 //! |---|---|---|---|
-//! | `Claude` | Claude Code | `Strict` | decided here (`Ask`): the file tools [`TOOLS`] on paths inside the copy |
+//! | `Claude` | Claude Code | `Strict` | decided here (`Ask`): the file tools [`TOOLS`] on paths inside the copy; restricted, auto-memory and the cross-session inbox off ([`CLAUDE_ARGUMENTS`]) |
 //! | `Codex` | Codex (`codex exec`) | `On`, H9 gating | decided here (`Ask`): `Bash` and `apply_patch` ([`CODEX_TOOLS`]) naming no path outside the copy; its own sandbox (`workspace-write` on the copy, no network) confines what a command writes; its home is its own ([`HOME_VARIABLES`]) |
 //! | `B10x` | b10x-harness | `On`, a gap holds the proposal | observed, never decided: metaharness's b10x adapter decides no call; the loop's toolset is what substrate confines to the copy |
 //!
@@ -336,15 +336,23 @@ impl SessionExecutor {
             (false, Some(program), kind) => Some(Named::new(kind, program.display().to_string())),
             (false, None, Kind::Codex) => Some(Named::new(Kind::Codex, "codex".to_owned())),
         };
+        // Claude Code's with no program named: metaharness's own spawn, which `start` would use,
+        // so that every Claude Code session starts through [`Restricted`].
+        let mut spawn = metaharness::SpawnRunner::new();
         let runner: Option<&mut dyn ProcessRunner> = match (supplied.as_mut(), named.as_mut()) {
             (Some(runner), _) => Some(runner.as_mut()),
             (None, Some(named)) => Some(named),
+            (None, None) if self.kind == Kind::Claude => Some(&mut spawn),
             (None, None) => None,
         };
         let started = match (runner, &home) {
             (Some(inner), Some(home)) => {
                 let mut homed = Homed { home, inner };
                 builder.start_with(Input::FromSpec, &mut homed, &mut *seams)
+            }
+            (Some(inner), None) if self.kind == Kind::Claude => {
+                let mut restricted = Restricted { inner };
+                builder.start_with(Input::FromSpec, &mut restricted, &mut *seams)
             }
             (Some(runner), None) => builder.start_with(Input::FromSpec, runner, &mut *seams),
             (None, _) => builder.start(Input::FromSpec),
@@ -631,6 +639,41 @@ impl ProcessRunner for Homed<'_> {
         }
         let homed = metaharness::LaunchPlanView { env: &env, ..*plan };
         self.inner.start(&homed)
+    }
+}
+
+/// The arguments a Claude Code session's child is given after those metaharness plans: a
+/// restricted session, as the print-mode step's was. Claude Code (2.1.304) starts a restricted
+/// session with auto-memory off, so its opening record names no memory directory
+/// (`memory_paths`) and its first request carries no auto-memory section, and with no
+/// cross-session inbox (`messaging_socket_path`); it still reads the `--settings` metaharness
+/// names, its hook among them, and confines the file tools to the working directory, the copy.
+/// metaharness writes the settings file itself and takes no setting for either, so the
+/// executor gives the child the argument ([`Restricted`]).
+pub const CLAUDE_ARGUMENTS: [&str; 1] = ["--restricted"];
+
+/// The runner a Claude Code session starts through: its child's arguments are the ones
+/// metaharness planned, then [`CLAUDE_ARGUMENTS`].
+struct Restricted<'a> {
+    inner: &'a mut dyn ProcessRunner,
+}
+
+impl ProcessRunner for Restricted<'_> {
+    fn requires_executable(&self) -> bool {
+        self.inner.requires_executable()
+    }
+
+    fn start(
+        &mut self,
+        plan: &metaharness::LaunchPlanView,
+    ) -> std::io::Result<Box<dyn metaharness::HarnessProcess>> {
+        let mut args = plan.args.to_vec();
+        args.extend(CLAUDE_ARGUMENTS.iter().map(|arg| (*arg).to_owned()));
+        let restricted = metaharness::LaunchPlanView {
+            args: &args,
+            ..*plan
+        };
+        self.inner.start(&restricted)
     }
 }
 
@@ -1751,5 +1794,153 @@ mod tests {
         assert!(copy.dir.join("a.txt").is_file());
         assert!(std::fs::symlink_metadata(copy.dir.join(".git")).is_err());
         assert!(std::fs::symlink_metadata(copy.dir.with_file_name("git")).is_err());
+    }
+
+    /// The arguments of each plan a [`Recording`] runner was started with.
+    type Plans = std::rc::Rc<RefCell<Vec<Vec<String>>>>;
+
+    /// A scripted Claude Code session that keeps the arguments of the plan it is started with,
+    /// then replies naming `tests.write`.
+    struct Recording(Plans);
+
+    impl ProcessRunner for Recording {
+        fn requires_executable(&self) -> bool {
+            false
+        }
+
+        fn start(
+            &mut self,
+            plan: &metaharness::LaunchPlanView,
+        ) -> std::io::Result<Box<dyn metaharness::HarnessProcess>> {
+            self.0.borrow_mut().push(plan.args.to_vec());
+            let init = serde_json::json!({
+                "type": "system", "subtype": "init", "claude_code_version": "2.1.304",
+                "cwd": plan.cwd.display().to_string(), "tools": TOOLS, "mcp_servers": [],
+                "plugins": [], "output_style": "default", "apiKeySource": "none",
+                "model": "scripted", "permissionMode": "default", "session_id": "s-1",
+            });
+            let reply = serde_json::json!({
+                "type": "assistant",
+                "message": {"content": [{"type": "text",
+                                         "text": "{\"action\": \"tests.write\", \"summary\": \"s\"}"}],
+                            "usage": {"input_tokens": 1, "output_tokens": 1}},
+            });
+            let result = serde_json::json!({
+                "type": "result", "subtype": "success", "is_error": false, "num_turns": 1,
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            });
+            metaharness::ScriptedRunner::of_lines(
+                [init.to_string(), reply.to_string(), result.to_string()],
+                metaharness::ScriptedLog::new(),
+            )
+            .start(plan)
+        }
+    }
+
+    /// A Claude Code session's child is started restricted, auto-memory and the cross-session inbox off: `--restricted`
+    /// among its arguments beside metaharness's own `--settings`, whatever runner starts it.
+    #[test]
+    fn a_claude_session_starts_with_auto_memory_off() {
+        let scratch = Scratch::new("memory");
+        let tree = scratch.0.join("tree");
+        std::fs::create_dir_all(&tree).expect("the tree");
+        std::fs::write(tree.join("a.txt"), "a\n").expect("a file");
+        let plans = Plans::default();
+        let mut executor = SessionExecutor::new(&tree, vec!["a.txt".to_owned()], "brief")
+            .with_runner(Box::new(Recording(std::rc::Rc::clone(&plans))));
+        executor.credentials = CredentialSource::None;
+        executor.scratch = scratch.0.join("scratch");
+        let mut report = SessionReport::default();
+        let proposal = executor.session(&mut report);
+        assert_eq!(
+            proposal.map(|proposal| proposal.action),
+            Ok("tests.write".to_owned()),
+            "{:?}",
+            report.floor
+        );
+        let plans = plans.borrow();
+        assert_eq!(plans.len(), 1, "one session");
+        assert!(
+            plans[0].iter().any(|arg| arg == "--restricted"),
+            "the child's arguments: {:?}",
+            plans[0]
+        );
+        assert!(
+            plans[0].iter().any(|arg| arg == "--settings"),
+            "{:?}",
+            plans[0]
+        );
+    }
+
+    /// Set in the child [`a_claude_session_metaharness_spawns_starts_with_auto_memory_off`]
+    /// runs: the file the double writes its arguments to.
+    const SPAWN_CHILD: &str = "SESSION_EXECUTOR_SPAWN_CHILD";
+
+    /// The same with no runner and no program named: metaharness's own spawn starts the
+    /// `claude` on the `PATH` it gives its child, `$HOME/.local/bin` first. Run in a child of
+    /// this test binary whose `HOME` holds a double there that writes its arguments out.
+    #[test]
+    fn a_claude_session_metaharness_spawns_starts_with_auto_memory_off() {
+        if let Some(seen) = std::env::var_os(SPAWN_CHILD) {
+            let scratch = Scratch::new("memory-spawn");
+            let tree = scratch.0.join("tree");
+            std::fs::create_dir_all(&tree).expect("the tree");
+            std::fs::write(tree.join("a.txt"), "a\n").expect("a file");
+            let mut executor = SessionExecutor::new(&tree, vec!["a.txt".to_owned()], "brief");
+            executor.credentials = CredentialSource::None;
+            executor.scratch = scratch.0.join("scratch");
+            let mut report = SessionReport::default();
+            let proposal = executor.session(&mut report);
+            assert_eq!(
+                proposal.map(|proposal| proposal.action),
+                Ok("tests.write".to_owned()),
+                "{:?} {:?}",
+                report.error,
+                report.floor
+            );
+            assert!(Path::new(&seen).is_file(), "the double ran");
+            return;
+        }
+        let scratch = Scratch::new("memory-spawn-home");
+        let home = scratch.0.join("home");
+        let bin = home.join(".local/bin");
+        std::fs::create_dir_all(&bin).expect("a program directory");
+        let seen = scratch.0.join("args");
+        let double = r#"#!/bin/sh
+printf '%s\n' "$@" > '@SEEN@'
+printf '%s\n' "{\"type\":\"system\",\"subtype\":\"init\",\"claude_code_version\":\"2.1.304\",\"cwd\":\"$PWD\",\"tools\":[\"Read\",\"Edit\",\"Write\",\"Glob\",\"Grep\"],\"mcp_servers\":[],\"plugins\":[],\"output_style\":\"default\",\"apiKeySource\":\"none\",\"model\":\"scripted\",\"permissionMode\":\"default\",\"session_id\":\"s-1\"}"
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"{\"action\": \"tests.write\", \"summary\": \"s\"}","usage":{"input_tokens":1,"output_tokens":1}}'
+"#
+        .replace("@SEEN@", &seen.display().to_string());
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::write(bin.join("claude"), double).expect("the double");
+            std::fs::set_permissions(bin.join("claude"), std::fs::Permissions::from_mode(0o755))
+                .expect("its mode");
+        }
+        let output = std::process::Command::new(std::env::current_exe().expect("this binary"))
+            .args([
+                "--exact",
+                "tests::a_claude_session_metaharness_spawns_starts_with_auto_memory_off",
+                "--nocapture",
+            ])
+            .env(SPAWN_CHILD, &seen)
+            .env("HOME", &home)
+            .output()
+            .expect("the child runs");
+        let said = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            output.status.success() && said.contains("1 passed"),
+            "{said}"
+        );
+        let args = std::fs::read_to_string(&seen).expect("the double's arguments");
+        assert!(
+            args.lines().any(|line| line == "--restricted"),
+            "the child's arguments:\n{args}"
+        );
     }
 }
