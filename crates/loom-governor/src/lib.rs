@@ -136,6 +136,10 @@ use loom_protocols::ProtocolCatalog;
 /// The generated `loom` model: [`evaluate`] reads and returns its `loom.evaluation` types.
 pub use loom as model;
 
+/// How a case completes when several declared outcomes are legitimate at once
+/// (`loom.governor.CompletionRule`, [`CanonGovernor::with_completion_rule`]).
+pub use loom::governor::CompletionRule;
+
 use loom::evaluation::{
     ActionStatus as DecidedStatus, ClaimValue, DecidedAction, DecidedClaim, DecidedObligation,
     EvaluationDecision, EvaluationInput, EvaluationRefusal, EvaluationRequest, ExplicitDecision,
@@ -688,15 +692,31 @@ impl fmt::Display for EvidenceRefusal {
 impl std::error::Error for EvidenceRefusal {}
 
 /// A governor that decides with Canon, over cases kept in `S`.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CanonGovernor<S, T = NoEvaluationTime> {
     store: S,
     protocols: BTreeMap<String, Ir>,
     catalog_definitions: Option<BTreeMap<String, String>>,
     time: T,
+    /// How a case completes when several declared outcomes are legitimate at once
+    /// ([`CanonGovernor::with_completion_rule`]).
+    completion_rule: CompletionRule,
     /// The documents behind the frontiers this governor issued, keyed by case id
     /// ([`CanonGovernor::decision_document`]).
     kept: Mutex<BTreeMap<String, KeptDocuments>>,
+}
+
+impl<S: Default, T: Default> Default for CanonGovernor<S, T> {
+    fn default() -> Self {
+        Self {
+            store: S::default(),
+            protocols: BTreeMap::new(),
+            catalog_definitions: None,
+            time: T::default(),
+            completion_rule: CompletionRule::ExactlyOne,
+            kept: Mutex::default(),
+        }
+    }
 }
 
 /// How many decision documents the governor keeps for one case: the documents behind the most
@@ -723,6 +743,7 @@ impl<S: FallibleCaseStore> CanonGovernor<S> {
             protocols: BTreeMap::new(),
             catalog_definitions: None,
             time: NoEvaluationTime,
+            completion_rule: CompletionRule::ExactlyOne,
             kept: Mutex::default(),
         }
     }
@@ -842,8 +863,21 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             protocols: self.protocols,
             catalog_definitions: self.catalog_definitions,
             time,
+            completion_rule: self.completion_rule,
             kept: self.kept,
         }
+    }
+
+    /// How a case completes when several outcomes its protocol declares are legitimate at once:
+    /// [`CompletionRule::ExactlyOne`], the default, leaves it open; [`CompletionRule::FirstDeclared`]
+    /// completes it on the first of them in the admitted protocol definition's declaration order.
+    /// Neither completes on an outcome Canon holds blocked. Host configuration, given when the
+    /// governor is built: never read from a case or a model, and not stored with a case (see the
+    /// crate documentation, "Evaluation").
+    #[must_use]
+    pub fn with_completion_rule(mut self, rule: CompletionRule) -> Self {
+        self.completion_rule = rule;
+        self
     }
 
     fn protocol_ir(&self, protocol: &str) -> Result<Ir, OpenError> {

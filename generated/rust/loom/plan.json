@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "53e615001102d5db4bf2a24bfaf7658e84c8763e6c694beeaed3e3944d5b2c5e",
-    "contract_digest": "91b11340c21ba91ed1f55878ed7c3283b927534dde34698c5273def13b1a792d"
+    "source_digest": "bc642d94f69cbdf95d14cb3073a6e846e7b335b8f96633ed6adcced128ea5a81",
+    "contract_digest": "c07e0b81375fb91ac34301173b7fefb2d8b8934d257db5f1db8bf32a80e2227f"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -237,6 +237,13 @@
     {
       "kind": "domain_type",
       "source": "loom.evaluation.ProtocolName",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.governor.CompletionRule",
       "disposition": {
         "disposition": "generated"
       }
