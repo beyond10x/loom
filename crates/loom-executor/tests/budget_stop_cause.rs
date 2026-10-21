@@ -6,7 +6,9 @@
 //!
 //! The model is scripted in this process: its one turn calls a catalogue action and reports 150
 //! input tokens against a ceiling of 100, so the loop stops before the call is put to the pipeline.
-//! The workflow judgement-step case is `tests/workflow_executor.rs`
+//! A workflow's judgement step no longer runs this loop (`story:judgement-step-any-executor`): its
+//! chooser's input-token budget suspends the run with the same `LoopBudget` stop, in
+//! `tests/workflow_executor.rs`
 //! (`a_judgement_step_stopped_by_its_input_token_budget_suspends_the_run_for_it`).
 
 use std::collections::VecDeque;

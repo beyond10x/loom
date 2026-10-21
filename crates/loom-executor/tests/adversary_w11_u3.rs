@@ -6,16 +6,16 @@
 //! Attacked here: type confusion (an integer with a fraction, a boolean spelt as a string, a list
 //! of mixed items, `null`); RFC 6901 pointer edges (`~0`/`~1` and their order, the empty pointer,
 //! an array index, a leading-zero index, `-`); a reference deep inside the arguments; a resolved
-//! value shaped like a reference; a model's arguments shaped like a reference; outputs of a step
-//! whose first effect was refused; two steps with the same request; a log carried over from an
-//! earlier executor; a resolved request still revalidated and gated by Commission; a step after a
-//! resolved one still reached; determinism across reruns. The governor, effect port and model are
+//! value shaped like a reference; a judgement step's arguments shaped like a reference; outputs of
+//! a step whose first effect was refused; two steps with the same request; a log carried over from
+//! an earlier executor; a resolved request still revalidated and gated by Commission; a step after
+//! a resolved one still reached; determinism across reruns. The governor, the effect port and the
+//! executor the host supplies for judgement steps (`story:judgement-step-any-executor`) are
 //! scripted; nothing reaches a network.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
-use std::time::Duration;
 
 use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::json::Value as CommissionValue;
@@ -24,27 +24,22 @@ use b10x_loom_commission::model::responsibility::{
     ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, AuthorityVerdict,
     AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData, CommissionId,
     CompletionDetermination, CompletionDeterminationComplete, EffectOutcome,
-    EffectOutcomePerformed, EffectOutcomeRefused, Frontier, FrontierAction, FrontierData,
-    FrontierId, GovernorError, Observation, ObservationId, PrincipalId, RunId, RunOutcome, Unit,
-    commission_state, frontier_state, observation_state,
+    EffectOutcomePerformed, EffectOutcomeRefused, ExecutorOutcome, ExecutorOutcomeProposedAction,
+    Frontier, FrontierAction, FrontierData, FrontierId, GovernorError, Observation, ObservationId,
+    PrincipalId, ProposedActionArguments, RunId, RunOutcome, Unit, commission_state,
+    frontier_state, observation_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use b10x_loom_commission::ports::evidence::ObservationPort;
+use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked};
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
-use b10x_loom_executor::harness::responses;
-use b10x_loom_executor::harness::turn_loop::LoopConfig;
-use b10x_loom_executor::harness::wire::{
-    CallId, Item, ModelPort, StopReason, StreamSink, ToolCall, ToolName, TurnOutcome, TurnRequest,
-    WireError, WireId,
-};
-use b10x_loom_executor::model::primitives::Uuid;
-use b10x_loom_executor::model::run::{CommissionRunId, SessionData, SessionId};
 use b10x_loom_executor::model::workflow::WorkflowDefinition;
-use b10x_loom_executor::workflow::{self, DefinitionError, RecordingEffects, WorkflowExecutor};
-use b10x_loom_executor::{EmptyObjectArguments, FirstAdmissibleSelector, Loom};
+use b10x_loom_executor::workflow::{
+    self, DefinitionError, Judgement, RecordingEffects, WorkflowExecutor,
+};
 use serde_json::json;
 
 const CASE: &str = "CASE-ADV-OUTPUTS";
@@ -244,40 +239,49 @@ impl EffectPort for ScriptedEffects<'_> {
     }
 }
 
-/// A scripted model counting its calls.
-struct ScriptedModel {
-    wire: WireId,
-    turns: VecDeque<TurnOutcome>,
-    asked: usize,
+/// The host's executor of judgement steps, counting its calls: each proposes the next scripted
+/// action and arguments, as an agent the workflow knows nothing of writes them.
+struct Host {
+    script: Mutex<VecDeque<(&'static str, serde_json::Value)>>,
+    asked: AtomicU64,
 }
 
-impl ModelPort for ScriptedModel {
-    fn wire(&self) -> &WireId {
-        &self.wire
-    }
+/// The host's executor built for one judgement.
+struct HostStep<'h> {
+    host: &'h Host,
+}
 
-    fn turn(
-        &mut self,
-        _request: &TurnRequest,
-        _sink: &mut dyn StreamSink,
-    ) -> Result<TurnOutcome, WireError> {
-        self.asked += 1;
-        self.turns
+impl AgentExecutor for HostStep<'_> {
+    fn run(
+        &self,
+        _commission: &Commission<commission_state::Assigned>,
+        _frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorOutcome {
+        self.host.asked.fetch_add(1, Ordering::SeqCst);
+        match self
+            .host
+            .script
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
             .pop_front()
-            .ok_or_else(|| WireError::protocol("the script has no further turn"))
+        {
+            Some((action, arguments)) => {
+                ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
+                    action: action.to_owned(),
+                    arguments: ProposedActionArguments(cv(arguments)),
+                })
+            }
+            None => ExecutorOutcome::NoUsefulAction(Unit(true)),
+        }
     }
 }
 
-fn calls(id: &str, tool: &str, arguments: serde_json::Value) -> TurnOutcome {
-    TurnOutcome {
-        stop_reason: StopReason::ToolCalls,
-        items: vec![Item::ToolCall(ToolCall {
-            call_id: CallId::new(id).expect("valid"),
-            name: ToolName::new(tool).expect("valid"),
-            arguments,
-        })],
-        usage: None,
-    }
+/// The host's executor proposes `action` with `arguments`.
+fn proposes(
+    action: &'static str,
+    arguments: serde_json::Value,
+) -> (&'static str, serde_json::Value) {
+    (action, arguments)
 }
 
 #[derive(Default)]
@@ -305,19 +309,11 @@ impl LoopContext for Context {
     }
 }
 
-fn session() -> SessionData {
-    SessionData {
-        session_id: SessionId(Uuid("00000000-0000-4000-8000-00000000a013".to_owned())),
-        commission_run: CommissionRunId(Uuid("00000000-0000-4000-8000-00000000a0ac".to_owned())),
-        wire: responses::WIRE.to_owned(),
-        boundary_refusals: 0,
-    }
-}
-
 /// What one run ended with.
 struct Ran {
     end: LoopEnd,
-    asked: usize,
+    /// The calls of the host's executor.
+    asked: u64,
     performed: Vec<String>,
     outputs: Vec<(String, String, CommissionValue)>,
 }
@@ -354,27 +350,20 @@ impl Ran {
     }
 }
 
-/// Runs `text` once on `case` through `effects`, with a model answering `turns`.
+/// Runs `text` once on `case` through `effects`, its judgement steps on the host's executor
+/// proposing `proposals` in order.
 fn run_on(
     case: &Case,
     effects: &RecordingEffects<ScriptedEffects<'_>>,
     text: &str,
-    turns: Vec<TurnOutcome>,
+    proposals: Vec<(&'static str, serde_json::Value)>,
 ) -> Ran {
-    let loom = Loom::new(FirstAdmissibleSelector, EmptyObjectArguments, "hand over")
-        .with_instance("workflow-outputs-adversary")
-        .with_governor(case);
-    let model = ScriptedModel {
-        wire: WireId::new(responses::WIRE).expect("valid"),
-        turns: turns.into(),
-        asked: 0,
+    let host = Host {
+        script: Mutex::new(proposals.into()),
+        asked: AtomicU64::new(0),
     };
-    let executor = WorkflowExecutor::new(
-        &loom,
-        model,
-        LoopConfig::new("scripted-model", "INSTRUCTIONS")
-            .with_retry_backoff(Duration::from_millis(1)),
-        session(),
+    let executor = WorkflowExecutor::with_executor(
+        |_: &Judgement| HostStep { host: &host },
         definition(text),
         effects.log(),
     );
@@ -399,10 +388,10 @@ fn run_on(
     )
     .unwrap_or_else(|error| panic!("the loop failed: {error:?}"));
     let outputs = executor.outputs();
-    let asked = executor.into_model().asked;
+    drop(executor);
     Ran {
         end,
-        asked,
+        asked: host.asked.load(Ordering::SeqCst),
         performed: case.performed(),
         outputs,
     }
@@ -413,11 +402,11 @@ fn run(
     text: &str,
     blocked: Vec<&'static str>,
     script: Vec<(&'static str, Vec<Reply>)>,
-    turns: Vec<TurnOutcome>,
+    proposals: Vec<(&'static str, serde_json::Value)>,
 ) -> Ran {
     let case = Case::new(blocked);
     let effects = RecordingEffects::new(ScriptedEffects::new(&case, script));
-    run_on(&case, &effects, text, turns)
+    run_on(&case, &effects, text, proposals)
 }
 
 /// A serde_json value as Commission's JSON, numbers in serde_json's spelling.
@@ -755,8 +744,9 @@ steps:
     );
 }
 
-/// A model's arguments shaped like a reference are the model's, carried as written: only a
-/// deterministic step's own arguments are resolved, so a model cannot read an output through one.
+/// A judgement step's arguments shaped like a reference are its executor's, carried as written:
+/// only a deterministic step's own arguments are resolved, so an executor (a model, or the host's
+/// agent) cannot read an output through one.
 #[test]
 fn a_models_arguments_shaped_like_a_reference_are_not_resolved() {
     let judged = r#"
@@ -778,9 +768,8 @@ steps:
         judged,
         Vec::new(),
         vec![(INSPECT, performed(cv(json!({"id": "c-17"}))))],
-        vec![calls(
-            "call_edit",
-            "implementation_edit",
+        vec![proposes(
+            EDIT,
             json!({"ref": {"$step": "read", "$output": "id"}}),
         )],
     );
@@ -794,8 +783,8 @@ steps:
 }
 
 /// An output a judgement step declares is read from its effect's report, never from the
-/// arguments the model wrote; or a judgement step's outputs are refused at load (they are out of
-/// the story's scope).
+/// arguments its executor wrote; or a judgement step's outputs are refused at load (they are out
+/// of the story's scope).
 #[test]
 fn a_judgement_steps_output_never_carries_the_models_value() {
     let judged = r#"
@@ -820,11 +809,7 @@ steps:
         judged,
         Vec::new(),
         vec![(EDIT, performed(cv(json!({"path": "from-report"}))))],
-        vec![calls(
-            "call_edit",
-            "implementation_edit",
-            json!({"path": "from-model"}),
-        )],
+        vec![proposes(EDIT, json!({"path": "from-model"}))],
     );
     assert_eq!(ran.actions(), [EDIT, RUN], "{:?}", ran.end.outcome);
     assert_eq!(

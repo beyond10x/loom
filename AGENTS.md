@@ -106,11 +106,11 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | Every selection gets one `SelectionRecord` equal to it, with `fell_back_to` on the overruled fast selection naming the replacement's strategy; a selection refused at the execution boundary raises its session's `boundary_refusals` by one and adds no record; neither is evidence | `crates/loom-executor/tests/selection_telemetry.rs` (`selection_telemetry_is_recorded`) |
 | Laya selects behind the confidence fallback; arguments are generated once, only for the finally selected action, and an action outside the frontier never reaches argument generation or revalidation | `crates/loom-selector-laya/tests/laya_arguments_slice.rs` (`a_choice_outside_the_frontier_is_rejected_and_never_reaches_arguments_or_revalidation`) |
 | A blocked or merge-seeking pick is never proposed | `crates/loom-executor/tests/adversary_executor_admission.rs` |
-| A workflow asks a model only in a judgement step, offering it only that step's actions; a step whose action the frontier does not list ends `NeedsHumanJudgment` naming it and nothing is proposed; a step advances only once its request was `Performed`; a definition naming an action outside its protocol is refused at load, naming the step | `crates/loom-executor/tests/workflow_executor.rs` (`deterministic_steps_call_no_model`, `a_judgement_step_offers_the_model_only_its_actions`, `a_step_the_frontier_does_not_list_ends_needing_human_judgment`, `a_step_advances_only_after_its_effect_was_performed`, `a_definition_naming_an_action_outside_its_protocol_is_refused`) |
+| A workflow asks a model only in a judgement step, offering it only that step's actions; a judgement step runs on the host's own `AgentExecutor` when it supplies one, called for that step only, told its instructions and handed only its actions, and a proposal outside them, or reads proposed together, never reach Commission; a step whose action the frontier does not list ends `NeedsHumanJudgment` naming it and nothing is proposed; a step advances only once its request was `Performed`; a definition naming an action outside its protocol is refused at load, naming the step | `crates/loom-executor/tests/workflow_executor.rs` (`deterministic_steps_call_no_model`, `a_judgement_step_offers_the_model_only_its_actions`, `a_judgement_step_runs_on_a_supplied_executor`, `a_supplied_executors_reads_proposed_together_are_never_proposed`, `a_step_the_frontier_does_not_list_ends_needing_human_judgment`, `a_step_advances_only_after_its_effect_was_performed`, `a_definition_naming_an_action_outside_its_protocol_is_refused`), `crates/loom-executor/tests/adversary_w11_u2.rs` |
 | A later step's arguments carry an earlier step's typed output with no model call, and a missing or mistyped output, or one its step did not produce, proposes nothing and ends `NeedsHumanJudgment` naming the step and the output; a reference to a later, unknown or undeclared output is refused at load | `crates/loom-executor/tests/workflow_step_outputs.rs` (`a_later_step_reads_an_earlier_output_without_a_model`, `a_mistyped_output_ends_needing_human_judgment`, `an_absent_output_ends_needing_human_judgment`, `a_reference_to_a_later_or_unknown_step_is_refused_at_load`, `outputs_are_identical_on_a_rerun_with_the_same_reports`) |
 | A judgement step sees exactly the earlier outputs it lists, typed, in one data block of its instructions that no value can close, never as instructions; a listed output the run did not produce asks the model nothing and ends `NeedsHumanJudgment` naming the step and the output; an input naming no earlier declared output, or listed twice, is refused at load | `crates/loom-executor/tests/workflow_step_outputs.rs` (`a_judgement_step_reads_a_listed_output_as_data`, `a_judgement_step_listing_an_absent_output_asks_no_model`, `a_judgement_step_input_naming_no_earlier_output_is_refused_at_load`) |
 | A workflow run's record, written after every performed step to the governor's `FileWorkflowRunStore` keyed by the Run id, lets `resume(run_id)` in another process continue the run after an approval or a crash between steps, every output bound, no performed step invoked again, and the usage report covering every segment; a record of another Run is refused, never read | `crates/loom-commission-testkit/tests/workflow_run_store.rs` (`a_step_result_survives_a_restart_across_an_approval`, `the_usage_report_covers_every_segment_of_a_resumed_run`, `a_step_result_of_another_run_is_refused`, `a_workflow_resumes_after_a_crash_between_steps`) |
-| A governed run stopped by a budget of its model loop is `Suspended` with `LoopBudget` carrying the loop's stop, through `Loom::run_loop`, `LoopExecutor` and a workflow's judgement step, never `NoUsefulAction` | `crates/loom-executor/tests/budget_stop_cause.rs` (`a_governed_run_stopped_by_its_input_token_budget_reports_the_budget`), `crates/loom-executor/tests/workflow_executor.rs` (`a_judgement_step_stopped_by_its_input_token_budget_suspends_the_run_for_it`) |
+| A governed run stopped by a budget of its model loop is `Suspended` with `LoopBudget` carrying the loop's stop, through `Loom::run_loop` and `LoopExecutor`, and so is a workflow run whose judgement step's chooser reached its input-token budget or could not observe it, never `NoUsefulAction` | `crates/loom-executor/tests/budget_stop_cause.rs` (`a_governed_run_stopped_by_its_input_token_budget_reports_the_budget`), `crates/loom-executor/tests/workflow_executor.rs` (`a_judgement_step_stopped_by_its_input_token_budget_suspends_the_run_for_it`, `a_judgement_step_whose_budget_cannot_be_observed_suspends_the_run_for_it`) |
 | A stale or unlisted request is refused at revalidation | `crates/loom-commission-testkit/tests/action_request.rs`, `crates/loom-executor/tests/adversary_run_revalidation.rs`, `crates/loom-executor/tests/selection_revalidation.rs` |
 | Unknown capabilities and panicking authority providers yield no grant | `crates/loom-commission-testkit/tests/adversary_authority_fail_closed.rs` |
 | An authority provider is asked about the action request the runtime revalidated, at the run loop and on a resume, bound to the frontier's revision and never to one the arguments name; a grant bound to one revision allows no other; the runtime reads the case's revision again after the allow and once more right before a resumed request is invoked, and performs nothing on a move it sees: a resume that sees it before its take takes nothing, one that sees it after releases the Suspension; a move while the effect itself runs is the effect port's to refuse, by the request's `expected_case_revision`; a failing provider grants nothing at either check | `crates/loom-commission-testkit/tests/authority_request.rs` (`the_provider_sees_the_request_it_decides`, `a_grant_bound_to_one_revision_does_not_allow_the_next`, `a_failing_provider_still_grants_nothing`, `a_resume_that_sees_the_case_moved_after_its_take_releases_the_suspension_and_performs_nothing`), `crates/loom-commission-testkit/tests/adversary_w20261020_u2.rs`, `crates/loom-commission/tests/security_w20261020_u2.rs` |
@@ -611,9 +611,27 @@ resolved graph `cargo metadata` reports.
 definition, the `loom.workflow` domain (`ess/domains/workflow.yaml`), as Commission's
 `AgentExecutor`. A definition names its protocol by catalog reference and orders its steps: a
 deterministic step (one `action`, literal `arguments`) is proposed without a model; a judgement
-step runs the governed loop (`LoopExecutor`) narrowed to its `actions` that the host's own
-narrowing (`LoopConfig::admits`) admits, never widening it, with its `instructions` as the run's
-instructions; `when` makes a step wait on a frontier claim, never on a model.
+step runs on its executor narrowed to its `actions` that the host's own narrowing
+(`WorkflowExecutor::with_admitted`) admits, never widening it; `when` makes a step wait on a
+frontier claim, never on a model.
+
+A judgement step's executor (`story:judgement-step-any-executor`) is the host's own
+`AgentExecutor` when the host supplies one (`WorkflowExecutor::with_executor`, which builds it for
+each call from a `workflow::Judgement`: the workflow, the step, its `instructions` with the data
+block of its inputs, and the actions it may propose), and otherwise Loom's chooser over the llm
+`Model` the workflow is given (`WorkflowExecutor::new(governor, model, …)`: a `Loom` over
+`model_selector`'s `ModelSelector` and `ModelArguments`, revalidating against the governor, one
+forced `select_action` request among the step's actions, then one forced `action_arguments`
+request, each led by the step's instructions). Either is handed the frontier listing no action
+but those. A proposal of another action, or of one the frontier does not list as `Admissible` or
+`ApprovalRequired`, is never returned, nor are reads proposed together (`ProposedReads`). What the
+host's executor reports a call spent (`run_with_usage`) is the workflow call's usage; the chooser
+reports none, its requests being counted at the metered model. A chooser answer without a usable
+call is no useful action, bounded by Commission's idle rule; a request never answered suspends the
+run for an external availability. Given `with_max_input_tokens`, a chooser call whose requests'
+input tokens reach it, or report none as final, suspends the run for it (`LoopBudget`,
+`max-input-tokens` or `budget-unobservable`), and the answer that reached it is not taken. The
+judgement step runs no ported loop and names nothing of `harness`.
 `WorkflowExecutor` takes the first step after the last performed one whose `when` holds; a step
 whose actions the frontier does not list as `Admissible` or `ApprovalRequired` ends the call
 `NeedsHumanJudgment`, naming the step and the frontier's reasons, and nothing later is taken
@@ -648,11 +666,12 @@ A judgement step lists the earlier outputs it is given (`story:dw-judgement-step
 `inputs`, a list of `loom.workflow.OutputReference`: a `step` and an `output`). When the step is
 proposed, the runtime appends exactly those values to the step's instructions as one data block,
 `<workflow-inputs>` around a JSON list of `{step, output, type, value}` with the type its step
-declares, introduced as data and never as instructions; `<`, `>` and `&` inside it are written as
-`\u` escapes, so no value can close the block. The model never reads them from the transcript, and
-no model supplies an output. A listed output the run did not produce (its step was skipped) or one
-not of its declared type ends the call `NeedsHumanJudgment` naming the judgement step and the
-output, and asks the model nothing. `load` refuses, naming the judgement step, an input naming a
+declares, introduced as data and never as instructions, and the step's executor is told those
+instructions (`Judgement::instructions`); `<`, `>` and `&` inside it are written as `\u` escapes,
+so no value can close the block. The model never reads them from the transcript, and no model
+supplies an output. A listed output the run did not produce (its step was skipped) or one not of
+its declared type ends the call `NeedsHumanJudgment` naming the judgement step and the output, and
+calls no executor. `load` refuses, naming the judgement step, an input naming a
 later step, the step itself, an unknown step or an undeclared output, and an input listed twice.
 
 ## Intake and the command line

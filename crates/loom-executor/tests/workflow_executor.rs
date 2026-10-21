@@ -5,14 +5,15 @@
 //!
 //! The case is scripted: a governor whose frontier lists the `software-change@1` actions this
 //! workflow names, moving one revision per performed effect, and listing `repository.merge`
-//! (approval required) once `tests.run` was performed. The model is scripted, records each call,
-//! and is metered (`MeteredModelPort`) under a `MeteredExecutor` sharing one `RunMeter`; nothing
-//! reaches a network.
+//! (approval required) once `tests.run` was performed. A judgement step runs on Loom's chooser
+//! over an llm `Model`, the default (`story:judgement-step-any-executor`): one selection request
+//! and one argument request per call. The model is scripted, records each request, and is metered
+//! (`MeteredModelPort`) under a `MeteredExecutor` sharing one `RunMeter`; nothing reaches a
+//! network. One case supplies the host's own executor instead.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
-use std::time::Duration;
 
 use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::json::Value as CommissionValue;
@@ -21,10 +22,11 @@ use b10x_loom_commission::model::responsibility::{
     ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, AuthorityVerdict,
     AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData, CommissionId,
     CompletionDetermination, EffectOutcome, EffectOutcomePending, EffectOutcomePerformed,
-    EffectOutcomeRefused, ExecutorOutcome, ExecutorOutcomeProposedAction, ExecutorStep,
-    ExecutorUsage, Frontier, FrontierAction, FrontierData, FrontierId, GovernorError, Observation,
-    ObservationId, PrincipalId, ProposedActionArguments, RunId, RunOutcome, RunOutcomeSuspended,
-    SuspensionReason, Unit, commission_state, frontier_state, observation_state,
+    EffectOutcomeRefused, ExecutorOutcome, ExecutorOutcomeProposedAction,
+    ExecutorOutcomeProposedReads, ExecutorStep, ExecutorUsage, Frontier, FrontierAction,
+    FrontierData, FrontierId, GovernorError, Observation, ObservationId, PrincipalId,
+    ProposedActionArguments, RunId, RunOutcome, RunOutcomeSuspended, SuspensionReason, Unit,
+    commission_state, frontier_state, observation_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -33,21 +35,17 @@ use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked};
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
-use b10x_loom_executor::harness::responses;
-use b10x_loom_executor::harness::turn_loop::{Budget, LoopConfig};
-use b10x_loom_executor::harness::wire::{
-    CallId, Item, ModelPort, StopReason, StreamSink, ToolCall, ToolName, TurnOutcome, TurnRequest,
-    Usage, WireError, WireId,
-};
 use b10x_loom_executor::metering::{MeteredExecutor, MeteredModelPort, RunMeter};
 use b10x_loom_executor::model::metering::RunUsageReport;
-use b10x_loom_executor::model::primitives::Uuid;
-use b10x_loom_executor::model::run::{CommissionRunId, SessionData, SessionId};
 use b10x_loom_executor::model::workflow::WorkflowDefinition;
 use b10x_loom_executor::workflow::{
     self, DefinitionError, Judgement, RecordingEffects, WorkflowExecutor,
 };
-use b10x_loom_executor::{EmptyObjectArguments, FirstAdmissibleSelector, Loom};
+use llm_core::{
+    BoxFuture, CallId, Cancel, Capabilities, Error as ModelError, Id, Item, Model, Protocol,
+    Provenance, StopReason, StreamSink, ToolCall, ToolChoice, TurnObservation, TurnOutcome,
+    TurnRequest, Usage,
+};
 use serde_json::json;
 
 const CASE: &str = "CASE-WORKFLOW";
@@ -269,78 +267,163 @@ impl EffectPort for CaseEffects<'_> {
     }
 }
 
-/// A scripted model that counts its calls: each turn it answers with the next scripted outcome,
-/// and records which actions the case had performed when it was asked and the tools it was
-/// offered.
-struct CountingModel<'c> {
-    case: &'c Case,
-    wire: WireId,
-    turns: VecDeque<TurnOutcome>,
-    asked: Vec<Asked>,
+/// One scripted answer of the model: a call of the tool the request is held to, with these
+/// arguments, reporting this many input tokens as final usage (none reported when `None`); or
+/// prose with no call.
+#[derive(Debug, Clone)]
+enum Answer {
+    Calls(serde_json::Value, Option<u64>),
+    Prose,
 }
 
-/// One call of the model.
+/// The selection answer naming `action`.
+fn select(action: &str) -> Answer {
+    Answer::Calls(json!({ "action": action }), None)
+}
+
+/// The argument answer carrying `arguments`.
+fn arguments(arguments: serde_json::Value) -> Answer {
+    Answer::Calls(arguments, None)
+}
+
+/// One request the model was sent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Asked {
     performed_before: Vec<String>,
-    tools: Vec<String>,
+    /// The tool the request is held to.
+    tool: String,
+    /// The actions a selection request offers (its tool's `action` enum); none for another.
+    offered: Vec<String>,
+    instructions: String,
+}
+
+/// A scripted llm `Model` that records its requests: each answers with the next scripted answer,
+/// and records which actions the case had performed when it was sent, the tool it is held to and
+/// the actions it offers. A request past the script is an error.
+struct CountingModel<'c> {
+    case: &'c Case,
+    provenance: Provenance,
+    capabilities: Capabilities,
+    script: Mutex<VecDeque<Answer>>,
+    asked: Mutex<Vec<Asked>>,
 }
 
 impl<'c> CountingModel<'c> {
-    fn new(case: &'c Case, turns: Vec<TurnOutcome>) -> Self {
+    fn new(case: &'c Case, script: Vec<Answer>) -> Self {
+        let id = |value: &str| Id::new(value).expect("a fixture id");
         Self {
             case,
-            wire: WireId::new(responses::WIRE).expect("valid"),
-            turns: turns.into(),
-            asked: Vec::new(),
+            provenance: Provenance {
+                protocol: Protocol::Responses,
+                provider: id("scripted"),
+                account: id("fixture"),
+                endpoint: id("in-process"),
+                model: id("scripted-model"),
+                binding_revision: id("scripted-1"),
+            },
+            capabilities: Capabilities {
+                tools: true,
+                tool_choice: true,
+                ..Capabilities::text(128_000, 8_192)
+            },
+            script: Mutex::new(script.into()),
+            asked: Mutex::default(),
         }
     }
-}
 
-impl ModelPort for CountingModel<'_> {
-    fn wire(&self) -> &WireId {
-        &self.wire
+    fn asked(&self) -> Vec<Asked> {
+        self.asked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
-    fn turn(
-        &mut self,
-        request: &TurnRequest,
-        _sink: &mut dyn StreamSink,
-    ) -> Result<TurnOutcome, WireError> {
-        self.asked.push(Asked {
-            performed_before: self.case.performed(),
-            tools: request
-                .tools
-                .iter()
-                .map(|tool| tool.name.to_string())
-                .collect(),
-        });
-        self.turns
+    fn answer(&self, request: &TurnRequest) -> Result<TurnOutcome, ModelError> {
+        let ToolChoice::Named(tool) = &request.tool_choice else {
+            return Err(ModelError::protocol("the request is held to no tool"));
+        };
+        let offered = request
+            .tools
+            .iter()
+            .filter(|spec| spec.name == *tool)
+            .filter_map(|spec| spec.input_schema.pointer("/properties/action/enum"))
+            .flat_map(|actions| actions.as_array().cloned().unwrap_or_default())
+            .filter_map(|action| action.as_str().map(str::to_owned))
+            .collect();
+        self.asked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(Asked {
+                performed_before: self.case.performed(),
+                tool: tool.to_string(),
+                offered,
+                instructions: request.instructions.clone(),
+            });
+        let answer = self
+            .script
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
             .pop_front()
-            .ok_or_else(|| WireError::protocol("the script has no further turn"))
+            .ok_or_else(|| ModelError::protocol("the script has no further turn"))?;
+        // Terminal, as llm requires of a successful outcome; the usage only when scripted.
+        let mut observation = TurnObservation {
+            final_usage: true,
+            ..TurnObservation::new(self.provenance.clone())
+        };
+        Ok(match answer {
+            Answer::Calls(arguments, input_tokens) => {
+                if let Some(input_tokens) = input_tokens {
+                    observation.usage = Some(Usage {
+                        input_tokens: Some(input_tokens),
+                        output_tokens: Some(10),
+                        ..Usage::default()
+                    });
+                }
+                TurnOutcome {
+                    stop_reason: StopReason::ToolCalls,
+                    items: vec![Item::ToolCall(ToolCall {
+                        call_id: CallId::new("call-1").expect("valid"),
+                        name: tool.clone(),
+                        arguments,
+                    })],
+                    observation,
+                }
+            }
+            Answer::Prose => TurnOutcome {
+                stop_reason: StopReason::EndTurn,
+                items: vec![Item::assistant("I would edit the code.")],
+                observation,
+            },
+        })
     }
 }
 
-/// A turn that calls `tool` with `arguments`.
-fn calls(id: &str, tool: &str, arguments: serde_json::Value) -> TurnOutcome {
-    TurnOutcome {
-        stop_reason: StopReason::ToolCalls,
-        items: vec![Item::ToolCall(ToolCall {
-            call_id: CallId::new(id).expect("valid"),
-            name: ToolName::new(tool).expect("valid"),
-            arguments,
-        })],
-        usage: None,
+impl Model for CountingModel<'_> {
+    fn provenance(&self) -> &Provenance {
+        &self.provenance
+    }
+
+    fn capabilities(&self) -> &Capabilities {
+        &self.capabilities
+    }
+
+    fn turn<'a>(
+        &'a self,
+        request: &'a TurnRequest,
+        _sink: &'a mut dyn StreamSink,
+        _cancel: &'a Cancel,
+    ) -> BoxFuture<'a, Result<TurnOutcome, ModelError>> {
+        let answered = self.answer(request);
+        Box::pin(async move { answered })
     }
 }
 
-/// The judgement answer of the acceptance: the model edits the implementation.
-fn edits() -> Vec<TurnOutcome> {
-    vec![calls(
-        "call_edit",
-        "implementation_edit",
-        json!({"path": "src/lib.rs", "patch": "fix"}),
-    )]
+/// The judgement answers of the acceptance: the model selects the edit and writes its arguments.
+fn edits() -> Vec<Answer> {
+    vec![
+        select(EDIT),
+        arguments(json!({"path": "src/lib.rs", "patch": "fix"})),
+    ]
 }
 
 #[derive(Default)]
@@ -365,15 +448,6 @@ impl LoopContext for Context {
 
     fn step_budget(&self) -> Option<usize> {
         None
-    }
-}
-
-fn session() -> SessionData {
-    SessionData {
-        session_id: SessionId(Uuid("00000000-0000-4000-8000-00000000d012".to_owned())),
-        commission_run: CommissionRunId(Uuid("00000000-0000-4000-8000-00000000d0ab".to_owned())),
-        wire: responses::WIRE.to_owned(),
-        boundary_refusals: 0,
     }
 }
 
@@ -403,66 +477,38 @@ impl Ran {
 }
 
 /// Runs `text` on a fresh case blocking `blocked`, whose effect port refuses the first invocation
-/// of each of `refuse_once`, with a model answering `turns`.
+/// of each of `refuse_once`, with a model answering `script`.
 fn run(
     text: &str,
     blocked: Vec<&'static str>,
     refuse_once: Vec<&'static str>,
-    turns: Vec<TurnOutcome>,
+    script: Vec<Answer>,
 ) -> Ran {
-    run_configured(
-        text,
-        blocked,
-        refuse_once,
-        turns,
-        LoopConfig::new("scripted-model", "INSTRUCTIONS"),
-    )
+    run_effects(text, blocked, refuse_once, Vec::new(), script, None)
 }
 
-/// [`run`], with the model loop of a judgement step under `config`.
-fn run_configured(
-    text: &str,
-    blocked: Vec<&'static str>,
-    refuse_once: Vec<&'static str>,
-    turns: Vec<TurnOutcome>,
-    config: LoopConfig,
-) -> Ran {
-    run_effects(text, blocked, refuse_once, Vec::new(), turns, config)
-}
-
-/// [`run_configured`], the effect port answering the first invocation of each of `pending_once`
-/// pending.
+/// [`run`], the effect port answering the first invocation of each of `pending_once` pending, and
+/// the chooser held to `max_input_tokens` per call when it is given.
 fn run_effects(
     text: &str,
     blocked: Vec<&'static str>,
     refuse_once: Vec<&'static str>,
     pending_once: Vec<&'static str>,
-    turns: Vec<TurnOutcome>,
-    config: LoopConfig,
+    script: Vec<Answer>,
+    max_input_tokens: Option<u64>,
 ) -> Ran {
     let case = Case::new(blocked);
     let effects =
         RecordingEffects::new(CaseEffects::new(&case, refuse_once).pending_once(pending_once));
-    let loom = Loom::new(
-        FirstAdmissibleSelector,
-        EmptyObjectArguments,
-        "change the code",
-    )
-    .with_instance("workflow-test")
-    .with_governor(&case);
     let meter = RunMeter::new(None);
-    let executor = MeteredExecutor::new(
-        WorkflowExecutor::new(
-            &loom,
-            MeteredModelPort::new(CountingModel::new(&case, turns), &meter),
-            config.with_retry_backoff(Duration::from_millis(1)),
-            session(),
-            definition(text),
-            effects.log(),
-        )
-        .with_meter(&meter),
-        &meter,
-    );
+    let model = CountingModel::new(&case, script);
+    let metered = MeteredModelPort::new(&model, &meter);
+    let mut workflow =
+        WorkflowExecutor::new(&case, &metered, definition(text), effects.log()).with_meter(&meter);
+    if let Some(limit) = max_input_tokens {
+        workflow = workflow.with_max_input_tokens(limit);
+    }
+    let executor = MeteredExecutor::new(workflow, &meter);
     let ids = AtomicU64::new(0x500);
     let mut runs = Generated::new(RunStore::new(move || {
         RunId(uuid(ids.fetch_add(1, Ordering::SeqCst)))
@@ -484,12 +530,10 @@ fn run_effects(
     )
     .unwrap_or_else(|error| panic!("the loop failed: {error:?}"));
     let report = meter.report(&end.run_id);
-    let executor = executor.into_inner();
-    let attempted = executor.attempted();
-    let asked = executor.into_model().into_inner().asked;
+    let attempted = executor.into_inner().attempted();
     Ran {
         end,
-        asked,
+        asked: model.asked(),
         performed: case.performed(),
         attempted,
         report,
@@ -523,8 +567,9 @@ fn deterministic_steps_call_no_model() {
     );
     assert_eq!(ran.performed, [INSPECT, EDIT, RUN]);
     assert_eq!(
-        ran.report.model_calls, 1,
-        "the metered port counted one model call: {:?}",
+        ran.report.model_calls, 2,
+        "the metered model counted the chooser's two requests, the selection and the edit's \
+         arguments: {:?}",
         ran.report
     );
     let steps: Vec<(Option<&str>, i64)> = ran
@@ -537,7 +582,7 @@ fn deterministic_steps_call_no_model() {
         steps,
         [
             (Some("inspect"), 0),
-            (Some("edit"), 1),
+            (Some("edit"), 2),
             (Some("test"), 0),
             (Some("merge"), 0)
         ],
@@ -545,10 +590,11 @@ fn deterministic_steps_call_no_model() {
          model: {:?}",
         ran.report
     );
+    let tools: Vec<&str> = ran.asked.iter().map(|asked| asked.tool.as_str()).collect();
     assert_eq!(
-        ran.asked.len(),
-        1,
-        "one model call, in the judgement step: {:?}",
+        tools,
+        ["select_action", "action_arguments"],
+        "two model requests, in the judgement step: {:?}",
         ran.asked
     );
     for asked in &ran.asked {
@@ -557,13 +603,19 @@ fn deterministic_steps_call_no_model() {
             [INSPECT],
             "the model is asked only during the judgement step: {asked:?}"
         );
+        assert!(
+            asked
+                .instructions
+                .starts_with("Edit the implementation so the failing test passes."),
+            "the step's instructions lead every request: {asked:?}"
+        );
     }
     assert_eq!(
         ran.proposed(),
         vec![
             (INSPECT.to_owned(), object(&[("path", text("src"))])),
-            // The model's arguments, as the governed loop carries them: keys in serde_json's
-            // sorted order. The deterministic steps keep the definition's own order.
+            // The model's arguments, as the chooser carries them: keys in serde_json's sorted
+            // order. The deterministic steps keep the definition's own order.
             (
                 EDIT.to_owned(),
                 object(&[("patch", text("fix")), ("path", text("src/lib.rs"))])
@@ -644,8 +696,8 @@ fn a_step_the_frontier_does_not_list_ends_needing_human_judgment() {
     assert!(ran.performed.is_empty());
 }
 
-/// The judgement step offers the model only its own actions: a call naming another action the
-/// frontier admits is refused to the model and never proposed; the model then chooses the step's
+/// The judgement step offers the model only its own actions: a selection naming another action
+/// the frontier admits is a selection error, never proposed; the model then chooses the step's
 /// action, which is.
 #[test]
 fn a_judgement_step_offers_the_model_only_its_actions() {
@@ -654,21 +706,23 @@ fn a_judgement_step_offers_the_model_only_its_actions() {
         Vec::new(),
         Vec::new(),
         vec![
-            calls("call_run", "tests_run", json!({})),
-            calls(
-                "call_edit",
-                "implementation_edit",
-                json!({"path": "src/lib.rs"}),
-            ),
+            select(RUN),
+            select(EDIT),
+            arguments(json!({"path": "src/lib.rs"})),
         ],
     );
 
-    assert!(ran.asked.len() >= 2, "{:?}", ran.asked);
-    for asked in &ran.asked {
+    let selections: Vec<&Asked> = ran
+        .asked
+        .iter()
+        .filter(|asked| asked.tool == "select_action")
+        .collect();
+    assert_eq!(selections.len(), 2, "{:?}", ran.asked);
+    for asked in selections {
         assert_eq!(
-            asked.tools,
-            ["implementation_edit"],
-            "the judgement step publishes only its own actions: {asked:?}"
+            asked.offered,
+            [EDIT],
+            "the judgement step offers only its own actions: {asked:?}"
         );
     }
     let proposed = ran.proposed();
@@ -726,32 +780,22 @@ fn a_definition_naming_an_action_outside_its_protocol_is_refused() {
     ));
 }
 
-/// A judgement step whose model loop stops on its input-token budget (100, against a turn reporting
-/// 150) suspends the run for that budget, carrying the loop's stop, not `NoUsefulAction`; the
-/// call of the over-budget turn is never proposed.
+/// A judgement step whose chooser stops on its input-token budget (100, against a selection
+/// request reporting 150) suspends the run for that budget, carrying the stop, not
+/// `NoUsefulAction`; the over-budget selection is never taken, so no argument request is sent and
+/// nothing is proposed for it.
 #[test]
 fn a_judgement_step_stopped_by_its_input_token_budget_suspends_the_run_for_it() {
-    let mut over = calls(
-        "call_edit",
-        "implementation_edit",
-        json!({"path": "src/lib.rs"}),
-    );
-    over.usage = Some(Usage {
-        model: "scripted-model".to_owned(),
-        input_tokens: 150,
-        output_tokens: 10,
-        cached_input_tokens: 0,
-        cache_creation_input_tokens: None,
-    });
-    let ran = run_configured(
+    let ran = run_effects(
         DEFINITION,
         Vec::new(),
         Vec::new(),
-        vec![over],
-        LoopConfig::new("scripted-model", "INSTRUCTIONS").with_budget(Budget {
-            max_input_tokens: Some(100),
-            ..Budget::default()
-        }),
+        Vec::new(),
+        vec![
+            Answer::Calls(json!({ "action": EDIT }), Some(150)),
+            arguments(json!({"path": "src/lib.rs"})),
+        ],
+        Some(100),
     );
 
     assert_eq!(
@@ -763,14 +807,82 @@ fn a_judgement_step_stopped_by_its_input_token_budget_suspends_the_run_for_it() 
                 ("reported", CommissionValue::Number("150".to_owned())),
             ])),
         }),
-        "the run is suspended for the loop's budget stop"
+        "the run is suspended for the chooser's budget stop"
     );
     assert_eq!(ran.asked.len(), 1, "{:?}", ran.asked);
     assert_eq!(
+        ran.report.input_tokens, 150,
+        "the metered model counted the over-budget request: {:?}",
+        ran.report
+    );
+    assert_eq!(
         ran.performed,
         [INSPECT],
-        "the over-budget call is never performed"
+        "the over-budget selection is never performed"
     );
+    assert_eq!(
+        ran.proposed()
+            .into_iter()
+            .map(|(action, _)| action)
+            .collect::<Vec<_>>(),
+        [INSPECT]
+    );
+}
+
+/// Held to an input-token budget, a chooser whose model reports no final input-token count cannot
+/// keep it: the run is suspended for the budget it could not observe, and the answer is not taken.
+#[test]
+fn a_judgement_step_whose_budget_cannot_be_observed_suspends_the_run_for_it() {
+    let ran = run_effects(
+        DEFINITION,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        edits(),
+        Some(100),
+    );
+
+    assert_eq!(
+        ran.end.outcome,
+        RunOutcome::Suspended(RunOutcomeSuspended {
+            reason: SuspensionReason::LoopBudget(object(&[
+                ("kind", text("budget-unobservable")),
+                ("name", text("max_input_tokens")),
+                (
+                    "reason",
+                    text("the model's answer reported no final input-token count")
+                ),
+            ])),
+        }),
+    );
+    assert_eq!(ran.asked.len(), 1, "{:?}", ran.asked);
+    assert_eq!(ran.performed, [INSPECT]);
+}
+
+/// A model that answers the judgement step's selection request without calling the tool (prose
+/// only, as a refusal reads) proposes nothing: each such call is no useful action, never an
+/// outage, and Commission's idle rule ends the run after two of them.
+#[test]
+fn a_judgement_answer_without_a_usable_call_proposes_nothing() {
+    let ran = run(
+        DEFINITION,
+        Vec::new(),
+        Vec::new(),
+        vec![Answer::Prose, Answer::Prose],
+    );
+
+    assert!(
+        matches!(&ran.end.outcome, RunOutcome::IdleBound(_)),
+        "{:?}",
+        ran.end.outcome
+    );
+    assert_eq!(ran.asked.len(), 2, "{:?}", ran.asked);
+    assert!(
+        ran.asked.iter().all(|asked| asked.tool == "select_action"),
+        "no argument request follows an unusable selection: {:?}",
+        ran.asked
+    );
+    assert_eq!(ran.performed, [INSPECT]);
     assert_eq!(
         ran.proposed()
             .into_iter()
@@ -811,7 +923,7 @@ fn a_step_advances_on_the_performed_effect_after_a_pending_one() {
         Vec::new(),
         vec![INSPECT],
         edits(),
-        LoopConfig::new("scripted-model", "INSTRUCTIONS"),
+        None,
     );
 
     let requests = &ran.end.requests;
@@ -1033,5 +1145,106 @@ fn a_judgement_step_runs_on_a_supplied_executor() {
             (Some("merge"), 0, 0)
         ],
         "each call of the host's executor reports its usage in its own step: {report:?}"
+    );
+}
+
+/// Runs `text` on a fresh case blocking `blocked`, its judgement steps on the host's executor
+/// `executor` builds: how the run ended, and the actions the case performed.
+fn run_supplied<F, E>(text: &str, blocked: Vec<&'static str>, executor: F) -> (LoopEnd, Vec<String>)
+where
+    F: Fn(&Judgement) -> E,
+    E: AgentExecutor,
+{
+    let case = Case::new(blocked);
+    let effects = RecordingEffects::new(CaseEffects::new(&case, Vec::new()));
+    let workflow = WorkflowExecutor::with_executor(executor, definition(text), effects.log());
+    let ids = AtomicU64::new(0x500);
+    let mut runs = Generated::new(RunStore::new(move || {
+        RunId(uuid(ids.fetch_add(1, Ordering::SeqCst)))
+    }));
+    let end = run_until_blocked(
+        &case,
+        &workflow,
+        &StaticAuthorityProvider::new(),
+        &effects,
+        &commission(),
+        &mut runs,
+        &mut Context::default(),
+    )
+    .unwrap_or_else(|error| panic!("the loop failed: {error:?}"));
+    (end, case.performed())
+}
+
+/// A host's executor that answers every call with one outcome.
+struct Answers(ExecutorOutcome);
+
+impl AgentExecutor for Answers {
+    fn run(
+        &self,
+        _commission: &Commission<commission_state::Assigned>,
+        _frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorOutcome {
+        self.0.clone()
+    }
+}
+
+/// `action` proposed with no arguments.
+fn proposal(action: &str) -> ExecutorOutcomeProposedAction {
+    ExecutorOutcomeProposedAction {
+        action: action.to_owned(),
+        arguments: ProposedActionArguments(object(&[])),
+    }
+}
+
+/// A host's executor that proposes reads together, even of the step's own action, proposes
+/// nothing: a judgement step proposes one action, so the reads never reach Commission, and the
+/// idle rule ends the run.
+#[test]
+fn a_supplied_executors_reads_proposed_together_are_never_proposed() {
+    let (end, performed) = run_supplied(DEFINITION, Vec::new(), |_: &Judgement| {
+        Answers(ExecutorOutcome::ProposedReads(
+            ExecutorOutcomeProposedReads {
+                reads: vec![proposal(EDIT), proposal(INSPECT)],
+            },
+        ))
+    });
+
+    assert!(
+        matches!(&end.outcome, RunOutcome::IdleBound(_)),
+        "{:?}",
+        end.outcome
+    );
+    assert_eq!(performed, [INSPECT]);
+    let proposed: Vec<&str> = end
+        .requests
+        .iter()
+        .map(|made| made.request.action.as_str())
+        .collect();
+    assert_eq!(proposed, [INSPECT], "{:?}", end.requests);
+}
+
+/// A step naming two actions, one of which the frontier blocks: the host's executor is told both,
+/// and its proposal of the blocked one never reaches Commission.
+#[test]
+fn a_supplied_executors_proposal_the_frontier_blocks_is_never_proposed() {
+    let two = DEFINITION.replace(
+        "actions: [implementation.edit]",
+        "actions: [implementation.edit, tests.write]",
+    );
+    let (end, performed) = run_supplied(&two, vec![WRITE], |judgement: &Judgement| {
+        assert_eq!(judgement.actions, [EDIT, WRITE]);
+        Answers(ExecutorOutcome::ProposedAction(proposal(WRITE)))
+    });
+
+    assert!(
+        matches!(&end.outcome, RunOutcome::IdleBound(_)),
+        "{:?}",
+        end.outcome
+    );
+    assert_eq!(performed, [INSPECT]);
+    assert!(
+        end.requests.iter().all(|made| made.request.action != WRITE),
+        "{:?}",
+        end.requests
     );
 }

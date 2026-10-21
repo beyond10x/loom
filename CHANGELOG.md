@@ -9,6 +9,28 @@ refuses `Breaking: none.` when `consumers/pinned/`, `crates/loom-sdk/tests/host_
 
 ## [Unreleased]
 
+A workflow's judgement step runs on any `AgentExecutor` the host supplies, and on Loom's chooser
+over an llm `Model` by default, instead of the ported harness loop
+(`story:judgement-step-any-executor`). `WorkflowExecutor::with_executor(executor, definition,
+effects)` takes a closure that builds the host's executor for each judgement call from a
+`workflow::Judgement` (the workflow, the step, its instructions with the `<workflow-inputs>` data
+block, and the actions it may propose); the executor is handed the frontier listing only those
+actions, a proposal of another action or of one the frontier does not list is never returned, nor
+are reads proposed together, and the usage it reports through `run_with_usage` is the workflow
+call's. `WorkflowExecutor::new(governor, model, definition, effects)` runs judgement steps on the
+chooser: a selection request among the step's actions, then an argument request, each led by the
+step's instructions; an answer without a usable call is no useful action, and
+`with_max_input_tokens` suspends the run with `LoopBudget` when a call's requests reach it or report
+no final input tokens. The host's narrowing of judgement steps is `with_admitted(actions)`. The
+workflow module names nothing of `harness`.
+Breaking: `WorkflowExecutor` has one lifetime parameter instead of `<'l, S, G, V, M>`;
+`WorkflowExecutor::new` takes `(governor: &dyn Governor, model: &dyn llm_core::Model, definition,
+effects)` instead of `(loom, model: impl ModelPort, config: LoopConfig, session, definition,
+effects)`; `WorkflowExecutor::into_model` is removed; the host's narrowing moves from
+`LoopConfig::admits` to `WorkflowExecutor::with_admitted`, naming actions, not tool names; a
+judgement step sends two model requests per call (selection, then arguments) instead of one loop
+turn; and `workflow::load` no longer refuses an action whose id cannot be a tool name.
+
 ## [0.30.0] - 2026-10-21
 
 Loom 0.30.0 moves plugin turns and the run meter onto llm's `Model` and runs on ESS 0.66.0. A

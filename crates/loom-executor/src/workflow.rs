@@ -16,14 +16,37 @@
 //!
 //! - a deterministic step whose action the frontier lists (`Admissible` or `ApprovalRequired`) is
 //!   proposed with its arguments, and no model is asked;
-//! - a judgement step runs the governed loop ([`LoopExecutor`], [`Loom::run_loop`]) narrowed to the
-//!   step's actions that the host's own narrowing (`LoopConfig::admits`) admits, so a step narrows
-//!   the host's narrowing further and never widens it, with the step's instructions as the run's
-//!   standing instructions; a call naming any other action is refused to the model by the loop,
-//!   and a proposal of an action outside that set is never returned; a judgement step none of
-//!   whose actions the host admits ends the call `NeedsHumanJudgment`;
+//! - a judgement step runs on its executor, narrowed to the step's actions that the host's own
+//!   narrowing ([`WorkflowExecutor::with_admitted`]) admits, so a step narrows the host's narrowing
+//!   further and never widens it; a judgement step none of whose actions the host admits ends the
+//!   call `NeedsHumanJudgment`;
 //! - a step whose actions the frontier does not list ends the call `NeedsHumanJudgment`, naming the
 //!   step and the frontier's reasons. The workflow never skips to a later step on its own.
+//!
+//! A judgement step's executor is the host's own [`AgentExecutor`], when the host supplies one
+//! ([`WorkflowExecutor::with_executor`]), or Loom's chooser over the llm [`Model`] the workflow is
+//! given ([`WorkflowExecutor::new`]). Either is told the step as a [`Judgement`] (the workflow, the
+//! step, its instructions with the data block of its inputs, and the actions it may propose) and
+//! handed the frontier with no action listed but those; the host's executor is built for each
+//! call from the [`Judgement`]. A proposal of an action outside those actions, or one the frontier
+//! does not list as `Admissible` or `ApprovalRequired`, is never returned, and neither are reads
+//! proposed together (`ProposedReads`): a judgement step proposes one action. What the call
+//! reports it spent ([`AgentExecutor::run_with_usage`]) is the workflow call's usage.
+//!
+//! The chooser is a [`Loom`] over [`ModelSelector`] and [`ModelArguments`] on the model,
+//! revalidating against the governor it is given: one forced `select_action` request among the
+//! step's actions the frontier lists, then one forced `action_arguments` request for the selected
+//! action, each carrying the step's instructions first. A selection outside them is a selection
+//! error, never a selection. An answer without a usable call (no call of the forced tool, an
+//! answer llm refuses for the request, a selection naming no action, arguments Commission's JSON
+//! cannot carry) is no useful action, so Commission's idle rule bounds it; a request the model
+//! never answered suspends the run for an external availability. Given an input-token budget
+//! ([`WorkflowExecutor::with_max_input_tokens`]), a call whose requests' input tokens reach it, or
+//! whose input tokens a request does not report as final, suspends the run for it
+//! (`LoopBudget`, `{"kind": "max-input-tokens", "limit", "reported"}` or
+//! `{"kind": "budget-unobservable", "name", "reason"}`), and the answer that reached it is not
+//! taken. The chooser's model calls are counted where the host meters the model it gives
+//! ([`crate::metering::MeteredModelPort`]), so it reports no usage of its own.
 //!
 //! When no step is left, the call is `CompletedLocalReasoning`: the executor's reasoning ended, and
 //! completion is still the governor's.
@@ -71,11 +94,12 @@
 //! `inputs`, each an [`OutputReference`] (a step and an output). When the step is proposed, exactly
 //! those values are appended to the step's instructions as one data block ([`INPUTS_OPEN`] …
 //! [`INPUTS_CLOSE`] around a JSON list of `{"step", "output", "type", "value"}`, the type as the
-//! step declares it), introduced as data, never as instructions. Inside the block `<`, `>` and `&`
-//! are written as `\u` escapes, so no value can close it. The model never reads them back out of
-//! the transcript, and no model supplies an output. A listed output the run did not produce, or one
-//! not of its declared type, ends the call `NeedsHumanJudgment` naming the judgement step and the
-//! output, and the model is not asked.
+//! step declares it), introduced as data, never as instructions, and its executor is told those
+//! instructions ([`Judgement::instructions`]). Inside the block `<`, `>` and `&` are written as
+//! `\u` escapes, so no value can close it. The model never reads them back out of the transcript,
+//! and no model supplies an output. A listed output the run did not produce, or one not of its
+//! declared type, ends the call `NeedsHumanJudgment` naming the judgement step and the output, and
+//! the executor is not called.
 //!
 //! Metered ([`WorkflowExecutor::with_meter`], under a [`crate::metering::MeteredExecutor`] over the
 //! same [`RunMeter`]), each call labels its step of the meter's report with the name of the
@@ -83,42 +107,47 @@
 //!
 //! A definition is read from YAML into the generated types and checked before any run ([`load`]):
 //! every step action is an action of its protocol, every step name is unique and neither begins
-//! nor ends with whitespace, and a judgement step
-//! names at least one action; every output a step declares has a unique name and a well-formed
+//! nor ends with whitespace, and a judgement step names at least one action, none twice; every
+//! output a step declares has a unique name and a well-formed
 //! pointer, and every argument reference and every judgement input names a declared output of an
 //! earlier step, an input at most once; a refusal names the step. The protocol's actions come from the host
 //! (`loom_protocols::ProtocolEntry::actions`), so this crate does not depend on the catalog.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::ops::Deref;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use b10x_loom_commission::model::json::Value as CommissionValue;
+use b10x_loom_commission::model::json::{self as commission_json, Value as CommissionValue};
 use b10x_loom_commission::model::responsibility::{
     ActionRequestData, ActionStatus, Commission, EffectOutcome, EffectOutcomePerformed,
-    ExecutorOutcome, ExecutorOutcomeNeedsHumanJudgment, ExecutorOutcomeProposedAction, Frontier,
-    HumanDecisionRequest, ProposedActionArguments, RunId, Truth as FrontierTruth, Unit,
-    commission_state, frontier_state,
+    ExecutorOutcome, ExecutorOutcomeNeedsHumanJudgment, ExecutorOutcomeProposedAction,
+    ExecutorOutcomeSuspended, ExecutorStep, ExecutorUsage, Frontier, FrontierData,
+    HumanDecisionRequest, ProposedActionArguments, RunId, SuspensionReason, Truth as FrontierTruth,
+    Unit, commission_state, frontier_state,
 };
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
+use llm_core::{
+    BoxFuture, Cancel, Capabilities, Error as ModelError, ErrorCode, Model, Provenance, StreamSink,
+    TurnOutcome, TurnRequest,
+};
 use sha2::{Digest as _, Sha256};
 
 use crate::Loom;
-use crate::harness::governed::{LoopExecutor, tool_name};
-use crate::harness::turn_loop::LoopConfig;
-use crate::harness::wire::{ModelPort, StreamSink, TurnOutcome, TurnRequest, WireError, WireId};
 use crate::metering::RunMeter;
 use crate::model::json::{self as loom_json, Value as LoomValue};
 use crate::model::metering::{CarriedUsage, EffectsUsage};
 use crate::model::primitives::Uuid;
-use crate::model::run::{CommissionRunId, SessionData};
+use crate::model::run::CommissionRunId;
 use crate::model::workflow::{
     DeterministicStep, JudgementStep, OutputReference, OutputType, RecordedOutput, StepCondition,
     StepKind, StepOutput, StepRequest, Truth, UnproducedOutput, WorkflowDefinition,
     WorkflowRunRecord, WorkflowStep,
+};
+use crate::model_selector::{
+    ARGUMENTS_TOOL, ArgumentsError, AskError, Briefing, ModelArguments, ModelSelector, NO_ACTION,
+    SELECT_TOOL, arguments_once, select_once,
 };
 
 /// The tag that opens a judgement step's data block in its instructions.
@@ -261,9 +290,6 @@ pub fn check(definition: &WorkflowDefinition, actions: &[String]) -> Result<(), 
             }
             if !seen.insert(action.as_str()) {
                 return refused(format!("`{action}` is named twice"));
-            }
-            if let Err(error) = tool_name(action) {
-                return refused(format!("`{action}` cannot be offered as a tool: {error}"));
             }
         }
         if let Err(why) = check_outputs(&step.outputs) {
@@ -707,14 +733,52 @@ struct Outstanding {
     recorded: usize,
 }
 
-/// A workflow definition as Commission's [`AgentExecutor`] (see the module docs). Judgement steps
-/// run `loom`'s governed loop on `model`, recording into `session`; runs take the model one at a
-/// time.
-pub struct WorkflowExecutor<'l, S, G, V, M> {
-    loom: &'l Loom<S, G, V>,
-    model: Mutex<M>,
-    config: LoopConfig,
-    session: SessionData,
+/// One judgement step as its executor is told it, for one call: the workflow, the step, the
+/// step's instructions and the actions it may propose. The frontier the executor is handed with
+/// it lists no other action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Judgement {
+    /// The workflow's name.
+    pub workflow: String,
+    /// The judgement step's name.
+    pub step: String,
+    /// The step's instructions, followed, when it lists inputs, by the data block holding their
+    /// values ([`INPUTS_OPEN`] … [`INPUTS_CLOSE`]).
+    pub instructions: String,
+    /// The step's actions the host's narrowing admits ([`WorkflowExecutor::with_admitted`]), in the
+    /// step's order: the only actions a proposal of the call may name.
+    pub actions: Vec<String>,
+}
+
+/// The host's executor of judgement steps: the step's call, on the executor built for it.
+type Supplied<'h> = dyn Fn(
+        &Judgement,
+        &Commission<commission_state::Assigned>,
+        &Frontier<frontier_state::Issued>,
+    ) -> ExecutorStep
+    + 'h;
+
+/// What runs a workflow's judgement steps.
+enum Judge<'h> {
+    /// Loom's chooser over `model`, revalidating against `governor`.
+    Chooser {
+        governor: &'h dyn Governor,
+        model: &'h dyn Model,
+    },
+    /// The host's executor.
+    Supplied(Box<Supplied<'h>>),
+}
+
+/// A workflow definition as Commission's [`AgentExecutor`] (see the module docs). Its judgement
+/// steps run on Loom's chooser over an llm [`Model`] ([`Self::new`]) or on the host's executor
+/// ([`Self::with_executor`]).
+pub struct WorkflowExecutor<'h> {
+    judge: Judge<'h>,
+    /// The host's narrowing of judgement steps ([`Self::with_admitted`]).
+    admits: Option<Vec<String>>,
+    /// The chooser's input-token budget per call ([`Self::with_max_input_tokens`]).
+    max_input_tokens: Option<u64>,
     definition: WorkflowDefinition,
     effects: EffectLog,
     position: Arc<Mutex<Position>>,
@@ -827,25 +891,49 @@ impl fmt::Display for RunRecordError {
 
 impl std::error::Error for RunRecordError {}
 
-impl<'l, S, G, V, M> WorkflowExecutor<'l, S, G, V, M> {
+impl<'h> WorkflowExecutor<'h> {
     /// An executor running `definition`, a definition [`load`] checked, whose judgement steps run
-    /// `loom`'s loop on `model` under `config` (the step's instructions replace its
-    /// instructions, and its actions narrow it), recording into `session`. It advances past a step
-    /// once `effects`, the log of the run's [`RecordingEffects`], records that step's request
-    /// `Performed`.
+    /// on Loom's chooser over `model`, revalidating each selection against `governor` (see the
+    /// module docs). It advances past a step once `effects`, the log of the run's
+    /// [`RecordingEffects`], records that step's request `Performed`.
     pub fn new(
-        loom: &'l Loom<S, G, V>,
-        model: M,
-        config: LoopConfig,
-        session: SessionData,
+        governor: &'h dyn Governor,
+        model: &'h dyn Model,
         definition: WorkflowDefinition,
         effects: EffectLog,
     ) -> Self {
+        Self::judged(Judge::Chooser { governor, model }, definition, effects)
+    }
+
+    /// An executor running `definition`, a definition [`load`] checked, whose judgement steps run
+    /// on the host's [`AgentExecutor`]: `executor` builds it for each call from the step's
+    /// [`Judgement`], and the call is its [`AgentExecutor::run_with_usage`] on the frontier
+    /// narrowed to the judgement's actions (see the module docs). It advances past a step once
+    /// `effects`, the log of the run's [`RecordingEffects`], records that step's request
+    /// `Performed`.
+    pub fn with_executor<F, E>(
+        executor: F,
+        definition: WorkflowDefinition,
+        effects: EffectLog,
+    ) -> Self
+    where
+        F: Fn(&Judgement) -> E + 'h,
+        E: AgentExecutor,
+    {
+        Self::judged(
+            Judge::Supplied(Box::new(move |judgement, commission, frontier| {
+                executor(judgement).run_with_usage(commission, frontier)
+            })),
+            definition,
+            effects,
+        )
+    }
+
+    fn judged(judge: Judge<'h>, definition: WorkflowDefinition, effects: EffectLog) -> Self {
         Self {
-            loom,
-            model: Mutex::new(model),
-            config,
-            session,
+            judge,
+            admits: None,
+            max_input_tokens: None,
             definition,
             effects,
             position: Arc::default(),
@@ -853,6 +941,24 @@ impl<'l, S, G, V, M> WorkflowExecutor<'l, S, G, V, M> {
             store: None,
             run: Mutex::new(None),
         }
+    }
+
+    /// Narrows every judgement step to the step's actions among `actions`, the host's own
+    /// narrowing: a step narrows it further and never widens it, and a step none of whose actions
+    /// it admits ends its call `NeedsHumanJudgment`. Deterministic steps are not narrowed.
+    #[must_use]
+    pub fn with_admitted(mut self, actions: Vec<String>) -> Self {
+        self.admits = Some(actions);
+        self
+    }
+
+    /// The chooser's budget: the input tokens the requests of one judgement call may report
+    /// before the call suspends the run for it (see the module docs). A host's executor
+    /// ([`Self::with_executor`]) keeps its own budgets, and this one does not apply to it.
+    #[must_use]
+    pub fn with_max_input_tokens(mut self, limit: u64) -> Self {
+        self.max_input_tokens = Some(limit);
+        self
     }
 
     /// Keeps the run's record in `store` (see the module docs): once the executor is bound to a
@@ -1091,63 +1197,82 @@ impl<'l, S, G, V, M> WorkflowExecutor<'l, S, G, V, M> {
         self.position().outputs.clone()
     }
 
-    /// The model, given back.
-    pub fn into_model(self) -> M {
-        self.model
-            .into_inner()
-            .unwrap_or_else(PoisonError::into_inner)
-    }
-
     fn position(&self) -> MutexGuard<'_, Position> {
         self.position.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
-impl<S, G, V, M> AgentExecutor for WorkflowExecutor<'_, S, G, V, M>
-where
-    V: Deref,
-    V::Target: Governor,
-    M: ModelPort,
-{
+impl AgentExecutor for WorkflowExecutor<'_> {
+    /// [`Self::run_with_usage`]'s outcome: whoever calls `run` gets the outcome alone.
     fn run(
         &self,
         commission: &Commission<commission_state::Assigned>,
         frontier: &Frontier<frontier_state::Issued>,
     ) -> ExecutorOutcome {
+        self.run_with_usage(commission, frontier).outcome
+    }
+
+    /// One call (see the module docs): its outcome, and what the judgement step's executor
+    /// reported the call spent, which a deterministic step and the chooser report none of. A call
+    /// whose outcome the record could not keep reports the usage still: it was spent.
+    fn run_with_usage(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorStep {
         let save = match self.save_handle() {
             Ok(save) => Some(save),
             Err(RunRecordError::NoStore) => None,
             // A store and no Run bound: nothing proposed could be recorded.
-            Err(_) => return ExecutorOutcome::NoUsefulAction(Unit(true)),
+            Err(_) => return alone(ExecutorOutcome::NoUsefulAction(Unit(true))),
         };
         if let Some(why) = self.position().unsaved.clone() {
-            return self.unrecorded(&why);
+            return alone(self.unrecorded(&why));
         }
-        let outcome = self.take_step(commission, frontier, save.as_ref());
+        let step = self.take_step(commission, frontier, save.as_ref());
         if let Some(save) = &save {
             let mut position = self.position();
             save.write(&mut position);
             if let Some(why) = position.unsaved.clone() {
                 // What the call proposed would not be known after a restart: it is not proposed.
-                return self.unrecorded(&why);
+                return ExecutorStep {
+                    outcome: self.unrecorded(&why),
+                    usage: step.usage,
+                };
             }
         }
-        outcome
+        step
     }
 }
 
-impl<S, G, V, M> WorkflowExecutor<'_, S, G, V, M>
-where
-    V: Deref,
-    V::Target: Governor,
-    M: ModelPort,
-{
+/// `outcome`, of a call that reports no usage.
+fn alone(outcome: ExecutorOutcome) -> ExecutorStep {
+    ExecutorStep {
+        outcome,
+        usage: None,
+    }
+}
+
+impl WorkflowExecutor<'_> {
     /// One call's step (see the module docs), the record written by the caller.
     fn take_step(
         &self,
         commission: &Commission<commission_state::Assigned>,
         frontier: &Frontier<frontier_state::Issued>,
         save: Option<&Save>,
+    ) -> ExecutorStep {
+        let mut usage = None;
+        let outcome = self.take_step_outcome(commission, frontier, save, &mut usage);
+        ExecutorStep { outcome, usage }
+    }
+
+    /// [`Self::take_step`]'s outcome; `usage` takes what a judgement step's executor reported.
+    fn take_step_outcome(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
+        save: Option<&Save>,
+        usage: &mut Option<ExecutorUsage>,
     ) -> ExecutorOutcome {
         let mut position = self.position();
         // The log settles the outstanding step when it records it performed; this settles one it
@@ -1239,22 +1364,29 @@ where
                 let instructions = match self.instructions(judgement, &position.outputs) {
                     Ok(instructions) => instructions,
                     Err((why, output)) => {
-                        // Nothing is asked of a model without a value the step lists.
+                        // Nothing is asked of an executor without a value the step lists.
                         return self.needs_judgment(step, &named, frontier, &why, Some(&output));
                     }
                 };
-                // The position is not held while the model works: nothing else reads it then.
+                let judgement = Judgement {
+                    workflow: self.definition.name.clone(),
+                    step: step.name.clone(),
+                    instructions,
+                    actions: named.clone(),
+                };
+                // The position is not held while the executor works: nothing else reads it then.
                 drop(position);
-                let outcome = self.judge(&instructions, &named, commission, frontier);
+                let judged = self.judge(&judgement, commission, &narrowed(frontier, &named));
                 position = self.position();
-                outcome
+                *usage = judged.usage;
+                judged.outcome
             }
         };
         match outcome {
             ExecutorOutcome::ProposedAction(proposal) => {
-                if !named.contains(&proposal.action) {
-                    // The loop's narrowing keeps this from happening; a proposal outside the step
-                    // is never returned, whatever produced it.
+                if !named.contains(&proposal.action) || !listed(frontier, &proposal.action) {
+                    // A proposal outside the step, or of an action the frontier does not list, is
+                    // never returned, whatever produced it.
                     return ExecutorOutcome::NoUsefulAction(Unit(true));
                 }
                 position.outstanding = Some(Outstanding {
@@ -1271,36 +1403,31 @@ where
                 });
                 ExecutorOutcome::ProposedAction(proposal)
             }
+            // A judgement step proposes one action: the workflow follows one request per step.
+            ExecutorOutcome::ProposedReads(_) => ExecutorOutcome::NoUsefulAction(Unit(true)),
             other => other,
         }
     }
-}
 
-impl<S, G, V, M> WorkflowExecutor<'_, S, G, V, M>
-where
-    V: Deref,
-    V::Target: Governor,
-    M: ModelPort,
-{
-    /// The governed loop on the model, narrowed to `offered` (the judgement's actions the host's
-    /// narrowing admits, [`Self::offered`]), under `instructions` ([`Self::instructions`]).
+    /// The call of `judgement` on its executor, handed `frontier`, which lists no action but the
+    /// judgement's: the host's executor, or the chooser (see the module docs).
     fn judge(
         &self,
-        instructions: &str,
-        offered: &[String],
+        judgement: &Judgement,
         commission: &Commission<commission_state::Assigned>,
         frontier: &Frontier<frontier_state::Issued>,
-    ) -> ExecutorOutcome {
-        // `check` refused an action that is no tool name, so every action is offered.
-        let admits = offered
-            .iter()
-            .filter_map(|action| tool_name(action).ok())
-            .collect();
-        let mut config = self.config.clone().with_admitted(Some(admits));
-        instructions.clone_into(&mut config.instructions);
-        let mut model = self.model.lock().unwrap_or_else(PoisonError::into_inner);
-        LoopExecutor::new(self.loom, Lent(&mut *model), config, self.session.clone())
-            .run(commission, frontier)
+    ) -> ExecutorStep {
+        match &self.judge {
+            Judge::Supplied(executor) => executor(judgement, commission, frontier),
+            Judge::Chooser { governor, model } => alone(choose(
+                *governor,
+                *model,
+                self.max_input_tokens,
+                judgement,
+                commission,
+                frontier,
+            )),
+        }
     }
 
     /// `judgement`'s instructions, followed, when it lists inputs, by one data block holding the
@@ -1365,14 +1492,15 @@ where
     }
 
     /// The actions `step` may propose: a deterministic step's one action; a judgement step's actions
-    /// the host's narrowing (`LoopConfig::admits`) admits, in the step's order. A step only narrows
-    /// the host's narrowing further, never widens it; with no narrowing, every action of the step.
+    /// the host's narrowing ([`Self::with_admitted`]) admits, in the step's order. A step only
+    /// narrows the host's narrowing further, never widens it; with no narrowing, every action of
+    /// the step.
     fn offered(&self, step: &WorkflowStep) -> Vec<String> {
         let named = step_actions(step);
-        match (&step.kind, &self.config.admits) {
+        match (&step.kind, &self.admits) {
             (StepKind::Judgement(_), Some(host)) => named
                 .into_iter()
-                .filter(|action| tool_name(action).is_ok_and(|tool| host.contains(&tool)))
+                .filter(|action| host.contains(action))
                 .collect(),
             _ => named,
         }
@@ -1947,21 +2075,289 @@ fn resolve(
     })
 }
 
-/// The executor's model, lent to one judgement step's loop.
-struct Lent<'m, M>(&'m mut M);
+/// `frontier` listing no action but `actions`: what a judgement step's executor is handed.
+fn narrowed(
+    frontier: &Frontier<frontier_state::Issued>,
+    actions: &[String],
+) -> Frontier<frontier_state::Issued> {
+    let issued = frontier.data();
+    Frontier::new(FrontierData {
+        actions: issued
+            .actions
+            .iter()
+            .filter(|listed| actions.contains(&listed.action))
+            .cloned()
+            .collect(),
+        ..issued.clone()
+    })
+}
 
-impl<M: ModelPort> ModelPort for Lent<'_, M> {
-    fn wire(&self) -> &WireId {
-        self.0.wire()
+/// The standing instruction a chooser's selection request adds after the step's instructions.
+const SELECT_INSTRUCTION: &str = "Call select_action with exactly one of the candidate actions.";
+
+/// The standing instruction a chooser's argument request adds after the step's instructions.
+const ARGUMENTS_INSTRUCTION: &str =
+    "Call action_arguments with the arguments of the selected action.";
+
+/// The call of `judgement` on Loom's chooser over `model`, revalidating against `governor`, on
+/// `frontier`, which lists no action but the judgement's, under `max_input_tokens` (see the
+/// module docs).
+fn choose(
+    governor: &dyn Governor,
+    model: &dyn Model,
+    max_input_tokens: Option<u64>,
+    judgement: &Judgement,
+    commission: &Commission<commission_state::Assigned>,
+    frontier: &Frontier<frontier_state::Issued>,
+) -> ExecutorOutcome {
+    let budgeted = Budgeted {
+        model,
+        max_input_tokens,
+        spent: Mutex::default(),
+    };
+    let unusable = Unusable::default();
+    let briefing = StepBriefing {
+        judgement,
+        unusable: &unusable,
+    };
+    let outcome = Loom::new(
+        ModelSelector::new(&budgeted, briefing),
+        ModelArguments::new(&budgeted, briefing),
+        judgement.instructions.as_str(),
+    )
+    .with_governor(governor)
+    .run(commission, frontier);
+    if let Some(stop) = budgeted.stop() {
+        // The request that reached the budget was answered, and its answer is not taken.
+        return ExecutorOutcome::Suspended(ExecutorOutcomeSuspended {
+            reason: SuspensionReason::LoopBudget(stop),
+        });
+    }
+    if unusable.answered() {
+        // Loom suspends on an answer without a usable call as on a model out of reach; the model
+        // did answer, so nothing is proposed, and Commission's idle rule bounds a repeat.
+        return ExecutorOutcome::NoUsefulAction(Unit(true));
+    }
+    outcome
+}
+
+/// What a chooser's selector and argument generator tell the model for one judgement: the
+/// workflow and the step, and the step's instructions before each request's own. An answer
+/// without a usable call is kept ([`Unusable`]).
+#[derive(Clone, Copy)]
+struct StepBriefing<'b> {
+    judgement: &'b Judgement,
+    unusable: &'b Unusable,
+}
+
+impl StepBriefing<'_> {
+    /// The step's instructions, then `standing`.
+    fn standing(&self, standing: &str) -> String {
+        let instructions = self.judgement.instructions.trim_end();
+        if instructions.is_empty() {
+            standing.to_owned()
+        } else {
+            format!("{instructions}\n\n{standing}")
+        }
+    }
+}
+
+impl Briefing for StepBriefing<'_> {
+    fn text(&self) -> String {
+        format!(
+            "Workflow `{}`, judgement step `{}`.\n",
+            self.judgement.workflow, self.judgement.step
+        )
     }
 
-    fn turn(
-        &mut self,
-        request: &TurnRequest,
-        sink: &mut dyn StreamSink,
-    ) -> Result<TurnOutcome, WireError> {
-        self.0.turn(request, sink)
+    fn selection_instructions(&self) -> String {
+        self.standing(SELECT_INSTRUCTION)
     }
+
+    fn argument_instructions(&self) -> String {
+        self.standing(ARGUMENTS_INSTRUCTION)
+    }
+
+    /// A workflow declares no argument schema for an action: any object.
+    fn arguments_schema(&self, _action: &str) -> serde_json::Value {
+        serde_json::json!({"type": "object"})
+    }
+
+    /// One selection request; an answer without a usable call of `select_action`, or one naming
+    /// no action, is kept as unusable.
+    fn select(
+        &self,
+        model: &dyn Model,
+        candidates: &str,
+        schema: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        match select_once(self, model, candidates, schema) {
+            Ok(answer) => {
+                if answer
+                    .get("action")
+                    .and_then(serde_json::Value::as_str)
+                    .is_none()
+                {
+                    self.unusable.keep(NO_ACTION.to_owned());
+                }
+                Ok(answer)
+            }
+            Err(AskError::Unusable(why)) => {
+                self.unusable.keep(format!(
+                    "the model answered `{SELECT_TOOL}` without a usable call: {why}"
+                ));
+                Err(why)
+            }
+            Err(unanswered) => Err(unanswered.to_string()),
+        }
+    }
+
+    /// One argument request; an answer without a usable call of `action_arguments`, or arguments
+    /// Commission's JSON cannot carry, is kept as unusable.
+    fn arguments(
+        &self,
+        model: &dyn Model,
+        action: &str,
+    ) -> Result<serde_json::Value, ArgumentsError> {
+        match arguments_once(self, model, action) {
+            Ok(answer) => {
+                if commission_json::parse(&answer.to_string()).is_err() {
+                    self.unusable.keep(format!(
+                        "the model's arguments of `{action}` are not Commission's JSON"
+                    ));
+                }
+                Ok(answer)
+            }
+            Err(AskError::Unusable(why)) => {
+                self.unusable.keep(format!(
+                    "the model answered `{ARGUMENTS_TOOL}` for `{action}` without a usable call: \
+                     {why}"
+                ));
+                Err(ArgumentsError::Refused(why))
+            }
+            Err(unanswered) => Err(ArgumentsError::Unavailable(unanswered.to_string())),
+        }
+    }
+}
+
+/// The first answer of a chooser's model that held no usable call, once one did.
+#[derive(Default)]
+struct Unusable {
+    answer: Mutex<Option<String>>,
+}
+
+impl Unusable {
+    /// Keeps `why`, unless an earlier answer is kept.
+    fn keep(&self, why: String) {
+        self.slot().get_or_insert(why);
+    }
+
+    /// Whether an answer was kept.
+    fn answered(&self) -> bool {
+        self.slot().is_some()
+    }
+
+    fn slot(&self) -> MutexGuard<'_, Option<String>> {
+        self.answer.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// A chooser's model for one judgement call, held to its input-token budget: once the input
+/// tokens its answers report reach `max_input_tokens`, or an answer does not report them as final,
+/// the answer is refused to the chooser and the stop kept ([`Budgeted::stop`]). Without a budget
+/// it is the model.
+struct Budgeted<'m> {
+    model: &'m dyn Model,
+    max_input_tokens: Option<u64>,
+    /// The input tokens reported so far, and the stop once one was reached.
+    spent: Mutex<(u64, Option<CommissionValue>)>,
+}
+
+impl Budgeted<'_> {
+    /// The budget's stop, as `LoopBudget` carries it, once one was reached.
+    fn stop(&self) -> Option<CommissionValue> {
+        self.spent
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .1
+            .clone()
+    }
+
+    /// Charges `outcome`'s input tokens against `limit`: the stop, when the budget is reached or
+    /// cannot be observed.
+    fn charge(&self, limit: u64, outcome: &TurnOutcome) -> Option<CommissionValue> {
+        let text = |value: &str| CommissionValue::Text(value.to_owned());
+        let number = |value: u64| CommissionValue::Number(value.to_string());
+        let mut spent = self.spent.lock().unwrap_or_else(PoisonError::into_inner);
+        let reported = outcome
+            .observation
+            .usage
+            .as_ref()
+            .filter(|_| outcome.observation.final_usage)
+            .and_then(|usage| usage.input_tokens);
+        let stop = match reported {
+            None => CommissionValue::Object(vec![
+                ("kind".to_owned(), text("budget-unobservable")),
+                ("name".to_owned(), text("max_input_tokens")),
+                (
+                    "reason".to_owned(),
+                    text("the model's answer reported no final input-token count"),
+                ),
+            ]),
+            Some(tokens) => {
+                spent.0 = spent.0.saturating_add(tokens);
+                if spent.0 < limit {
+                    return None;
+                }
+                CommissionValue::Object(vec![
+                    ("kind".to_owned(), text("max-input-tokens")),
+                    ("limit".to_owned(), number(limit)),
+                    ("reported".to_owned(), number(spent.0)),
+                ])
+            }
+        };
+        Some(spent.1.get_or_insert(stop).clone())
+    }
+}
+
+impl Model for Budgeted<'_> {
+    fn provenance(&self) -> &Provenance {
+        self.model.provenance()
+    }
+
+    fn capabilities(&self) -> &Capabilities {
+        self.model.capabilities()
+    }
+
+    fn turn<'a>(
+        &'a self,
+        request: &'a TurnRequest,
+        sink: &'a mut dyn StreamSink,
+        cancel: &'a Cancel,
+    ) -> BoxFuture<'a, Result<TurnOutcome, ModelError>> {
+        let Some(limit) = self.max_input_tokens else {
+            return self.model.turn(request, sink, cancel);
+        };
+        if self.stop().is_some() {
+            return Box::pin(async { Err(budget_reached()) });
+        }
+        let turn = self.model.turn(request, sink, cancel);
+        Box::pin(async move {
+            let outcome = turn.await?;
+            match self.charge(limit, &outcome) {
+                Some(_) => Err(budget_reached()),
+                None => Ok(outcome),
+            }
+        })
+    }
+}
+
+/// What a chooser's budgeted model answers in place of an answer past its budget: not retriable.
+fn budget_reached() -> ModelError {
+    ModelError::new(
+        ErrorCode::Refused,
+        "the judgement step reached its input-token budget",
+    )
 }
 
 /// The YAML document into the generated types, member order kept.
