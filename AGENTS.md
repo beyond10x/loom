@@ -20,20 +20,21 @@ and can execute only what the current frontier admits, and authority is rechecke
 effect. **O3, any harness, observed and compared:** Loom is the native executor Metaharness compares
 against other harnesses on the same case.
 
-Loom owns the model/tool loop (ADR 0071): prompt and context assembly, model turns, the projected
-action catalogue, action selection, argument generation, tool round trips, streaming, compaction,
-sessions and transcripts, budgets, interruption and recovery, and model-facing approval suspension.
-Since ADR 0090 it also holds Commission's contracts and runtime, the governor and intake (sections
-below).
+Loom owns the decision path (ADR 0071, as ADR 0098 narrows it): prompt and context assembly, the
+projected action catalogue, action selection, argument generation, the budgets of its model
+requests, and model-facing approval suspension. Each decision is a structured request to an llm
+`Model`; Loom runs no model loop of its own. Since ADR 0090 it also holds Commission's contracts
+and runtime, the governor and intake (sections below).
 
 It does not own protocol semantics (Canon), engineering protocol definitions
 (`b10x-canon-engineering`, beyond10x/engineering-protocols), case truth, organizational authority,
 connector credentials, final completion, provider wires or credentials (llm), or the engineering
 record of a case (AEP).
 
-`beyond10x/harness` is the predecessor. Port its implementation instead of rewriting from zero, and
-do not break its consumers while they still depend on it. Code ported from Harness into Loom is
-Apache-2.0 (operator, 2026-10-04); Harness keeps its own `LicenseRef-B10x-Proprietary` licence.
+Loom reaches models through llm only, for its decisions, and agent work in a harness (Harness,
+Claude Code, Codex) through metaharness behind an `AgentExecutor` (ADR 0098). Loom deleted its
+port of Harness (`story:delete-harness-port`); do not port a harness loop, wire or session into it
+again.
 
 ## Protocol composition and system queries
 
@@ -98,19 +99,19 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 
 | Claim | Held by |
 |---|---|
-| The catalogue follows the frontier | `crates/loom-executor/tests/frontier_projection.rs` (`projection_follows_frontier`), `crates/loom-executor/tests/harness_loop_port.rs` (`ported_loop_round_trip`) |
+| The catalogue follows the frontier | `crates/loom-executor/tests/frontier_projection.rs` (`projection_follows_frontier`) |
 | A selector cannot leave the catalogue | `crates/loom-executor/tests/action_selector.rs` (`selector_cannot_leave_catalogue`) |
 | The reasoning-model selector, `model_selector::ModelSelector` over an llm `Model`, offers the model only its candidates, and an answer outside them is never a selection | `crates/loom-executor/tests/reasoning_model_selector.rs` (`an_action_outside_the_candidate_set_is_a_selection_error_and_never_a_selection`) |
 | Low confidence falls back to the stronger selector, at a host-supplied threshold compared as a number | `crates/loom-executor/tests/confidence_fallback.rs` (`the_fast_choice_is_returned_only_at_or_above_the_supplied_threshold`) |
 | A confidence fallback is recorded as two selections, each with its own selector's strategy: the fast one `Overruled`, naming its replacement, which alone reaches argument generation and revalidation; a replacement that is unknown, the selection itself, no longer `Selected` or from another catalogue is refused and nothing is recorded; `Loom::select` returns the pick under its own selector's strategy | `crates/loom-executor/tests/fallback_selection_recording.rs` (`an_overruled_fast_selection_is_recorded_overruled_naming_its_replacement`, `overrule_selection_naming_an_unknown_replacement_is_refused_with_selection_not_found`); `crates/loom-executor/tests/adversary_w4_fallback_overrule.rs`; `crates/loom-executor/tests/adversary_w4_fallback_pipeline.rs` (`adversary_w4_loom_select_carries_the_strategy_of_the_selector_that_made_the_pick`) |
-| Every selection gets one `SelectionRecord` equal to it, with `fell_back_to` on the overruled fast selection naming the replacement's strategy; a selection refused at the execution boundary raises its session's `boundary_refusals` by one and adds no record; neither is evidence | `crates/loom-executor/tests/selection_telemetry.rs` (`selection_telemetry_is_recorded`) |
+| Every selection gets one `SelectionRecord` equal to it, with `fell_back_to` on the overruled fast selection naming the replacement's strategy; a selection refused at the execution boundary adds no record; a record is never evidence | `crates/loom-executor/tests/selection_telemetry.rs` (`selection_telemetry_is_recorded`) |
 | Laya selects behind the confidence fallback; arguments are generated once, only for the finally selected action, and an action outside the frontier never reaches argument generation or revalidation | `crates/loom-selector-laya/tests/laya_arguments_slice.rs` (`a_choice_outside_the_frontier_is_rejected_and_never_reaches_arguments_or_revalidation`) |
 | A blocked or merge-seeking pick is never proposed | `crates/loom-executor/tests/adversary_executor_admission.rs` |
 | A workflow asks a model only in a judgement step, offering it only that step's actions; a judgement step runs on the host's own `AgentExecutor` when it supplies one, called for that step only, told its instructions and handed only its actions, and a proposal outside them, or reads proposed together, never reach Commission; a step whose action the frontier does not list ends `NeedsHumanJudgment` naming it and nothing is proposed; a step advances only once its request was `Performed`; a definition naming an action outside its protocol is refused at load, naming the step | `crates/loom-executor/tests/workflow_executor.rs` (`deterministic_steps_call_no_model`, `a_judgement_step_offers_the_model_only_its_actions`, `a_judgement_step_runs_on_a_supplied_executor`, `a_supplied_executors_reads_proposed_together_are_never_proposed`, `a_step_the_frontier_does_not_list_ends_needing_human_judgment`, `a_step_advances_only_after_its_effect_was_performed`, `a_definition_naming_an_action_outside_its_protocol_is_refused`), `crates/loom-executor/tests/adversary_w11_u2.rs` |
 | A later step's arguments carry an earlier step's typed output with no model call, and a missing or mistyped output, or one its step did not produce, proposes nothing and ends `NeedsHumanJudgment` naming the step and the output; a reference to a later, unknown or undeclared output is refused at load | `crates/loom-executor/tests/workflow_step_outputs.rs` (`a_later_step_reads_an_earlier_output_without_a_model`, `a_mistyped_output_ends_needing_human_judgment`, `an_absent_output_ends_needing_human_judgment`, `a_reference_to_a_later_or_unknown_step_is_refused_at_load`, `outputs_are_identical_on_a_rerun_with_the_same_reports`) |
 | A judgement step sees exactly the earlier outputs it lists, typed, in one data block of its instructions that no value can close, never as instructions; a listed output the run did not produce asks the model nothing and ends `NeedsHumanJudgment` naming the step and the output; an input naming no earlier declared output, or listed twice, is refused at load | `crates/loom-executor/tests/workflow_step_outputs.rs` (`a_judgement_step_reads_a_listed_output_as_data`, `a_judgement_step_listing_an_absent_output_asks_no_model`, `a_judgement_step_input_naming_no_earlier_output_is_refused_at_load`) |
 | A workflow run's record, written after every performed step to the governor's `FileWorkflowRunStore` keyed by the Run id, lets `resume(run_id)` in another process continue the run after an approval or a crash between steps, every output bound, no performed step invoked again, and the usage report covering every segment, what a host's executor reported for a judgement call included, counted once; a record of another Run is refused, never read | `crates/loom-commission-testkit/tests/workflow_run_store.rs` (`a_step_result_survives_a_restart_across_an_approval`, `the_usage_report_covers_every_segment_of_a_resumed_run`, `a_step_result_of_another_run_is_refused`, `a_workflow_resumes_after_a_crash_between_steps`), `crates/loom-executor/tests/workflow_executor.rs` (`the_run_record_carries_a_host_executors_usage_once`), `crates/loom-executor/tests/adversary_w20261021w5_u1.rs` |
-| A governed run stopped by a budget of its model loop is `Suspended` with `LoopBudget` carrying the loop's stop, through `Loom::run_loop` and `LoopExecutor`, and so is a workflow run whose judgement step's chooser reached its input-token budget or could not observe it, never `NoUsefulAction` | `crates/loom-executor/tests/budget_stop_cause.rs` (`a_governed_run_stopped_by_its_input_token_budget_reports_the_budget`), `crates/loom-executor/tests/workflow_executor.rs` (`a_judgement_step_stopped_by_its_input_token_budget_suspends_the_run_for_it`, `a_judgement_step_whose_budget_cannot_be_observed_suspends_the_run_for_it`) |
+| A workflow run whose judgement step's chooser reached its input-token budget or could not observe it is `Suspended` with `LoopBudget` carrying the stop as `loom.run.LoopStop` declares it, never `NoUsefulAction` | `crates/loom-executor/tests/workflow_executor.rs` (`a_judgement_step_stopped_by_its_input_token_budget_suspends_the_run_for_it`, `a_judgement_step_whose_budget_cannot_be_observed_suspends_the_run_for_it`) |
 | A stale or unlisted request is refused at revalidation | `crates/loom-commission-testkit/tests/action_request.rs`, `crates/loom-executor/tests/adversary_run_revalidation.rs`, `crates/loom-executor/tests/selection_revalidation.rs` |
 | Unknown capabilities and panicking authority providers yield no grant | `crates/loom-commission-testkit/tests/adversary_authority_fail_closed.rs` |
 | An authority provider is asked about the action request the runtime revalidated, at the run loop and on a resume, bound to the frontier's revision and never to one the arguments name; a grant bound to one revision allows no other; the runtime reads the case's revision again after the allow and once more right before a resumed request is invoked, and performs nothing on a move it sees: a resume that sees it before its take takes nothing, one that sees it after releases the Suspension; a move while the effect itself runs is the effect port's to refuse, by the request's `expected_case_revision`; a failing provider grants nothing at either check | `crates/loom-commission-testkit/tests/authority_request.rs` (`the_provider_sees_the_request_it_decides`, `a_grant_bound_to_one_revision_does_not_allow_the_next`, `a_failing_provider_still_grants_nothing`, `a_resume_that_sees_the_case_moved_after_its_take_releases_the_suspension_and_performs_nothing`), `crates/loom-commission-testkit/tests/adversary_w20261020_u2.rs`, `crates/loom-commission/tests/security_w20261020_u2.rs` |
@@ -133,11 +134,10 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | The executor answers the commands of `ess/` as their synthesized scenarios specify, except `not-in-frontier`, which the conformance target answers | `task conform` (`crates/loom-conformance/tests/conform.rs`, `ess_conformance_report`); the membership rule: `crates/loom-executor/tests/adversary_run_revalidation.rs` (`not_in_frontier_follows_the_frontier_actions`) |
 | The intake slice answers the commands of `ess/intake/` as their synthesized scenarios specify: a resume context is kept once (`KeepResumeContext`) and dropped (`DropResumeContext`), a merge hand-off is recorded once per request and per `HEAD` (`RecordMergeHandoff`), and the stores read back what the views `ResumeContexts` and `MergeHandoffs` publish | `task intake-conform` (`crates/loom-intake-conformance/tests/conform.rs`, `ess_conformance_report`) |
 | The router refuses a pick outside the registry or below the threshold | `crates/loom-intake-router/tests/adversary_classify.rs` |
-| A metered run reports one model call per `turn` of an llm `Model` wrapped in `MeteredModelPort`, failed turns included and a model wrapped again on its meter counted once, one step per executor call, holding the turns made on its thread or on another while it ran, and tokens and cost per step that sum to the run's, each turn priced with `metering::RateCard`; a cost no rate card priced is absent, never zero, as is the cost of a turn whose usage is not final or names no input or output tokens; the usage an executor that is not a model loop reports (`AgentExecutor::run_with_usage`) is its step's usage and no model call, never in the report's effects, and is in the meter only when the call came through `run_with_usage`, so the meter and the run's charges agree; an executor metered at its model port reports none, so nothing is counted twice | `crates/loom-executor/tests/run_metering.rs` (`the_reported_calls_equal_the_turns_the_model_port_saw`, `a_step_counts_the_selector_and_argument_calls_made_in_it`, `cost_is_absent_without_a_rate_card_and_for_an_unlisted_model`, `a_non_model_executor_usage_is_its_step_usage`, `a_step_sums_its_metered_turns_and_the_usage_its_executor_reports`, `an_executor_metered_at_its_model_port_reports_no_usage_and_is_counted_once`), `crates/loom-executor/tests/adversary_w11_u1_metering.rs` (`an_answer_whose_usage_is_partial_is_a_call_whose_cost_is_absent`, `a_model_metered_again_on_one_meter_counts_each_turn_once_however_it_is_reached`, `a_turn_on_another_thread_while_executor_calls_overlap_counts_in_the_last_opened`), `crates/loom-executor/tests/adversary_w20261020w4_u4.rs`, `crates/loom-executor/tests/adversary_w20261020w3_u3.rs` (`a_wrapper_that_does_not_forward_leaves_the_meter_and_the_budget_agreeing`) |
+| A metered run reports one model call per `turn` of an llm `Model` wrapped in `MeteredModel`, failed turns included and a model wrapped again on its meter counted once, one step per executor call, holding the turns made on its thread or on another while it ran, and tokens and cost per step that sum to the run's, each turn priced with `metering::RateCard`; a cost no rate card priced is absent, never zero, as is the cost of a turn whose usage is not final or names no input or output tokens; the usage an executor that is not a model loop reports (`AgentExecutor::run_with_usage`) is its step's usage and no model call, never in the report's effects, and is in the meter only when the call came through `run_with_usage`, so the meter and the run's charges agree; an executor metered at its model port reports none, so nothing is counted twice | `crates/loom-executor/tests/run_metering.rs` (`the_reported_calls_equal_the_turns_the_model_port_saw`, `a_step_counts_the_selector_and_argument_calls_made_in_it`, `cost_is_absent_without_a_rate_card_and_for_an_unlisted_model`, `a_non_model_executor_usage_is_its_step_usage`, `a_step_sums_its_metered_turns_and_the_usage_its_executor_reports`, `an_executor_metered_at_its_model_port_reports_no_usage_and_is_counted_once`), `crates/loom-executor/tests/adversary_w11_u1_metering.rs` (`an_answer_whose_usage_is_partial_is_a_call_whose_cost_is_absent`, `a_model_metered_again_on_one_meter_counts_each_turn_once_however_it_is_reached`, `a_turn_on_another_thread_while_executor_calls_overlap_counts_in_the_last_opened`), `crates/loom-executor/tests/adversary_w20261020w4_u4.rs`, `crates/loom-executor/tests/adversary_w20261020w3_u3.rs` (`a_wrapper_that_does_not_forward_leaves_the_meter_and_the_budget_agreeing`) |
 | An executor call's reported usage (`ExecutorStep.usage`) is charged to the run, never to an action or as a trial, and delivered in the step's observation; a usage with no cost leaves the run's cost absent; a charge past a spending limit suspends the Run with `RunBudget` once the step was observed, before its outcome is acted on | `crates/loom-commission-testkit/tests/executor_usage.rs` (`an_executor_usage_is_charged_to_the_run`, `a_run_budget_breach_by_executor_usage_suspends_the_run`, `an_unknown_cost_stays_unknown`) |
-| Model or provider JSON nested past 128 levels is refused | `crates/loom-executor/tests/json_depth.rs` |
+| A provider document Loom decodes itself, the Laya selector's answer, nested past 128 levels is refused; a model's answer is llm's to decode | `crates/loom-selector-laya/tests/laya_selector.rs` (`every_transport_or_answer_failure_is_unavailable`) |
 | No hand-written type shadows an ESS-declared one | `task no-hand-model`, `task commission:no-hand-model` |
-| Ported Harness modules keep the import limits their crates had; `turn_loop` alone may also name the generated model (`crate::model`), for `LoopStop` | `crates/loom-executor/tests/adversary_harness_port_boundaries.rs` (`the_boundaries_harness_enforced_by_crate_still_hold_between_modules`), `crates/loom-executor/tests/adversary2_harness_port.rs` (`each_ported_module_names_only_what_its_harness_manifest_allowed`) |
 | Package and library names are the `loom-` names | `crates/loom-executor/tests/crate_names.rs` |
 | No manifest names an archived Commission, governor or intake repository | `crates/loom-executor/tests/governor_import.rs`, `intake_import.rs`, `commission_import.rs` |
 | The SDK stability page (`website/docs/reference/sdk-stability.md`) lists exactly the ports a host implements and the `loom_sdk` paths control-plane imports, each resolving through `loom_sdk`; a change to that surface updates the page and names any break in a `**Breaking:**` bullet of `CHANGELOG.md` | `crates/loom-sdk/tests/host_ports.rs` (`a_host_implements_every_port_through_loom_sdk_alone`, `the_stability_page_lists_exactly_the_ports_this_test_implements`, `every_control_plane_path_on_the_page_resolves`) |
@@ -581,11 +581,7 @@ reuse `crates/loom-plugin/tests/support/mod.rs` by path and answer Slack-shaped 
 `b10x-loom plugin run` settles both models before any read: with `--catalog` from route aliases
 (`model_catalog`), otherwise Codex models, as `run` does. A turn runs on the agent's llm `Model`
 itself (`b10x_loom_cli::plugin::turn_models`): the chooser path sends each selection and argument
-request to it, with no model port between and no other target; the CLI builds no
-`LlmModelPort` and defines no model port of its own (`crates/loom-sdk/tests/llm_model_port.rs`).
-`loom_sdk::llm::LlmModelPort` (`crates/loom-sdk/src/llm.rs`) stays the bridge from an llm `Model`
-to the harness `ModelPort` for a host that runs the ported loop: one `Model::turn` per port turn,
-no retry and no other target, an opaque item carried back under the wire id `llm-model` only. Without `--once`, the first SIGTERM or SIGINT sets the host's stop, so
+request to it, with nothing between and no other target. Without `--once`, the first SIGTERM or SIGINT sets the host's stop, so
 a systemd stop ends it after the item being handled; a second one exits at once with 130
 (`plugin_run_stops_on_sigterm`). `plugin report` reads `record.jsonl` without the lock and drops a torn
 last line. `crates/loom-cli/tests/plugin.rs` runs the binary against the fake `connectors` and the
@@ -633,8 +629,8 @@ being counted at the metered model. A chooser answer without a usable
 call is no useful action, bounded by Commission's idle rule; a request never answered suspends the
 run for an external availability. Given `with_max_input_tokens`, a chooser call whose requests'
 input tokens reach it, or report none as final, suspends the run for it (`LoopBudget`,
-`max-input-tokens` or `budget-unobservable`), and the answer that reached it is not taken. The
-judgement step runs no ported loop and names nothing of `harness`.
+`max-input-tokens` or `budget-unobservable`, the two causes `loom.run.LoopStop` declares), and the
+answer that reached it is not taken. The judgement step runs no model loop.
 `WorkflowExecutor` takes the first step after the last performed one whose `when` holds; a step
 whose actions the frontier does not list as `Admissible` or `ApprovalRequired` ends the call
 `NeedsHumanJudgment`, naming the step and the frontier's reasons, and nothing later is taken
@@ -919,7 +915,7 @@ run workspace, with hooks, fsmonitor, helpers and global/system configuration di
 Model calls go through llm's crates at release tag `0.8.1`, never a hand-written HTTP client.
 `model_retry.rs` owns caller retries using llm's retry
 classification and `RetryPolicy`: three identical attempts, no retry after a sink event,
-cancellation-aware backoff and per-attempt context metrics. Model ports stay single-attempt;
+cancellation-aware backoff and per-attempt context metrics. A model's turn stays single-attempt;
 effects remain outside this loop. `system_query.rs` exercises recovery in all three request phases. The Codex preset and the forced tool call are
 `codex_model` (the CLI builds its model with it) and `call_tool` (the router calls it). With
 `run --catalog`, the CLI builds both models instead with `b10x-llm-models` `port` from the
@@ -927,19 +923,8 @@ route aliases `--model` and `--classifier-model` name (`crates/loom-cli/src/mode
 held by `crates/loom-cli/tests/catalog_route.rs`): one target per route, no fallback, and no
 credential resolver, so a credentialed account is refused before any model call. The
 credential is the operator's Codex login (`~/.codex/auth.json`), read and renewed by llm, never by
-Loom code. The ported wires take theirs from a `loom.run.WireCredential` reference through
-`credentials::ResolvedBearer`, which asks a `SecretResolver` the embedder injects at each call.
-
-The SDK ships two model ports. `loom_sdk::llm::LlmModelPort` is the llm-backed one above.
-`loom_sdk::loom::wire::ClaudeCodePort` (`crates/loom-executor/src/wire/claude_code.rs`) runs on an
-operator's Claude Code login only through the `claude` command, which reads that login itself:
-one turn is one `claude -p --output-format json` invocation, the command's own tools off, the
-turn's tools and conversation on its standard input as escaped JSON blocks, and a call answered
-as a JSON object the loop executes. It is single-attempt, bounded in output and time; a missing
-or failing command is a `WireError` naming it. A port that reads a Claude Code login directly is
-llm's to build, never Loom's. `crates/loom-sdk/tests/sdk_model_ports.rs` runs a governed loop turn
-on it over a stand-in `claude` on `PATH`. The ported `harness::wire` stays free of I/O; Loom's own
-ports that run something are under `wire`.
+Loom code. Loom ships no model port and no provider wire of its own: an SDK host hands Loom its
+llm `Model`, and a Claude Code session is metaharness's to run (ADR 0098).
 
 ## Planning and waves
 

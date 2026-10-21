@@ -63,14 +63,6 @@ host_ports! {
     loom_sdk::loom::selection::ActionSelector => hosts::Selector;
     loom_sdk::loom::workflow::WorkflowRunStore => hosts::RunRecords;
     loom_sdk::loom::arguments::ArgumentGenerator => hosts::Arguments;
-    loom_sdk::loom::harness::wire::ModelPort => hosts::Model;
-    loom_sdk::loom::harness::wire::ToolPort => hosts::Tools;
-    loom_sdk::loom::harness::wire::BearerSource => hosts::Bearers;
-    loom_sdk::loom::harness::turn_loop::ApprovalPort => hosts::Approvals;
-    loom_sdk::loom::harness::turn_loop::TurnEnvironmentProvider => hosts::Environment;
-    loom_sdk::loom::harness::turn_loop::HookPort => hosts::Hooks;
-    loom_sdk::loom::harness::turn_loop::LoopSink => hosts::LoopEvents;
-    loom_sdk::loom::harness::wire::StreamSink => hosts::StreamEvents;
     loom_sdk::commission::runtime::LoopContext => hosts::Context;
 }
 
@@ -105,14 +97,6 @@ mod hosts {
     };
     use loom_sdk::intake::slice::executor::TestCommand;
     use loom_sdk::loom::arguments::{ArgumentContext, ArgumentGenerator};
-    use loom_sdk::loom::harness::turn_loop::{
-        ApprovalDecision, ApprovalPort, EnvironmentError, HookPort, LoopEvent, LoopSink,
-        TurnEnvironment, TurnEnvironmentProvider, TurnEnvironmentRequest,
-    };
-    use loom_sdk::loom::harness::wire::{
-        Bearer, BearerSource, ModelPort, StreamEvent, StreamSink, ToolCall, ToolOutcome, ToolPort,
-        ToolSpec, TurnOutcome, TurnRequest, WireError, WireId,
-    };
     use loom_sdk::loom::model::run::{CatalogueEntry, CommissionRunId, SelectionStrategy};
     use loom_sdk::loom::model::workflow::WorkflowRunRecord;
     use loom_sdk::loom::model_selector::Briefing;
@@ -393,82 +377,6 @@ mod hosts {
         }
     }
 
-    pub struct Model;
-
-    impl ModelPort for Model {
-        fn wire(&self) -> &WireId {
-            unreachable!("{NEVER_CALLED}")
-        }
-
-        fn turn(
-            &mut self,
-            _request: &TurnRequest,
-            _sink: &mut dyn StreamSink,
-        ) -> Result<TurnOutcome, WireError> {
-            unreachable!("{NEVER_CALLED}")
-        }
-    }
-
-    pub struct Tools;
-
-    impl ToolPort for Tools {
-        fn specs(&self) -> &[ToolSpec] {
-            unreachable!("{NEVER_CALLED}")
-        }
-
-        fn call(&mut self, _call: &ToolCall) -> ToolOutcome {
-            unreachable!("{NEVER_CALLED}")
-        }
-    }
-
-    pub struct Bearers;
-
-    impl BearerSource for Bearers {
-        fn bearer(&self) -> Result<Bearer, WireError> {
-            unreachable!("{NEVER_CALLED}")
-        }
-    }
-
-    pub struct Approvals;
-
-    impl ApprovalPort for Approvals {
-        fn decide(&mut self, _call: &ToolCall, _spec: &ToolSpec) -> ApprovalDecision {
-            unreachable!("{NEVER_CALLED}")
-        }
-    }
-
-    pub struct Environment;
-
-    impl TurnEnvironmentProvider for Environment {
-        fn refresh(
-            &mut self,
-            _request: TurnEnvironmentRequest,
-        ) -> Result<TurnEnvironment, EnvironmentError> {
-            unreachable!("{NEVER_CALLED}")
-        }
-    }
-
-    /// Every `HookPort` method has a default; a host overrides the ones it needs.
-    pub struct Hooks;
-
-    impl HookPort for Hooks {}
-
-    pub struct LoopEvents;
-
-    impl LoopSink for LoopEvents {
-        fn emit(&mut self, _event: LoopEvent) {
-            unreachable!("{NEVER_CALLED}")
-        }
-    }
-
-    pub struct StreamEvents;
-
-    impl StreamSink for StreamEvents {
-        fn emit(&mut self, _event: StreamEvent) {
-            unreachable!("{NEVER_CALLED}")
-        }
-    }
-
     pub struct Context;
 
     impl LoopContext for Context {
@@ -492,8 +400,9 @@ mod hosts {
 
 /// One `use` per path of the page's control-plane table, read from
 /// `~/beyond10x/control-plane/crates/control-plane-runtime` and its xtask: the `loom_sdk` items it
-/// imports, the items it names inline, and the items of `loom_sdk::loom::harness::wire` it names
-/// through that module. Associated functions and enum variants are left to their type.
+/// imports and the items it names inline that this release still exports. The harness and session
+/// paths it names are removed (`story:delete-harness-port`), each in a `**Breaking:**` bullet of
+/// `CHANGELOG.md`. Associated functions and enum variants are left to their type.
 ///
 /// [`every_control_plane_path_on_the_page_resolves`] reads these lines out of this file, between
 /// the two marker comments, so keep one path per `use` and nothing else between them.
@@ -522,40 +431,13 @@ mod control_plane {
     use loom_sdk::governor::CaseState;
     use loom_sdk::governor::FallibleCaseStore;
     use loom_sdk::loom::arguments::ArgumentContext;
-    use loom_sdk::loom::harness::turn_loop::AgentLoop;
-    use loom_sdk::loom::harness::turn_loop::Budget;
-    use loom_sdk::loom::harness::turn_loop::DenyAll;
-    use loom_sdk::loom::harness::turn_loop::LoopConfig;
-    use loom_sdk::loom::harness::turn_loop::LoopEvent;
-    use loom_sdk::loom::harness::turn_loop::LoopSink;
-    use loom_sdk::loom::harness::turn_loop::OutputSchema;
-    use loom_sdk::loom::harness::turn_loop::RunLedger;
-    use loom_sdk::loom::harness::wire;
-    use loom_sdk::loom::harness::wire::Item;
-    use loom_sdk::loom::harness::wire::ModelPort;
-    use loom_sdk::loom::harness::wire::StreamSink;
-    use loom_sdk::loom::harness::wire::ToolCall;
-    use loom_sdk::loom::harness::wire::ToolName;
-    use loom_sdk::loom::harness::wire::ToolOutcome;
-    use loom_sdk::loom::harness::wire::ToolPort;
-    use loom_sdk::loom::harness::wire::ToolSpec;
-    use loom_sdk::loom::harness::wire::TurnOutcome;
-    use loom_sdk::loom::harness::wire::TurnRequest;
-    use loom_sdk::loom::harness::wire::Usage;
-    use loom_sdk::loom::harness::wire::WireError;
-    use loom_sdk::loom::harness::wire::WireErrorCode;
-    use loom_sdk::loom::harness::wire::WireId;
     use loom_sdk::loom::model::primitives::Uuid as LoomUuid;
     use loom_sdk::loom::model::run::CatalogueEntry;
     use loom_sdk::loom::model::run::CommissionRunId;
-    use loom_sdk::loom::model::run::RunEnding;
     use loom_sdk::loom::model::run::SelectionStrategy;
-    use loom_sdk::loom::model::run::SessionData;
-    use loom_sdk::loom::model::run::SessionId;
     use loom_sdk::loom::selection::Choice;
     use loom_sdk::loom::selection::SelectionContext;
     use loom_sdk::loom::selection::SelectorError;
-    use loom_sdk::loom::session::SessionFile;
     use loom_sdk::run_until_blocked;
     // control-plane paths: end
 }
@@ -691,14 +573,6 @@ fn a_host_implements_every_port_through_loom_sdk_alone() {
         "ActionSelector",
         "WorkflowRunStore",
         "ArgumentGenerator",
-        "ModelPort",
-        "ToolPort",
-        "BearerSource",
-        "ApprovalPort",
-        "TurnEnvironmentProvider",
-        "HookPort",
-        "LoopSink",
-        "StreamSink",
         "LoopContext",
     ]
     .into_iter()

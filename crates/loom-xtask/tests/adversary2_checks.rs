@@ -109,11 +109,14 @@ fn no_hand_model_refuses_a_model_type_defined_through_a_macro_parameter() {
 fn no_hand_model_refuses_cfg_gated_and_nested_module_types() {
     let root = copy_of_repository("cfg-nested");
     let lib = root.join("crates/loom-executor/src/lib.rs");
-    let cfg_line = append(&lib, "#[cfg(any())]\npub struct Session;") + 1;
+    let cfg_line = append(&lib, "#[cfg(any())]\npub struct Selection;") + 1;
     let nested = root.join("crates/loom-executor/src/hidden/deeper.rs");
     fs::create_dir_all(nested.parent().unwrap_or(&root)).unwrap_or_else(|e| panic!("create: {e}"));
-    fs::write(&nested, "pub mod inner {\n    pub enum Turn { A }\n}\n")
-        .unwrap_or_else(|e| panic!("write {}: {e}", nested.display()));
+    fs::write(
+        &nested,
+        "pub mod inner {\n    pub enum ActionCatalogue { A }\n}\n",
+    )
+    .unwrap_or_else(|e| panic!("write {}: {e}", nested.display()));
 
     let found = xtask(&root, &["no-hand-model"]);
     let text = stderr(&found);
@@ -121,11 +124,11 @@ fn no_hand_model_refuses_cfg_gated_and_nested_module_types() {
     assert!(!found.status.success(), "no-hand-model passed: {text}");
     assert!(
         text.contains(&format!("{}:{cfg_line}:", lib.display())),
-        "the cfg-gated Session is not named: {text}"
+        "the cfg-gated Selection is not named: {text}"
     );
     assert!(
         text.contains(&format!("{}:2:", nested.display())),
-        "the nested Turn is not named: {text}"
+        "the nested ActionCatalogue is not named: {text}"
     );
 }
 

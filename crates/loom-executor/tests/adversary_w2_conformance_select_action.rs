@@ -23,8 +23,8 @@ use b10x_loom_executor::model::run::{
     CatalogueRevisionMismatch, ProjectCatalogue, ProjectCatalogueOutcome, SelectAction,
     SelectActionOutcome, SelectionData, SelectionId, SelectionState, SelectionStrategy, TurnId,
 };
+use b10x_loom_executor::projection::CatalogueRecord;
 use b10x_loom_executor::selection::select_action;
-use b10x_loom_executor::session::TurnRecord;
 
 const CATALOGUE_REVISION: i64 = 7;
 const LISTED: &str = "repository.read";
@@ -38,9 +38,9 @@ fn catalogue_id() -> CatalogueId {
 }
 
 /// A record holding one catalogue, projected at [`CATALOGUE_REVISION`] and listing [`LISTED`].
-fn projected() -> TurnRecord {
-    let mut turns = TurnRecord::default();
-    let outcome = turns
+fn projected() -> CatalogueRecord {
+    let mut catalogues = CatalogueRecord::default();
+    let outcome = catalogues
         .project_catalogue(ProjectCatalogue {
             catalogue_id: catalogue_id(),
             turn_id: TurnId(uuid(0x7e1)),
@@ -56,7 +56,7 @@ fn projected() -> TurnRecord {
         matches!(outcome, ProjectCatalogueOutcome::Projected { .. }),
         "{outcome:?}"
     );
-    turns
+    catalogues
 }
 
 fn input(action: &str, case_revision: i64) -> SelectAction {
@@ -76,10 +76,10 @@ fn input(action: &str, case_revision: i64) -> SelectAction {
 fn adversary_w2_a_revision_on_either_side_of_the_catalogues_is_refused_and_nothing_stored() {
     let mut failures = Vec::new();
     for claimed in [CATALOGUE_REVISION - 1, CATALOGUE_REVISION + 1] {
-        let turns = projected();
+        let catalogues = projected();
         let mut requests = RequestRecord::default();
 
-        let outcome = select_action(&turns, &mut requests, input(LISTED, claimed));
+        let outcome = select_action(&catalogues, &mut requests, input(LISTED, claimed));
 
         let expected = SelectActionOutcome::RevisionMismatch {
             error: CatalogueRevisionMismatch {
@@ -108,11 +108,11 @@ fn adversary_w2_a_revision_on_either_side_of_the_catalogues_is_refused_and_nothi
 /// list is refused as such whatever revision the input claims, and nothing is stored.
 #[test]
 fn adversary_w2_an_unlisted_action_at_another_revision_is_not_in_catalogue() {
-    let turns = projected();
+    let catalogues = projected();
     let mut requests = RequestRecord::default();
 
     let outcome = select_action(
-        &turns,
+        &catalogues,
         &mut requests,
         input("repository.merge", CATALOGUE_REVISION + 1),
     );
@@ -136,10 +136,14 @@ fn adversary_w2_an_unlisted_action_at_another_revision_is_not_in_catalogue() {
 /// input: the confidence and the strategy included, which no view publishes.
 #[test]
 fn adversary_w2_a_selection_keeps_the_confidence_and_strategy_it_was_made_with() {
-    let turns = projected();
+    let catalogues = projected();
     let mut requests = RequestRecord::default();
 
-    let outcome = select_action(&turns, &mut requests, input(LISTED, CATALOGUE_REVISION));
+    let outcome = select_action(
+        &catalogues,
+        &mut requests,
+        input(LISTED, CATALOGUE_REVISION),
+    );
 
     assert_eq!(
         outcome,

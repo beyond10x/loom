@@ -1,11 +1,11 @@
 // generated from loom v1
-// model digest d963e91e2eff0bd7be27b613dc6014a58f63a3404143010ceaa390d8c1120a90
-// contract digest 7065673dfdf28e8b98b7e5d5d5e1933bea6c5ee58b6f0579685582e353e9b84f
+// model digest 1d444202ff5ea55b90c19ce388d5b307090dc8b11d651cdd4e3ec3305a5c4630
+// contract digest 747f718a7d6e4cdc7f8cb59838b8d3065716a8e71730de52af6f47cf9f5d6546
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Run — `loom.run`.
 //!
-//! One model session executing a commission's run. Each catalogue is projected from one frontier; a selection names one action from that catalogue; arguments are generated for the selected action only. Loom never decides authority or completion.
+//! The executor's record of a commission's run. Each catalogue is projected from one frontier; a selection names one action from that catalogue; arguments are generated for the selected action only. Loom never decides authority or completion.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
 
@@ -59,67 +59,13 @@ pub struct CatalogueId(pub crate::primitives::Uuid);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommissionRunId(pub crate::primitives::Uuid);
 
-/// The states of `loom.run.Compaction`, as runtime values.
-///
-/// Synthesised from the lifecycle, so the two cannot disagree. Which *moves* are legal is not
-/// carried here — it is carried by `Compaction<S>`, where an undeclared move does not compile.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CompactionState {
-    /// `Recorded`.
-    Recorded,
-}
-
-/// CompactionId — `loom.run.CompactionId`: a distinct wrapper around `Uuid`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompactionId(pub crate::primitives::Uuid);
-
-/// CredentialKind — `loom.run.CredentialKind`: one of a closed set of names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CredentialKind {
-    /// `ApiKey`.
-    ApiKey,
-    /// `Oauth`.
-    Oauth,
-}
-
-/// CredentialReference — `loom.run.CredentialReference`: a distinct wrapper around `String`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CredentialReference(pub String);
-
 /// LoopStop — `loom.run.LoopStop`: one of a fixed set of shapes, tagged on the wire by `kind`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoopStop {
-    /// Tagged `awaiting-approval` — `loom.run.LoopStopAwaitingApproval`.
-    AwaitingApproval(LoopStopAwaitingApproval),
     /// Tagged `budget-unobservable` — `loom.run.LoopStopBudgetUnobservable`.
     BudgetUnobservable(LoopStopBudgetUnobservable),
-    /// Tagged `cancelled` — `loom.run.LoopStopCancelled`.
-    Cancelled(LoopStopCancelled),
-    /// Tagged `completed`, carrying nothing.
-    Completed,
-    /// Tagged `context-above-trigger` — `loom.run.LoopStopContextAboveTrigger`.
-    ContextAboveTrigger(LoopStopContextAboveTrigger),
-    /// Tagged `deadline` — `loom.run.LoopStopDeadline`.
-    Deadline(LoopStopDeadline),
-    /// Tagged `max-cost` — `loom.run.LoopStopMaxCost`.
-    MaxCost(LoopStopMaxCost),
     /// Tagged `max-input-tokens` — `loom.run.LoopStopMaxInputTokens`.
     MaxInputTokens(LoopStopMaxInputTokens),
-    /// Tagged `max-output-tokens` — `loom.run.LoopStopMaxOutputTokens`.
-    MaxOutputTokens(LoopStopMaxOutputTokens),
-    /// Tagged `max-turns` — `loom.run.LoopStopMaxTurns`.
-    MaxTurns(LoopStopMaxTurns),
-    /// Tagged `provider-incomplete` — `loom.run.LoopStopProviderIncomplete`.
-    ProviderIncomplete(LoopStopProviderIncomplete),
-    /// Tagged `unstructured` — `loom.run.LoopStopUnstructured`.
-    Unstructured(LoopStopUnstructured),
-}
-
-/// LoopStopAwaitingApproval — `loom.run.LoopStopAwaitingApproval`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoopStopAwaitingApproval {
-    /// `checkpoint_id` — `String`.
-    pub checkpoint_id: String,
 }
 
 /// LoopStopBudgetUnobservable — `loom.run.LoopStopBudgetUnobservable`.
@@ -131,40 +77,6 @@ pub struct LoopStopBudgetUnobservable {
     pub reason: String,
 }
 
-/// LoopStopCancelled — `loom.run.LoopStopCancelled`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoopStopCancelled {
-    /// `reason` — `String`.
-    pub reason: String,
-}
-
-/// LoopStopContextAboveTrigger — `loom.run.LoopStopContextAboveTrigger`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoopStopContextAboveTrigger {
-    /// `window` — `Integer`.
-    pub window: i64,
-    /// `target` — `Integer`.
-    pub target: i64,
-    /// `occupied` — `Integer`.
-    pub occupied: i64,
-}
-
-/// LoopStopDeadline — `loom.run.LoopStopDeadline`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoopStopDeadline {
-    /// `limit_ms` — `Integer`.
-    pub limit_ms: i64,
-}
-
-/// LoopStopMaxCost — `loom.run.LoopStopMaxCost`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoopStopMaxCost {
-    /// `limit_micro_usd` — `Integer`.
-    pub limit_micro_usd: i64,
-    /// `spent_micro_usd` — `Integer`.
-    pub spent_micro_usd: i64,
-}
-
 /// LoopStopMaxInputTokens — `loom.run.LoopStopMaxInputTokens`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoopStopMaxInputTokens {
@@ -172,62 +84,6 @@ pub struct LoopStopMaxInputTokens {
     pub limit: i64,
     /// `reported` — `Integer`.
     pub reported: i64,
-}
-
-/// LoopStopMaxOutputTokens — `loom.run.LoopStopMaxOutputTokens`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoopStopMaxOutputTokens {
-    /// `limit` — `Integer`.
-    pub limit: i64,
-    /// `reported` — `Integer`.
-    pub reported: i64,
-}
-
-/// LoopStopMaxTurns — `loom.run.LoopStopMaxTurns`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoopStopMaxTurns {
-    /// `limit` — `Integer`.
-    pub limit: i64,
-}
-
-/// LoopStopProviderIncomplete — `loom.run.LoopStopProviderIncomplete`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoopStopProviderIncomplete {
-    /// `reason` — `String`.
-    pub reason: String,
-}
-
-/// LoopStopUnstructured — `loom.run.LoopStopUnstructured`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoopStopUnstructured {
-    /// `asked_again` — `Integer`.
-    pub asked_again: i64,
-}
-
-/// ReportedUsage — `loom.run.ReportedUsage`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReportedUsage {
-    /// `model` — `String`.
-    pub model: String,
-    /// `input_tokens` — `Integer`.
-    pub input_tokens: i64,
-    /// `output_tokens` — `Integer`.
-    pub output_tokens: i64,
-    /// `cached_input_tokens` — `Integer`.
-    pub cached_input_tokens: i64,
-    /// `cache_creation_input_tokens` — `Optional<Integer>`.
-    pub cache_creation_input_tokens: Option<i64>,
-}
-
-/// RunEnding — `loom.run.RunEnding`: one of a closed set of names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunEnding {
-    /// `Answered`.
-    Answered,
-    /// `Stopped`.
-    Stopped,
-    /// `Failed`.
-    Failed,
 }
 
 /// The states of `loom.run.Selection`, as runtime values.
@@ -277,46 +133,9 @@ pub enum SelectionStrategy {
     Hybrid,
 }
 
-/// The states of `loom.run.Session`, as runtime values.
-///
-/// Synthesised from the lifecycle, so the two cannot disagree. Which *moves* are legal is not
-/// carried here — it is carried by `Session<S>`, where an undeclared move does not compile.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionState {
-    /// `Active`.
-    Active,
-    /// `Filed`.
-    Filed,
-    /// `Interrupted`.
-    Interrupted,
-}
-
-/// SessionId — `loom.run.SessionId`: a distinct wrapper around `Uuid`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionId(pub crate::primitives::Uuid);
-
-/// The states of `loom.run.Turn`, as runtime values.
-///
-/// Synthesised from the lifecycle, so the two cannot disagree. Which *moves* are legal is not
-/// carried here — it is carried by `Turn<S>`, where an undeclared move does not compile.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TurnState {
-    /// `Taken`.
-    Taken,
-}
-
 /// TurnId — `loom.run.TurnId`: a distinct wrapper around `Uuid`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnId(pub crate::primitives::Uuid);
-
-/// WireCredential — `loom.run.WireCredential`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WireCredential {
-    /// `reference` — `loom.run.CredentialReference`.
-    pub reference: CredentialReference,
-    /// `kind` — `loom.run.CredentialKind`.
-    pub kind: CredentialKind,
-}
 
 /// What ActionCatalogue — `loom.run.ActionCatalogue` — holds, apart from where it is in its lifecycle.
 ///
@@ -327,8 +146,6 @@ pub struct ActionCatalogueData {
     /// The identity: `catalogue_id` — `loom.run.CatalogueId`.
     pub catalogue_id: CatalogueId,
     /// `turn_id` — `loom.run.TurnId`.
-    ///
-    /// Carries `catalogue`: `loom.run.Turn` owns one `loom.run.ActionCatalogue`.
     pub turn_id: TurnId,
     /// `frontier` — `String`.
     pub frontier: String,
@@ -578,138 +395,6 @@ impl AnyArgumentRequest {
         match self {
             Self::Requested(instance) => ArgumentRequestSnapshot {
                 state: ArgumentRequestState::Requested,
-                data: instance.into_data(),
-            },
-        }
-    }
-}
-
-/// What Compaction — `loom.run.Compaction` — holds, apart from where it is in its lifecycle.
-///
-/// The identity and every declared field. The state is deliberately not one: inside the domain it
-/// is carried by the type parameter of [`Compaction<S>`], and at a boundary by [`CompactionSnapshot::state`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompactionData {
-    /// The identity: `compaction_id` — `loom.run.CompactionId`.
-    pub compaction_id: CompactionId,
-    /// `session_id` — `loom.run.SessionId`.
-    ///
-    /// Carries `compactions`: `loom.run.Session` owns many `loom.run.Compaction`.
-    pub session_id: SessionId,
-    /// `usage` — `Optional<loom.run.ReportedUsage>`.
-    pub usage: Option<ReportedUsage>,
-}
-
-/// The states of `loom.run.Compaction`, at the type level.
-///
-/// One marker type per declared state, sealed: a state the lifecycle does not declare cannot
-/// implement [`Marker`](compaction_state::Marker), so [`Compaction<S>`](Compaction) can only ever rest in a real state.
-pub mod compaction_state {
-    /// Closes [`Marker`] over the declared states.
-    mod sealed {
-        /// Implemented only by the marker types beside this module.
-        pub trait Sealed {}
-        impl Sealed for super::Recorded {}
-    }
-
-    /// A declared state of `Compaction`, as a type.
-    pub trait Marker: sealed::Sealed {
-        /// The same state, as the runtime value.
-        const STATE: super::CompactionState;
-    }
-
-    /// `Recorded`. Where a new instance starts.
-    pub struct Recorded;
-
-    impl Marker for Recorded {
-        const STATE: super::CompactionState = super::CompactionState::Recorded;
-    }
-}
-
-/// Compaction — `loom.run.Compaction` — with its lifecycle state carried by the type.
-///
-/// The one constructor rests in `Recorded`, and the only way to change `S` is a method generated from
-/// a declared transition. A move the specification does not declare is therefore not an error
-/// case: it does not compile. Where the state is data — wire, storage — use [`CompactionSnapshot`]
-/// and [`CompactionSnapshot::refine`].
-pub struct Compaction<S: compaction_state::Marker> {
-    data: CompactionData,
-    state: core::marker::PhantomData<S>,
-}
-
-impl<S: compaction_state::Marker> Compaction<S> {
-    /// The state this instance rests in, as the runtime value.
-    pub fn state(&self) -> CompactionState {
-        S::STATE
-    }
-
-    /// What it holds.
-    pub fn data(&self) -> &CompactionData {
-        &self.data
-    }
-
-    /// Hands the data back, giving up the typed state.
-    pub fn into_data(self) -> CompactionData {
-        self.data
-    }
-}
-
-impl Compaction<compaction_state::Recorded> {
-    /// A new instance, resting in `Recorded` — the only state the lifecycle starts one in.
-    pub fn new(data: CompactionData) -> Self {
-        Self {
-            data,
-            state: core::marker::PhantomData,
-        }
-    }
-}
-
-/// `loom.run.Compaction` as it crosses a boundary: the state as a value beside the data.
-///
-/// Wire and storage know states only at runtime; [`CompactionSnapshot::refine`] is the one door back
-/// into the typed lifecycle.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompactionSnapshot {
-    /// Where the instance is in its lifecycle.
-    pub state: CompactionState,
-    /// What it holds.
-    pub data: CompactionData,
-}
-
-/// An `Compaction` in whichever declared state it was found.
-pub enum AnyCompaction {
-    /// Resting in `Recorded`.
-    Recorded(Compaction<compaction_state::Recorded>),
-}
-
-impl CompactionSnapshot {
-    /// Refines the runtime state into the typed one.
-    ///
-    /// Total: every declared state has an arm, and an undeclared state cannot reach here because
-    /// `CompactionState` cannot spell one.
-    pub fn refine(self) -> AnyCompaction {
-        match self.state {
-            CompactionState::Recorded => AnyCompaction::Recorded(Compaction {
-                data: self.data,
-                state: core::marker::PhantomData,
-            }),
-        }
-    }
-}
-
-impl AnyCompaction {
-    /// The state, as the runtime value.
-    pub fn state(&self) -> CompactionState {
-        match self {
-            Self::Recorded(_) => CompactionState::Recorded,
-        }
-    }
-
-    /// Back to the boundary shape.
-    pub fn snapshot(self) -> CompactionSnapshot {
-        match self {
-            Self::Recorded(instance) => CompactionSnapshot {
-                state: CompactionState::Recorded,
                 data: instance.into_data(),
             },
         }
@@ -1087,497 +772,6 @@ impl AnySelectionRecord {
     }
 }
 
-/// What Session — `loom.run.Session` — holds, apart from where it is in its lifecycle.
-///
-/// The identity and every declared field. The state is deliberately not one: inside the domain it
-/// is carried by the type parameter of [`Session<S>`], and at a boundary by [`SessionSnapshot::state`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionData {
-    /// The identity: `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-    /// `commission_run` — `loom.run.CommissionRunId`.
-    pub commission_run: CommissionRunId,
-    /// `wire` — `String`.
-    pub wire: String,
-    /// `boundary_refusals` — `Integer`.
-    pub boundary_refusals: i64,
-}
-
-/// The states of `loom.run.Session`, at the type level.
-///
-/// One marker type per declared state, sealed: a state the lifecycle does not declare cannot
-/// implement [`Marker`](session_state::Marker), so [`Session<S>`](Session) can only ever rest in a real state.
-pub mod session_state {
-    /// Closes [`Marker`] over the declared states.
-    mod sealed {
-        /// Implemented only by the marker types beside this module.
-        pub trait Sealed {}
-        impl Sealed for super::Active {}
-        impl Sealed for super::Filed {}
-        impl Sealed for super::Interrupted {}
-    }
-
-    /// A declared state of `Session`, as a type.
-    pub trait Marker: sealed::Sealed {
-        /// The same state, as the runtime value.
-        const STATE: super::SessionState;
-    }
-
-    /// `Active`. Where a new instance starts.
-    pub struct Active;
-
-    impl Marker for Active {
-        const STATE: super::SessionState = super::SessionState::Active;
-    }
-
-    /// `Filed`.
-    pub struct Filed;
-
-    impl Marker for Filed {
-        const STATE: super::SessionState = super::SessionState::Filed;
-    }
-
-    /// `Interrupted`.
-    pub struct Interrupted;
-
-    impl Marker for Interrupted {
-        const STATE: super::SessionState = super::SessionState::Interrupted;
-    }
-}
-
-/// Session — `loom.run.Session` — with its lifecycle state carried by the type.
-///
-/// The one constructor rests in `Active`, and the only way to change `S` is a method generated from
-/// a declared transition. A move the specification does not declare is therefore not an error
-/// case: it does not compile. Where the state is data — wire, storage — use [`SessionSnapshot`]
-/// and [`SessionSnapshot::refine`].
-pub struct Session<S: session_state::Marker> {
-    data: SessionData,
-    state: core::marker::PhantomData<S>,
-}
-
-impl<S: session_state::Marker> Session<S> {
-    /// The state this instance rests in, as the runtime value.
-    pub fn state(&self) -> SessionState {
-        S::STATE
-    }
-
-    /// What it holds.
-    pub fn data(&self) -> &SessionData {
-        &self.data
-    }
-
-    /// Hands the data back, giving up the typed state.
-    pub fn into_data(self) -> SessionData {
-        self.data
-    }
-}
-
-impl Session<session_state::Active> {
-    /// A new instance, resting in `Active` — the only state the lifecycle starts one in.
-    pub fn new(data: SessionData) -> Self {
-        Self {
-            data,
-            state: core::marker::PhantomData,
-        }
-    }
-}
-
-impl Session<session_state::Active> {
-    /// `file` — `Active` → `Filed`. Taken by the `filed` outcome of `loom.run.FileSession`.
-    pub fn file(self) -> Session<session_state::Filed> {
-        Session {
-            data: self.data,
-            state: core::marker::PhantomData,
-        }
-    }
-
-    /// `release` — `Active` → `Filed`. Taken by the `released` outcome of `loom.run.ReleaseSession`.
-    pub fn release(self) -> Session<session_state::Filed> {
-        Session {
-            data: self.data,
-            state: core::marker::PhantomData,
-        }
-    }
-
-    /// `interrupt` — `Active` → `Interrupted`. Taken by the `interrupted` outcome of `loom.run.InterruptSession`.
-    pub fn interrupt(self) -> Session<session_state::Interrupted> {
-        Session {
-            data: self.data,
-            state: core::marker::PhantomData,
-        }
-    }
-
-    /// `count_refusal` — `Active` → `Active`. Taken by the `counted` outcome of `loom.run.CountBoundaryRefusal`.
-    pub fn count_refusal(self) -> Session<session_state::Active> {
-        Session {
-            data: self.data,
-            state: core::marker::PhantomData,
-        }
-    }
-}
-
-impl Session<session_state::Filed> {
-    /// `resume` — `Filed` → `Active`. Taken by the `resumed` outcome of `loom.run.ResumeSession`.
-    pub fn resume(self) -> Session<session_state::Active> {
-        Session {
-            data: self.data,
-            state: core::marker::PhantomData,
-        }
-    }
-}
-
-impl Session<session_state::Interrupted> {
-    /// `resume` — `Interrupted` → `Active`. Taken by the `resumed` outcome of `loom.run.ResumeSession`.
-    pub fn resume(self) -> Session<session_state::Active> {
-        Session {
-            data: self.data,
-            state: core::marker::PhantomData,
-        }
-    }
-}
-
-/// `loom.run.Session` as it crosses a boundary: the state as a value beside the data.
-///
-/// Wire and storage know states only at runtime; [`SessionSnapshot::refine`] is the one door back
-/// into the typed lifecycle.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionSnapshot {
-    /// Where the instance is in its lifecycle.
-    pub state: SessionState,
-    /// What it holds.
-    pub data: SessionData,
-}
-
-/// An `Session` in whichever declared state it was found.
-pub enum AnySession {
-    /// Resting in `Active`.
-    Active(Session<session_state::Active>),
-    /// Resting in `Filed`.
-    Filed(Session<session_state::Filed>),
-    /// Resting in `Interrupted`.
-    Interrupted(Session<session_state::Interrupted>),
-}
-
-impl SessionSnapshot {
-    /// Refines the runtime state into the typed one.
-    ///
-    /// Total: every declared state has an arm, and an undeclared state cannot reach here because
-    /// `SessionState` cannot spell one.
-    pub fn refine(self) -> AnySession {
-        match self.state {
-            SessionState::Active => AnySession::Active(Session {
-                data: self.data,
-                state: core::marker::PhantomData,
-            }),
-            SessionState::Filed => AnySession::Filed(Session {
-                data: self.data,
-                state: core::marker::PhantomData,
-            }),
-            SessionState::Interrupted => AnySession::Interrupted(Session {
-                data: self.data,
-                state: core::marker::PhantomData,
-            }),
-        }
-    }
-}
-
-impl AnySession {
-    /// The state, as the runtime value.
-    pub fn state(&self) -> SessionState {
-        match self {
-            Self::Active(_) => SessionState::Active,
-            Self::Filed(_) => SessionState::Filed,
-            Self::Interrupted(_) => SessionState::Interrupted,
-        }
-    }
-
-    /// Back to the boundary shape.
-    pub fn snapshot(self) -> SessionSnapshot {
-        match self {
-            Self::Active(instance) => SessionSnapshot {
-                state: SessionState::Active,
-                data: instance.into_data(),
-            },
-            Self::Filed(instance) => SessionSnapshot {
-                state: SessionState::Filed,
-                data: instance.into_data(),
-            },
-            Self::Interrupted(instance) => SessionSnapshot {
-                state: SessionState::Interrupted,
-                data: instance.into_data(),
-            },
-        }
-    }
-}
-
-/// What Turn — `loom.run.Turn` — holds, apart from where it is in its lifecycle.
-///
-/// The identity and every declared field. The state is deliberately not one: inside the domain it
-/// is carried by the type parameter of [`Turn<S>`], and at a boundary by [`TurnSnapshot::state`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TurnData {
-    /// The identity: `turn_id` — `loom.run.TurnId`.
-    pub turn_id: TurnId,
-    /// `session_id` — `loom.run.SessionId`.
-    ///
-    /// Carries `turns`: `loom.run.Session` owns many `loom.run.Turn`.
-    pub session_id: SessionId,
-    /// `index` — `Integer`.
-    pub index: i64,
-    /// `items` — `List<String>`.
-    pub items: Vec<String>,
-}
-
-/// The states of `loom.run.Turn`, at the type level.
-///
-/// One marker type per declared state, sealed: a state the lifecycle does not declare cannot
-/// implement [`Marker`](turn_state::Marker), so [`Turn<S>`](Turn) can only ever rest in a real state.
-pub mod turn_state {
-    /// Closes [`Marker`] over the declared states.
-    mod sealed {
-        /// Implemented only by the marker types beside this module.
-        pub trait Sealed {}
-        impl Sealed for super::Taken {}
-    }
-
-    /// A declared state of `Turn`, as a type.
-    pub trait Marker: sealed::Sealed {
-        /// The same state, as the runtime value.
-        const STATE: super::TurnState;
-    }
-
-    /// `Taken`. Where a new instance starts.
-    pub struct Taken;
-
-    impl Marker for Taken {
-        const STATE: super::TurnState = super::TurnState::Taken;
-    }
-}
-
-/// Turn — `loom.run.Turn` — with its lifecycle state carried by the type.
-///
-/// The one constructor rests in `Taken`, and the only way to change `S` is a method generated from
-/// a declared transition. A move the specification does not declare is therefore not an error
-/// case: it does not compile. Where the state is data — wire, storage — use [`TurnSnapshot`]
-/// and [`TurnSnapshot::refine`].
-pub struct Turn<S: turn_state::Marker> {
-    data: TurnData,
-    state: core::marker::PhantomData<S>,
-}
-
-impl<S: turn_state::Marker> Turn<S> {
-    /// The state this instance rests in, as the runtime value.
-    pub fn state(&self) -> TurnState {
-        S::STATE
-    }
-
-    /// What it holds.
-    pub fn data(&self) -> &TurnData {
-        &self.data
-    }
-
-    /// Hands the data back, giving up the typed state.
-    pub fn into_data(self) -> TurnData {
-        self.data
-    }
-}
-
-impl Turn<turn_state::Taken> {
-    /// A new instance, resting in `Taken` — the only state the lifecycle starts one in.
-    pub fn new(data: TurnData) -> Self {
-        Self {
-            data,
-            state: core::marker::PhantomData,
-        }
-    }
-}
-
-/// `loom.run.Turn` as it crosses a boundary: the state as a value beside the data.
-///
-/// Wire and storage know states only at runtime; [`TurnSnapshot::refine`] is the one door back
-/// into the typed lifecycle.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TurnSnapshot {
-    /// Where the instance is in its lifecycle.
-    pub state: TurnState,
-    /// What it holds.
-    pub data: TurnData,
-}
-
-/// An `Turn` in whichever declared state it was found.
-pub enum AnyTurn {
-    /// Resting in `Taken`.
-    Taken(Turn<turn_state::Taken>),
-}
-
-impl TurnSnapshot {
-    /// Refines the runtime state into the typed one.
-    ///
-    /// Total: every declared state has an arm, and an undeclared state cannot reach here because
-    /// `TurnState` cannot spell one.
-    pub fn refine(self) -> AnyTurn {
-        match self.state {
-            TurnState::Taken => AnyTurn::Taken(Turn {
-                data: self.data,
-                state: core::marker::PhantomData,
-            }),
-        }
-    }
-}
-
-impl AnyTurn {
-    /// The state, as the runtime value.
-    pub fn state(&self) -> TurnState {
-        match self {
-            Self::Taken(_) => TurnState::Taken,
-        }
-    }
-
-    /// Back to the boundary shape.
-    pub fn snapshot(self) -> TurnSnapshot {
-        match self {
-            Self::Taken(instance) => TurnSnapshot {
-                state: TurnState::Taken,
-                data: instance.into_data(),
-            },
-        }
-    }
-}
-
-/// CountBoundaryRefusal — the input of `loom.run.CountBoundaryRefusal`.
-///
-/// Everything it can result in is [`CountBoundaryRefusalOutcome`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CountBoundaryRefusal {
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-}
-
-/// Everything `loom.run.CountBoundaryRefusal` can result in — one variant per declared outcome.
-///
-/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
-/// a transport fault is a fact about the run, and conflating the two is what the declared
-/// outcomes exist to prevent.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CountBoundaryRefusalOutcome {
-    /// `counted` — otherwise.
-    Counted {
-        /// The `loom.run.BoundaryRefusalCounted` this outcome publishes.
-        boundary_refusal_counted: BoundaryRefusalCounted,
-    },
-    /// `wrong-state` — from a state no declared move starts in.
-    WrongState {
-        /// Why it was refused: `loom.run.SessionStateConflict`.
-        error: SessionStateConflict,
-    },
-    /// `wrong-state` — for an instance no record carries.
-    ///
-    /// The same declared branch and error as [`Self::WrongState`], without the error's fields: an instance
-    /// that does not exist has nothing for them to describe (`docs/design/unknown-instance-seams.md`).
-    WrongStateUnknownInstance,
-}
-
-/// FileSession — the input of `loom.run.FileSession`.
-///
-/// Everything it can result in is [`FileSessionOutcome`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileSession {
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-    /// `ending` — `loom.run.RunEnding`.
-    pub ending: RunEnding,
-}
-
-/// Everything `loom.run.FileSession` can result in — one variant per declared outcome.
-///
-/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
-/// a transport fault is a fact about the run, and conflating the two is what the declared
-/// outcomes exist to prevent.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FileSessionOutcome {
-    /// `filed` — otherwise.
-    Filed {
-        /// The `loom.run.SessionFiled` this outcome publishes.
-        session_filed: SessionFiled,
-    },
-    /// `wrong-state` — from a state no declared move starts in.
-    WrongState {
-        /// Why it was refused: `loom.run.SessionStateConflict`.
-        error: SessionStateConflict,
-    },
-    /// `wrong-state` — for an instance no record carries.
-    ///
-    /// The same declared branch and error as [`Self::WrongState`], without the error's fields: an instance
-    /// that does not exist has nothing for them to describe (`docs/design/unknown-instance-seams.md`).
-    WrongStateUnknownInstance,
-}
-
-/// InterruptSession — the input of `loom.run.InterruptSession`.
-///
-/// Everything it can result in is [`InterruptSessionOutcome`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InterruptSession {
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-}
-
-/// Everything `loom.run.InterruptSession` can result in — one variant per declared outcome.
-///
-/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
-/// a transport fault is a fact about the run, and conflating the two is what the declared
-/// outcomes exist to prevent.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum InterruptSessionOutcome {
-    /// `interrupted` — otherwise.
-    Interrupted {
-        /// The `loom.run.SessionInterrupted` this outcome publishes.
-        session_interrupted: SessionInterrupted,
-    },
-    /// `wrong-state` — from a state no declared move starts in.
-    WrongState {
-        /// Why it was refused: `loom.run.SessionStateConflict`.
-        error: SessionStateConflict,
-    },
-    /// `wrong-state` — for an instance no record carries.
-    ///
-    /// The same declared branch and error as [`Self::WrongState`], without the error's fields: an instance
-    /// that does not exist has nothing for them to describe (`docs/design/unknown-instance-seams.md`).
-    WrongStateUnknownInstance,
-}
-
-/// OpenSession — the input of `loom.run.OpenSession`.
-///
-/// Everything it can result in is [`OpenSessionOutcome`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OpenSession {
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-    /// `commission_run` — `loom.run.CommissionRunId`.
-    pub commission_run: CommissionRunId,
-    /// `wire` — `String`.
-    pub wire: String,
-}
-
-/// Everything `loom.run.OpenSession` can result in — one variant per declared outcome.
-///
-/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
-/// a transport fault is a fact about the run, and conflating the two is what the declared
-/// outcomes exist to prevent.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OpenSessionOutcome {
-    /// `session-exists` — for an identity a record already carries.
-    SessionExists {
-        /// Why it was refused: `loom.run.SessionExists`.
-        error: SessionExists,
-    },
-    /// `opened` — otherwise.
-    Opened {
-        /// The `loom.run.SessionOpened` this outcome publishes.
-        session_opened: SessionOpened,
-    },
-}
-
 /// OverruleSelection — the input of `loom.run.OverruleSelection`.
 ///
 /// Everything it can result in is [`OverruleSelectionOutcome`].
@@ -1649,43 +843,6 @@ pub enum ProjectCatalogueOutcome {
     },
 }
 
-/// RecordCompaction — the input of `loom.run.RecordCompaction`.
-///
-/// Everything it can result in is [`RecordCompactionOutcome`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RecordCompaction {
-    /// `compaction_id` — `loom.run.CompactionId`.
-    pub compaction_id: CompactionId,
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-    /// `usage` — `Optional<loom.run.ReportedUsage>`.
-    pub usage: Option<ReportedUsage>,
-}
-
-/// Everything `loom.run.RecordCompaction` can result in — one variant per declared outcome.
-///
-/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
-/// a transport fault is a fact about the run, and conflating the two is what the declared
-/// outcomes exist to prevent.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RecordCompactionOutcome {
-    /// `session-unknown` — when no `loom.run.Session` carries the identity `input.session_id` names.
-    SessionUnknown {
-        /// Why it was refused: `loom.run.SessionNotFound`.
-        error: SessionNotFound,
-    },
-    /// `session-not-active` — when the `loom.run.Session` that `input.session_id` names satisfies `state != Active`.
-    SessionNotActive {
-        /// Why it was refused: `loom.run.SessionNotActive`.
-        error: SessionNotActive,
-    },
-    /// `recorded` — otherwise.
-    Recorded {
-        /// The `loom.run.SessionCompacted` this outcome publishes.
-        session_compacted: SessionCompacted,
-    },
-}
-
 /// RecordSelection — the input of `loom.run.RecordSelection`.
 ///
 /// Everything it can result in is [`RecordSelectionOutcome`].
@@ -1737,78 +894,6 @@ pub enum RecordSelectionOutcome {
     },
 }
 
-/// RecordTurn — the input of `loom.run.RecordTurn`.
-///
-/// Everything it can result in is [`RecordTurnOutcome`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RecordTurn {
-    /// `turn_id` — `loom.run.TurnId`.
-    pub turn_id: TurnId,
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-    /// `index` — `Integer`.
-    pub index: i64,
-    /// `items` — `List<String>`.
-    pub items: Vec<String>,
-}
-
-/// Everything `loom.run.RecordTurn` can result in — one variant per declared outcome.
-///
-/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
-/// a transport fault is a fact about the run, and conflating the two is what the declared
-/// outcomes exist to prevent.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RecordTurnOutcome {
-    /// `session-unknown` — when no `loom.run.Session` carries the identity `input.session_id` names.
-    SessionUnknown {
-        /// Why it was refused: `loom.run.SessionNotFound`.
-        error: SessionNotFound,
-    },
-    /// `session-not-active` — when the `loom.run.Session` that `input.session_id` names satisfies `state != Active`.
-    SessionNotActive {
-        /// Why it was refused: `loom.run.SessionNotActive`.
-        error: SessionNotActive,
-    },
-    /// `recorded` — otherwise.
-    Recorded {
-        /// The `loom.run.TurnRecorded` this outcome publishes.
-        turn_recorded: TurnRecorded,
-    },
-}
-
-/// ReleaseSession — the input of `loom.run.ReleaseSession`.
-///
-/// Everything it can result in is [`ReleaseSessionOutcome`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReleaseSession {
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-}
-
-/// Everything `loom.run.ReleaseSession` can result in — one variant per declared outcome.
-///
-/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
-/// a transport fault is a fact about the run, and conflating the two is what the declared
-/// outcomes exist to prevent.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReleaseSessionOutcome {
-    /// `released` — otherwise.
-    Released {
-        /// The `loom.run.SessionReleased` this outcome publishes.
-        session_released: SessionReleased,
-    },
-    /// `wrong-state` — from a state no declared move starts in.
-    WrongState {
-        /// Why it was refused: `loom.run.SessionStateConflict`.
-        error: SessionStateConflict,
-    },
-    /// `wrong-state` — for an instance no record carries.
-    ///
-    /// The same declared branch and error as [`Self::WrongState`], without the error's fields: an instance
-    /// that does not exist has nothing for them to describe (`docs/design/unknown-instance-seams.md`).
-    WrongStateUnknownInstance,
-}
-
 /// RequestArguments — the input of `loom.run.RequestArguments`.
 ///
 /// Everything it can result in is [`RequestArgumentsOutcome`].
@@ -1842,46 +927,6 @@ pub enum RequestArgumentsOutcome {
         /// The `loom.run.ArgumentsRequested` this outcome publishes.
         arguments_requested: ArgumentsRequested,
     },
-}
-
-/// ResumeSession — the input of `loom.run.ResumeSession`.
-///
-/// Everything it can result in is [`ResumeSessionOutcome`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResumeSession {
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-    /// `wire` — `String`.
-    pub wire: String,
-}
-
-/// Everything `loom.run.ResumeSession` can result in — one variant per declared outcome.
-///
-/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
-/// a transport fault is a fact about the run, and conflating the two is what the declared
-/// outcomes exist to prevent.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ResumeSessionOutcome {
-    /// `cross-wire` — when the existing subject's stored fields satisfy `wire != input.wire`.
-    CrossWire {
-        /// Why it was refused: `loom.run.SessionWireMismatch`.
-        error: SessionWireMismatch,
-    },
-    /// `resumed` — otherwise.
-    Resumed {
-        /// The `loom.run.SessionResumed` this outcome publishes.
-        session_resumed: SessionResumed,
-    },
-    /// `wrong-state` — from a state no declared move starts in.
-    WrongState {
-        /// Why it was refused: `loom.run.SessionStateConflict`.
-        error: SessionStateConflict,
-    },
-    /// `wrong-state` — for an instance no record carries.
-    ///
-    /// The same declared branch and error as [`Self::WrongState`], without the error's fields: an instance
-    /// that does not exist has nothing for them to describe (`docs/design/unknown-instance-seams.md`).
-    WrongStateUnknownInstance,
 }
 
 /// RevalidateSelection — the input of `loom.run.RevalidateSelection`.
@@ -1999,13 +1044,6 @@ pub struct ArgumentsRequested {
     pub selection_id: SelectionId,
 }
 
-/// BoundaryRefusalCounted — the event `loom.run.BoundaryRefusalCounted`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BoundaryRefusalCounted {
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-}
-
 /// CatalogueProjected — the event `loom.run.CatalogueProjected`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogueProjected {
@@ -2066,73 +1104,6 @@ pub struct SelectionStale {
     pub case_revision: i64,
 }
 
-/// SessionCompacted — the event `loom.run.SessionCompacted`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionCompacted {
-    /// `compaction_id` — `loom.run.CompactionId`.
-    pub compaction_id: CompactionId,
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-    /// `usage` — `Optional<loom.run.ReportedUsage>`.
-    pub usage: Option<ReportedUsage>,
-}
-
-/// SessionFiled — the event `loom.run.SessionFiled`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionFiled {
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-    /// `ending` — `loom.run.RunEnding`.
-    pub ending: RunEnding,
-}
-
-/// SessionInterrupted — the event `loom.run.SessionInterrupted`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionInterrupted {
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-}
-
-/// SessionOpened — the event `loom.run.SessionOpened`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionOpened {
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-    /// `commission_run` — `loom.run.CommissionRunId`.
-    pub commission_run: CommissionRunId,
-    /// `wire` — `String`.
-    pub wire: String,
-}
-
-/// SessionReleased — the event `loom.run.SessionReleased`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionReleased {
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-    /// `ending` — `loom.run.RunEnding`.
-    pub ending: RunEnding,
-}
-
-/// SessionResumed — the event `loom.run.SessionResumed`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionResumed {
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-    /// `wire` — `String`.
-    pub wire: String,
-}
-
-/// TurnRecorded — the event `loom.run.TurnRecorded`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TurnRecorded {
-    /// `turn_id` — `loom.run.TurnId`.
-    pub turn_id: TurnId,
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-    /// `index` — `Integer`.
-    pub index: i64,
-}
-
 /// The declared error `loom.run.ActionNotInCatalogue`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionNotInCatalogue {
@@ -2191,45 +1162,6 @@ pub struct SelectionRecordExists {
 pub struct SelectionStateConflict {
     /// `state` — `loom.run.Selection.State`.
     pub state: SelectionState,
-}
-
-/// The declared error `loom.run.SessionExists`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionExists {
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-}
-
-/// The declared error `loom.run.SessionNotActive`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionNotActive {
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-}
-
-/// The declared error `loom.run.SessionNotFound`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionNotFound {
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-}
-
-/// The declared error `loom.run.SessionStateConflict`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionStateConflict {
-    /// `state` — `loom.run.Session.State`.
-    pub state: SessionState,
-}
-
-/// The declared error `loom.run.SessionWireMismatch`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionWireMismatch {
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-    /// `session_wire` — `String`.
-    pub session_wire: String,
-    /// `wire` — `String`.
-    pub wire: String,
 }
 
 /// Catalogues — one row of the view `loom.run.Catalogues`.
@@ -2299,75 +1231,12 @@ pub struct Selections {
     pub state: SelectionState,
 }
 
-/// Sessions — one row of the view `loom.run.Sessions`.
-///
-/// Projects `loom.run.Session` at `read_your_writes` consistency.
-/// The specification fully determines every row, so its query is generated over the storage port —
-/// see the plan.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Sessions {
-    /// `session_id` — `loom.run.SessionId`.
-    pub session_id: SessionId,
-    /// `commission_run` — `loom.run.CommissionRunId`.
-    pub commission_run: CommissionRunId,
-    /// `wire` — `String`.
-    pub wire: String,
-    /// `boundary_refusals` — `Integer`.
-    pub boundary_refusals: i64,
-    /// `state` — `loom.run.Session.State`.
-    pub state: SessionState,
-}
-
 /// What this bounded context owes its implementor, and the seams of what is generated.
 ///
 /// One trait per obligation in the synthesis plan, each carrying the plan's own contract, and one
 /// per generated behaviour, which [`Generated`](crate::behaviour::Generated) implements.
 /// [`Unimplemented`](obligations::Unimplemented) satisfies every owed trait by refusing in the type system.
 pub mod obligations {
-    /// The behaviour `loom.run.CountBoundaryRefusal` — generated.
-    ///
-    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
-    /// over the storage and context ports. Implement it yourself to replace that behaviour.
-    pub trait CountBoundaryRefusalBehavior {
-        /// Decides and enacts exactly one declared outcome of `loom.run.CountBoundaryRefusal`.
-        ///
-        /// `Err` is the typed refusal of a request the model declares no outcome for.
-        fn count_boundary_refusal(&mut self, input: super::CountBoundaryRefusal) -> Result<super::CountBoundaryRefusalOutcome, crate::obligation::UnmetObligation>;
-    }
-
-    /// The behaviour `loom.run.FileSession` — generated.
-    ///
-    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
-    /// over the storage and context ports. Implement it yourself to replace that behaviour.
-    pub trait FileSessionBehavior {
-        /// Decides and enacts exactly one declared outcome of `loom.run.FileSession`.
-        ///
-        /// `Err` is the typed refusal of a request the model declares no outcome for.
-        fn file_session(&mut self, input: super::FileSession) -> Result<super::FileSessionOutcome, crate::obligation::UnmetObligation>;
-    }
-
-    /// The behaviour `loom.run.InterruptSession` — generated.
-    ///
-    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
-    /// over the storage and context ports. Implement it yourself to replace that behaviour.
-    pub trait InterruptSessionBehavior {
-        /// Decides and enacts exactly one declared outcome of `loom.run.InterruptSession`.
-        ///
-        /// `Err` is the typed refusal of a request the model declares no outcome for.
-        fn interrupt_session(&mut self, input: super::InterruptSession) -> Result<super::InterruptSessionOutcome, crate::obligation::UnmetObligation>;
-    }
-
-    /// The behaviour `loom.run.OpenSession` — generated.
-    ///
-    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
-    /// over the storage and context ports. Implement it yourself to replace that behaviour.
-    pub trait OpenSessionBehavior {
-        /// Decides and enacts exactly one declared outcome of `loom.run.OpenSession`.
-        ///
-        /// `Err` is the typed refusal of a request the model declares no outcome for.
-        fn open_session(&mut self, input: super::OpenSession) -> Result<super::OpenSessionOutcome, crate::obligation::UnmetObligation>;
-    }
-
     /// The behaviour `loom.run.OverruleSelection` — generated.
     ///
     /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
@@ -2390,17 +1259,6 @@ pub mod obligations {
         fn project_catalogue(&mut self, input: super::ProjectCatalogue) -> Result<super::ProjectCatalogueOutcome, crate::obligation::UnmetObligation>;
     }
 
-    /// The behaviour `loom.run.RecordCompaction` — generated.
-    ///
-    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
-    /// over the storage and context ports. Implement it yourself to replace that behaviour.
-    pub trait RecordCompactionBehavior {
-        /// Decides and enacts exactly one declared outcome of `loom.run.RecordCompaction`.
-        ///
-        /// `Err` is the typed refusal of a request the model declares no outcome for.
-        fn record_compaction(&mut self, input: super::RecordCompaction) -> Result<super::RecordCompactionOutcome, crate::obligation::UnmetObligation>;
-    }
-
     /// The behaviour `loom.run.RecordSelection` — generated.
     ///
     /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
@@ -2412,28 +1270,6 @@ pub mod obligations {
         fn record_selection(&mut self, input: super::RecordSelection) -> Result<super::RecordSelectionOutcome, crate::obligation::UnmetObligation>;
     }
 
-    /// The behaviour `loom.run.RecordTurn` — generated.
-    ///
-    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
-    /// over the storage and context ports. Implement it yourself to replace that behaviour.
-    pub trait RecordTurnBehavior {
-        /// Decides and enacts exactly one declared outcome of `loom.run.RecordTurn`.
-        ///
-        /// `Err` is the typed refusal of a request the model declares no outcome for.
-        fn record_turn(&mut self, input: super::RecordTurn) -> Result<super::RecordTurnOutcome, crate::obligation::UnmetObligation>;
-    }
-
-    /// The behaviour `loom.run.ReleaseSession` — generated.
-    ///
-    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
-    /// over the storage and context ports. Implement it yourself to replace that behaviour.
-    pub trait ReleaseSessionBehavior {
-        /// Decides and enacts exactly one declared outcome of `loom.run.ReleaseSession`.
-        ///
-        /// `Err` is the typed refusal of a request the model declares no outcome for.
-        fn release_session(&mut self, input: super::ReleaseSession) -> Result<super::ReleaseSessionOutcome, crate::obligation::UnmetObligation>;
-    }
-
     /// The behaviour `loom.run.RequestArguments` — generated.
     ///
     /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
@@ -2443,17 +1279,6 @@ pub mod obligations {
         ///
         /// `Err` is the typed refusal of a request the model declares no outcome for.
         fn request_arguments(&mut self, input: super::RequestArguments) -> Result<super::RequestArgumentsOutcome, crate::obligation::UnmetObligation>;
-    }
-
-    /// The behaviour `loom.run.ResumeSession` — generated.
-    ///
-    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
-    /// over the storage and context ports. Implement it yourself to replace that behaviour.
-    pub trait ResumeSessionBehavior {
-        /// Decides and enacts exactly one declared outcome of `loom.run.ResumeSession`.
-        ///
-        /// `Err` is the typed refusal of a request the model declares no outcome for.
-        fn resume_session(&mut self, input: super::ResumeSession) -> Result<super::ResumeSessionOutcome, crate::obligation::UnmetObligation>;
     }
 
     /// The behaviour `loom.run.RevalidateSelection` — generated.
@@ -2511,17 +1336,6 @@ pub mod obligations {
         ///
         /// `Err` is the typed refusal of a row whose declared type cannot hold its value.
         fn selections(&self) -> Result<Vec<super::Selections>, crate::obligation::UnmetObligation>;
-    }
-
-    /// The query `loom.run.Sessions` — generated.
-    ///
-    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
-    /// over the storage port. Implement it yourself to replace that query.
-    pub trait SessionsQuery {
-        /// Serves `loom.run.Sessions` rows at the view's declared consistency.
-        ///
-        /// `Err` is the typed refusal of a row whose declared type cannot hold its value.
-        fn sessions(&self) -> Result<Vec<super::Sessions>, crate::obligation::UnmetObligation>;
     }
 
     /// Every obligation of this bounded context, refused in the type system.

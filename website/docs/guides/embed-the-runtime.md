@@ -112,10 +112,10 @@ requests with their revalidation, the effects, and the last frontier. The exampl
 
 ## Meter a run
 
-`RunMeter`, `MeteredModelPort` and `MeteredExecutor` (top-level in the SDK, from
+`RunMeter`, `MeteredModel` and `MeteredExecutor` (top-level in the SDK, from
 `loom_sdk::loom::metering`) report what one run spent on its model. Create one `RunMeter`, with
 the run's `RateCard` (`loom_sdk::RateCard`) or none; wrap every llm `Model` the run uses in a
-`MeteredModelPort` on that meter and hand the metered model to whatever asks it (the model
+`MeteredModel` on that meter and hand the metered model to whatever asks it (the model
 selector, an argument generator, your own requests), and the executor you hand
 `run_until_blocked` in a `MeteredExecutor` on it. When the loop returns,
 `meter.report(&end.run_id)` is a `loom.metering.RunUsageReport`: the model calls, the input,

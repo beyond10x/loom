@@ -9,8 +9,8 @@
 //! fails unless the report's `conformance_status` is `passed`, so naming a scenario in
 //! `ess/SKIPPED.md` no longer keeps it green. This case holds the replacement.
 //!
-//! The case builds that report the documented way: a copy of `ess/` whose `ReleaseSession` is sent
-//! by an actor with an attribute (so every step invoking it carries a caller, which `LoomTarget`
+//! The case builds that report the documented way: a copy of `ess/` whose `OverruleSelection` is
+//! sent by an actor with an attribute (so every step invoking it carries a caller, which `LoomTarget`
 //! answers `unsupported`), and an `ess/SKIPPED.md` naming each such scenario with a reason. It
 //! checks that ESS's report rates that run `failed`, then runs the real `conform` test binary
 //! against the copy, by pointing `CARGO_MANIFEST_DIR` (read at run time, `conform.rs` `root()`) at
@@ -24,7 +24,7 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The actor block inserted ahead of `commands:` in the copy's `ess/domains/run.yaml`.
-const ACTOR: &str = "actors:\n  - name: loom.run.Releaser\n    attributes:\n      - {name: releaser, type: String}\n    may: [loom.run.ReleaseSession]\n\n";
+const ACTOR: &str = "actors:\n  - name: loom.run.Overruler\n    attributes:\n      - {name: overruler, type: String}\n    may: [loom.run.OverruleSelection]\n\n";
 
 fn root() -> PathBuf {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -159,7 +159,7 @@ fn adversary2_w2_named_unsupported_scenarios_fail_task_conform_on_conformance_st
     );
     for id in &unsupported {
         skipped.push_str(&format!(
-            "- {id}: Loom holds no credential to send loom.run.ReleaseSession as a caller\n"
+            "- {id}: Loom holds no credential to send loom.run.OverruleSelection as a caller\n"
         ));
     }
     fs::write(fake.join("ess/SKIPPED.md"), skipped).expect("write the copy's SKIPPED.md");

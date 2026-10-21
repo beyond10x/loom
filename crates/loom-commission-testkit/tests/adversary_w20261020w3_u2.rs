@@ -110,20 +110,26 @@ impl LoopContext for Context {
 }
 
 /// Performs and reads both actions; each invocation takes the next scripted answer for its action,
-/// the last one answering again, and every request handed over is recorded in order.
+/// the last one answering again, and every request handed over is recorded as it is invoked. The
+/// reads of a fan-out run concurrently, so the record has no fixed order between them.
 struct Reads {
     answers: Mutex<BTreeMap<&'static str, VecDeque<EffectOutcome>>>,
     invoked: Mutex<Vec<ActionRequestData>>,
 }
 
 impl Reads {
-    fn invoked(&self) -> Vec<String> {
-        self.invoked
+    /// How many times each action was handed to the port, whatever the order of the invocations.
+    fn invocations(&self) -> BTreeMap<String, usize> {
+        let mut counted = BTreeMap::new();
+        for request in self
+            .invoked
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .iter()
-            .map(|request| request.action.clone())
-            .collect()
+        {
+            *counted.entry(request.action.clone()).or_insert(0) += 1;
+        }
+        counted
     }
 }
 
@@ -227,9 +233,11 @@ fn adversary_a_pending_read_whose_entry_now_names_a_capability_is_not_invoked_ag
     )
     .unwrap_or_else(|error| panic!("the loop failed: {error:?}"));
 
+    // Each read is handed over exactly once: `search` is never invoked again on the entry that now
+    // names a capability. The two first invocations run concurrently, so their order is not held.
     assert_eq!(
-        effects.invoked(),
-        [SEARCH, FETCH],
+        effects.invocations(),
+        BTreeMap::from([(FETCH.to_owned(), 1), (SEARCH.to_owned(), 1)]),
         "a pending read whose frontier entry now names a capability was invoked again; \
          effects {:?}, outcome {:?}",
         end.effects,

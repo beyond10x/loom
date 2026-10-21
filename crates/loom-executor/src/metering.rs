@@ -3,8 +3,8 @@
 //! What one Commission run spent on its model, counted at llm's [`Model`] boundary
 //! (`ess/domains/metering.yaml`, `loom.metering`).
 //!
-//! A [`RunMeter`] is shared by the [`MeteredModelPort`]s and the [`MeteredExecutor`] of one run.
-//! A [`MeteredModelPort`] is an llm [`Model`] over the model a host built, and each `turn` of it is
+//! A [`RunMeter`] is shared by the [`MeteredModel`]s and the [`MeteredExecutor`] of one run.
+//! A [`MeteredModel`] is an llm [`Model`] over the model a host built, and each `turn` of it is
 //! one model call, whoever made it: the model selector, an argument generator, a host's own
 //! request. The call is counted when `turn` is called, before the turn runs, so a turn that failed,
 //! unwound or was dropped unfinished is still a call; a turn that answered adds the tokens the
@@ -41,9 +41,6 @@
 //! carries), the step's cost is absent, and so is the run's. A step that made no model call needs
 //! no price: its cost is the cost its executor reported, and zero when it reported no usage, card
 //! or none.
-//!
-//! The ported model loop's own model port is metered by a [`MeteredModelPort`] too, by the same
-//! rules, until that port is deleted; that implementation lives beside the loop.
 //!
 //! The report is the generated [`RunUsageReport`] ([`RunMeter::report`]). It covers what the meter
 //! saw: one process segment of the run, and the earlier segments it was resumed from. A meter
@@ -614,7 +611,7 @@ impl RunMeter {
     }
 
     /// The step of the innermost executor call of this meter running on this thread, if any.
-    fn open_here(&self) -> Option<usize> {
+    pub(crate) fn open_here(&self) -> Option<usize> {
         let id = self.id();
         OPEN.with_borrow(|open| {
             open.iter()
@@ -625,16 +622,12 @@ impl RunMeter {
     }
 
     /// The step a call made now on this thread is counted in: the step of the executor call
-    /// running on this thread; else `outside` when it names one (for a fork of the ported loop's
-    /// port, the step it was made in); else the step of the executor call of this meter running on
+    /// running on this thread; else the step of the executor call of this meter running on
     /// another thread, a thread it spawned or the host's, the one opened last when several run;
     /// else step 0, made while no executor call ran.
-    pub(crate) fn step_here(&self, outside: usize) -> usize {
+    fn step_here(&self) -> usize {
         if let Some(step) = self.open_here() {
             return step;
-        }
-        if outside != 0 {
-            return outside;
         }
         self.ledger().running.last().copied().unwrap_or(0)
     }
@@ -824,12 +817,12 @@ impl Future for Inner<'_> {
 /// the executor call of the meter running elsewhere (the one opened last), else of step 0,
 /// whichever thread then drives its future.
 #[derive(Debug)]
-pub struct MeteredModelPort<M> {
+pub struct MeteredModel<M> {
     pub(crate) inner: M,
     pub(crate) meter: RunMeter,
 }
 
-impl<M> MeteredModelPort<M> {
+impl<M> MeteredModel<M> {
     /// `inner`, its turns counted into `meter`.
     pub fn new(inner: M, meter: &RunMeter) -> Self {
         Self {
@@ -844,7 +837,7 @@ impl<M> MeteredModelPort<M> {
     }
 }
 
-impl<M> Model for MeteredModelPort<M>
+impl<M> Model for MeteredModel<M>
 where
     M: Deref + Send + Sync,
     M::Target: Model,
@@ -871,7 +864,7 @@ where
         if self.meter.turning_here() {
             return self.inner.turn(request, sink, cancel);
         }
-        let call = self.meter.begin(self.meter.step_here(0));
+        let call = self.meter.begin(self.meter.step_here());
         let turn = {
             let _turning = self.meter.turning();
             self.inner.turn(request, sink, cancel)

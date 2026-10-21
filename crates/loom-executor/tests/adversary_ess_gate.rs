@@ -205,8 +205,8 @@ fn mutant_marker_mid_line_in_run_yaml_is_killed() {
         |tree| {
             replace(
                 &tree.join("ess/domains/run.yaml"),
-                "        type: loom.run.CommissionRunId\n",
-                "        type: loom.run.CommissionRunId # UNMAPPED: mid-line\n",
+                "        type: loom.run.TurnId\n",
+                "        type: loom.run.TurnId # UNMAPPED: mid-line\n",
             );
         },
         &[
@@ -245,7 +245,8 @@ fn mutant_confidence_binary64_is_killed() {
     );
 }
 
-// Item 2: the relation Turn.catalogue dropped.
+// Item 2: the relation Selection.catalogue dropped. It was Turn.catalogue until
+// `story:delete-harness-port` removed the turn with the ported loop.
 #[test]
 fn mutant_relation_dropped_is_killed() {
     mutant_is_killed(
@@ -253,14 +254,8 @@ fn mutant_relation_dropped_is_killed() {
         |tree| {
             replace(
                 &tree.join("ess/domains/run.yaml"),
-                "      - name: catalogue\n        kind: owns\n        target: loom.run.ActionCatalogue\n        cardinality: one\n        via: turn_id\n",
+                "      - name: catalogue\n        kind: references\n        target: loom.run.ActionCatalogue\n        cardinality: one\n        via: catalogue_id\n",
                 "",
-            );
-            // A `relations:` key left with only comments is null; drop it with the relation.
-            replace(
-                &tree.join("ess/domains/run.yaml"),
-                "    relations:\n      # A catalogue is projected once per turn",
-                "      # A catalogue is projected once per turn",
             );
         },
         &["compiled_specification_declares_the_settled_relations ... FAILED"],
@@ -283,16 +278,17 @@ fn mutant_relation_cardinality_many_is_killed() {
     );
 }
 
-// Item 2: commission_run back to String, and CommissionRunId of String.
+// Item 2: a commission run's id back to String, and CommissionRunId of String. The field was
+// Session.commission_run until `story:delete-harness-port`; a workflow run record's `run` is one.
 #[test]
 fn mutant_commission_run_string_is_killed() {
     mutant_is_killed(
         "commission_run_string",
         |tree| {
             replace(
-                &tree.join("ess/domains/run.yaml"),
-                "        type: loom.run.CommissionRunId\n",
-                "        type: String\n",
+                &tree.join("ess/domains/workflow.yaml"),
+                "      - name: run\n        type: loom.run.CommissionRunId\n",
+                "      - name: run\n        type: String\n",
             );
         },
         &["compiled_specification_declares_the_settled_relations ... FAILED"],

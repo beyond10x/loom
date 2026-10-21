@@ -4,21 +4,19 @@
 //! runs against, and [`run_suite`] runs one suite against it and returns the
 //! `ess-conformance-report/2` document a caller reads the verdict from.
 //!
-//! Every command is answered by `b10x-loom-executor`, over the two records a Loom keeps:
+//! Every command is answered by `b10x-loom-executor`, over two records:
 //!
-//! * `OpenSession`, `RecordTurn`, `RecordCompaction`, `FileSession`, `InterruptSession`,
-//!   `ResumeSession`, `ReleaseSession`, `CountBoundaryRefusal` and `ProjectCatalogue` by the
-//!   behaviours of `b10x_loom_executor::session::TurnRecord`;
+//! * `ProjectCatalogue` by the generated behaviour of
+//!   `b10x_loom_executor::projection::CatalogueRecord`;
 //! * `SelectAction` by `b10x_loom_executor::selection::select_action`, from the catalogues the
-//!   `TurnRecord` holds into the selections of a `b10x_loom_executor::arguments::RequestRecord`;
+//!   `CatalogueRecord` holds into the selections of a `b10x_loom_executor::arguments::RequestRecord`;
 //! * `RequestArguments`, `RevalidateSelection` and `OverruleSelection` by the behaviours of that
 //!   `RequestRecord`; `OverruleSelection` by its generated behaviour, which overrules whatever
 //!   replacement it is named, not by `RequestRecord::overrule`, the host's check that the
 //!   replacement is held (ESS refuses that guard beside `wrong_state`, `ESS-COMMAND-004`);
 //! * `RecordSelection` by the generated behaviour of that `RequestRecord`, over the selections it
 //!   holds and the selection records it keeps;
-//! * the views `Sessions`, `Catalogues`, `Selections` and `SelectionRecords` from what the two
-//!   records hold.
+//! * the views `Catalogues`, `Selections` and `SelectionRecords` from what the two records hold.
 //!
 //! This crate translates values and records what was published. It decides no outcome: each
 //! answer is the outcome the executor returned, and each event is the one it returned.
@@ -45,24 +43,17 @@ use std::cell::RefCell;
 use b10x_loom_executor::arguments::RequestRecord;
 use b10x_loom_executor::model::behaviour::SelectionStorage;
 use b10x_loom_executor::model::run::obligations::{
-    CountBoundaryRefusalBehavior, FileSessionBehavior, InterruptSessionBehavior,
-    OpenSessionBehavior, OverruleSelectionBehavior, ProjectCatalogueBehavior,
-    RecordCompactionBehavior, RecordSelectionBehavior, RecordTurnBehavior, ReleaseSessionBehavior,
-    RequestArgumentsBehavior, ResumeSessionBehavior, RevalidateSelectionBehavior,
+    OverruleSelectionBehavior, ProjectCatalogueBehavior, RecordSelectionBehavior,
+    RequestArgumentsBehavior, RevalidateSelectionBehavior,
 };
 use b10x_loom_executor::model::run::{
-    ArgumentRequestId, CatalogueId, CommissionRunId, CompactionId, CountBoundaryRefusal,
-    CountBoundaryRefusalOutcome, FileSession, FileSessionOutcome, InterruptSession,
-    InterruptSessionOutcome, OpenSession, OpenSessionOutcome, OverruleSelection,
-    OverruleSelectionOutcome, ProjectCatalogue, ProjectCatalogueOutcome, RecordCompaction,
-    RecordCompactionOutcome, RecordSelection, RecordSelectionOutcome, RecordTurn,
-    RecordTurnOutcome, ReleaseSession, ReleaseSessionOutcome, RequestArguments,
-    RequestArgumentsOutcome, ResumeSession, ResumeSessionOutcome, RevalidateSelection,
-    RevalidateSelectionOutcome, SelectAction, SelectActionOutcome, SelectionId, SelectionRecordId,
-    SelectionState, SessionId, SessionState, TurnId,
+    ArgumentRequestId, CatalogueId, OverruleSelection, OverruleSelectionOutcome, ProjectCatalogue,
+    ProjectCatalogueOutcome, RecordSelection, RecordSelectionOutcome, RequestArguments,
+    RequestArgumentsOutcome, RevalidateSelection, RevalidateSelectionOutcome, SelectAction,
+    SelectActionOutcome, SelectionId, SelectionRecordId, SelectionState, TurnId,
 };
+use b10x_loom_executor::projection::CatalogueRecord;
 use b10x_loom_executor::selection::select_action;
-use b10x_loom_executor::session::TurnRecord;
 use ess_conformance::scenario::{CommandRef, ErrorRef, EventRef, OutcomeRef};
 use ess_conformance::target::{
     ConformanceTarget, DeclaredErrorValue, EventObservationRequest, ExternalOutcomeControl,
@@ -80,28 +71,13 @@ use crate::codec::Input;
 /// The name this implementation is reported under.
 pub const IMPLEMENTATION: &str = "b10x-loom-executor";
 
-const OPEN_SESSION: &str = "loom.run.OpenSession";
-const RECORD_TURN: &str = "loom.run.RecordTurn";
-const RECORD_COMPACTION: &str = "loom.run.RecordCompaction";
-const FILE_SESSION: &str = "loom.run.FileSession";
-const INTERRUPT_SESSION: &str = "loom.run.InterruptSession";
-const RESUME_SESSION: &str = "loom.run.ResumeSession";
-const RELEASE_SESSION: &str = "loom.run.ReleaseSession";
 const PROJECT_CATALOGUE: &str = "loom.run.ProjectCatalogue";
 const SELECT_ACTION: &str = "loom.run.SelectAction";
 const REQUEST_ARGUMENTS: &str = "loom.run.RequestArguments";
 const REVALIDATE_SELECTION: &str = "loom.run.RevalidateSelection";
 const OVERRULE_SELECTION: &str = "loom.run.OverruleSelection";
 const RECORD_SELECTION: &str = "loom.run.RecordSelection";
-const COUNT_BOUNDARY_REFUSAL: &str = "loom.run.CountBoundaryRefusal";
 
-const SESSION_OPENED: &str = "loom.run.SessionOpened";
-const TURN_RECORDED: &str = "loom.run.TurnRecorded";
-const SESSION_COMPACTED: &str = "loom.run.SessionCompacted";
-const SESSION_FILED: &str = "loom.run.SessionFiled";
-const SESSION_INTERRUPTED: &str = "loom.run.SessionInterrupted";
-const SESSION_RESUMED: &str = "loom.run.SessionResumed";
-const SESSION_RELEASED: &str = "loom.run.SessionReleased";
 const CATALOGUE_PROJECTED: &str = "loom.run.CatalogueProjected";
 const ACTION_SELECTED: &str = "loom.run.ActionSelected";
 const ARGUMENTS_REQUESTED: &str = "loom.run.ArgumentsRequested";
@@ -110,13 +86,7 @@ const SELECTION_NOT_IN_FRONTIER: &str = "loom.run.SelectionNotInFrontier";
 const SELECTION_ADMITTED: &str = "loom.run.SelectionAdmitted";
 const SELECTION_OVERRULED: &str = "loom.run.SelectionOverruled";
 const SELECTION_RECORDED: &str = "loom.run.SelectionRecorded";
-const BOUNDARY_REFUSAL_COUNTED: &str = "loom.run.BoundaryRefusalCounted";
 
-const SESSION_EXISTS: &str = "loom.run.SessionExists";
-const SESSION_NOT_FOUND: &str = "loom.run.SessionNotFound";
-const SESSION_NOT_ACTIVE: &str = "loom.run.SessionNotActive";
-const SESSION_STATE_CONFLICT: &str = "loom.run.SessionStateConflict";
-const SESSION_WIRE_MISMATCH: &str = "loom.run.SessionWireMismatch";
 const CATALOGUE_EXISTS: &str = "loom.run.CatalogueExists";
 const CATALOGUE_NOT_FOUND: &str = "loom.run.CatalogueNotFound";
 const ACTION_NOT_IN_CATALOGUE: &str = "loom.run.ActionNotInCatalogue";
@@ -126,7 +96,6 @@ const SELECTION_NOT_SELECTED: &str = "loom.run.SelectionNotSelected";
 const SELECTION_STATE_CONFLICT: &str = "loom.run.SelectionStateConflict";
 const SELECTION_RECORD_EXISTS: &str = "loom.run.SelectionRecordExists";
 
-const SESSIONS: &str = "loom.run.Sessions";
 const CATALOGUES: &str = "loom.run.Catalogues";
 const SELECTIONS: &str = "loom.run.Selections";
 const SELECTION_RECORDS: &str = "loom.run.SelectionRecords";
@@ -137,8 +106,8 @@ const NOT_IN_FRONTIER: &str = "not-in-frontier";
 /// One scenario's state.
 #[derive(Default)]
 struct Live {
-    /// Sessions, turns, compactions and catalogues, behind the executor's behaviours.
-    turns: TurnRecord,
+    /// Catalogues, behind the executor's behaviour.
+    catalogues: CatalogueRecord,
     /// Selections and argument requests, behind the executor's behaviours.
     requests: RequestRecord,
     /// Every event published in this scenario, in order.
@@ -205,20 +174,12 @@ impl ConformanceTarget for LoomTarget {
         let input = &request.input;
         let correlation = &request.correlation;
         let result = match command.as_str() {
-            OPEN_SESSION => open_session(&mut live, input, correlation),
-            RECORD_TURN => record_turn(&mut live, input, correlation),
-            RECORD_COMPACTION => record_compaction(&mut live, input, correlation),
-            FILE_SESSION => file_session(&mut live, input, correlation),
-            INTERRUPT_SESSION => interrupt_session(&mut live, input, correlation),
-            RESUME_SESSION => resume_session(&mut live, input, correlation),
-            RELEASE_SESSION => release_session(&mut live, input, correlation),
             PROJECT_CATALOGUE => project_catalogue(&mut live, input, correlation),
             SELECT_ACTION => select(&mut live, input, correlation),
             REQUEST_ARGUMENTS => request_arguments(&mut live, input, correlation),
             REVALIDATE_SELECTION => revalidate_selection(&mut live, input, correlation),
             OVERRULE_SELECTION => overrule_selection(&mut live, input, correlation),
             RECORD_SELECTION => record_selection(&mut live, input, correlation),
-            COUNT_BOUNDARY_REFUSAL => count_boundary_refusal(&mut live, input, correlation),
             other => {
                 return Err(TargetError::unavailable(
                     format!("invoking `{other}`"),
@@ -236,28 +197,8 @@ impl ConformanceTarget for LoomTarget {
         let view = request.view.to_string();
         let live = self.live.borrow();
         let rows: Vec<ViewRow> = match view.as_str() {
-            SESSIONS => live
-                .turns
-                .sessions()
-                .iter()
-                .map(|held| {
-                    ViewRow::from([
-                        ("session_id".to_owned(), codec::id(&held.data.session_id.0)),
-                        (
-                            "commission_run".to_owned(),
-                            codec::id(&held.data.commission_run.0),
-                        ),
-                        ("wire".to_owned(), Node::Text(held.data.wire.clone())),
-                        (
-                            "boundary_refusals".to_owned(),
-                            codec::number(held.data.boundary_refusals),
-                        ),
-                        ("state".to_owned(), codec::session_state(held.state)),
-                    ])
-                })
-                .collect(),
             CATALOGUES => live
-                .turns
+                .catalogues
                 .catalogues()
                 .iter()
                 .map(|held| {
@@ -432,15 +373,6 @@ fn event(name: &str) -> ObservedEvent {
     ObservedEvent::new(parse::<EventRef>(name))
 }
 
-/// `wrong-state` with the session's actual state, or with no field for a session no record holds.
-fn session_wrong_state(command: &str, state: Option<SessionState>) -> SemanticCommandResult {
-    let declared = error(SESSION_STATE_CONFLICT);
-    took(command, "wrong-state").with_error(match state {
-        Some(state) => declared.with("state", codec::session_state(state)),
-        None => declared,
-    })
-}
-
 /// `wrong-state` with the selection's actual state, or with no field for a selection no record
 /// holds.
 fn selection_wrong_state(command: &str, state: Option<SelectionState>) -> SemanticCommandResult {
@@ -462,236 +394,6 @@ fn refused(
     took(command, outcome).with_error(error(name).with(field, value))
 }
 
-fn open_session(
-    live: &mut Live,
-    input: &Input,
-    correlation: &CorrelationId,
-) -> Option<SemanticCommandResult> {
-    let command = OpenSession {
-        session_id: SessionId(codec::uuid(input, "session_id")?),
-        commission_run: CommissionRunId(codec::uuid(input, "commission_run")?),
-        wire: codec::text(input, "wire")?,
-    };
-    Some(match live.turns.open_session(command).ok()? {
-        OpenSessionOutcome::SessionExists { error } => refused(
-            OPEN_SESSION,
-            "session-exists",
-            SESSION_EXISTS,
-            "session_id",
-            codec::id(&error.session_id.0),
-        ),
-        OpenSessionOutcome::Opened { session_opened } => {
-            let published = live.publish(
-                event(SESSION_OPENED)
-                    .with("session_id", codec::id(&session_opened.session_id.0))
-                    .with(
-                        "commission_run",
-                        codec::id(&session_opened.commission_run.0),
-                    )
-                    .with("wire", Node::Text(session_opened.wire)),
-                correlation,
-            );
-            took(OPEN_SESSION, "opened").emitting(published)
-        }
-    })
-}
-
-fn record_turn(
-    live: &mut Live,
-    input: &Input,
-    correlation: &CorrelationId,
-) -> Option<SemanticCommandResult> {
-    let command = RecordTurn {
-        turn_id: TurnId(codec::uuid(input, "turn_id")?),
-        session_id: SessionId(codec::uuid(input, "session_id")?),
-        index: codec::integer(input, "index")?,
-        items: codec::texts(input, "items")?,
-    };
-    Some(match live.turns.record_turn(command).ok()? {
-        RecordTurnOutcome::SessionUnknown { error } => refused(
-            RECORD_TURN,
-            "session-unknown",
-            SESSION_NOT_FOUND,
-            "session_id",
-            codec::id(&error.session_id.0),
-        ),
-        RecordTurnOutcome::SessionNotActive { error } => refused(
-            RECORD_TURN,
-            "session-not-active",
-            SESSION_NOT_ACTIVE,
-            "session_id",
-            codec::id(&error.session_id.0),
-        ),
-        RecordTurnOutcome::Recorded { turn_recorded } => {
-            let published = live.publish(
-                event(TURN_RECORDED)
-                    .with("turn_id", codec::id(&turn_recorded.turn_id.0))
-                    .with("session_id", codec::id(&turn_recorded.session_id.0))
-                    .with("index", codec::number(turn_recorded.index)),
-                correlation,
-            );
-            took(RECORD_TURN, "recorded").emitting(published)
-        }
-    })
-}
-
-fn record_compaction(
-    live: &mut Live,
-    input: &Input,
-    correlation: &CorrelationId,
-) -> Option<SemanticCommandResult> {
-    let command = RecordCompaction {
-        compaction_id: CompactionId(codec::uuid(input, "compaction_id")?),
-        session_id: SessionId(codec::uuid(input, "session_id")?),
-        usage: codec::optional_usage(input, "usage")?,
-    };
-    Some(match live.turns.record_compaction(command).ok()? {
-        RecordCompactionOutcome::SessionUnknown { error } => refused(
-            RECORD_COMPACTION,
-            "session-unknown",
-            SESSION_NOT_FOUND,
-            "session_id",
-            codec::id(&error.session_id.0),
-        ),
-        RecordCompactionOutcome::SessionNotActive { error } => refused(
-            RECORD_COMPACTION,
-            "session-not-active",
-            SESSION_NOT_ACTIVE,
-            "session_id",
-            codec::id(&error.session_id.0),
-        ),
-        RecordCompactionOutcome::Recorded { session_compacted } => {
-            let published = live.publish(
-                event(SESSION_COMPACTED)
-                    .with(
-                        "compaction_id",
-                        codec::id(&session_compacted.compaction_id.0),
-                    )
-                    .with("session_id", codec::id(&session_compacted.session_id.0))
-                    .with("usage", codec::usage(session_compacted.usage.as_ref())),
-                correlation,
-            );
-            took(RECORD_COMPACTION, "recorded").emitting(published)
-        }
-    })
-}
-
-fn file_session(
-    live: &mut Live,
-    input: &Input,
-    correlation: &CorrelationId,
-) -> Option<SemanticCommandResult> {
-    let command = FileSession {
-        session_id: SessionId(codec::uuid(input, "session_id")?),
-        ending: codec::run_ending(input, "ending")?,
-    };
-    Some(match live.turns.file_session(command).ok()? {
-        FileSessionOutcome::Filed { session_filed } => {
-            let published = live.publish(
-                event(SESSION_FILED)
-                    .with("session_id", codec::id(&session_filed.session_id.0))
-                    .with("ending", codec::run_ending_name(session_filed.ending)),
-                correlation,
-            );
-            took(FILE_SESSION, "filed").emitting(published)
-        }
-        FileSessionOutcome::WrongState { error } => {
-            session_wrong_state(FILE_SESSION, Some(error.state))
-        }
-        FileSessionOutcome::WrongStateUnknownInstance => session_wrong_state(FILE_SESSION, None),
-    })
-}
-
-fn interrupt_session(
-    live: &mut Live,
-    input: &Input,
-    correlation: &CorrelationId,
-) -> Option<SemanticCommandResult> {
-    let command = InterruptSession {
-        session_id: SessionId(codec::uuid(input, "session_id")?),
-    };
-    Some(match live.turns.interrupt_session(command).ok()? {
-        InterruptSessionOutcome::Interrupted {
-            session_interrupted,
-        } => {
-            let published = live.publish(
-                event(SESSION_INTERRUPTED)
-                    .with("session_id", codec::id(&session_interrupted.session_id.0)),
-                correlation,
-            );
-            took(INTERRUPT_SESSION, "interrupted").emitting(published)
-        }
-        InterruptSessionOutcome::WrongState { error } => {
-            session_wrong_state(INTERRUPT_SESSION, Some(error.state))
-        }
-        InterruptSessionOutcome::WrongStateUnknownInstance => {
-            session_wrong_state(INTERRUPT_SESSION, None)
-        }
-    })
-}
-
-fn resume_session(
-    live: &mut Live,
-    input: &Input,
-    correlation: &CorrelationId,
-) -> Option<SemanticCommandResult> {
-    let command = ResumeSession {
-        session_id: SessionId(codec::uuid(input, "session_id")?),
-        wire: codec::text(input, "wire")?,
-    };
-    Some(match live.turns.resume_session(command).ok()? {
-        ResumeSessionOutcome::CrossWire { error: mismatch } => took(RESUME_SESSION, "cross-wire")
-            .with_error(
-                error(SESSION_WIRE_MISMATCH)
-                    .with("session_id", codec::id(&mismatch.session_id.0))
-                    .with("session_wire", Node::Text(mismatch.session_wire))
-                    .with("wire", Node::Text(mismatch.wire)),
-            ),
-        ResumeSessionOutcome::Resumed { session_resumed } => {
-            let published = live.publish(
-                event(SESSION_RESUMED)
-                    .with("session_id", codec::id(&session_resumed.session_id.0))
-                    .with("wire", Node::Text(session_resumed.wire)),
-                correlation,
-            );
-            took(RESUME_SESSION, "resumed").emitting(published)
-        }
-        ResumeSessionOutcome::WrongState { error } => {
-            session_wrong_state(RESUME_SESSION, Some(error.state))
-        }
-        ResumeSessionOutcome::WrongStateUnknownInstance => {
-            session_wrong_state(RESUME_SESSION, None)
-        }
-    })
-}
-
-fn release_session(
-    live: &mut Live,
-    input: &Input,
-    correlation: &CorrelationId,
-) -> Option<SemanticCommandResult> {
-    let command = ReleaseSession {
-        session_id: SessionId(codec::uuid(input, "session_id")?),
-    };
-    Some(match live.turns.release_session(command).ok()? {
-        ReleaseSessionOutcome::Released { session_released } => {
-            let published = live.publish(
-                event(SESSION_RELEASED)
-                    .with("session_id", codec::id(&session_released.session_id.0))
-                    .with("ending", codec::run_ending_name(session_released.ending)),
-                correlation,
-            );
-            took(RELEASE_SESSION, "released").emitting(published)
-        }
-        ReleaseSessionOutcome::WrongState { error } => {
-            session_wrong_state(RELEASE_SESSION, Some(error.state))
-        }
-        ReleaseSessionOutcome::WrongStateUnknownInstance => {
-            session_wrong_state(RELEASE_SESSION, None)
-        }
-    })
-}
-
 fn project_catalogue(
     live: &mut Live,
     input: &Input,
@@ -704,7 +406,7 @@ fn project_catalogue(
         case_revision: codec::integer(input, "case_revision")?,
         entries: codec::entries(input, "entries")?,
     };
-    Some(match live.turns.project_catalogue(command).ok()? {
+    Some(match live.catalogues.project_catalogue(command).ok()? {
         ProjectCatalogueOutcome::CatalogueExists { error } => refused(
             PROJECT_CATALOGUE,
             "catalogue-exists",
@@ -747,7 +449,7 @@ fn select(
         case_revision: codec::integer(input, "case_revision")?,
     };
     Some(
-        match select_action(&live.turns, &mut live.requests, command) {
+        match select_action(&live.catalogues, &mut live.requests, command) {
             SelectActionOutcome::CatalogueUnknown { error } => refused(
                 SELECT_ACTION,
                 "catalogue-unknown",
@@ -1005,37 +707,6 @@ fn record_selection(
                 correlation,
             );
             took(RECORD_SELECTION, "recorded").emitting(published)
-        }
-    })
-}
-
-/// `CountBoundaryRefusal`, by the generated behaviour of the `TurnRecord`.
-fn count_boundary_refusal(
-    live: &mut Live,
-    input: &Input,
-    correlation: &CorrelationId,
-) -> Option<SemanticCommandResult> {
-    let command = CountBoundaryRefusal {
-        session_id: SessionId(codec::uuid(input, "session_id")?),
-    };
-    Some(match live.turns.count_boundary_refusal(command).ok()? {
-        CountBoundaryRefusalOutcome::Counted {
-            boundary_refusal_counted,
-        } => {
-            let published = live.publish(
-                event(BOUNDARY_REFUSAL_COUNTED).with(
-                    "session_id",
-                    codec::id(&boundary_refusal_counted.session_id.0),
-                ),
-                correlation,
-            );
-            took(COUNT_BOUNDARY_REFUSAL, "counted").emitting(published)
-        }
-        CountBoundaryRefusalOutcome::WrongState { error } => {
-            session_wrong_state(COUNT_BOUNDARY_REFUSAL, Some(error.state))
-        }
-        CountBoundaryRefusalOutcome::WrongStateUnknownInstance => {
-            session_wrong_state(COUNT_BOUNDARY_REFUSAL, None)
         }
     })
 }

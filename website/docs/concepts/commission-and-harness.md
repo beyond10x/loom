@@ -2,10 +2,10 @@
 title: Commission, Harness and Metaharness
 sidebar_label: Commission and Harness
 sidebar_position: 4
-description: Commission's contracts and runtime inside Loom, the Harness Loom succeeds, and Metaharness, which compares harnesses.
+description: Commission's contracts and runtime inside Loom, the Harness Loom started from, and Metaharness, which compares harnesses.
 status: shipped
-lede: Commission's contracts and runtime live in Loom as their own crate, which never depends on the executor; Loom carries the Harness it succeeds over by porting it; Metaharness compares Loom with other harnesses.
-source: Atlas ADRs 0075 and 0090; Taskfile.commission.yml (deps-guard); docs/design/harness-map.md
+lede: Commission's contracts and runtime live in Loom as their own crate, which never depends on the executor; Loom no longer carries a port of Harness and reaches models through llm; Metaharness compares Loom with other harnesses.
+source: Atlas ADRs 0075, 0090 and 0098; Taskfile.commission.yml (deps-guard)
 ---
 
 ## Commission
@@ -23,32 +23,17 @@ Commission's specification (`ess/commission/`) has its own reference: the
 
 ## Harness, the predecessor
 
-Loom succeeds [Harness](https://beyond10x.github.io/ecosystem/harness/)
-([GitHub](https://github.com/beyond10x/harness)). Harness's model wires, turn loop, tool round trips,
-approvals, budgets, streaming, compaction and session transcripts are ported into Loom step by step,
-not rewritten. Code carried over is relicensed Apache-2.0. Harness stays in service, unchanged,
-until its consumers have moved.
+Loom started from [Harness](https://beyond10x.github.io/ecosystem/harness/)
+([GitHub](https://github.com/beyond10x/harness)): releases up to 0.30.0 carried a port of its model
+wires, turn loop and session transcripts. Loom deleted that port (Atlas ADR 0098). Harness stays in
+service, unchanged, as the in-house harness behind Metaharness.
 
-Every Harness crate has one disposition. Six are ported into Loom: the wire, its HTTP transport, two
-model-API projections, the loop, and session transcripts. Eight are not carried and stay with
-Harness. The repository's
-[Harness to Loom module map](https://github.com/beyond10x/loom/blob/main/docs/design/harness-map.md)
-lists them, and [Move from Harness](../guides/move-to-loom.md#move-from-harness) gives each crate's
-`loom_sdk` path or owner and what changes for a program that moves.
-
-:::caution[Planned]
-The provider wires, messages, responses, HTTP, the turn loop, sessions, transcripts and streaming
-are ported as modules of `b10x-loom-executor`, and `Loom::run_loop` runs a governed run through
-them: each turn's tools are the catalogue projected from the case's current frontier, and a model's
-tool call is selected, given its arguments and revalidated before Loom proposes it. Each compaction
-of the run's session is recorded with the usage the endpoint reported for it. A run can be
-interrupted, and its session resumed by id from the approval checkpoint the run stopped at:
-recovery projects from the frontier current at resume and revalidates before it proposes anything,
-so a call selected before the case moved is never proposed. Budgets are planned, and
-`b10x-loom run` does not use the loop yet:
-today the slice's model calls go through
-[llm](https://beyond10x.github.io/llm/) ([GitHub](https://github.com/beyond10x/llm)).
-:::
+Loom's decisions (routing an intent, selecting an action, generating its arguments, a workflow's
+judgement step) are each one structured request to an llm `Model`, through
+[llm](https://beyond10x.github.io/llm/) ([GitHub](https://github.com/beyond10x/llm)). Agent work in
+a harness goes through Metaharness behind an `AgentExecutor`.
+[Move from Harness](../guides/move-to-loom.md#move-from-harness) says what a Harness program uses
+instead.
 
 ## Metaharness
 

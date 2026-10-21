@@ -7,7 +7,7 @@
 //! The case is scripted: a governor listing the `software-change@1` actions admissible, moving one
 //! revision per performed effect; an effect port answering each action with the report the test
 //! scripts for it. Judgement steps run on Loom's chooser over a scripted llm `Model`, metered
-//! (`MeteredModelPort`) under a `MeteredExecutor` sharing one `RunMeter`, which records the
+//! (`MeteredModel`) under a `MeteredExecutor` sharing one `RunMeter`, which records the
 //! instructions of every request; the judgement-step cases (`story:dw-judgement-step-inputs`) run
 //! on it and on an executor the host supplies, which records the instructions it is told
 //! (`story:judgement-step-any-executor`), and only they script either. Nothing reaches a network.
@@ -33,7 +33,7 @@ use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked};
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
-use b10x_loom_executor::metering::{MeteredExecutor, MeteredModelPort, RunMeter};
+use b10x_loom_executor::metering::{MeteredExecutor, MeteredModel, RunMeter};
 use b10x_loom_executor::model::metering::RunUsageReport;
 use b10x_loom_executor::model::workflow::WorkflowDefinition;
 use b10x_loom_executor::workflow::{
@@ -447,7 +447,7 @@ fn run_judged(text: &str, reports: &[(&'static str, CommissionValue)], judged: J
     };
     let hosted = !proposals.is_empty();
     let model = ScriptedModel::new(script);
-    let metered = MeteredModelPort::new(&model, &meter);
+    let metered = MeteredModel::new(&model, &meter);
     let host = Host {
         script: Mutex::new(proposals.into()),
         instructions: Mutex::default(),

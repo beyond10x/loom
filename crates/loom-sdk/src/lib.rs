@@ -3,8 +3,9 @@
 //! The Loom SDK: one crate an application depends on to embed a governed agent.
 //!
 //! It re-exports the crates an embedder needs, under stable module names. Its one module of its
-//! own is [`llm`], the harness model port over an llm `Model`; the executor's own selector and
-//! argument generator over an llm `Model` are [`loom::model_selector`].
+//! own is [`models`], a host's llm models loaded from a models configuration or a routes document;
+//! the executor's own selector and argument generator over an llm `Model` are
+//! [`loom::model_selector`].
 //!
 //! | Module | Crate | What it is for |
 //! | --- | --- | --- |
@@ -12,14 +13,13 @@
 //! | [`connectors`] | `b10x-loom-connectors` | Commission's `ConnectorInvoker` over a Connectors service: [`connectors::ConnectorsInvoker`] invokes the operation an action is bound to once, on the host's endpoint for its instance, and reports the attempt Connectors recorded; [`connectors::cli::ConnectorsCli`] reads through the operator's `connectors` command line and performs one governed write for an admitted request, and [`connectors::evidence::WriteEvidenceAdapter`] records an applied write as the protocol's evidence. |
 //! | [`loom`] | `b10x-loom-executor` | The executor: [`Loom`] proposes one action per frontier through an [`ActionSelector`] and an [`ArgumentGenerator`] the embedder supplies, or the ones over an llm `Model` in [`loom::model_selector`], told the embedder's `Briefing`, on which a plugin turn runs. |
 //! | [`governor`] | `b10x-loom-governor` | The governor: [`CanonGovernor`] evaluates a case's protocol with Canon over a [`CaseStore`] and issues its frontier. |
-//! | [`llm`] | `b10x-llm-core` | [`llm::LlmModelPort`], a harness `ModelPort` over an llm `Model`: one `Model::turn` per turn, for a host that runs the ported loop. |
 //! | [`intake`] | `b10x-loom-intake-router`, `b10x-loom-intake-slice` | Intake: the router that proposes a protocol for an intent ([`intake::router`]), and the slice's case opening, local executor, test-result verifier and local effect adapter ([`intake::slice`]). |
 //!
 //! The items an embedding always touches are also re-exported at the top: [`run_until_blocked`],
 //! [`LoopContext`], [`LoopEnd`], [`EffectPort`], [`Loom`], [`ActionSelector`],
 //! [`ArgumentGenerator`], [`CanonGovernor`], [`CaseStore`] and [`MemoryCaseStore`].
-//! [`RunMeter`], [`MeteredModelPort`] and [`MeteredExecutor`] report a run's model calls, tokens
-//! and cost per executor call (`loom::metering`): a [`MeteredModelPort`] is an llm `Model` over
+//! [`RunMeter`], [`MeteredModel`] and [`MeteredExecutor`] report a run's model calls, tokens
+//! and cost per executor call (`loom::metering`): a [`MeteredModel`] is an llm `Model` over
 //! the one a host built, each of its turns one call, priced with the run's [`RateCard`].
 //! [`serde_json`] is the one Loom links, whose `Value` a host's `Briefing` returns.
 //!
@@ -48,8 +48,6 @@ pub use b10x_loom_connectors as connectors;
 /// The Loom executor (`b10x-loom-executor`).
 pub use b10x_loom_executor as loom;
 
-pub mod llm;
-
 pub mod models;
 
 /// The governor (`b10x-loom-governor`).
@@ -75,7 +73,7 @@ pub use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked}
 /// `ProtocolEntry::actions` of the protocol it names.
 pub use b10x_loom_executor::workflow::{RecordingEffects, WorkflowExecutor};
 pub use b10x_loom_executor::{ActionSelector, ArgumentGenerator, Loom};
-pub use b10x_loom_executor::{MeteredExecutor, MeteredModelPort, RateCard, RunMeter};
+pub use b10x_loom_executor::{MeteredExecutor, MeteredModel, RateCard, RunMeter};
 /// A child process a host names, run confined by [`SubstrateRunner::run_child`] with the guarantees
 /// a test has; Substrate's types it is named with are at `loom_sdk::intake::slice::confinement`.
 pub use b10x_loom_intake_slice::confinement::ChildCommand;

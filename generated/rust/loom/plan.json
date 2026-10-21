@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "d963e91e2eff0bd7be27b613dc6014a58f63a3404143010ceaa390d8c1120a90",
-    "contract_digest": "7065673dfdf28e8b98b7e5d5d5e1933bea6c5ee58b6f0579685582e353e9b84f"
+    "source_digest": "1d444202ff5ea55b90c19ce388d5b307090dc8b11d651cdd4e3ec3305a5c4630",
+    "contract_digest": "747f718a7d6e4cdc7f8cb59838b8d3065716a8e71730de52af6f47cf9f5d6546"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -523,42 +523,7 @@
     },
     {
       "kind": "domain_type",
-      "source": "loom.run.Compaction.State",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.run.CompactionId",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.run.CredentialKind",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.run.CredentialReference",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
       "source": "loom.run.LoopStop",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.run.LoopStopAwaitingApproval",
       "disposition": {
         "disposition": "generated"
       }
@@ -572,77 +537,7 @@
     },
     {
       "kind": "domain_type",
-      "source": "loom.run.LoopStopCancelled",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.run.LoopStopContextAboveTrigger",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.run.LoopStopDeadline",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.run.LoopStopMaxCost",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
       "source": "loom.run.LoopStopMaxInputTokens",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.run.LoopStopMaxOutputTokens",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.run.LoopStopMaxTurns",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.run.LoopStopProviderIncomplete",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.run.LoopStopUnstructured",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.run.ReportedUsage",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.run.RunEnding",
       "disposition": {
         "disposition": "generated"
       }
@@ -684,35 +579,7 @@
     },
     {
       "kind": "domain_type",
-      "source": "loom.run.Session.State",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.run.SessionId",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.run.Turn.State",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
       "source": "loom.run.TurnId",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.run.WireCredential",
       "disposition": {
         "disposition": "generated"
       }
@@ -845,13 +712,6 @@
     },
     {
       "kind": "entity_lifecycle",
-      "source": "loom.run.Compaction",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "entity_lifecycle",
       "source": "loom.run.Selection",
       "disposition": {
         "disposition": "generated"
@@ -865,76 +725,6 @@
       }
     },
     {
-      "kind": "entity_lifecycle",
-      "source": "loom.run.Session",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "entity_lifecycle",
-      "source": "loom.run.Turn",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "command_contract",
-      "source": "loom.run.CountBoundaryRefusal",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "command_behavior",
-      "source": "loom.run.CountBoundaryRefusal",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "command_contract",
-      "source": "loom.run.FileSession",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "command_behavior",
-      "source": "loom.run.FileSession",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "command_contract",
-      "source": "loom.run.InterruptSession",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "command_behavior",
-      "source": "loom.run.InterruptSession",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "command_contract",
-      "source": "loom.run.OpenSession",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "command_behavior",
-      "source": "loom.run.OpenSession",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
       "kind": "command_contract",
       "source": "loom.run.OverruleSelection",
       "disposition": {
@@ -964,20 +754,6 @@
     },
     {
       "kind": "command_contract",
-      "source": "loom.run.RecordCompaction",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "command_behavior",
-      "source": "loom.run.RecordCompaction",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "command_contract",
       "source": "loom.run.RecordSelection",
       "disposition": {
         "disposition": "generated"
@@ -992,34 +768,6 @@
     },
     {
       "kind": "command_contract",
-      "source": "loom.run.RecordTurn",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "command_behavior",
-      "source": "loom.run.RecordTurn",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "command_contract",
-      "source": "loom.run.ReleaseSession",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "command_behavior",
-      "source": "loom.run.ReleaseSession",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "command_contract",
       "source": "loom.run.RequestArguments",
       "disposition": {
         "disposition": "generated"
@@ -1028,20 +776,6 @@
     {
       "kind": "command_behavior",
       "source": "loom.run.RequestArguments",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "command_contract",
-      "source": "loom.run.ResumeSession",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "command_behavior",
-      "source": "loom.run.ResumeSession",
       "disposition": {
         "disposition": "generated"
       }
@@ -1095,13 +829,6 @@
     },
     {
       "kind": "event_type",
-      "source": "loom.run.BoundaryRefusalCounted",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "event_type",
       "source": "loom.run.CatalogueProjected",
       "disposition": {
         "disposition": "generated"
@@ -1138,55 +865,6 @@
     {
       "kind": "event_type",
       "source": "loom.run.SelectionStale",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "event_type",
-      "source": "loom.run.SessionCompacted",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "event_type",
-      "source": "loom.run.SessionFiled",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "event_type",
-      "source": "loom.run.SessionInterrupted",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "event_type",
-      "source": "loom.run.SessionOpened",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "event_type",
-      "source": "loom.run.SessionReleased",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "event_type",
-      "source": "loom.run.SessionResumed",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "event_type",
-      "source": "loom.run.TurnRecorded",
       "disposition": {
         "disposition": "generated"
       }
@@ -1248,41 +926,6 @@
       }
     },
     {
-      "kind": "error_type",
-      "source": "loom.run.SessionExists",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "error_type",
-      "source": "loom.run.SessionNotActive",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "error_type",
-      "source": "loom.run.SessionNotFound",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "error_type",
-      "source": "loom.run.SessionStateConflict",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "error_type",
-      "source": "loom.run.SessionWireMismatch",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
       "kind": "view_type",
       "source": "loom.run.Catalogues",
       "disposition": {
@@ -1320,20 +963,6 @@
     {
       "kind": "view_query",
       "source": "loom.run.Selections",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "view_type",
-      "source": "loom.run.Sessions",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "view_query",
-      "source": "loom.run.Sessions",
       "disposition": {
         "disposition": "generated"
       }

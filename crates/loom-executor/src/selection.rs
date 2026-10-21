@@ -80,11 +80,6 @@ pub(crate) fn elapsed_ms(started: Instant) -> i64 {
     i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX)
 }
 
-/// A token count as the run model's `Integer`, saturating.
-pub(crate) fn tokens(count: u64) -> i64 {
-    i64::try_from(count).unwrap_or(i64::MAX)
-}
-
 /// What a selector's answer resolved to: the pick it chose and, when a stronger selector overruled
 /// a fast one to make it, the fast pick it overruled (`story:fallback-selection-recording`).
 #[derive(Debug, Clone, PartialEq, Eq)]

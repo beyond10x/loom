@@ -22,8 +22,8 @@ use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_commission_testkit::fake_governor::{Answer, FakeGovernor};
 use b10x_loom_executor::model::primitives::Uuid;
 use b10x_loom_executor::model::run::{
-    CatalogueEntry, CommissionRunId, SelectionStrategy, Session, SessionData, SessionId,
-    SessionState,
+    ActionCatalogue, ActionCatalogueData, ActionCatalogueState, CatalogueEntry,
+    CatalogueEntryStatus, CatalogueId, SelectionStrategy, TurnId,
 };
 use b10x_loom_executor::selection::{Choice, SelectionContext};
 use b10x_loom_executor::{
@@ -214,20 +214,26 @@ fn proposes_merge(outcome: &ExecutorOutcome) -> bool {
     )
 }
 
-/// Acceptance 3: a generated `Session`, built through `b10x-loom-executor`'s re-export, carries the
-/// `CommissionRunId` it was built with.
+/// Acceptance 3: a generated entity, built through `b10x-loom-executor`'s re-export, starts in its
+/// declared initial state and carries the data it was built with. It was a `Session` until
+/// `story:delete-harness-port` removed the session with the ported loop; the catalogue is the
+/// generated entity every run builds.
 #[test]
-fn session_carries_commission_run_id() {
-    let run = CommissionRunId(Uuid("00000000-0000-4000-8000-0000000000a1".to_owned()));
-    let session = Session::new(SessionData {
-        session_id: SessionId(Uuid("00000000-0000-4000-8000-0000000000b2".to_owned())),
-        commission_run: run.clone(),
-        // The wire the session's items come from (story:session-transcript-streaming).
-        wire: "openai-responses".to_owned(),
-        boundary_refusals: 0,
+fn a_generated_catalogue_carries_the_data_it_was_built_with() {
+    let catalogue_id = CatalogueId(Uuid("00000000-0000-4000-8000-0000000000a1".to_owned()));
+    let entries = vec![CatalogueEntry {
+        action: MERGE.to_owned(),
+        status: CatalogueEntryStatus::ApprovalRequired,
+    }];
+    let catalogue = ActionCatalogue::new(ActionCatalogueData {
+        catalogue_id: catalogue_id.clone(),
+        turn_id: TurnId(Uuid("00000000-0000-4000-8000-0000000000b2".to_owned())),
+        frontier: "00000000-0000-4000-8000-0000000000c3".to_owned(),
+        case_revision: 2,
+        entries: entries.clone(),
     });
 
-    assert_eq!(session.state(), SessionState::Active);
-    assert_eq!(session.data().commission_run, run);
-    assert_eq!(session.into_data().commission_run, run);
+    assert_eq!(catalogue.state(), ActionCatalogueState::Projected);
+    assert_eq!(catalogue.data().catalogue_id, catalogue_id);
+    assert_eq!(catalogue.into_data().entries, entries);
 }

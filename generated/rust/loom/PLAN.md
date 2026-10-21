@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest d963e91e2eff0bd7be27b613dc6014a58f63a3404143010ceaa390d8c1120a90
-  contract digest 7065673dfdf28e8b98b7e5d5d5e1933bea6c5ee58b6f0579685582e353e9b84f
+  model digest 1d444202ff5ea55b90c19ce388d5b307090dc8b11d651cdd4e3ec3305a5c4630
+  contract digest 747f718a7d6e4cdc7f8cb59838b8d3065716a8e71730de52af6f47cf9f5d6546
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-189 capabilities: **188 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+136 capabilities: **135 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -87,34 +87,15 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.run.CatalogueEntryStatus` |
 | domain type | `loom.run.CatalogueId` |
 | domain type | `loom.run.CommissionRunId` |
-| domain type | `loom.run.Compaction.State` |
-| domain type | `loom.run.CompactionId` |
-| domain type | `loom.run.CredentialKind` |
-| domain type | `loom.run.CredentialReference` |
 | domain type | `loom.run.LoopStop` |
-| domain type | `loom.run.LoopStopAwaitingApproval` |
 | domain type | `loom.run.LoopStopBudgetUnobservable` |
-| domain type | `loom.run.LoopStopCancelled` |
-| domain type | `loom.run.LoopStopContextAboveTrigger` |
-| domain type | `loom.run.LoopStopDeadline` |
-| domain type | `loom.run.LoopStopMaxCost` |
 | domain type | `loom.run.LoopStopMaxInputTokens` |
-| domain type | `loom.run.LoopStopMaxOutputTokens` |
-| domain type | `loom.run.LoopStopMaxTurns` |
-| domain type | `loom.run.LoopStopProviderIncomplete` |
-| domain type | `loom.run.LoopStopUnstructured` |
-| domain type | `loom.run.ReportedUsage` |
-| domain type | `loom.run.RunEnding` |
 | domain type | `loom.run.Selection.State` |
 | domain type | `loom.run.SelectionId` |
 | domain type | `loom.run.SelectionRecord.State` |
 | domain type | `loom.run.SelectionRecordId` |
 | domain type | `loom.run.SelectionStrategy` |
-| domain type | `loom.run.Session.State` |
-| domain type | `loom.run.SessionId` |
-| domain type | `loom.run.Turn.State` |
 | domain type | `loom.run.TurnId` |
-| domain type | `loom.run.WireCredential` |
 | domain type | `loom.slack.ChannelObjectives` |
 | domain type | `loom.slack.SlackConfig` |
 | domain type | `loom.workflow.DeterministicStep` |
@@ -133,54 +114,27 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.workflow.WorkflowStep` |
 | entity lifecycle | `loom.run.ActionCatalogue` |
 | entity lifecycle | `loom.run.ArgumentRequest` |
-| entity lifecycle | `loom.run.Compaction` |
 | entity lifecycle | `loom.run.Selection` |
 | entity lifecycle | `loom.run.SelectionRecord` |
-| entity lifecycle | `loom.run.Session` |
-| entity lifecycle | `loom.run.Turn` |
-| command contract | `loom.run.CountBoundaryRefusal` |
-| command behaviour | `loom.run.CountBoundaryRefusal` |
-| command contract | `loom.run.FileSession` |
-| command behaviour | `loom.run.FileSession` |
-| command contract | `loom.run.InterruptSession` |
-| command behaviour | `loom.run.InterruptSession` |
-| command contract | `loom.run.OpenSession` |
-| command behaviour | `loom.run.OpenSession` |
 | command contract | `loom.run.OverruleSelection` |
 | command behaviour | `loom.run.OverruleSelection` |
 | command contract | `loom.run.ProjectCatalogue` |
 | command behaviour | `loom.run.ProjectCatalogue` |
-| command contract | `loom.run.RecordCompaction` |
-| command behaviour | `loom.run.RecordCompaction` |
 | command contract | `loom.run.RecordSelection` |
 | command behaviour | `loom.run.RecordSelection` |
-| command contract | `loom.run.RecordTurn` |
-| command behaviour | `loom.run.RecordTurn` |
-| command contract | `loom.run.ReleaseSession` |
-| command behaviour | `loom.run.ReleaseSession` |
 | command contract | `loom.run.RequestArguments` |
 | command behaviour | `loom.run.RequestArguments` |
-| command contract | `loom.run.ResumeSession` |
-| command behaviour | `loom.run.ResumeSession` |
 | command contract | `loom.run.RevalidateSelection` |
 | command behaviour | `loom.run.RevalidateSelection` |
 | command contract | `loom.run.SelectAction` |
 | event type | `loom.run.ActionSelected` |
 | event type | `loom.run.ArgumentsRequested` |
-| event type | `loom.run.BoundaryRefusalCounted` |
 | event type | `loom.run.CatalogueProjected` |
 | event type | `loom.run.SelectionAdmitted` |
 | event type | `loom.run.SelectionNotInFrontier` |
 | event type | `loom.run.SelectionOverruled` |
 | event type | `loom.run.SelectionRecorded` |
 | event type | `loom.run.SelectionStale` |
-| event type | `loom.run.SessionCompacted` |
-| event type | `loom.run.SessionFiled` |
-| event type | `loom.run.SessionInterrupted` |
-| event type | `loom.run.SessionOpened` |
-| event type | `loom.run.SessionReleased` |
-| event type | `loom.run.SessionResumed` |
-| event type | `loom.run.TurnRecorded` |
 | error type | `loom.run.ActionNotInCatalogue` |
 | error type | `loom.run.CatalogueExists` |
 | error type | `loom.run.CatalogueNotFound` |
@@ -189,19 +143,12 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | error type | `loom.run.SelectionNotSelected` |
 | error type | `loom.run.SelectionRecordExists` |
 | error type | `loom.run.SelectionStateConflict` |
-| error type | `loom.run.SessionExists` |
-| error type | `loom.run.SessionNotActive` |
-| error type | `loom.run.SessionNotFound` |
-| error type | `loom.run.SessionStateConflict` |
-| error type | `loom.run.SessionWireMismatch` |
 | view type | `loom.run.Catalogues` |
 | view query | `loom.run.Catalogues` |
 | view type | `loom.run.SelectionRecords` |
 | view query | `loom.run.SelectionRecords` |
 | view type | `loom.run.Selections` |
 | view query | `loom.run.Selections` |
-| view type | `loom.run.Sessions` |
-| view query | `loom.run.Sessions` |
 
 ## Ports — yours to provide
 
