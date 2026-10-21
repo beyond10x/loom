@@ -42,9 +42,6 @@
 //! no price: its cost is the cost its executor reported, and zero when it reported no usage, card
 //! or none.
 //!
-//! The ported model loop's own model port is metered by a [`MeteredModelPort`] too, by the same
-//! rules, until that port is deleted; that implementation lives beside the loop.
-//!
 //! The report is the generated [`RunUsageReport`] ([`RunMeter::report`]). It covers what the meter
 //! saw: one process segment of the run, and the earlier segments it was resumed from. A meter
 //! gives what it counted as a [`CarriedUsage`] ([`RunMeter::carried`]), which a workflow run
@@ -614,7 +611,7 @@ impl RunMeter {
     }
 
     /// The step of the innermost executor call of this meter running on this thread, if any.
-    fn open_here(&self) -> Option<usize> {
+    pub(crate) fn open_here(&self) -> Option<usize> {
         let id = self.id();
         OPEN.with_borrow(|open| {
             open.iter()
@@ -625,16 +622,12 @@ impl RunMeter {
     }
 
     /// The step a call made now on this thread is counted in: the step of the executor call
-    /// running on this thread; else `outside` when it names one (for a fork of the ported loop's
-    /// port, the step it was made in); else the step of the executor call of this meter running on
+    /// running on this thread; else the step of the executor call of this meter running on
     /// another thread, a thread it spawned or the host's, the one opened last when several run;
     /// else step 0, made while no executor call ran.
-    pub(crate) fn step_here(&self, outside: usize) -> usize {
+    fn step_here(&self) -> usize {
         if let Some(step) = self.open_here() {
             return step;
-        }
-        if outside != 0 {
-            return outside;
         }
         self.ledger().running.last().copied().unwrap_or(0)
     }
@@ -871,7 +864,7 @@ where
         if self.meter.turning_here() {
             return self.inner.turn(request, sink, cancel);
         }
-        let call = self.meter.begin(self.meter.step_here(0));
+        let call = self.meter.begin(self.meter.step_here());
         let turn = {
             let _turning = self.meter.turning();
             self.inner.turn(request, sink, cancel)

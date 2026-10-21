@@ -1659,14 +1659,15 @@ fn carried_with(meter: &RunMeter, reported: Option<&ExecutorUsage>) -> CarriedUs
     let Some(usage) = reported else {
         return carried;
     };
-    // `step_here` answers the step of the executor call of `meter` running on this thread, and
-    // otherwise the step it is handed: `usize::MAX`, a step no meter opens, says none runs here.
-    let open = meter.step_here(usize::MAX);
+    // The step of the executor call of `meter` running on this thread, if one runs here.
+    let Some(open) = meter.open_here() else {
+        return carried;
+    };
     let count = |figure: i64| figure.max(0);
     if let Some(step) = carried
         .steps
         .iter_mut()
-        .find(|step| open != usize::MAX && usize::try_from(step.step).ok() == Some(open))
+        .find(|step| usize::try_from(step.step).ok() == Some(open))
     {
         step.input_tokens = step.input_tokens.saturating_add(count(usage.input_tokens));
         step.output_tokens = step

@@ -2,7 +2,7 @@
 
 //! Loom: the native executor of a Commission run.
 //!
-//! The run model (Session, Turn, ActionCatalogue, Selection, ArgumentRequest and their ids) is
+//! The run model (ActionCatalogue, Selection, SelectionRecord, ArgumentRequest and their ids) is
 //! generated from `ess/` into `generated/rust/loom/` and re-exported here as [`model`]. It is never
 //! written by hand.
 //!
@@ -19,20 +19,8 @@
 //! revision the case has left as `CaseMoved`; Commission still rechecks every proposal before any
 //! effect.
 //!
-//! [`Loom::run_loop`] runs the ported Harness loop over a commission's frontier instead
-//! ([`harness::governed`]): each turn's tool list is the catalogue projected from the current
-//! frontier, the model's tool call is the selection and carries its arguments, and the same
-//! pipeline revalidates it before Loom proposes it. Each completed turn is recorded
-//! ([`Loom::turns`]), with the catalogue it was offered ([`Loom::catalogues`]), and so is each
-//! compaction of the run's session, with the usage the endpoint reported for it
-//! ([`Loom::compactions`], [`compaction`]).
-//!
-//! A governed run is interrupted by [`Loom::interrupt`] and its session resumed by id with
-//! [`Loom::resume_loop`], which continues from the approval checkpoint the run stopped at and
-//! revalidates against the frontier current at resume before it proposes anything ([`recovery`]).
-//!
-//! [`wire`] holds Loom's own model ports that run something: [`wire::ClaudeCodePort`] runs a turn
-//! through the `claude` command on an operator's Claude Code login.
+//! Loom runs no model loop of its own (Atlas ADR 0098): every model request it makes is one turn
+//! of an llm `Model`, and agent work in a harness belongs to metaharness.
 //!
 //! [`model_selector`] holds the selector and argument generator over an llm `Model` that the
 //! intake slice and a plugin turn run Loom's chooser path on, each told a host's
@@ -44,17 +32,11 @@
 pub use loom as model;
 
 pub mod arguments;
-pub mod compaction;
-pub mod credentials;
-pub mod harness;
 pub mod metering;
 pub mod model_selector;
 pub mod projection;
-pub mod recovery;
 pub mod revalidation;
 pub mod selection;
-pub mod session;
-pub mod wire;
 pub mod workflow;
 
 use std::collections::hash_map::RandomState;
@@ -87,20 +69,16 @@ pub use selection::{
 use arguments::RequestRecord;
 use model::behaviour::SelectionStorage;
 use model::run::obligations::{
-    CountBoundaryRefusalBehavior, RecordSelectionBehavior, RequestArgumentsBehavior,
-    RevalidateSelectionBehavior,
+    RecordSelectionBehavior, RequestArgumentsBehavior, RevalidateSelectionBehavior,
 };
 use model::run::{
-    ActionCatalogue, ActionCatalogueSnapshot, AnySelection, ArgumentRequestId,
-    ArgumentRequestSnapshot, CatalogueId, CompactionSnapshot, CountBoundaryRefusal,
+    ActionCatalogue, AnySelection, ArgumentRequestId, ArgumentRequestSnapshot, CatalogueId,
     OverruleSelection, OverruleSelectionOutcome, RecordSelection, RequestArguments,
     RequestArgumentsOutcome, RevalidateSelection, RevalidateSelectionOutcome, Selection,
     SelectionId, SelectionRecordId, SelectionRecordSnapshot, SelectionSnapshot, SelectionStrategy,
-    SessionId, TurnId, TurnSnapshot, action_catalogue_state, selection_state,
+    TurnId, action_catalogue_state, selection_state,
 };
-use recovery::Recovery;
 use selection::{Pick, SelectionContext, SelectionRefusal};
-use session::TurnRecord;
 
 /// Loom as Commission's agent executor: a selector, an argument generator and the run's prompt,
 /// with the record of every selection it has made, every argument request that serves one and
@@ -111,9 +89,7 @@ use session::TurnRecord;
 /// derived from this Loom's namespace, the frontier's id and the run's number. Two runs on one
 /// frontier therefore keep two selections and two requests apart, and so do two Looms: each has a
 /// namespace of its own, random unless [`Loom::with_instance`] fixes it, so a Loom built to recover
-/// a run never gives an id an earlier one gave. The catalogues and selections of the governed loop
-/// ([`Loom::run_loop`], [`Loom::resume_loop`]) are numbered by one count of this Loom's, across all
-/// of its runs, so a resumed run never repeats an id an earlier run of the same Loom gave.
+/// a run never gives an id an earlier one gave.
 ///
 /// `V` is how Loom holds the governor it revalidates selections against: a reference, `Box`, `Rc`
 /// or `Arc` of a [`Governor`], given by [`Loom::with_governor`]. A Loom made by [`Loom::new`] holds
@@ -124,10 +100,7 @@ pub struct Loom<S, G, V = &'static NoGovernor> {
     prompt: String,
     instance: String,
     record: Mutex<RequestRecord>,
-    turns: Mutex<TurnRecord>,
-    recovery: Mutex<Recovery>,
     runs: AtomicU64,
-    numbered: AtomicU64,
     governor: Option<V>,
 }
 
@@ -161,10 +134,7 @@ impl<S, G> Loom<S, G> {
             prompt: prompt.into(),
             instance: fresh_instance(),
             record: Mutex::default(),
-            turns: Mutex::default(),
-            recovery: Mutex::default(),
             runs: AtomicU64::new(0),
-            numbered: AtomicU64::new(0),
             governor: None,
         }
     }
@@ -184,10 +154,7 @@ impl<S, G> Loom<S, G> {
             prompt: self.prompt,
             instance: self.instance,
             record: self.record,
-            turns: self.turns,
-            recovery: self.recovery,
             runs: self.runs,
-            numbered: self.numbered,
             governor: Some(governor),
         }
     }
@@ -203,11 +170,6 @@ impl<S, G, V> Loom<S, G, V> {
         self
     }
 
-    /// Every catalogue [`Loom::run_loop`] offered a turn, in the order offered: one per turn, the
-    /// catalogue projected from the case's current frontier for it.
-    pub fn catalogues(&self) -> Vec<ActionCatalogueSnapshot> {
-        self.turn_record().catalogues().to_vec()
-    }
     /// Every selection this Loom has made, in the order it made them: one per run that selected,
     /// and two for a run whose confidence fallback overruled a fast selection, the fast one first,
     /// `Overruled` and naming the one that replaced it.
@@ -219,11 +181,9 @@ impl<S, G, V> Loom<S, G, V> {
     /// selection, in the order it made them: the strategy of the selector that made it, how many
     /// candidates it was offered, the action it chose and its confidence, on a fast selection a
     /// confidence fallback overruled the strategy of the selector that replaced it
-    /// (`fell_back_to`), and how long the pick took and the tokens its selector reported for it.
-    /// In a governed run ([`Loom::run_loop`]) the first selection of a turn carries that turn's
-    /// latency and tokens and a later one of the same turn 0. A selection refused at the execution
-    /// boundary keeps the record written when it was made. For Metaharness; never evidence (Atlas
-    /// ADR 0074).
+    /// (`fell_back_to`), and how long the pick took and the tokens its selector reported for it. A
+    /// selection refused at the execution boundary keeps the record written when it was made. For
+    /// Metaharness; never evidence (Atlas ADR 0074).
     pub fn selection_records(&self) -> Vec<SelectionRecordSnapshot> {
         self.record().selection_records().to_vec()
     }
@@ -241,39 +201,9 @@ impl<S, G, V> Loom<S, G, V> {
         self.record().revalidations().to_vec()
     }
 
-    /// Every turn [`Loom::run_loop`] recorded (`loom.run.RecordTurn`), in the order recorded: one
-    /// per turn a provider completed, with the items it added.
-    pub fn turns(&self) -> Vec<TurnSnapshot> {
-        self.turn_record().turns().to_vec()
-    }
-
-    /// Every compaction [`Loom::run_loop`] recorded (`loom.run.RecordCompaction`), in the order
-    /// recorded: one per compaction the loop made, on the session it was made in, with the usage
-    /// the endpoint reported for its summary request ([`compaction`]).
-    pub fn compactions(&self) -> Vec<CompactionSnapshot> {
-        self.turn_record().compactions().to_vec()
-    }
-
     /// The record, whatever a panicking holder left: each write to it is one whole snapshot.
     fn record(&self) -> MutexGuard<'_, RequestRecord> {
         self.record.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// The sessions and turns, whatever a panicking holder left: each write is one whole snapshot.
-    fn turn_record(&self) -> MutexGuard<'_, TurnRecord> {
-        self.turns.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// The running runs and held checkpoints, whatever a panicking holder left. Taken before the
-    /// turn record whenever both are held, never after it.
-    fn recovery(&self) -> MutexGuard<'_, Recovery> {
-        self.recovery.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// The next number of this Loom's governed runs, catalogues and selections: from 0, across
-    /// every run, resumed runs included, so no two get one number.
-    fn next_number(&self) -> u64 {
-        self.numbered.fetch_add(1, Ordering::Relaxed)
     }
 }
 
@@ -369,21 +299,14 @@ fn fresh_instance() -> String {
         .collect()
 }
 
-/// The `kind` id of number `run` in `scope` (a frontier, a session or a catalogue), in the Loom
-/// namespace `instance`: a name-based UUID (RFC 9562 version 8) over the SHA-256 of the four.
-/// Within one namespace, two runs, two scopes or two kinds get different ids, up to a SHA-256
-/// collision; two Looms get different ids because each has its own namespace, so a Loom built to
-/// recover a run, which numbers its runs from 0 again, never repeats an earlier Loom's ids. Every
-/// turn, catalogue, selection and argument-request id is one. A turn is numbered by its index in
-/// its session; the others by a count of their Loom's that no run restarts, so none repeats.
+/// The `kind` id of number `run` in `scope` (a frontier or a selection), in the Loom namespace
+/// `instance`: a name-based UUID (RFC 9562 version 8) over the SHA-256 of the four. Within one
+/// namespace, two runs, two scopes or two kinds get different ids, up to a SHA-256 collision; two
+/// Looms get different ids because each has its own namespace, so a Loom built to recover a run,
+/// which numbers its runs from 0 again, never repeats an earlier Loom's ids. Every selection,
+/// argument-request and selection-record id is one.
 fn loom_id(instance: &str, kind: &str, scope: &str, run: u64) -> model::primitives::Uuid {
     name_uuid(&format!("{instance}\n{kind}\n{scope}\n{run}"))
-}
-
-/// The `kind` id of number `run` in `scope`, in no Loom's namespace: the same in every Loom. Only
-/// a compaction's id is one ([`compaction`]); it is unique within its session.
-fn run_id(kind: &str, scope: &str, run: u64) -> model::primitives::Uuid {
-    name_uuid(&format!("{kind}\n{scope}\n{run}"))
 }
 
 /// The name-based UUID (RFC 9562 version 8) over the SHA-256 of `name`.
@@ -465,8 +388,6 @@ where
             TurnId(model::primitives::Uuid(identity())),
         );
         let prepared = self.prepare(
-            &self.selector,
-            &self.arguments,
             (frontier, &catalogue),
             (
                 SelectionId(loom_id(&self.instance, "selection", &identity(), run)),
@@ -477,42 +398,15 @@ where
                     run,
                 )),
             ),
-            None,
         );
         match prepared {
-            Ok(prepared) => self.finish(&commission.data().case_id, prepared, None),
+            Ok(prepared) => self.finish(&commission.data().case_id, prepared),
             Err(outcome) => outcome,
         }
     }
 }
 
-/// The session a governed run holds and the run's number: where a selection refused at the
-/// execution boundary is counted (`loom.run.CountBoundaryRefusal`). A run with no session, as
-/// [`AgentExecutor::run`] is, counts nothing.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Boundary<'s> {
-    pub(crate) session: &'s SessionId,
-    pub(crate) run: u64,
-}
-
 impl<S, G, V> Loom<S, G, V> {
-    /// Counts one boundary refusal on the session `at` names, while its run still holds it: a
-    /// session another run resumed, or one an interrupt moved out of `Active`, is not counted.
-    pub(crate) fn count_refusal(&self, at: Option<Boundary<'_>>) {
-        let Some(at) = at else {
-            return;
-        };
-        // The recovery lock before the turn record, as everywhere both are held.
-        let recovery = self.recovery();
-        if recovery.holds(at.session, at.run) {
-            let _ = self
-                .turn_record()
-                .count_boundary_refusal(CountBoundaryRefusal {
-                    session_id: at.session.clone(),
-                });
-        }
-    }
-
     /// Records the telemetry of `selection`, made from `pick` out of `candidates` candidates
     /// (`loom.run.RecordSelection`); `fell_back_to` is the strategy of the selector that replaced
     /// it, on a fast selection a confidence fallback overruled. Telemetry decides nothing, so a
@@ -562,12 +456,11 @@ impl Prepared {
     }
 }
 
-impl<S, G, V> Loom<S, G, V> {
-    /// From a selector's choice to the arguments of the selected action, on `frontier` and the
-    /// catalogue projected from it, under the ids given: the selection, Commission's admission,
-    /// the argument request, then the generator. [`Loom::finish`] revalidates what it prepared;
-    /// the two are one pipeline, which [`AgentExecutor::run`] runs with this Loom's own selector
-    /// and generator, and [`Loom::run_loop`] with the model's tool call.
+impl<S: ActionSelector, G: ArgumentGenerator, V> Loom<S, G, V> {
+    /// From this Loom's selector's choice to the arguments its generator gives the selected action,
+    /// on `frontier` and the catalogue projected from it, under the ids given: the selection,
+    /// Commission's admission, the argument request, then the generator. [`Loom::finish`]
+    /// revalidates what it prepared; [`AgentExecutor::run`] runs the two as one pipeline.
     ///
     /// Every selection made is recorded; for one Commission does not refuse, the argument request
     /// is recorded against it before the generator is handed the selected catalogue entry. What it
@@ -580,19 +473,16 @@ impl<S, G, V> Loom<S, G, V> {
     ///
     /// Each selection recorded gets its telemetry as it is recorded (`loom.run.RecordSelection`,
     /// [`Loom::selection_records`]); the overruled fast one names the strategy of the selection
-    /// that replaced it. A selection Commission's admission refuses is counted on the
-    /// session of the run `at` names, if any ([`Loom::count_refusal`]).
+    /// that replaced it.
     fn prepare(
         &self,
-        selector: &impl ActionSelector,
-        arguments: &impl ArgumentGenerator,
         (frontier, catalogue): (
             &Frontier<frontier_state::Issued>,
             &ActionCatalogue<action_catalogue_state::Projected>,
         ),
         (selection_id, argument_request_id): (SelectionId, ArgumentRequestId),
-        at: Option<Boundary<'_>>,
     ) -> Result<Prepared, ExecutorOutcome> {
+        let (selector, arguments) = (&self.selector, &self.arguments);
         let context = SelectionContext {
             prompt: self.prompt.clone(),
         };
@@ -665,7 +555,6 @@ impl<S, G, V> Loom<S, G, V> {
         if matches!(admission, Admission::Refused(_))
             || !has_deciding_entry(frontier, &selected, &admission)
         {
-            self.count_refusal(at);
             return Err(no_useful_action());
         }
         // The generator is handed the one entry the selection names, never the rest of the
@@ -704,17 +593,11 @@ where
     V::Target: Governor,
 {
     /// The proposal of what [`Loom::prepare`] prepared, once revalidated against the governor's
-    /// current frontier of `case`; what [`Loom::revalidate`] returns instead when it is refused,
-    /// a refusal counted on the session of the run `at` names.
-    fn finish(
-        &self,
-        case: &CaseId,
-        prepared: Prepared,
-        at: Option<Boundary<'_>>,
-    ) -> ExecutorOutcome {
+    /// current frontier of `case`; what [`Loom::revalidate`] returns instead when it is refused.
+    fn finish(&self, case: &CaseId, prepared: Prepared) -> ExecutorOutcome {
         // Revalidation is the last step before the proposal (Atlas ADR 0072): it moves the
         // selection out of `Selected`, which the argument request above requires.
-        if let Err(refused) = self.revalidate(case, prepared.selection_id.clone(), at) {
+        if let Err(refused) = self.revalidate(case, prepared.selection_id.clone()) {
             return refused;
         }
         ExecutorOutcome::ProposedAction(prepared.proposal())
@@ -733,15 +616,8 @@ where
     /// instead of a proposal. A governor that cannot answer, or answers with another case's
     /// frontier, is an outage; a selection refused `stale-revision` is `CaseMoved`, naming the
     /// revision it was selected at; any other outcome but `admitted` is `NoUsefulAction`. Every
-    /// refusal is recorded on the selection and in [`Loom::revalidations`]; a `stale-revision` or
-    /// `not-in-frontier` refusal is counted on the session of the run `at` names, if any
-    /// ([`Loom::count_refusal`]).
-    fn revalidate(
-        &self,
-        case: &CaseId,
-        selection_id: SelectionId,
-        at: Option<Boundary<'_>>,
-    ) -> Result<(), ExecutorOutcome> {
+    /// refusal is recorded on the selection and in [`Loom::revalidations`].
+    fn revalidate(&self, case: &CaseId, selection_id: SelectionId) -> Result<(), ExecutorOutcome> {
         let Some(governor) = &self.governor else {
             return Ok(());
         };
@@ -774,13 +650,9 @@ where
         match revalidated {
             Ok(RevalidateSelectionOutcome::Admitted { .. }) => Ok(()),
             Ok(RevalidateSelectionOutcome::StaleRevision { selection_stale }) => {
-                self.count_refusal(at);
                 Err(case_moved(selection_stale.catalogue_revision))
             }
-            Ok(RevalidateSelectionOutcome::NotInFrontier { .. }) => {
-                self.count_refusal(at);
-                Err(no_useful_action())
-            }
+            Ok(RevalidateSelectionOutcome::NotInFrontier { .. }) => Err(no_useful_action()),
             _ => Err(no_useful_action()),
         }
     }
