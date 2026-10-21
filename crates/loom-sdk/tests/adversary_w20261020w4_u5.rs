@@ -103,6 +103,8 @@ fn a_host_executor_that_borrows_and_holds_a_refcell_is_called_as_a_trait_object(
         ExecutorStep {
             outcome: proposes.clone(),
             usage: None,
+            transcript_digest: None,
+            summary: None,
         },
         "the provided run_with_usage returns the host's run outcome with no usage"
     );

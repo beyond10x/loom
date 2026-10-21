@@ -230,6 +230,11 @@ types:
   # `usage`. Once the step was observed, the run budget's spending limits are checked: a charge past
   # one ends the run there, before the outcome is acted on (no request is made from it, and an
   # executor's own suspension is not the Run's), the Run suspended for `RunBudget` naming the limit.
+  # story:metaharness-session-executor: an agent session's step also names its trace and what the
+  # session said it did, each absent when the executor states none: `transcript_digest`, the SHA-256
+  # of the session's transcript as lowercase hex, and `summary`, the session's one line. The runtime
+  # delivers both in the step's observation beside `usage`; neither is evidence, and neither is part
+  # of the proposed action, so two sessions proposing the same change are the same request.
   - name: commission.responsibility.ExecutorStep
     kind: struct
     fields:
@@ -237,6 +242,10 @@ types:
         type: commission.responsibility.ExecutorOutcome
       - name: usage
         type: Optional<commission.responsibility.ExecutorUsage>
+      - name: transcript_digest
+        type: Optional<String>
+      - name: summary
+        type: Optional<String>
 
   # story:authority-provider-port: what an AuthorityProvider answers at the call. Distinct from the
   # stored AuthorityDecision entity.

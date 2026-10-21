@@ -1,4 +1,4 @@
-//! Values between the suite's vocabulary ([`Node`]) and the generated run model.
+//! Values between the suite's vocabulary ([`Node`]) and the generated run and session models.
 //!
 //! Decoding reads one declared input field into the generated type the model gives it, and answers
 //! `None` when the value cannot be held by that type: the command then reaches no declared outcome.
@@ -12,6 +12,7 @@ use b10x_loom_executor::model::run::{
     ActionCatalogueState, CatalogueEntry, CatalogueEntryStatus, SelectionRecordState,
     SelectionState, SelectionStrategy,
 };
+use b10x_loom_executor::model::session::{AgentSessionState, ChangedFile, SessionKind};
 use ess_primitives::facts::{Number, is_canonical_uuid};
 use ess_primitives::node::Node;
 
@@ -147,4 +148,83 @@ pub fn catalogue_state(state: ActionCatalogueState) -> Node {
 
 fn name(text: &str) -> Node {
     Node::Text(text.to_owned())
+}
+
+/// The `Optional<String>` field `name`.
+pub fn optional_text(input: &Input, name: &str) -> Option<Option<String>> {
+    match input.get(name) {
+        None | Some(Node::Null) => Some(None),
+        Some(Node::Text(text)) => Some(Some(text.clone())),
+        Some(_) => None,
+    }
+}
+
+/// The `loom.session.SessionKind` field `name`.
+pub fn session_kind(input: &Input, name: &str) -> Option<SessionKind> {
+    Some(match input.get(name)?.as_text()? {
+        "ClaudeCode" => SessionKind::ClaudeCode,
+        "Codex" => SessionKind::Codex,
+        "Harness" => SessionKind::Harness,
+        _ => return None,
+    })
+}
+
+/// The `List<loom.session.ChangedFile>` field `name`, a member's absent or null `content` a
+/// removal.
+pub fn changed_files(input: &Input, name: &str) -> Option<Vec<ChangedFile>> {
+    input
+        .get(name)?
+        .as_seq()?
+        .iter()
+        .map(|item| {
+            let members = item.as_map()?;
+            Some(ChangedFile {
+                path: members.get("path")?.as_text()?.to_owned(),
+                content: match members.get("content") {
+                    None | Some(Node::Null) => None,
+                    Some(Node::Text(text)) => Some(text.clone()),
+                    Some(_) => return None,
+                },
+            })
+        })
+        .collect()
+}
+
+/// A `String` as a suite value.
+pub fn text_node(text: &str) -> Node {
+    name(text)
+}
+
+/// The declared name of a session kind.
+pub fn session_kind_name(kind: SessionKind) -> Node {
+    name(match kind {
+        SessionKind::ClaudeCode => "ClaudeCode",
+        SessionKind::Codex => "Codex",
+        SessionKind::Harness => "Harness",
+    })
+}
+
+/// A `List<loom.session.ChangedFile>` as a suite value, a removal's `content` null.
+pub fn changed_files_node(files: &[ChangedFile]) -> Node {
+    Node::Seq(
+        files
+            .iter()
+            .map(|file| {
+                Node::Map(BTreeMap::from([
+                    ("path".to_owned(), name(&file.path)),
+                    (
+                        "content".to_owned(),
+                        file.content.as_deref().map_or(Node::Null, name),
+                    ),
+                ]))
+            })
+            .collect(),
+    )
+}
+
+/// The declared name of an agent session state.
+pub fn agent_session_state(state: AgentSessionState) -> Node {
+    name(match state {
+        AgentSessionState::Ended => "Ended",
+    })
 }

@@ -18,6 +18,11 @@
 //!   holds and the selection records it keeps;
 //! * the views `Catalogues`, `Selections` and `SelectionRecords` from what the two records hold.
 //!
+//! The `loom.session` domain's `ProposeSessionChange` is answered by `b10x-loom-session-executor`,
+//! which records a session only by running one: the target runs a scripted Claude Code session
+//! through it, and the view `AgentSessions` reads the sessions it recorded (the `session` module
+//! says how).
+//!
 //! This crate translates values and records what was published. It decides no outcome: each
 //! answer is the outcome the executor returned, and each event is the one it returned.
 //!
@@ -37,6 +42,7 @@
 //! runs of one suite report the same thing.
 
 pub mod codec;
+mod session;
 
 use std::cell::RefCell;
 
@@ -54,6 +60,7 @@ use b10x_loom_executor::model::run::{
 };
 use b10x_loom_executor::projection::CatalogueRecord;
 use b10x_loom_executor::selection::select_action;
+use b10x_loom_session_executor::model::session::AgentSessions;
 use ess_conformance::scenario::{CommandRef, ErrorRef, EventRef, OutcomeRef};
 use ess_conformance::target::{
     ConformanceTarget, DeclaredErrorValue, EventObservationRequest, ExternalOutcomeControl,
@@ -116,6 +123,8 @@ struct Live {
     not_in_frontier: bool,
     /// The invocations performed, which consistency tokens are minted from.
     sequence: u64,
+    /// The sessions the session executor recorded, one `AgentSessions` row each.
+    sessions: Vec<AgentSessions>,
 }
 
 impl Live {
@@ -180,6 +189,9 @@ impl ConformanceTarget for LoomTarget {
             REVALIDATE_SELECTION => revalidate_selection(&mut live, input, correlation),
             OVERRULE_SELECTION => overrule_selection(&mut live, input, correlation),
             RECORD_SELECTION => record_selection(&mut live, input, correlation),
+            session::PROPOSE_SESSION_CHANGE => {
+                session::propose_session_change(&mut live, input, correlation)?
+            }
             other => {
                 return Err(TargetError::unavailable(
                     format!("invoking `{other}`"),
@@ -298,6 +310,7 @@ impl ConformanceTarget for LoomTarget {
                     ])
                 })
                 .collect(),
+            session::AGENT_SESSIONS => live.sessions.iter().map(session::row).collect(),
             _ => {
                 return Err(TargetError::unavailable(
                     format!("reading `{view}`"),

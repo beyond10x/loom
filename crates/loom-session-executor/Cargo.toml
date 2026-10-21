@@ -1,0 +1,18 @@
+[package]
+name = "b10x-loom-session-executor"
+description = "An AgentExecutor of Commission over a metaharness session in a scratch copy: it proposes, it never performs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+b10x-loom-commission = { path = "../loom-commission" }
+loom = { path = "../../generated/rust/loom" }
+metaharness = { git = "https://github.com/beyond10x/metaharness", tag = "0.10.1" }
+metaharness-b10x = { git = "https://github.com/beyond10x/metaharness", tag = "0.10.1" }
+serde_json = "1"
+sha2 = "0.11.0"
+
+[dev-dependencies]
+b10x-loom-commission-testkit = { path = "../loom-commission-testkit" }

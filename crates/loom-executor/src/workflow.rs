@@ -1277,7 +1277,7 @@ impl WorkflowExecutor<'_> {
                 // What the call proposed would not be known after a restart: it is not proposed.
                 return ExecutorStep {
                     outcome: self.unrecorded(&why),
-                    usage: step.usage,
+                    ..step
                 };
             }
         }
@@ -1290,6 +1290,8 @@ fn alone(outcome: ExecutorOutcome) -> ExecutorStep {
     ExecutorStep {
         outcome,
         usage: None,
+        transcript_digest: None,
+        summary: None,
     }
 }
 
@@ -1303,7 +1305,12 @@ impl WorkflowExecutor<'_> {
     ) -> ExecutorStep {
         let mut usage = None;
         let outcome = self.take_step_outcome(commission, frontier, save, &mut usage);
-        ExecutorStep { outcome, usage }
+        ExecutorStep {
+            outcome,
+            usage,
+            transcript_digest: None,
+            summary: None,
+        }
     }
 
     /// [`Self::take_step`]'s outcome; `usage` takes what a judgement step's executor reported.

@@ -210,6 +210,8 @@ impl AgentExecutor for HostStep {
                 duration_ms: 10,
                 cost_micro_usd: None,
             }),
+            transcript_digest: None,
+            summary: None,
         }
     }
 }

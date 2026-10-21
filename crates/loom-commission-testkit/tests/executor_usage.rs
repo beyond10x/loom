@@ -111,6 +111,8 @@ impl AgentExecutor for Session {
                 arguments: ProposedActionArguments(Value::Number(call.to_string())),
             }),
             usage: Some(self.usage.clone()),
+            transcript_digest: None,
+            summary: None,
         }
     }
 }

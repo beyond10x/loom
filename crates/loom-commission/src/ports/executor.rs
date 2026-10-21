@@ -5,7 +5,9 @@
 //! never the executor's, and `CompletedLocalReasoning` only says the executor's own reasoning ended.
 //!
 //! The runtime takes each call as an [`ExecutorStep`] ([`AgentExecutor::run_with_usage`],
-//! `story:executor-reports-usage`): the outcome, and what the call reports it spent.
+//! `story:executor-reports-usage`): the outcome, what the call reports it spent, and an agent
+//! session's transcript digest and summary, which the step's observation carries and which are
+//! never evidence and never part of a proposal.
 
 use crate::model::responsibility::{
     Commission, ExecutorOutcome, ExecutorStep, Frontier, commission_state, frontier_state,
@@ -44,6 +46,8 @@ pub trait AgentExecutor {
         ExecutorStep {
             outcome: self.run(commission, frontier),
             usage: None,
+            transcript_digest: None,
+            summary: None,
         }
     }
 }

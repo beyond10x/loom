@@ -1052,6 +1052,8 @@ impl AgentExecutor for HostStep<'_> {
                 duration_ms: 10,
                 cost_micro_usd: None,
             }),
+            transcript_digest: None,
+            summary: None,
         }
     }
 }
@@ -1313,6 +1315,8 @@ impl<E: AgentExecutor> AgentExecutor for Over<'_, E> {
             ExecutorStep {
                 outcome: self.inner.run(commission, frontier),
                 usage: None,
+                transcript_digest: None,
+                summary: None,
             }
         }
     }
