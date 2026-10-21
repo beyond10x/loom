@@ -22,6 +22,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `JudgeIdleIteration` gains a `bound` input, which `outcome::judge_idle` judges against (story:stop-policy-gate-and-idle-bound)
 - **Breaking:** `RunBudget` gains `max_tokens` and `deadline`, `BudgetLimit` gains `MaxTokens` and `Deadline` (story:run-budget-tokens-and-deadline)
 - **Breaking:** `StopPolicy` gains `on_breach`, and `LoopFailure` gains `InvalidDeadline`, refusing a deadline not RFC 3339 before a Run starts
+- **Breaking:** `EffectOutcomePending` gains `ends_run`: `true` ends the run `Waiting` for `Time` (story:pending-answer-ends-run)
 
 ### Fixed
 

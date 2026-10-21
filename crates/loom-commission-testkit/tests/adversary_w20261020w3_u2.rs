@@ -72,6 +72,7 @@ fn proposed(name: &str) -> ExecutorOutcomeProposedAction {
 fn pending(seen: &str) -> EffectOutcome {
     EffectOutcome::Pending(EffectOutcomePending {
         report: Value::Text(seen.to_owned()),
+        ends_run: false,
     })
 }
 

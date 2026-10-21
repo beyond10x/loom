@@ -257,6 +257,7 @@ impl EffectPort for CaseEffects<'_> {
             pending.remove(at);
             return Ok(EffectOutcome::Pending(EffectOutcomePending {
                 report: CommissionValue::Text(format!("{action} still running")),
+                ends_run: false,
             }));
         }
         self.case.perform(action);

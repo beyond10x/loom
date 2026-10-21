@@ -178,7 +178,18 @@
 //!    when it was), and a request performed under a grant passes the gate (5). A step budget or a
 //!    run budget that stops the run while a request is pending ends it `Waiting`
 //!    ([`judge_budget_stop`] answers `waiting`), naming the pending requests in the order made and
-//!    the budget's reason, the Run suspended for that reason as at any budget stop;
+//!    the budget's reason, the Run suspended for that reason as at any budget stop.
+//!    A `Pending` the port marks as ending the run (`EffectOutcomePending.ends_run`,
+//!    `story:pending-answer-ends-run`), after a proposal (8), a fan-out (8a), an invocation again
+//!    or a resumed request, is not invoked again: once the answer was recorded, charged and
+//!    observed, the run budget's spending limits checked and a final refusal judged, the Run is
+//!    suspended through `SuspendRun` with `SuspensionReason::Time`, carrying that answer's
+//!    `report`, and the run ends `Waiting` ([`judge_budget_stop`]), naming every request answered
+//!    `Pending` by that step in the order made, with or without `ends_run`; the reason is the first
+//!    one's that asked to end. A breach the stop policy kept (`on_breach: KeepStep`) is the
+//!    reason instead. Beside a stale request the wait is kept, as a final refusal is, and the move
+//!    is judged first; when the next iteration's load finds no move, the kept wait ends the run,
+//!    after a kept refusal. Commission sets no wait or timer: the host resumes the work;
 //! 9. on `CaseMoved`, by which the executor reports that the case moved while it worked, naming
 //!    the revision of the frontier it was handed (`story:moved-case-outcome`), the governor decides
 //!    whether it moved: the case is loaded once more ([`Governor::current_revision`]). At the
@@ -290,7 +301,11 @@
 //!   the Run is suspended for `RunBudget`, limit `Deadline`, `max` the deadline and `charged` the
 //!   reading, each in whole seconds since the Unix epoch, and the run ends suspended, or `Waiting`
 //!   while a request is pending. A reading that is not RFC 3339 counts as past the deadline, its
-//!   `charged` absent. A resumed request is not checked against it.
+//!   `charged` absent. A resume reads it twice, as it reads the case revision: before the
+//!   Suspension is taken, when a deadline passed takes nothing and leaves the Suspension
+//!   `Pending`, and right before the held request is invoked, when one passed releases the
+//!   Suspension and performs nothing; either way the resumed Run ends suspended for `RunBudget`
+//!   as above.
 //!
 //! An executor call that reports what it spent ([`ExecutorStep`]'s `usage`, through
 //! [`AgentExecutor::run_with_usage`], `story:executor-reports-usage`: an executor that is not a
@@ -350,7 +365,10 @@
 //! loaded again, and a revision other than the request's, the case moved while the provider
 //! decided, ends it with [`ResumeRefusal::CaseMoved`]; the effect port must
 //! perform its action. Then the Run is put back into a run store that does not hold it,
-//! `Suspended` at the case revision it started at, and resumed through `ResumeRun`. The Suspension
+//! `Suspended` at the case revision it started at, and resumed through `ResumeRun`. A run budget's
+//! deadline passed by then (read from [`LoopContext::now`], as above) takes nothing: the Run is
+//! suspended again for `RunBudget`, limit `Deadline`, the Suspension stays `Pending`, and the
+//! resume ends as a passed deadline ends a run. The Suspension
 //! is then taken through the port for the request read and revalidated (`TakeSuspension`,
 //! `Pending` → `Resuming`): of two resumes one takes it, and the other is refused,
 //! [`ResumeRefusal::NothingSuspended`] when the first already released it,
@@ -361,12 +379,15 @@
 //! `taken` the Run is suspended again in the run store with its stored reason, no Suspension is
 //! held, and nothing is performed. Then the case is loaded once more
 //! ([`Governor::current_revision`]), since somebody else may have moved it while the resume wrote
-//! the Run and took the Suspension. At the request's revision, the request, under its own id and
+//! the Run and took the Suspension; before that load, a deadline passed since the take releases
+//! the Suspension, invokes nothing and ends the resumed Run as before the take. At the request's
+//! revision, the request, under its own id and
 //! at its own revision, is handed to [`EffectPort::invoke`] once, recorded and observed as the loop
 //! does (8), and the Suspension is released for that request (`ReleaseSuspension`), removed; a
 //! refusal the port marks final then ends the resumed Run `EffectRefused`, as in 8, and a
 //! `Pending` answer leaves the request pending, invoked again from the loop's first iteration on
-//! as in 8b, revalidated and asked about again, never from the released Suspension. A provider that
+//! as in 8b, revalidated and asked about again, never from the released Suspension, unless the
+//! port marked it as ending the run, which then ends `Waiting` as in 8b. A provider that
 //! allows the request only while its Suspension is `Pending` (the intake slice's grant authority)
 //! answers `ApprovalRequired` at that ask, so the resumed Run ends `NeedsAuthority` and holds a new
 //! Suspension for the same request, which an approval and a resume perform again. At
@@ -1130,6 +1151,9 @@ where
     // How the run ends on a read the port refused as final in a fan-out beside a stale read, kept
     // until the next iteration has judged the move (8a).
     let mut kept_refusal: Option<RunOutcome> = None;
+    // Why the run waits on a pending answer that ends it (`ends_run`) beside a stale request, kept
+    // as `kept_refusal` is until the next iteration has judged the move (8a, 8b).
+    let mut kept_wait: Option<SuspensionReason> = None;
     // The requests the effect port last answered `Pending`, which the next iteration invokes
     // again instead of running the executor (8b).
     let mut waiting: Option<Waiting> = None;
@@ -1161,7 +1185,10 @@ where
     // effect port or a governor that fails first leaves it `Resuming`. On a case that moved, the
     // request bound to its revision can never be performed: it is recorded stale, the Suspension
     // is released, nothing is invoked, and the next iteration judges the move, as after a stale
-    // proposal (8). A request the port answered `Pending` is invoked again as in 8b.
+    // proposal (8). A request the port answered `Pending` is invoked again as in 8b, unless the
+    // answer ends the run (`ends_run`), which then waits on it. A deadline the trusted clock reads
+    // as reached right before the invoke releases the Suspension the resume took, and the Run is
+    // suspended for it with nothing invoked, as before an executor call.
     if let Some(Resumed {
         request: data,
         answer,
@@ -1169,6 +1196,11 @@ where
     }) = resumed
     {
         first = false;
+        if let Some(breach) = deadline_reached(deadline, context) {
+            release_taken(suspensions, taken, &data)?;
+            let reason = SuspensionReason::RunBudget(breach);
+            return budget_ended(runs, run_id, reason, None, track);
+        }
         let current = governor.current_revision(&data.case_id)?;
         if current == data.expected_case_revision {
             track.requests.push(Revalidated {
@@ -1203,6 +1235,11 @@ where
             // A refusal the port marks final ends the resumed Run, its Suspension released (8).
             if let Some(ended) = refusal_end(&data, &effect)? {
                 return Ok(track.end(run_id, ended));
+            }
+            // A pending answer that ends the run ends the resumed Run waiting on its request, its
+            // Suspension released (8b).
+            if let Some(reason) = wait_reason(&effect) {
+                return budget_ended(runs, run_id, reason, waiting.as_ref(), track);
             }
         } else {
             track.requests.push(Revalidated {
@@ -1272,6 +1309,11 @@ where
         // it ends the run, before any budget stop and before the executor runs (8a).
         if let Some(ended) = kept_refusal.take() {
             return Ok(track.end(run_id, ended));
+        }
+        // So does a pending answer that ends the run kept beside it: the run waits on every
+        // request still pending (8b).
+        if let Some(reason) = kept_wait.take() {
+            return budget_ended(runs, run_id, reason, waiting.as_ref(), track);
         }
         // After a performed effect that left no gate pending, a case still open is suspended for
         // its budget (0), or ends `Waiting` while a request is pending.
@@ -1368,6 +1410,15 @@ where
                         return Ok(track.end(run_id, ended));
                     }
                     kept_refusal = Some(ended);
+                }
+                // A pending answer that ends the run ends it waiting on every request still
+                // pending, as a refusal marked final ends it: at once, unless a stale revalidation
+                // showed a move, which the next iteration judges first.
+                if let Some(reason) = again.wait {
+                    if !again.stale {
+                        return budget_ended(runs, run_id, reason, waiting.as_ref(), track);
+                    }
+                    kept_wait = Some(reason);
                 }
                 effected = again.performed && !again.stale;
                 // Once none is pending, the step that admitted them is judged against the idle
@@ -1599,6 +1650,15 @@ where
                 if let Some(ended) = refusal_end(&data, &effect)? {
                     return Ok(track.end(run_id, ended));
                 }
+                // A pending answer that ends the run is not invoked again: the run ends waiting
+                // on it, for the time the port's report names, or for the spending limit a kept
+                // step passed, which ends the run first (8b).
+                if let Some(reason) = wait_reason(&effect) {
+                    let reason = kept_breach
+                        .clone()
+                        .map_or(reason, SuspensionReason::RunBudget);
+                    return budget_ended(runs, run_id, reason, waiting.as_ref(), track);
+                }
                 // Only an effect that took place may have moved the case; after a refusal, a move
                 // is somebody else's.
                 effected = matches!(effect, EffectOutcome::Performed(_));
@@ -1649,6 +1709,19 @@ where
                     return Ok(track.end(run_id, ended));
                 }
                 kept_refusal = Some(ended);
+            }
+            // A read answered pending with `ends_run` ends the run once every read was recorded,
+            // waiting on every read answered pending, in the order proposed, for the time the
+            // first such read's report names, or for the spending limit a kept step passed; beside
+            // a stale read it is kept as a final refusal is (8a, 8b).
+            if let Some(reason) = fanned.wait {
+                let reason = kept_breach
+                    .clone()
+                    .map_or(reason, SuspensionReason::RunBudget);
+                if !fanned.stale {
+                    return budget_ended(runs, run_id, reason, waiting.as_ref(), track);
+                }
+                kept_wait = Some(reason);
             }
             if fanned.admitted {
                 decided = true;
@@ -1851,7 +1924,10 @@ fn suspend_for_approval<R: SuspendRunBehavior + ?Sized>(
 
 /// Continues the Run `commission`'s stored Suspension holds, after the grant, as the module
 /// documents: the Suspension is taken, the suspended request is performed once, the Suspension is
-/// released, and the loop goes on until the Run ends.
+/// released, and the loop goes on until the Run ends. A run budget's deadline passed before the
+/// take, or between the take and the invocation, performs nothing and ends the resumed Run
+/// suspended for `RunBudget` (limit `Deadline`): the Suspension stays `Pending` in the first case
+/// and is released in the second.
 ///
 /// `runs` need not hold the Run: a store of a new process gets it back, `Suspended`, from the
 /// Suspension.
@@ -1888,7 +1964,7 @@ where
 {
     let refused = |refusal| Err(ResumeError::Refused(refusal));
     // A deadline that names no instant is refused before the Suspension is read or taken.
-    deadline_of(context.run_budget().as_ref())
+    let deadline = deadline_of(context.run_budget().as_ref())
         .map_err(|failure| ResumeError::Loop(unstarted(failure)))?;
     let held = commission.data();
     let Some(stored) = suspensions
@@ -1996,6 +2072,13 @@ where
             return Err(ResumeError::Loop(failed(LoopFailure::RunStorage(error))));
         }
         other => return refused(ResumeRefusal::RunNotSuspended(other)),
+    }
+    // A deadline the trusted clock reads as reached takes nothing: the Suspension stays
+    // `Pending`, and the Run is suspended for the deadline, as before an executor call.
+    if let Some(breach) = deadline_reached(deadline, context) {
+        let reason = SuspensionReason::RunBudget(breach);
+        let ended = budget_ended(runs, &run_id, reason, None, Track::default());
+        return finish(runs, run_id, ended).map_err(ResumeError::Loop);
     }
     // Taken before anything is performed, for the request read and revalidated above: of two
     // resumes one takes it, a Suspension a resume took and never released is never taken again,
@@ -2211,6 +2294,9 @@ struct FannedOut {
     /// The reads the port answered `Pending`, in the order proposed, which the next iteration
     /// invokes again (8b).
     pending: Vec<ActionRequestData>,
+    /// Why the run waits when the port answered a read `Pending` with `ends_run`: the first such,
+    /// in the order proposed ([`wait_reason`]). No read is invoked again then.
+    wait: Option<SuspensionReason>,
 }
 
 /// Performs the fan-out `reads`, which [`fans_out`] admitted, as item 8a documents: each read
@@ -2269,6 +2355,7 @@ where
             over_budget: None,
             ended: None,
             pending: Vec::new(),
+            wait: None,
         });
     }
     // A fan-out that would take an action past its trial limit invokes none of its reads.
@@ -2282,6 +2369,7 @@ where
             over_budget: Some(breach),
             ended: None,
             pending: Vec::new(),
+            wait: None,
         });
     }
     let progressed = admitted.iter().any(|data| {
@@ -2301,6 +2389,7 @@ where
         over_budget: None,
         ended: answered.ended,
         pending: answered.pending,
+        wait: answered.wait,
     })
 }
 
@@ -2338,6 +2427,9 @@ struct Answered {
     /// How the run ends when the port refused one as final: the first such, in order
     /// ([`refusal_end`]).
     ended: Option<RunOutcome>,
+    /// Why the run waits when the port answered one `Pending` with `ends_run`: the first such, in
+    /// order ([`wait_reason`]).
+    wait: Option<SuspensionReason>,
 }
 
 /// Records and observes, in the order of `handed`, what the effect port answered for each
@@ -2358,6 +2450,7 @@ where
         performed: false,
         pending: Vec::new(),
         ended: None,
+        wait: None,
     };
     let mut failed: Option<EffectError> = None;
     for (data, answer) in handed.iter().zip(answers) {
@@ -2371,6 +2464,9 @@ where
                 }
                 if answered.ended.is_none() {
                     answered.ended = refusal_end(data, &effect)?;
+                }
+                if answered.wait.is_none() {
+                    answered.wait = wait_reason(&effect);
                 }
             }
             Err(error) => {
@@ -2402,6 +2498,9 @@ struct InvokedAgain {
     pending: Vec<ActionRequestData>,
     /// How the run ends when the port refused one as final ([`refusal_end`]).
     ended: Option<RunOutcome>,
+    /// Why the run waits when the port answered one `Pending` with `ends_run`: the first such,
+    /// in order ([`wait_reason`]).
+    wait: Option<SuspensionReason>,
     /// The one request the provider answered `ApprovalRequired` for when asked again: the run
     /// ends needing authority, as at a first `ApprovalRequired` (8).
     withheld: Option<Withheld>,
@@ -2456,6 +2555,7 @@ where
         performed: false,
         pending: Vec::new(),
         ended: None,
+        wait: None,
         withheld: None,
     };
     for data in &waiting.requests {
@@ -2539,7 +2639,21 @@ where
     again.performed = answered.performed;
     again.pending = answered.pending;
     again.ended = answered.ended;
+    again.wait = answered.wait;
     Ok(again)
+}
+
+/// Why the run waits when the effect port answered `effect` `Pending` with `ends_run`
+/// (`story:pending-answer-ends-run`): `Time`, carrying the port's report; `None` for any other
+/// answer, a `Pending` one without `ends_run` included, and the request is invoked again (8b).
+/// Called once the answer was recorded and observed.
+fn wait_reason(effect: &EffectOutcome) -> Option<SuspensionReason> {
+    match effect {
+        EffectOutcome::Pending(pending) if pending.ends_run => {
+            Some(SuspensionReason::Time(pending.report.clone()))
+        }
+        _ => None,
+    }
 }
 
 /// How the run ends after the effect port answered `effect` for `request`: with `EffectRefused`,
