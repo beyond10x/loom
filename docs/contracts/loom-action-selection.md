@@ -124,11 +124,14 @@ none. A selector reports latency and tokens on its `Pick`; the reasoning-model s
 (`model_selector::ModelSelector`) reports no tokens, so its records hold 0, and a run's meter
 counts its model requests instead.
 
-A selection refused at the execution boundary, after it was made, by Commission's admission or by
-revalidation against the current frontier, adds no record: the refused selection keeps the record
-written when it was made, and its state says it was refused (`loom.run.Selections`). An answer
-naming an action outside the catalogue makes no selection and so no record. Metaharness reads the
-records through `Loom::selection_records`. They are never evidence (Atlas ADR 0074).
+A selection refused at the execution boundary, after it was made, adds no record: it keeps the
+record written when it was made. Its state (`loom.run.Selections`) shows where it was refused.
+Only Loom's own revalidation against the current frontier (`stale-revision`, `not-in-frontier`)
+moves it to `Refused`. One that Loom's own admission check refuses stays `Selected`, and one that
+Commission's runtime refuses after Loom proposed it (stale, or no longer admitted) stays
+`Admitted`. An answer naming an action outside the catalogue makes no selection and so no record.
+Metaharness reads the records through `Loom::selection_records`. They are never evidence (Atlas ADR
+0074).
 
 ## Safety rules
 
