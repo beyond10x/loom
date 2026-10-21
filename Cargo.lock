@@ -657,9 +657,12 @@ name = "b10x-loom-session-executor"
 version = "0.30.0"
 dependencies = [
  "b10x-loom-commission",
+ "b10x-loom-commission-testkit",
+ "loom",
  "metaharness",
  "metaharness-b10x",
  "serde_json",
+ "sha2 0.11.0",
 ]
 
 [[package]]

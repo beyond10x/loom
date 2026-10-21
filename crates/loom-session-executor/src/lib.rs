@@ -1,7 +1,8 @@
-//! An [`AgentExecutor`] of loom-sdk over a metaharness session: the session works in a scratch
+//! An [`AgentExecutor`] of Commission over a metaharness session: the session works in a scratch
 //! copy of a workspace, never in the workspace itself, and the executor returns what it changed
-//! there as a proposal ([`Proposal`]); it performs nothing. The embedder's edit effect applies
-//! a proposal, or refuses it, under its own guard.
+//! there as a proposal ([`Proposal`]); it performs nothing. Commission revalidates the proposal
+//! against the case's revision, and the embedder's edit effect applies it, or refuses it, under
+//! its own guard.
 //!
 //! One executor, the harness its [`Kind`]: the same brief, the same scratch copy, the same
 //! proposal for each. The copy is the session's working directory, declared as the embedder's
@@ -15,25 +16,57 @@
 //! | `Codex` | Codex (`codex exec`) | `On`, H9 gating | decided here (`Ask`): `Bash` and `apply_patch` ([`CODEX_TOOLS`]) naming no path outside the copy; its own sandbox (`workspace-write` on the copy, no network) confines what a command writes; its home is its own ([`HOME_VARIABLES`]) |
 //! | `B10x` | b10x-harness | `On`, a gap holds the proposal | observed, never decided: metaharness's b10x adapter decides no call; the loop's toolset is what substrate confines to the copy |
 //!
-//! This crate depends on no crate of the application that embeds it, so it can move into Loom
-//! unchanged.
+//! # One call, one session
+//!
+//! Each [`AgentExecutor::run_with_usage`] call is one session of the `loom.session` domain
+//! (`ess/domains/session.yaml`): the executor mints a new [`SessionId`](model::session::SessionId)
+//! for it and, when the session proposes a change, records it as one `AgentSession` through the
+//! generated `ProposeSessionChange` behaviour, naming the commission's and the frontier's real ids
+//! and the vendor's own session id where the harness stated one ([`SessionExecutor::sessions`],
+//! [`SessionExecutor::proposed`]). The proposal's arguments are `{files}` only; the session's
+//! summary and the SHA-256 digest of its transcript travel on the call's `ExecutorStep`, which the
+//! runtime delivers as the step's observation and never as evidence, so two sessions that propose
+//! the same files are the same request. The step's `usage` is what the session reported it spent,
+//! charged to the run and its budget.
+//!
+//! A session that fails proposes nothing and is no record: the call returns `Suspended` with
+//! `ExternalAvailability` naming why. A session that changed nothing proposes an empty list of
+//! files.
+//!
+//! The change is what the session made in its copy against the bytes the copy was made from, the
+//! workspace as the frontier was handed: a file written in the workspace while the session runs
+//! is never proposed back.
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use b10x_loom_commission::model::json::Value as Json;
 use b10x_loom_commission::model::responsibility::{
-    Commission, ExecutorOutcome, ExecutorOutcomeProposedAction, ExecutorOutcomeSuspended, Frontier,
-    ProposedActionArguments, SuspensionReason, commission_state, frontier_state,
+    Commission, ExecutorOutcome, ExecutorOutcomeProposedAction, ExecutorOutcomeSuspended,
+    ExecutorStep, ExecutorUsage, Frontier, ProposedActionArguments, SuspensionReason,
+    commission_state, frontier_state,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
+use loom::behaviour::{AgentSessionStorage, Generated};
+use loom::obligation::UnmetObligation;
+use loom::primitives::Uuid;
+use loom::session::obligations::{AgentSessionsQuery as _, ProposeSessionChangeBehavior as _};
+use loom::session::{
+    AgentSessionSnapshot, AgentSessions, ChangedFile, CommissionId, FrontierId,
+    ProposeSessionChange, ProposeSessionChangeOutcome, SessionChangeProposed, SessionId,
+    SessionKind,
+};
 use metaharness::protocol::{
     Command, Decision, DecisionMode, Event, HermeticMode, HermeticRow, RunSpec, SeamFactory,
     Severity, Verdict,
 };
 use metaharness::{ClaudeSeams, CodexSeams, EventPoll, Input, Metaharness};
+use sha2::{Digest as _, Sha256};
 
+/// Loom's generated model: the `loom.session` domain this executor records its sessions in.
+pub use loom as model;
 pub use metaharness;
 pub use metaharness::ProcessRunner;
 pub use metaharness::protocol::{CredentialSource, Kind};
@@ -75,14 +108,17 @@ pub struct ProposedFile {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Proposal {
     pub action: String,
+    /// The session's own line on what it did: on the call's `ExecutorStep`, never in the
+    /// outcome's arguments.
     pub summary: String,
     pub files: Vec<ProposedFile>,
 }
 
 impl Proposal {
     /// The proposal as the executor outcome that carries it: `ProposedAction` with the action
-    /// and, as its arguments, `{"summary": …, "files": [{"path": …, "content": …}]}`, a removed
-    /// file's `content` null.
+    /// and, as its arguments, `{"files": [{"path": …, "content": …}]}` only, a removed file's
+    /// `content` null. The summary is not in them, so two proposals of the same files are the
+    /// same request whatever each session said about it.
     #[must_use]
     pub fn to_outcome(&self) -> ExecutorOutcome {
         let files = self
@@ -100,26 +136,22 @@ impl Proposal {
             .collect();
         ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
             action: self.action.clone(),
-            arguments: ProposedActionArguments(Json::Object(vec![
-                ("summary".to_owned(), Json::Text(self.summary.clone())),
-                ("files".to_owned(), Json::Array(files)),
-            ])),
+            arguments: ProposedActionArguments(Json::Object(vec![(
+                "files".to_owned(),
+                Json::Array(files),
+            )])),
         })
     }
 
-    /// The proposal an outcome carries: none for an outcome that proposes no action; an error
-    /// naming what does not read for a `ProposedAction` whose arguments are not a proposal's.
+    /// The proposal an outcome carries, its summary empty because the arguments do not carry
+    /// one: none for an outcome that proposes no action; an error naming what does not read for
+    /// a `ProposedAction` whose arguments are not a proposal's.
     pub fn from_outcome(outcome: &ExecutorOutcome) -> Option<Result<Self, String>> {
         let ExecutorOutcome::ProposedAction(proposed) = outcome else {
             return None;
         };
         let arguments = &proposed.arguments.0;
         let read = || -> Result<Self, String> {
-            let summary = match arguments.member("summary") {
-                Some(Json::Text(text)) => text.clone(),
-                None | Some(Json::Null) => String::new(),
-                Some(other) => return Err(format!("summary is {}", other.describes())),
-            };
             let Some(Json::Array(items)) = arguments.member("files") else {
                 return Err("the proposal names no list of files".to_owned());
             };
@@ -142,7 +174,7 @@ impl Proposal {
             }
             Ok(Self {
                 action: proposed.action.clone(),
-                summary,
+                summary: String::new(),
                 files,
             })
         };
@@ -157,6 +189,8 @@ pub struct SessionReport {
     pub version: Option<String>,
     /// The models its terminal record named, joined with `+`, else the opening record's.
     pub model: Option<String>,
+    /// The vendor's own id of the session, as its opening record stated it.
+    pub vendor_session_id: Option<String>,
     pub cost_usd: Option<f64>,
     pub duration_ms: Option<u64>,
     pub api_ms: Option<u64>,
@@ -207,6 +241,8 @@ pub struct SessionExecutor {
     pub endpoint: Option<Endpoint>,
     runner: RefCell<Option<Box<dyn ProcessRunner>>>,
     last: RefCell<Option<SessionReport>>,
+    ids: RefCell<Box<dyn FnMut() -> SessionId>>,
+    record: RefCell<SessionRecord>,
 }
 
 impl std::fmt::Debug for SessionExecutor {
@@ -244,7 +280,68 @@ impl SessionExecutor {
             endpoint: None,
             runner: RefCell::new(None),
             last: RefCell::new(None),
+            ids: RefCell::new(Box::new(fresh_session_id)),
+            record: RefCell::new(SessionRecord::default()),
         }
+    }
+
+    /// The same executor, each call's [`SessionId`] taken from `ids` instead of a fresh one
+    /// ([`fresh_session_id`]): for a caller that assigns the ids itself, as a conformance run
+    /// assigns the scenario's.
+    #[must_use]
+    pub fn with_session_ids(self, ids: impl FnMut() -> SessionId + 'static) -> Self {
+        *self.ids.borrow_mut() = Box::new(ids);
+        self
+    }
+
+    /// Every session this executor recorded, one row of the `loom.session.AgentSessions` view
+    /// each, in the order they ran: a session that failed is not among them.
+    #[must_use]
+    pub fn sessions(&self) -> Vec<AgentSessions> {
+        self.record.borrow().sessions()
+    }
+
+    /// The `loom.session.SessionChangeProposed` each recorded session published, in the order
+    /// they ran.
+    #[must_use]
+    pub fn proposed(&self) -> Vec<SessionChangeProposed> {
+        self.record.borrow().proposed.clone()
+    }
+
+    /// Records `proposal`, the change of the session `report` describes, as one `AgentSession`
+    /// for `commission` over `frontier`, under a new [`SessionId`].
+    fn record(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
+        report: &SessionReport,
+        proposal: &Proposal,
+    ) -> Result<SessionChangeProposed, String> {
+        let session_id = (self.ids.borrow_mut())();
+        let kind = match self.kind {
+            Kind::Claude => SessionKind::ClaudeCode,
+            Kind::Codex => SessionKind::Codex,
+            Kind::B10x => SessionKind::Harness,
+        };
+        self.record
+            .borrow_mut()
+            .propose(ProposeSessionChange {
+                session_id,
+                kind,
+                commission_id: CommissionId(Uuid(commission.data().commission_id.0.0.clone())),
+                frontier_id: FrontierId(Uuid(frontier.data().frontier_id.0.0.clone())),
+                vendor_session_id: report.vendor_session_id.clone(),
+                action: proposal.action.clone(),
+                files: proposal
+                    .files
+                    .iter()
+                    .map(|file| ChangedFile {
+                        path: file.path.clone(),
+                        content: file.content.clone(),
+                    })
+                    .collect(),
+            })
+            .map_err(|unmet| format!("the session could not be recorded: {unmet}"))
     }
 
     /// The same executor, its session the harness `kind`.
@@ -391,11 +488,13 @@ impl SessionExecutor {
             }
             match &line.event {
                 Event::SessionStarted {
+                    session_id,
                     harness_version,
                     model,
                     plugins,
                     ..
                 } => {
+                    report.vendor_session_id.clone_from(session_id);
                     report.version.clone_from(harness_version);
                     report.model.clone_from(model);
                     builtin_only = plugins.as_ref().is_some_and(|plugins| {
@@ -551,7 +650,7 @@ impl SessionExecutor {
         }
         let replied = replied.or(final_text);
         let (action, summary) = reply(&replied.unwrap_or_else(|| said.join("\n")))?;
-        let files = copy.changes(&self.workspace, &self.files)?;
+        let files = copy.changes()?;
         Ok(Proposal {
             action,
             summary,
@@ -561,25 +660,179 @@ impl SessionExecutor {
 }
 
 impl AgentExecutor for SessionExecutor {
-    /// One session over the frontier the brief describes; the proposal as `ProposedAction`, or
-    /// `Suspended` with `ExternalAvailability` naming why there is none.
+    /// The outcome of [`Self::run_with_usage`].
     fn run(
         &self,
-        _commission: &Commission<commission_state::Assigned>,
-        _frontier: &Frontier<frontier_state::Issued>,
+        commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
     ) -> ExecutorOutcome {
+        self.run_with_usage(commission, frontier).outcome
+    }
+
+    /// One session over the frontier the brief describes, recorded as the module documents: the
+    /// proposal as `ProposedAction`, or `Suspended` with `ExternalAvailability` naming why there
+    /// is none; what the session reported it spent ([`usage_of`]); the SHA-256 digest of its
+    /// transcript, lowercase hex, when it left one; and its summary, when it gave one.
+    fn run_with_usage(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorStep {
+        let started = Instant::now();
         let mut report = SessionReport::default();
-        let outcome = match self.session(&mut report) {
-            Ok(proposal) => proposal.to_outcome(),
+        let proposed = self.session(&mut report).and_then(|proposal| {
+            self.record(commission, frontier, &report, &proposal)
+                .map(|_| proposal)
+        });
+        let (outcome, summary) = match proposed {
+            Ok(proposal) => {
+                let summary = Some(proposal.summary.clone()).filter(|said| !said.is_empty());
+                (proposal.to_outcome(), summary)
+            }
             Err(why) => {
                 report.error = Some(why.clone());
-                ExecutorOutcome::Suspended(ExecutorOutcomeSuspended {
+                let suspended = ExecutorOutcome::Suspended(ExecutorOutcomeSuspended {
                     reason: SuspensionReason::ExternalAvailability(Json::Text(why)),
-                })
+                });
+                (suspended, None)
             }
         };
+        let usage = usage_of(&report, started.elapsed());
+        let transcript_digest = (!report.transcript.is_empty()).then(|| digest(&report.transcript));
         *self.last.borrow_mut() = Some(report);
-        outcome
+        ExecutorStep {
+            outcome,
+            usage: Some(usage),
+            transcript_digest,
+            summary,
+        }
+    }
+}
+
+/// What a session spent, as its report states it: its input and output tokens (0 where it stated
+/// none), its duration, else the call's own wall time `took`, and its cost in micro-USD where it
+/// stated one. A session that failed spent too, and is charged.
+#[must_use]
+pub fn usage_of(report: &SessionReport, took: Duration) -> ExecutorUsage {
+    let count = |figure: Option<u64>| figure.map_or(0, |n| i64::try_from(n).unwrap_or(i64::MAX));
+    let duration = report
+        .duration_ms
+        .unwrap_or_else(|| u64::try_from(took.as_millis()).unwrap_or(u64::MAX));
+    ExecutorUsage {
+        input_tokens: count(report.input_tokens),
+        output_tokens: count(report.output_tokens),
+        duration_ms: count(Some(duration)),
+        cost_micro_usd: report.cost_usd.map(micro_usd),
+    }
+}
+
+/// `usd` in micro-USD, rounded to the nearest; a figure that is not a finite amount of at least
+/// zero is none spent.
+fn micro_usd(usd: f64) -> i64 {
+    let micro = (usd * 1_000_000.0).round();
+    if micro.is_finite() && micro >= 0.0 {
+        // `as` saturates at the largest an i64 holds.
+        micro as i64
+    } else {
+        0
+    }
+}
+
+/// The SHA-256 digest of `bytes`, lowercase hex.
+fn digest(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// A new [`SessionId`]: a version-8 UUID from the SHA-256 digest of the process, the time and a
+/// counter, so no two calls of one process, and no two processes, mint the same.
+#[must_use]
+pub fn fresh_session_id() -> SessionId {
+    static ISSUED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let issued = ISSUED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos());
+    let hashed = Sha256::digest(
+        format!("loom.session\n{}\n{nanos}\n{issued}", std::process::id()).as_bytes(),
+    );
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&hashed[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x80;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    SessionId(Uuid(format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )))
+}
+
+/// The sessions an executor recorded (`loom.session.AgentSession`, through the generated
+/// behaviour over this store) and the `SessionChangeProposed` each published, in the order run.
+#[derive(Debug, Default)]
+struct SessionRecord {
+    sessions: Vec<AgentSessionSnapshot>,
+    proposed: Vec<SessionChangeProposed>,
+}
+
+impl AgentSessionStorage for SessionRecord {
+    fn get(&self, identity: &SessionId) -> Option<AgentSessionSnapshot> {
+        self.sessions
+            .iter()
+            .find(|held| &held.data.session_id == identity)
+            .cloned()
+    }
+
+    fn put(&mut self, snapshot: AgentSessionSnapshot) {
+        match self
+            .sessions
+            .iter_mut()
+            .find(|held| held.data.session_id == snapshot.data.session_id)
+        {
+            Some(held) => *held = snapshot,
+            None => self.sessions.push(snapshot),
+        }
+    }
+
+    fn delete(&mut self, identity: &SessionId) {
+        self.sessions
+            .retain(|held| &held.data.session_id != identity);
+    }
+
+    fn list(&self) -> Vec<AgentSessionSnapshot> {
+        self.sessions.clone()
+    }
+}
+
+impl SessionRecord {
+    /// `ProposeSessionChange`, by its generated behaviour; the event it published, kept.
+    fn propose(
+        &mut self,
+        input: ProposeSessionChange,
+    ) -> Result<SessionChangeProposed, UnmetObligation> {
+        let mut generated = Generated::new(std::mem::take(self));
+        let answered = generated.propose_session_change(input);
+        *self = generated.ports;
+        let ProposeSessionChangeOutcome::Proposed {
+            session_change_proposed,
+        } = answered?;
+        self.proposed.push(session_change_proposed.clone());
+        Ok(session_change_proposed)
+    }
+
+    /// The `loom.session.AgentSessions` view, by its generated query.
+    fn sessions(&self) -> Vec<AgentSessions> {
+        let generated = Generated::new(Self {
+            sessions: self.sessions.clone(),
+            proposed: Vec::new(),
+        });
+        generated.agent_sessions().unwrap_or_default()
     }
 }
 
@@ -1016,10 +1269,12 @@ pub fn plain_relative(path: &str) -> bool {
 
 /// The scratch copy a session works in: `<scratch>/session-<pid>-<n>/copy`, and beside it
 /// `git`, the git directory the copy's `.git` names when the workspace has one; both removed
-/// when dropped.
+/// when dropped. It keeps the digest of each file it copied, as copied: the base a session's
+/// change is read against.
 struct ScratchCopy {
     root: PathBuf,
     dir: PathBuf,
+    base: BTreeMap<String, String>,
 }
 
 impl ScratchCopy {
@@ -1041,6 +1296,7 @@ impl ScratchCopy {
         let mut copy = Self {
             dir: root.join("copy"),
             root,
+            base: BTreeMap::new(),
         };
         std::fs::create_dir(&copy.dir)
             .map_err(|error| format!("make {}: {error}", copy.dir.display()))?;
@@ -1071,6 +1327,9 @@ impl ScratchCopy {
             };
             std::fs::set_permissions(&to, std::fs::Permissions::from_mode(mode))
                 .map_err(|error| format!("set the mode of {}: {error}", to.display()))?;
+            let copied = std::fs::read(&to)
+                .map_err(|error| format!("read {file} in the scratch copy: {error}"))?;
+            copy.base.insert(file.clone(), digest(&copied));
         }
         copy.carry_git(workspace)?;
         Ok(copy)
@@ -1161,29 +1420,20 @@ impl ScratchCopy {
         Ok(())
     }
 
-    /// Every file of the copy that differs from `workspace`: a file `files` named whose bytes
-    /// differ or that is gone, and any file the session added; never `.git` or a path under it,
-    /// the copy's git state, which no proposal carries. Content that is not UTF-8, or a link the
-    /// session left, is an error: a proposal carries text files only.
-    fn changes(&self, workspace: &Path, files: &[String]) -> Result<Vec<ProposedFile>, String> {
+    /// Every file of the copy that differs from what was copied into it: a copied file whose
+    /// bytes differ or that is gone, and any file the session added; never `.git` or a path
+    /// under it, the copy's git state, which no proposal carries. The workspace is not read: a
+    /// file written there since the copy was made is never proposed back. Content that is not
+    /// UTF-8, or a link the session left, is an error: a proposal carries text files only.
+    fn changes(&self) -> Result<Vec<ProposedFile>, String> {
         let mut found = Vec::new();
         walk(&self.dir, &self.dir, &mut found)?;
         found.retain(|path| !Path::new(path).starts_with(".git"));
-        let listed: std::collections::BTreeSet<&str> = files
-            .iter()
-            .filter(|file| plain_relative(file))
-            .map(String::as_str)
-            .collect();
         let mut changes = Vec::new();
         for path in &found {
             let now = std::fs::read(self.dir.join(path))
                 .map_err(|error| format!("read {path} in the scratch copy: {error}"))?;
-            let was = if listed.contains(path.as_str()) {
-                std::fs::read(workspace.join(path)).ok()
-            } else {
-                None
-            };
-            if was.as_deref() == Some(now.as_slice()) {
+            if self.base.get(path) == Some(&digest(&now)) {
                 continue;
             }
             let content = String::from_utf8(now).map_err(|_| {
@@ -1195,12 +1445,10 @@ impl ScratchCopy {
             });
         }
         let present: std::collections::BTreeSet<&str> = found.iter().map(String::as_str).collect();
-        for path in &listed {
-            let copied =
-                std::fs::symlink_metadata(workspace.join(path)).is_ok_and(|meta| meta.is_file());
-            if copied && !present.contains(path) {
+        for path in self.base.keys() {
+            if !present.contains(path.as_str()) {
                 changes.push(ProposedFile {
-                    path: (*path).to_owned(),
+                    path: path.clone(),
                     content: None,
                 });
             }
@@ -1359,9 +1607,11 @@ mod tests {
         }
     }
 
+    /// A proposal reads back from its outcome but for its summary, which the arguments do not
+    /// carry.
     #[test]
     fn a_proposal_reads_back_from_its_outcome() {
-        let proposal = Proposal {
+        let mut proposal = Proposal {
             action: "implementation.edit".to_owned(),
             summary: "fixed add".to_owned(),
             files: vec![
@@ -1376,6 +1626,7 @@ mod tests {
             ],
         };
         let back = Proposal::from_outcome(&proposal.to_outcome());
+        proposal.summary = String::new();
         assert_eq!(back, Some(Ok(proposal)));
     }
 
@@ -1766,7 +2017,7 @@ mod tests {
         let scratch = Scratch::new("changes");
         let tree = scratch.0.join("tree");
         repository(&tree, "sha1", "files");
-        let (copy, files) = scratch.copy(&tree);
+        let (copy, _) = scratch.copy(&tree);
         std::fs::write(copy.dir.join("src/lib.rs"), "changed\n").expect("a file");
         let expected = vec![ProposedFile {
             path: "src/lib.rs".to_owned(),
@@ -1774,12 +2025,12 @@ mod tests {
         }];
         let planted = format!("gitdir: {}\n", tree.join(".git").display());
         std::fs::write(copy.dir.join(".git"), planted).expect("the gitlink rewritten");
-        assert_eq!(copy.changes(&tree, &files), Ok(expected.clone()));
+        assert_eq!(copy.changes(), Ok(expected.clone()));
         std::fs::remove_file(copy.dir.join(".git")).expect("the gitlink removed");
         std::fs::create_dir_all(copy.dir.join(".git/hooks")).expect("a directory");
         std::fs::write(copy.dir.join(".git/hooks/pre-commit"), "#!/bin/sh\n").expect("a hook");
         std::fs::write(copy.dir.join(".git/config"), "[core]\n\tfsmonitor = x\n").expect("a file");
-        assert_eq!(copy.changes(&tree, &files), Ok(expected));
+        assert_eq!(copy.changes(), Ok(expected));
     }
 
     /// A workspace with no git directory gives a copy with none.
