@@ -12,6 +12,14 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `LoopContext::stop_policy` returns a `StopPolicy`: the host turns the approval gate off and sets the idle bound (story:stop-policy-gate-and-idle-bound)
+
+### Changed
+
+- **Breaking:** `JudgeIdleIteration` gains a `bound` input, which `outcome::judge_idle` judges against (story:stop-policy-gate-and-idle-bound)
+
 ### Fixed
 
 - A timed-out `run --action-bindings` command is killed with every process it started (story:bound-command-process-group)

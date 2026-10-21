@@ -19,7 +19,7 @@
 //! * `JudgeEffectRefusal` by `b10x_loom_commission::outcome::judge_refusal`, the judgement the
 //!   runtime makes of every refusal an effect port answers;
 //! * `JudgeIdleIteration` by `b10x_loom_commission::outcome::judge_idle`, the judgement the
-//!   runtime makes of every iteration of a run with no step budget that made no progress;
+//!   runtime makes of every iteration that made no progress in a run its idle bound applies to;
 //! * `JudgePerformableActions` by `b10x_loom_commission::outcome::judge_performable`, the
 //!   judgement the runtime makes of a frontier before the executor runs and of an admitted
 //!   request, when the effect port performs none of the actions the run needs;
@@ -748,9 +748,9 @@ fn refusal(input: &Input) -> Option<JudgeEffectRefusal> {
     })
 }
 
-/// `JudgeIdleIteration`: the idle iterations in a row the input counts, judged as the runtime
-/// judges a run with no step budget after an iteration that made no progress. It reads and writes
-/// no store, so every view stays as it was.
+/// `JudgeIdleIteration`: the idle iterations in a row the input counts, judged against the input's
+/// bound as the runtime judges a run its idle bound applies to after an iteration that made no
+/// progress. It reads and writes no store, so every view stays as it was.
 fn judge_idle_iteration(input: &Input) -> Result<Option<SemanticCommandResult>, TargetError> {
     let Some(idle_iterations) = codec::integer(input, "idle_iterations") else {
         return Ok(None);
