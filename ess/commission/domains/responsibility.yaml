@@ -230,6 +230,9 @@ types:
   # `usage`. Once the step was observed, the run budget's spending limits are checked: a charge past
   # one ends the run there, before the outcome is acted on (no request is made from it, and an
   # executor's own suspension is not the Run's), the Run suspended for `RunBudget` naming the limit.
+  # story:run-budget-tokens-and-deadline: that is the stop policy's DiscardStep, the default; under
+  # its KeepStep the outcome is acted on and the Run is suspended for the breach before the next
+  # step, unless the outcome ends the run.
   # story:metaharness-session-executor: an agent session's step also names its trace and what the
   # session said it did, each absent when the executor states none: `transcript_digest`, the SHA-256
   # of the session's transcript as lowercase hex, and `summary`, the session's one line. The runtime
@@ -376,6 +379,10 @@ types:
   # IdleBound (`JudgeIdleIteration`, `bound`), with or without a step budget; a value below 1 is
   # read as 1, so it never turns the bound off. Absent, the default, the bound is two and applies
   # only to a run with no step budget.
+  # story:run-budget-tokens-and-deadline: `on_breach` is what becomes of an executor step whose
+  # reported usage took the run past a spending limit of its RunBudget (ExecutorStep). DiscardStep,
+  # the default, ends the run before the step's outcome is acted on. KeepStep acts on it as with no
+  # breach, and suspends the Run for the breach before the next step.
   - name: commission.responsibility.StopPolicy
     kind: struct
     fields:
@@ -383,6 +390,20 @@ types:
         type: Boolean
       - name: idle_bound
         type: Optional<Integer>
+      - name: on_breach
+        type: commission.responsibility.BreachStep
+
+  # story:run-budget-tokens-and-deadline: what becomes of an executor step whose reported usage
+  # took the run past a spending limit. DiscardStep: the Run is suspended for the breach once the
+  # step was observed, and its outcome is not acted on; its proposal is never revalidated or
+  # performed. KeepStep: the step's outcome is acted on as with no breach (a proposal is
+  # revalidated, asked about and performed only when admitted), and where the run would then go on
+  # the Run is suspended for the breach before the next step; a step whose outcome ends the run
+  # ends it with that outcome. KeepStep performs a proposal after a spending limit was passed. An
+  # effect's own usage breach is the same under both: that effect is already performed.
+  - name: commission.responsibility.BreachStep
+    kind: enum
+    variants: [DiscardStep, KeepStep]
 
   # story:unperformable-names-actions: what no effect performs, as `JudgePerformableActions`
   # answers `unperformable` for it. `actions` are the actions the run needed performed that the
@@ -515,6 +536,13 @@ types:
   # executor calls as the step budget does; the others bound what every performed effect of the
   # run reported it spent, and, for the run's own limits, what its executor calls reported they
   # spent (story:executor-reports-usage, ExecutorStep). The host supplies it; the model never does.
+  # story:run-budget-tokens-and-deadline: `max_tokens` bounds the input and output tokens charged
+  # to the run together, from its effects and its executor calls, checked with the other spending
+  # limits. `deadline` is an RFC 3339 instant read against the trusted time (`now`) before each
+  # step: before each executor call and before a pending request is invoked again. At or after it,
+  # the Run is suspended for the deadline (limit Deadline), the run ending Suspended, or Waiting
+  # while a request is pending, as at any budget stop. A deadline that is not RFC 3339 is refused
+  # before the Run starts. Neither is an action's limit: ActionBudget has no counterpart.
   - name: commission.responsibility.RunBudget
     kind: struct
     fields:
@@ -528,13 +556,21 @@ types:
         type: Optional<Integer>
       - name: max_cost_micro_usd
         type: Optional<Integer>
+      - name: max_tokens
+        type: Optional<Integer>
+      - name: deadline
+        type: Optional<Timestamp>
       - name: per_action
         type: List<commission.responsibility.ActionBudget>
 
   # story:run-and-action-budgets: which limit of a run budget or an action budget was reached.
+  # story:run-budget-tokens-and-deadline adds MaxTokens (input and output tokens together) and
+  # Deadline (the run's wall-clock deadline), both the run's own.
   - name: commission.responsibility.BudgetLimit
     kind: enum
-    variants: [MaxSteps, MaxTrials, MaxTokensIn, MaxTokensOut, MaxDurationMs, MaxCostMicroUsd]
+    variants:
+      [MaxSteps, MaxTrials, MaxTokensIn, MaxTokensOut, MaxDurationMs, MaxCostMicroUsd, MaxTokens,
+       Deadline]
 
   # story:run-and-action-budgets: what one run, or one action of it, was charged: the requests
   # handed to the effect port (`trials`), and the sums of the usage its performed effects reported.
@@ -583,7 +619,10 @@ types:
   # the run before the step or request that would pass it; a spending limit stops it once an
   # effect's reported usage took the charge past it, after that effect was recorded and observed,
   # or once an executor call's reported usage did, after that step was observed and before its
-  # outcome is acted on (story:executor-reports-usage, ExecutorStep).
+  # outcome is acted on (story:executor-reports-usage, ExecutorStep), or, under the stop policy's
+  # KeepStep, before the next step (story:run-budget-tokens-and-deadline). For the Deadline limit,
+  # `max` is the deadline and `charged` the time read, both in whole seconds since the Unix epoch;
+  # `charged` is absent when the time read is not RFC 3339, which is taken as past the deadline.
   - name: commission.responsibility.RunBudgetBreach
     kind: struct
     fields:
