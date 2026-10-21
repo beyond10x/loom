@@ -60,17 +60,17 @@ fn a_key_followed_by_a_version_decimal_is_not_a_key() {
 fn a_decomposed_letter_before_a_key_glues_it_like_the_composed_one() {
     // "ÄPR-1" written as A + U+0308 COMBINING DIAERESIS (NFD), which macOS text often is.
     assert_eq!(found("A\u{0308}PR-1"), Vec::new());
-    assert_eq!(found("cafe\u{0301}DEV-1"), Vec::new());
+    assert_eq!(found("cafe\u{0301}ABC-1"), Vec::new());
 }
 
 #[test]
 fn a_key_glued_to_a_non_ascii_letter_or_digit_is_not_a_key() {
     for text in [
-        "яDEV-1",
-        "λDEV-1",
-        "\u{0663}DEV-1",
-        "1DEV-1",
-        "DEV-1\u{00B2}",
+        "яABC-1",
+        "λABC-1",
+        "\u{0663}ABC-1",
+        "1ABC-1",
+        "ABC-1\u{00B2}",
     ] {
         assert_eq!(found(text), Vec::new(), "{text}");
     }
@@ -79,11 +79,11 @@ fn a_key_glued_to_a_non_ascii_letter_or_digit_is_not_a_key() {
 #[test]
 fn keys_next_to_emoji_and_symbols_are_found() {
     for (text, key) in [
-        ("\u{1F680}DEV-1", "DEV-1"),
-        ("DEV-2\u{1F389} shipped", "DEV-2"),
-        ("\u{FF08}DEV-3\u{FF09}", "DEV-3"),
-        ("DEV-4\u{200B}", "DEV-4"),
-        ("課題DEV-5、", "DEV-5"),
+        ("\u{1F680}ABC-1", "ABC-1"),
+        ("ABC-2\u{1F389} shipped", "ABC-2"),
+        ("\u{FF08}ABC-3\u{FF09}", "ABC-3"),
+        ("ABC-4\u{200B}", "ABC-4"),
+        ("課題ABC-5、", "ABC-5"),
     ] {
         assert_eq!(found(text), one(ReferenceKind::JiraIssue, key), "{text}");
     }
@@ -94,16 +94,16 @@ fn a_key_bordered_by_lao_text_is_found() {
     // Lao, like Thai, is written without spaces between words; the crate docs promise such
     // scripts may border a key.
     assert_eq!(
-        found("ແກ້DEV-630ດ່ວນ"),
-        one(ReferenceKind::JiraIssue, "DEV-630")
+        found("ແກ້ABC-123ດ່ວນ"),
+        one(ReferenceKind::JiraIssue, "ABC-123")
     );
 }
 
 #[test]
 fn slack_italic_underscores_around_a_key_do_not_glue_it() {
     assert_eq!(
-        found("_DEV-630_ is blocked"),
-        one(ReferenceKind::JiraIssue, "DEV-630")
+        found("_ABC-123_ is blocked"),
+        one(ReferenceKind::JiraIssue, "ABC-123")
     );
 }
 
@@ -147,7 +147,7 @@ fn a_url_template_keeps_its_closing_brace() {
 fn cjk_sentence_punctuation_after_a_url_is_dropped() {
     for text in [
         "PRは https://github.com/beyond10x/intake/pull/3。",
-        "https://github.com/beyond10x/intake/pull/3、DEV-1",
+        "https://github.com/beyond10x/intake/pull/3、ABC-1",
         "（https://github.com/beyond10x/intake/pull/3）",
     ] {
         assert_eq!(found(text).first(), pr3().first(), "{text}");

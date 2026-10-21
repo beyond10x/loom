@@ -9,14 +9,14 @@ fn found(intent: &str) -> Vec<(ReferenceKind, String)> {
 
 #[test]
 fn intent_references_are_extracted_in_order() {
-    let intent = "fix DEV-630, see https://acme.atlassian.net/browse/DEV-630 and \
+    let intent = "fix ABC-123, see https://acme.atlassian.net/browse/ABC-123 and \
 https://gitlab.example.com/team/app/-/merge_requests/42 and the thread \
 https://example.slack.com/archives/C01/p1700000000000100, also https://acme.atlassian.net/browse/OPS-7, \
 https://gitlab.example.com/team/app/-/issues/9, https://github.com/beyond10x/intake/pull/3 and \
 https://example.org/design.pdf";
 
     let expected = vec![
-        (ReferenceKind::JiraIssue, "DEV-630".to_owned()),
+        (ReferenceKind::JiraIssue, "ABC-123".to_owned()),
         (ReferenceKind::GitlabMergeRequest, "team/app!42".to_owned()),
         (
             ReferenceKind::SlackMessage,
@@ -39,7 +39,7 @@ https://example.org/design.pdf";
 
 #[test]
 fn lower_case_keys_and_email_addresses_yield_nothing() {
-    assert_eq!(found("fix dev-630 please"), Vec::new());
+    assert_eq!(found("fix abc-123 please"), Vec::new());
     assert_eq!(found("write to ops.team@example.org about it"), Vec::new());
 }
 
@@ -63,5 +63,5 @@ fn a_longer_dashed_identifier_is_not_cut_into_a_key() {
 
 #[test]
 fn key_shaped_email_local_parts_yield_nothing() {
-    assert_eq!(found("write to DEV-630@example.org"), Vec::new());
+    assert_eq!(found("write to ABC-123@example.org"), Vec::new());
 }

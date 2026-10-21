@@ -1,6 +1,6 @@
 //! Deterministic extraction of an intent's key references (story intent-references).
 //!
-//! [`references`] finds, in text order and once each: Jira issue keys (bare, such as `DEV-630`,
+//! [`references`] finds, in text order and once each: Jira issue keys (bare, such as `ABC-123`,
 //! and inside Jira `/browse/` URLs), Slack message permalinks, GitLab issue and merge-request
 //! URLs, GitHub issue and pull-request URLs, and any other `http`/`https` URL. Extraction is
 //! pattern matching only: no model call, no network.
@@ -9,7 +9,7 @@
 //!
 //! - A key's project part has at least two letters before any digit. It is not glued to a word
 //!   on either side: a letter, digit or combining mark next to it glues it, and so does an `_`
-//!   with a word character beyond it (so `foo_PR-1` is not a key, but the italic `_DEV-630_` is).
+//!   with a word character beyond it (so `foo_PR-1` is not a key, but the italic `_ABC-123_` is).
 //!   Letters of the scripts written without spaces (listed below) may border a key. A key is not
 //!   followed by `-<digit>` or `.<digit>`, so neither `CVE-2024-1234` nor `MPL-2.0` is cut into
 //!   a key, and its project part is not one of a fixed list of standard names (`UTF-8`,

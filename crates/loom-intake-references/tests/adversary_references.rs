@@ -49,7 +49,7 @@ fn key_shapes_inside_words_are_not_keys() {
 
 #[test]
 fn a_key_after_an_at_sign_is_not_a_key() {
-    assert_eq!(found("mail ops@DEV-1 about it"), Vec::new());
+    assert_eq!(found("mail ops@ABC-1 about it"), Vec::new());
 }
 
 #[test]
@@ -126,8 +126,8 @@ fn query_strings_and_fragments_stay_on_a_plain_url() {
 #[test]
 fn a_key_followed_by_a_colon_is_found() {
     assert_eq!(
-        found("DEV-630: login fails"),
-        one(ReferenceKind::JiraIssue, "DEV-630")
+        found("ABC-123: login fails"),
+        one(ReferenceKind::JiraIssue, "ABC-123")
     );
 }
 
@@ -139,10 +139,10 @@ fn a_key_with_digits_in_its_project_is_found() {
 #[test]
 fn keys_separated_by_a_slash_are_both_found() {
     assert_eq!(
-        found("fix DEV-1/DEV-2 together"),
+        found("fix ABC-1/ABC-2 together"),
         vec![
-            (ReferenceKind::JiraIssue, "DEV-1".to_owned()),
-            (ReferenceKind::JiraIssue, "DEV-2".to_owned()),
+            (ReferenceKind::JiraIssue, "ABC-1".to_owned()),
+            (ReferenceKind::JiraIssue, "ABC-2".to_owned()),
         ]
     );
 }
@@ -150,8 +150,8 @@ fn keys_separated_by_a_slash_are_both_found() {
 #[test]
 fn a_key_followed_by_cjk_text_is_found() {
     assert_eq!(
-        found("DEV-630を直してください"),
-        one(ReferenceKind::JiraIssue, "DEV-630")
+        found("ABC-123を直してください"),
+        one(ReferenceKind::JiraIssue, "ABC-123")
     );
 }
 
@@ -193,8 +193,8 @@ https://github.com/beyond10x/intake/issues/5#issuecomment-1"
 #[test]
 fn a_jira_url_with_a_query_yields_its_key() {
     assert_eq!(
-        found("https://acme.atlassian.net/browse/DEV-1?focusedCommentId=7"),
-        one(ReferenceKind::JiraIssue, "DEV-1")
+        found("https://acme.atlassian.net/browse/ABC-1?focusedCommentId=7"),
+        one(ReferenceKind::JiraIssue, "ABC-1")
     );
 }
 
@@ -222,8 +222,8 @@ https://www.github.com/beyond10x/intake/pull/3"
 #[test]
 fn a_jira_key_dedups_between_url_and_bare_form_in_either_order() {
     assert_eq!(
-        found("https://acme.atlassian.net/browse/DEV-630 then DEV-630"),
-        one(ReferenceKind::JiraIssue, "DEV-630")
+        found("https://acme.atlassian.net/browse/ABC-123 then ABC-123"),
+        one(ReferenceKind::JiraIssue, "ABC-123")
     );
 }
 
@@ -249,7 +249,7 @@ fn a_plain_url_dedups_across_host_case() {
 
 #[test]
 fn a_mebibyte_of_unicode_text_is_extracted_quickly() {
-    let chunk = "Grüße 日本語のテキスト mit Umlauten DEV-1 und https://example.org/x ";
+    let chunk = "Grüße 日本語のテキスト mit Umlauten ABC-1 und https://example.org/x ";
     let mut text = String::new();
     while text.len() < 1 << 20 {
         text.push_str(chunk);
@@ -261,7 +261,7 @@ fn a_mebibyte_of_unicode_text_is_extracted_quickly() {
     assert_eq!(
         refs,
         vec![
-            (ReferenceKind::JiraIssue, "DEV-1".to_owned()),
+            (ReferenceKind::JiraIssue, "ABC-1".to_owned()),
             (ReferenceKind::Url, "https://example.org/x".to_owned()),
         ]
     );
