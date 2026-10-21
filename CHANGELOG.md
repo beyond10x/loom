@@ -20,6 +20,14 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - The host's executor is handed only the step's actions; another action, or reads proposed together, never return
 - A host executor's usage through `run_with_usage` is the call's, kept in its run record, so a resumed run reports it
 - `WorkflowExecutor::with_admitted(actions)` is the host's narrowing of judgement steps
+- `b10x-loom-session-executor`: an `AgentExecutor` over one metaharness session (story:metaharness-session-executor)
+- `SessionExecutor` returns the session's change as a `ProposedAction` with `{files}` arguments; an effect applies it
+- `loom_sdk::session` re-exports it; the SDK stability page lists `SessionExecutor`, `Proposal` and `ProposedFile`
+- The `loom.session` domain: `AgentSession`, `ProposeSessionChange`, `SessionChangeProposed` and `AgentSessions`
+- `SessionExecutor::sessions` and `SessionExecutor::proposed` read the sessions it recorded, one id per call
+- `SessionExecutor::run_with_usage` reports the session's tokens, duration and cost, charged to the run
+- `ExecutorStep` carries `transcript_digest` and `summary`; the step's observation carries both, never as evidence
+- `task conform` runs `loom.session.ProposeSessionChange` against the session executor
 
 ### Changed
 
@@ -35,6 +43,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** the host's narrowing moves from `LoopConfig::admits` to `WorkflowExecutor::with_admitted`, by action
 - **Breaking:** a judgement step sends two model requests per call (selection, then arguments) instead of one loop turn
 - **Breaking:** `workflow::load` no longer refuses an action whose id cannot be a tool name
+- **Breaking:** `ExecutorStep` gains `transcript_digest` and `summary`; a struct literal of it must name both
 
 ### Removed
 
