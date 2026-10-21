@@ -1868,6 +1868,41 @@ mod tests {
         );
     }
 
+    /// `cargo test` runs under a rustup proxy, which exports its own `RUSTUP_TOOLCHAIN` to every
+    /// process it starts. The workspace's toolchain file still decides the compiler: a custom path
+    /// it names is refused, never swapped for the toolchain the launching process ran under.
+    #[test]
+    fn the_workspace_toolchain_file_decides_whatever_the_launching_process_inherited() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir_all(workspace.join("custom/bin")).unwrap();
+        std::fs::create_dir(workspace.join(WRITABLE)).unwrap();
+        let rustc = workspace.join("custom/bin/rustc");
+        std::fs::write(&rustc, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(&rustc, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(
+            workspace.join("rust-toolchain.toml"),
+            format!(
+                "[toolchain]\npath = '{}'\n",
+                workspace.join("custom").display()
+            ),
+        )
+        .unwrap();
+        if host_program("rustup", &workspace).is_none() {
+            eprintln!("skipped: missing prerequisite: rustup on PATH");
+            return;
+        }
+        let error = RustClosure::discover(&workspace)
+            .err()
+            .expect("a custom toolchain path the workspace names is refused");
+        assert_eq!(
+            error.reason,
+            ConfinementRefusal::ScopeInvalid,
+            "{}",
+            error.detail
+        );
+    }
+
     #[test]
     fn registry_credentials_and_symlinked_cache_are_not_admitted() {
         let root = tempfile::tempdir().unwrap();
