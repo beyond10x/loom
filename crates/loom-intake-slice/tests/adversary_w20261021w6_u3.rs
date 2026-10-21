@@ -155,6 +155,124 @@ fn adversary_a_child_holding_only_stderr_is_gone_and_the_run_returns_in_bounded_
     case.guard.assert_all_gone();
 }
 
+/// Set in the environment of a test binary re-executed in a user and pid namespace of its own.
+const IN_NAMESPACE: &str = "LOOM_ADVERSARY_W6_U3_NAMESPACE";
+
+/// A command that ends at once while a process it started in a session of its own (`setsid`)
+/// holds its standard output. The command is reaped, its group is empty and its id free, and an
+/// unrelated process takes that id as its own group before the timeout. The group kill at the
+/// timeout must not reach that unrelated group.
+///
+/// The case runs in a user and pid namespace of its own (`unshare -rpf --kill-child
+/// --mount-proc`), where it may choose the next pid (`ns_last_pid`), so the reuse is
+/// deterministic; every process in the namespace ends with it. Where the namespace cannot be
+/// made, the case says so and checks nothing.
+#[test]
+fn adversary_a_group_kill_after_its_leader_was_reaped_reaches_no_other_group() {
+    const NAME: &str = "adversary_a_group_kill_after_its_leader_was_reaped_reaches_no_other_group";
+    if std::env::var_os(IN_NAMESPACE).is_some() {
+        reaped_leader_scenario();
+        return;
+    }
+    let mut child = match std::process::Command::new("/usr/bin/unshare")
+        .args(["-rpf", "--kill-child", "--mount-proc"])
+        .arg(std::env::current_exe().unwrap())
+        .args([NAME, "--exact", "--nocapture", "--test-threads", "1"])
+        .env(IN_NAMESPACE, "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => {
+            eprintln!("skipped: /usr/bin/unshare did not start: {error}");
+            return;
+        }
+    };
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while child.try_wait().unwrap().is_none() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if child.try_wait().unwrap().is_none() {
+        let _ = child.kill();
+    }
+    let out = child.wait_with_output().unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    if !text.contains("running 1 test") {
+        eprintln!("skipped: no user and pid namespace could be made:\n{text}");
+        return;
+    }
+    assert!(
+        out.status.success(),
+        "the case in its namespace failed:\n{text}"
+    );
+}
+
+/// The body of [`adversary_a_group_kill_after_its_leader_was_reaped_reaches_no_other_group`],
+/// as pid 1 of its own pid namespace.
+fn reaped_leader_scenario() {
+    let case = Case::new("/usr/bin/setsid /usr/bin/sleep 120 &\necho $! >> PIDS\nexit 0\n");
+    let pids = case.guard.pids.clone();
+    // Takes the command's pid as the id of a new process group once the command was reaped.
+    let taker = std::thread::spawn(move || -> Result<std::process::Child, String> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let leader: i32 = loop {
+            let first = std::fs::read_to_string(&pids).ok().and_then(|text| {
+                text.lines()
+                    .next()
+                    .and_then(|line| line.trim().parse().ok())
+            });
+            if let Some(pid) = first {
+                break pid;
+            }
+            if Instant::now() > deadline {
+                return Err("the command never wrote its pid".into());
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        };
+        while proc(leader).exists() {
+            if Instant::now() > deadline {
+                return Err(format!("the command {leader} was never reaped"));
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        for _ in 0..20 {
+            std::fs::write("/proc/sys/kernel/ns_last_pid", (leader - 1).to_string())
+                .map_err(|error| format!("ns_last_pid: {error}"))?;
+            let mut command = std::process::Command::new("/usr/bin/sleep");
+            command
+                .arg("120")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            std::os::unix::process::CommandExt::process_group(&mut command, 0);
+            let mut taken = command.spawn().map_err(|error| error.to_string())?;
+            if i32::try_from(taken.id()) == Ok(leader) {
+                return Ok(taken);
+            }
+            let _ = taken.kill();
+            let _ = taken.wait();
+        }
+        Err(format!("no process took the id {leader}"))
+    });
+    let output = run_case_for(case.dir.path(), 2);
+    let mut unrelated = taker.join().unwrap().unwrap();
+    let ended = unrelated.try_wait().unwrap();
+    let _ = unrelated.kill();
+    let _ = unrelated.wait();
+    assert!(
+        ended.is_none(),
+        "the run's group kill at its timeout reached an unrelated process group that took the \
+         reaped command's id ({}): it ended {ended:?}\n{output}",
+        unrelated.id()
+    );
+}
+
 /// One case directory: the installed protocol, the script and the pid file.
 struct Case {
     /// First, so it is dropped (and every process still running killed) before `dir` removes the
@@ -185,6 +303,11 @@ impl Case {
 
 /// Runs the intent in case directory `dir` to its one step and returns what the run printed.
 fn run_case(dir: &Path) -> String {
+    run_case_for(dir, 1)
+}
+
+/// Runs the intent in case directory `dir`, the command bound with a timeout of `seconds`.
+fn run_case_for(dir: &Path, seconds: i64) -> String {
     let catalog: ProtocolCatalog = InstallStore::new(dir.join("installed")).catalog().unwrap();
     let governor = CanonGovernor::new(MemoryCaseStore::default())
         .with_catalog(&catalog)
@@ -208,7 +331,7 @@ fn run_case(dir: &Path) -> String {
         test_paths: b10x_loom_intake_slice::test_paths::TestPaths::default(),
         bindings: Some(ActionBindings {
             protocol: NAME.into(),
-            timeout_seconds: Some(1),
+            timeout_seconds: Some(seconds),
             unconfined_bindings: Some(true),
             bindings: vec![ActionBinding {
                 action: "note.record".into(),
