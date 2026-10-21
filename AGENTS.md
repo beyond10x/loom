@@ -140,10 +140,10 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | Ported Harness modules keep the import limits their crates had; `turn_loop` alone may also name the generated model (`crate::model`), for `LoopStop` | `crates/loom-executor/tests/adversary_harness_port_boundaries.rs` (`the_boundaries_harness_enforced_by_crate_still_hold_between_modules`), `crates/loom-executor/tests/adversary2_harness_port.rs` (`each_ported_module_names_only_what_its_harness_manifest_allowed`) |
 | Package and library names are the `loom-` names | `crates/loom-executor/tests/crate_names.rs` |
 | No manifest names an archived Commission, governor or intake repository | `crates/loom-executor/tests/governor_import.rs`, `intake_import.rs`, `commission_import.rs` |
-| The SDK stability page (`website/docs/reference/sdk-stability.md`) lists exactly the ports a host implements and the `loom_sdk` paths control-plane imports, each resolving through `loom_sdk`; a change to that surface updates the page and names any break under `Breaking:` in `CHANGELOG.md` | `crates/loom-sdk/tests/host_ports.rs` (`a_host_implements_every_port_through_loom_sdk_alone`, `the_stability_page_lists_exactly_the_ports_this_test_implements`, `every_control_plane_path_on_the_page_resolves`) |
+| The SDK stability page (`website/docs/reference/sdk-stability.md`) lists exactly the ports a host implements and the `loom_sdk` paths control-plane imports, each resolving through `loom_sdk`; a change to that surface updates the page and names any break in a `**Breaking:**` bullet of `CHANGELOG.md` | `crates/loom-sdk/tests/host_ports.rs` (`a_host_implements_every_port_through_loom_sdk_alone`, `the_stability_page_lists_exactly_the_ports_this_test_implements`, `every_control_plane_path_on_the_page_resolves`) |
 | The `run --output jsonl` records and exit statuses change within `schema_version` 1 only by a new optional field; any other change fails the gate until the committed contract moves | `task docs-check` (`crates/loom-docs/src/run_events.rs`, `the_v1_contract_matches_the_declared_events`, `a_removed_renamed_or_retyped_field_is_a_break`, `a_new_record_kind_is_a_break`, `a_new_optional_field_is_not_a_break`) |
 | A release tag equals the workspace version and has a CHANGELOG entry | `loom-xtask release-check`, run by `release.yml` (`crates/loom-xtask/tests/release_check.rs`) |
-| A release's CHANGELOG entry says what breaks for a consumer: it has a `Breaking:` sentence, and `Breaking: none.` is refused when `consumers/pinned/`, `crates/loom-sdk/tests/host_ports.rs` or `docs/contracts/run-events-v1.json` changed since the previous tag; `release.yml` fetches the history and tags it diffs | `loom-xtask release-check` (`crates/loom-xtask/tests/release_check.rs`: `release_check_names_an_entry_without_a_breaking_sentence`, `release_check_refuses_breaking_none_when_a_stable_surface_changed_since_the_previous_tag`, `release_check_accepts_breaking_none_when_no_stable_surface_changed`, `release_check_passes_on_the_first_tag`, `release_workflow_verifies_the_tag_and_reuses_the_check`) |
+| A release's CHANGELOG entry says what breaks for a consumer: a `**Breaking:**` bullet per break or the line `No breaking changes.`, never both, and no `**Breaking:**` bullet that names nothing or says `none`; a `Breaking:` sentence in prose does not count; `No breaking changes.` is refused when `consumers/pinned/`, `crates/loom-sdk/tests/host_ports.rs` or `docs/contracts/run-events-v1.json` changed since the previous tag; `release.yml` fetches the history and tags it diffs | `loom-xtask release-check` (`crates/loom-xtask/tests/release_check.rs`: `release_check_names_an_entry_without_a_breaking_bullet`, `release_check_refuses_no_breaking_changes_when_a_stable_surface_changed_since_the_previous_tag`, `release_check_accepts_no_breaking_changes_when_no_stable_surface_changed`, `release_check_refuses_a_breaking_bullet_that_names_no_break`, `release_check_refuses_an_entry_with_both_a_breaking_bullet_and_no_breaking_changes`, `release_check_passes_on_the_first_tag`, `release_workflow_verifies_the_tag_and_reuses_the_check`) |
 | The documented embedding builds and runs to `ApprovalRequired (repository.merge)` as an external crate: `consumers/pinned/` is its own workspace, depends on `b10x-loom-sdk` alone by path, includes `crates/loom-sdk/examples/software_change.rs` by `#[path]` and resolves one copy of each Loom and Canon crate | `task consumer-check` (`consumers/pinned/tests/embedding.rs`, `the_pinned_consumer_stops_at_approval_required`), `crates/loom-xtask/tests/pinned_consumer.rs` |
 
 ## ESS
@@ -254,8 +254,8 @@ it. A flag change in `b10x-loom-cli` regenerates the CLI reference. Every packag
 `description`, and the crate page publishes it, so it names no story id or internal name.
 
 `website/data/status.json` is maintained by hand. A change that ships, decides or drops a
-capability updates it, the page that describes it and `CHANGELOG.md` (**Unreleased**) in the same
-commit. A change to a command, a crate or a rule updates README.md and this file in that commit too.
+capability updates it, the page that describes it and `CHANGELOG.md` (a bullet under
+`## [Unreleased]`, § Releases) in the same commit. A change to a command, a crate or a rule updates README.md and this file in that commit too.
 
 ## Commission
 
@@ -962,12 +962,20 @@ Every commit and push is `b10x-bot[bot]`'s through `b10x-gates bot`. Every other
 ## Releases
 
 Loom releases from source at bare-version tags (`0.1.0`, no `v`); every crate inherits the
-workspace version and nothing is on a registry. Consumers pin `tag = "<version>"`, and
-`CHANGELOG.md` collects under **Unreleased** between releases. A release is:
+workspace version and nothing is on a registry. Consumers pin `tag = "<version>"`.
+
+`CHANGELOG.md` follows Keep a Changelog 1.1.0 and collects under `## [Unreleased]` between
+releases. A change adds one bullet per change a consumer sees under `### Added`, `### Changed`,
+`### Deprecated`, `### Removed`, `### Fixed` or `### Security` (in that order, each only when it
+has a bullet): one line of about 120 characters naming the public item in backticks, its story id
+in parentheses where it fits. A break for a consumer is a bullet that starts `**Breaking:**`, one
+per break. No prose paragraph: the detail stays in the story and the commit. A release is:
 
 1. A release commit on `main` (through a wave or a bot pull request): `[workspace.package] version`
-   in `Cargo.toml`, `Cargo.lock`, and **Unreleased** turned into `## [<version>] - <date>` under an
-   empty **Unreleased**, opening with a one-paragraph summary fit for the release notes. README,
+   in `Cargo.toml`, `Cargo.lock`, and `## [Unreleased]` turned into `## [<version>] - <date>`
+   under an empty `## [Unreleased]`, carrying its `**Breaking:**` bullets or, when nothing breaks,
+   the line `No breaking changes.` under the heading; the link references at the bottom move with
+   it (`[Unreleased]` compares from the new tag, and a `[<version>]` line links its tag). README,
    AGENTS.md and the site pages that name the version or a dependency line move with it. A
    release moves the `ess` pin (§ ESS) to the newest ESS release in that same release.
    `cargo run -q --locked -p loom-xtask -- release-check --tag <version>` passes on it.
@@ -975,15 +983,16 @@ workspace version and nothing is on a registry. Consumers pin `tag = "<version>"
 3. An annotated tag by `b10x-bot[bot]` on that commit: `b10x-gates bot … -- tag -a <version> -m
    "Loom <version>" <commit>`, then `-- push origin <version>`.
 4. `release` (`.github/workflows/release.yml`) green on the tag. It runs `loom-xtask release-check`
-   (the tag equals the workspace version and `CHANGELOG.md` has its entry, with a `Breaking:`
-   sentence that says `none` only when no stable surface changed since the previous tag, so the
-   job checks out the full history and its tags) and then `check.yml` on
-   the tagged commit. It is read-only, needs no secret and creates no release.
+   (the tag equals the workspace version and `CHANGELOG.md` has its entry, with a `**Breaking:**`
+   bullet, or `No breaking changes.` only when no stable surface changed since the previous tag,
+   so the job checks out the full history and its tags) and then `check.yml` on the tagged
+   commit. It is read-only, needs no secret and creates no release.
 5. The GitHub Release for the tag, created by the bot (`b10x-gates api --method POST --path
-   /repos/beyond10x/loom/releases`), named `<version>`, with short notes: one or two summary
-   lines, a **Breaking** list and a **Changed** list of one line per item (at most 8 each), and a
-   link to the version's section of `CHANGELOG.md` at the tag. The CHANGELOG entry keeps the full
-   text; every line of the notes is taken from it.
+   /repos/beyond10x/loom/releases`), named `<version>`, with short notes built from the entry's
+   bullets: one or two summary lines drawn from them, a **Breaking** list of its `**Breaking:**`
+   bullets (or `No breaking changes.`) and a **Changed** list of its other bullets, one line per
+   item and at most 8 each, and a link to the version's section of `CHANGELOG.md` at the tag. The
+   entry keeps every bullet; every line of the notes is taken from it.
 
 A release is finished when the tag, the green `release` run and the bot's GitHub Release with its
 notes are verified. A pushed tag whose `release` run is not green is queued, not released; never
