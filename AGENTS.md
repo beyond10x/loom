@@ -839,8 +839,10 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   (the jsonl terminal record's `unperformed_actions`) every unbound action; otherwise
   `bindings::CommandEffects` performs each admitted action by starting its program directly (no
   shell) with the arguments as JSON on stdin, only `PATH` in its environment and a timeout past
-  which it is killed and reaped: exit 0 is `Performed` with its stdout (one JSON object) as the
-  report, anything else `Refused`. Evidence comes only from the report's `evidence` list
+  which it and the processes it started are killed and reaped: exit 0 is `Performed` with its
+  stdout (one JSON object) as the report, anything else `Refused`, a status that cannot be read
+  included, naming the error (`crates/loom-intake-slice/tests/bound_command.rs`,
+  `a_timed_out_command_leaves_no_process_it_started`). Evidence comes only from the report's `evidence` list
   (`intake.bindings.CommandEvidence`), each of a kind the action declares it may produce, about
   `intent`; another kind fails the run. A binding confers no authority: the slice's
   authority provider still answers every capability with approval required, and `resume`

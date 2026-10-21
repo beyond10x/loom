@@ -1277,11 +1277,11 @@ fn run_bounded(test: &TestCommand, root: &Path) -> Result<Finished, ExecuteError
             }
             Ok(None) => {
                 timed_out = true;
-                kill(&mut child);
+                kill_group(&mut child);
                 break child.wait().map_err(io)?;
             }
             Err(error) => {
-                kill(&mut child);
+                kill_group(&mut child);
                 let _ = child.wait();
                 return Err(io(error));
             }
@@ -1304,8 +1304,11 @@ fn run_bounded(test: &TestCommand, root: &Path) -> Result<Finished, ExecuteError
     })
 }
 
-/// Kills `child`, and on Unix the process group it leads, so what it started dies with it.
-fn kill(child: &mut Child) {
+/// Kills `child`, and on Unix the process group it leads, so what it started dies with it. The
+/// caller started `child` with `process_group(0)` and reaps it after. The group is killed even
+/// when `child` itself was already reaped: a process it started that is still running holds the
+/// group's id, so the id names that group and no other.
+pub(crate) fn kill_group(child: &mut Child) {
     #[cfg(unix)]
     {
         let _ = Command::new("kill")

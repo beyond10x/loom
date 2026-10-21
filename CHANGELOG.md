@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Fixed
+
+- A timed-out `run --action-bindings` command is killed with every process it started (story:bound-command-process-group)
+
 ## [0.31.0] - 2026-10-21
 
 ### Added

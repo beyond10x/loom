@@ -7,9 +7,10 @@
 //! before any model call. A run of that protocol performs an admitted action by starting its
 //! program directly, never through a shell, with the action's arguments as JSON on standard input,
 //! a cleared environment that keeps only `PATH`, and the configuration's timeout
-//! ([`DEFAULT_TIMEOUT_SECONDS`] when absent), past which the program is killed and reaped. Exit
-//! status 0 is `Performed`, with the program's standard output, one JSON object, as the report;
-//! any other end is `Refused`. The report's `evidence` member (a list of
+//! ([`DEFAULT_TIMEOUT_SECONDS`] when absent), past which the program and the processes it started
+//! are killed and reaped. Exit status 0 is `Performed`, with the program's standard output, one
+//! JSON object, as the report; any other end is `Refused`, a status that cannot be read included,
+//! naming the error. The report's `evidence` member (a list of
 //! `intake.bindings.CommandEvidence`) states evidence about the intent, each of a kind the action
 //! declares it may produce; it is submitted under this module's producer, citing one observation
 //! of the command's run. A binding confers no authority: the governor admits the action first,
@@ -38,7 +39,7 @@ use serde_json::Value;
 
 use crate::case::INTENT;
 use crate::effect::{Console, refuse};
-use crate::executor::fresh_uuid;
+use crate::executor::{fresh_uuid, kill_group};
 use crate::run::{SliceError, json_text, printable};
 use crate::selector::Briefing;
 
@@ -224,8 +225,11 @@ pub(crate) fn productions(entry: &ProtocolEntry) -> BTreeMap<String, Vec<String>
 /// How a command ended.
 enum Ended {
     Exited(ExitStatus, Vec<u8>, Vec<u8>),
+    /// Killed at its timeout, with the processes it started.
     TimedOut,
     NotStarted(std::io::Error),
+    /// Its status could not be read; it was killed with the processes it started and reaped.
+    Unobserved(std::io::Error),
 }
 
 /// The effect port that performs an admitted action through the command bound to it.
@@ -302,18 +306,11 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> CommandEffects<'a, 'o, S, 
             ));
         }
         let program = &binding.argv[0];
-        let (status, stdout, stderr) = match self.run(binding, &arguments) {
-            Ended::Exited(status, stdout, stderr) => (status, stdout, stderr),
-            Ended::TimedOut => {
-                return refused(format!(
-                    "{program} was killed after {} s",
-                    self.timeout().as_secs()
-                ));
-            }
-            Ended::NotStarted(error) => {
-                return refused(format!("{program} did not start: {error}"));
-            }
-        };
+        let (status, stdout, stderr) =
+            match exited(program, self.timeout(), self.run(binding, &arguments)) {
+                Ok(exited) => exited,
+                Err(reason) => return refused(reason),
+            };
         if !status.success() {
             let stderr = String::from_utf8_lossy(&stderr);
             let tail: String = stderr
@@ -381,7 +378,8 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> CommandEffects<'a, 'o, S, 
     }
 
     /// Runs `binding`'s program with `arguments` on standard input, to its end or for the
-    /// timeout, whichever is first; one still running is killed and reaped.
+    /// timeout, whichever is first; one still running is killed and reaped with the processes it
+    /// started.
     fn run(&self, binding: &ActionBinding, arguments: &str) -> Ended {
         let deadline = Instant::now() + self.timeout();
         let mut command = Command::new(&binding.argv[0]);
@@ -392,6 +390,12 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> CommandEffects<'a, 'o, S, 
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // The program leads a process group of its own, so what it starts is killed with it.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt as _;
+            command.process_group(0);
+        }
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) => return Ended::NotStarted(error),
@@ -401,27 +405,7 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> CommandEffects<'a, 'o, S, 
             // Dropping the pipe at the end of the write closes standard input.
             thread::spawn(move || pipe.write_all(document.as_bytes()));
         }
-        let stdout = drain(child.stdout.take());
-        let stderr = drain(child.stderr.take());
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) if Instant::now() < deadline => thread::sleep(POLL),
-                Ok(None) | Err(_) => {
-                    stop(&mut child);
-                    return Ended::TimedOut;
-                }
-            }
-        };
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        let Ok(stdout) = stdout.recv_timeout(remaining) else {
-            return Ended::TimedOut;
-        };
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        let Ok(stderr) = stderr.recv_timeout(remaining) else {
-            return Ended::TimedOut;
-        };
-        Ended::Exited(status, stdout, stderr)
+        finish(child, deadline, Child::try_wait)
     }
 
     /// The report `stdout` holds, and the evidence it states, each of a kind `action` declares it
@@ -542,15 +526,118 @@ fn drain(pipe: Option<impl Read + Send + 'static>) -> mpsc::Receiver<Vec<u8>> {
     receiver
 }
 
-/// Kills `child` and reaps it, so no process and no zombie is left.
+/// Waits for `child`, a process-group leader, polling its status with `poll` until it ends and
+/// its output is read, or until `deadline`. At the deadline, and when its status cannot be read,
+/// it and the processes it started are killed and reaped ([`stop`]); that includes a program that
+/// ended while a process it started keeps its output open past the deadline.
+fn finish(
+    mut child: Child,
+    deadline: Instant,
+    mut poll: impl FnMut(&mut Child) -> std::io::Result<Option<ExitStatus>>,
+) -> Ended {
+    let stdout = drain(child.stdout.take());
+    let stderr = drain(child.stderr.take());
+    let status = loop {
+        match poll(&mut child) {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => thread::sleep(POLL),
+            Ok(None) => {
+                stop(&mut child);
+                return Ended::TimedOut;
+            }
+            Err(error) => {
+                stop(&mut child);
+                return Ended::Unobserved(error);
+            }
+        }
+    };
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let Ok(stdout) = stdout.recv_timeout(remaining) else {
+        stop(&mut child);
+        return Ended::TimedOut;
+    };
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let Ok(stderr) = stderr.recv_timeout(remaining) else {
+        stop(&mut child);
+        return Ended::TimedOut;
+    };
+    Ended::Exited(status, stdout, stderr)
+}
+
+/// What `program` ended with when it exited, else the reason its action is refused: killed at
+/// `timeout`, never started, or its status unreadable, naming the error.
+fn exited(
+    program: &str,
+    timeout: Duration,
+    ended: Ended,
+) -> Result<(ExitStatus, Vec<u8>, Vec<u8>), String> {
+    match ended {
+        Ended::Exited(status, stdout, stderr) => Ok((status, stdout, stderr)),
+        Ended::TimedOut => Err(format!(
+            "{program} was killed after {} s",
+            timeout.as_secs()
+        )),
+        Ended::NotStarted(error) => Err(format!("{program} did not start: {error}")),
+        Ended::Unobserved(error) => Err(format!(
+            "{program}'s status could not be read, so it was killed: {error}"
+        )),
+    }
+}
+
+/// Kills `child`, the leader of its own process group, with the processes it started
+/// ([`kill_group`], the test runner's), and reaps it, so no process and no zombie is left.
 fn stop(child: &mut Child) {
-    let _ = child.kill();
+    kill_group(child);
     let _ = child.wait();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Kills the `sleep` with this pid when a test ends with it still there, so none outlives the
+    /// test run.
+    struct Sleeping(u32);
+
+    impl Drop for Sleeping {
+        fn drop(&mut self) {
+            let proc = std::path::Path::new("/proc").join(self.0.to_string());
+            if std::fs::read(proc.join("cmdline")).is_ok_and(|line| line.starts_with(b"sleep\0")) {
+                let _ = Command::new("kill")
+                    .args(["-s", "KILL", "--", &self.0.to_string()])
+                    .status();
+            }
+        }
+    }
+
+    #[test]
+    fn a_status_that_cannot_be_read_is_refused_with_its_error_and_never_as_a_timeout() {
+        let mut command = Command::new("sleep");
+        command
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        {
+            use std::os::unix::process::CommandExt as _;
+            command.process_group(0);
+        }
+        let child = command.spawn().unwrap();
+        let sleeping = Sleeping(child.id());
+        let ended = finish(child, Instant::now() + Duration::from_secs(30), |_| {
+            Err(std::io::Error::other("the fixture's wait failed"))
+        });
+        assert!(matches!(ended, Ended::Unobserved(_)));
+        let reason = exited("record-note", Duration::from_secs(30), ended).unwrap_err();
+        assert_eq!(
+            reason,
+            "record-note's status could not be read, so it was killed: the fixture's wait failed"
+        );
+        assert!(!reason.contains("killed after"), "{reason}");
+        // The program was killed and reaped: no process and no zombie is left.
+        let proc = std::path::Path::new("/proc").join(sleeping.0.to_string());
+        assert!(!proc.exists(), "{} is still there", proc.display());
+    }
 
     #[test]
     fn a_file_with_an_undeclared_member_is_refused_naming_it() {
