@@ -194,10 +194,11 @@ fn usage(input_tokens: i64, output_tokens: i64) -> EffectUsage {
 }
 
 /// An effect port performing every action, each invocation reporting `usage`, recording what it
-/// was handed; or, `pending`, answering every invocation `Pending`.
+/// was handed; or, `pending`, answering every invocation `Pending`, with `ends_run` as given.
 struct Effects {
     usage: Option<EffectUsage>,
     pending: bool,
+    ends_run: bool,
     invoked: Mutex<VecDeque<ActionRequestData>>,
 }
 
@@ -206,6 +207,7 @@ impl Effects {
         Self {
             usage,
             pending: false,
+            ends_run: false,
             invoked: Mutex::new(VecDeque::new()),
         }
     }
@@ -214,6 +216,14 @@ impl Effects {
         Self {
             pending: true,
             ..Self::reporting(None)
+        }
+    }
+
+    /// Answers every invocation `Pending` with `ends_run`.
+    fn pending_ending() -> Self {
+        Self {
+            ends_run: true,
+            ..Self::pending()
         }
     }
 
@@ -242,6 +252,7 @@ impl EffectPort for Effects {
         if self.pending {
             return Ok(EffectOutcome::Pending(EffectOutcomePending {
                 report: Value::Text("still evaluating".to_owned()),
+                ends_run: self.ends_run,
             }));
         }
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {
@@ -259,6 +270,8 @@ enum Clock<'a> {
     Fixed(&'static str),
     /// [`BEFORE`] until the session was called once, [`AFTER`] from then on.
     PastDeadlineAfterFirstCall(&'a Session),
+    /// Each reading in turn, the last one from then on.
+    Readings(VecDeque<&'static str>),
 }
 
 /// New ids from counters, a trusted clock, no step budget, the run budget it was given and the
@@ -303,10 +316,14 @@ impl LoopContext for Context<'_> {
     }
 
     fn now(&mut self) -> Timestamp {
-        let reading = match self.clock {
-            Clock::Fixed(reading) => reading,
+        let reading = match &mut self.clock {
+            Clock::Fixed(reading) => *reading,
             Clock::PastDeadlineAfterFirstCall(session) if session.calls() == 0 => BEFORE,
             Clock::PastDeadlineAfterFirstCall(_) => AFTER,
+            Clock::Readings(readings) if readings.len() > 1 => {
+                readings.pop_front().unwrap_or(AFTER)
+            }
+            Clock::Readings(readings) => readings.front().copied().unwrap_or(AFTER),
         };
         Timestamp(reading.to_owned())
     }
@@ -958,4 +975,146 @@ fn a_resume_under_a_deadline_that_is_not_rfc_3339_takes_nothing() {
     assert_eq!(stored.state, SuspensionState::Pending, "nothing was taken");
     assert_eq!(effects.invoked(), 0, "nothing is performed");
     assert_eq!(session.calls(), 0);
+}
+
+/// A suspension store under the test's own directory `name`, holding `commission`'s Suspension of
+/// an `evaluate` request at revision 1, the request `0x301` of the Run `0x101`.
+fn holding(name: &str, commission: &Commission<commission_state::Assigned>) -> FileSuspensionStore {
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join("run-and-action-budgets")
+        .join(name);
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+    let suspensions = FileSuspensionStore::open(&dir).expect("the suspension store opens");
+    let commission_id = commission.data().commission_id.clone();
+    let held = suspensions.hold(HoldSuspension {
+        suspension: SuspensionKey {
+            commission_id: commission_id.clone(),
+        },
+        commission_id,
+        run_id: RunId(uuid(0x101)),
+        run_case_revision: 1,
+        action_request_id: ActionRequestId(uuid(0x301)),
+        case_id: commission.data().case_id.clone(),
+        expected_case_revision: 1,
+        action: EVALUATE.to_owned(),
+        arguments: ProposedActionArguments(Value::Null),
+        reason: SuspensionReason::Authority(Value::Null),
+    });
+    assert!(matches!(held, HoldSuspensionOutcome::Held { .. }));
+    suspensions
+}
+
+/// A resume past its run budget's deadline performs nothing, as a passed deadline stops a run
+/// before an executor call: the resume ends suspended for `Deadline`. Read past it before the
+/// take, the resume takes nothing and the Suspension stays `Pending`; read before it then, and
+/// past it right before the held request is invoked, the Suspension the resume took is released.
+/// Either way the effect port is never invoked and no executor runs.
+#[test]
+fn a_resume_past_its_deadline_performs_nothing() {
+    let passed = suspended_for(RunBudgetBreach {
+        action: None,
+        limit: BudgetLimit::Deadline,
+        max: DEADLINE_SECONDS,
+        charged: Some(AFTER_SECONDS),
+    });
+    let resumed = |name: &str, clock: Clock<'static>| {
+        let case = CaseId(format!("case-budget-{name}"));
+        let commission = commission(&case);
+        let suspensions = holding(name, &commission);
+        let session = Session::reporting(None);
+        let effects = Effects::reporting(None);
+        let budget = RunBudget {
+            deadline: Some(Timestamp(DEADLINE.to_owned())),
+            ..unlimited()
+        };
+        let mut runs = RunStore::new(|| RunId(uuid(0x102)));
+        let end = resume_after_grant(
+            &governor(&case),
+            &session,
+            &StaticAuthorityProvider::new(),
+            &effects,
+            &commission,
+            &mut runs,
+            &suspensions,
+            &mut Context::reading(budget, clock, default_policy()),
+        );
+        let stored = suspensions
+            .get(&commission.data().commission_id)
+            .expect("the store reads");
+        let run = RunStorage::get(&runs, &RunId(uuid(0x101))).map(|held| held.state);
+        (
+            end,
+            stored.map(|held| held.state),
+            run,
+            effects.invoked(),
+            session.calls(),
+        )
+    };
+
+    let (end, stored, run, invoked, calls) =
+        resumed("resume-past-deadline-before-take", Clock::Fixed(AFTER));
+    let end = end.unwrap_or_else(|error| panic!("the resume failed: {error:?}"));
+    assert_eq!(end.outcome, passed, "ended as a passed deadline ends a run");
+    assert_eq!(invoked, 0, "nothing is performed");
+    assert_eq!(
+        stored,
+        Some(SuspensionState::Pending),
+        "nothing was taken: the Suspension stays pending"
+    );
+    assert_eq!(run, Some(RunState::Suspended));
+    assert_eq!(calls, 0, "no executor runs");
+
+    let (end, stored, run, invoked, calls) = resumed(
+        "resume-past-deadline-after-take",
+        Clock::Readings(VecDeque::from([BEFORE, AFTER])),
+    );
+    let end = end.unwrap_or_else(|error| panic!("the resume failed: {error:?}"));
+    assert_eq!(end.outcome, passed, "ended as a passed deadline ends a run");
+    assert_eq!(invoked, 0, "nothing is performed");
+    assert_eq!(stored, None, "the Suspension the resume took is released");
+    assert_eq!(run, Some(RunState::Suspended));
+    assert_eq!(calls, 0, "no executor runs");
+}
+
+/// Under `on_breach: KeepStep`, a kept step's proposal answered `Pending` with `ends_run` is not
+/// invoked again, and the breach the step kept ends the run first: `Waiting`, naming the request,
+/// for the breach.
+#[test]
+fn keep_step_ends_a_run_waiting_on_an_ending_pending_answer_for_its_breach() {
+    let session = Session::reporting(Some(call_usage(60, 50)));
+    let effects = Effects::pending_ending();
+    let budget = RunBudget {
+        max_tokens: Some(100),
+        ..unlimited()
+    };
+
+    let (end, runs) = run_session(
+        &session,
+        &effects,
+        None,
+        &StaticAuthorityProvider::new(),
+        &mut Context::reading(budget, Clock::Fixed(BEFORE), keep_step()),
+    );
+    let end = end.unwrap_or_else(|error| panic!("the loop failed: {error}"));
+
+    assert_eq!(
+        end.outcome,
+        RunOutcome::Waiting(RunOutcomeWaiting {
+            action_request_ids: vec![ActionRequestId(uuid(0x301))],
+            reason: SuspensionReason::RunBudget(RunBudgetBreach {
+                action: None,
+                limit: BudgetLimit::MaxTokens,
+                max: 100,
+                charged: Some(110),
+            }),
+        })
+    );
+    assert_eq!(effects.invoked(), 1, "not invoked again");
+    assert_eq!(session.calls(), 1);
+    assert_eq!(
+        RunStorage::get(&runs.ports, &end.run_id).map(|held| held.state),
+        Some(RunState::Suspended)
+    );
 }

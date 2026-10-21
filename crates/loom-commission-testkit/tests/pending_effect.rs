@@ -7,6 +7,11 @@
 //! not invoked again. Each answer is one trial on the run budget and one observation, never
 //! evidence. A budget that ends the run while a request is pending ends it `Waiting`, naming the
 //! request and the budget's reason, where it would otherwise be `Suspended` (`JudgeBudgetStop`).
+//!
+//! `story:pending-answer-ends-run`: a pending answer with `ends_run` is not invoked again. Once it
+//! was recorded, charged and observed, and the run budget's spending limits checked, the run ends
+//! `Waiting`, naming the request (for a fan-out, every read answered pending, in proposal order),
+//! the Run suspended for `SuspensionReason::Time` carrying the port's report.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Mutex, PoisonError};
@@ -19,7 +24,7 @@ use b10x_loom_commission::model::responsibility::{
     ActionRequestStale, ActionStatus, AgentRevisionId, AuthorityContext, AuthorityVerdict,
     AuthorityVerdictApprovalRequired, AuthorityVerdictDeny, BudgetLimit, CaseId, ChargedUsage,
     Commission, CommissionData, CommissionId, EffectOutcome, EffectOutcomePending,
-    EffectOutcomePerformed, ExecutorOutcome, ExecutorOutcomeProposedAction,
+    EffectOutcomePerformed, EffectUsage, ExecutorOutcome, ExecutorOutcomeProposedAction,
     ExecutorOutcomeProposedReads, FrontierAction, ObservationId, PrincipalId,
     ProposedActionArguments, RevalidateActionRequestOutcome, RunBudget, RunBudgetBreach, RunId,
     RunOutcome, RunOutcomeAwaitingApproval, RunOutcomeCaseMovedOn, RunOutcomeIdleBound,
@@ -97,7 +102,21 @@ fn idle() -> ExecutorOutcome {
 fn pending(seen: &str) -> EffectOutcome {
     EffectOutcome::Pending(EffectOutcomePending {
         report: Value::Text(seen.to_owned()),
+        ends_run: false,
     })
+}
+
+/// A pending answer with `ends_run`: the port asks not to be invoked again in this run.
+fn ending(seen: &str) -> EffectOutcome {
+    EffectOutcome::Pending(EffectOutcomePending {
+        report: Value::Text(seen.to_owned()),
+        ends_run: true,
+    })
+}
+
+/// The reason a run a pending answer with `ends_run` ended is suspended for: the port's report.
+fn time(seen: &str) -> SuspensionReason {
+    SuspensionReason::Time(Value::Text(seen.to_owned()))
 }
 
 fn performed(action: &str) -> EffectOutcome {
@@ -1279,4 +1298,321 @@ fn a_budget_reached_while_two_reads_are_pending_names_both_in_order() {
             )])),
         })
     );
+}
+
+/// The port answers the proposed request pending with `ends_run`: it is invoked once and never
+/// again, the run ends `Waiting`, naming it, for the time the port's report names, the executor is
+/// called once, and the Run is suspended for that reason. On 0.28.0 a pending answer could not end
+/// the run: the request was invoked again at the next iteration.
+#[test]
+fn a_pending_answer_that_ends_the_run_is_not_invoked_again() {
+    let case = CaseId("case-pending-ends-run".to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(case.clone(), [listing(4, vec![admissible(CHECK)])]);
+    let executor = ScriptedExecutor::new([proposal(CHECK), idle(), idle()]);
+    let effects = Effects::answering(CHECK, vec![ending("job queued"), performed(CHECK)]);
+
+    let (end, runs) = run(&governor, &executor, &effects, &case, None);
+
+    let made = request(1, &end.run_id, &case, 4, CHECK);
+    assert_eq!(effects.invoked(), vec![made], "the port is invoked once");
+    assert_eq!(
+        end.outcome,
+        RunOutcome::Waiting(RunOutcomeWaiting {
+            action_request_ids: vec![ActionRequestId(uuid(0x301))],
+            reason: time("job queued"),
+        })
+    );
+    assert_eq!(executor.calls().len(), 1, "the executor is called once");
+    assert_eq!(
+        stored_state(&runs, &end.run_id),
+        RunState::Suspended,
+        "the Run is suspended for the time the port named"
+    );
+}
+
+/// The answer that ends the run is recorded in the loop's effects, charged one trial to the run
+/// and to its action, and delivered as one observation, never as evidence.
+#[test]
+fn a_pending_answer_that_ends_the_run_is_recorded_charged_and_observed_once() {
+    let case = CaseId("case-pending-ends-run-charged".to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(case.clone(), [listing(4, vec![admissible(CHECK)])]);
+    let executor = ScriptedExecutor::new([proposal(CHECK), idle(), idle()]);
+    let effects = Effects::answering(CHECK, vec![ending("job queued")]);
+
+    let (end, _) = run(&governor, &executor, &effects, &case, None);
+
+    assert_eq!(end.effects, vec![ending("job queued")], "recorded once");
+    let charged = ChargedUsage {
+        trials: 1,
+        input_tokens: 0,
+        output_tokens: 0,
+        duration_ms: 0,
+        cost_micro_usd: Some(0),
+    };
+    assert_eq!(end.charges.run, charged, "one trial on the run");
+    assert_eq!(
+        end.charges.actions,
+        vec![ActionCharge {
+            action: CHECK.to_owned(),
+            charged,
+        }],
+        "one trial on the action"
+    );
+    let observed: Vec<_> = governor
+        .observations()
+        .into_iter()
+        .filter(|observation| observation.source == "effect")
+        .collect();
+    assert_eq!(observed.len(), 1, "observed once");
+    let member = |key: &str| observed[0].payload.member(key).cloned();
+    assert_eq!(member("outcome"), Some(Value::Text("Pending".to_owned())));
+    assert_eq!(member("report"), Some(Value::Text("job queued".to_owned())));
+    assert!(
+        governor.evidence().is_empty(),
+        "an effect became evidence: {:?}",
+        governor.evidence()
+    );
+}
+
+/// `ends_run: false` is the pending answer as before: the request is invoked again at the next
+/// iteration, with no executor call between, until the port answers otherwise, and the run goes
+/// on.
+#[test]
+fn a_pending_answer_with_ends_run_false_is_invoked_again() {
+    let case = CaseId("case-pending-ends-run-false".to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(case.clone(), [listing(4, vec![admissible(CHECK)])]);
+    let executor = ScriptedExecutor::new([proposal(CHECK), idle(), idle()]);
+    let effects = Effects::answering(CHECK, vec![pending("job queued"), performed(CHECK)]);
+
+    let (end, _) = run(&governor, &executor, &effects, &case, None);
+
+    let made = request(1, &end.run_id, &case, 4, CHECK);
+    assert_eq!(effects.invoked(), vec![made.clone(), made]);
+    assert_eq!(end.effects, vec![pending("job queued"), performed(CHECK)]);
+    assert_eq!(executor.calls().len(), 3, "the run goes on once performed");
+    assert_eq!(
+        end.outcome,
+        RunOutcome::IdleBound(RunOutcomeIdleBound { idle_iterations: 2 })
+    );
+}
+
+/// A request answered pending, invoked again and answered pending with `ends_run`: it is not
+/// invoked a third time, and the run ends `Waiting` for the time the second answer names.
+#[test]
+fn a_pending_request_invoked_again_that_ends_the_run_is_not_invoked_a_third_time() {
+    let case = CaseId("case-pending-again-ends-run".to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(case.clone(), [listing(4, vec![admissible(CHECK)])]);
+    let executor = ScriptedExecutor::new([proposal(CHECK), idle(), idle()]);
+    let effects = Effects::answering(
+        CHECK,
+        vec![
+            pending("job queued"),
+            ending("job running"),
+            performed(CHECK),
+        ],
+    );
+
+    let (end, runs) = run(&governor, &executor, &effects, &case, None);
+
+    let made = request(1, &end.run_id, &case, 4, CHECK);
+    assert_eq!(effects.invoked(), vec![made.clone(), made], "invoked twice");
+    assert_eq!(
+        end.outcome,
+        RunOutcome::Waiting(RunOutcomeWaiting {
+            action_request_ids: vec![ActionRequestId(uuid(0x301))],
+            reason: time("job running"),
+        })
+    );
+    assert_eq!(executor.calls().len(), 1);
+    assert_eq!(stored_state(&runs, &end.run_id), RunState::Suspended);
+}
+
+/// Four reads proposed together: `search` answered pending, `fetch` performed, and `scan` and
+/// `crawl` pending with `ends_run`. Once every read joined, the run ends `Waiting`, naming every
+/// read answered pending, with or without `ends_run`, in proposal order, for the time the report of
+/// `scan`, the first that asked to end the run, names. No read is invoked again.
+#[test]
+fn a_fan_out_whose_read_ends_the_run_waits_on_every_pending_read() {
+    let case = CaseId("case-pending-read-ends-run".to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(
+        case.clone(),
+        [listing(
+            4,
+            vec![
+                admissible("search"),
+                admissible("fetch"),
+                admissible("scan"),
+                admissible("crawl"),
+            ],
+        )],
+    );
+    let executor = ScriptedExecutor::new([fan_out(&["search", "fetch", "scan", "crawl"]), idle()]);
+    let effects = Effects::answering("search", vec![pending("index building")])
+        .with("scan", vec![ending("scan queued")])
+        .with("crawl", vec![ending("crawl queued")])
+        .reading(vec!["search", "fetch", "scan", "crawl"]);
+
+    let (end, runs) = run(&governor, &executor, &effects, &case, None);
+
+    assert_eq!(
+        end.effects,
+        vec![
+            pending("index building"),
+            performed("fetch"),
+            ending("scan queued"),
+            ending("crawl queued"),
+        ],
+        "every read joined and was recorded"
+    );
+    assert_eq!(effects.invoked().len(), 4, "each read is invoked once");
+    assert_eq!(
+        end.outcome,
+        RunOutcome::Waiting(RunOutcomeWaiting {
+            action_request_ids: vec![
+                ActionRequestId(uuid(0x301)),
+                ActionRequestId(uuid(0x303)),
+                ActionRequestId(uuid(0x304)),
+            ],
+            reason: time("scan queued"),
+        })
+    );
+    assert_eq!(executor.calls().len(), 1, "no executor runs after it");
+    assert_eq!(stored_state(&runs, &end.run_id), RunState::Suspended);
+}
+
+/// The run budget's spending limits are checked first: a fan-out whose performed read passed the
+/// run's input-token limit, beside a read answered pending with `ends_run`, ends `Waiting` for the
+/// breach, naming the pending read, as at any budget stop.
+#[test]
+fn a_breach_beside_a_pending_answer_that_ends_the_run_ends_it_first() {
+    let case = CaseId("case-pending-ends-run-breach".to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(
+        case.clone(),
+        [listing(4, vec![admissible("fetch"), admissible("scan")])],
+    );
+    let executor = ScriptedExecutor::new([fan_out(&["fetch", "scan"]), idle()]);
+    let spent = EffectOutcome::Performed(EffectOutcomePerformed {
+        report: Value::Text("done fetch".to_owned()),
+        attempt: None,
+        audit: None,
+        usage: Some(EffectUsage {
+            input_tokens: 150,
+            output_tokens: 0,
+            duration_ms: 0,
+            cost_micro_usd: None,
+        }),
+    });
+    let effects = Effects::answering("fetch", vec![spent])
+        .with("scan", vec![ending("scan queued")])
+        .reading(vec!["fetch", "scan"]);
+    let mut context = Context::new(None);
+    context.run_budget = Some(RunBudget {
+        max_steps: None,
+        max_tokens_in: Some(100),
+        max_tokens_out: None,
+        max_duration_ms: None,
+        max_cost_micro_usd: None,
+        max_tokens: None,
+        deadline: None,
+        per_action: Vec::new(),
+    });
+
+    let (end, _) = run_with(
+        &governor,
+        &executor,
+        &StaticAuthorityProvider::new(),
+        &effects,
+        &case,
+        &mut context,
+    );
+
+    assert_eq!(
+        end.outcome,
+        RunOutcome::Waiting(RunOutcomeWaiting {
+            action_request_ids: vec![ActionRequestId(uuid(0x302))],
+            reason: SuspensionReason::RunBudget(RunBudgetBreach {
+                action: None,
+                limit: BudgetLimit::MaxTokensIn,
+                max: 100,
+                charged: Some(150),
+            }),
+        })
+    );
+    assert_eq!(effects.invoked().len(), 2);
+}
+
+/// A resumed request answered pending with `ends_run`: the resume releases the Suspension it took
+/// first, the request is not invoked again, no executor runs, and the run ends `Waiting`, naming
+/// the request, for the time the port's report names, the Run suspended for it.
+#[test]
+fn a_resumed_request_whose_pending_answer_ends_the_run_is_released_and_waits() {
+    let case = CaseId("case-pending-resumed-ends-run".to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(case.clone(), [gated_listing(7)]);
+    let effects = Effects::answering(MERGE, vec![ending("merge queued"), performed(MERGE)]);
+    let suspensions = SuspensionStore::new();
+    let withheld = AuthorityVerdict::ApprovalRequired(AuthorityVerdictApprovalRequired {
+        request: "approve the merge".to_owned(),
+    });
+    let suspended = run_with_suspension(
+        &governor,
+        &ScriptedExecutor::new([proposal(MERGE)]),
+        &StaticAuthorityProvider::new().answer(CAPABILITY, withheld),
+        &effects,
+        &commission(&case),
+        &mut runs(0),
+        &suspensions,
+        &mut Context::new(None),
+    )
+    .unwrap_or_else(|error| panic!("the loop failed: {error:?}"));
+    assert!(
+        matches!(suspended.outcome, RunOutcome::NeedsAuthority(_)),
+        "precondition: the merge is withheld and held as a Suspension"
+    );
+
+    let executor = ScriptedExecutor::new([idle(), idle()]);
+    let authority =
+        StaticAuthorityProvider::new().answer(CAPABILITY, AuthorityVerdict::Allow(Unit(true)));
+    let mut context = Context::new(None);
+    context.requests = 0x380;
+    context.observations = 0x480;
+    let mut store = runs(0x80);
+    let end = resume_after_grant(
+        &governor,
+        &executor,
+        &authority,
+        &effects,
+        &commission(&case),
+        &mut store,
+        &suspensions,
+        &mut context,
+    )
+    .unwrap_or_else(|error| panic!("the resume failed: {error:?}"));
+
+    let held = request(1, &suspended.run_id, &case, 7, MERGE);
+    assert_eq!(
+        effects.invoked(),
+        vec![held.clone()],
+        "invoked by the resume and not again"
+    );
+    assert_eq!(
+        end.outcome,
+        RunOutcome::Waiting(RunOutcomeWaiting {
+            action_request_ids: vec![held.action_request_id],
+            reason: time("merge queued"),
+        })
+    );
+    let stored = SuspensionPort::get(&suspensions, &commission(&case).data().commission_id)
+        .unwrap_or_else(|error| panic!("the store reads: {error:?}"));
+    assert_eq!(stored, None, "the Suspension is released");
+    assert!(executor.calls().is_empty(), "no executor runs");
+    let run = RunStorage::get(&store, &end.run_id)
+        .unwrap_or_else(|| panic!("the Run {} is not stored", end.run_id.0.0));
+    assert_eq!(run.state, RunState::Suspended);
 }

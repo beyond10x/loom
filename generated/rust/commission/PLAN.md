@@ -1,7 +1,7 @@
 <!--
   generated from commission v1
-  model digest 110ce466d1465f27156ddee90a23c5c3abc02e24613044348bd9b6aab4fc474d
-  contract digest 897513a9f8ac1418fe5ce912275c08613edd0ec8f9de4f7ff603ba3a1abdb659
+  model digest 24f933215e98a20ff4758a4c398276a46849806e95ade4524297a92f95fe25fc
+  contract digest 079c52a5c30f36a2d41adc343a508d804fd1658d2217aeeefa310d5094f46d2c
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — commission v1
