@@ -183,7 +183,7 @@ impl ProcessRunner for Probe {
     }
 
     fn start(&mut self, plan: &LaunchPlanView) -> std::io::Result<Box<dyn HarnessProcess>> {
-        (self.0)(&plan.cwd);
+        (self.0)(plan.cwd);
         let init = serde_json::json!({
             "type": "system", "subtype": "init", "claude_code_version": "2.1.304",
             "cwd": plan.cwd.display().to_string(), "tools": TOOLS, "mcp_servers": [],
