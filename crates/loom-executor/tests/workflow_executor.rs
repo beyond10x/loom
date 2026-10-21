@@ -21,13 +21,15 @@ use b10x_loom_commission::model::responsibility::{
     ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, AuthorityVerdict,
     AuthorityVerdictApprovalRequired, CaseId, Commission, CommissionData, CommissionId,
     CompletionDetermination, EffectOutcome, EffectOutcomePending, EffectOutcomePerformed,
-    EffectOutcomeRefused, Frontier, FrontierAction, FrontierData, FrontierId, GovernorError,
-    Observation, ObservationId, PrincipalId, RunId, RunOutcome, RunOutcomeSuspended,
+    EffectOutcomeRefused, ExecutorOutcome, ExecutorOutcomeProposedAction, ExecutorStep,
+    ExecutorUsage, Frontier, FrontierAction, FrontierData, FrontierId, GovernorError, Observation,
+    ObservationId, PrincipalId, ProposedActionArguments, RunId, RunOutcome, RunOutcomeSuspended,
     SuspensionReason, Unit, commission_state, frontier_state, observation_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use b10x_loom_commission::ports::evidence::ObservationPort;
+use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked};
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
@@ -42,7 +44,9 @@ use b10x_loom_executor::model::metering::RunUsageReport;
 use b10x_loom_executor::model::primitives::Uuid;
 use b10x_loom_executor::model::run::{CommissionRunId, SessionData, SessionId};
 use b10x_loom_executor::model::workflow::WorkflowDefinition;
-use b10x_loom_executor::workflow::{self, DefinitionError, RecordingEffects, WorkflowExecutor};
+use b10x_loom_executor::workflow::{
+    self, DefinitionError, Judgement, RecordingEffects, WorkflowExecutor,
+};
 use b10x_loom_executor::{EmptyObjectArguments, FirstAdmissibleSelector, Loom};
 use serde_json::json;
 
@@ -835,5 +839,199 @@ fn a_step_advances_on_the_performed_effect_after_a_pending_one() {
         matches!(&ran.end.outcome, RunOutcome::NeedsAuthority(needs) if needs.request == "merge-approval"),
         "{:?}",
         ran.end.outcome
+    );
+}
+
+/// One call of the host's executor: the judgement it was built for, the actions of the frontier
+/// it was handed, and what the case had performed when it was called.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HostCall {
+    workflow: String,
+    step: String,
+    instructions: String,
+    actions: Vec<String>,
+    handed: Vec<String>,
+    performed_before: Vec<String>,
+}
+
+/// The host's own executor of the workflow's judgement steps, an agent the workflow knows nothing
+/// of: each call proposes the next scripted action and reports what the call spent.
+struct Host<'c> {
+    case: &'c Case,
+    script: Mutex<VecDeque<&'static str>>,
+    calls: Mutex<Vec<HostCall>>,
+}
+
+/// What each call of the host's executor reports it spent.
+const HOST_INPUT_TOKENS: i64 = 40;
+
+impl<'c> Host<'c> {
+    fn new(case: &'c Case, script: Vec<&'static str>) -> Self {
+        Self {
+            case,
+            script: Mutex::new(script.into()),
+            calls: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn calls(&self) -> Vec<HostCall> {
+        self.calls
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+/// The host's executor built for one judgement.
+struct HostStep<'h> {
+    host: &'h Host<'h>,
+    judgement: Judgement,
+}
+
+impl AgentExecutor for HostStep<'_> {
+    fn run(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorOutcome {
+        self.run_with_usage(commission, frontier).outcome
+    }
+
+    fn run_with_usage(
+        &self,
+        _commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorStep {
+        self.host
+            .calls
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(HostCall {
+                workflow: self.judgement.workflow.clone(),
+                step: self.judgement.step.clone(),
+                instructions: self.judgement.instructions.clone(),
+                actions: self.judgement.actions.clone(),
+                handed: frontier
+                    .data()
+                    .actions
+                    .iter()
+                    .map(|listed| listed.action.clone())
+                    .collect(),
+                performed_before: self.host.case.performed(),
+            });
+        let next = self
+            .host
+            .script
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .pop_front();
+        ExecutorStep {
+            outcome: next.map_or(ExecutorOutcome::NoUsefulAction(Unit(true)), |action| {
+                ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
+                    action: action.to_owned(),
+                    arguments: ProposedActionArguments(object(&[("path", text("src/lib.rs"))])),
+                })
+            }),
+            usage: Some(ExecutorUsage {
+                input_tokens: HOST_INPUT_TOKENS,
+                output_tokens: 5,
+                duration_ms: 10,
+                cost_micro_usd: None,
+            }),
+        }
+    }
+}
+
+/// story:judgement-step-any-executor: the host supplies its own executor for the judgement step.
+/// It is called for the judgement step only (after `repository.inspect`, before the edit), built
+/// for that step and told its instructions, and handed a frontier listing only the step's actions.
+/// Its first proposal, `tests.run`, an action the case admits but the step does not name, is
+/// refused: it is never proposed, and `tests.run` is proposed only by its own deterministic step.
+/// What each of its calls reports it spent is the usage of that call's step. No model is given.
+#[test]
+fn a_judgement_step_runs_on_a_supplied_executor() {
+    let case = Case::new(Vec::new());
+    let effects = RecordingEffects::new(CaseEffects::new(&case, Vec::new()));
+    let host = Host::new(&case, vec![RUN, EDIT]);
+    let meter = RunMeter::new(None);
+    let executor = MeteredExecutor::new(
+        WorkflowExecutor::with_executor(
+            |judgement: &Judgement| HostStep {
+                host: &host,
+                judgement: judgement.clone(),
+            },
+            definition(DEFINITION),
+            effects.log(),
+        )
+        .with_meter(&meter),
+        &meter,
+    );
+    let ids = AtomicU64::new(0x500);
+    let mut runs = Generated::new(RunStore::new(move || {
+        RunId(uuid(ids.fetch_add(1, Ordering::SeqCst)))
+    }));
+    let authority = StaticAuthorityProvider::new().answer(
+        MERGE,
+        AuthorityVerdict::ApprovalRequired(AuthorityVerdictApprovalRequired {
+            request: "merge-approval".to_owned(),
+        }),
+    );
+    let end = run_until_blocked(
+        &case,
+        &executor,
+        &authority,
+        &effects,
+        &commission(),
+        &mut runs,
+        &mut Context::default(),
+    )
+    .unwrap_or_else(|error| panic!("the loop failed: {error:?}"));
+    let report = meter.report(&end.run_id);
+
+    assert!(
+        matches!(&end.outcome, RunOutcome::NeedsAuthority(needs) if needs.request == "merge-approval"),
+        "the workflow runs to the merge approval: {:?}",
+        end.outcome
+    );
+    assert_eq!(case.performed(), [INSPECT, EDIT, RUN]);
+    let call = HostCall {
+        workflow: "change".to_owned(),
+        step: "edit".to_owned(),
+        instructions: "Edit the implementation so the failing test passes.".to_owned(),
+        actions: vec![EDIT.to_owned()],
+        handed: vec![EDIT.to_owned()],
+        performed_before: vec![INSPECT.to_owned()],
+    };
+    assert_eq!(
+        host.calls(),
+        [call.clone(), call],
+        "the host's executor is called for the judgement step only, told its instructions and \
+         offered only its actions"
+    );
+    let proposed: Vec<String> = end
+        .requests
+        .iter()
+        .map(|made| made.request.action.clone())
+        .collect();
+    assert_eq!(
+        proposed,
+        [INSPECT, EDIT, RUN, MERGE],
+        "the host's proposal outside the step is never proposed"
+    );
+    let steps: Vec<(Option<&str>, i64, i64)> = report
+        .steps
+        .iter()
+        .map(|step| (step.label.as_deref(), step.model_calls, step.input_tokens))
+        .collect();
+    assert_eq!(
+        steps,
+        [
+            (Some("inspect"), 0, 0),
+            (Some("edit"), 0, HOST_INPUT_TOKENS),
+            (Some("edit"), 0, HOST_INPUT_TOKENS),
+            (Some("test"), 0, 0),
+            (Some("merge"), 0, 0)
+        ],
+        "each call of the host's executor reports its usage in its own step: {report:?}"
     );
 }
