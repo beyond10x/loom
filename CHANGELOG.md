@@ -12,6 +12,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-21
+
 ### Added
 
 - A workflow's judgement step runs on any `AgentExecutor` the host supplies (story:judgement-step-any-executor)
@@ -887,7 +889,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.30.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.31.0...HEAD
+[0.31.0]: https://github.com/beyond10x/loom/releases/tag/0.31.0
 [0.30.0]: https://github.com/beyond10x/loom/releases/tag/0.30.0
 [0.29.0]: https://github.com/beyond10x/loom/releases/tag/0.29.0
 [0.28.0]: https://github.com/beyond10x/loom/releases/tag/0.28.0
