@@ -44,6 +44,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** a judgement step sends two model requests per call (selection, then arguments) instead of one loop turn
 - **Breaking:** `workflow::load` no longer refuses an action whose id cannot be a tool name
 - **Breaking:** `ExecutorStep` gains `transcript_digest` and `summary`; a struct literal of it must name both
+- **Breaking:** Loom requires ESS 0.67.0 (story:ess-067-upgrade); specifications built with Loom's tasks need it
 
 ### Removed
 
