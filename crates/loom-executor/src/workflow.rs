@@ -63,7 +63,11 @@
 //! `loom.workflow.WorkflowRunRecord` after every performed step and at the end of every call: the
 //! steps performed, the step proposed and not yet seen performed, the outputs taken, the output a
 //! step could not produce, the steps attempted and, metered, the usage so far
-//! ([`RunMeter::carried`]). [`WorkflowExecutor::resume`] in another process reads it back, so the
+//! ([`RunMeter::carried`]; the record written at the end of a call, made through
+//! [`AgentExecutor::run_with_usage`] under a [`crate::metering::MeteredExecutor`] of the same
+//! meter, also carries what the host's executor reported the call spent, which that metered
+//! executor counts only once the call returned, so a run resumed from it reports it, once).
+//! [`WorkflowExecutor::resume`] in another process reads it back, so the
 //! run continues at the step after the last performed one with every output bound and no performed
 //! step proposed again, and its meter reports every segment ([`RunMeter::carry`]). The step
 //! proposed before the restart is expected again: a request performed after the restart (the held
@@ -670,8 +674,18 @@ impl fmt::Debug for Save {
 }
 
 impl Save {
-    /// The record of `position` under this Run.
+    /// The record of `position` under this Run, its usage what the meter counted.
     fn record(&self, position: &Position) -> WorkflowRunRecord {
+        self.record_with(position, None)
+    }
+
+    /// The record of `position` under this Run, its usage what the meter counted with `reported`
+    /// added, the usage the executor call running now reported ([`carried_with`]).
+    fn record_with(
+        &self,
+        position: &Position,
+        reported: Option<&ExecutorUsage>,
+    ) -> WorkflowRunRecord {
         let name = |index: usize| self.names.get(index).cloned().unwrap_or_default();
         WorkflowRunRecord {
             run: self.run.clone(),
@@ -700,13 +714,21 @@ impl Save {
                     why: unproduced.why.clone(),
                 }),
             attempted: position.attempted.clone(),
-            usage: self.meter.as_ref().map_or_else(no_usage, RunMeter::carried),
+            usage: self
+                .meter
+                .as_ref()
+                .map_or_else(no_usage, |meter| carried_with(meter, reported)),
         }
     }
 
     /// Writes the record of `position`; a write that fails is kept as why every later call ends.
     fn write(&self, position: &mut Position) {
-        let record = self.record(position);
+        self.write_with(position, None);
+    }
+
+    /// [`Self::write`], the record's usage with `reported` added ([`Self::record_with`]).
+    fn write_with(&self, position: &mut Position, reported: Option<&ExecutorUsage>) {
+        let record = self.record_with(position, reported);
         if let Err(error) = self.store.save(&record) {
             position.unsaved = Some(format!(
                 "the record of run `{}` could not be written: {error}",
@@ -1203,22 +1225,37 @@ impl<'h> WorkflowExecutor<'h> {
 }
 
 impl AgentExecutor for WorkflowExecutor<'_> {
-    /// [`Self::run_with_usage`]'s outcome: whoever calls `run` gets the outcome alone.
+    /// One call's outcome alone (see the module docs): whoever calls `run` hands on no usage, so
+    /// the run's record carries none of it either.
     fn run(
         &self,
         commission: &Commission<commission_state::Assigned>,
         frontier: &Frontier<frontier_state::Issued>,
     ) -> ExecutorOutcome {
-        self.run_with_usage(commission, frontier).outcome
+        self.call(commission, frontier, false).outcome
     }
 
     /// One call (see the module docs): its outcome, and what the judgement step's executor
     /// reported the call spent, which a deterministic step and the chooser report none of. A call
-    /// whose outcome the record could not keep reports the usage still: it was spent.
+    /// whose outcome the record could not keep reports the usage still: it was spent. The record
+    /// written at the end of the call carries that usage ([`carried_with`]).
     fn run_with_usage(
         &self,
         commission: &Commission<commission_state::Assigned>,
         frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorStep {
+        self.call(commission, frontier, true)
+    }
+}
+
+impl WorkflowExecutor<'_> {
+    /// One call, its record written at its end; `handed_on` says whether the caller hands the
+    /// call's usage on to the run ([`AgentExecutor::run_with_usage`]), so the record carries it.
+    fn call(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
+        handed_on: bool,
     ) -> ExecutorStep {
         let save = match self.save_handle() {
             Ok(save) => Some(save),
@@ -1232,7 +1269,8 @@ impl AgentExecutor for WorkflowExecutor<'_> {
         let step = self.take_step(commission, frontier, save.as_ref());
         if let Some(save) = &save {
             let mut position = self.position();
-            save.write(&mut position);
+            let reported = step.usage.as_ref().filter(|_| handed_on);
+            save.write_with(&mut position, reported);
             if let Some(why) = position.unsaved.clone() {
                 // What the call proposed would not be known after a restart: it is not proposed.
                 return ExecutorStep {
@@ -1605,6 +1643,41 @@ fn proposal_of(request: &StepRequest) -> ExecutorOutcomeProposedAction {
 /// `run` as the generated model names a Commission run.
 fn run_id(run: &RunId) -> CommissionRunId {
     CommissionRunId(Uuid(run.0.0.clone()))
+}
+
+/// What `meter` counted, as a run record carries it, with `reported` added to the step of the
+/// executor call running on this thread: what that call, a judgement step on the host's executor,
+/// reported it spent. The [`crate::metering::MeteredExecutor`] that opened the step on this meter
+/// adds that usage only once the call returned, so the record written at the end of the call
+/// carries it already, as the meter will: its tokens added, and its cost to the step's, absent when
+/// the usage carries none (a negative figure counts nothing). Every record written later, by
+/// [`WorkflowExecutor::save`] or a later call, takes it from the meter instead, so it is counted
+/// once. With no step of `meter` open on this thread (the workflow is not under a metered executor
+/// of its meter), the meter never counts the usage, and neither does the record.
+fn carried_with(meter: &RunMeter, reported: Option<&ExecutorUsage>) -> CarriedUsage {
+    let mut carried = meter.carried();
+    let Some(usage) = reported else {
+        return carried;
+    };
+    // `step_here` answers the step of the executor call of `meter` running on this thread, and
+    // otherwise the step it is handed: `usize::MAX`, a step no meter opens, says none runs here.
+    let open = meter.step_here(usize::MAX);
+    let count = |figure: i64| figure.max(0);
+    if let Some(step) = carried
+        .steps
+        .iter_mut()
+        .find(|step| open != usize::MAX && usize::try_from(step.step).ok() == Some(open))
+    {
+        step.input_tokens = step.input_tokens.saturating_add(count(usage.input_tokens));
+        step.output_tokens = step
+            .output_tokens
+            .saturating_add(count(usage.output_tokens));
+        step.cost_micro_usd = step
+            .cost_micro_usd
+            .zip(usage.cost_micro_usd.map(count))
+            .map(|(sum, cost)| sum.saturating_add(cost));
+    }
+    carried
 }
 
 /// The usage a run record carries for an unmetered run: nothing.

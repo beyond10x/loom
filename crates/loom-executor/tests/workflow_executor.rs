@@ -11,9 +11,9 @@
 //! (`MeteredModelPort`) under a `MeteredExecutor` sharing one `RunMeter`; nothing reaches a
 //! network. One case supplies the host's own executor instead.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::json::Value as CommissionValue;
@@ -37,9 +37,11 @@ use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked};
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
 use b10x_loom_executor::metering::{MeteredExecutor, MeteredModelPort, RunMeter};
 use b10x_loom_executor::model::metering::RunUsageReport;
-use b10x_loom_executor::model::workflow::WorkflowDefinition;
+use b10x_loom_executor::model::run::CommissionRunId;
+use b10x_loom_executor::model::workflow::{WorkflowDefinition, WorkflowRunRecord};
 use b10x_loom_executor::workflow::{
-    self, DefinitionError, Judgement, RecordingEffects, WorkflowExecutor,
+    self, DefinitionError, Judgement, RecordingEffects, RunStoreError, WorkflowExecutor,
+    WorkflowRunStore,
 };
 use llm_core::{
     BoxFuture, CallId, Cancel, Capabilities, Error as ModelError, Id, Item, Model, Protocol,
@@ -1247,4 +1249,189 @@ fn a_supplied_executors_proposal_the_frontier_blocks_is_never_proposed() {
         "{:?}",
         end.requests
     );
+}
+
+/// A run store in this process, keyed by the Run.
+#[derive(Default)]
+struct Records(Mutex<BTreeMap<String, WorkflowRunRecord>>);
+
+impl Records {
+    fn get(&self, run: &RunId) -> WorkflowRunRecord {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&run.0.0)
+            .cloned()
+            .unwrap_or_else(|| panic!("no record of run `{}`", run.0.0))
+    }
+}
+
+impl WorkflowRunStore for Records {
+    fn load(&self, run: &CommissionRunId) -> Result<Option<WorkflowRunRecord>, RunStoreError> {
+        Ok(self
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&run.0.0)
+            .cloned())
+    }
+
+    fn save(&self, record: &WorkflowRunRecord) -> Result<(), RunStoreError> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(record.run.0.0.clone(), record.clone());
+        Ok(())
+    }
+}
+
+/// An executor over another, held by reference: it forwards `run_with_usage` when `forwards`, and
+/// otherwise calls the inner `run` alone, as a wrapper that does not forward `run_with_usage` does,
+/// handing the inner call's usage on to nobody.
+struct Over<'e, E> {
+    inner: &'e E,
+    forwards: bool,
+}
+
+impl<E: AgentExecutor> AgentExecutor for Over<'_, E> {
+    fn run(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorOutcome {
+        self.inner.run(commission, frontier)
+    }
+
+    fn run_with_usage(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorStep {
+        if self.forwards {
+            self.inner.run_with_usage(commission, frontier)
+        } else {
+            ExecutorStep {
+                outcome: self.inner.run(commission, frontier),
+                usage: None,
+            }
+        }
+    }
+}
+
+/// The workflow whose last executor call is the judgement step on the host's executor: its merge
+/// needs an approval the provider withholds, so the run stops right after that call.
+const DECIDES_LAST: &str = r#"
+name: change
+protocol: software-change@1
+steps:
+  - name: inspect
+    kind: Deterministic
+    action: repository.inspect
+    arguments: {path: "src"}
+  - name: test
+    kind: Deterministic
+    action: tests.run
+    arguments: {}
+  - name: decide
+    kind: Judgement
+    actions: [repository.merge]
+    instructions: Merge once the tests ran.
+"#;
+
+/// story:judgement-step-any-executor, adversary pass 1: the record written at the end of the host's
+/// judgement call carries the usage the call reported exactly as the run's meter counts it once
+/// the call returned, and saving the record again (`WorkflowExecutor::save`) counts it once. A call
+/// whose usage nobody hands on (a wrapper that calls `run` alone) leaves it out of the meter and of
+/// the record alike.
+#[test]
+fn the_run_record_carries_a_host_executors_usage_once() {
+    for handed_on in [true, false] {
+        let case = Case::new(Vec::new());
+        let effects = RecordingEffects::new(CaseEffects::new(&case, Vec::new()));
+        let host = Host::new(&case, vec![MERGE]);
+        let meter = RunMeter::new(None);
+        let records = Arc::new(Records::default());
+        let run = RunId(uuid(0x900));
+        let workflow = WorkflowExecutor::with_executor(
+            |judgement: &Judgement| HostStep {
+                host: &host,
+                judgement: judgement.clone(),
+            },
+            definition(DECIDES_LAST),
+            effects.log(),
+        )
+        .with_meter(&meter)
+        .with_store(Arc::clone(&records) as Arc<dyn WorkflowRunStore + Send + Sync>);
+        workflow.begin(&run).expect("the run begins");
+        let executor = MeteredExecutor::new(
+            Over {
+                inner: &workflow,
+                forwards: handed_on,
+            },
+            &meter,
+        );
+        let ids = AtomicU64::new(0x500);
+        let mut runs = Generated::new(RunStore::new(move || {
+            RunId(uuid(ids.fetch_add(1, Ordering::SeqCst)))
+        }));
+        let authority = StaticAuthorityProvider::new().answer(
+            MERGE,
+            AuthorityVerdict::ApprovalRequired(AuthorityVerdictApprovalRequired {
+                request: "merge-approval".to_owned(),
+            }),
+        );
+        let end = run_until_blocked(
+            &case,
+            &executor,
+            &authority,
+            &effects,
+            &commission(),
+            &mut runs,
+            &mut Context::default(),
+        )
+        .unwrap_or_else(|error| panic!("the loop failed: {error:?}"));
+        assert!(
+            matches!(&end.outcome, RunOutcome::NeedsAuthority(_)),
+            "the run stops at the merge approval: {:?}",
+            end.outcome
+        );
+        assert_eq!(
+            host.calls().len(),
+            1,
+            "the host's executor made the run's last call"
+        );
+        let decided = |record: &WorkflowRunRecord| -> i64 {
+            record
+                .usage
+                .steps
+                .iter()
+                .filter(|step| step.label.as_deref() == Some("decide"))
+                .map(|step| step.input_tokens)
+                .sum()
+        };
+        let reported = if handed_on { HOST_INPUT_TOKENS } else { 0 };
+
+        let at_the_call = records.get(&run);
+        assert_eq!(
+            decided(&at_the_call),
+            reported,
+            "handed on {handed_on}: {:?}",
+            at_the_call.usage.steps
+        );
+        assert_eq!(
+            at_the_call.usage.steps,
+            meter.carried().steps,
+            "handed on {handed_on}: the record written at the end of the call agrees with the meter"
+        );
+
+        workflow.save().expect("the record is written again");
+        let saved = records.get(&run);
+        assert_eq!(
+            decided(&saved),
+            reported,
+            "handed on {handed_on}: saving again counts the call's usage once: {:?}",
+            saved.usage.steps
+        );
+        assert_eq!(saved.usage, at_the_call.usage, "handed on {handed_on}");
+    }
 }

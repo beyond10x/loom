@@ -17,7 +17,8 @@ effects)` takes a closure that builds the host's executor for each judgement cal
 block, and the actions it may propose); the executor is handed the frontier listing only those
 actions, a proposal of another action or of one the frontier does not list is never returned, nor
 are reads proposed together, and the usage it reports through `run_with_usage` is the workflow
-call's. `WorkflowExecutor::new(governor, model, definition, effects)` runs judgement steps on the
+call's, carried by the run record written at the end of that call, so a resumed run reports it.
+`WorkflowExecutor::new(governor, model, definition, effects)` runs judgement steps on the
 chooser: a selection request among the step's actions, then an argument request, each led by the
 step's instructions; an answer without a usable call is no useful action, and
 `with_max_input_tokens` suspends the run with `LoopBudget` when a call's requests reach it or report
