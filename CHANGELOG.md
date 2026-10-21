@@ -15,6 +15,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Fixed
 
 - A timed-out `run --action-bindings` command is killed with every process it started (story:bound-command-process-group)
+- `SubstrateRunner::run` takes the toolchain from the workspace, never from an inherited `RUSTUP_TOOLCHAIN` (story:confinement-adversary-runs)
 
 ## [0.31.0] - 2026-10-21
 

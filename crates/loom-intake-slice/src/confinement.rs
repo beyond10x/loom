@@ -1532,11 +1532,14 @@ struct RustClosure {
 impl RustClosure {
     fn discover(workspace: &Path) -> Result<Self, ConfinementError> {
         // The host rustup only resolves an installed compiler. AUTO_INSTALL=0 prevents
-        // a repository's rust-toolchain file from turning resolution into a download.
+        // a repository's rust-toolchain file from turning resolution into a download. The
+        // workspace decides the toolchain: a rustup proxy exports RUSTUP_TOOLCHAIN to whatever
+        // it starts, and that variable would override the workspace's rust-toolchain file.
         let rustc = host_program("rustup", workspace).map(|rustup| {
             Command::new(rustup)
                 .args(["which", "rustc"])
                 .env("RUSTUP_AUTO_INSTALL", "0")
+                .env_remove("RUSTUP_TOOLCHAIN")
                 .current_dir(workspace)
                 .output()
         });
@@ -1865,6 +1868,41 @@ mod tests {
         assert_eq!(
             validate_toolchain(&custom, &installed).unwrap_err().reason,
             ConfinementRefusal::ScopeInvalid
+        );
+    }
+
+    /// `cargo test` runs under a rustup proxy, which exports its own `RUSTUP_TOOLCHAIN` to every
+    /// process it starts. The workspace's toolchain file still decides the compiler: a custom path
+    /// it names is refused, never swapped for the toolchain the launching process ran under.
+    #[test]
+    fn the_workspace_toolchain_file_decides_whatever_the_launching_process_inherited() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir_all(workspace.join("custom/bin")).unwrap();
+        std::fs::create_dir(workspace.join(WRITABLE)).unwrap();
+        let rustc = workspace.join("custom/bin/rustc");
+        std::fs::write(&rustc, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(&rustc, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(
+            workspace.join("rust-toolchain.toml"),
+            format!(
+                "[toolchain]\npath = '{}'\n",
+                workspace.join("custom").display()
+            ),
+        )
+        .unwrap();
+        if host_program("rustup", &workspace).is_none() {
+            eprintln!("skipped: missing prerequisite: rustup on PATH");
+            return;
+        }
+        let error = RustClosure::discover(&workspace)
+            .err()
+            .expect("a custom toolchain path the workspace names is refused");
+        assert_eq!(
+            error.reason,
+            ConfinementRefusal::ScopeInvalid,
+            "{}",
+            error.detail
         );
     }
 
