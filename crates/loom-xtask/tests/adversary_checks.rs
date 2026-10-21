@@ -75,8 +75,8 @@ fn append(file: &Path, text: &str) -> usize {
     line
 }
 
-/// The generated crate declares `SessionData`, `SessionSnapshot`, `AnySession` and the state
-/// markers beside `Session`; they are model types as much as `Session` is (Commission's own
+/// The generated crate declares `SelectionData`, `SelectionSnapshot`, `AnySelection` and the
+/// state markers beside `Selection`; they are model types as much as `Selection` is (Commission's own
 /// `no-hand-model` reserves every type its generated crate declares). A hand-written one in
 /// `crates/loom-executor/src` must be refused.
 #[test]
@@ -85,10 +85,10 @@ fn no_hand_model_refuses_derived_model_types() {
     let lib = root.join("crates/loom-executor/src/lib.rs");
     let mut missed = Vec::new();
     for item in [
-        "pub struct SessionData { pub commission_run: String }",
+        "pub struct SelectionData { pub action: String }",
         "pub struct SelectionSnapshot;",
-        "pub enum AnySession { A }",
-        "pub struct TurnData;",
+        "pub enum AnySelection { A }",
+        "pub struct ActionCatalogueData;",
     ] {
         let original = fs::read_to_string(&lib).unwrap_or_else(|e| panic!("read: {e}"));
         let line = append(&lib, item);
