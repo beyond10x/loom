@@ -34,7 +34,7 @@ use b10x_loom_executor::model::run::{
 };
 use b10x_loom_executor::model_selector::{Briefing, ModelSelector};
 use b10x_loom_executor::selection::{SelectionContext, select};
-use b10x_loom_executor::{MeteredExecutor, MeteredModelPort, RunMeter};
+use b10x_loom_executor::{MeteredExecutor, MeteredModel, RunMeter};
 use llm_core::{
     BoxFuture, CallId, Cancel, Capabilities, Error, Id, Item, Model, Protocol, Provenance,
     StopReason, StreamSink, ToolCall, ToolChoice, TurnObservation, TurnOutcome, TurnRequest, Usage,
@@ -308,8 +308,8 @@ fn steps(report: &RunUsageReport) -> Vec<(i64, i64)> {
 fn adversary_w20261020w4_u4_a_metered_model_metered_again_on_one_meter_counts_one_call_per_turn() {
     let model = Scripted::new(Vec::new());
     let meter = RunMeter::new(None);
-    let inner: Arc<dyn Model> = Arc::new(MeteredModelPort::new(&model, &meter));
-    let outer = MeteredModelPort::new(inner, &meter);
+    let inner: Arc<dyn Model> = Arc::new(MeteredModel::new(&model, &meter));
+    let outer = MeteredModel::new(inner, &meter);
 
     assert!(turn(&outer).is_ok(), "the scripted turn answers");
 
@@ -329,7 +329,7 @@ fn adversary_w20261020w4_u4_a_metered_model_metered_again_on_one_meter_counts_on
 #[test]
 fn adversary_w20261020w4_u4_a_turn_made_on_a_thread_the_executor_call_spawned_counts_in_its_step() {
     struct Worker<'m> {
-        model: MeteredModelPort<&'m Scripted>,
+        model: MeteredModel<&'m Scripted>,
     }
 
     impl AgentExecutor for Worker<'_> {
@@ -353,7 +353,7 @@ fn adversary_w20261020w4_u4_a_turn_made_on_a_thread_the_executor_call_spawned_co
     let meter = RunMeter::new(None);
     let executor = MeteredExecutor::new(
         Worker {
-            model: MeteredModelPort::new(&model, &meter),
+            model: MeteredModel::new(&model, &meter),
         },
         &meter,
     );

@@ -18,8 +18,8 @@
 //! The items an embedding always touches are also re-exported at the top: [`run_until_blocked`],
 //! [`LoopContext`], [`LoopEnd`], [`EffectPort`], [`Loom`], [`ActionSelector`],
 //! [`ArgumentGenerator`], [`CanonGovernor`], [`CaseStore`] and [`MemoryCaseStore`].
-//! [`RunMeter`], [`MeteredModelPort`] and [`MeteredExecutor`] report a run's model calls, tokens
-//! and cost per executor call (`loom::metering`): a [`MeteredModelPort`] is an llm `Model` over
+//! [`RunMeter`], [`MeteredModel`] and [`MeteredExecutor`] report a run's model calls, tokens
+//! and cost per executor call (`loom::metering`): a [`MeteredModel`] is an llm `Model` over
 //! the one a host built, each of its turns one call, priced with the run's [`RateCard`].
 //! [`serde_json`] is the one Loom links, whose `Value` a host's `Briefing` returns.
 //!
@@ -73,7 +73,7 @@ pub use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked}
 /// `ProtocolEntry::actions` of the protocol it names.
 pub use b10x_loom_executor::workflow::{RecordingEffects, WorkflowExecutor};
 pub use b10x_loom_executor::{ActionSelector, ArgumentGenerator, Loom};
-pub use b10x_loom_executor::{MeteredExecutor, MeteredModelPort, RateCard, RunMeter};
+pub use b10x_loom_executor::{MeteredExecutor, MeteredModel, RateCard, RunMeter};
 /// A child process a host names, run confined by [`SubstrateRunner::run_child`] with the guarantees
 /// a test has; Substrate's types it is named with are at `loom_sdk::intake::slice::confinement`.
 pub use b10x_loom_intake_slice::confinement::ChildCommand;

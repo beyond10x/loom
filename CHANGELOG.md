@@ -62,7 +62,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `loom_sdk::loom::compaction`, `loom_sdk::loom::credentials` and `loom_sdk::loom::recovery` are removed
 - **Breaking:** `Loom::run_loop`, `Loom::resume_loop`, `Loom::interrupt` and `Loom::sessions` are removed
 - **Breaking:** `Loom::turns`, `Loom::catalogues`, `Loom::compactions` and `LoopExecutor` are removed
-- **Breaking:** `MeteredModelPort` is an llm `Model` only; its harness `ModelPort` implementation is removed
+- **Breaking:** `MeteredModelPort` is renamed `MeteredModel`, an llm `Model` only; its harness `ModelPort` impl is removed
 - **Breaking:** `loom.run` drops `Session`, `Turn`, `Compaction`, their commands, events and errors, and `Sessions`
 - **Breaking:** `loom_sdk::loom::model::run::SessionData` and `loom_sdk::loom::model::run::SessionId` are removed
 - **Breaking:** `loom_sdk::loom::model::run::RunEnding` is removed, and so are `CompactionId` and `ReportedUsage`

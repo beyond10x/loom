@@ -42,7 +42,7 @@ use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked};
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
-use b10x_loom_executor::metering::{MeteredExecutor, MeteredModelPort, RunMeter};
+use b10x_loom_executor::metering::{MeteredExecutor, MeteredModel, RunMeter};
 use b10x_loom_executor::model::run::CommissionRunId;
 use b10x_loom_executor::model::workflow::{WorkflowDefinition, WorkflowRunRecord};
 use b10x_loom_executor::workflow::{
@@ -472,7 +472,7 @@ fn adversary_w20261021w5_u1_control_a_resumed_run_keeps_the_usage_the_chooser_sp
     let effects = RecordingEffects::new(CaseEffects { case: &case });
     let meter = RunMeter::new(None);
     let model = ScriptedModel::new(vec![(json!({ "action": MERGE }), 60), (json!({}), 40)]);
-    let metered = MeteredModelPort::new(&model, &meter);
+    let metered = MeteredModel::new(&model, &meter);
     let executor = WorkflowExecutor::new(&case, &metered, definition(), effects.log())
         .with_meter(&meter)
         .with_store(store());
@@ -512,7 +512,7 @@ fn adversary_w20261021w5_u1_the_choosers_budget_sums_both_requests_of_a_call() {
     let effects = RecordingEffects::new(CaseEffects { case: &case });
     let meter = RunMeter::new(None);
     let model = ScriptedModel::new(vec![(json!({ "action": MERGE }), 60), (json!({}), 60)]);
-    let metered = MeteredModelPort::new(&model, &meter);
+    let metered = MeteredModel::new(&model, &meter);
     let executor = MeteredExecutor::new(
         WorkflowExecutor::new(&case, &metered, definition(), effects.log())
             .with_meter(&meter)

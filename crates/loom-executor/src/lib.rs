@@ -25,7 +25,7 @@
 //! [`model_selector`] holds the selector and argument generator over an llm `Model` that the
 //! intake slice and a plugin turn run Loom's chooser path on, each told a host's
 //! [`model_selector::Briefing`]; its selector is the one whose strategy is `ReasoningModel`.
-//! [`metering`] counts what a run spent at that `Model`: a [`MeteredModelPort`] over it, priced
+//! [`metering`] counts what a run spent at that `Model`: a [`MeteredModel`] over it, priced
 //! with the run's [`RateCard`].
 
 /// The run model, synthesized from the ESS specification.
@@ -60,7 +60,7 @@ use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
 
 pub use arguments::{ArgumentContext, ArgumentGenerator, EmptyObjectArguments, OverruleRefused};
-pub use metering::{MeteredExecutor, MeteredModelPort, RateCard, RunMeter};
+pub use metering::{MeteredExecutor, MeteredModel, RateCard, RunMeter};
 pub use selection::{
     ActionSelector, Confidence, FirstAdmissibleSelector, HybridSelector, InvalidThreshold,
     SelectorError,

@@ -42,7 +42,7 @@ use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
 use b10x_loom_executor::metering::RateCard;
 use b10x_loom_executor::model::metering::RunUsageReport;
 use b10x_loom_executor::model_selector::{Briefing, ModelArguments, ModelSelector};
-use b10x_loom_executor::{Loom, MeteredExecutor, MeteredModelPort, RunMeter};
+use b10x_loom_executor::{Loom, MeteredExecutor, MeteredModel, RunMeter};
 use llm_core::{
     BoxFuture, CallId, Cancel, Capabilities, Error, ErrorCode, Id, Item, Model, Protocol,
     Provenance, StopReason, StreamSink, ToolCall, ToolChoice, TurnObservation, TurnOutcome,
@@ -431,7 +431,7 @@ fn step_calls(report: &RunUsageReport) -> Vec<i64> {
 fn chooser_run(prices: Option<RateCard>) -> (RunUsageReport, Vec<i64>, u64) {
     let model = Scripted::new([]);
     let meter = RunMeter::new(prices);
-    let metered = MeteredModelPort::new(&model, &meter);
+    let metered = MeteredModel::new(&model, &meter);
     let executor = Observed::new(MeteredExecutor::new(chooser(&metered), &meter), &model);
     let end = run(&executor, 2);
     (meter.report(&end.run_id), executor.spans(), model.seen())
@@ -443,7 +443,7 @@ fn the_reported_calls_equal_the_turns_the_model_port_saw() {
     // call too.
     let model = Scripted::new([3]);
     let meter = RunMeter::new(None);
-    let metered = MeteredModelPort::new(&model, &meter);
+    let metered = MeteredModel::new(&model, &meter);
     let executor = Observed::new(MeteredExecutor::new(chooser(&metered), &meter), &model);
 
     let end = run(&executor, 3);
@@ -593,7 +593,7 @@ impl AgentExecutor for OneTurn<'_> {
 fn a_failed_turn_is_a_call_without_usage() {
     let model = Scripted::new([1]);
     let meter = RunMeter::new(Some(card(MODEL)));
-    let metered = MeteredModelPort::new(&model, &meter);
+    let metered = MeteredModel::new(&model, &meter);
     let executor = MeteredExecutor::new(OneTurn { model: &metered }, &meter);
     let frontier = Frontier::new(frontier_data(&CaseId(CASE.to_owned())));
     let _ = executor.run(&commission(), &frontier);
@@ -722,7 +722,7 @@ fn a_non_model_executor_usage_is_its_step_usage() {
 fn a_step_sums_its_metered_turns_and_the_usage_its_executor_reports() {
     let model = Scripted::new([]);
     let meter = RunMeter::new(Some(card(MODEL)));
-    let metered = MeteredModelPort::new(&model, &meter);
+    let metered = MeteredModel::new(&model, &meter);
     let executor = MeteredExecutor::new(
         Session {
             model: Some(&metered),
@@ -762,7 +762,7 @@ fn a_step_sums_its_metered_turns_and_the_usage_its_executor_reports() {
 fn an_executor_metered_at_its_model_port_reports_no_usage_and_is_counted_once() {
     let model = Scripted::new([]);
     let meter = RunMeter::new(Some(card(MODEL)));
-    let metered = MeteredModelPort::new(&model, &meter);
+    let metered = MeteredModel::new(&model, &meter);
     let executor = MeteredExecutor::new(chooser(&metered), &meter);
 
     let end = run(&executor, 2);

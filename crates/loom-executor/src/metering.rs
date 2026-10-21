@@ -3,8 +3,8 @@
 //! What one Commission run spent on its model, counted at llm's [`Model`] boundary
 //! (`ess/domains/metering.yaml`, `loom.metering`).
 //!
-//! A [`RunMeter`] is shared by the [`MeteredModelPort`]s and the [`MeteredExecutor`] of one run.
-//! A [`MeteredModelPort`] is an llm [`Model`] over the model a host built, and each `turn` of it is
+//! A [`RunMeter`] is shared by the [`MeteredModel`]s and the [`MeteredExecutor`] of one run.
+//! A [`MeteredModel`] is an llm [`Model`] over the model a host built, and each `turn` of it is
 //! one model call, whoever made it: the model selector, an argument generator, a host's own
 //! request. The call is counted when `turn` is called, before the turn runs, so a turn that failed,
 //! unwound or was dropped unfinished is still a call; a turn that answered adds the tokens the
@@ -817,12 +817,12 @@ impl Future for Inner<'_> {
 /// the executor call of the meter running elsewhere (the one opened last), else of step 0,
 /// whichever thread then drives its future.
 #[derive(Debug)]
-pub struct MeteredModelPort<M> {
+pub struct MeteredModel<M> {
     pub(crate) inner: M,
     pub(crate) meter: RunMeter,
 }
 
-impl<M> MeteredModelPort<M> {
+impl<M> MeteredModel<M> {
     /// `inner`, its turns counted into `meter`.
     pub fn new(inner: M, meter: &RunMeter) -> Self {
         Self {
@@ -837,7 +837,7 @@ impl<M> MeteredModelPort<M> {
     }
 }
 
-impl<M> Model for MeteredModelPort<M>
+impl<M> Model for MeteredModel<M>
 where
     M: Deref + Send + Sync,
     M::Target: Model,

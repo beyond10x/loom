@@ -24,7 +24,7 @@ use b10x_loom_commission::model::responsibility::{
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_executor::metering::RateCard;
 use b10x_loom_executor::model::metering::RunUsageReport;
-use b10x_loom_executor::{MeteredExecutor, MeteredModelPort, RunMeter};
+use b10x_loom_executor::{MeteredExecutor, MeteredModel, RunMeter};
 use llm_core::{
     BoxFuture, Cancel, Capabilities, Error, ErrorCode, Id, Item, Model, Protocol, Provenance,
     StopReason, StreamSink, TurnObservation, TurnOutcome, TurnRequest, Usage, VecSink,
@@ -213,11 +213,11 @@ impl Model for Scripted {
 }
 
 /// A metered model holds its model as a host does, behind a pointer.
-type Metered = MeteredModelPort<Arc<Scripted>>;
+type Metered = MeteredModel<Arc<Scripted>>;
 
 /// `model`, sharing its script and count, metered into `meter`.
 fn metered(model: &Scripted, meter: &RunMeter) -> Metered {
-    MeteredModelPort::new(Arc::new(model.clone()), meter)
+    MeteredModel::new(Arc::new(model.clone()), meter)
 }
 
 /// `future` driven to completion on a runtime made for it.
@@ -643,7 +643,7 @@ fn a_shared_model_a_host_built_is_metered_as_it_is() {
     let model = Scripted::new([]);
     let shared: Arc<dyn Model> = Arc::new(model.clone());
     let meter = RunMeter::new(Some(card(MODEL)));
-    let metered = MeteredModelPort::new(shared, &meter);
+    let metered = MeteredModel::new(shared, &meter);
     assert_eq!(
         metered.provenance(),
         &provenance(),
@@ -689,8 +689,8 @@ impl<M: Model> Model for Lazy<M> {
 fn a_model_metered_again_on_one_meter_counts_each_turn_once_however_it_is_reached() {
     let model = Scripted::new([]);
     let meter = RunMeter::new(Some(card(MODEL)));
-    let at_call = MeteredModelPort::new(Arc::new(metered(&model, &meter)), &meter);
-    let while_running = MeteredModelPort::new(
+    let at_call = MeteredModel::new(Arc::new(metered(&model, &meter)), &meter);
+    let while_running = MeteredModel::new(
         Arc::new(Lazy {
             inner: metered(&model, &meter),
         }),
@@ -712,7 +712,7 @@ fn a_model_metered_again_on_one_meter_counts_each_turn_once_however_it_is_reache
 fn a_model_metered_on_two_meters_counts_its_turn_in_each() {
     let model = Scripted::new([]);
     let (first, second) = (RunMeter::new(None), RunMeter::new(None));
-    let outer = MeteredModelPort::new(Arc::new(metered(&model, &first)), &second);
+    let outer = MeteredModel::new(Arc::new(metered(&model, &first)), &second);
     assert!(turn(&outer).is_ok());
 
     for meter in [&first, &second] {

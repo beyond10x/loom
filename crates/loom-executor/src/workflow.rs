@@ -46,7 +46,7 @@
 //! (`LoopBudget`, `{"kind": "max-input-tokens", "limit", "reported"}` or
 //! `{"kind": "budget-unobservable", "name", "reason"}`), and the answer that reached it is not
 //! taken. The chooser's model calls are counted where the host meters the model it gives
-//! ([`crate::metering::MeteredModelPort`]), so it reports no usage of its own.
+//! ([`crate::metering::MeteredModel`]), so it reports no usage of its own.
 //!
 //! When no step is left, the call is `CompletedLocalReasoning`: the executor's reasoning ended, and
 //! completion is still the governor's.

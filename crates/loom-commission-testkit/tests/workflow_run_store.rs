@@ -11,7 +11,7 @@
 //! arguments as JSON). The frontier lists every action admissible and, from the edit until the
 //! merge is performed, the merge, which needs approval and names its capability, so the authority
 //! provider decides it. The judgement step runs on Loom's chooser over a scripted llm `Model`
-//! (`story:judgement-step-any-executor`), metered through `MeteredModelPort`.
+//! (`story:judgement-step-any-executor`), metered through `MeteredModel`.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -37,7 +37,7 @@ use b10x_loom_commission::runtime::{
     LoopContext, resume_after_grant, run_until_blocked, run_with_suspension,
 };
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
-use b10x_loom_executor::metering::{MeteredExecutor, MeteredModelPort, RunMeter};
+use b10x_loom_executor::metering::{MeteredExecutor, MeteredModel, RunMeter};
 use b10x_loom_executor::model::primitives::Uuid;
 use b10x_loom_executor::model::run::CommissionRunId;
 use b10x_loom_executor::workflow::{
@@ -457,7 +457,7 @@ fn suspend_segment(dir: &Path, run: u64) {
     });
     let meter = RunMeter::new(None);
     let scripted = model(edit_answers());
-    let metered = MeteredModelPort::new(&scripted, &meter);
+    let metered = MeteredModel::new(&scripted, &meter);
     let definition = workflow::load(ACROSS_APPROVAL, &protocol).expect("the definition loads");
     let executor = WorkflowExecutor::new(&case, &metered, definition, effects.log())
         .with_meter(&meter)
@@ -492,7 +492,7 @@ fn resume_segment(dir: &Path) {
     });
     let meter = RunMeter::new(None);
     let scripted = model(Vec::new());
-    let metered = MeteredModelPort::new(&scripted, &meter);
+    let metered = MeteredModel::new(&scripted, &meter);
     let definition = workflow::load(ACROSS_APPROVAL, &protocol).expect("the definition loads");
     let suspensions = FileSuspensionStore::open(dir).expect("the suspension store opens");
     let held = suspensions

@@ -8,7 +8,7 @@
 //! (approval required) once `tests.run` was performed. A judgement step runs on Loom's chooser
 //! over an llm `Model`, the default (`story:judgement-step-any-executor`): one selection request
 //! and one argument request per call. The model is scripted, records each request, and is metered
-//! (`MeteredModelPort`) under a `MeteredExecutor` sharing one `RunMeter`; nothing reaches a
+//! (`MeteredModel`) under a `MeteredExecutor` sharing one `RunMeter`; nothing reaches a
 //! network. One case supplies the host's own executor instead.
 
 use std::collections::{BTreeMap, VecDeque};
@@ -35,7 +35,7 @@ use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked};
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
-use b10x_loom_executor::metering::{MeteredExecutor, MeteredModelPort, RunMeter};
+use b10x_loom_executor::metering::{MeteredExecutor, MeteredModel, RunMeter};
 use b10x_loom_executor::model::metering::RunUsageReport;
 use b10x_loom_executor::model::run::CommissionRunId;
 use b10x_loom_executor::model::workflow::{WorkflowDefinition, WorkflowRunRecord};
@@ -504,7 +504,7 @@ fn run_effects(
         RecordingEffects::new(CaseEffects::new(&case, refuse_once).pending_once(pending_once));
     let meter = RunMeter::new(None);
     let model = CountingModel::new(&case, script);
-    let metered = MeteredModelPort::new(&model, &meter);
+    let metered = MeteredModel::new(&model, &meter);
     let mut workflow =
         WorkflowExecutor::new(&case, &metered, definition(text), effects.log()).with_meter(&meter);
     if let Some(limit) = max_input_tokens {
