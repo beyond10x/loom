@@ -27,7 +27,8 @@
 //! summary and the SHA-256 digest of its transcript travel on the call's `ExecutorStep`, which the
 //! runtime delivers as the step's observation and never as evidence, so two sessions that propose
 //! the same files are the same request. The step's `usage` is what the session reported it spent,
-//! charged to the run and its budget.
+//! charged to the run and its budget: the total its terminal record states, or for a
+//! b10x-harness session that states none the sum of its per-call usage, never both.
 //!
 //! A session that fails proposes nothing and is no record: the call returns `Suspended` with
 //! `ExternalAvailability` naming why. A session that changed nothing proposes an empty list of
@@ -65,7 +66,7 @@ use loom::session::{
 };
 use metaharness::protocol::{
     Command, Decision, DecisionMode, Event, HermeticMode, HermeticRow, RunSpec, SeamFactory,
-    Severity, Verdict,
+    Severity, Usage, Verdict,
 };
 use metaharness::{ClaudeSeams, CodexSeams, EventPoll, Input, Metaharness};
 use sha2::{Digest as _, Sha256};
@@ -478,6 +479,11 @@ impl SessionExecutor {
         // Whether every plugin the opening record names ships inside the vendor program
         // (`<name>@builtin`): none from a directory, a marketplace or a managed setting.
         let mut builtin_only = false;
+        // The usage total the terminal record states, and, for b10x-harness, each call's
+        // `usage` event: what the session is charged ([`charged_usage`]).
+        let mut ended_usage: Option<Usage> = None;
+        let mut usage_events: Vec<Usage> = Vec::new();
+        let mut stream_error = None;
         loop {
             if !halted && deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                 halted = true;
@@ -489,7 +495,10 @@ impl SessionExecutor {
                 Ok(EventPoll::Event(line)) => line,
                 Ok(EventPoll::Ended) => break,
                 Ok(EventPoll::Idle | EventPoll::Progress | EventPoll::DecisionPending) => continue,
-                Err(error) => return Err(format!("the session's stream: {error}")),
+                Err(error) => {
+                    stream_error = Some(format!("the session's stream: {error}"));
+                    break;
+                }
             };
             if let Ok(text) = serde_json::to_string(&*line) {
                 report.transcript.extend_from_slice(text.as_bytes());
@@ -516,6 +525,12 @@ impl SessionExecutor {
                     });
                 }
                 Event::Text { text, .. } => said.push(text.clone()),
+                // b10x-harness states each call's tokens only here. Codex's `usage` events are
+                // running totals and Claude Code's are per message beside a total, so neither
+                // is summed.
+                Event::Usage { usage, .. } if self.kind == Kind::B10x => {
+                    usage_events.push(usage.clone());
+                }
                 Event::ToolRequested {
                     call_id,
                     name,
@@ -556,25 +571,7 @@ impl SessionExecutor {
                     report.duration_ms = *duration_ms;
                     report.api_ms = *duration_api_ms;
                     report.cost_usd = *total_cost_usd;
-                    if let Some(usage) = usage {
-                        report.input_tokens = usage.input_tokens;
-                        report.output_tokens = usage.output_tokens;
-                        report.cache_read = usage.cache_read_input_tokens;
-                        report.cache_creation = usage.cache_creation_input_tokens;
-                        // Codex's input figure, and the OpenAI Responses wire's, holds the cached
-                        // tokens it also states apart: the input charged is the rest, so no
-                        // token is counted twice.
-                        let responses = self.kind == Kind::Codex
-                            || self.endpoint.as_ref().is_some_and(|endpoint| {
-                                self.kind == Kind::B10x && endpoint.wire == "openai-responses"
-                            });
-                        if responses
-                            && let (Some(input), Some(cached)) =
-                                (usage.input_tokens, usage.cache_read_input_tokens)
-                        {
-                            report.input_tokens = Some(input.saturating_sub(cached));
-                        }
-                    }
+                    ended_usage.clone_from(usage);
                     if let Some(models) = model_usage
                         && !models.is_empty()
                     {
@@ -595,6 +592,27 @@ impl SessionExecutor {
                 }
                 _ => {}
             }
+        }
+        if let Some(usage) = charged_usage(ended_usage.as_ref(), &usage_events) {
+            report.input_tokens = usage.input_tokens;
+            report.output_tokens = usage.output_tokens;
+            report.cache_read = usage.cache_read_input_tokens;
+            report.cache_creation = usage.cache_creation_input_tokens;
+            // Codex's input figure, and the OpenAI Responses wire's, holds the cached tokens it
+            // also states apart: the input charged is the rest, so no token is counted twice.
+            let responses = self.kind == Kind::Codex
+                || self.endpoint.as_ref().is_some_and(|endpoint| {
+                    self.kind == Kind::B10x && endpoint.wire == "openai-responses"
+                });
+            if responses
+                && let (Some(input), Some(cached)) =
+                    (usage.input_tokens, usage.cache_read_input_tokens)
+            {
+                report.input_tokens = Some(input.saturating_sub(cached));
+            }
+        }
+        if let Some(error) = stream_error {
+            return Err(error);
         }
         // The floor: every gating row that is not `ok` is reported, and every row's verdict is
         // kept. Under Claude Code's `Strict` a `gap` holds the proposal back, but two facts
@@ -747,6 +765,29 @@ pub fn usage_of(report: &SessionReport, took: Duration) -> ExecutorUsage {
         duration_ms: count(Some(duration)),
         cost_micro_usd: cost,
     }
+}
+
+/// The tokens a session is charged, counted once: the total its terminal record states when it
+/// states one, else the sum of the per-call `usage` events it emitted (b10x-harness's, whose
+/// terminal record states none in metaharness 0.10.1), else none. Each figure of the sum is
+/// absent only when no event stated it.
+fn charged_usage(total: Option<&Usage>, events: &[Usage]) -> Option<Usage> {
+    if let Some(total) = total {
+        return Some(total.clone());
+    }
+    if events.is_empty() {
+        return None;
+    }
+    let sum = |figure: fn(&Usage) -> Option<u64>| {
+        events.iter().filter_map(figure).reduce(u64::saturating_add)
+    };
+    Some(Usage {
+        input_tokens: sum(|usage| usage.input_tokens),
+        output_tokens: sum(|usage| usage.output_tokens),
+        cache_read_input_tokens: sum(|usage| usage.cache_read_input_tokens),
+        cache_creation_input_tokens: sum(|usage| usage.cache_creation_input_tokens),
+        ..Usage::default()
+    })
 }
 
 /// `usd` in micro-USD, rounded to the nearest; a figure that is not a finite amount of at least
@@ -1854,6 +1895,35 @@ mod tests {
             (priced.input_tokens, priced.cost_micro_usd),
             (3, Some(250_000))
         );
+    }
+
+    /// A session's tokens are counted once: the terminal total when the session states one, even
+    /// beside per-call events (metaharness 0.10.1's b10x adapter states no total, so this is
+    /// pinned here and not through a scripted session); else the events summed, a figure no event
+    /// stated staying absent; else none.
+    #[test]
+    fn a_terminal_usage_total_is_charged_once_and_events_only_without_one() {
+        let usage = |input, output, cached: Option<u64>| Usage {
+            input_tokens: Some(input),
+            output_tokens: Some(output),
+            cache_read_input_tokens: cached,
+            ..Usage::default()
+        };
+        let events = [usage(100, 20, Some(40)), usage(50, 10, None)];
+        let total = usage(150, 30, Some(40));
+        assert_eq!(charged_usage(Some(&total), &events), Some(total.clone()));
+        assert_eq!(charged_usage(Some(&total), &[]), Some(total));
+        let summed = charged_usage(None, &events).expect("the events summed");
+        assert_eq!(
+            (
+                summed.input_tokens,
+                summed.output_tokens,
+                summed.cache_read_input_tokens,
+                summed.cache_creation_input_tokens
+            ),
+            (Some(150), Some(30), Some(40), None)
+        );
+        assert_eq!(charged_usage(None, &[]), None);
     }
 
     /// A named path with a linked directory anywhere above it in the workspace is not copied,

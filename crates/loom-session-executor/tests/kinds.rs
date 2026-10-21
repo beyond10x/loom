@@ -203,21 +203,51 @@ fn unpinned_codex(cwd: &Path) -> Vec<ScriptStep> {
     codex_rollout("0.999.0", cwd)
 }
 
-/// A b10x-harness session's own lines: started, the reply naming the action, one call's usage
-/// (100 input tokens, 40 of them cached, 20 output), its cost of 1234 micro-USD, finished.
-fn b10x_lines(_cwd: &Path) -> Vec<ScriptStep> {
-    [
+/// A b10x-harness session's own lines: started, the reply naming the action, one `usage` line
+/// per call as `(input, output, cached)`, its cost of 1234 micro-USD, finished.
+fn b10x_session(calls: &[(u64, u64, u64)]) -> Vec<ScriptStep> {
+    let mut lines = vec![
         serde_json::json!({"kind": "started", "model": "synthetic", "published_tools": [],
                            "credential_source": "none"}),
         serde_json::json!({"kind": "text-delta", "text": action_line()}),
-        serde_json::json!({"kind": "usage", "model": "synthetic", "input_tokens": 100,
-                           "output_tokens": 20, "cached_input_tokens": 40}),
-        serde_json::json!({"kind": "cost", "micro_usd": 1234}),
-        serde_json::json!({"kind": "finished", "stop": {"kind": "completed"}}),
-    ]
-    .into_iter()
-    .map(|line| ScriptStep::line(line.to_string()))
-    .collect()
+    ];
+    lines.extend(calls.iter().map(|(input, output, cached)| {
+        serde_json::json!({"kind": "usage", "model": "synthetic", "input_tokens": input,
+                           "output_tokens": output, "cached_input_tokens": cached})
+    }));
+    lines.push(serde_json::json!({"kind": "cost", "micro_usd": 1234}));
+    lines.push(serde_json::json!({"kind": "finished", "stop": {"kind": "completed"}}));
+    lines
+        .into_iter()
+        .map(|line| ScriptStep::line(line.to_string()))
+        .collect()
+}
+
+/// One call: 100 input tokens, none cached, 20 output.
+fn b10x_one_call(_cwd: &Path) -> Vec<ScriptStep> {
+    b10x_session(&[(100, 20, 0)])
+}
+
+/// Two calls: 100 input tokens of which 40 cached and 20 output, then 50 input, none cached,
+/// and 10 output.
+fn b10x_two_calls(_cwd: &Path) -> Vec<ScriptStep> {
+    b10x_session(&[(100, 20, 40), (50, 10, 0)])
+}
+
+/// A b10x-harness executor over `scratch`, its loop pointed at a closed local port on `wire`,
+/// started by `session`.
+fn b10x_executor(scratch: &Scratch, wire: &str, session: Session) -> SessionExecutor {
+    let token = scratch.0.join("token.json");
+    std::fs::write(&token, "{\"token\": \"scripted\"}\n").expect("a token file");
+    let mut executor = scratch.executor(Kind::B10x, session);
+    executor.endpoint = Some(Endpoint {
+        base_url: "http://127.0.0.1:9/v1".to_owned(),
+        wire: wire.to_owned(),
+        model: "synthetic".to_owned(),
+        token_file: token,
+        token_pointer: Some("/token".to_owned()),
+    });
+    executor
 }
 
 fn commission(case: &CaseId) -> Commission<commission_state::Assigned> {
@@ -371,24 +401,14 @@ fn a_codex_session_outside_the_pin_is_held_by_h9() {
 }
 
 /// A b10x-harness session is recorded as `Harness` and proposes its change; the executor decides
-/// none of its calls (it observes them) and charges it the cost it stated. Its tokens are not
-/// asserted: metaharness 0.10.1's b10x adapter states its usage lines as `usage` events only and
-/// ends the session with none, which is all the executor reads.
+/// none of its calls (it observes them) and charges it the cost it stated and the tokens of its
+/// one `usage` line, which metaharness 0.10.1's b10x adapter states as a `usage` event only.
 #[test]
-fn a_b10x_session_is_observed_and_charged_its_cost() {
+fn a_b10x_session_is_observed_and_charged_its_cost_and_tokens() {
     let scratch = Scratch::new("b10x");
-    let token = scratch.0.join("token.json");
-    std::fs::write(&token, "{\"token\": \"scripted\"}\n").expect("a token file");
-    let session = Session::new(b10x_lines);
+    let session = Session::new(b10x_one_call);
     let (_, log) = session.handles();
-    let mut executor = scratch.executor(Kind::B10x, session);
-    executor.endpoint = Some(Endpoint {
-        base_url: "http://127.0.0.1:9/v1".to_owned(),
-        wire: "openai-responses".to_owned(),
-        model: "synthetic".to_owned(),
-        token_file: token,
-        token_pointer: Some("/token".to_owned()),
-    });
+    let executor = b10x_executor(&scratch, "openai-responses", session);
 
     let step = step_of(&executor);
 
@@ -410,4 +430,28 @@ fn a_b10x_session_is_observed_and_charged_its_cost() {
     );
     let usage = step.usage.expect("the step's usage");
     assert_eq!(usage.cost_micro_usd, Some(1234));
+    assert_eq!((usage.input_tokens, usage.output_tokens), (100, 20));
+}
+
+/// A b10x-harness session's calls are summed, each counted once: on the OpenAI Responses wire,
+/// whose input figure holds the cached tokens, the input charged is the rest (150 less 40); on
+/// the Anthropic Messages wire, whose input figure does not, it is the whole.
+#[test]
+fn a_b10x_sessions_calls_are_summed_less_the_cached_input_on_responses() {
+    for (wire, input) in [("openai-responses", 110), ("anthropic-messages", 150)] {
+        let scratch = Scratch::new(&format!("b10x-sum-{wire}"));
+        let executor = b10x_executor(&scratch, wire, Session::new(b10x_two_calls));
+
+        let step = step_of(&executor);
+
+        proposal(&step, &executor);
+        let usage = step.usage.expect("the step's usage");
+        assert_eq!(
+            (usage.input_tokens, usage.output_tokens),
+            (input, 30),
+            "{wire}"
+        );
+        let report = executor.last_report().expect("a report");
+        assert_eq!(report.cache_read, Some(40), "{wire}");
+    }
 }
