@@ -73,10 +73,12 @@
 //!    a fan-out's `reads` (each an `action` and its `arguments`, in the order proposed), a human
 //!    request's `request`, or a reported move's `expected_case_revision`, and, when the call
 //!    reported what it spent ([`ExecutorStep`]'s `usage`, `story:executor-reports-usage`), that
-//!    `usage` (input and output tokens, wall time, and the cost when it reported one). It is never
-//!    evidence. A reported usage is charged to the run before the step is observed, and once it is
-//!    observed the run budget's spending limits are checked (Run and action budgets, below): a
-//!    breach ends the run there, so the outcome is not acted on (7-10);
+//!    `usage` (input and output tokens, wall time, and the cost when it reported one), and the
+//!    step's `transcript_digest` and `summary` when it stated them (an agent session's, never part
+//!    of the proposal's arguments). It is never evidence. A reported usage is charged to the run
+//!    before the step is observed, and once it is observed the run budget's spending limits are
+//!    checked (Run and action budgets, below): a breach ends the run there, so the outcome is not
+//!    acted on (7-10);
 //! 7. on `Suspended`, the Run is suspended through `SuspendRun` with the executor's reason and the
 //!    run ends suspended, carrying it. The Run is suspended with that reason even when delivering
 //!    the step's observation failed; the loop then returns that failure as a [`LoopError`] that
@@ -1315,11 +1317,12 @@ where
             return budget_ended(runs, run_id, exhausted_for, None, track);
         }
 
-        let ExecutorStep { outcome, usage, .. } = executor.run_with_usage(commission, &handed);
-        if let Some(usage) = &usage {
+        let step = executor.run_with_usage(commission, &handed);
+        if let Some(usage) = &step.usage {
             charge_step(&mut track.charges, usage);
         }
-        let observed = governor.observe(observation(context, &frontier, &outcome, usage.as_ref()));
+        let observed = governor.observe(observation(context, &frontier, &step));
+        let ExecutorStep { outcome, usage, .. } = step;
         // The step's own usage past a spending limit stops the run once the step is observed,
         // before its outcome is acted on: no request is made from it, and an executor's own
         // suspension is not the Run's.
@@ -2657,15 +2660,16 @@ fn unchanged(before: &[FrontierAction], after: &[FrontierAction]) -> bool {
         })
 }
 
-/// The observation of one executor step, as the module documents: `outcome`, and `usage`, what
-/// the call reported it spent, when it reported any.
+/// The observation of one executor step, as the module documents: `outcome`; `usage`, what the
+/// call reported it spent, when it reported any; and the step's `transcript_digest` and `summary`,
+/// each when the step stated it.
 fn observation<C: LoopContext + ?Sized>(
     context: &mut C,
     frontier: &Frontier<frontier_state::Issued>,
-    outcome: &ExecutorOutcome,
-    usage: Option<&ExecutorUsage>,
+    step: &ExecutorStep,
 ) -> Observation<observation_state::Reported> {
     let frontier = frontier.data();
+    let outcome = &step.outcome;
     let text = |text: &str| Value::Text(text.to_owned());
     let mut payload = match outcome {
         ExecutorOutcome::ProposedAction(proposed) => vec![
@@ -2708,7 +2712,7 @@ fn observation<C: LoopContext + ?Sized>(
             ),
         ],
     };
-    if let Some(usage) = usage {
+    if let Some(usage) = &step.usage {
         payload.push((
             "usage".to_owned(),
             spent_value(
@@ -2718,6 +2722,14 @@ fn observation<C: LoopContext + ?Sized>(
                 usage.cost_micro_usd,
             ),
         ));
+    }
+    for (name, stated) in [
+        ("transcript_digest", &step.transcript_digest),
+        ("summary", &step.summary),
+    ] {
+        if let Some(stated) = stated {
+            payload.push((name.to_owned(), text(stated)));
+        }
     }
     Observation::new(ObservationData {
         observation_id: context.observation_id(),
