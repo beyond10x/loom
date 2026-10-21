@@ -15,9 +15,9 @@ use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
     ActionRequestData, ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext,
-    AuthorityVerdict, AuthorityVerdictApprovalRequired, AuthorityVerdictDeny, CaseId, Commission,
-    CommissionData, CommissionId, EffectOutcome, EffectOutcomePerformed, ExecutorOutcome,
-    ExecutorOutcomeProposedAction, FrontierAction, ObservationId, PrincipalId,
+    AuthorityVerdict, AuthorityVerdictApprovalRequired, AuthorityVerdictDeny, BreachStep, CaseId,
+    Commission, CommissionData, CommissionId, EffectOutcome, EffectOutcomePerformed,
+    ExecutorOutcome, ExecutorOutcomeProposedAction, FrontierAction, ObservationId, PrincipalId,
     ProposedActionArguments, RunId, RunOutcome, RunOutcomeAwaitingApproval, RunOutcomeIdleBound,
     RunOutcomeNeedsAuthority, RunOutcomeSuspended, StopPolicy, SuspensionReason, SuspensionState,
     Unit, commission_state,
@@ -129,6 +129,7 @@ fn policy(approval_gate: bool, idle_bound: Option<i64>) -> StopPolicy {
     StopPolicy {
         approval_gate,
         idle_bound,
+        on_breach: BreachStep::DiscardStep,
     }
 }
 

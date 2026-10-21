@@ -181,6 +181,8 @@ fn unlimited() -> RunBudget {
         max_tokens_out: None,
         max_duration_ms: None,
         max_cost_micro_usd: None,
+        max_tokens: None,
+        deadline: None,
         per_action: Vec::new(),
     }
 }

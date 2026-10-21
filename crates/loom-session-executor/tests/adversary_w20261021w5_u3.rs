@@ -290,6 +290,8 @@ fn a_session_that_never_started_suspends_for_availability_under_a_cost_limit() {
         max_tokens_out: None,
         max_duration_ms: None,
         max_cost_micro_usd: Some(1_000_000),
+        max_tokens: None,
+        deadline: None,
         per_action: Vec::new(),
     };
     let effects = Applying {

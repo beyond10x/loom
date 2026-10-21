@@ -378,7 +378,7 @@ use crate::model::responsibility::obligations::{
     ResumeRunBehavior, StartRunBehavior, SuspendRunBehavior,
 };
 use crate::model::responsibility::{
-    ActionCharge, BudgetLimit, ChargedUsage, RunBudget, RunBudgetBreach, RunCharges,
+    ActionCharge, BreachStep, BudgetLimit, ChargedUsage, RunBudget, RunBudgetBreach, RunCharges,
 };
 use crate::model::responsibility::{
     ActionNeedsAuthority, ActionNotAdmitted, ActionRequest, ActionRequestData, ActionRequestId,
@@ -437,11 +437,14 @@ pub trait LoopContext {
     /// (`ess/commission/domains/responsibility.yaml`, `StopPolicy`): whether the approval gate (5)
     /// ends it `AwaitingApproval`, and how many idle iterations in a row end it `IdleBound`. The
     /// default keeps the gate and sets no idle bound: two idle iterations end a run with no step
-    /// budget, and a budgeted run is bounded by its budget alone.
+    /// budget, and a budgeted run is bounded by its budget alone. It also says what becomes of an
+    /// executor step whose reported usage passed a spending limit (`on_breach`); the default,
+    /// `DiscardStep`, ends the run before that step's outcome is acted on.
     fn stop_policy(&self) -> StopPolicy {
         StopPolicy {
             approval_gate: true,
             idle_bound: None,
+            on_breach: BreachStep::DiscardStep,
         }
     }
 }

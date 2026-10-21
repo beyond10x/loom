@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 42add0733a6199e5713b6313c3bbb5c5ce429071848e56c3791eb79c41e58ea9
-// contract digest e6ab0245b27b257f77bdd6fc228586d2882f8aabe21fbd73be09472e33cd45ab
+// model digest 110ce466d1465f27156ddee90a23c5c3abc02e24613044348bd9b6aab4fc474d
+// contract digest 897513a9f8ac1418fe5ce912275c08613edd0ec8f9de4f7ff603ba3a1abdb659
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! The typed refusal of an unmet obligation, and the conversion seams owed between contexts.

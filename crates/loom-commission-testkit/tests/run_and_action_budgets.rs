@@ -4,8 +4,15 @@
 //! suspends the Run for `SuspensionReason::RunBudget` once an effect's usage took the charge past
 //! it; a trial limit suspends it before the request that would pass it is handed to the port. The
 //! charges reach the run's usage report beside model-port usage ([`RunMeter::charge_effects`]).
+//!
+//! `story:run-budget-tokens-and-deadline`: a run may also be bounded by its input and output
+//! tokens together (`max_tokens`) and by an RFC 3339 deadline read against the trusted time before
+//! each step, and the host's [`StopPolicy`] chooses, in `on_breach`, whether an executor step whose
+//! reported usage passed a spending limit is discarded (the default) or kept: acted on as with no
+//! breach, the Run suspended for the breach before the next step.
 
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use b10x_loom_commission::model::behaviour::{Generated, RunStorage};
@@ -13,15 +20,17 @@ use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
     ActionBudget, ActionCharge, ActionRequestData, ActionRequestId, ActionStatus, AgentRevisionId,
-    AuthorityContext, BudgetLimit, CaseId, ChargedUsage, Commission, CommissionData, CommissionId,
-    EffectOutcome, EffectOutcomePerformed, EffectUsage, ExecutorOutcome,
-    ExecutorOutcomeProposedAction, FrontierAction, ObservationId, PrincipalId,
-    ProposedActionArguments, RunBudget, RunBudgetBreach, RunId, RunOutcome, RunOutcomeSuspended,
-    RunState, SuspensionReason, commission_state,
+    AuthorityContext, AuthorityVerdict, AuthorityVerdictDeny, BreachStep, BudgetLimit, CaseId,
+    ChargedUsage, Commission, CommissionData, CommissionId, EffectOutcome, EffectOutcomePerformed,
+    EffectUsage, ExecutorOutcome, ExecutorOutcomeProposedAction, ExecutorStep, ExecutorUsage,
+    Frontier, FrontierAction, ObservationId, PrincipalId, ProposedActionArguments, RunBudget,
+    RunBudgetBreach, RunId, RunOutcome, RunOutcomeSuspended, RunState, StopPolicy,
+    SuspensionReason, commission_state, frontier_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
-use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked};
+use b10x_loom_commission::ports::executor::AgentExecutor;
+use b10x_loom_commission::runtime::{LoopContext, LoopEnd, LoopError, run_until_blocked};
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
 use b10x_loom_commission_testkit::fake_executor::ScriptedExecutor;
 use b10x_loom_commission_testkit::fake_governor::{Answer, FakeGovernor};
@@ -46,22 +55,118 @@ fn commission(case: &CaseId) -> Commission<commission_state::Assigned> {
 
 /// The case open at revision 1, its frontier listing `evaluate` admissible, on every call.
 fn governor(case: &CaseId) -> FakeGovernor {
+    governor_naming(case, None)
+}
+
+/// The case open at revision 1, on every call, its frontier listing `evaluate` admissible when no
+/// capability is named; otherwise as needing approval for `capability`, beside an admissible
+/// `inspect`, so a step whose proposal is denied leaves the run going on.
+fn governor_naming(case: &CaseId, capability: Option<&str>) -> FakeGovernor {
+    let entry = |action: &str, status, capability: Option<&str>| FrontierAction {
+        action: action.to_owned(),
+        status,
+        capability: capability.map(str::to_owned),
+        reasons: Vec::new(),
+    };
+    let actions = match capability {
+        None => vec![entry(EVALUATE, ActionStatus::Admissible, None)],
+        Some(capability) => vec![
+            entry(EVALUATE, ActionStatus::ApprovalRequired, Some(capability)),
+            entry("inspect", ActionStatus::Admissible, None),
+        ],
+    };
     let governor = FakeGovernor::new();
     governor.script(
         case.clone(),
-        [Answer::at(1).with_items(
-            Vec::new(),
-            Vec::new(),
-            vec![FrontierAction {
-                action: EVALUATE.to_owned(),
-                status: ActionStatus::Admissible,
-                capability: None,
-                reasons: Vec::new(),
-            }],
-        )],
+        [Answer::at(1).with_items(Vec::new(), Vec::new(), actions)],
     );
     governor
 }
+
+/// An executor over an agent session: each call proposes `evaluate` with arguments of its own, so
+/// each is progress, and reports `usage` as what the call spent.
+struct Session {
+    usage: Option<ExecutorUsage>,
+    calls: AtomicUsize,
+}
+
+impl Session {
+    fn reporting(usage: Option<ExecutorUsage>) -> Self {
+        Self {
+            usage,
+            calls: AtomicUsize::new(0),
+        }
+    }
+
+    fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+impl AgentExecutor for Session {
+    fn run(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorOutcome {
+        self.run_with_usage(commission, frontier).outcome
+    }
+
+    fn run_with_usage(
+        &self,
+        _commission: &Commission<commission_state::Assigned>,
+        _frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorStep {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        ExecutorStep {
+            outcome: ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
+                action: EVALUATE.to_owned(),
+                arguments: ProposedActionArguments(Value::Number(call.to_string())),
+            }),
+            usage: self.usage.clone(),
+            transcript_digest: None,
+            summary: None,
+        }
+    }
+}
+
+/// What one executor call reports it spent: `input_tokens` in, `output_tokens` out.
+fn call_usage(input_tokens: i64, output_tokens: i64) -> ExecutorUsage {
+    ExecutorUsage {
+        input_tokens,
+        output_tokens,
+        duration_ms: 500,
+        cost_micro_usd: Some(3),
+    }
+}
+
+/// The stop policy the context gives when the test sets none: the default.
+fn default_policy() -> StopPolicy {
+    StopPolicy {
+        approval_gate: true,
+        idle_bound: None,
+        on_breach: BreachStep::DiscardStep,
+    }
+}
+
+/// The default stop policy, keeping the step that passed a spending limit.
+fn keep_step() -> StopPolicy {
+    StopPolicy {
+        on_breach: BreachStep::KeepStep,
+        ..default_policy()
+    }
+}
+
+/// The trusted time before the first executor call.
+const BEFORE: &str = "2026-10-21T09:00:00Z";
+/// The deadline the deadline test sets, between [`BEFORE`] and [`AFTER`].
+const DEADLINE: &str = "2026-10-21T09:30:00Z";
+/// `DEADLINE` in whole seconds since the Unix epoch.
+const DEADLINE_SECONDS: i64 = 1_792_575_000;
+/// The trusted time once the executor was called.
+const AFTER: &str = "2026-10-21T10:00:00Z";
+/// `AFTER` in whole seconds since the Unix epoch.
+const AFTER_SECONDS: i64 = 1_792_576_800;
 
 /// An executor proposing `evaluate` `n` times, each with its own arguments, so each is progress.
 fn evaluations(n: u64) -> ScriptedExecutor {
@@ -128,24 +233,45 @@ impl EffectPort for Effects {
     }
 }
 
-/// New ids from counters, one trusted time, no step budget and the run budget it was given.
-struct Context {
+/// What the context's trusted clock reads.
+enum Clock<'a> {
+    /// One reading, always.
+    Fixed(&'static str),
+    /// [`BEFORE`] until the session was called once, [`AFTER`] from then on.
+    PastDeadlineAfterFirstCall(&'a Session),
+}
+
+/// New ids from counters, a trusted clock, no step budget, the run budget it was given and the
+/// stop policy it was given.
+struct Context<'a> {
     requests: u64,
     observations: u64,
     budget: RunBudget,
+    clock: Clock<'a>,
+    policy: StopPolicy,
 }
 
-impl Context {
+impl<'a> Context<'a> {
     fn with(budget: RunBudget) -> Self {
+        Self::reading(
+            budget,
+            Clock::Fixed("2026-10-16T09:00:00Z"),
+            default_policy(),
+        )
+    }
+
+    fn reading(budget: RunBudget, clock: Clock<'a>, policy: StopPolicy) -> Self {
         Self {
             requests: 0,
             observations: 0,
             budget,
+            clock,
+            policy,
         }
     }
 }
 
-impl LoopContext for Context {
+impl LoopContext for Context<'_> {
     fn action_request_id(&mut self) -> ActionRequestId {
         self.requests += 1;
         ActionRequestId(uuid(0x300 + self.requests))
@@ -157,7 +283,12 @@ impl LoopContext for Context {
     }
 
     fn now(&mut self) -> Timestamp {
-        Timestamp("2026-10-16T09:00:00Z".to_owned())
+        let reading = match self.clock {
+            Clock::Fixed(reading) => reading,
+            Clock::PastDeadlineAfterFirstCall(session) if session.calls() == 0 => BEFORE,
+            Clock::PastDeadlineAfterFirstCall(_) => AFTER,
+        };
+        Timestamp(reading.to_owned())
     }
 
     fn step_budget(&self) -> Option<usize> {
@@ -166,6 +297,10 @@ impl LoopContext for Context {
 
     fn run_budget(&self) -> Option<RunBudget> {
         Some(self.budget.clone())
+    }
+
+    fn stop_policy(&self) -> StopPolicy {
+        self.policy.clone()
     }
 }
 
@@ -176,6 +311,8 @@ fn unlimited() -> RunBudget {
         max_tokens_out: None,
         max_duration_ms: None,
         max_cost_micro_usd: None,
+        max_tokens: None,
+        deadline: None,
         per_action: Vec::new(),
     }
 }
@@ -210,6 +347,30 @@ fn run(
         &mut context,
     )
     .unwrap_or_else(|error| panic!("the loop failed: {error}"));
+    (end, runs)
+}
+
+/// `run_until_blocked` of `session` on [`governor_naming`] under `context`, asking `authority`,
+/// with the run store.
+fn run_session(
+    session: &Session,
+    effects: &Effects,
+    capability: Option<&str>,
+    authority: &StaticAuthorityProvider,
+    context: &mut Context<'_>,
+) -> (Result<LoopEnd, LoopError>, Generated<RunStore>) {
+    let case = CaseId("case-budget-session".to_owned());
+    let governor = governor_naming(&case, capability);
+    let mut runs = Generated::new(RunStore::new(|| RunId(uuid(0x101))));
+    let end = run_until_blocked(
+        &governor,
+        session,
+        authority,
+        effects,
+        &commission(&case),
+        &mut runs,
+        context,
+    );
     (end, runs)
 }
 
@@ -377,4 +538,223 @@ fn a_cost_limit_suspends_once_an_effect_reports_usage_without_a_cost() {
         "an unknown cost under a cost limit fails toward less effect"
     );
     assert_eq!(effects.invoked(), 1);
+}
+
+/// `max_tokens` bounds the input and output tokens charged to the run together: a call reporting
+/// 60 in and 50 out passes a limit of 100 that neither figure passes alone.
+#[test]
+fn max_tokens_counts_input_and_output_together() {
+    let session = Session::reporting(Some(call_usage(60, 50)));
+    let effects = Effects::reporting(None);
+    let budget = RunBudget {
+        max_tokens: Some(100),
+        ..unlimited()
+    };
+
+    let (end, runs) = run_session(
+        &session,
+        &effects,
+        None,
+        &StaticAuthorityProvider::new(),
+        &mut Context::reading(budget, Clock::Fixed(BEFORE), default_policy()),
+    );
+    let end = end.unwrap_or_else(|error| panic!("the loop failed: {error}"));
+
+    assert_eq!(
+        end.outcome,
+        suspended_for(RunBudgetBreach {
+            action: None,
+            limit: BudgetLimit::MaxTokens,
+            max: 100,
+            charged: Some(110),
+        }),
+        "the first call's 110 tokens pass the run's total-token limit"
+    );
+    assert_eq!(session.calls(), 1, "no second executor call");
+    assert_eq!(
+        effects.invoked(),
+        0,
+        "under the default DiscardStep, the breaching step's proposal is not acted on"
+    );
+    assert_eq!(
+        RunStorage::get(&runs.ports, &end.run_id).map(|held| held.state),
+        Some(RunState::Suspended)
+    );
+}
+
+/// A deadline is read against the trusted time before each executor call: once the clock reads
+/// past it, the run is suspended for `Deadline` before the next step, naming the deadline and the
+/// reading in whole seconds since the Unix epoch.
+#[test]
+fn a_passed_deadline_stops_the_run_before_the_next_step() {
+    let session = Session::reporting(None);
+    let effects = Effects::reporting(None);
+    let budget = RunBudget {
+        deadline: Some(Timestamp(DEADLINE.to_owned())),
+        ..unlimited()
+    };
+
+    let (end, runs) = run_session(
+        &session,
+        &effects,
+        None,
+        &StaticAuthorityProvider::new(),
+        &mut Context::reading(
+            budget,
+            Clock::PastDeadlineAfterFirstCall(&session),
+            default_policy(),
+        ),
+    );
+    let end = end.unwrap_or_else(|error| panic!("the loop failed: {error}"));
+
+    assert_eq!(
+        end.outcome,
+        suspended_for(RunBudgetBreach {
+            action: None,
+            limit: BudgetLimit::Deadline,
+            max: DEADLINE_SECONDS,
+            charged: Some(AFTER_SECONDS),
+        })
+    );
+    assert_eq!(session.calls(), 1, "the executor is called once");
+    assert_eq!(
+        effects.invoked(),
+        1,
+        "the first step, taken before the deadline, is performed"
+    );
+    assert_eq!(
+        RunStorage::get(&runs.ports, &end.run_id).map(|held| held.state),
+        Some(RunState::Suspended)
+    );
+}
+
+/// A deadline that is not RFC 3339 is a loop error before the Run starts: no Run is stored, the
+/// executor is never called and nothing is performed.
+#[test]
+fn a_deadline_that_is_not_rfc_3339_is_refused_before_the_run_starts() {
+    let session = Session::reporting(None);
+    let effects = Effects::reporting(None);
+    let budget = RunBudget {
+        deadline: Some(Timestamp("next tuesday".to_owned())),
+        ..unlimited()
+    };
+
+    let (end, runs) = run_session(
+        &session,
+        &effects,
+        None,
+        &StaticAuthorityProvider::new(),
+        &mut Context::reading(budget, Clock::Fixed(BEFORE), default_policy()),
+    );
+
+    let error = match end {
+        Ok(end) => panic!("the loop ran: {:?}", end.outcome),
+        Err(error) => error,
+    };
+    assert_eq!(error.run_id, None, "no Run was started");
+    assert!(
+        error.to_string().contains("next tuesday"),
+        "the error names the deadline: {error}"
+    );
+    assert!(
+        RunStorage::get(&runs.ports, &RunId(uuid(0x101))).is_none(),
+        "the run store holds no Run"
+    );
+    assert_eq!(session.calls(), 0, "the executor is never called");
+    assert_eq!(effects.invoked(), 0, "nothing is performed");
+}
+
+/// Under `on_breach: KeepStep`, the step whose reported usage passed a spending limit is acted on:
+/// its proposal is performed once, and the run then ends suspended for the breach with no further
+/// executor call.
+#[test]
+fn keep_step_acts_on_the_step_that_passed_a_spending_limit() {
+    let session = Session::reporting(Some(call_usage(60, 50)));
+    let effects = Effects::reporting(None);
+    let budget = RunBudget {
+        max_tokens: Some(100),
+        ..unlimited()
+    };
+
+    let (end, runs) = run_session(
+        &session,
+        &effects,
+        None,
+        &StaticAuthorityProvider::new(),
+        &mut Context::reading(budget, Clock::Fixed(BEFORE), keep_step()),
+    );
+    let end = end.unwrap_or_else(|error| panic!("the loop failed: {error}"));
+
+    assert_eq!(
+        end.outcome,
+        suspended_for(RunBudgetBreach {
+            action: None,
+            limit: BudgetLimit::MaxTokens,
+            max: 100,
+            charged: Some(110),
+        }),
+        "the kept step's breach suspends the run before the next step"
+    );
+    assert_eq!(
+        effects.invoked(),
+        1,
+        "the kept step's proposal is performed once"
+    );
+    assert_eq!(end.admitted.len(), 1);
+    assert_eq!(session.calls(), 1, "no further executor call");
+    assert_eq!(
+        RunStorage::get(&runs.ports, &end.run_id).map(|held| held.state),
+        Some(RunState::Suspended)
+    );
+}
+
+/// A kept step is acted on as with no breach, and no more: its proposal of an action the provider
+/// does not allow is asked about and never handed to the effect port, and the run is then
+/// suspended for the breach.
+#[test]
+fn keep_step_still_refuses_an_unadmitted_proposal() {
+    let session = Session::reporting(Some(call_usage(60, 50)));
+    let effects = Effects::reporting(None);
+    let authority = StaticAuthorityProvider::new().answer(
+        EVALUATE,
+        AuthorityVerdict::Deny(AuthorityVerdictDeny {
+            reason: "no evaluations today".to_owned(),
+        }),
+    );
+    let budget = RunBudget {
+        max_tokens: Some(100),
+        ..unlimited()
+    };
+
+    let (end, _) = run_session(
+        &session,
+        &effects,
+        Some(EVALUATE),
+        &authority,
+        &mut Context::reading(budget, Clock::Fixed(BEFORE), keep_step()),
+    );
+    let end = end.unwrap_or_else(|error| panic!("the loop failed: {error}"));
+
+    assert_eq!(
+        authority.requests().len(),
+        1,
+        "the kept step's proposal is asked about"
+    );
+    assert_eq!(
+        effects.invoked(),
+        0,
+        "a proposal the provider does not allow is never handed to the effect port"
+    );
+    assert!(end.admitted.is_empty());
+    assert_eq!(
+        end.outcome,
+        suspended_for(RunBudgetBreach {
+            action: None,
+            limit: BudgetLimit::MaxTokens,
+            max: 100,
+            charged: Some(110),
+        }),
+        "the run would go on, so it is suspended for the breach before the next step"
+    );
+    assert_eq!(session.calls(), 1, "no further executor call");
 }
