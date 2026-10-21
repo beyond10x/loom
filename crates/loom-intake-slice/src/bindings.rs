@@ -7,9 +7,10 @@
 //! before any model call. A run of that protocol performs an admitted action by starting its
 //! program directly, never through a shell, with the action's arguments as JSON on standard input,
 //! a cleared environment that keeps only `PATH`, and the configuration's timeout
-//! ([`DEFAULT_TIMEOUT_SECONDS`] when absent), past which the program is killed and reaped. Exit
-//! status 0 is `Performed`, with the program's standard output, one JSON object, as the report;
-//! any other end is `Refused`. The report's `evidence` member (a list of
+//! ([`DEFAULT_TIMEOUT_SECONDS`] when absent), past which the program and the processes it started
+//! are killed and reaped. Exit status 0 is `Performed`, with the program's standard output, one
+//! JSON object, as the report; any other end is `Refused`, a status that cannot be read included,
+//! naming the error. The report's `evidence` member (a list of
 //! `intake.bindings.CommandEvidence`) states evidence about the intent, each of a kind the action
 //! declares it may produce; it is submitted under this module's producer, citing one observation
 //! of the command's run. A binding confers no authority: the governor admits the action first,
@@ -38,7 +39,7 @@ use serde_json::Value;
 
 use crate::case::INTENT;
 use crate::effect::{Console, refuse};
-use crate::executor::fresh_uuid;
+use crate::executor::{ended_unreaped, fresh_uuid, kill_group};
 use crate::run::{SliceError, json_text, printable};
 use crate::selector::Briefing;
 
@@ -224,8 +225,18 @@ pub(crate) fn productions(entry: &ProtocolEntry) -> BTreeMap<String, Vec<String>
 /// How a command ended.
 enum Ended {
     Exited(ExitStatus, Vec<u8>, Vec<u8>),
-    TimedOut,
+    /// Ran past its timeout: killed with the processes it started and reaped, unless `unkilled`
+    /// names why its process group could not be killed.
+    TimedOut {
+        unkilled: Option<std::io::Error>,
+    },
     NotStarted(std::io::Error),
+    /// Its status could not be read (`error`): killed with the processes it started and reaped,
+    /// unless `unkilled` names why its process group could not be killed.
+    Unobserved {
+        error: std::io::Error,
+        unkilled: Option<std::io::Error>,
+    },
 }
 
 /// The effect port that performs an admitted action through the command bound to it.
@@ -302,18 +313,11 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> CommandEffects<'a, 'o, S, 
             ));
         }
         let program = &binding.argv[0];
-        let (status, stdout, stderr) = match self.run(binding, &arguments) {
-            Ended::Exited(status, stdout, stderr) => (status, stdout, stderr),
-            Ended::TimedOut => {
-                return refused(format!(
-                    "{program} was killed after {} s",
-                    self.timeout().as_secs()
-                ));
-            }
-            Ended::NotStarted(error) => {
-                return refused(format!("{program} did not start: {error}"));
-            }
-        };
+        let (status, stdout, stderr) =
+            match exited(program, self.timeout(), self.run(binding, &arguments)) {
+                Ok(exited) => exited,
+                Err(reason) => return refused(reason),
+            };
         if !status.success() {
             let stderr = String::from_utf8_lossy(&stderr);
             let tail: String = stderr
@@ -381,7 +385,8 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> CommandEffects<'a, 'o, S, 
     }
 
     /// Runs `binding`'s program with `arguments` on standard input, to its end or for the
-    /// timeout, whichever is first; one still running is killed and reaped.
+    /// timeout, whichever is first; one still running is killed and reaped with the processes it
+    /// started.
     fn run(&self, binding: &ActionBinding, arguments: &str) -> Ended {
         let deadline = Instant::now() + self.timeout();
         let mut command = Command::new(&binding.argv[0]);
@@ -392,6 +397,12 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> CommandEffects<'a, 'o, S, 
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // The program leads a process group of its own, so what it starts is killed with it.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt as _;
+            command.process_group(0);
+        }
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) => return Ended::NotStarted(error),
@@ -401,27 +412,7 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> CommandEffects<'a, 'o, S, 
             // Dropping the pipe at the end of the write closes standard input.
             thread::spawn(move || pipe.write_all(document.as_bytes()));
         }
-        let stdout = drain(child.stdout.take());
-        let stderr = drain(child.stderr.take());
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) if Instant::now() < deadline => thread::sleep(POLL),
-                Ok(None) | Err(_) => {
-                    stop(&mut child);
-                    return Ended::TimedOut;
-                }
-            }
-        };
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        let Ok(stdout) = stdout.recv_timeout(remaining) else {
-            return Ended::TimedOut;
-        };
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        let Ok(stderr) = stderr.recv_timeout(remaining) else {
-            return Ended::TimedOut;
-        };
-        Ended::Exited(status, stdout, stderr)
+        finish(child, deadline, |child| ended_unreaped(child))
     }
 
     /// The report `stdout` holds, and the evidence it states, each of a kind `action` declares it
@@ -542,15 +533,325 @@ fn drain(pipe: Option<impl Read + Send + 'static>) -> mpsc::Receiver<Vec<u8>> {
     receiver
 }
 
-/// Kills `child` and reaps it, so no process and no zombie is left.
-fn stop(child: &mut Child) {
-    let _ = child.kill();
-    let _ = child.wait();
+/// Waits for `child`, a process-group leader, asking `poll` whether it ended
+/// ([`ended_unreaped`], which leaves it unreaped) until it ends and its output is read, or until
+/// `deadline`. At the deadline, and when its status cannot be read, it and the processes it
+/// started are killed and reaped ([`stop`]); that includes a program that ended while a process
+/// it started keeps its output open past the deadline. The program is reaped only after its output
+/// was read or its group was killed, so the group's id is its own whenever it is killed.
+fn finish(
+    mut child: Child,
+    deadline: Instant,
+    mut poll: impl FnMut(&mut Child) -> std::io::Result<bool>,
+) -> Ended {
+    let stdout = drain(child.stdout.take());
+    let stderr = drain(child.stderr.take());
+    loop {
+        match poll(&mut child) {
+            Ok(true) => break,
+            Ok(false) if Instant::now() < deadline => thread::sleep(POLL),
+            Ok(false) => {
+                return Ended::TimedOut {
+                    unkilled: stop(&mut child).err(),
+                };
+            }
+            Err(error) => {
+                return Ended::Unobserved {
+                    error,
+                    unkilled: stop(&mut child).err(),
+                };
+            }
+        }
+    }
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let Ok(stdout) = stdout.recv_timeout(remaining) else {
+        return Ended::TimedOut {
+            unkilled: stop(&mut child).err(),
+        };
+    };
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let Ok(stderr) = stderr.recv_timeout(remaining) else {
+        return Ended::TimedOut {
+            unkilled: stop(&mut child).err(),
+        };
+    };
+    match child.wait() {
+        Ok(status) => Ended::Exited(status, stdout, stderr),
+        Err(error) => Ended::Unobserved {
+            error,
+            unkilled: stop(&mut child).err(),
+        },
+    }
+}
+
+/// What `program` ended with when it exited, else the reason its action is refused: killed at
+/// `timeout`, never started, or its status unreadable, naming the error; a process group that
+/// could not be killed is named as such, never reported killed.
+fn exited(
+    program: &str,
+    timeout: Duration,
+    ended: Ended,
+) -> Result<(ExitStatus, Vec<u8>, Vec<u8>), String> {
+    let seconds = timeout.as_secs();
+    match ended {
+        Ended::Exited(status, stdout, stderr) => Ok((status, stdout, stderr)),
+        Ended::TimedOut { unkilled: None } => {
+            Err(format!("{program} was killed after {seconds} s"))
+        }
+        Ended::TimedOut {
+            unkilled: Some(why),
+        } => Err(format!(
+            "{program} ran past {seconds} s, and the processes it started could not be killed: \
+             {why}"
+        )),
+        Ended::NotStarted(error) => Err(format!("{program} did not start: {error}")),
+        Ended::Unobserved {
+            error,
+            unkilled: None,
+        } => Err(format!(
+            "{program}'s status could not be read, so it was killed: {error}"
+        )),
+        Ended::Unobserved {
+            error,
+            unkilled: Some(why),
+        } => Err(format!(
+            "{program}'s status could not be read ({error}), and the processes it started could \
+             not be killed: {why}"
+        )),
+    }
+}
+
+/// Kills `child`, the leader of its own process group, with the processes it started
+/// ([`kill_group`], the test runner's), and reaps it, so no process and no zombie is left.
+///
+/// # Errors
+/// The group could not be killed; `child` is then reaped only if it already ended, since waiting
+/// for a process the signal did not reach could hold the run past its timeout.
+fn stop(child: &mut Child) -> std::io::Result<()> {
+    let killed = kill_group(child);
+    if killed.is_ok() {
+        let _ = child.wait();
+    } else {
+        let _ = child.try_wait();
+    }
+    killed
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Kills the `sleep` with this pid when a test ends with it still there, so none outlives the
+    /// test run.
+    struct Sleeping(u32);
+
+    impl Drop for Sleeping {
+        fn drop(&mut self) {
+            let proc = std::path::Path::new("/proc").join(self.0.to_string());
+            if std::fs::read(proc.join("cmdline")).is_ok_and(|line| line.starts_with(b"sleep\0"))
+                && let Ok(pid) = i32::try_from(self.0)
+            {
+                let _ = nix::sys::signal::kill(
+                    nix::unistd::Pid::from_raw(pid),
+                    nix::sys::signal::Signal::SIGKILL,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_group_that_could_not_be_killed_is_never_reported_killed() {
+        let unkilled = || Some(std::io::Error::from_raw_os_error(libc::EPERM));
+        let reason = exited(
+            "record-note",
+            Duration::from_secs(1),
+            Ended::TimedOut {
+                unkilled: unkilled(),
+            },
+        )
+        .unwrap_err();
+        assert!(
+            reason.starts_with(
+                "record-note ran past 1 s, and the processes it started could not be killed: "
+            ),
+            "{reason}"
+        );
+        assert!(reason.contains("Operation not permitted"), "{reason}");
+        assert!(!reason.contains("was killed"), "{reason}");
+        let reason = exited(
+            "record-note",
+            Duration::from_secs(1),
+            Ended::Unobserved {
+                error: std::io::Error::other("the fixture's wait failed"),
+                unkilled: unkilled(),
+            },
+        )
+        .unwrap_err();
+        assert!(reason.contains("the fixture's wait failed"), "{reason}");
+        assert!(reason.contains("could not be killed"), "{reason}");
+        assert!(!reason.contains("so it was killed"), "{reason}");
+    }
+
+    #[test]
+    fn a_status_that_cannot_be_read_is_refused_with_its_error_and_never_as_a_timeout() {
+        let mut command = Command::new("sleep");
+        command
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        {
+            use std::os::unix::process::CommandExt as _;
+            command.process_group(0);
+        }
+        let child = command.spawn().unwrap();
+        let sleeping = Sleeping(child.id());
+        let ended = finish(child, Instant::now() + Duration::from_secs(30), |_| {
+            Err(std::io::Error::other("the fixture's wait failed"))
+        });
+        assert!(matches!(ended, Ended::Unobserved { unkilled: None, .. }));
+        let reason = exited("record-note", Duration::from_secs(30), ended).unwrap_err();
+        assert_eq!(
+            reason,
+            "record-note's status could not be read, so it was killed: the fixture's wait failed"
+        );
+        assert!(!reason.contains("killed after"), "{reason}");
+        // The program was killed and reaped: no process and no zombie is left.
+        let proc = std::path::Path::new("/proc").join(sleeping.0.to_string());
+        assert!(!proc.exists(), "{} is still there", proc.display());
+    }
+
+    /// A program started as `sh -c script`, leading a process group of its own.
+    fn leader(script: &str) -> Child {
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", script])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        {
+            use std::os::unix::process::CommandExt as _;
+            command.process_group(0);
+        }
+        command.spawn().unwrap()
+    }
+
+    #[test]
+    fn a_leader_reaped_before_the_timeout_is_never_signalled_and_never_reported_killed() {
+        let child = leader("exit 0");
+        // The poll reaps the program and still answers that it runs, so the deadline finds the
+        // group's id no longer held by its leader.
+        let ended = finish(
+            child,
+            Instant::now() + Duration::from_millis(300),
+            |child| child.try_wait().map(|_| false),
+        );
+        let Ended::TimedOut {
+            unkilled: Some(why),
+        } = ended
+        else {
+            panic!("a group whose leader was reaped is reported killed");
+        };
+        assert!(why.to_string().contains("already reaped"), "{why}");
+        let reason = exited(
+            "record-note",
+            Duration::from_secs(1),
+            Ended::TimedOut {
+                unkilled: Some(why),
+            },
+        )
+        .unwrap_err();
+        assert!(!reason.contains("was killed"), "{reason}");
+    }
+
+    #[test]
+    fn output_held_past_the_timeout_after_its_leader_was_reaped_is_never_reported_killed() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("pid");
+        let child = leader(&format!(
+            "sleep 30 & echo $! > '{}'; exit 0",
+            pid_file.display()
+        ));
+        let leader_pid = child.id();
+        // The poll reaps the program once it ended, while the `sleep` it started holds its
+        // output open past the deadline.
+        let ended = finish(
+            child,
+            Instant::now() + Duration::from_millis(500),
+            |child| child.try_wait().map(|status| status.is_some()),
+        );
+        let sleeping = Sleeping(
+            std::fs::read_to_string(&pid_file)
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap(),
+        );
+        let Ended::TimedOut {
+            unkilled: Some(why),
+        } = ended
+        else {
+            panic!("a group whose leader {leader_pid} was reaped is reported killed");
+        };
+        assert!(why.to_string().contains("already reaped"), "{why}");
+        // Nothing was signalled: the `sleep` still runs, and its guard kills it.
+        let proc = std::path::Path::new("/proc").join(sleeping.0.to_string());
+        assert!(proc.exists(), "{} was signalled", proc.display());
+    }
+
+    #[test]
+    fn standard_error_held_past_the_timeout_after_its_leader_was_reaped_is_never_reported_killed() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("pid");
+        let child = leader(&format!(
+            "sleep 30 > /dev/null & echo $! > '{}'; exit 0",
+            pid_file.display()
+        ));
+        // Standard output closes with the program; the `sleep` it started holds only its standard
+        // error open past the deadline.
+        let ended = finish(
+            child,
+            Instant::now() + Duration::from_millis(500),
+            |child| child.try_wait().map(|status| status.is_some()),
+        );
+        let sleeping = Sleeping(
+            std::fs::read_to_string(&pid_file)
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap(),
+        );
+        let Ended::TimedOut {
+            unkilled: Some(why),
+        } = ended
+        else {
+            panic!("a group whose leader was reaped is reported killed");
+        };
+        assert!(why.to_string().contains("already reaped"), "{why}");
+        let proc = std::path::Path::new("/proc").join(sleeping.0.to_string());
+        assert!(proc.exists(), "{} was signalled", proc.display());
+    }
+
+    #[test]
+    fn a_status_lost_after_the_program_ended_is_never_reported_killed() {
+        let child = leader("exit 0");
+        let pid = nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap());
+        // The poll reaps the program behind `Child`'s back, so its status cannot be read after.
+        let ended = finish(child, Instant::now() + Duration::from_secs(5), |_| {
+            use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
+            waitpid(pid, Some(WaitPidFlag::WNOHANG))
+                .map(|status| status != WaitStatus::StillAlive)
+                .map_err(std::io::Error::from)
+        });
+        let Ended::Unobserved {
+            unkilled: Some(why),
+            ..
+        } = ended
+        else {
+            panic!("a lost status is not refused naming a group that could not be killed");
+        };
+        assert!(why.to_string().contains("already reaped"), "{why}");
+    }
 
     #[test]
     fn a_file_with_an_undeclared_member_is_refused_naming_it() {
