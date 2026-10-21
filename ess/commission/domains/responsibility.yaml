@@ -292,6 +292,8 @@ types:
   # story:pending-effect adds Waiting (a budget ended the run while the effect port's last answer
   # for a request was Pending, `JudgeBudgetStop`, `waiting`): where the run would otherwise be
   # Suspended for that budget, it names the pending requests and the budget's reason.
+  # story:pending-answer-ends-run: a run also ends Waiting when the effect port answers Pending
+  # with `ends_run`, the reason Time carrying the port's report.
   - name: commission.responsibility.RunOutcome
     kind: union
     tag: kind
@@ -424,6 +426,11 @@ types:
   # story:pending-effect: the requests the effect port last answered Pending when a budget ended
   # the run, in the order they were made (one, or the pending reads of one fan-out), and the reason
   # the Run was suspended for that budget, as `JudgeBudgetStop` answers `waiting` for them.
+  # story:pending-answer-ends-run: or the requests pending when the effect port answered Pending
+  # with `ends_run` (EffectOutcomePending): the request so answered, or every read of its fan-out
+  # answered Pending, in proposal order, and the reason Time carrying the report of the first that
+  # asked to end the run; a run budget breach found after the same answer ends the run first, with
+  # the breach as the reason.
   - name: commission.responsibility.RunOutcomeWaiting
     kind: struct
     fields:
@@ -465,11 +472,21 @@ types:
   # the request is judged once the port answers otherwise. A budget that ends the run while a
   # request is pending ends it Waiting, naming the request (`JudgeBudgetStop`). Nothing it reports
   # was performed, so the case moves only after a Performed.
+  # story:pending-answer-ends-run: `ends_run` asks the runtime not to invoke the request again in
+  # this run: once the answer was recorded, charged and observed, and the run budget's spending
+  # limits checked (a breach ends the run as at any budget stop), the run ends Waiting, naming the
+  # request, the Run suspended through `SuspendRun` for the reason Time carrying this `report`
+  # (`JudgeBudgetStop`, `waiting`). In a fan-out the run ends so once every read joined, naming
+  # every read answered Pending, in proposal order, with the report of the first that asked to end
+  # the run. A resumed request answered so releases its Suspension first. False is today's answer:
+  # the request is invoked again. How a host continues such a run is the host's.
   - name: commission.responsibility.EffectOutcomePending
     kind: struct
     fields:
       - name: report
         type: Json
+      - name: ends_run
+        type: Boolean
 
   # What the effect did, as the effect port reports it. Commission declares no structure for it.
   # story:effect-invocation (decision-blocker:invocation-attempt-record, A): the one Connector
@@ -543,6 +560,11 @@ types:
   # the Run is suspended for the deadline (limit Deadline), the run ending Suspended, or Waiting
   # while a request is pending, as at any budget stop. A deadline that is not RFC 3339 is refused
   # before the Run starts. Neither is an action's limit: ActionBudget has no counterpart.
+  # story:pending-answer-ends-run: a resumed request is checked against the deadline too, before
+  # its Suspension is taken and again right before the request is invoked, where the case revision
+  # is read again. At or after the deadline the first takes nothing and the Suspension stays
+  # Pending; the second releases the Suspension; neither performs anything, and the resume ends as
+  # a passed deadline ends a run before an executor call.
   - name: commission.responsibility.RunBudget
     kind: struct
     fields:
@@ -1663,6 +1685,10 @@ commands:
   # outcome is `Waiting`, naming them and the reason as `waiting` does: the work they started has
   # not finished. With none, nothing changes (`suspended`), and the run outcome is `Suspended` with
   # the reason, as before.
+  # story:pending-answer-ends-run: a Pending answer with `ends_run` stops the run as a budget does
+  # and is judged here the same way: `pending` lists the request so answered (for a fan-out, every
+  # read answered Pending, in proposal order), and `reason` is Time carrying the port's report, so
+  # the outcome is `waiting`.
   - name: commission.responsibility.JudgeBudgetStop
     input:
       - name: pending
