@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-21T20:55:25Z",
+  "actor": "human:timo",
+  "artifact": "story:run-budget-tokens-and-deadline",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "the after-call deadline finding fixed in 3e2712a, merged a083809; pass 2 green, 21 cases, merged ad63859",
+    "reference": "ad63859",
+    "review": "review-result:w7-adversary",
+    "outcome": "fixed"
+  }
+}

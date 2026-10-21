@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-21T19:29:23Z",
+  "actor": "human:timo",
+  "artifact": "story:run-budget-tokens-and-deadline",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test -p b10x-loom-commission -p b10x-loom-commission-testkit -p b10x-loom-commission-conformance -p b10x-loom-governor -p b10x-loom-session-executor --locked; task commission:ess-gate commission:conform commission:drift commission:no-hand-model commission:docs-drift commission:deps-guard; cargo check --workspace --all-targets --locked",
+    "reference": "e52f3372"
+  }
+}

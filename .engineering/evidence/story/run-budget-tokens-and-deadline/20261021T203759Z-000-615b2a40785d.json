@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-21T20:37:59Z",
+  "actor": "human:timo",
+  "artifact": "story:run-budget-tokens-and-deadline",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "green at 3e2712a: cargo test -p b10x-loom-commission-testkit -p b10x-loom-commission --locked --no-fail-fast, 84 test results ok, exit 0; clippy -D warnings and cargo fmt --all --check exit 0",
+    "reference": "3e2712a"
+  }
+}

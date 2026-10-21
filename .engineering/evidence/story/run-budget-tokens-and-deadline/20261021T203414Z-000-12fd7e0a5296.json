@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-21T20:34:14Z",
+  "actor": "human:timo",
+  "artifact": "story:run-budget-tokens-and-deadline",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "red at 82d3561: cargo test -p b10x-loom-commission-testkit --locked --test run_and_action_budgets, 17 passed, 1 failed (a_deadline_passed_during_an_executor_call_discards_its_step, invoked 1, expected 0)",
+    "reference": "82d3561"
+  }
+}

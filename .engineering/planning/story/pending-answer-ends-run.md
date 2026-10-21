@@ -2,14 +2,32 @@
 format: aep.planning-md/3
 id: story:pending-answer-ends-run
 kind: story
-status: active
+status: implemented
 title: An effect port's pending answer can end the run waiting on it
 relations:
 - serves: vision:governed-autonomy
-revision: 3
+scope:
+- confidence: cited
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/adversary_w20261020w3_u2.rs
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/pending_effect.rs
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/run_and_action_budgets.rs
+- confidence: cited
+  path: crates/loom-commission/src/runtime.rs
+- confidence: cited
+  path: crates/loom-executor/tests/workflow_executor.rs
+- confidence: cited
+  path: ess/commission/domains/responsibility.yaml
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-21T18:44:06Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-21T18:44:06Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-21T22:26:38Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":2,"review_outcome":1}}}
 ---
 ## Outcome
 
@@ -69,3 +87,7 @@ while the process waits (a local wait the host resumes later) has no way to end 
 - every `EffectOutcomePending { .. }` literal in the workspace
 - `crates/loom-commission-conformance/src/codec.rs`
 - `AGENTS.md`, `CHANGELOG.md`, `website/docs/reference/commission/` (regenerated)
+
+## Shipped
+
+Merged into wave 2026-10-21-w7 as 4a07f3f2. Adversary pass 1 (review-result:w7-adversary) attacked mixed fan-outs, a breach and a final refusal beside an ending read, a request invoked again and a resumed one: nothing was invoked twice.

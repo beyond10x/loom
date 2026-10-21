@@ -2,14 +2,28 @@
 format: aep.planning-md/3
 id: story:first-declared-completion
 kind: story
-status: active
+status: implemented
 title: A governor can complete on the first declared legitimate outcome
 relations:
 - serves: vision:governed-autonomy
-revision: 3
+scope:
+- confidence: cited
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
+  path: crates/loom-governor/src/lib.rs
+- confidence: cited
+  path: crates/loom-governor/tests/completion_rule.rs
+- confidence: cited
+  path: crates/loom-sdk/src/lib.rs
+- confidence: cited
+  path: ess/domains/governor.yaml
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-21T18:44:07Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-21T18:44:07Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-21T22:26:38Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":2,"review_outcome":1}}}
 ---
 ## Outcome
 
@@ -66,3 +80,7 @@ a decision recorded after it) and whose own rule takes the first declared cannot
 - `crates/loom-governor/tests/completion_rule.rs`
 - `AGENTS.md` § Governor, `CHANGELOG.md`, `website/docs/reference/ess/`, `website/data/ess/`
   (regenerated)
+
+## Shipped
+
+Merged into wave 2026-10-21-w7 as 4bfacfd0. Adversary pass 1 (review-result:w7-adversary) held declaration order against name order, per protocol, across a `FileCaseStore` restart, and `evaluate` on `ExactlyOne`.

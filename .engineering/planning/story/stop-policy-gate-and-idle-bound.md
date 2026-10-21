@@ -2,14 +2,34 @@
 format: aep.planning-md/3
 id: story:stop-policy-gate-and-idle-bound
 kind: story
-status: active
+status: implemented
 title: A host chooses whether an unchanged frontier awaits approval and how many idle steps end a run
 relations:
 - serves: vision:governed-autonomy
-revision: 3
+scope:
+- confidence: cited
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
+  path: crates/loom-commission-conformance/src/lib.rs
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/stop_policy.rs
+- confidence: cited
+  path: crates/loom-commission/src/outcome.rs
+- confidence: cited
+  path: crates/loom-commission/src/runtime.rs
+- confidence: cited
+  path: docs/commission/design/approval-gate.md
+- confidence: cited
+  path: ess/commission/domains/responsibility.yaml
+- confidence: cited
+  path: ess/commission/system.yaml
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-21T18:44:05Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-21T18:44:06Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-21T22:26:37Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":2,"review_outcome":1}}}
 ---
 ## Outcome
 
@@ -92,3 +112,7 @@ policy.
 - `crates/loom-commission-conformance/` (the new input)
 - `docs/commission/design/approval-gate.md`
 - `AGENTS.md`, `CHANGELOG.md`, `website/docs/reference/commission/` (regenerated)
+
+## Shipped
+
+Merged into wave 2026-10-21-w7 as 65f66ac1. Adversary pass 1 (review-result:w7-adversary) attacked the gate off with a withheld, failing and panicking provider on a fan-out, a pending request, a resume and a kept step: nothing was invoked.

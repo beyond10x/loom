@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-21T22:08:02Z",
+  "actor": "human:timo",
+  "artifact": "story:first-declared-completion",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "full gate on ad638597 under ESS 0.67.0 (task check steps one by one, intake-conform included, task plan, release-check, task website): 24 of 24 exit 0; steps 1-17 in gate-ad638597.log, cargo test --workspace --locked --no-fail-fast 1749 passed, 0 failed, 10 ignored in gate-ad638597-rest.log, consumer-check onward in gate-ad638597-tail.log",
+    "reference": "~/.cache/loom-wave-2026-10-21-w7/gate-ad638597-tail.log"
+  }
+}

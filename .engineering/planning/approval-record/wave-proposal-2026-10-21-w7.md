@@ -11,7 +11,7 @@ relations:
 - decides: story:run-budget-tokens-and-deadline
 - decides: story:pending-answer-ends-run
 - decides: story:first-declared-completion
-revision: 1
+revision: 2
 ---
 # Wave 2026-10-21-w7 proposal, accepted with no operator turn
 
@@ -55,3 +55,17 @@ performs a proposal after a spending limit was passed; the specification changes
 
 Integration tree `loom-wave-20261021-w7`, branch `wave/2026-10-21-w7`. Scratch root
 `~/.cache/loom-wave-2026-10-21-w7/`.
+
+## Red run: a resume whose deadline passes after the take
+
+The second case of `a_resume_past_its_deadline_performs_nothing`
+(`crates/loom-commission-testkit/tests/run_and_action_budgets.rs`) covers a deadline that passes
+after the resume took the Suspension. Unit 3's red run never reached it: the first case panicked
+first. It was run alone on 2026-10-21, in a scratch tree at the wave head `4a07f3f2`.
+
+| Runtime | Command | Result |
+|---|---|---|
+| `4a07f3f2` without the check after the take (`crates/loom-commission/src/runtime.rs`, five lines removed from the resumed branch: `deadline_reached`, `release_taken`, `budget_ended`) | `cargo test -p b10x-loom-commission-testkit --locked --test run_and_action_budgets -- --exact a_resume_past_its_deadline_performs_nothing` | `FAILED`, `run_and_action_budgets.rs:1075:5`, `nothing is performed`, `left: 1`, `right: 0`, exit 101 |
+| `4a07f3f2` as merged | the same | `ok`, 1 passed, exit 0 |
+
+The first case passed both times, so the failure at line 1075 is the second case's.

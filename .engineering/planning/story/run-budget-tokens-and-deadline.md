@@ -2,14 +2,48 @@
 format: aep.planning-md/3
 id: story:run-budget-tokens-and-deadline
 kind: story
-status: active
+status: implemented
 title: A run is bounded by total tokens and a deadline, and may keep the step that passed a limit
 relations:
 - serves: vision:governed-autonomy
-revision: 3
+scope:
+- confidence: cited
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
+  path: crates/loom-commission-conformance/src/codec.rs
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/adversary_w20261021w7_runtime.rs
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/executor_usage.rs
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/pending_effect.rs
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/run_and_action_budgets.rs
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/stop_policy.rs
+- confidence: cited
+  path: crates/loom-commission/src/lib.rs
+- confidence: cited
+  path: crates/loom-commission/src/rfc3339.rs
+- confidence: cited
+  path: crates/loom-commission/src/runtime.rs
+- confidence: cited
+  path: crates/loom-governor/src/file_suspension.rs
+- confidence: cited
+  path: crates/loom-governor/tests/suspension_budget_limits.rs
+- confidence: cited
+  path: crates/loom-session-executor/tests/adversary_w20261021w5_u3.rs
+- confidence: cited
+  path: crates/loom-session-executor/tests/proposes.rs
+- confidence: cited
+  path: ess/commission/domains/responsibility.yaml
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-21T18:44:06Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-21T18:44:06Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-21T22:26:37Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"test_result":4,"review_outcome":1}}}
 ---
 ## Outcome
 
@@ -45,13 +79,18 @@ default and the other choice is opt-in.
   budget stop). A deadline that is not RFC 3339 is a `LoopError` before the Run starts; a clock
   reading that is not is taken as past the deadline, with `charged` absent. Commission parses
   RFC 3339 itself and takes no time crate.
+- The deadline is read again once an executor call was observed, after the spending limits: a call
+  that ended at or after it is a breach `on_breach` decides, as for a spending limit, so by default
+  nothing that call proposed is performed (added in the wave after the adversary pass found that a
+  proposal from a call that ran past the deadline was still performed).
 - ESS `StopPolicy` (from the stop-policy story) gains `on_breach: BreachStep`, an enum
   `[DiscardStep, KeepStep]`, default `DiscardStep`. `KeepStep`: when an executor call's reported
-  usage took the run past a spending limit, the step's outcome is acted on as with no breach (a
-  proposal is revalidated, asked about and performed only when admitted), and where the run would
-  then go on it is suspended for the breach before the next step. A step whose outcome ends the run
-  ends it with that outcome. `KeepStep` performs a proposal after a spending limit was passed; an
-  effect's own usage breach is unchanged (that effect is already performed).
+  usage took the run past a spending limit, or the call ended at or after the deadline, the step's
+  outcome is acted on as with no breach (a proposal is revalidated, asked about and performed only
+  when admitted), and where the run would then go on it is suspended for the breach before the next
+  step. A step whose outcome ends the run ends it with that outcome. `KeepStep` performs a proposal
+  after a spending limit or the deadline was passed; an effect's own usage breach is unchanged
+  (that effect is already performed).
 
 ## ESS first
 
@@ -67,6 +106,10 @@ regenerates. Red tests in `crates/loom-commission-testkit/tests/run_and_action_b
   reports 60 in and 50 out is suspended for `RunBudget { limit: MaxTokens, max: 100, charged: 110 }`.
 - `a_passed_deadline_stops_the_run_before_the_next_step`: with a clock past the deadline after the
   first step, the executor is called once and the run ends suspended for `Deadline`.
+- `a_deadline_passed_during_an_executor_call_discards_its_step`: with a clock past the deadline
+  once the first call ended, nothing that call proposed is performed and the run ends suspended
+  for `Deadline`; `keep_step_performs_the_step_whose_call_ended_past_the_deadline` performs it once
+  under `KeepStep`.
 - `a_deadline_that_is_not_rfc_3339_is_refused_before_the_run_starts`.
 - `keep_step_acts_on_the_step_that_passed_a_spending_limit`: with `on_breach: KeepStep`, the
   proposal of the step that passed the limit is performed once, and the run then ends suspended
@@ -90,3 +133,7 @@ regenerates. Red tests in `crates/loom-commission-testkit/tests/run_and_action_b
 - `crates/loom-commission-conformance/src/codec.rs`
 - every `RunBudget { .. }` literal in the workspace's tests (`loom-session-executor`, testkit)
 - `AGENTS.md`, `CHANGELOG.md`, `website/docs/reference/commission/` (regenerated)
+
+## Shipped
+
+Merged into wave 2026-10-21-w7 as cd1022d4. A resume reads the deadline before the take and again right before the invoke; that came in unit 3's merge (4a07f3f2). Its after-take case was run alone in a scratch tree at 4a07f3f2 and seen red there, as the approval record's "Red run" section records. Adversary pass 1 found that a proposal from a call ending past the deadline was still performed. The deadline is now read again once the call was observed: 82d3561 spec, da5c818 red, 3e2712a fix, merged a083809a. Adversary pass 2 attacked the fix (merged ad638597). Both passes are review-result:w7-adversary.

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-21T19:02:02Z",
+  "actor": "human:timo",
+  "artifact": "story:stop-policy-gate-and-idle-bound",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test -p b10x-loom-commission -p b10x-loom-commission-testkit -p b10x-loom-commission-conformance --locked; task commission:ess-gate commission:conform commission:drift commission:no-hand-model commission:docs-drift commission:deps-guard",
+    "reference": "7a062ecf"
+  }
+}

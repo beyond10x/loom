@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-21T20:55:25Z",
+  "actor": "human:timo",
+  "artifact": "story:first-declared-completion",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "adversary pass 1 green, 36 cases, merged c29004fe; findings recorded as documented semantics",
+    "reference": "ad63859",
+    "review": "review-result:w7-adversary",
+    "outcome": "no-op"
+  }
+}

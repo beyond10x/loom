@@ -15,14 +15,14 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Added
 
 - `LoopContext::stop_policy` returns a `StopPolicy`: the host turns the approval gate off and sets the idle bound (story:stop-policy-gate-and-idle-bound)
-- `StopPolicy.on_breach`: `KeepStep` performs a proposal after a spending limit was passed; `DiscardStep` stays the default (story:run-budget-tokens-and-deadline)
+- `StopPolicy.on_breach`: `KeepStep` performs a proposal after a spending limit or the deadline was passed; `DiscardStep` stays the default (story:run-budget-tokens-and-deadline)
 - `CanonGovernor::with_completion_rule(CompletionRule::FirstDeclared)` completes on the first declared legitimate outcome (story:first-declared-completion)
 
 ### Changed
 
 - **Breaking:** `JudgeIdleIteration` gains a `bound` input, which `outcome::judge_idle` judges against (story:stop-policy-gate-and-idle-bound)
 - **Breaking:** `RunBudget` gains `max_tokens` and `deadline`, `BudgetLimit` gains `MaxTokens` and `Deadline` (story:run-budget-tokens-and-deadline)
-- **Breaking:** `StopPolicy` gains `on_breach`, and `LoopFailure` gains `InvalidDeadline`, refusing a deadline not RFC 3339 before a Run starts
+- **Breaking:** `LoopFailure` gains `InvalidDeadline`: a `RunBudget.deadline` not RFC 3339 is refused before a Run starts (story:run-budget-tokens-and-deadline)
 - **Breaking:** `EffectOutcomePending` gains `ends_run`: `true` ends the run `Waiting` for `Time` (story:pending-answer-ends-run)
 
 ### Fixed
