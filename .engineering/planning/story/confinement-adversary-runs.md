@@ -2,19 +2,28 @@
 format: aep.planning-md/3
 id: story:confinement-adversary-runs
 kind: story
-status: active
+status: implemented
 title: The confinement escape tests run under a delegated scope instead of being ignored
 relations:
 - serves: vision:governed-autonomy
 scope:
+- confidence: cited
+  path: CHANGELOG.md
 - confidence: inferred
   path: crates/loom-intake-slice/src/confinement.rs
 - confidence: cited
   path: crates/loom-intake-slice/tests/adversary_confinement.rs
-revision: 5
+- confidence: cited
+  path: crates/loom-intake-slice/tests/confined_child.rs
+- confidence: cited
+  path: crates/loom-intake-slice/tests/security_w20261021w6_u2.rs
+- confidence: cited
+  path: crates/loom-intake-slice/tests/support/mod.rs
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-21T13:40:13Z", actor: "human:timo", revision: 4}
 - {from: "proposed", to: "active", at: "2026-10-21T13:40:14Z", actor: "human:timo", revision: 5}
+- {from: "active", to: "implemented", at: "2026-10-21T15:53:26Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 
@@ -57,3 +66,7 @@ Exempt: no behaviour of Loom changes. The tests move from ignored to run.
 
 - `crates/loom-intake-slice/tests/adversary_confinement.rs`
 - `crates/loom-intake-slice/src/confinement.rs` (only if an escape test fails)
+
+## Shipped
+
+Merged into wave 2026-10-21-w6 as 2497f285, after one security review (review-result:sec-w20261021w6-u2-pass-1). Running the escape tests found that an inherited `RUSTUP_TOOLCHAIN` overrode the workspace toolchain file (fixed in 57debc06). The review found that the shared harness passed a case that never ran, or a refusal naming no missing prerequisite, as a skip (fixed in ae16fdb5).

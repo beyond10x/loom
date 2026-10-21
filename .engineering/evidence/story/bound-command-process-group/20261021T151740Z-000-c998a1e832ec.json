@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-21T15:17:40Z",
+  "actor": "human:timo",
+  "artifact": "story:bound-command-process-group",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "full gate on 2497f285 under ESS 0.67.0 (task check steps one by one, intake-conform included, task plan, release-check, task website): 24 of 24 exit 0; cargo test --workspace --locked --no-fail-fast 1654 passed, 0 failed, 10 ignored",
+    "reference": "~/.cache/loom-wave-2026-10-21-w6/gate-2497f285.log"
+  }
+}

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:bound-command-process-group
 kind: story
-status: active
+status: implemented
 title: A timed-out bound command is killed with every process it started
 relations:
 - serves: vision:governed-autonomy
@@ -12,13 +12,22 @@ scope:
 - confidence: cited
   path: CHANGELOG.md
 - confidence: cited
+  path: Cargo.lock
+- confidence: cited
+  path: crates/loom-intake-slice/Cargo.toml
+- confidence: cited
   path: crates/loom-intake-slice/src/bindings.rs
 - confidence: cited
   path: crates/loom-intake-slice/src/executor.rs
-revision: 4
+- confidence: cited
+  path: crates/loom-intake-slice/tests/adversary_w20261021w6_u3.rs
+- confidence: cited
+  path: crates/loom-intake-slice/tests/bound_command.rs
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-21T13:40:12Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-21T13:40:12Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-21T15:53:25Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"test_result":1,"review_outcome":2}}}
 ---
 ## Outcome
 
@@ -63,3 +72,7 @@ the child's pid to a file and outlives the timeout; the test then checks that th
 - `crates/loom-intake-slice/src/bindings.rs`
 - `crates/loom-intake-slice/src/executor.rs` (the shared kill helper)
 - `AGENTS.md`
+
+## Shipped
+
+Merged into wave 2026-10-21-w6 as cda46dcc, after two adversary passes (review-result:adv-w20261021w6-u3-pass-1, -pass-2). The group kill is `nix::sys::signal::killpg` (810c1d47), and the leader is reaped only after it (21dcbc5f), so the kill never reaches a reused group id.

@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-21T15:18:27Z",
+  "actor": "human:timo",
+  "artifact": "story:confinement-adversary-runs",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "fix ae16fdb5, merge 2497f285",
+    "review": "review-result:sec-w20261021w6-u2-pass-1",
+    "outcome": "fixed"
+  }
+}

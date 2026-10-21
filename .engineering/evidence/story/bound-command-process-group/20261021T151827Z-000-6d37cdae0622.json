@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-21T15:18:27Z",
+  "actor": "human:timo",
+  "artifact": "story:bound-command-process-group",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "fix 810c1d47, merge cda46dcc",
+    "review": "review-result:adv-w20261021w6-u3-pass-1",
+    "outcome": "fixed"
+  }
+}
