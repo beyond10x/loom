@@ -5,12 +5,15 @@
 //!
 //! The delegated cases need bubblewrap and a delegated cgroup v2 scope. Each starts its own test
 //! binary again under `systemd-run --user --scope -p Delegate=yes`, as `b10x-loom` starts itself,
-//! and runs the case there. Where bubblewrap, a user systemd manager or the Substrate driver is
-//! absent, the case prints `skipped: missing prerequisite: …` and returns; such a skip establishes
-//! no qualification. The egress cases also skip naming what is missing where `bash` is absent or
+//! and runs the case there, through the harness in `tests/support`. Where bubblewrap, a user
+//! systemd manager or the Substrate driver is absent, the case prints
+//! `skipped: missing prerequisite: …` and returns; such a skip establishes no qualification. The
+//! egress cases also skip naming what is missing where `bash` is absent or
 //! Substrate does not serve an egress aperture on this machine, and the trust-anchor case where
 //! `openssl` or `curl` is. Their hosts are loopback listeners the test starts; nothing connects
 //! past loopback.
+
+mod support;
 
 use std::collections::BTreeMap;
 use std::io::{BufRead as _, BufReader, Write as _};
@@ -23,24 +26,13 @@ use std::time::{Duration, Instant};
 use b10x_loom_intake_slice::confinement::{
     Backend, ChildCommand, ConfinementError, ConfinementRefusal, EgressAperture, ExecEnvironment,
     NetworkMode, SandboxProfile, SubstrateRunner, TestExecution, TestRunner as _,
-    prepare_delegated_cgroup,
 };
 use b10x_loom_intake_slice::executor::TestCommand;
 use substrate_wire::{APERTURE_CA_BUNDLE_PATH, ApertureMechanism, AppliedNetwork};
+use support::{bubblewrap_present, skip};
 
-/// Set in the test binary started inside the delegated scope, so it runs the case instead of
-/// starting itself again.
-const DELEGATED: &str = "LOOM_CONFINED_CHILD_DELEGATED";
-/// The file the delegated binary writes: `started`, then `ran` or the missing prerequisite.
-const REPORT: &str = "LOOM_CONFINED_CHILD_REPORT";
 /// A variable the process that launches the child holds and the host never names.
 const UNNAMED: &str = "LOOM_CONFINED_CHILD_UNNAMED";
-const BUBBLEWRAP: &str = "/usr/bin/bwrap";
-
-fn bubblewrap_present() -> bool {
-    use std::os::unix::fs::PermissionsExt as _;
-    std::fs::metadata(BUBBLEWRAP).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-}
 
 /// The two variables the host names.
 fn named() -> ExecEnvironment {
@@ -53,77 +45,10 @@ fn named() -> ExecEnvironment {
     }
 }
 
-/// Run `case` against the real backend in a delegated scope, or skip naming what is missing.
+/// Run `case` against the real backend in a delegated scope, or skip naming what is missing; the
+/// process that launches the child holds [`UNNAMED`].
 fn delegated(name: &str, case: impl FnOnce(&SubstrateRunner, &Path)) {
-    if std::env::var_os(DELEGATED).is_some() {
-        let report = PathBuf::from(std::env::var_os(REPORT).expect("the report path is given"));
-        std::fs::write(&report, "started").unwrap();
-        let cgroup = match prepare_delegated_cgroup() {
-            Ok(cgroup) => cgroup,
-            Err(error) => {
-                std::fs::write(&report, format!("a delegated cgroup v2 scope ({error})")).unwrap();
-                return;
-            }
-        };
-        let runner = SubstrateRunner::new(Some(cgroup));
-        let fixture = tempfile::tempdir().unwrap();
-        let workspace = fixture.path().join("workspace");
-        std::fs::create_dir(&workspace).unwrap();
-        if let Err(error) = runner.preflight(&workspace) {
-            std::fs::write(&report, format!("the Substrate driver ({error})")).unwrap();
-            return;
-        }
-        std::fs::write(&report, "ran").unwrap();
-        case(&runner, &workspace);
-        return;
-    }
-    if !bubblewrap_present() {
-        eprintln!("skipped: missing prerequisite: executable {BUBBLEWRAP}");
-        return;
-    }
-    let state = tempfile::tempdir().unwrap();
-    let report = state.path().join("report");
-    let started = Command::new("systemd-run")
-        .args(["--user", "--scope", "--quiet", "-p", "Delegate=yes", "--"])
-        .arg(std::env::current_exe().unwrap())
-        .args(["--exact", name, "--nocapture", "--test-threads=1"])
-        .env(DELEGATED, "1")
-        .env(REPORT, &report)
-        .env(UNNAMED, "leak")
-        .output();
-    let output = match started {
-        Ok(output) => output,
-        Err(error) => {
-            eprintln!("skipped: missing prerequisite: systemd-run ({error})");
-            return;
-        }
-    };
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    match std::fs::read_to_string(&report).ok().as_deref() {
-        None => eprintln!(
-            "skipped: missing prerequisite: a user systemd manager that starts a delegated scope (systemd-run {}: {})",
-            output.status,
-            stderr.trim()
-        ),
-        Some("started") => panic!(
-            "the delegated case stopped before it decided its prerequisites: {}\n{stdout}{stderr}",
-            output.status
-        ),
-        Some("ran") => {
-            assert!(
-                output.status.success(),
-                "the delegated case failed: {}\n{stdout}{stderr}",
-                output.status
-            );
-            assert!(
-                stdout.contains("1 passed"),
-                "the delegated binary ran the case: {stdout}{stderr}"
-            );
-            eprintln!("ran delegated: {name}");
-        }
-        Some(missing) => eprintln!("skipped: missing prerequisite: {missing}"),
-    }
+    support::delegated(name, &[(UNNAMED, "leak")], case);
 }
 
 #[test]
@@ -536,12 +461,6 @@ fn model_aperture(address: SocketAddr) -> EgressAperture {
         pinned: address,
         max_bytes: None,
     }
-}
-
-/// Inside the delegated binary: the case skips, naming what this machine lacks.
-fn skip(missing: &str) {
-    let report = std::env::var_os(REPORT).expect("a case skips only inside the delegated binary");
-    std::fs::write(report, missing).unwrap();
 }
 
 /// The result of a child with an egress aperture, or `None` once the case skipped because
