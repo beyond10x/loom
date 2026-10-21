@@ -18,7 +18,7 @@ control-plane path, and fails when either table here and the code disagree.
 ## The promise
 
 - The surface on this page stays stable within a release line. A release that breaks any of it
-  names each break in its `CHANGELOG.md` entry, on a line that starts `Breaking:`.
+  names each break in its `CHANGELOG.md` entry, in a bullet that starts `**Breaking:**`.
 - Loom releases from source at bare-version tags and nothing is on a registry. A consumer pins a
   tag, `tag = "<version>"`, and moves by changing it:
 

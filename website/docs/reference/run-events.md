@@ -123,7 +123,7 @@ The records and the exit statuses are a contract at `schema_version` 1. Within i
 - a new optional field of an existing record kind is not a break: a reader that reads members by
   name ignores it;
 - anything else, a new record kind included, is a break. It changes the schema version and is
-  named in that release's CHANGELOG entry under `Breaking:`.
+  named in that release's CHANGELOG entry, in a bullet that starts `**Breaking:**`.
 
 The contract is committed as
 [`docs/contracts/run-events-v1.json`](https://github.com/beyond10x/loom/blob/main/docs/contracts/run-events-v1.json):
