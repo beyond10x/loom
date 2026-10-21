@@ -1421,14 +1421,15 @@ impl ScratchCopy {
     }
 
     /// Every file of the copy that differs from what was copied into it: a copied file whose
-    /// bytes differ or that is gone, and any file the session added; never `.git` or a path
-    /// under it, the copy's git state, which no proposal carries. The workspace is not read: a
+    /// bytes differ or that is gone, and any file the session added; never a path with a part
+    /// named `.git` ([`plain_relative`]), the copy's git state or a git directory a session
+    /// planted anywhere in the copy, which no proposal carries. The workspace is not read: a
     /// file written there since the copy was made is never proposed back. Content that is not
     /// UTF-8, or a link the session left, is an error: a proposal carries text files only.
     fn changes(&self) -> Result<Vec<ProposedFile>, String> {
         let mut found = Vec::new();
         walk(&self.dir, &self.dir, &mut found)?;
-        found.retain(|path| !Path::new(path).starts_with(".git"));
+        found.retain(|path| plain_relative(path));
         let mut changes = Vec::new();
         for path in &found {
             let now = std::fs::read(self.dir.join(path))
