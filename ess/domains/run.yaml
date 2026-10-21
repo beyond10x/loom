@@ -5,8 +5,8 @@
 domain: loom.run
 
 summary: >-
-  One model session executing a commission's run. Each catalogue is projected from one frontier;
-  a selection names one action from that catalogue; arguments are generated for the selected action
+  The executor's record of a commission's run. Each catalogue is projected from one frontier; a
+  selection names one action from that catalogue; arguments are generated for the selected action
   only. Loom never decides authority or completion.
 
 naming:
@@ -14,10 +14,7 @@ naming:
   display: Run
 
 types:
-  - name: loom.run.SessionId
-    kind: newtype
-    of: Uuid
-
+  # The executor call a catalogue was projected for: one frontier, one turn.
   - name: loom.run.TurnId
     kind: newtype
     of: Uuid
@@ -38,8 +35,9 @@ types:
     kind: newtype
     of: Uuid
 
-  # The id of the commission run a session executes: Commission's commission.responsibility.RunId.
-  # A typed id, not a relation: ESS cannot name another system's entity.
+  # The id of a commission run, as a run's usage report (loom.metering) and a workflow run record
+  # (loom.workflow) name it: Commission's commission.responsibility.RunId. A typed id, not a
+  # relation: ESS cannot name another system's entity.
   - name: loom.run.CommissionRunId
     kind: newtype
     of: Uuid
@@ -64,42 +62,15 @@ types:
       - name: status
         type: loom.run.CatalogueEntryStatus
 
-  # How the run a session is filed after ended: it answered; it stopped short of an answer without
-  # an error, for one of the causes loom.run.LoopStop declares; or it failed (the endpoint dropped
-  # the connection, the stream broke, the loop panicked). A summary turn that fails or writes
-  # nothing is not a failed run. A session is filed in every case.
-  - name: loom.run.RunEnding
-    kind: enum
-    variants: [Answered, Stopped, Failed]
-
-  # Why the governed loop stopped or suspended (crates/loom-executor/src/harness/turn_loop). Every
-  # variant is a real state, not an exception. A loop outcome and the loop's finished events carry
-  # it; a filed session stores only its RunEnding. On the wire the tag is `kind` and each cause's
-  # fields sit beside it.
+  # Why a workflow judgement step's chooser stopped on its budget (crates/loom-executor/src/workflow.rs,
+  # `WorkflowExecutor::with_max_input_tokens`): the payload of the `LoopBudget` suspension, which
+  # Commission carries as Json. On the wire the tag is `kind` and each cause's fields sit beside it.
   - name: loom.run.LoopStop
     kind: union
     tag: kind
     variants:
-      # The model answered and asked for nothing further.
-      completed:
-      max-turns: loom.run.LoopStopMaxTurns
       max-input-tokens: loom.run.LoopStopMaxInputTokens
-      max-output-tokens: loom.run.LoopStopMaxOutputTokens
-      max-cost: loom.run.LoopStopMaxCost
       budget-unobservable: loom.run.LoopStopBudgetUnobservable
-      deadline: loom.run.LoopStopDeadline
-      cancelled: loom.run.LoopStopCancelled
-      awaiting-approval: loom.run.LoopStopAwaitingApproval
-      provider-incomplete: loom.run.LoopStopProviderIncomplete
-      unstructured: loom.run.LoopStopUnstructured
-      context-above-trigger: loom.run.LoopStopContextAboveTrigger
-
-  # The run reached its turn ceiling.
-  - name: loom.run.LoopStopMaxTurns
-    kind: struct
-    fields:
-      - name: limit
-        type: Integer
 
   # The input tokens the endpoint reported reached the declared ceiling.
   - name: loom.run.LoopStopMaxInputTokens
@@ -108,25 +79,6 @@ types:
       - name: limit
         type: Integer
       - name: reported
-        type: Integer
-
-  # The output tokens the endpoint reported reached the declared ceiling.
-  - name: loom.run.LoopStopMaxOutputTokens
-    kind: struct
-    fields:
-      - name: limit
-        type: Integer
-      - name: reported
-        type: Integer
-
-  # A spend ceiling bound, in micro-USD. Reachable only for a run whose rate card prices its model:
-  # an unpriced run cannot be held to a figure nobody could compute.
-  - name: loom.run.LoopStopMaxCost
-    kind: struct
-    fields:
-      - name: limit_micro_usd
-        type: Integer
-      - name: spent_micro_usd
         type: Integer
 
   # A declared ceiling could no longer be observed after a provider omitted or contradicted the
@@ -139,201 +91,9 @@ types:
       - name: reason
         type: String
 
-  # The run's wall-clock deadline, in milliseconds, passed.
-  - name: loom.run.LoopStopDeadline
-    kind: struct
-    fields:
-      - name: limit_ms
-        type: Integer
-
-  # The run was cancelled, for the reason given.
-  - name: loom.run.LoopStopCancelled
-    kind: struct
-    fields:
-      - name: reason
-        type: String
-
-  # The run is suspended before an exact effect until its checkpoint is resumed.
-  - name: loom.run.LoopStopAwaitingApproval
-    kind: struct
-    fields:
-      - name: checkpoint_id
-        type: String
-
-  # The provider ended a turn early for a reason it named.
-  - name: loom.run.LoopStopProviderIncomplete
-    kind: struct
-    fields:
-      - name: reason
-        type: String
-
-  # The run was asked for a structured answer and the model ended in prose instead; asked_again is
-  # how many nudges were spent first. Not `completed`: a consumer reading the answer as JSON must
-  # not get prose with a success status.
-  - name: loom.run.LoopStopUnstructured
-    kind: struct
-    fields:
-      - name: asked_again
-        type: Integer
-
-  # The session was still at or above its compaction trigger after compaction, so the next request
-  # was not sent. All three figures are tokens: the declared context window, the target a
-  # compaction aims for, and what the session occupied once compaction had removed everything it
-  # may.
-  - name: loom.run.LoopStopContextAboveTrigger
-    kind: struct
-    fields:
-      - name: window
-        type: Integer
-      - name: target
-        type: Integer
-      - name: occupied
-        type: Integer
-
-  - name: loom.run.CompactionId
-    kind: newtype
-    of: Uuid
-
-  # Token counts as the endpoint reported them for one request, in the shape of the ported wire's
-  # Usage (crates/loom-executor/src/harness/wire/turn.rs): input_tokens is the whole input and the
-  # cache figures are parts of it. A cache-write figure the provider does not report is absent,
-  # never zero.
-  - name: loom.run.ReportedUsage
-    kind: struct
-    fields:
-      - name: model
-        type: String
-      - name: input_tokens
-        type: Integer
-      - name: output_tokens
-        type: Integer
-      - name: cached_input_tokens
-        type: Integer
-      - name: cache_creation_input_tokens
-        type: Optional<Integer>
-
-  # A non-secret, operator-defined lookup name for one wire's credential (llm-credentials
-  # SecretRef). The resolver the embedder injects owns the secret; the reference may name a secret
-  # that does not exist yet.
-  - name: loom.run.CredentialReference
-    kind: newtype
-    of: String
-
-  # What kind of secret a credential reference answers with, so a wire can present it the way its
-  # route wants: a long-lived key issued to a program, or a short-lived token obtained on a
-  # person's behalf and renewed elsewhere.
-  - name: loom.run.CredentialKind
-    kind: enum
-    variants: [ApiKey, Oauth]
-
-  # Where one wire takes its credential from, held in the run configuration beside the endpoint,
-  # never inside it. It carries no secret value.
-  - name: loom.run.WireCredential
-    kind: struct
-    fields:
-      - name: reference
-        type: loom.run.CredentialReference
-      - name: kind
-        type: loom.run.CredentialKind
-
 entities:
-  # Session and transcript state for one run (loom-design.md § Owns). Filed outside the workspace
-  # whether the run answered or failed; a resume continues the same session by id (Harness
-  # transcript.rs Session::save and Session::load at 798325f0).
-  - name: loom.run.Session
-    identity:
-      name: session_id
-      type: loom.run.SessionId
-    fields:
-      - name: commission_run
-        type: loom.run.CommissionRunId
-      # The wire the session's items were produced on. An opaque provider item may not cross
-      # wires, so a resume on another wire is refused naming both.
-      - name: wire
-        type: String
-      # How many selections of the session were refused at the execution boundary, after they were
-      # made: by Commission's admission or by revalidation against the current frontier
-      # (decision-blocker:selection-telemetry-record). Telemetry for Metaharness, never evidence
-      # (Atlas ADR 0074).
-      - name: boundary_refusals
-        type: Integer
-    relations:
-      # A turn is part of one session's transcript (loom-design.md: "model turn loop",
-      # "session/transcript state").
-      - name: turns
-        kind: owns
-        target: loom.run.Turn
-        cardinality: many
-        via: session_id
-      # The trigger is checked before every request, so a session can compact more than once.
-      - name: compactions
-        kind: owns
-        target: loom.run.Compaction
-        cardinality: many
-        via: session_id
-    # Active while a run takes turns in it; Filed once the run ended and the session was written;
-    # Interrupted once its run was cancelled while it held the session, so nothing that run had in
-    # flight is trusted; Active again when a later run resumes it, from Filed or Interrupted. A
-    # session left Active by a run that died without filing it is released back to Filed by an
-    # operator.
-    lifecycle:
-      initial: Active
-      states: [Active, Filed, Interrupted]
-      terminal: []
-      transitions:
-        - {name: file, from: [Active], to: Filed}
-        - {name: resume, from: [Filed, Interrupted], to: Active}
-        - {name: release, from: [Active], to: Filed}
-        - {name: interrupt, from: [Active], to: Interrupted}
-        - {name: count_refusal, from: [Active], to: Active}
-
-  # One completed model turn. A turn that did not complete is never recorded, so a filed session
-  # holds exactly the turns completed before the run ended.
-  - name: loom.run.Turn
-    identity:
-      name: turn_id
-      type: loom.run.TurnId
-    fields:
-      - name: session_id
-        type: loom.run.SessionId
-      - name: index
-        type: Integer
-      # The provider items the turn added to the conversation, verbatim, opaque ones included.
-      # Streamed reasoning text is not an item and is never stored.
-      - name: items
-        type: List<String>
-    relations:
-      # A catalogue is projected once per turn and does not outlive it (operator decision
-      # 2026-10-04, decision-blocker:catalogue-ownership).
-      - name: catalogue
-        kind: owns
-        target: loom.run.ActionCatalogue
-        cardinality: one
-        via: turn_id
-    lifecycle:
-      initial: Taken
-      states: [Taken]
-      terminal: [Taken]
-
-  # One compaction of a session's conversation, made by the loop before a request once the
-  # conversation crossed its trigger. It never rewrites instruction text. Its usage is what the
-  # endpoint reported for the summary request, never an estimate; absent when no summary request
-  # was made or the endpoint reported none.
-  - name: loom.run.Compaction
-    identity:
-      name: compaction_id
-      type: loom.run.CompactionId
-    fields:
-      - name: session_id
-        type: loom.run.SessionId
-      - name: usage
-        type: Optional<loom.run.ReportedUsage>
-    lifecycle:
-      initial: Recorded
-      states: [Recorded]
-      terminal: [Recorded]
-
-  # The model-visible catalogue derived from one frontier (ADR 0072), projected for one turn.
+  # The model-visible catalogue derived from one frontier (ADR 0072), projected for one turn: one
+  # executor call.
   - name: loom.run.ActionCatalogue
     identity:
       name: catalogue_id
@@ -511,246 +271,7 @@ errors:
       - name: selection_record_id
         type: loom.run.SelectionRecordId
 
-  # A session is opened once: its id is never opened again.
-  - name: loom.run.SessionExists
-    fields:
-      - name: session_id
-        type: loom.run.SessionId
-
-  # The session a turn names was never opened.
-  - name: loom.run.SessionNotFound
-    fields:
-      - name: session_id
-        type: loom.run.SessionId
-
-  # Turns are recorded only into a session a run is taking turns in.
-  - name: loom.run.SessionNotActive
-    fields:
-      - name: session_id
-        type: loom.run.SessionId
-
-  # A session is filed and interrupted only while Active, and resumed only while Filed or
-  # Interrupted.
-  - name: loom.run.SessionStateConflict
-    fields:
-      - name: state
-        type: loom.run.Session.State
-
-  # A session recorded on one wire is resumed on another: its opaque items may not cross wires.
-  # Names both wires.
-  - name: loom.run.SessionWireMismatch
-    fields:
-      - name: session_id
-        type: loom.run.SessionId
-      - name: session_wire
-        type: String
-      - name: wire
-        type: String
-
 commands:
-  # A run opens a new session on the wire it speaks.
-  - name: loom.run.OpenSession
-    input:
-      - name: session_id
-        type: loom.run.SessionId
-      - name: commission_run
-        type: loom.run.CommissionRunId
-      - name: wire
-        type: String
-    outcomes:
-      - name: session-exists
-        existing_instance: true
-        error: loom.run.SessionExists
-        payload:
-          loom.run.SessionExists:
-            session_id: input.session_id
-      - name: opened
-        creates: loom.run.Session
-        instance: session_id
-        sets:
-          commission_run: input.commission_run
-          wire: input.wire
-          boundary_refusals: 0
-        emits: [loom.run.SessionOpened]
-        payload:
-          loom.run.SessionOpened:
-            session_id: input.session_id
-            commission_run: input.commission_run
-            wire: input.wire
-
-  # A completed turn is recorded into its session with the items it added, verbatim. A turn the
-  # endpoint broke off is never recorded.
-  - name: loom.run.RecordTurn
-    input:
-      - name: turn_id
-        type: loom.run.TurnId
-      - name: session_id
-        type: loom.run.SessionId
-      - name: index
-        type: Integer
-      - name: items
-        type: List<String>
-    outcomes:
-      - name: session-unknown
-        when_related: {via: input.session_id, exists: false}
-        error: loom.run.SessionNotFound
-        payload:
-          loom.run.SessionNotFound:
-            session_id: input.session_id
-      - name: session-not-active
-        when_related:
-          via: input.session_id
-          predicate: state != Active
-        error: loom.run.SessionNotActive
-        payload:
-          loom.run.SessionNotActive:
-            session_id: input.session_id
-      - name: recorded
-        creates: loom.run.Turn
-        instance: turn_id
-        sets:
-          session_id: input.session_id
-          index: input.index
-          items: input.items
-        emits: [loom.run.TurnRecorded]
-        payload:
-          loom.run.TurnRecorded:
-            turn_id: input.turn_id
-            session_id: input.session_id
-            index: input.index
-
-  # A compaction the loop made is recorded on the session it was made in, with the usage the
-  # endpoint reported for its summary request. Recorded only into a session a run is taking turns
-  # in.
-  - name: loom.run.RecordCompaction
-    input:
-      - name: compaction_id
-        type: loom.run.CompactionId
-      - name: session_id
-        type: loom.run.SessionId
-      - name: usage
-        type: Optional<loom.run.ReportedUsage>
-    outcomes:
-      - name: session-unknown
-        when_related: {via: input.session_id, exists: false}
-        error: loom.run.SessionNotFound
-        payload:
-          loom.run.SessionNotFound:
-            session_id: input.session_id
-      - name: session-not-active
-        when_related:
-          via: input.session_id
-          predicate: state != Active
-        error: loom.run.SessionNotActive
-        payload:
-          loom.run.SessionNotActive:
-            session_id: input.session_id
-      - name: recorded
-        creates: loom.run.Compaction
-        instance: compaction_id
-        sets:
-          session_id: input.session_id
-          usage: input.usage
-        emits: [loom.run.SessionCompacted]
-        payload:
-          loom.run.SessionCompacted:
-            compaction_id: input.compaction_id
-            session_id: input.session_id
-            usage: input.usage
-
-  # The run ended, answered, stopped or failed, and its session is written: outside the
-  # workspace, the directory 0700 and the file 0600, holding no credential and no instruction text,
-  # and holding its conversation up to the last completed turn.
-  - name: loom.run.FileSession
-    input:
-      - name: session_id
-        type: loom.run.SessionId
-      - name: ending
-        type: loom.run.RunEnding
-    outcomes:
-      - name: filed
-        moves: loom.run.Session.file
-        instance: session_id
-        emits: [loom.run.SessionFiled]
-        payload:
-          loom.run.SessionFiled:
-            session_id: input.session_id
-            ending: input.ending
-      - name: wrong-state
-        wrong_state: true
-        error: loom.run.SessionStateConflict
-
-  # A run is cancelled while it holds its session: the session is interrupted, and nothing the run
-  # had in flight is proposed. Only an Active session is interrupted.
-  - name: loom.run.InterruptSession
-    input:
-      - name: session_id
-        type: loom.run.SessionId
-    outcomes:
-      - name: interrupted
-        moves: loom.run.Session.interrupt
-        instance: session_id
-        emits: [loom.run.SessionInterrupted]
-        payload:
-          loom.run.SessionInterrupted:
-            session_id: input.session_id
-      - name: wrong-state
-        wrong_state: true
-        error: loom.run.SessionStateConflict
-
-  # A later run continues a filed or interrupted session by id, replaying its stored items in
-  # stored order. An interrupted session is recovered by the same resume: the resumed run projects
-  # its catalogue from the frontier current at resume, and revalidates what the interrupted run had
-  # in flight, before anything is proposed. A session recorded on another wire is refused before
-  # anything is sent, naming both wires. Once claimed, a session is filed or interrupted again in every case: a run refused on
-  # another wire files it back unchanged.
-  - name: loom.run.ResumeSession
-    input:
-      - name: session_id
-        type: loom.run.SessionId
-      - name: wire
-        type: String
-    outcomes:
-      - name: cross-wire
-        when_subject:
-          predicate: wire != input.wire
-        error: loom.run.SessionWireMismatch
-        payload:
-          loom.run.SessionWireMismatch:
-            session_id: input.session_id
-            session_wire: {subject: wire}
-            wire: input.wire
-      - name: resumed
-        moves: loom.run.Session.resume
-        instance: session_id
-        emits: [loom.run.SessionResumed]
-        payload:
-          loom.run.SessionResumed:
-            session_id: input.session_id
-            wire: input.wire
-      - name: wrong-state
-        wrong_state: true
-        error: loom.run.SessionStateConflict
-
-  # A session left Active by a run that died without filing it (killed, out of memory) is filed
-  # back as Failed by an operator, so a later run can resume it. Only an Active session is released.
-  - name: loom.run.ReleaseSession
-    input:
-      - name: session_id
-        type: loom.run.SessionId
-    outcomes:
-      - name: released
-        moves: loom.run.Session.release
-        instance: session_id
-        emits: [loom.run.SessionReleased]
-        payload:
-          loom.run.SessionReleased:
-            session_id: input.session_id
-            ending: Failed
-      - name: wrong-state
-        wrong_state: true
-        error: loom.run.SessionStateConflict
-
   # One catalogue projected from one frontier for one turn: one entry per action, by Commission's
   # admission: Admissible when admitted, ApprovalRequired when it needs authority, none when refused.
   - name: loom.run.ProjectCatalogue
@@ -966,27 +487,6 @@ commands:
             strategy: input.strategy
             fell_back_to: input.fell_back_to
 
-  # A selection of the session was refused at the execution boundary, after it was made: the
-  # session's count of such refusals goes up by one. Counted only in a session a run is taking turns
-  # in.
-  - name: loom.run.CountBoundaryRefusal
-    input:
-      - name: session_id
-        type: loom.run.SessionId
-    outcomes:
-      - name: counted
-        moves: loom.run.Session.count_refusal
-        instance: session_id
-        sets:
-          boundary_refusals: {increment: 1}
-        emits: [loom.run.BoundaryRefusalCounted]
-        payload:
-          loom.run.BoundaryRefusalCounted:
-            session_id: input.session_id
-      - name: wrong-state
-        wrong_state: true
-        error: loom.run.SessionStateConflict
-
   # Before a selection is proposed it is revalidated against the case revision and the action ids
   # of the frontier current at revalidation, which come from the governor, never from the model.
   # not-in-frontier stays `external:`, answered by the executor from the input's frontier_actions:
@@ -1032,60 +532,6 @@ commands:
         error: loom.run.SelectionStateConflict
 
 events:
-  - name: loom.run.SessionOpened
-    fields:
-      - name: session_id
-        type: loom.run.SessionId
-      - name: commission_run
-        type: loom.run.CommissionRunId
-      - name: wire
-        type: String
-
-  - name: loom.run.TurnRecorded
-    fields:
-      - name: turn_id
-        type: loom.run.TurnId
-      - name: session_id
-        type: loom.run.SessionId
-      - name: index
-        type: Integer
-
-  - name: loom.run.SessionCompacted
-    fields:
-      - name: compaction_id
-        type: loom.run.CompactionId
-      - name: session_id
-        type: loom.run.SessionId
-      - name: usage
-        type: Optional<loom.run.ReportedUsage>
-
-  - name: loom.run.SessionFiled
-    fields:
-      - name: session_id
-        type: loom.run.SessionId
-      - name: ending
-        type: loom.run.RunEnding
-
-  - name: loom.run.SessionResumed
-    fields:
-      - name: session_id
-        type: loom.run.SessionId
-      - name: wire
-        type: String
-
-  - name: loom.run.SessionInterrupted
-    fields:
-      - name: session_id
-        type: loom.run.SessionId
-
-  # Released by an operator after its run died: filed as Failed.
-  - name: loom.run.SessionReleased
-    fields:
-      - name: session_id
-        type: loom.run.SessionId
-      - name: ending
-        type: loom.run.RunEnding
-
   - name: loom.run.CatalogueProjected
     fields:
       - name: catalogue_id
@@ -1127,11 +573,6 @@ events:
       - name: fell_back_to
         type: Optional<loom.run.SelectionStrategy>
 
-  - name: loom.run.BoundaryRefusalCounted
-    fields:
-      - name: session_id
-        type: loom.run.SessionId
-
   # Overruled by a confidence fallback: names the selection that replaced it.
   - name: loom.run.SelectionOverruled
     fields:
@@ -1160,22 +601,6 @@ events:
         type: Integer
 
 views:
-  # Every session with its wire and state: what a resume is checked against.
-  - name: loom.run.Sessions
-    source: loom.run.Session
-    consistency: read_your_writes
-    fields:
-      - name: session_id
-        type: loom.run.SessionId
-      - name: commission_run
-        type: loom.run.CommissionRunId
-      - name: wire
-        type: String
-      - name: boundary_refusals
-        type: Integer
-      - name: state
-        type: loom.run.Session.State
-
   # Every selection with its state: what revalidation reads and what it changed.
   - name: loom.run.Selections
     source: loom.run.Selection
