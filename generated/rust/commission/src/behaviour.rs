@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 3c8fd62cc537868801ef5f8fd3dcc0be5e0f74acf288eccfca0336e5245c0efb
-// contract digest 5b702c6cb6d14e2446886f45b028e6c0c016ba1b3e9c7c2ecda0fb917551e418
+// model digest 42add0733a6199e5713b6313c3bbb5c5ce429071848e56c3791eb79c41e58ea9
+// contract digest e6ab0245b27b257f77bdd6fc228586d2882f8aabe21fbd73be09472e33cd45ab
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -112,7 +112,7 @@ impl<P> crate::responsibility::obligations::JudgeIdleIterationBehavior for Gener
     fn judge_idle_iteration(&mut self, input: crate::responsibility::JudgeIdleIteration) -> Result<crate::responsibility::JudgeIdleIterationOutcome, UnmetObligation> {
         let _ = &input;
         // `bound`: an input-guarded refusal, before the addressed subject is loaded.
-        if decided(compare_numbers(Some(&input.idle_iterations).map(|value| value.to_string()), Some("2".to_owned()), core::cmp::Ordering::is_ge), "commission.responsibility.JudgeIdleIteration")? {
+        if decided(compare_numbers(Some(&input.idle_iterations).map(|value| value.to_string()), Some(&input.bound).map(|value| value.to_string()), core::cmp::Ordering::is_ge), "commission.responsibility.JudgeIdleIteration")? {
             return Ok(crate::responsibility::JudgeIdleIterationOutcome::Bound { error: crate::responsibility::IdleBoundReached { idle_iterations: input.idle_iterations.clone() } });
         }
         // `below`: the default.

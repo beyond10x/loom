@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 3c8fd62cc537868801ef5f8fd3dcc0be5e0f74acf288eccfca0336e5245c0efb
-// contract digest 5b702c6cb6d14e2446886f45b028e6c0c016ba1b3e9c7c2ecda0fb917551e418
+// model digest 42add0733a6199e5713b6313c3bbb5c5ce429071848e56c3791eb79c41e58ea9
+// contract digest e6ab0245b27b257f77bdd6fc228586d2882f8aabe21fbd73be09472e33cd45ab
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Responsibility — `commission.responsibility`.
@@ -692,6 +692,15 @@ pub struct RunOutcomeWaiting {
     pub action_request_ids: Vec<ActionRequestId>,
     /// `reason` — `commission.responsibility.SuspensionReason`.
     pub reason: SuspensionReason,
+}
+
+/// StopPolicy — `commission.responsibility.StopPolicy`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StopPolicy {
+    /// `approval_gate` — `Boolean`.
+    pub approval_gate: bool,
+    /// `idle_bound` — `Optional<Integer>`.
+    pub idle_bound: Option<i64>,
 }
 
 /// The states of `commission.responsibility.Suspension`, as runtime values.
@@ -2710,6 +2719,8 @@ pub enum JudgeEffectRefusalOutcome {
 pub struct JudgeIdleIteration {
     /// `idle_iterations` — `Integer`.
     pub idle_iterations: i64,
+    /// `bound` — `Integer`.
+    pub bound: i64,
 }
 
 /// Everything `commission.responsibility.JudgeIdleIteration` can result in — one variant per declared outcome.
@@ -2719,7 +2730,7 @@ pub struct JudgeIdleIteration {
 /// outcomes exist to prevent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JudgeIdleIterationOutcome {
-    /// `bound` — when `idle_iterations >= 2`.
+    /// `bound` — when `idle_iterations >= {fact: bound}`.
     Bound {
         /// Why it was refused: `commission.responsibility.IdleBoundReached`.
         error: IdleBoundReached,
