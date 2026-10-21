@@ -542,10 +542,10 @@ fn every_host_git_command_goes_through_a_hardened_helper() {
         let package = packages.iter().find(|package| package["id"] == id).unwrap();
         let name = package["name"].as_str().unwrap();
         if name == "b10x-substrate-host" {
-            assert_eq!(package["version"], "0.7.17");
+            assert_eq!(package["version"], "0.7.18");
             assert_eq!(
                 package["source"],
-                "git+https://github.com/beyond10x/substrate?rev=00fa634cb24eb307946bfe3bbe40142f4b7a469a#00fa634cb24eb307946bfe3bbe40142f4b7a469a"
+                "git+https://github.com/beyond10x/substrate?rev=17e0e96946b9588c150298ac0f951211681b2043#17e0e96946b9588c150298ac0f951211681b2043"
             );
             continue;
         }

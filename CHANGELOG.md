@@ -45,6 +45,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `workflow::load` no longer refuses an action whose id cannot be a tool name
 - **Breaking:** `ExecutorStep` gains `transcript_digest` and `summary`; a struct literal of it must name both
 - **Breaking:** Loom requires ESS 0.67.0 (story:ess-067-upgrade); specifications built with Loom's tasks need it
+- **Breaking:** Loom links Substrate 0.7.18 (`rev = "17e0e96946b9588c150298ac0f951211681b2043"`); a host linking `b10x-substrate-host` or `-wire` moves with it
 
 ### Removed
 

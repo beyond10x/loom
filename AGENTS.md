@@ -852,7 +852,7 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   a Mandate refusal is `NotGranted` (16) and performs nothing. A `resume` without `--mandate`
   refuses a grant naming a Mandate approval `NotGranted` (16) and performs nothing.
 
-The injected `TestRunner` defaults to Substrate 0.7.17, with host and wire pinned together.
+The injected `TestRunner` defaults to Substrate 0.7.18, with host and wire pinned together.
 Tests get no network, a cleared environment, read-only source and Rust toolchain, writes only
 under `target/`, and resource bounds. Mount dependency-cache subdirectories only; never Cargo's
 credential/config files or the operator's home. Dependencies are prefetched explicitly by the
