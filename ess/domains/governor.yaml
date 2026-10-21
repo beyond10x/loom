@@ -124,6 +124,18 @@ types:
       - name: decisions
         type: Optional<List<loom.evaluation.ExplicitDecision>>
 
+  # When a case completes while more than one outcome its protocol declares is legitimate at once
+  # (story first-declared-completion). `ExactlyOne`, the default, completes only when exactly one
+  # is legitimate and leaves the case open otherwise. `FirstDeclared` completes on the first
+  # legitimate outcome in the protocol's declaration order, as the admitted protocol definition
+  # declares it, never the order of the decision document's map. Neither ever completes on an
+  # outcome Canon holds blocked, and with one legitimate outcome the two agree. Host
+  # configuration, given when the governor is built: never read from a case or a model, and not
+  # stored with a case.
+  - name: loom.governor.CompletionRule
+    kind: enum
+    variants: [ExactlyOne, FirstDeclared]
+
   # One observation kept: Commission's commission.responsibility.Observation data, field for field.
   # Never evidence (Atlas ADR 0074).
   - name: loom.governor.StoredObservation

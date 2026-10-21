@@ -87,6 +87,7 @@ implements it through.
 | `loom_sdk::LoopEnd` | What `run_until_blocked` returns |
 | `loom_sdk::Loom` | The executor: proposes one action per frontier |
 | `loom_sdk::CanonGovernor` | The governor over a case store |
+| `loom_sdk::CompletionRule` | How the governor completes a case when several declared outcomes are legitimate at once (`CanonGovernor::with_completion_rule`): `ExactlyOne`, the default, or `FirstDeclared`, generated from `loom.governor` under `ess/` |
 | `loom_sdk::MemoryCaseStore` | An in-memory `CaseStore` |
 | `loom_sdk::CaseInputs` | The case inputs a host gives when it opens a case |
 | `loom_sdk::CaseIndependence` | The independence dimensions a host declares for each evidence producer when it opens a case |
