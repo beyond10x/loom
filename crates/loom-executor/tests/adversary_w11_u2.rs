@@ -2,12 +2,12 @@
 
 //! Adversary pass, wave 2026-10-14-w2, U2 (`story:dw-workflow-definition-executor`): attempts to
 //! break the governance rules of `AGENTS.md` § Rules for `WorkflowExecutor`. Scripted governor and
-//! scripted model only; nothing reaches a network.
+//! a scripted executor the host supplies for judgement steps (`story:judgement-step-any-executor`)
+//! only; nothing reaches a network.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
-use std::time::Duration;
 
 use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::json::Value as CommissionValue;
@@ -15,27 +15,21 @@ use b10x_loom_commission::model::primitives::{Timestamp, Uuid as CommissionUuid}
 use b10x_loom_commission::model::responsibility::{
     ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, AuthorityVerdict,
     AuthorityVerdictDeny, CaseId, Commission, CommissionData, CommissionId,
-    CompletionDetermination, EffectOutcome, EffectOutcomePerformed, Frontier, FrontierAction,
-    FrontierData, FrontierId, GovernorError, Observation, ObservationId, PrincipalId, RunId,
+    CompletionDetermination, EffectOutcome, EffectOutcomePerformed, ExecutorOutcome,
+    ExecutorOutcomeProposedAction, Frontier, FrontierAction, FrontierData, FrontierId,
+    GovernorError, Observation, ObservationId, PrincipalId, ProposedActionArguments, RunId,
     RunOutcome, Unit, commission_state, frontier_state, observation_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use b10x_loom_commission::ports::evidence::ObservationPort;
+use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked};
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
-use b10x_loom_executor::harness::responses;
-use b10x_loom_executor::harness::turn_loop::LoopConfig;
-use b10x_loom_executor::harness::wire::{
-    CallId, Item, ModelPort, StopReason, StreamSink, ToolCall, ToolName, TurnOutcome, TurnRequest,
-    WireError, WireId,
+use b10x_loom_executor::workflow::{
+    self, DefinitionError, Judgement, RecordingEffects, WorkflowExecutor,
 };
-use b10x_loom_executor::model::primitives::Uuid;
-use b10x_loom_executor::model::run::{CommissionRunId, SessionData, SessionId};
-use b10x_loom_executor::workflow::{self, DefinitionError, RecordingEffects, WorkflowExecutor};
-use b10x_loom_executor::{EmptyObjectArguments, FirstAdmissibleSelector, Loom};
-use serde_json::json;
 
 const CASE: &str = "CASE-ADV-W11-U2";
 const INSPECT: &str = "repository.inspect";
@@ -195,44 +189,73 @@ impl EffectPort for CaseEffects<'_> {
     }
 }
 
-struct Model {
-    wire: WireId,
-    turns: VecDeque<TurnOutcome>,
-    tools: Vec<Vec<String>>,
+/// The host's executor of judgement steps: each call records the actions of the frontier it is
+/// handed (those listed `Admissible` or `ApprovalRequired`, what it is offered) and the actions it
+/// was told, and proposes the next scripted action.
+struct Host {
+    script: Mutex<VecDeque<&'static str>>,
+    offered: Mutex<Vec<Vec<String>>>,
+    told: Mutex<Vec<Vec<String>>>,
 }
 
-impl ModelPort for Model {
-    fn wire(&self) -> &WireId {
-        &self.wire
+impl Host {
+    fn new(script: Vec<&'static str>) -> Self {
+        Self {
+            script: Mutex::new(script.into()),
+            offered: Mutex::default(),
+            told: Mutex::default(),
+        }
     }
+}
 
-    fn turn(
-        &mut self,
-        request: &TurnRequest,
-        _sink: &mut dyn StreamSink,
-    ) -> Result<TurnOutcome, WireError> {
-        self.tools.push(
-            request
-                .tools
-                .iter()
-                .map(|tool| tool.name.to_string())
-                .collect(),
-        );
-        self.turns
+/// The host's executor built for one judgement.
+struct HostStep<'h> {
+    host: &'h Host,
+    actions: Vec<String>,
+}
+
+impl AgentExecutor for HostStep<'_> {
+    fn run(
+        &self,
+        _commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorOutcome {
+        self.host
+            .offered
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(
+                frontier
+                    .data()
+                    .actions
+                    .iter()
+                    .filter(|listed| {
+                        matches!(
+                            listed.status,
+                            ActionStatus::Admissible | ActionStatus::ApprovalRequired
+                        )
+                    })
+                    .map(|listed| listed.action.clone())
+                    .collect(),
+            );
+        self.host
+            .told
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(self.actions.clone());
+        match self
+            .host
+            .script
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
             .pop_front()
-            .ok_or_else(|| WireError::protocol("the script has no further turn"))
-    }
-}
-
-fn calls(id: &str, tool: &str, arguments: serde_json::Value) -> TurnOutcome {
-    TurnOutcome {
-        stop_reason: StopReason::ToolCalls,
-        items: vec![Item::ToolCall(ToolCall {
-            call_id: CallId::new(id).expect("valid"),
-            name: ToolName::new(tool).expect("valid"),
-            arguments,
-        })],
-        usage: None,
+        {
+            Some(action) => ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
+                action: action.to_owned(),
+                arguments: ProposedActionArguments(CommissionValue::Object(Vec::new())),
+            }),
+            None => ExecutorOutcome::NoUsefulAction(Unit(true)),
+        }
     }
 }
 
@@ -261,18 +284,12 @@ impl LoopContext for Context {
     }
 }
 
-fn session() -> SessionData {
-    SessionData {
-        session_id: SessionId(Uuid("00000000-0000-4000-8000-00000000a012".to_owned())),
-        commission_run: CommissionRunId(Uuid("00000000-0000-4000-8000-00000000a0ab".to_owned())),
-        wire: responses::WIRE.to_owned(),
-        boundary_refusals: 0,
-    }
-}
-
 struct Ran {
     end: LoopEnd,
-    tools: Vec<Vec<String>>,
+    /// What each call of the host's executor was offered.
+    offered: Vec<Vec<String>>,
+    /// The actions each call of the host's executor was told it may propose.
+    told: Vec<Vec<String>>,
     performed: Vec<String>,
 }
 
@@ -286,35 +303,30 @@ impl Ran {
     }
 }
 
+/// Runs `text` on `case`, its judgement steps on the host's executor proposing `script` in
+/// order, under the host's narrowing `admitted` when it is given.
 fn run(
     text: &str,
     case: &Case,
-    config: LoopConfig,
+    admitted: Option<Vec<String>>,
     authority: &StaticAuthorityProvider,
-    turns: Vec<TurnOutcome>,
+    script: Vec<&'static str>,
 ) -> Ran {
     let effects = RecordingEffects::new(CaseEffects { case });
-    let loom = Loom::new(
-        FirstAdmissibleSelector,
-        EmptyObjectArguments,
-        "change the code",
-    )
-    .with_instance("adversary-w11-u2")
-    .with_governor(case);
     let definition =
         workflow::load(text, &protocol).unwrap_or_else(|error| panic!("refused: {error}"));
-    let executor = WorkflowExecutor::new(
-        &loom,
-        Model {
-            wire: WireId::new(responses::WIRE).expect("valid"),
-            turns: turns.into(),
-            tools: Vec::new(),
+    let host = Host::new(script);
+    let mut executor = WorkflowExecutor::with_executor(
+        |judgement: &Judgement| HostStep {
+            host: &host,
+            actions: judgement.actions.clone(),
         },
-        config,
-        session(),
         definition,
         effects.log(),
     );
+    if let Some(admitted) = admitted {
+        executor = executor.with_admitted(admitted);
+    }
     let ids = AtomicU64::new(0x500);
     let mut runs = Generated::new(RunStore::new(move || {
         RunId(uuid(ids.fetch_add(1, Ordering::SeqCst)))
@@ -329,16 +341,19 @@ fn run(
         &mut Context::default(),
     )
     .unwrap_or_else(|error| panic!("the loop failed: {error:?}"));
-    let tools = executor.into_model().tools;
+    drop(executor);
     Ran {
         end,
-        tools,
+        offered: host
+            .offered
+            .into_inner()
+            .unwrap_or_else(PoisonError::into_inner),
+        told: host
+            .told
+            .into_inner()
+            .unwrap_or_else(PoisonError::into_inner),
         performed: case.performed(),
     }
-}
-
-fn config() -> LoopConfig {
-    LoopConfig::new("scripted-model", "INSTRUCTIONS").with_retry_backoff(Duration::from_millis(1))
 }
 
 const JUDGE_TWO: &str = r#"
@@ -351,33 +366,28 @@ steps:
     instructions: Edit or write a test.
 "#;
 
-/// The host narrowed its loop to `implementation_edit` (`LoopConfig::with_admitted`); a judgement
-/// step naming `implementation.edit` and `tests.write` must narrow that further, never widen it
-/// (`WorkflowExecutor::new` docs: "its actions narrow it"; `AGENTS.md` § Rules: never silently
-/// broaden capability).
+/// The host narrowed judgement steps to `implementation.edit` (`WorkflowExecutor::with_admitted`);
+/// a judgement step naming `implementation.edit` and `tests.write` must narrow that further, never
+/// widen it (`AGENTS.md` § Rules: never silently broaden capability). The host's executor is
+/// offered and told only the edit, and its proposal of the write is never proposed.
 #[test]
 fn adversary_w11_u2_a_judgement_step_never_widens_the_hosts_narrowing() {
     let case = Case::new(&[], Vec::new(), None);
-    let narrowed = config().with_admitted(Some(vec![
-        ToolName::new("implementation_edit").expect("valid"),
-    ]));
     let ran = run(
         JUDGE_TWO,
         &case,
-        narrowed,
+        Some(vec![EDIT.to_owned()]),
         &StaticAuthorityProvider::new(),
-        vec![
-            calls("call_write", "tests_write", json!({})),
-            calls("call_edit", "implementation_edit", json!({})),
-        ],
+        vec![WRITE, EDIT],
     );
-    assert!(!ran.tools.is_empty(), "the model was asked");
-    for offered in &ran.tools {
+    assert!(!ran.offered.is_empty(), "the host's executor was asked");
+    for offered in ran.offered.iter().chain(&ran.told) {
         assert_eq!(
             offered,
-            &["implementation_edit".to_owned()],
-            "the host's narrowing was widened by the judgement step: {:?}",
-            ran.tools
+            &[EDIT.to_owned()],
+            "the host's narrowing was widened by the judgement step: {:?} / {:?}",
+            ran.offered,
+            ran.told
         );
     }
     assert!(
@@ -387,29 +397,21 @@ fn adversary_w11_u2_a_judgement_step_never_widens_the_hosts_narrowing() {
     );
 }
 
-/// A judgement step naming an action the frontier blocks offers the model only the step's actions
-/// the frontier lists, and a call of the blocked one is never proposed.
+/// A judgement step naming an action the frontier blocks offers the host's executor only the
+/// step's actions the frontier lists, and a proposal of the blocked one is never proposed.
 #[test]
 fn adversary_w11_u2_a_judgement_step_offers_no_action_the_frontier_blocks() {
     let case = Case::new(&[WRITE], Vec::new(), None);
     let ran = run(
         JUDGE_TWO,
         &case,
-        config(),
+        None,
         &StaticAuthorityProvider::new(),
-        vec![
-            calls("call_write", "tests_write", json!({})),
-            calls("call_edit", "implementation_edit", json!({})),
-        ],
+        vec![WRITE, EDIT],
     );
-    assert!(!ran.tools.is_empty(), "the model was asked");
-    for offered in &ran.tools {
-        assert_eq!(
-            offered,
-            &["implementation_edit".to_owned()],
-            "{:?}",
-            ran.tools
-        );
+    assert!(!ran.offered.is_empty(), "the host's executor was asked");
+    for offered in &ran.offered {
+        assert_eq!(offered, &[EDIT.to_owned()], "{:?}", ran.offered);
     }
     assert!(
         !ran.proposed().iter().any(|action| action == WRITE),
@@ -443,16 +445,17 @@ steps:
 
 /// A deterministic proposal is revalidated by Commission like any other: the handed frontier listed
 /// `repository.inspect`, the frontier read at revalidation blocks it. Nothing is performed, and the
-/// workflow never moves on to a later step: no model is asked and no later action is proposed.
+/// workflow never moves on to a later step: the judgement step's executor is not asked and no
+/// later action is proposed.
 #[test]
 fn adversary_w11_u2_a_deterministic_step_refused_at_revalidation_is_never_skipped() {
     let case = Case::new(&[], Vec::new(), Some(INSPECT));
     let ran = run(
         DETERMINISTIC_THEN_JUDGE,
         &case,
-        config(),
+        None,
         &StaticAuthorityProvider::new(),
-        vec![calls("call_edit", "implementation_edit", json!({}))],
+        vec![EDIT],
     );
     assert!(
         ran.performed.is_empty(),
@@ -460,9 +463,9 @@ fn adversary_w11_u2_a_deterministic_step_refused_at_revalidation_is_never_skippe
         ran.performed
     );
     assert!(
-        ran.tools.is_empty(),
-        "no model is asked past the refused step: {:?}",
-        ran.tools
+        ran.offered.is_empty(),
+        "the host's executor is not asked past the refused step: {:?}",
+        ran.offered
     );
     assert!(
         ran.proposed().iter().all(|action| action == INSPECT),
@@ -495,15 +498,15 @@ fn adversary_w11_u2_a_denied_deterministic_step_is_never_effected_nor_skipped() 
     let ran = run(
         DETERMINISTIC_THEN_JUDGE,
         &case,
-        config(),
+        None,
         &authority,
-        vec![calls("call_edit", "implementation_edit", json!({}))],
+        vec![EDIT],
     );
     assert!(ran.performed.is_empty(), "{:?}", ran.performed);
     assert!(
-        ran.tools.is_empty(),
-        "no model asked past the denied step: {:?}",
-        ran.tools
+        ran.offered.is_empty(),
+        "the host's executor is not asked past the denied step: {:?}",
+        ran.offered
     );
     assert!(
         ran.proposed().iter().all(|action| action == INSPECT),
