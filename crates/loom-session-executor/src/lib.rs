@@ -1267,6 +1267,18 @@ pub fn plain_relative(path: &str) -> bool {
             .all(|part| matches!(part, Component::Normal(name) if name != ".git"))
 }
 
+/// Whether `path`, a plain relative path ([`plain_relative`]), reaches through a link inside
+/// `workspace`: any of its leading parts, or the whole of it, is a symbolic link there. Such a
+/// path is neither copied nor proposed, since reading or writing it would reach wherever the
+/// link points, outside the workspace or onto another of its files.
+fn through_link(workspace: &Path, path: &str) -> bool {
+    let mut at = workspace.to_path_buf();
+    Path::new(path).components().any(|part| {
+        at.push(part);
+        std::fs::symlink_metadata(&at).is_ok_and(|meta| meta.file_type().is_symlink())
+    })
+}
+
 /// The scratch copy a session works in: `<scratch>/session-<pid>-<n>/copy`, and beside it
 /// `git`, the git directory the copy's `.git` names when the workspace has one; both removed
 /// when dropped. It keeps the digest of each file it copied, as copied: the base a session's
@@ -1274,13 +1286,15 @@ pub fn plain_relative(path: &str) -> bool {
 struct ScratchCopy {
     root: PathBuf,
     dir: PathBuf,
+    workspace: PathBuf,
     base: BTreeMap<String, String>,
 }
 
 impl ScratchCopy {
     /// Makes the copy of `files` of `workspace` under `scratch`: each regular file with its
-    /// bytes and its executable bit; a link, a directory or a path that is not plain is left out;
-    /// then the workspace's git state ([`Self::carry_git`]).
+    /// bytes and its executable bit; a link, a directory, a path that is not plain, or one
+    /// reached through a link in the workspace ([`through_link`]) is left out; then the
+    /// workspace's git state ([`Self::carry_git`]).
     fn make(scratch: &Path, workspace: &Path, files: &[String]) -> Result<Self, String> {
         use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -1296,6 +1310,7 @@ impl ScratchCopy {
         let mut copy = Self {
             dir: root.join("copy"),
             root,
+            workspace: workspace.to_path_buf(),
             base: BTreeMap::new(),
         };
         std::fs::create_dir(&copy.dir)
@@ -1305,6 +1320,9 @@ impl ScratchCopy {
         copy.dir = std::fs::canonicalize(&copy.dir)
             .map_err(|error| format!("resolve {}: {error}", copy.dir.display()))?;
         for file in files.iter().filter(|file| plain_relative(file)) {
+            if through_link(workspace, file) {
+                continue;
+            }
             let from = workspace.join(file);
             let Ok(meta) = std::fs::symlink_metadata(&from) else {
                 continue;
@@ -1423,13 +1441,15 @@ impl ScratchCopy {
     /// Every file of the copy that differs from what was copied into it: a copied file whose
     /// bytes differ or that is gone, and any file the session added; never a path with a part
     /// named `.git` ([`plain_relative`]), the copy's git state or a git directory a session
-    /// planted anywhere in the copy, which no proposal carries. The workspace is not read: a
-    /// file written there since the copy was made is never proposed back. Content that is not
-    /// UTF-8, or a link the session left, is an error: a proposal carries text files only.
+    /// planted anywhere in the copy, which no proposal carries; and never a path that reaches
+    /// through a link in the workspace ([`through_link`]), the one thing of the workspace read
+    /// here. A file written there since the copy was made is never proposed back. Content that
+    /// is not UTF-8, or a link the session left, is an error: a proposal carries text files
+    /// only.
     fn changes(&self) -> Result<Vec<ProposedFile>, String> {
         let mut found = Vec::new();
         walk(&self.dir, &self.dir, &mut found)?;
-        found.retain(|path| plain_relative(path));
+        found.retain(|path| plain_relative(path) && !through_link(&self.workspace, path));
         let mut changes = Vec::new();
         for path in &found {
             let now = std::fs::read(self.dir.join(path))
@@ -1753,6 +1773,39 @@ mod tests {
         assert!(copy.dir.join("a.txt").is_file());
         assert!(std::fs::symlink_metadata(copy.dir.join(".git")).is_err());
         assert!(std::fs::symlink_metadata(copy.dir.with_file_name("git")).is_err());
+    }
+
+    /// A named path with a linked directory anywhere above it in the workspace is not copied,
+    /// and a file the session adds under that directory's name in the copy is not proposed: the
+    /// effect would write it through the link.
+    #[test]
+    fn a_path_through_a_linked_directory_is_neither_copied_nor_proposed() {
+        let scratch = Scratch::new("linked");
+        let tree = scratch.0.join("tree");
+        let outside = scratch.0.join("outside");
+        std::fs::create_dir_all(tree.join("src")).expect("the tree");
+        std::fs::create_dir_all(outside.join("deep")).expect("a directory outside");
+        std::fs::write(tree.join("src/lib.rs"), "a\n").expect("a file");
+        std::fs::write(outside.join("deep/secret.txt"), "s\n").expect("a file outside");
+        std::os::unix::fs::symlink(&outside, tree.join("src/linked")).expect("a link");
+        let files = ["src/lib.rs", "src/linked/deep/secret.txt"].map(str::to_owned);
+        assert!(through_link(&tree, "src/linked/deep/secret.txt"));
+        assert!(through_link(&tree, "src/linked"));
+        assert!(!through_link(&tree, "src/lib.rs"));
+        assert!(!through_link(&tree, "src/absent/file.rs"));
+        let copy = ScratchCopy::make(&scratch.0.join("scratch"), &tree, &files).expect("the copy");
+        assert!(copy.dir.join("src/lib.rs").is_file());
+        assert!(!copy.dir.join("src/linked").exists());
+        std::fs::create_dir_all(copy.dir.join("src/linked/deep")).expect("a directory in the copy");
+        std::fs::write(copy.dir.join("src/linked/deep/new.txt"), "n\n").expect("an added file");
+        std::fs::write(copy.dir.join("src/new.rs"), "n\n").expect("an added file");
+        let paths: Vec<String> = copy
+            .changes()
+            .expect("the changes")
+            .into_iter()
+            .map(|file| file.path)
+            .collect();
+        assert_eq!(paths, ["src/new.rs"]);
     }
 
     /// The arguments of each plan a [`Recording`] runner was started with.
