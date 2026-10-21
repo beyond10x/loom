@@ -451,7 +451,9 @@ dependencies = [
 name = "b10x-loom-conformance"
 version = "0.30.0"
 dependencies = [
+ "b10x-loom-commission",
  "b10x-loom-executor",
+ "b10x-loom-session-executor",
  "ess-conformance",
  "ess-primitives",
  "serde_json",
