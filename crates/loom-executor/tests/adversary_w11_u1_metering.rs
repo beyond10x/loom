@@ -4,9 +4,8 @@
 //! `story:metering-on-llm-model`, `crates/loom-executor/src/metering.rs`,
 //! `ess/domains/metering.yaml`).
 //!
-//! Every model here is a scripted llm `Model` that counts its own `turn` calls, except the last
-//! section's, a scripted harness `ModelPort` metered by the ported loop's adapter until
-//! `story:delete-harness-port` removes both; nothing calls a live model or the network. The
+//! Every model here is a scripted llm `Model` that counts its own `turn` calls; nothing calls a
+//! live model or the network. The
 //! executors are driven directly, one `AgentExecutor::run` call at a time, so each case states
 //! exactly which calls happen inside which step.
 
@@ -23,7 +22,6 @@ use b10x_loom_commission::model::responsibility::{
     FrontierObligation, PrincipalId, RunId, Unit, commission_state, frontier_state,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
-use b10x_loom_executor::harness::wire as harness;
 use b10x_loom_executor::metering::RateCard;
 use b10x_loom_executor::model::metering::RunUsageReport;
 use b10x_loom_executor::{MeteredExecutor, MeteredModelPort, RunMeter};
@@ -757,187 +755,5 @@ fn a_turn_on_another_thread_while_executor_calls_overlap_counts_in_the_last_open
         vec![(0, 1), (1, 0), (2, 1)],
         "the host's turn while both ran is B's, the one after both returned is step 0's: \
          {report:?}"
-    );
-}
-
-// ---------------------------------------------------------------------------------------------
-// The ported loop's own model port, which a `MeteredModelPort` meters until
-// `story:delete-harness-port` removes it (`crates/loom-executor/src/harness/governed.rs`).
-
-/// A harness `ModelPort` that counts its own `turn` calls, before anything else, and answers each
-/// with 100 input tokens, 40 of them cached, and 10 output tokens of [`MODEL`]. Its clones and its
-/// forks share the count.
-#[derive(Clone)]
-struct HarnessPort {
-    wire: harness::WireId,
-    seen: Arc<Mutex<i64>>,
-}
-
-impl HarnessPort {
-    fn new() -> Self {
-        Self {
-            wire: harness::WireId::new("scripted").expect("a valid wire id"),
-            seen: Arc::new(Mutex::new(0)),
-        }
-    }
-
-    fn seen(&self) -> i64 {
-        *self.seen.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-}
-
-impl harness::ModelPort for HarnessPort {
-    fn wire(&self) -> &harness::WireId {
-        &self.wire
-    }
-
-    fn turn(
-        &mut self,
-        _request: &harness::TurnRequest,
-        _sink: &mut dyn harness::StreamSink,
-    ) -> Result<harness::TurnOutcome, harness::WireError> {
-        *self.seen.lock().unwrap_or_else(PoisonError::into_inner) += 1;
-        Ok(harness::TurnOutcome {
-            stop_reason: harness::StopReason::EndTurn,
-            items: vec![harness::Item::assistant("{}")],
-            usage: Some(harness::Usage {
-                model: MODEL.to_owned(),
-                input_tokens: 100,
-                output_tokens: 10,
-                cached_input_tokens: 40,
-                cache_creation_input_tokens: None,
-            }),
-        })
-    }
-
-    fn fork(&self) -> Option<Box<dyn harness::ModelPort + Send + '_>> {
-        Some(Box::new(self.clone()))
-    }
-}
-
-/// One turn of a harness port.
-fn harness_turn(
-    port: &mut (impl harness::ModelPort + ?Sized),
-) -> Result<harness::TurnOutcome, harness::WireError> {
-    let request = harness::TurnRequest {
-        model: MODEL.to_owned(),
-        instructions: "Answer.".to_owned(),
-        items: vec![harness::Item::user("go")],
-        tools: Vec::new(),
-        max_output_tokens: None,
-        sampling: harness::Sampling::default(),
-        tool_choice: harness::ToolChoice::Auto,
-    };
-    port.turn(&request, &mut harness::VecSink::new())
-}
-
-/// A turn through a fork of a metered harness port, and through a fork of that fork, is a call of
-/// the same run, counted in the step that is open.
-#[test]
-fn a_turn_through_a_fork_of_a_metered_port_is_counted() {
-    struct Forking {
-        port: MeteredModelPort<HarnessPort>,
-    }
-
-    impl AgentExecutor for Forking {
-        fn run(
-            &self,
-            _commission: &Commission<commission_state::Assigned>,
-            _frontier: &Frontier<frontier_state::Issued>,
-        ) -> ExecutorOutcome {
-            let mut fork = harness::ModelPort::fork(&self.port).expect("the port forks");
-            let _ = harness_turn(&mut *fork);
-            let mut grandchild = fork.fork().expect("the fork forks");
-            let _ = harness_turn(&mut *grandchild);
-            ExecutorOutcome::NoUsefulAction(Unit(true))
-        }
-    }
-
-    let port = HarnessPort::new();
-    let meter = RunMeter::new(Some(card(MODEL)));
-    let executor = MeteredExecutor::new(
-        Forking {
-            port: MeteredModelPort::new(port.clone(), &meter),
-        },
-        &meter,
-    );
-    let _ = executor.run(&commission(), &frontier());
-
-    let report = meter.report(&run_id());
-    assert_eq!(port.seen(), 2);
-    assert_eq!(steps(&report), vec![(1, 2)], "{report:?}");
-    assert_eq!(report.input_tokens, 200, "{report:?}");
-    assert_eq!(report.cost_micro_usd, Some(2 * 180), "{report:?}");
-}
-
-/// A fork made in a step and turned on another thread after its executor call returned is still a
-/// call of that step, not of step 0.
-#[test]
-fn a_fork_turned_on_another_thread_keeps_the_step_it_was_made_in() {
-    let port = HarnessPort::new();
-    let meter = RunMeter::new(None);
-    let metered = MeteredModelPort::new(port.clone(), &meter);
-    let fork = Mutex::new(None);
-
-    struct Makes<'p, 'f> {
-        port: &'p MeteredModelPort<HarnessPort>,
-        fork: &'f Mutex<Option<Box<dyn harness::ModelPort + Send + 'p>>>,
-    }
-
-    impl AgentExecutor for Makes<'_, '_> {
-        fn run(
-            &self,
-            _commission: &Commission<commission_state::Assigned>,
-            _frontier: &Frontier<frontier_state::Issued>,
-        ) -> ExecutorOutcome {
-            *self.fork.lock().unwrap_or_else(PoisonError::into_inner) =
-                harness::ModelPort::fork(self.port);
-            ExecutorOutcome::NoUsefulAction(Unit(true))
-        }
-    }
-
-    let _ = MeteredExecutor::new(
-        Makes {
-            port: &metered,
-            fork: &fork,
-        },
-        &meter,
-    )
-    .run(&commission(), &frontier());
-    let mut made = fork
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .take()
-        .expect("the port forked");
-    std::thread::scope(|scope| {
-        scope
-            .spawn(|| assert!(harness_turn(&mut *made).is_ok()))
-            .join()
-            .expect("the thread returned");
-    });
-
-    let report = meter.report(&run_id());
-    assert_eq!(port.seen(), 1);
-    assert_eq!(steps(&report), vec![(1, 1)], "{report:?}");
-}
-
-/// A metered harness port wrapped again on its meter counts each turn once.
-#[test]
-fn a_harness_port_metered_again_on_one_meter_counts_each_turn_once() {
-    let port = HarnessPort::new();
-    let meter = RunMeter::new(Some(card(MODEL)));
-    let mut twice = MeteredModelPort::new(MeteredModelPort::new(port.clone(), &meter), &meter);
-    assert!(harness_turn(&mut twice).is_ok());
-
-    let report = meter.report(&run_id());
-    assert_eq!(port.seen(), 1);
-    assert_eq!(
-        (
-            report.model_calls,
-            report.input_tokens,
-            report.cost_micro_usd
-        ),
-        (1, 100, Some(180)),
-        "{report:?}"
     );
 }

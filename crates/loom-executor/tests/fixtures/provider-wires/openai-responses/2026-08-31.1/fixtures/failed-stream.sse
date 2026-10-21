@@ -1,2 +1,0 @@
-data: {"type":"response.failed","response":{"status":"failed","error":{"code":"server_error","message":"synthetic failure"}}}
-

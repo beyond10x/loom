@@ -428,12 +428,16 @@ fn compiled_specification_declares_the_settled_relations() {
     assert_eq!(run_id.str_at(&["of", "kind"]), Some("primitive"));
     assert_eq!(run_id.str_at(&["of", "name"]), Some("uuid"));
 
-    let commission_run = field(&compiled, "loom.run.Session", "commission_run");
-    assert_eq!(commission_run.str_at(&["kind"]), Some("declared"));
-    assert_eq!(
-        commission_run.str_at(&["name"]),
-        Some("loom.run.CommissionRunId")
-    );
+    let run = compiled
+        .at(&["types", "loom.workflow.WorkflowRunRecord", "body", "fields"])
+        .and_then(Json::as_array)
+        .expect("type loom.workflow.WorkflowRunRecord has fields")
+        .iter()
+        .find(|f| f.str_at(&["name"]) == Some("run"))
+        .and_then(|f| f.at(&["type_ref"]))
+        .expect("loom.workflow.WorkflowRunRecord has field `run`");
+    assert_eq!(run.str_at(&["kind"]), Some("declared"));
+    assert_eq!(run.str_at(&["name"]), Some("loom.run.CommissionRunId"));
 
     let confidence = field(&compiled, "loom.run.Selection", "confidence");
     assert_eq!(confidence.str_at(&["kind"]), Some("optional"));
@@ -445,20 +449,29 @@ fn compiled_specification_declares_the_settled_relations() {
     assert_eq!(turn_id.str_at(&["name"]), Some("loom.run.TurnId"));
 
     let relations = compiled
-        .at(&["entities", "loom.run.Turn", "relations"])
+        .at(&["entities", "loom.run.Selection", "relations"])
         .and_then(Json::as_array)
-        .expect("loom.run.Turn has relations");
+        .expect("loom.run.Selection has relations");
     let catalogue = relations
         .iter()
         .find(|r| r.str_at(&["name"]) == Some("catalogue"))
-        .expect("loom.run.Turn has relation `catalogue`");
-    assert_eq!(catalogue.str_at(&["kind"]), Some("owns"));
+        .expect("loom.run.Selection has relation `catalogue`");
+    assert_eq!(catalogue.str_at(&["kind"]), Some("references"));
     assert_eq!(catalogue.str_at(&["cardinality"]), Some("one"));
     assert_eq!(
         catalogue.str_at(&["target"]),
         Some("loom.run.ActionCatalogue")
     );
-    assert_eq!(catalogue.str_at(&["via"]), Some("turn_id"));
+    assert_eq!(catalogue.str_at(&["via"]), Some("catalogue_id"));
+
+    // The session, its turns and compactions were the ported Harness loop's, and went with it
+    // (`story:delete-harness-port`).
+    for entity in ["loom.run.Session", "loom.run.Turn", "loom.run.Compaction"] {
+        assert!(
+            compiled.at(&["entities", entity]).is_none(),
+            "{entity} is declared again"
+        );
+    }
 }
 
 /// The `type_ref` of `entity.fields[name]`.

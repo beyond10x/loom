@@ -142,7 +142,7 @@ fn adversary2_map_sections_appear_once() {
 }
 
 /// Mutants killed: `harness-http` ported onto `crates/loom-executor/src/harness/wire.rs` (the module
-/// `harness::wire`, which `harness-wire` already lands in as `harness/wire/`); `harness-cli` ported
+/// `wire` under `harness`, which `harness-wire` already lands in as `harness/wire/`); `harness-cli` ported
 /// onto `crates/loom-executor/src/harness.rs` (the parent module of every other port); any port onto
 /// `crates/loom-executor/src/lib.rs` (the crate root, inside which every port sits). The existing checks
 /// compare target strings, and `wire.rs` is not a string prefix of `wire/`.

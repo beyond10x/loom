@@ -1,6 +1,7 @@
 //! Acceptance of `story:run-pipeline-skeleton`: the run pipeline's settled nouns are declared in
-//! `ess/`, the generated model carries them through `b10x-loom-executor`'s re-export, and the module files
-//! of `epic:loom-native-harness` exist and are declared in `lib.rs`.
+//! `ess/`, the generated model carries them through `b10x-loom-executor`'s re-export, and the
+//! pipeline's module files exist and are declared in `lib.rs`. The modules of the ported Harness
+//! loop that `epic:loom-native-harness` added are gone (`story:delete-harness-port`).
 //!
 //! The repository is read from `CARGO_MANIFEST_DIR` at run time, and the specification is compiled
 //! by the `ess` binary on `PATH`. Only the standard library is used.
@@ -31,15 +32,22 @@ const TYPES: [&str; 2] = ["loom.run.CatalogueEntry", "loom.run.CatalogueEntrySta
 const SELECTION_STATES: [&str; 3] = ["Selected", "Admitted", "Refused"];
 
 /// The module files of the epic, relative to `crates/loom-executor/src`, with the module each declares.
-const MODULES: [(&str, &str); 8] = [
+const MODULES: [(&str, &str); 4] = [
     ("projection", "projection.rs"),
     ("selection", "selection.rs"),
     ("arguments", "arguments.rs"),
     ("revalidation", "revalidation.rs"),
+];
+
+/// The modules of the ported Harness loop and what only it used, deleted by
+/// `story:delete-harness-port` (Atlas ADR 0098), with the path each lived at.
+const DELETED: [(&str, &str); 6] = [
+    ("harness", "harness"),
+    ("wire", "wire"),
     ("session", "session.rs"),
     ("compaction", "compaction.rs"),
+    ("credentials", "credentials.rs"),
     ("recovery", "recovery.rs"),
-    ("harness", "harness/mod.rs"),
 ];
 
 fn crate_dir() -> PathBuf {
@@ -207,6 +215,20 @@ fn run_skeleton_declares_pipeline_nouns() {
         assert!(
             lib.lines().any(|line| line.trim() == declaration),
             "crates/loom-executor/src/lib.rs declares `{declaration}`"
+        );
+    }
+
+    // 4. The ported Harness loop and what only it used are gone, and lib.rs declares none of them.
+    for (module, path) in DELETED {
+        assert!(
+            !src.join(path).exists(),
+            "crates/loom-executor/src/{path} was deleted with the port"
+        );
+        let declaration = format!("mod {module};");
+        assert!(
+            !lib.lines()
+                .any(|line| line.trim().trim_start_matches("pub ") == declaration),
+            "crates/loom-executor/src/lib.rs declares no `{declaration}`"
         );
     }
 }
