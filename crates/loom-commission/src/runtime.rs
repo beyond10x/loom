@@ -370,10 +370,10 @@ use crate::model::responsibility::{
     RevalidateActionRequestOutcome, Run, RunData, RunId, RunOutcome, RunOutcomeAwaitingApproval,
     RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeEffectRefused, RunOutcomeIdleBound,
     RunOutcomeNeedsAuthority, RunOutcomeNoPerformableAction, RunOutcomeSuspended,
-    RunOutcomeWaiting, RunStarted, RunStorageFailed, StartRun, StartRunOutcome, SuspendRun,
-    SuspendRunOutcome, SuspensionKey, SuspensionReason, SuspensionState, SuspensionStateConflict,
-    TakeSuspension, TakeSuspensionOutcome, Truth, Unit, commission_state, frontier_state,
-    observation_state,
+    RunOutcomeWaiting, RunStarted, RunStorageFailed, StartRun, StartRunOutcome, StopPolicy,
+    SuspendRun, SuspendRunOutcome, SuspensionKey, SuspensionReason, SuspensionState,
+    SuspensionStateConflict, TakeSuspension, TakeSuspensionOutcome, Truth, Unit, commission_state,
+    frontier_state, observation_state,
 };
 use crate::outcome::{
     CapabilityVerdict, Derived, derive, judge_budget_stop, judge_idle, judge_performable,
@@ -410,6 +410,17 @@ pub trait LoopContext {
     /// none: only the step budget bounds the run.
     fn run_budget(&self) -> Option<RunBudget> {
         None
+    }
+    /// How the run stops where its frontier does not change, as the module documents
+    /// (`ess/commission/domains/responsibility.yaml`, `StopPolicy`): whether the approval gate (5)
+    /// ends it `AwaitingApproval`, and how many idle iterations in a row end it `IdleBound`. The
+    /// default keeps the gate and sets no idle bound: two idle iterations end a run with no step
+    /// budget, and a budgeted run is bounded by its budget alone.
+    fn stop_policy(&self) -> StopPolicy {
+        StopPolicy {
+            approval_gate: true,
+            idle_bound: None,
+        }
     }
 }
 
@@ -1276,7 +1287,7 @@ where
                         && !again.stale
                         && !pending.progressed
                         && let Some(ended) =
-                            idle_judged(governor, case, idle.saturating_add(1), effected)?
+                            idle_judged(governor, case, idle.saturating_add(1), 2, effected)?
                     {
                         return Ok(track.end(run_id, ended));
                     }
@@ -1588,7 +1599,7 @@ where
             && !stale
             && !progressed
             && waiting.is_none()
-            && let Some(ended) = idle_judged(governor, case, idle.saturating_add(1), effected)?
+            && let Some(ended) = idle_judged(governor, case, idle.saturating_add(1), 2, effected)?
         {
             return Ok(track.end(run_id, ended));
         }
@@ -2449,8 +2460,12 @@ fn refusal_end(
 /// How a run with no step budget ends after `idle_iterations` idle iterations in a row, this one
 /// included (`JudgeIdleIteration`, `story:idle-bound-outcome`): `IdleBound`, naming them, when
 /// [`judge_idle`] answers `bound`; `None` when it answers `below`, and the run goes on.
-fn idle_end(idle_iterations: i64) -> Result<Option<RunOutcome>, LoopFailure> {
-    Ok(match judge_idle(JudgeIdleIteration { idle_iterations })? {
+fn idle_end(idle_iterations: i64, bound: i64) -> Result<Option<RunOutcome>, LoopFailure> {
+    let judged = judge_idle(JudgeIdleIteration {
+        idle_iterations,
+        bound,
+    })?;
+    Ok(match judged {
         JudgeIdleIterationOutcome::Bound { error } => {
             Some(RunOutcome::IdleBound(RunOutcomeIdleBound {
                 idle_iterations: error.idle_iterations,
@@ -2469,9 +2484,10 @@ fn idle_judged<G: Governor + ?Sized>(
     governor: &G,
     case: &CaseId,
     idle_iterations: i64,
+    bound: i64,
     effected: bool,
 ) -> Result<Option<RunOutcome>, Stopped> {
-    let Some(ended) = idle_end(idle_iterations)? else {
+    let Some(ended) = idle_end(idle_iterations, bound)? else {
         return Ok(None);
     };
     if effected {

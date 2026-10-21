@@ -755,7 +755,14 @@ fn judge_idle_iteration(input: &Input) -> Result<Option<SemanticCommandResult>, 
     let Some(idle_iterations) = codec::integer(input, "idle_iterations") else {
         return Ok(None);
     };
-    let outcome = judge_idle(JudgeIdleIteration { idle_iterations }).map_err(|unmet| {
+    let Some(bound) = codec::integer(input, "bound") else {
+        return Ok(None);
+    };
+    let outcome = judge_idle(JudgeIdleIteration {
+        idle_iterations,
+        bound,
+    })
+    .map_err(|unmet| {
         TargetError::unavailable(
             format!("judging through `{JUDGE_IDLE}`"),
             format!("{} is owed: {}", unmet.capability, unmet.source),
