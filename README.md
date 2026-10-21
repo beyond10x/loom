@@ -31,10 +31,15 @@ Loom does not decide what is legitimate: protocols are evaluated by
 `software-change@1` comes from
 [engineering protocols](https://beyond10x.github.io/engineering-protocols/)
 ([GitHub](https://github.com/beyond10x/engineering-protocols)). It holds no model credentials and
-speaks no provider wire; model calls go through [llm](https://beyond10x.github.io/llm/)
-([GitHub](https://github.com/beyond10x/llm)). It grants no authority, and it never merges, pushes
-or deploys. [Where Loom ends](https://beyond10x.github.io/loom/docs/concepts/where-loom-ends) draws
-the whole boundary.
+speaks no provider wire. Its decisions (routing an intent, selecting an action, generating its
+arguments, a workflow's judgement step) are structured requests to a model through
+[llm](https://beyond10x.github.io/llm/) ([GitHub](https://github.com/beyond10x/llm)), and agent
+work in a harness such as Claude Code goes through
+[Metaharness](https://beyond10x.github.io/metaharness/)
+([GitHub](https://github.com/beyond10x/metaharness)) behind an executor the host supplies; Loom
+runs no model loop of its own (Atlas ADR 0098). It grants no authority, and it never merges,
+pushes or deploys. [Where Loom ends](https://beyond10x.github.io/loom/docs/concepts/where-loom-ends)
+draws the whole boundary.
 
 ## Status
 
@@ -63,8 +68,7 @@ requires ESS 0.66.0.
 
 Since `0.7.0` a process can supervise a run through `b10x-loom run --output jsonl`, decide a case
 it keeps itself through `b10x-loom evaluate`, and drive a run with a model from an llm catalog
-through `b10x-loom run --catalog`; a ported wire can take its credential from an llm credential
-reference.
+through `b10x-loom run --catalog`.
 
 Since `0.8.0` `b10x-loom-connectors` (`loom_sdk::connectors`) performs a commission's bound
 actions through a Connectors service at `v0.35.0`, answering a write with the Connector attempt it
@@ -129,24 +133,16 @@ naming its replacement, each with the strategy of the selector that made it, and
 selection carries a telemetry record (`loom.run.SelectionRecord`) for Metaharness; Loom
 requires ESS 0.57.0.
 
-Since `0.14.0` `LoopStop` is generated from its ESS declaration (`loom.run.LoopStop`): its
-variants carry payload structs and `i64` counts, while the JSON of loop outcomes and events is
-unchanged.
-
 Since `0.13.0` Loom hosts plugins (ADR `plugin-hooks`): `b10x-loom-plugin` runs an unattended
 agent as hooks around a governed run on the read-only protocol `inbound-answer@1`, reading data
 sources through the `connectors` command line, and `b10x-loom plugin run slack-handler` walks the
 Slack channels a bot belongs to and records proposed answers to unanswered messages; nothing is
 posted.
 
-Since `0.12.0` the executor offers two more action selectors: `ReasoningModelSelector` asks any
-model port to choose one of the given candidates, and `HybridSelector` takes a fast selector's
-choice at or above a confidence threshold the host supplies, else the stronger selector's. The
-experimental `b10x-loom-selector-laya` crate is a fast selector over a Laya endpoint. A compaction
-of a declared context window now leaves the session at or below its target where it can; when what
-it cannot remove keeps the session at or above its trigger, the run ends with
-`LoopStop::ContextAboveTrigger` and sends no further request. Callers that match `LoopStop`
-exhaustively add an arm.
+Since `0.12.0` the executor offers two more action selectors: a reasoning-model selector chooses
+one of the given candidates, and `HybridSelector` takes a fast selector's choice at or above a
+confidence threshold the host supplies, else the stronger selector's. The experimental
+`b10x-loom-selector-laya` crate is a fast selector over a Laya endpoint.
 
 ## Run the command line
 
@@ -336,7 +332,7 @@ surface kept stable within a release line, every port a host implements among it
 | `b10x-loom-protocols` | The shared protocol catalog and verified offline installations |
 | `b10x-loom-cli` | The `b10x-loom` command line |
 | `b10x-loom-sdk` | The one crate an embedding depends on |
-| `b10x-loom-executor` | The executor: catalogue, action selection, argument generation, and the model wires, turn loop and sessions ported from Harness |
+| `b10x-loom-executor` | The executor: catalogue, action selection and argument generation, each model request one turn of an llm `Model` |
 | `b10x-loom-commission` | Commission's contracts and runtime loop, generated from its ESS specification |
 | `b10x-loom-connectors` | Commission's `ConnectorInvoker` over a Connectors service (Connectors `v0.35.0`) |
 | `b10x-loom-plugin` | The plugin host: polls a plugin, classifies each item and answers it in a governed read-only turn over Connectors data sources, one record line per item |

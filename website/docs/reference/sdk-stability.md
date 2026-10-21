@@ -3,7 +3,7 @@ title: SDK stability
 sidebar_label: SDK stability
 sidebar_position: 4
 description: The stable surface of b10x-loom-sdk, the ports a host implements and the loom_sdk paths control-plane imports, with the promise Loom makes for them.
-source: crates/loom-sdk/src/lib.rs, crates/loom-sdk/src/llm.rs, crates/loom-sdk/src/models.rs, crates/loom-executor/src/wire/claude_code.rs, crates/loom-sdk/tests/host_ports.rs, control-plane's crates/control-plane-runtime (its loom_sdk imports), CHANGELOG.md
+source: crates/loom-sdk/src/lib.rs, crates/loom-sdk/src/models.rs, crates/loom-sdk/tests/host_ports.rs, control-plane's crates/control-plane-runtime (its loom_sdk imports), CHANGELOG.md
 ---
 
 # SDK stability
@@ -72,14 +72,6 @@ implements it through.
 | `WorkflowRunStore` | `loom_sdk::loom::workflow::WorkflowRunStore` | Durable storage of a workflow run's record, so the run resumes after a restart |
 | `ArgumentGenerator` | `loom_sdk::loom::arguments::ArgumentGenerator` | Arguments for the selected action only |
 | `Briefing` | `loom_sdk::loom::model_selector::Briefing` | What `ModelSelector` and `ModelArguments` tell the model: the text every request carries, the standing instructions of a selection request and of an argument request, and each action's argument schema, a `loom_sdk::serde_json::Value`; the provided `send`, `select` and `arguments` make one request each, and a host overrides them to ask otherwise |
-| `ModelPort` | `loom_sdk::loom::harness::wire::ModelPort` | One model turn over a wire |
-| `ToolPort` | `loom_sdk::loom::harness::wire::ToolPort` | The tools a turn may call, and their calls |
-| `BearerSource` | `loom_sdk::loom::harness::wire::BearerSource` | The credential a wire sends, resolved at each call |
-| `ApprovalPort` | `loom_sdk::loom::harness::turn_loop::ApprovalPort` | Approving or denying a tool call |
-| `TurnEnvironmentProvider` | `loom_sdk::loom::harness::turn_loop::TurnEnvironmentProvider` | The context and tools of each turn |
-| `HookPort` | `loom_sdk::loom::harness::turn_loop::HookPort` | Hooks before and after a tool call and at a stop |
-| `LoopSink` | `loom_sdk::loom::harness::turn_loop::LoopSink` | Receiving the loop's events |
-| `StreamSink` | `loom_sdk::loom::harness::wire::StreamSink` | Receiving a turn's stream events |
 | `LoopContext` | `loom_sdk::commission::runtime::LoopContext` | Ids, the time and the step budget, which no model supplies |
 | `TestRunner` | `loom_sdk::intake::slice::confinement::TestRunner` | Running the slice's test command in a workspace and reporting the confinement it observed applied, not the one it was asked for; the slice's `LocalExecutor` takes one through `with_runner`, and `loom_sdk::SubstrateRunner` is Loom's |
 
@@ -99,14 +91,12 @@ implements it through.
 | `loom_sdk::CaseInputs` | The case inputs a host gives when it opens a case |
 | `loom_sdk::CaseIndependence` | The independence dimensions a host declares for each evidence producer when it opens a case |
 | `loom_sdk::ProtocolCatalog` | The protocol catalog shared by routing, case opening and admission |
-| `loom_sdk::llm::LlmModelPort` | A `ModelPort` over an llm `Model`: one `Model::turn` per turn, for a host that runs the ported loop; `b10x-loom` runs a plugin turn on the llm `Model` itself |
 | `loom_sdk::models::from_config` | Loads a host's models from a models configuration (YAML): the model of each declared role, over the `llm.routes/1` document it names, relative to the configuration's directory; every endpoint of the routes document must resolve, including ones no role uses ([llm issue 36](https://github.com/beyond10x/llm/issues/36)) |
 | `loom_sdk::models::from_routes` | The llm `Model` one name of an `llm.routes/1` document serves: a route, or `<endpoint>/<model-id>` of a declared endpoint; every endpoint of the document must resolve, including ones no role uses ([llm issue 36](https://github.com/beyond10x/llm/issues/36)) |
 | `loom_sdk::models::parse_config` | Parses a models configuration into a `ModelsConfig`, the parser `from_config` uses |
 | `loom_sdk::models::Models` | What `from_config` returns: the model of each declared role (`get`, and `name_of` for the name that serves it), any other name of the same routes document (`model`), and `check_credential`, which resolves the `env:` or `file:` secret of the endpoint a name reaches and drops the value, so a host can refuse a missing secret before any model call |
 | `loom_sdk::models::ModelsError` | Why models could not be loaded; its message names the file and the role or name |
 | `loom_sdk::models::ModelsConfig`, `loom_sdk::models::ModelRole`, `loom_sdk::models::RoleModel` | The models configuration, generated from `loom.models` under `ess/`; it changes with that declaration |
-| `loom_sdk::loom::wire::ClaudeCodePort` | A `ModelPort` on an operator's Claude Code login: one `claude -p --output-format json` invocation per turn, the command reading its own login |
 | `loom_sdk::TestRunner`, `loom_sdk::SubstrateRunner`, `loom_sdk::UnconfinedRunner`, `loom_sdk::TestExecution`, `loom_sdk::ConfinementError` | The slice's test runners |
 | `loom_sdk::ChildCommand` | A child process the host names, run confined by `SubstrateRunner::run_child` with a test's guarantees: its program and arguments, never a shell line; the directory it runs in, writable only under its `target/` and the workspace directories it names with `with_writable` (`.git` only when named); exactly the environment the host names; and the profile and network it asks for, the workspace profile with no network unless it names others; with `with_egress`, its network is the one egress aperture it names and nothing else, and with `with_ca_bundle` it trusts the certificate bundle the host names there: the bytes read from the file once at launch, through an open with its last component not followed, handed to Substrate as a private read-only copy and bound where `SSL_CERT_FILE` names, the one variable it gets beside the named environment. The bundle is the trust store the child gets through `SSL_CERT_FILE`; beside it, the environment may not name the listed variables, so a host does not override by accident the bundle it named. That is no guarantee about what the child trusts: configuration under `HOME`, a program's own flags and variables not listed can still point a client elsewhere or turn verification off; what the child reaches is bounded by the aperture. The last three are Substrate's `ExecEnvironment`, `SandboxProfile` and `NetworkMode`, and the aperture Substrate's `EgressAperture`, at `loom_sdk::intake::slice::confinement`. A guarantee Substrate does not serve, an aperture declaration Substrate's daemon never makes (no host name or IPv4 literal, no port, a pinned address other than the named one) or that names its host by an IPv4 literal other than `127.0.0.1`, which the child reaches only by name, a writable path that is absolute, climbs out with `..`, passes a symbolic link, is absent or no directory, holds a special file or a hard link from outside, or overlaps another, a certificate bundle named without an aperture, by a path that is not UTF-8 or not absolute, or that is absent, a symbolic link, no regular file, empty, larger than 1 MiB or unreadable, or beside an environment naming a variable that replaces or widens a TLS client's trust store (`SSL_CERT_FILE`, `SSL_CERT_DIR`, `CURL_CA_BUNDLE`, `CURL_CA_PATH`, `CURL_HOME`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`, `GIT_SSL_NO_VERIFY`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_PARAMETERS`, or a `GIT_CONFIG_KEY_<n>` naming Git's `http.sslCAInfo`, `http.sslCAPath` or `http.sslVerify`), or a program containing `=` or starting with `-`, is a `ConfinementError` and nothing runs; a result whose applied confinement differs from the request, a wider network or writable set included, or with no exit status that neither its timeout nor its aperture's byte ceiling explains, is refused after the child ran; otherwise the `TestExecution` it returns carries the applied confinement, naming the aperture it reached and listing the writable paths. Launches through one `SubstrateRunner` and its clones share one driver per directory holding their workspaces, egress aperture and certificate bundle they name (its path and the bytes read), so launches in workspaces of one directory run side by side; a launch that needs a driver for another directory, aperture or bundle while a launch of the process runs under the same cgroup root is refused `CapabilityUnserved` |
 | `loom_sdk::connectors::cli::ConnectorsCli` | The client over the operator's `connectors` command line: reads (`invoke_read`, `read`) and, for a request the runtime admitted, one governed write (`invoke_write`) with the path of the person's approval proof, invoked once and never retried |
@@ -120,9 +110,14 @@ implements it through.
 ## Used by control-plane
 
 control-plane embeds `loom_sdk` in `crates/control-plane-runtime`. These are the `loom_sdk` paths
-it names: its imports, the items it names inline, and the items of `loom_sdk::loom::harness::wire`
-it names through that module. Associated functions and enum variants are covered by their type.
-Rows marked *generated* are generated model types or modules, outside the promise above.
+it names, its imports and the items it names inline, that this release still exports.
+Associated functions and enum variants are covered by their type. Rows marked *generated* are
+generated model types or modules, outside the promise above.
+
+control-plane also names `loom_sdk::loom::harness` paths, `loom_sdk::loom::session::SessionFile`
+and the session types of `loom_sdk::loom::model::run`, which 0.30.0 listed here. Loom no longer
+ships its port of Harness (Atlas ADR 0098), so they are removed, each named in a `**Breaking:**`
+bullet of `CHANGELOG.md`; control-plane moves off them when it moves its pin past 0.30.0.
 
 | Path | Kind |
 |---|---|
@@ -148,40 +143,13 @@ Rows marked *generated* are generated model types or modules, outside the promis
 | `loom_sdk::governor::CaseState` | type |
 | `loom_sdk::governor::FallibleCaseStore` | port |
 | `loom_sdk::loom::arguments::ArgumentContext` | type |
-| `loom_sdk::loom::harness::turn_loop::AgentLoop` | type |
-| `loom_sdk::loom::harness::turn_loop::Budget` | type |
-| `loom_sdk::loom::harness::turn_loop::DenyAll` | type |
-| `loom_sdk::loom::harness::turn_loop::LoopConfig` | type |
-| `loom_sdk::loom::harness::turn_loop::LoopEvent` | type |
-| `loom_sdk::loom::harness::turn_loop::LoopSink` | port |
-| `loom_sdk::loom::harness::turn_loop::OutputSchema` | type |
-| `loom_sdk::loom::harness::turn_loop::RunLedger` | type |
-| `loom_sdk::loom::harness::wire` | module |
-| `loom_sdk::loom::harness::wire::Item` | type |
-| `loom_sdk::loom::harness::wire::ModelPort` | port |
-| `loom_sdk::loom::harness::wire::StreamSink` | port |
-| `loom_sdk::loom::harness::wire::ToolCall` | type |
-| `loom_sdk::loom::harness::wire::ToolName` | type |
-| `loom_sdk::loom::harness::wire::ToolOutcome` | type |
-| `loom_sdk::loom::harness::wire::ToolPort` | port |
-| `loom_sdk::loom::harness::wire::ToolSpec` | type |
-| `loom_sdk::loom::harness::wire::TurnOutcome` | type |
-| `loom_sdk::loom::harness::wire::TurnRequest` | type |
-| `loom_sdk::loom::harness::wire::Usage` | type |
-| `loom_sdk::loom::harness::wire::WireError` | type |
-| `loom_sdk::loom::harness::wire::WireErrorCode` | type |
-| `loom_sdk::loom::harness::wire::WireId` | type |
 | `loom_sdk::loom::model::primitives::Uuid` | generated |
 | `loom_sdk::loom::model::run::CatalogueEntry` | generated |
 | `loom_sdk::loom::model::run::CommissionRunId` | generated |
-| `loom_sdk::loom::model::run::RunEnding` | generated |
 | `loom_sdk::loom::model::run::SelectionStrategy` | generated |
-| `loom_sdk::loom::model::run::SessionData` | generated |
-| `loom_sdk::loom::model::run::SessionId` | generated |
 | `loom_sdk::loom::selection::Choice` | type |
 | `loom_sdk::loom::selection::SelectionContext` | type |
 | `loom_sdk::loom::selection::SelectorError` | type |
-| `loom_sdk::loom::session::SessionFile` | type |
 | `loom_sdk::run_until_blocked` | function |
 
 The [embedding guide](../guides/embed-the-runtime.md) walks through a whole embedding with the

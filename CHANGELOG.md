@@ -39,6 +39,35 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Removed
 
 - **Breaking:** `WorkflowExecutor::into_model` is removed
+- **Breaking:** Loom's port of Harness is deleted: `loom_sdk::loom::harness` and its modules (story:delete-harness-port)
+- **Breaking:** `loom_sdk::loom::harness::wire::ModelPort` and `loom_sdk::loom::harness::wire::ToolPort` are removed
+- **Breaking:** `loom_sdk::loom::harness::wire::BearerSource` and `loom_sdk::loom::harness::wire::StreamSink` are removed
+- **Breaking:** `loom_sdk::loom::harness::turn_loop::ApprovalPort` is removed
+- **Breaking:** `loom_sdk::loom::harness::turn_loop::HookPort` is removed
+- **Breaking:** `loom_sdk::loom::harness::turn_loop::TurnEnvironmentProvider` is removed
+- **Breaking:** `loom_sdk::loom::harness::turn_loop::LoopSink`, `loom_sdk::loom::harness::turn_loop::LoopEvent` are removed
+- **Breaking:** `loom_sdk::loom::harness::turn_loop::AgentLoop`, `loom_sdk::loom::harness::turn_loop::LoopConfig` are removed
+- **Breaking:** `loom_sdk::loom::harness::turn_loop::Budget` and `loom_sdk::loom::harness::turn_loop::DenyAll` are removed
+- **Breaking:** `loom_sdk::loom::harness::turn_loop::OutputSchema`, `loom_sdk::loom::harness::turn_loop::RunLedger` removed
+- **Breaking:** the harness `RateCard`, `loom_sdk::loom::harness::turn_loop::RateCard`, is removed
+- **Breaking:** the module `loom_sdk::loom::harness::wire` and `loom_sdk::loom::harness::wire::WireId` are removed
+- **Breaking:** `loom_sdk::loom::harness::wire::Item` and `loom_sdk::loom::harness::wire::Usage` are removed
+- **Breaking:** `loom_sdk::loom::harness::wire::ToolCall` and `loom_sdk::loom::harness::wire::ToolName` are removed
+- **Breaking:** `loom_sdk::loom::harness::wire::ToolOutcome` and `loom_sdk::loom::harness::wire::ToolSpec` are removed
+- **Breaking:** `loom_sdk::loom::harness::wire::TurnOutcome` and `loom_sdk::loom::harness::wire::TurnRequest` are removed
+- **Breaking:** `loom_sdk::loom::harness::wire::WireError` and `loom_sdk::loom::harness::wire::WireErrorCode` are removed
+- **Breaking:** `loom_sdk::llm::LlmModelPort` and the module `loom_sdk::llm` are removed; a host hands Loom its llm `Model`
+- **Breaking:** `loom_sdk::loom::wire::ClaudeCodePort` and `loom_sdk::loom::wire` are removed (Claude Code is metaharness's)
+- **Breaking:** `loom_sdk::loom::session::SessionFile` and the rest of `loom_sdk::loom::session` are removed
+- **Breaking:** `loom_sdk::loom::compaction`, `loom_sdk::loom::credentials` and `loom_sdk::loom::recovery` are removed
+- **Breaking:** `Loom::run_loop`, `Loom::resume_loop`, `Loom::interrupt` and `Loom::sessions` are removed
+- **Breaking:** `Loom::turns`, `Loom::catalogues`, `Loom::compactions` and `LoopExecutor` are removed
+- **Breaking:** `MeteredModelPort` is an llm `Model` only; its harness `ModelPort` implementation is removed
+- **Breaking:** `loom.run` drops `Session`, `Turn`, `Compaction`, their commands, events and errors, and `Sessions`
+- **Breaking:** `loom_sdk::loom::model::run::SessionData` and `loom_sdk::loom::model::run::SessionId` are removed
+- **Breaking:** `loom_sdk::loom::model::run::RunEnding` is removed, and so are `CompactionId` and `ReportedUsage`
+- **Breaking:** `loom.run` drops `WireCredential`, `CredentialReference` and `CredentialKind`
+- **Breaking:** `loom.run.LoopStop` keeps `max-input-tokens` and `budget-unobservable`, the stops a judgement step raises
 
 ## [0.30.0] - 2026-10-21
 
