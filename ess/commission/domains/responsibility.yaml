@@ -382,9 +382,10 @@ types:
   # read as 1, so it never turns the bound off. Absent, the default, the bound is two and applies
   # only to a run with no step budget.
   # story:run-budget-tokens-and-deadline: `on_breach` is what becomes of an executor step whose
-  # reported usage took the run past a spending limit of its RunBudget (ExecutorStep). DiscardStep,
-  # the default, ends the run before the step's outcome is acted on. KeepStep acts on it as with no
-  # breach, and suspends the Run for the breach before the next step.
+  # reported usage took the run past a spending limit of its RunBudget (ExecutorStep), or that
+  # ended at or after its deadline. DiscardStep, the default, ends the run before the step's
+  # outcome is acted on. KeepStep acts on it as with no breach, and suspends the Run for the breach
+  # before the next step.
   - name: commission.responsibility.StopPolicy
     kind: struct
     fields:
@@ -396,13 +397,16 @@ types:
         type: commission.responsibility.BreachStep
 
   # story:run-budget-tokens-and-deadline: what becomes of an executor step whose reported usage
-  # took the run past a spending limit. DiscardStep: the Run is suspended for the breach once the
-  # step was observed, and its outcome is not acted on; its proposal is never revalidated or
-  # performed. KeepStep: the step's outcome is acted on as with no breach (a proposal is
-  # revalidated, asked about and performed only when admitted), and where the run would then go on
-  # the Run is suspended for the breach before the next step; a step whose outcome ends the run
-  # ends it with that outcome. KeepStep performs a proposal after a spending limit was passed. An
-  # effect's own usage breach is the same under both: that effect is already performed.
+  # took the run past a spending limit, or whose call ended at or after the run's deadline (the
+  # trusted time read once the step was observed). DiscardStep: the Run is suspended for the
+  # breach once the step was observed, and its outcome is not acted on; its proposal is never
+  # revalidated or performed. KeepStep: the step's outcome is acted on as with no breach (a
+  # proposal is revalidated, asked about and performed only when admitted), and where the run
+  # would then go on the Run is suspended for the breach before the next step; a step whose outcome
+  # ends the run ends it with that outcome. KeepStep performs a proposal after a spending limit or
+  # the deadline was passed. A spending limit is checked first, so a step past both is suspended
+  # for the spending limit. An effect's own usage breach is the same under both: that effect is
+  # already performed.
   - name: commission.responsibility.BreachStep
     kind: enum
     variants: [DiscardStep, KeepStep]
@@ -558,7 +562,10 @@ types:
   # limits. `deadline` is an RFC 3339 instant read against the trusted time (`now`) before each
   # step: before each executor call and before a pending request is invoked again. At or after it,
   # the Run is suspended for the deadline (limit Deadline), the run ending Suspended, or Waiting
-  # while a request is pending, as at any budget stop. A deadline that is not RFC 3339 is refused
+  # while a request is pending, as at any budget stop. It is read again once an executor call was
+  # observed, before its outcome is acted on: a call that ended at or after it is a breach the
+  # stop policy's `on_breach` decides, as for a spending limit, so by default nothing it proposed
+  # is performed. A deadline that is not RFC 3339 is refused
   # before the Run starts. Neither is an action's limit: ActionBudget has no counterpart.
   # story:pending-answer-ends-run: a resumed request is checked against the deadline too, before
   # its Suspension is taken and again right before the request is invoked, where the case revision
@@ -642,7 +649,9 @@ types:
   # effect's reported usage took the charge past it, after that effect was recorded and observed,
   # or once an executor call's reported usage did, after that step was observed and before its
   # outcome is acted on (story:executor-reports-usage, ExecutorStep), or, under the stop policy's
-  # KeepStep, before the next step (story:run-budget-tokens-and-deadline). For the Deadline limit,
+  # KeepStep, before the next step (story:run-budget-tokens-and-deadline). The Deadline limit stops
+  # it before an executor call or a pending request's invocation, and, once an executor call that
+  # ended at or after it was observed, as a spending limit does after that call. For the Deadline limit,
   # `max` is the deadline and `charged` the time read, both in whole seconds since the Unix epoch;
   # `charged` is absent when the time read is not RFC 3339, which is taken as past the deadline.
   - name: commission.responsibility.RunBudgetBreach
