@@ -293,6 +293,7 @@ struct Effects {
     reads: bool,
     replies: Mutex<BTreeMap<String, VecDeque<Reply>>>,
     invoked: Mutex<Vec<ActionRequestData>>,
+    invocations: Arc<AtomicUsize>,
 }
 
 impl Effects {
@@ -365,6 +366,7 @@ impl EffectPort for Effects {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(data);
+        self.invocations.fetch_add(1, Ordering::SeqCst);
         Ok(match reply {
             Reply::Performed(usage) => EffectOutcome::Performed(EffectOutcomePerformed {
                 report: Value::Text("done".to_owned()),
@@ -465,7 +467,7 @@ fn keep_step() -> StopPolicy {
 enum Clock {
     /// One reading, always.
     Fixed(String),
-    /// `before` until the executor was called once, `after` from then on.
+    /// `before` until `calls` counted one call, `after` from then on.
     AfterFirstCall {
         calls: Arc<AtomicUsize>,
         before: String,
@@ -500,9 +502,10 @@ impl Context {
         self
     }
 
-    fn past_first_call(mut self, executor: &Steps<'_>, before: &str, after: &str) -> Self {
+    /// `before` until the effect port was handed a request once, `after` from then on.
+    fn past_first_invoke(mut self, effects: &Effects, before: &str, after: &str) -> Self {
         self.clock = Clock::AfterFirstCall {
-            calls: Arc::clone(&executor.calls),
+            calls: Arc::clone(&effects.invocations),
             before: before.to_owned(),
             after: after.to_owned(),
         };
@@ -1160,7 +1163,7 @@ fn adversary_a_pending_request_is_not_invoked_again_at_the_deadline() {
         }],
     );
     let mut context = Context::new(deadline("2026-10-21T09:30:00Z"), default_policy())
-        .past_first_call(&executor, NOW, "2026-10-21T09:30:00Z");
+        .past_first_invoke(&effects, NOW, "2026-10-21T09:30:00Z");
 
     let (end, store) = run(
         &case,
