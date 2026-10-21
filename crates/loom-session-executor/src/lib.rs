@@ -211,6 +211,9 @@ pub struct SessionReport {
     pub rows: Vec<String>,
     /// Why the call proposed nothing, when it did not.
     pub error: Option<String>,
+    /// Whether metaharness started the harness program. A call that failed before it did (the
+    /// copy, the spec, or a program that could not be started) made no model call.
+    pub started: bool,
 }
 
 /// The executor: one call runs one session over a scratch copy of `workspace` holding the
@@ -458,6 +461,7 @@ impl SessionExecutor {
         drop(supplied);
         let mut run =
             started.map_err(|refusal| format!("metaharness refused the session: {refusal}"))?;
+        report.started = true;
         let deadline = self
             .timeout
             .and_then(|left| Instant::now().checked_add(left));
@@ -711,18 +715,25 @@ impl AgentExecutor for SessionExecutor {
 
 /// What a session spent, as its report states it: its input and output tokens (0 where it stated
 /// none), its duration, else the call's own wall time `took`, and its cost in micro-USD where it
-/// stated one. A session that failed spent too, and is charged.
+/// stated one. A session that failed spent too, and is charged. A session that never started
+/// ([`SessionReport::started`]) made no call: its tokens and its cost are a known zero, so a run
+/// under a cost limit is not left with a cost it cannot know.
 #[must_use]
 pub fn usage_of(report: &SessionReport, took: Duration) -> ExecutorUsage {
     let count = |figure: Option<u64>| figure.map_or(0, |n| i64::try_from(n).unwrap_or(i64::MAX));
     let duration = report
         .duration_ms
         .unwrap_or_else(|| u64::try_from(took.as_millis()).unwrap_or(u64::MAX));
+    let cost = if report.started {
+        report.cost_usd.map(micro_usd)
+    } else {
+        Some(0)
+    };
     ExecutorUsage {
         input_tokens: count(report.input_tokens),
         output_tokens: count(report.output_tokens),
         duration_ms: count(Some(duration)),
-        cost_micro_usd: report.cost_usd.map(micro_usd),
+        cost_micro_usd: cost,
     }
 }
 
@@ -1773,6 +1784,39 @@ mod tests {
         assert!(copy.dir.join("a.txt").is_file());
         assert!(std::fs::symlink_metadata(copy.dir.join(".git")).is_err());
         assert!(std::fs::symlink_metadata(copy.dir.with_file_name("git")).is_err());
+    }
+
+    /// A session that never started is charged a known zero; one that started and stated no cost
+    /// is charged an unknown cost, never zero; one that stated a cost is charged it.
+    #[test]
+    fn only_a_session_that_never_started_costs_a_known_zero() {
+        let took = Duration::from_millis(7);
+        let never = usage_of(&SessionReport::default(), took);
+        assert_eq!(
+            (
+                never.input_tokens,
+                never.output_tokens,
+                never.cost_micro_usd
+            ),
+            (0, 0, Some(0))
+        );
+        assert_eq!(never.duration_ms, 7);
+        let silent = SessionReport {
+            started: true,
+            ..SessionReport::default()
+        };
+        assert_eq!(usage_of(&silent, took).cost_micro_usd, None);
+        let priced = SessionReport {
+            started: true,
+            cost_usd: Some(0.25),
+            input_tokens: Some(3),
+            ..SessionReport::default()
+        };
+        let priced = usage_of(&priced, took);
+        assert_eq!(
+            (priced.input_tokens, priced.cost_micro_usd),
+            (3, Some(250_000))
+        );
     }
 
     /// A named path with a linked directory anywhere above it in the workspace is not copied,
