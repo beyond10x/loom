@@ -10,13 +10,14 @@
 //! the host's effect port appends to `effects.log`, one line per invocation (action, then the
 //! arguments as JSON). The frontier lists every action admissible and, from the edit until the
 //! merge is performed, the merge, which needs approval and names its capability, so the authority
-//! provider decides it. The model is scripted and metered.
+//! provider decides it. The judgement step runs on Loom's chooser over a scripted llm `Model`
+//! (`story:judgement-step-any-executor`), metered through `MeteredModelPort`.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use b10x_loom_commission::model::json::{self, Value as CommissionValue};
 use b10x_loom_commission::model::primitives::{Timestamp, Uuid as CommissionUuid};
@@ -36,19 +37,17 @@ use b10x_loom_commission::runtime::{
     LoopContext, resume_after_grant, run_until_blocked, run_with_suspension,
 };
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
-use b10x_loom_executor::harness::responses;
-use b10x_loom_executor::harness::turn_loop::LoopConfig;
-use b10x_loom_executor::harness::wire::{
-    CallId, Item, ModelPort, StopReason, StreamSink, ToolCall, ToolName, TurnOutcome, TurnRequest,
-    Usage, WireError, WireId,
-};
 use b10x_loom_executor::metering::{MeteredExecutor, MeteredModelPort, RunMeter};
 use b10x_loom_executor::model::primitives::Uuid;
-use b10x_loom_executor::model::run::{CommissionRunId, SessionData, SessionId};
+use b10x_loom_executor::model::run::CommissionRunId;
 use b10x_loom_executor::workflow::{
     self, RecordingEffects, RunRecordError, WorkflowExecutor, WorkflowRunStore,
 };
-use b10x_loom_executor::{EmptyObjectArguments, FirstAdmissibleSelector, Loom};
+use llm_core::{
+    BoxFuture, CallId, Cancel, Capabilities, Error as ModelError, Id, Item, Model, Protocol,
+    Provenance, StopReason, StreamSink, ToolCall, ToolChoice, TurnObservation, TurnOutcome,
+    TurnRequest, Usage,
+};
 use loom_governor::{FileSuspensionStore, FileWorkflowRunStore};
 
 const CASE: &str = "CASE-DURABLE";
@@ -279,53 +278,95 @@ impl<E: EffectPort> EffectPort for Killed<E> {
     }
 }
 
-/// A scripted model answering its turns in order; a call past the script is an error.
+/// One scripted answer: a call of the tool the request is held to, with these arguments, reporting
+/// these input and output tokens as final usage.
+type Answer = (serde_json::Value, u64, u64);
+
+/// A scripted llm `Model` answering its script in order; a request past the script is an error.
 struct ScriptedModel {
-    wire: WireId,
-    turns: Vec<TurnOutcome>,
+    provenance: Provenance,
+    capabilities: Capabilities,
+    script: Mutex<VecDeque<Answer>>,
 }
 
-impl ModelPort for ScriptedModel {
-    fn wire(&self) -> &WireId {
-        &self.wire
-    }
-
-    fn turn(
-        &mut self,
-        _request: &TurnRequest,
-        _sink: &mut dyn StreamSink,
-    ) -> Result<TurnOutcome, WireError> {
-        if self.turns.is_empty() {
-            return Err(WireError::protocol("the script has no further turn"));
-        }
-        Ok(self.turns.remove(0))
+impl ScriptedModel {
+    fn answer(&self, request: &TurnRequest) -> Result<TurnOutcome, ModelError> {
+        let ToolChoice::Named(tool) = &request.tool_choice else {
+            return Err(ModelError::protocol("the request is held to no tool"));
+        };
+        let (arguments, input, output) = self
+            .script
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .pop_front()
+            .ok_or_else(|| ModelError::protocol("the script has no further turn"))?;
+        Ok(TurnOutcome {
+            stop_reason: StopReason::ToolCalls,
+            items: vec![Item::ToolCall(ToolCall {
+                call_id: CallId::new("call-1").expect("valid"),
+                name: tool.clone(),
+                arguments,
+            })],
+            observation: TurnObservation {
+                final_usage: true,
+                usage: Some(Usage {
+                    input_tokens: Some(input),
+                    output_tokens: Some(output),
+                    ..Usage::default()
+                }),
+                ..TurnObservation::new(self.provenance.clone())
+            },
+        })
     }
 }
 
-fn model(turns: Vec<TurnOutcome>) -> ScriptedModel {
+impl Model for ScriptedModel {
+    fn provenance(&self) -> &Provenance {
+        &self.provenance
+    }
+
+    fn capabilities(&self) -> &Capabilities {
+        &self.capabilities
+    }
+
+    fn turn<'a>(
+        &'a self,
+        request: &'a TurnRequest,
+        _sink: &'a mut dyn StreamSink,
+        _cancel: &'a Cancel,
+    ) -> BoxFuture<'a, Result<TurnOutcome, ModelError>> {
+        let answered = self.answer(request);
+        Box::pin(async move { answered })
+    }
+}
+
+fn model(script: Vec<Answer>) -> ScriptedModel {
+    let id = |value: &str| Id::new(value).expect("a fixture id");
     ScriptedModel {
-        wire: WireId::new(responses::WIRE).expect("valid"),
-        turns,
+        provenance: Provenance {
+            protocol: Protocol::Responses,
+            provider: id("scripted"),
+            account: id("fixture"),
+            endpoint: id("in-process"),
+            model: id("scripted-model"),
+            binding_revision: id("scripted-1"),
+        },
+        capabilities: Capabilities {
+            tools: true,
+            tool_choice: true,
+            ..Capabilities::text(128_000, 8_192)
+        },
+        script: Mutex::new(script.into()),
     }
 }
 
-/// The edit the judgement step's model call makes, reporting 100 input and 20 output tokens.
-fn calls_edit() -> TurnOutcome {
-    TurnOutcome {
-        stop_reason: StopReason::ToolCalls,
-        items: vec![Item::ToolCall(ToolCall {
-            call_id: CallId::new("call_edit").expect("valid"),
-            name: ToolName::new("implementation_edit").expect("valid"),
-            arguments: serde_json::json!({"path": "src/lib.rs"}),
-        })],
-        usage: Some(Usage {
-            model: "scripted-model".to_owned(),
-            input_tokens: 100,
-            output_tokens: 20,
-            cached_input_tokens: 0,
-            cache_creation_input_tokens: None,
-        }),
-    }
+/// The judgement step's two model requests: the chooser's selection of the edit, then the edit's
+/// arguments, reporting 100 input and 20 output tokens between them.
+fn edit_answers() -> Vec<Answer> {
+    vec![
+        (serde_json::json!({ "action": EDIT }), 60, 10),
+        (serde_json::json!({"path": "src/lib.rs"}), 40, 10),
+    ]
 }
 
 struct Context {
@@ -349,15 +390,6 @@ impl LoopContext for Context {
 
     fn step_budget(&self) -> Option<usize> {
         None
-    }
-}
-
-fn session() -> SessionData {
-    SessionData {
-        session_id: SessionId(Uuid("00000000-0000-4000-8000-00000000d013".to_owned())),
-        commission_run: CommissionRunId(Uuid("00000000-0000-4000-8000-00000000d0ac".to_owned())),
-        wire: responses::WIRE.to_owned(),
-        boundary_refusals: 0,
     }
 }
 
@@ -423,26 +455,13 @@ fn suspend_segment(dir: &Path, run: u64) {
     let effects = RecordingEffects::new(LoggedEffects {
         dir: dir.to_owned(),
     });
-    let loom = Loom::new(
-        FirstAdmissibleSelector,
-        EmptyObjectArguments,
-        "fix the call",
-    )
-    .with_instance("workflow-run-store-suspend")
-    .with_governor(&case);
     let meter = RunMeter::new(None);
+    let scripted = model(edit_answers());
+    let metered = MeteredModelPort::new(&scripted, &meter);
     let definition = workflow::load(ACROSS_APPROVAL, &protocol).expect("the definition loads");
-    let executor = WorkflowExecutor::new(
-        &loom,
-        MeteredModelPort::new(model(vec![calls_edit()]), &meter),
-        LoopConfig::new("scripted-model", "INSTRUCTIONS")
-            .with_retry_backoff(Duration::from_millis(1)),
-        session(),
-        definition,
-        effects.log(),
-    )
-    .with_meter(&meter)
-    .with_store(run_records(dir));
+    let executor = WorkflowExecutor::new(&case, &metered, definition, effects.log())
+        .with_meter(&meter)
+        .with_store(run_records(dir));
     executor.begin(&RunId(uuid(run))).expect("the run begins");
     let executor = MeteredExecutor::new(executor, &meter);
     let suspensions = FileSuspensionStore::open(dir).expect("the suspension store opens");
@@ -471,31 +490,18 @@ fn resume_segment(dir: &Path) {
     let effects = RecordingEffects::new(LoggedEffects {
         dir: dir.to_owned(),
     });
-    let loom = Loom::new(
-        FirstAdmissibleSelector,
-        EmptyObjectArguments,
-        "fix the call",
-    )
-    .with_instance("workflow-run-store-resume")
-    .with_governor(&case);
     let meter = RunMeter::new(None);
+    let scripted = model(Vec::new());
+    let metered = MeteredModelPort::new(&scripted, &meter);
     let definition = workflow::load(ACROSS_APPROVAL, &protocol).expect("the definition loads");
     let suspensions = FileSuspensionStore::open(dir).expect("the suspension store opens");
     let held = suspensions
         .get(&commission().data().commission_id)
         .expect("the suspension store reads")
         .expect("a Suspension is held");
-    let executor = WorkflowExecutor::new(
-        &loom,
-        MeteredModelPort::new(model(Vec::new()), &meter),
-        LoopConfig::new("scripted-model", "INSTRUCTIONS")
-            .with_retry_backoff(Duration::from_millis(1)),
-        session(),
-        definition,
-        effects.log(),
-    )
-    .with_meter(&meter)
-    .with_store(run_records(dir));
+    let executor = WorkflowExecutor::new(&case, &metered, definition, effects.log())
+        .with_meter(&meter)
+        .with_store(run_records(dir));
     executor
         .resume(&held.data.run_id)
         .expect("the run resumes from its record");
@@ -564,23 +570,10 @@ fn killed_segment(dir: &Path) {
         after: 2,
         answered: AtomicU64::new(0),
     };
-    let loom = Loom::new(
-        FirstAdmissibleSelector,
-        EmptyObjectArguments,
-        "fix the call",
-    )
-    .with_instance("workflow-run-store-killed")
-    .with_governor(&case);
+    let scripted = model(Vec::new());
     let definition = workflow::load(BETWEEN_STEPS, &protocol).expect("the definition loads");
-    let executor = WorkflowExecutor::new(
-        &loom,
-        model(Vec::new()),
-        LoopConfig::new("scripted-model", "INSTRUCTIONS"),
-        session(),
-        definition,
-        log,
-    )
-    .with_store(run_records(dir));
+    let executor =
+        WorkflowExecutor::new(&case, &scripted, definition, log).with_store(run_records(dir));
     executor.begin(&RunId(uuid(RUN_A))).expect("the run begins");
     let _ = run_until_blocked(
         &case,
@@ -602,23 +595,10 @@ fn continued_segment(dir: &Path) {
     let effects = RecordingEffects::new(LoggedEffects {
         dir: dir.to_owned(),
     });
-    let loom = Loom::new(
-        FirstAdmissibleSelector,
-        EmptyObjectArguments,
-        "fix the call",
-    )
-    .with_instance("workflow-run-store-continued")
-    .with_governor(&case);
+    let scripted = model(Vec::new());
     let definition = workflow::load(BETWEEN_STEPS, &protocol).expect("the definition loads");
-    let executor = WorkflowExecutor::new(
-        &loom,
-        model(Vec::new()),
-        LoopConfig::new("scripted-model", "INSTRUCTIONS"),
-        session(),
-        definition,
-        effects.log(),
-    )
-    .with_store(run_records(dir));
+    let executor = WorkflowExecutor::new(&case, &scripted, definition, effects.log())
+        .with_store(run_records(dir));
     executor
         .resume(&RunId(uuid(RUN_A)))
         .expect("the run resumes from its record");
@@ -747,15 +727,16 @@ fn a_step_result_survives_a_restart_across_an_approval() {
 }
 
 /// The acceptance: the report after the resume covers both segments: the first segment's steps
-/// (the read, the judgement step's one model call and its tokens, the merge) and the second's
-/// (the test run), numbered in one sequence, and the effects of both.
+/// (the read, the judgement step's two model calls, the chooser's selection and the edit's
+/// arguments, and their tokens, the merge) and the second's (the test run), numbered in one
+/// sequence, and the effects of both.
 #[test]
 fn the_usage_report_covers_every_segment_of_a_resumed_run() {
     let (_, resumed) = across_an_approval();
     assert_eq!(
         resumed.get("model_calls"),
-        "1",
-        "the first segment's model call"
+        "2",
+        "the first segment's model calls, metered at the llm Model"
     );
     assert_eq!(resumed.get("input_tokens"), "100");
     assert_eq!(resumed.get("labels"), "read,edit,merge,test");
@@ -806,18 +787,11 @@ fn a_step_result_of_another_run_is_refused() {
     );
 
     let case = Case { dir: held.clone() };
-    let loom = Loom::new(
-        FirstAdmissibleSelector,
-        EmptyObjectArguments,
-        "fix the call",
-    )
-    .with_governor(&case);
+    let scripted = model(Vec::new());
     let effects = RecordingEffects::new(LoggedEffects { dir: held.clone() });
     let executor = WorkflowExecutor::new(
-        &loom,
-        model(Vec::new()),
-        LoopConfig::new("scripted-model", "INSTRUCTIONS"),
-        session(),
+        &case,
+        &scripted,
         workflow::load(ACROSS_APPROVAL, &protocol).expect("the definition loads"),
         effects.log(),
     )
