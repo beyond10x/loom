@@ -260,7 +260,8 @@
 //!   so it never turns the bound off. `None` keeps two, judged only for a run with no step budget.
 //!   A run budget's `max_steps` counts as a step budget here, as at (0).
 //! * `on_breach` says what becomes of an executor step whose reported usage passed a spending
-//!   limit (`story:run-budget-tokens-and-deadline`, below). `DiscardStep`, the default, ends the
+//!   limit, or whose call ended at or after the run's deadline
+//!   (`story:run-budget-tokens-and-deadline`, below). `DiscardStep`, the default, ends the
 //!   run before the step's outcome is acted on. `KeepStep` acts on it as with no breach: a proposal
 //!   is revalidated, asked about and, when admitted, performed, as any other, and nothing the
 //!   breach did not do is granted. A step whose outcome ends the run ends it with that outcome;
@@ -300,8 +301,10 @@
 //!   before each executor call and before a pending request is invoked again (8b): at or after it,
 //!   the Run is suspended for `RunBudget`, limit `Deadline`, `max` the deadline and `charged` the
 //!   reading, each in whole seconds since the Unix epoch, and the run ends suspended, or `Waiting`
-//!   while a request is pending. A reading that is not RFC 3339 counts as past the deadline, its
-//!   `charged` absent. A resume reads it twice, as it reads the case revision: before the
+//!   while a request is pending. It is read again once an executor call was observed, after the
+//!   spending limits: a call that ended at or after the deadline is a breach `on_breach` decides,
+//!   so by default nothing it proposed is performed. A reading that is not RFC 3339 counts as past
+//!   the deadline, its `charged` absent. A resume reads it twice, as it reads the case revision: before the
 //!   Suspension is taken, when a deadline passed takes nothing and leaves the Suspension
 //!   `Pending`, and right before the held request is invoked, when one passed releases the
 //!   Suspension and performs nothing; either way the resumed Run ends suspended for `RunBudget`
@@ -1491,6 +1494,20 @@ where
             && let Some(breach) = run_budget
                 .as_ref()
                 .and_then(|limits| spent_past(limits, &track))
+        {
+            match policy.on_breach {
+                BreachStep::KeepStep => kept_breach = Some(breach),
+                BreachStep::DiscardStep => {
+                    let reason = SuspensionReason::RunBudget(breach);
+                    return budget_ended(runs, run_id, reason, None, track);
+                }
+            }
+        }
+        // The deadline is read again once the step is observed: a call that ended at or after it
+        // is a breach `on_breach` decides as for a spending limit, which is checked first.
+        if observed.is_ok()
+            && kept_breach.is_none()
+            && let Some(breach) = deadline_reached(deadline, context)
         {
             match policy.on_breach {
                 BreachStep::KeepStep => kept_breach = Some(breach),
