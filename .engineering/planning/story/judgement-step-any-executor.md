@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:judgement-step-any-executor
 kind: story
-status: draft
+status: active
 title: A workflow judgement step runs on any AgentExecutor, the chooser by default
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -28,7 +28,10 @@ scope:
   path: crates/loom-executor/tests/workflow_executor.rs
 - confidence: cited
   path: crates/loom-executor/tests/workflow_step_outputs.rs
-revision: 7
+revision: 9
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-21T00:00:05Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":2}}}
+- {from: "proposed", to: "active", at: "2026-10-21T00:00:05Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":2}}}
 ---
 ## Outcome
 

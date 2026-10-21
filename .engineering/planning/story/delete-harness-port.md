@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:delete-harness-port
 kind: story
-status: draft
+status: active
 title: Loom deletes its port of harness and releases the break
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -56,7 +56,10 @@ scope:
   path: website/docs/reference/crates.md
 - confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 7
+revision: 9
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-21T00:00:05Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":5}}}
+- {from: "proposed", to: "active", at: "2026-10-21T00:00:05Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":5}}}
 ---
 ## Outcome
 

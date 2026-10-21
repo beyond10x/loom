@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:metaharness-session-executor
 kind: story
-status: draft
+status: active
 title: Loom hosts the metaharness session executor for harness, Claude Code and Codex
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -25,21 +25,30 @@ scope:
   path: crates/loom-sdk/src/lib.rs
 - confidence: cited
   path: crates/loom-sdk/tests/host_ports.rs
-- confidence: inferred
+- confidence: cited
   path: crates/loom-session-executor
 - confidence: cited
   path: ess/SKIPPED.md
+- confidence: cited
+  path: ess/commission/domains/responsibility.yaml
 - confidence: inferred
   path: ess/domains/session.yaml
 - confidence: inferred
   path: ess/ess-inputs.yaml
 - confidence: inferred
   path: ess/system.yaml
+- confidence: cited
+  path: generated/rust/commission
 - confidence: inferred
   path: generated/rust/loom
 - confidence: cited
+  path: website/docs/reference
+- confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 15
+revision: 20
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-21T00:00:06Z", actor: "human:timo", revision: 19, decided_on: {"recorded":{"review_outcome":4}}}
+- {from: "proposed", to: "active", at: "2026-10-21T00:00:06Z", actor: "human:timo", revision: 20, decided_on: {"recorded":{"review_outcome":4}}}
 ---
 ## Outcome
 
@@ -58,22 +67,39 @@ application finds it. takt's Codex executor extends the same crate.
 
 ## Acceptance
 
+- The move: the first commit copies takt `crates/session-executor` at takt `main` `7f2843bb` into
+  `crates/loom-session-executor/`; `diff -r` of that commit's `src/` against takt's shows no change
+  but the package name and its path dependencies. The decisions (section "Decisions on the session
+  domain") are later commits.
+- The session domain: `ess/domains/session.yaml` (from the draft below, its eight markers replaced by
+  the decisions, no `UNMAPPED:` left) is listed in `ess/system.yaml` and `ess/ess-inputs.yaml`;
+  `task spec`, `task ess-gate`, `task drift` and `task conform` pass with every session scenario run
+  against the executor (none in `ess/SKIPPED.md`). The transcript digest and the summary are optional
+  fields on `ExecutorStep`, declared in `ess/commission/domains/responsibility.yaml` first.
 - `crates/loom-session-executor/tests/proposes.rs::a_session_change_returns_as_a_proposed_action`:
-  over a recorded metaharness session on a fixture workspace, the executor returns
-  `ProposedAction` carrying the changed files, and the fixture workspace's bytes are unchanged.
+  over a recorded metaharness session on a fixture workspace, the executor returns a
+  `ProposedAction` whose arguments are `{files}` only (a deletion with `content: null`), mints a new
+  `SessionId` per call, names the real `commission_id` and `frontier_id`, and leaves the fixture
+  workspace's bytes unchanged.
 - `…::a_proposal_on_a_moved_case_is_refused_at_revalidation`: run through `run_until_blocked`, a
   proposal whose case moved while the session ran is refused and the effect is not invoked.
+- `…::a_concurrent_workspace_write_refuses_the_stale_proposal`: a workspace file written while the
+  session runs moves the case revision and the proposal (bound to `expected_case_revision`) is
+  refused; if the write cannot be shown to move the revision, the executor diffs against the
+  frontier's snapshot and this test shows the concurrent write is never proposed back.
 - `…::the_effect_applies_the_admitted_change`: with a test effect, the admitted proposal's files
   reach the workspace only through the effect.
-- `…::the_session_trace_is_never_evidence`: the step's observation carries the trace reference and
-  no evidence record is submitted for it.
-- `diff -r` of the crate's `src/` against takt's at the commit `upstream-blocker:takt-session-executor-crate`
-  names when it clears shows no change but the package name and its path dependencies.
+- `…::the_session_trace_is_never_evidence`: the step's `ExecutorStep` carries the transcript digest
+  and the summary, and no evidence record is submitted for them.
+- `…::a_session_usage_is_charged_to_the_run`: the executor implements `run_with_usage`; a session's
+  tokens and cost reach the Run's charges and budget, and a breach suspends the Run with `RunBudget`.
+- `…::a_repeated_proposal_keeps_its_identity`: two sessions proposing the same files with different
+  summaries are the same request for the idle check.
 - `crates/loom-sdk/tests/host_ports.rs` reaches the executor through `loom_sdk`, and the stability
   page lists it.
 - Loom's graph gains metaharness through the new crate only: `cargo tree --locked -i` of the
-  metaharness library package in Loom's workspace lists `loom-session-executor` (and `b10x-loom-sdk`
-  through it) and no other Loom package; today `Cargo.lock` has no metaharness entry.
+  metaharness library package lists `loom-session-executor` (and `b10x-loom-sdk` through it) and no
+  other Loom package.
 - `task check` exits 0, with no live model call.
 
 ## ESS first
@@ -317,3 +343,42 @@ views:
       - name: state
         type: loom.session.AgentSession.State
 ```
+
+## Decisions on the session domain
+
+Decided by the orchestrator session (b10x-chef-orchestrator, message of 2026-10-21, inside ADR 0098
+and 0099, no published contract broken beyond this story's release), on the answers in
+`~/.cache/loom-wave-2026-10-20-w4/session-questions.md`:
+
+1. Identity: the executor mints a `SessionId(Uuid)` per `run` call; no port change. The vendor's
+   `session_id` stays an optional field.
+2. Changed files: `{path, content: Optional<String>}`; a deletion is null, a rename is a delete
+   plus an add, binary content is refused, file modes are not carried.
+3. The link to the run: `commission_id` and `frontier_id`, no `RunId` on the port; the executor
+   passes the real ids (takt's crate passes nil UUIDs today).
+4. No base field: the base is the frontier's `case_revision`, which Commission binds as the
+   request's `expected_case_revision`.
+5. The trace reference: an optional field on `ExecutorStep` carrying the transcript digest
+   (SHA-256) only; no path, and nothing in the arguments.
+6. The proposal names a frontier action; its arguments are `{files}` only. The session's summary
+   travels on the `ExecutorStep` observation beside the trace digest, so a repeated proposal keeps
+   its identity for the idle check.
+7. Proposed and Applied are not session states (they are the ActionRequest's); a session is one
+   record. A failed session returns `Suspended(ExternalAvailability)`; an empty one proposes
+   `files: []`.
+8. The recheck and an effect's refusal are Commission's existing answers; the draft's
+   `SessionCaseMoved` and `ApplySessionChange` are dropped.
+
+Two more, from reading takt's crate:
+
+- Stale diff: the crate diffs the scratch copy against the workspace as it is when the session
+  ends. The proposal binds `expected_case_revision`, and a test proves that a concurrent workspace
+  write moves the case revision so the stale proposal is refused; if that cannot be proven, the
+  executor diffs against the frontier's snapshot instead of the live workspace.
+- Budget: the executor implements `run_with_usage`, so a session's usage reaches the Run's charges
+  and budget.
+
+The crate to move is takt `crates/session-executor` (`b10x-session-executor`) at takt `main`
+`7f2843bbc6bf70d0fc3b58b0ead2cac2401c6ef2` (last changed in `c933f17f`); it depends on
+`b10x-loom-sdk`, `metaharness`, `metaharness-b10x` and `serde_json` only, and takt's CI on that
+commit is green. The decisions above are made in Loom's copy after the move.
