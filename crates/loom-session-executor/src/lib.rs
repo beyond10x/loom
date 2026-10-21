@@ -35,7 +35,12 @@
 //!
 //! The change is what the session made in its copy against the bytes the copy was made from, the
 //! workspace as the frontier was handed: a file written in the workspace while the session runs
-//! is never proposed back.
+//! is never proposed back. When the session ends, each file it changed is read again in the
+//! workspace, and if any is no longer what the copy was made from (its bytes differ, it is gone,
+//! or a file the session added now exists there) the call proposes nothing and returns
+//! `Suspended` with `ExternalAvailability` naming those paths, so a stale change never overwrites
+//! a concurrent write. A write to such a file between the session's end and the edit effect
+//! applying the proposal is not seen here; that window is the effect's own guard to close.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -655,6 +660,13 @@ impl SessionExecutor {
         let replied = replied.or(final_text);
         let (action, summary) = reply(&replied.unwrap_or_else(|| said.join("\n")))?;
         let files = copy.changes()?;
+        let stale = copy.stale(&files);
+        if !stale.is_empty() {
+            return Err(format!(
+                "the workspace changed under the session: {} no longer as the copy was made from",
+                stale.join(", ")
+            ));
+        }
         Ok(Proposal {
             action,
             summary,
@@ -1487,6 +1499,31 @@ impl ScratchCopy {
         }
         changes.sort_by(|a, b| a.path.cmp(&b.path));
         Ok(changes)
+    }
+
+    /// The paths of `changes` whose file in the workspace is no longer what the copy was made
+    /// from: a copied file whose bytes there now differ from the base, or that is gone or no
+    /// longer a regular file; a file the session added that now exists there. Proposing such a
+    /// change would overwrite a write made in the workspace while the session ran.
+    fn stale(&self, changes: &[ProposedFile]) -> Vec<String> {
+        changes
+            .iter()
+            .filter(|change| {
+                let live = self.workspace.join(&change.path);
+                match self.base.get(&change.path) {
+                    Some(base) => {
+                        let file =
+                            std::fs::symlink_metadata(&live).is_ok_and(|meta| meta.is_file());
+                        !(file && std::fs::read(&live).is_ok_and(|now| digest(&now) == *base))
+                    }
+                    None => !matches!(
+                        std::fs::symlink_metadata(&live),
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+                    ),
+                }
+            })
+            .map(|change| change.path.clone())
+            .collect()
     }
 }
 

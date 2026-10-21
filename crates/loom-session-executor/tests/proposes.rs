@@ -630,6 +630,44 @@ fn a_concurrent_workspace_write_refuses_the_stale_proposal() {
     );
 }
 
+/// A file the session changed that was also written in the workspace while it ran, or a file it
+/// added that now exists there, makes the call propose nothing: it suspends for
+/// `ExternalAvailability` naming the path, is no record, and the concurrent write stands.
+#[test]
+fn a_concurrent_write_to_a_file_the_session_changed_suspends_the_step() {
+    let fixture = Fixture::new("stale");
+    let case = CaseId("case-stale".to_owned());
+    let written = "pub fn add(a: i32, b: i32) -> i32 {\n    b - a\n}\n";
+    for (path, frontier_id) in [("src/lib.rs", 0xf1), ("src/more.rs", 0xf2)] {
+        let script = Script {
+            meanwhile: Some((fixture.workspace.join(path), written.to_owned())),
+            ..Script::fixing()
+        };
+        let executor = fixture.executor(&script);
+
+        let step = executor.run_with_usage(&commission(&case), &frontier(&case, frontier_id));
+
+        let why = match &step.outcome {
+            ExecutorOutcome::Suspended(suspended) => match &suspended.reason {
+                SuspensionReason::ExternalAvailability(Value::Text(why)) => why.clone(),
+                other => panic!("{path}: suspended for {other:?}"),
+            },
+            other => panic!("{path}: a stale change was not refused: {other:?}"),
+        };
+        assert!(why.contains(path), "{path}: {why}");
+        assert!(
+            executor.sessions().is_empty(),
+            "{path}: a stale change is no record"
+        );
+        assert!(executor.proposed().is_empty());
+        assert_eq!(
+            std::fs::read_to_string(fixture.workspace.join(path)).expect("the file"),
+            written,
+            "{path}: the concurrent write stands"
+        );
+    }
+}
+
 /// With a test effect, the admitted proposal's files reach the workspace only through the
 /// effect: the effect finds the workspace as it was, and leaves it changed.
 #[test]
