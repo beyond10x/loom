@@ -73,7 +73,12 @@
 //!
 //! `completion` reports `Complete` with an outcome only when exactly one declared outcome is
 //! `legitimate` in Canon's decision, and `Open` otherwise: never an outcome Canon holds blocked,
-//! and never a choice between several.
+//! and never a choice between several. A host may choose otherwise when it builds the governor
+//! ([`CanonGovernor::with_completion_rule`], [`CompletionRule::FirstDeclared`]): the case then
+//! completes on the first legitimate outcome in the admitted protocol definition's declaration
+//! order, never the order of the decision document's map, and still never on a blocked one. The
+//! rule is the host's configuration, never read from a case or a model, and not stored with a
+//! case. [`evaluate`] always reports its outcome under the default.
 //!
 //! # Evidence
 //!
@@ -697,6 +702,9 @@ pub struct CanonGovernor<S, T = NoEvaluationTime> {
     store: S,
     protocols: BTreeMap<String, Ir>,
     catalog_definitions: Option<BTreeMap<String, String>>,
+    /// The outcomes each admitted definition in `protocols` declares, in its declaration order,
+    /// which the compiled protocol does not keep.
+    outcome_orders: BTreeMap<String, Vec<String>>,
     time: T,
     /// How a case completes when several declared outcomes are legitimate at once
     /// ([`CanonGovernor::with_completion_rule`]).
@@ -712,6 +720,7 @@ impl<S: Default, T: Default> Default for CanonGovernor<S, T> {
             store: S::default(),
             protocols: BTreeMap::new(),
             catalog_definitions: None,
+            outcome_orders: BTreeMap::new(),
             time: T::default(),
             completion_rule: CompletionRule::ExactlyOne,
             kept: Mutex::default(),
@@ -742,6 +751,7 @@ impl<S: FallibleCaseStore> CanonGovernor<S> {
             store,
             protocols: BTreeMap::new(),
             catalog_definitions: None,
+            outcome_orders: BTreeMap::new(),
             time: NoEvaluationTime,
             completion_rule: CompletionRule::ExactlyOne,
             kept: Mutex::default(),
@@ -763,6 +773,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             });
         }
         let mut protocols = BTreeMap::new();
+        let mut outcome_orders = BTreeMap::new();
         for entry in catalog.iter() {
             let name = entry.name();
             let ir = compile(&entry.model).map_err(|problems| OpenError::InvalidProtocol {
@@ -775,8 +786,10 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             })?;
             representable(name, &ir)?;
             protocols.insert(name.to_owned(), ir);
+            outcome_orders.insert(name.to_owned(), declared_outcomes(&entry.model));
         }
         self.protocols = protocols;
+        self.outcome_orders = outcome_orders;
         self.catalog_definitions = Some(
             catalog
                 .iter()
@@ -853,6 +866,8 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
         })?;
         representable(name, &ir)?;
         self.protocols.insert(name.to_owned(), ir);
+        self.outcome_orders
+            .insert(name.to_owned(), declared_outcomes(model));
         Ok(self)
     }
 
@@ -862,6 +877,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             store: self.store,
             protocols: self.protocols,
             catalog_definitions: self.catalog_definitions,
+            outcome_orders: self.outcome_orders,
             time,
             completion_rule: self.completion_rule,
             kept: self.kept,
@@ -878,6 +894,21 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
     pub fn with_completion_rule(mut self, rule: CompletionRule) -> Self {
         self.completion_rule = rule;
         self
+    }
+
+    /// The outcomes `protocol` declares, in the admitted definition's declaration order: the
+    /// definition registered or admitted from the catalog under that name, else the built-in one,
+    /// as [`Self::protocol_ir`] chooses between them.
+    fn outcome_order(&self, protocol: &str) -> Result<Vec<String>, OpenError> {
+        match self.outcome_orders.get(protocol) {
+            Some(order) => Ok(order.clone()),
+            None if self.catalog_definitions.is_some() || self.protocols.contains_key(protocol) => {
+                Err(OpenError::UnknownProtocol {
+                    protocol: protocol.to_owned(),
+                })
+            }
+            None => Ok(declared_outcomes(&builtin(protocol)?.model)),
+        }
     }
 
     fn protocol_ir(&self, protocol: &str) -> Result<Ir, OpenError> {
@@ -1300,8 +1331,17 @@ impl<S: FallibleCaseStore, T: EvaluationTime> Governor for CanonGovernor<S, T> {
     }
 
     fn completion(&self, case: &CaseId) -> Result<CompletionDetermination, GovernorError> {
-        let (_, _, decision) = self.decided(case)?;
-        Ok(match completed(&decision) {
+        let (state, _, decision) = self.decided(case)?;
+        let outcome = match self.completion_rule {
+            CompletionRule::ExactlyOne => completed(&decision),
+            CompletionRule::FirstDeclared => {
+                let order = self
+                    .outcome_order(&state.protocol)
+                    .map_err(|_| GovernorError::GovernorUnavailable)?;
+                first_declared(&decision, &order)
+            }
+        };
+        Ok(match outcome {
             Some(outcome) => {
                 CompletionDetermination::Complete(CompletionDeterminationComplete { outcome })
             }
@@ -1555,6 +1595,30 @@ fn opened(
 
 /// The ELS built-in `protocol`, `<name>@<major>`, compiled by Canon.
 fn protocol_ir(protocol: &str) -> Result<Ir, OpenError> {
+    let builtin = builtin(protocol)?;
+    compile(&builtin.model).map_err(|problems| OpenError::InvalidProtocol {
+        protocol: protocol.to_owned(),
+        problem: problems
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("; "),
+    })
+}
+
+/// The outcomes the definition `model` declares, in its declaration order: the order
+/// [`CompletionRule::FirstDeclared`] takes them in. Canon's compiled protocol and its decision
+/// document key outcomes by id, so neither keeps it.
+fn declared_outcomes(model: &b10x_canon::model::Protocol) -> Vec<String> {
+    model
+        .outcomes
+        .ids()
+        .map(|outcome| outcome.as_str().to_owned())
+        .collect()
+}
+
+/// The ELS built-in `protocol`, `<name>@<major>`, as the registry declares it.
+fn builtin(protocol: &str) -> Result<canon_engineering::registry::Builtin, OpenError> {
     let unknown = || OpenError::UnknownProtocol {
         protocol: protocol.to_owned(),
     };
@@ -1564,21 +1628,13 @@ fn protocol_ir(protocol: &str) -> Result<Ir, OpenError> {
         .ok()
         .filter(|parsed: &u32| parsed.to_string() == major)
         .ok_or_else(unknown)?;
-    let builtin = canon_engineering::registry::get(name, major).map_err(|error| match error {
+    canon_engineering::registry::get(name, major).map_err(|error| match error {
         canon_engineering::registry::Error::UnknownName { .. }
         | canon_engineering::registry::Error::UnknownMajor { .. } => unknown(),
         other => OpenError::InvalidProtocol {
             protocol: protocol.to_owned(),
             problem: other.to_string(),
         },
-    })?;
-    compile(&builtin.model).map_err(|problems| OpenError::InvalidProtocol {
-        protocol: protocol.to_owned(),
-        problem: problems
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("; "),
     })
 }
 
@@ -1868,10 +1924,10 @@ fn project(ir: &Ir, decision: &Decision) -> Option<Projection> {
     })
 }
 
-/// The case's outcome when exactly one declared outcome is `legitimate` in `decision`: never an
-/// outcome Canon holds blocked, and never a choice between several.
-fn completed(decision: &Decision) -> Option<String> {
-    let legitimate: Vec<&String> = decision
+/// The outcomes Canon reports `legitimate` in `decision`, in the order of its map: never one it
+/// holds blocked.
+fn legitimate(decision: &Decision) -> Vec<&String> {
+    decision
         .outcomes
         .as_ref()
         .and_then(|section| section.as_object())
@@ -1879,11 +1935,28 @@ fn completed(decision: &Decision) -> Option<String> {
         .flatten()
         .filter(|(_, entry)| entry["status"] == "legitimate")
         .map(|(outcome, _)| outcome)
-        .collect();
-    match legitimate.as_slice() {
+        .collect()
+}
+
+/// The case's outcome when exactly one declared outcome is `legitimate` in `decision`
+/// ([`CompletionRule::ExactlyOne`]): never an outcome Canon holds blocked, and never a choice
+/// between several.
+fn completed(decision: &Decision) -> Option<String> {
+    match legitimate(decision).as_slice() {
         [outcome] => Some((*outcome).clone()),
         _ => None,
     }
+}
+
+/// The case's outcome under [`CompletionRule::FirstDeclared`]: of the outcomes `legitimate` in
+/// `decision`, the first in `order`, the admitted definition's declaration order, never the order
+/// of the decision document's map; never an outcome Canon holds blocked.
+fn first_declared(decision: &Decision, order: &[String]) -> Option<String> {
+    let legitimate = legitimate(decision);
+    order
+        .iter()
+        .find(|outcome| legitimate.contains(outcome))
+        .cloned()
 }
 
 /// Canon's decision for a case the caller keeps: `request` names a protocol of the host's

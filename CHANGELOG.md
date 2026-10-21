@@ -16,6 +16,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 - `LoopContext::stop_policy` returns a `StopPolicy`: the host turns the approval gate off and sets the idle bound (story:stop-policy-gate-and-idle-bound)
 - `StopPolicy.on_breach`: `KeepStep` performs a proposal after a spending limit was passed; `DiscardStep` stays the default (story:run-budget-tokens-and-deadline)
+- `CanonGovernor::with_completion_rule(CompletionRule::FirstDeclared)` completes on the first declared legitimate outcome (story:first-declared-completion)
 
 ### Changed
 
