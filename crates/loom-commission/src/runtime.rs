@@ -248,6 +248,14 @@
 //!   step budget, whichever is reached first ending the run; a value below one is read as one,
 //!   so it never turns the bound off. `None` keeps two, judged only for a run with no step budget.
 //!   A run budget's `max_steps` counts as a step budget here, as at (0).
+//! * `on_breach` says what becomes of an executor step whose reported usage passed a spending
+//!   limit (`story:run-budget-tokens-and-deadline`, below). `DiscardStep`, the default, ends the
+//!   run before the step's outcome is acted on. `KeepStep` acts on it as with no breach: a proposal
+//!   is revalidated, asked about and, when admitted, performed, as any other, and nothing the
+//!   breach did not do is granted. A step whose outcome ends the run ends it with that outcome;
+//!   otherwise the Run is suspended for the breach before the next step, at the point and in the
+//!   way the used-up step budget suspends it (0), the kept breach the reason even when the step's
+//!   own effect then passed another limit.
 //!
 //! # Run and action budgets
 //!
@@ -269,10 +277,20 @@
 //!   revalidation and not admitted, and a fan-out that would take any action past it invokes none
 //!   of its reads. A resumed request is not checked;
 //! * the spending limits (`max_tokens_in`, `max_tokens_out`, `max_duration_ms`,
-//!   `max_cost_micro_usd`), the action's in the order the budget lists them and then the run's,
-//!   are checked once an effect, or a whole fan-out, was recorded and observed: a charge above a
-//!   limit, or an unknown cost under a cost limit, ends the run there, before the case is loaded
-//!   again, so no further request is made.
+//!   `max_cost_micro_usd`, and the run's `max_tokens`, its input and output tokens together), the
+//!   action's in the order the budget lists them and then the run's in that order, are checked
+//!   once an effect, or a whole fan-out, was recorded and observed: a charge above a limit, or an
+//!   unknown cost under a cost limit, ends the run there, before the case is loaded again, so no
+//!   further request is made;
+//! * the run's `deadline`, an RFC 3339 date-time (`story:run-budget-tokens-and-deadline`), is read
+//!   once before the Run starts, and one that is not RFC 3339 is a [`LoopError`]
+//!   ([`LoopFailure::InvalidDeadline`]) with nothing started; [`resume_after_grant`] refuses it
+//!   before it reads the Suspension. The trusted clock ([`LoopContext::now`]) is read against it
+//!   before each executor call and before a pending request is invoked again (8b): at or after it,
+//!   the Run is suspended for `RunBudget`, limit `Deadline`, `max` the deadline and `charged` the
+//!   reading, each in whole seconds since the Unix epoch, and the run ends suspended, or `Waiting`
+//!   while a request is pending. A reading that is not RFC 3339 counts as past the deadline, its
+//!   `charged` absent. A resumed request is not checked against it.
 //!
 //! An executor call that reports what it spent ([`ExecutorStep`]'s `usage`, through
 //! [`AgentExecutor::run_with_usage`], `story:executor-reports-usage`: an executor that is not a
@@ -282,7 +300,8 @@
 //! trial and to no action. Once the step was observed (6), the spending limits are checked as
 //! after an effect, the run's being the only ones the charge moved: a breach suspends the Run for
 //! `RunBudget` and ends the run suspended with that reason before its outcome is acted on (7-10):
-//! no request is made from a proposal, and an executor's own `Suspended` is not the Run's. Nothing
+//! no request is made from a proposal, and an executor's own `Suspended` is not the Run's, unless
+//! the stop policy keeps the step (`on_breach: KeepStep`, above). Nothing
 //! is pending while an executor runs (8b), so such a run never ends `Waiting`. An executor that
 //! reports no usage, as a model loop metered at its model port does, is charged nothing for its
 //! call, as before.
@@ -407,6 +426,7 @@ use crate::ports::evidence::ObservationPort;
 use crate::ports::executor::AgentExecutor;
 use crate::ports::governor::Governor;
 use crate::ports::suspension::{SuspensionPort, SuspensionStoreError};
+use crate::rfc3339;
 
 /// The source of the observation of an executor step.
 pub const EXECUTOR_SOURCE: &str = "executor";
@@ -531,6 +551,9 @@ pub enum LoopFailure {
     /// was performed, or after the resume found the case moved off the request's revision and
     /// performed nothing. [`UnreleasedSuspension::outcome`] says what the port left stored.
     SuspensionNotReleased(Box<UnreleasedSuspension>),
+    /// The run budget's `deadline` is not an RFC 3339 date-time; it holds the text. Nothing was
+    /// started: the loop refuses it before the Run starts, and a resume before it takes anything.
+    InvalidDeadline(String),
 }
 
 /// A release of the Suspension a resume took that did not remove it: after its request was
@@ -577,6 +600,9 @@ impl fmt::Display for LoopFailure {
                 "suspension not released after request {} was performed or found stale: {:?}",
                 unreleased.action_request_id.0.0, unreleased.outcome
             ),
+            Self::InvalidDeadline(text) => {
+                write!(f, "the run budget's deadline is not RFC 3339: {text:?}")
+            }
         }
     }
 }
@@ -678,8 +704,9 @@ pub enum ResumeError {
     Store(SuspensionStoreError),
     /// The governor could not answer before the Run resumed. Nothing was resumed.
     Governor(GovernorError),
-    /// `ResumeRun` failed, the Suspension could not be taken, or the resumed loop stopped without
-    /// a run outcome.
+    /// The run budget's deadline is not RFC 3339 (nothing was read or resumed), `ResumeRun`
+    /// failed, the Suspension could not be taken, or the resumed loop stopped without a run
+    /// outcome.
     Loop(LoopError),
 }
 
@@ -834,6 +861,8 @@ where
     R: StartRunBehavior + SuspendRunBehavior + ?Sized,
     C: LoopContext + ?Sized,
 {
+    // A deadline that names no instant is refused before anything is asked or started.
+    deadline_of(context.run_budget().as_ref()).map_err(unstarted)?;
     let revision = ports
         .governor
         .current_revision(&commission.data().case_id)
@@ -1072,6 +1101,9 @@ where
         (steps, run_steps) => steps.or(run_steps),
     };
     let policy = context.stop_policy();
+    // The instant past which no step is taken; [`start`] and [`resume_after_grant`] refused a
+    // deadline that names none before the Run started or resumed.
+    let deadline = deadline_of(run_budget.as_ref())?;
     // How many idle iterations in a row end the run (`JudgeIdleIteration`, `bound`): the host's,
     // read as one below one, with or without a step budget; when it sets none, two, and only for a
     // run with no step budget.
@@ -1101,6 +1133,10 @@ where
     // The requests the effect port last answered `Pending`, which the next iteration invokes
     // again instead of running the executor (8b).
     let mut waiting: Option<Waiting> = None;
+    // The spending limit an executor step's usage passed under a stop policy that keeps the step
+    // (`BreachStep::KeepStep`): its outcome was acted on, and the Run is suspended for it before
+    // the next step, as when the step budget is used up.
+    let mut kept_breach: Option<RunBudgetBreach> = None;
 
     let limit = budget.unwrap_or(UNBUDGETED_STEP_LIMIT);
     // Why the Run is suspended when its steps reach `limit`: the run budget's step limit when it
@@ -1188,10 +1224,19 @@ where
         // With the budget used up, a pending approval gate is still read and checked first, after
         // a stale proposal the move is judged first, and after a performed effect the case is
         // loaded first, so a case the last step completed ends the run completed. While a request
-        // is pending no gate is read (8b), and the run ends `Waiting`.
-        let exhausted = track.steps >= limit;
-        if exhausted && (gate.is_none() || waiting.is_some()) && !after_stale && !effected {
-            return budget_ended(runs, run_id, exhausted_for, waiting.as_ref(), track);
+        // is pending no gate is read (8b), and the run ends `Waiting`. A spending limit the
+        // previous executor step passed under `KeepStep` stops the run as the used-up budget
+        // does, and is the reason given.
+        let stop = match &kept_breach {
+            Some(breach) => Some(SuspensionReason::RunBudget(breach.clone())),
+            None => (track.steps >= limit).then(|| exhausted_for.clone()),
+        };
+        if let Some(reason) = &stop
+            && (gate.is_none() || waiting.is_some())
+            && !after_stale
+            && !effected
+        {
+            return budget_ended(runs, run_id, reason.clone(), waiting.as_ref(), track);
         }
 
         let loaded = if first {
@@ -1230,8 +1275,11 @@ where
         }
         // After a performed effect that left no gate pending, a case still open is suspended for
         // its budget (0), or ends `Waiting` while a request is pending.
-        if exhausted && (gate.is_none() || waiting.is_some()) && !after_stale {
-            return budget_ended(runs, run_id, exhausted_for, waiting.as_ref(), track);
+        if let Some(reason) = &stop
+            && (gate.is_none() || waiting.is_some())
+            && !after_stale
+        {
+            return budget_ended(runs, run_id, reason.clone(), waiting.as_ref(), track);
         }
 
         let frontier = governor.frontier(case)?;
@@ -1250,8 +1298,14 @@ where
         // The requests the port answered `Pending` are invoked again before any executor runs,
         // each revalidated as before its first invocation (8b). No gate is read for them.
         if let Some(pending) = waiting.take() {
-            if exhausted {
-                return budget_ended(runs, run_id, exhausted_for, Some(&pending), track);
+            if let Some(reason) = &stop {
+                return budget_ended(runs, run_id, reason.clone(), Some(&pending), track);
+            }
+            // A deadline the trusted clock reads as reached stops the run before the requests
+            // are invoked again; they are still pending.
+            if let Some(breach) = deadline_reached(deadline, context) {
+                let reason = SuspensionReason::RunBudget(breach);
+                return budget_ended(runs, run_id, reason, Some(&pending), track);
             }
             let again = invoke_again(
                 governor,
@@ -1361,8 +1415,13 @@ where
                 return Ok(track.end(run_id, outcome));
             }
         }
-        if exhausted {
-            return budget_ended(runs, run_id, exhausted_for, None, track);
+        if let Some(reason) = stop {
+            return budget_ended(runs, run_id, reason, None, track);
+        }
+        // A deadline the trusted clock reads as reached stops the run before the executor runs.
+        if let Some(breach) = deadline_reached(deadline, context) {
+            let reason = SuspensionReason::RunBudget(breach);
+            return budget_ended(runs, run_id, reason, None, track);
         }
 
         let step = executor.run_with_usage(commission, &handed);
@@ -1371,17 +1430,24 @@ where
         }
         let observed = governor.observe(observation(context, &frontier, &step));
         let ExecutorStep { outcome, usage, .. } = step;
-        // The step's own usage past a spending limit stops the run once the step is observed,
-        // before its outcome is acted on: no request is made from it, and an executor's own
-        // suspension is not the Run's.
+        // The step's own usage past a spending limit stops the run once the step is observed. By
+        // default (`DiscardStep`) that is before its outcome is acted on: no request is made from
+        // it, and an executor's own suspension is not the Run's. A stop policy that keeps the step
+        // (`KeepStep`) acts on the outcome as with no breach, and the run, unless that outcome
+        // ends it, is suspended for the breach before the next step.
         if observed.is_ok()
             && usage.is_some()
             && let Some(breach) = run_budget
                 .as_ref()
                 .and_then(|limits| spent_past(limits, &track))
         {
-            let reason = SuspensionReason::RunBudget(breach);
-            return budget_ended(runs, run_id, reason, None, track);
+            match policy.on_breach {
+                BreachStep::KeepStep => kept_breach = Some(breach),
+                BreachStep::DiscardStep => {
+                    let reason = SuspensionReason::RunBudget(breach);
+                    return budget_ended(runs, run_id, reason, None, track);
+                }
+            }
         }
         if let ExecutorOutcome::Suspended(suspended) = &outcome {
             let reason = suspended.reason.clone();
@@ -1518,10 +1584,12 @@ where
                     });
                 }
                 // Usage past a spending limit stops the run once the effect is recorded and
-                // observed.
-                if let Some(breach) = run_budget
-                    .as_ref()
-                    .and_then(|limits| spent_past(limits, &track))
+                // observed. A step kept past a breach is suspended for that breach once its
+                // outcome was acted on, at the next iteration.
+                if kept_breach.is_none()
+                    && let Some(breach) = run_budget
+                        .as_ref()
+                        .and_then(|limits| spent_past(limits, &track))
                 {
                     let reason = SuspensionReason::RunBudget(breach);
                     return budget_ended(runs, run_id, reason, waiting.as_ref(), track);
@@ -1566,6 +1634,7 @@ where
             if let Some(breach) = fanned.over_budget.or_else(|| {
                 run_budget
                     .as_ref()
+                    .filter(|_| kept_breach.is_none())
                     .and_then(|limits| spent_past(limits, &track))
             }) {
                 let reason = SuspensionReason::RunBudget(breach);
@@ -1793,9 +1862,10 @@ fn suspend_for_approval<R: SuspendRunBehavior + ?Sized>(
 /// performed now, or another resume took the Suspension first or the commission holds one for
 /// another request by the time it is taken; [`ResumeError::Store`] or
 /// [`ResumeError::Governor`] when a port fails before the Run resumes: nothing is performed, and
-/// the Suspension stays stored as it was. [`ResumeError::Loop`] when `ResumeRun` fails, the
-/// Suspension cannot be taken (nothing is performed), or the resumed loop stops without a run
-/// outcome.
+/// the Suspension stays stored as it was. [`ResumeError::Loop`] when the run budget's deadline is
+/// not RFC 3339 ([`LoopFailure::InvalidDeadline`], before the Suspension is read), `ResumeRun`
+/// fails, the Suspension cannot be taken (nothing is performed), or the resumed loop stops without
+/// a run outcome.
 // The ports of `run_until_blocked`, and the suspension port.
 #[allow(clippy::too_many_arguments)]
 pub fn resume_after_grant<G, E, A, F, R, C>(
@@ -1817,6 +1887,9 @@ where
     C: LoopContext + ?Sized,
 {
     let refused = |refusal| Err(ResumeError::Refused(refusal));
+    // A deadline that names no instant is refused before the Suspension is read or taken.
+    deadline_of(context.run_budget().as_ref())
+        .map_err(|failure| ResumeError::Loop(unstarted(failure)))?;
     let held = commission.data();
     let Some(stored) = suspensions
         .get(&held.commission_id)
@@ -2955,7 +3028,7 @@ fn add_usage(
 /// a charge above its limit, or an unknown cost under a cost limit.
 fn spending(
     action: Option<&str>,
-    limits: [(BudgetLimit, Option<i64>, Option<i64>); 4],
+    limits: [(BudgetLimit, Option<i64>, Option<i64>); 5],
 ) -> Option<RunBudgetBreach> {
     limits.into_iter().find_map(|(limit, max, charged)| {
         let max = max?;
@@ -2971,14 +3044,16 @@ fn spending(
     })
 }
 
-/// The spending limits of `charged` under the four limits given.
+/// The spending limits of `charged` under the limits given: the four an action's budget may set,
+/// then the run's alone, its input and output tokens together (`tokens`).
 fn spent(
     tokens_in: Option<i64>,
     tokens_out: Option<i64>,
     duration_ms: Option<i64>,
     cost: Option<i64>,
+    tokens: Option<i64>,
     charged: &ChargedUsage,
-) -> [(BudgetLimit, Option<i64>, Option<i64>); 4] {
+) -> [(BudgetLimit, Option<i64>, Option<i64>); 5] {
     [
         (
             BudgetLimit::MaxTokensIn,
@@ -2996,6 +3071,11 @@ fn spent(
             Some(charged.duration_ms),
         ),
         (BudgetLimit::MaxCostMicroUsd, cost, charged.cost_micro_usd),
+        (
+            BudgetLimit::MaxTokens,
+            tokens,
+            Some(charged.input_tokens.saturating_add(charged.output_tokens)),
+        ),
     ]
 }
 
@@ -3019,6 +3099,7 @@ fn spent_past(budget: &RunBudget, track: &Track) -> Option<RunBudgetBreach> {
                     limits.max_tokens_out,
                     limits.max_duration_ms,
                     limits.max_cost_micro_usd,
+                    None,
                     charged,
                 ),
             )
@@ -3031,10 +3112,47 @@ fn spent_past(budget: &RunBudget, track: &Track) -> Option<RunBudgetBreach> {
                     budget.max_tokens_out,
                     budget.max_duration_ms,
                     budget.max_cost_micro_usd,
+                    budget.max_tokens,
                     &charges.run,
                 ),
             )
         })
+}
+
+/// The instant `budget`'s deadline names, in whole seconds since the Unix epoch and the
+/// nanoseconds past that second; `None` when it sets no deadline.
+///
+/// # Errors
+///
+/// [`LoopFailure::InvalidDeadline`] when the deadline is not an RFC 3339 date-time.
+fn deadline_of(budget: Option<&RunBudget>) -> Result<Option<(i64, u32)>, LoopFailure> {
+    let Some(Timestamp(text)) = budget.and_then(|limits| limits.deadline.as_ref()) else {
+        return Ok(None);
+    };
+    match rfc3339::instant(text) {
+        Some(instant) => Ok(Some(instant)),
+        None => Err(LoopFailure::InvalidDeadline(text.clone())),
+    }
+}
+
+/// The breach of `deadline` when the trusted clock reads it as reached: at or after it, or a
+/// reading that is no RFC 3339 date-time, which counts as past it and charges nothing known. The
+/// breach names the deadline and the reading in whole seconds since the Unix epoch.
+fn deadline_reached<C: LoopContext + ?Sized>(
+    deadline: Option<(i64, u32)>,
+    context: &mut C,
+) -> Option<RunBudgetBreach> {
+    let deadline = deadline?;
+    let reading = rfc3339::instant(&context.now().0);
+    if reading.is_some_and(|now| now < deadline) {
+        return None;
+    }
+    Some(RunBudgetBreach {
+        action: None,
+        limit: BudgetLimit::Deadline,
+        max: deadline.0,
+        charged: reading.map(|(seconds, _)| seconds),
+    })
 }
 
 /// The trial limit of `budget` that handing requests for `actions` to the effect port would pass,

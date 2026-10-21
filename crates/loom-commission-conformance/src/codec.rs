@@ -247,13 +247,15 @@ pub(crate) fn from_suspension_reason(reason: &SuspensionReason) -> Option<Node> 
 }
 
 /// The names of `BudgetLimit`, as `ess/commission/` declares them.
-const LIMITS: [(BudgetLimit, &str); 6] = [
+const LIMITS: [(BudgetLimit, &str); 8] = [
     (BudgetLimit::MaxSteps, "MaxSteps"),
     (BudgetLimit::MaxTrials, "MaxTrials"),
     (BudgetLimit::MaxTokensIn, "MaxTokensIn"),
     (BudgetLimit::MaxTokensOut, "MaxTokensOut"),
     (BudgetLimit::MaxDurationMs, "MaxDurationMs"),
     (BudgetLimit::MaxCostMicroUsd, "MaxCostMicroUsd"),
+    (BudgetLimit::MaxTokens, "MaxTokens"),
+    (BudgetLimit::Deadline, "Deadline"),
 ];
 
 /// A `RunBudgetBreach`: its fields by name, an optional one absent or null when it holds nothing.

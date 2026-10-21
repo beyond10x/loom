@@ -21,19 +21,25 @@ use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
     ActionBudget, ActionCharge, ActionRequestData, ActionRequestId, ActionStatus, AgentRevisionId,
     AuthorityContext, AuthorityVerdict, AuthorityVerdictDeny, BreachStep, BudgetLimit, CaseId,
-    ChargedUsage, Commission, CommissionData, CommissionId, EffectOutcome, EffectOutcomePerformed,
-    EffectUsage, ExecutorOutcome, ExecutorOutcomeProposedAction, ExecutorStep, ExecutorUsage,
-    Frontier, FrontierAction, ObservationId, PrincipalId, ProposedActionArguments, RunBudget,
-    RunBudgetBreach, RunId, RunOutcome, RunOutcomeSuspended, RunState, StopPolicy,
-    SuspensionReason, commission_state, frontier_state,
+    ChargedUsage, Commission, CommissionData, CommissionId, EffectOutcome, EffectOutcomePending,
+    EffectOutcomePerformed, EffectUsage, ExecutorOutcome, ExecutorOutcomeProposedAction,
+    ExecutorStep, ExecutorUsage, Frontier, FrontierAction, HoldSuspension, HoldSuspensionOutcome,
+    ObservationId, PrincipalId, ProposedActionArguments, RunBudget, RunBudgetBreach, RunId,
+    RunOutcome, RunOutcomeSuspended, RunOutcomeWaiting, RunState, StopPolicy, SuspensionKey,
+    SuspensionReason, SuspensionState, commission_state, frontier_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use b10x_loom_commission::ports::executor::AgentExecutor;
-use b10x_loom_commission::runtime::{LoopContext, LoopEnd, LoopError, run_until_blocked};
+use b10x_loom_commission::ports::suspension::SuspensionPort;
+use b10x_loom_commission::runtime::{
+    LoopContext, LoopEnd, LoopError, LoopFailure, ResumeError, resume_after_grant,
+    run_until_blocked,
+};
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
 use b10x_loom_commission_testkit::fake_executor::ScriptedExecutor;
 use b10x_loom_commission_testkit::fake_governor::{Answer, FakeGovernor};
+use b10x_loom_commission_testkit::file_suspension::FileSuspensionStore;
 use b10x_loom_executor::metering::RunMeter;
 use b10x_loom_executor::model::metering::ActionUsage;
 
@@ -188,9 +194,10 @@ fn usage(input_tokens: i64, output_tokens: i64) -> EffectUsage {
 }
 
 /// An effect port performing every action, each invocation reporting `usage`, recording what it
-/// was handed.
+/// was handed; or, `pending`, answering every invocation `Pending`.
 struct Effects {
     usage: Option<EffectUsage>,
+    pending: bool,
     invoked: Mutex<VecDeque<ActionRequestData>>,
 }
 
@@ -198,7 +205,15 @@ impl Effects {
     fn reporting(usage: Option<EffectUsage>) -> Self {
         Self {
             usage,
+            pending: false,
             invoked: Mutex::new(VecDeque::new()),
+        }
+    }
+
+    fn pending() -> Self {
+        Self {
+            pending: true,
+            ..Self::reporting(None)
         }
     }
 
@@ -224,6 +239,11 @@ impl EffectPort for Effects {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push_back(request.data().clone());
+        if self.pending {
+            return Ok(EffectOutcome::Pending(EffectOutcomePending {
+                report: Value::Text("still evaluating".to_owned()),
+            }));
+        }
         Ok(EffectOutcome::Performed(EffectOutcomePerformed {
             report: Value::Text("evaluated".to_owned()),
             attempt: None,
@@ -757,4 +777,185 @@ fn keep_step_still_refuses_an_unadmitted_proposal() {
         "the run would go on, so it is suspended for the breach before the next step"
     );
     assert_eq!(session.calls(), 1, "no further executor call");
+}
+
+/// A deadline reached while a request is pending is read before the request is invoked again: the
+/// run ends `Waiting`, naming the request and the deadline, and the request is not invoked again.
+#[test]
+fn a_deadline_reached_while_a_request_is_pending_ends_the_run_waiting() {
+    let session = Session::reporting(None);
+    let effects = Effects::pending();
+    let budget = RunBudget {
+        deadline: Some(Timestamp(DEADLINE.to_owned())),
+        ..unlimited()
+    };
+
+    let (end, runs) = run_session(
+        &session,
+        &effects,
+        None,
+        &StaticAuthorityProvider::new(),
+        &mut Context::reading(
+            budget,
+            Clock::PastDeadlineAfterFirstCall(&session),
+            default_policy(),
+        ),
+    );
+    let end = end.unwrap_or_else(|error| panic!("the loop failed: {error}"));
+
+    assert_eq!(
+        end.outcome,
+        RunOutcome::Waiting(RunOutcomeWaiting {
+            action_request_ids: vec![ActionRequestId(uuid(0x301))],
+            reason: SuspensionReason::RunBudget(RunBudgetBreach {
+                action: None,
+                limit: BudgetLimit::Deadline,
+                max: DEADLINE_SECONDS,
+                charged: Some(AFTER_SECONDS),
+            }),
+        })
+    );
+    assert_eq!(
+        effects.invoked(),
+        1,
+        "the pending request is not invoked again"
+    );
+    assert_eq!(session.calls(), 1);
+    assert_eq!(
+        RunStorage::get(&runs.ports, &end.run_id).map(|held| held.state),
+        Some(RunState::Suspended)
+    );
+}
+
+/// A clock reading that is not RFC 3339 counts as past the deadline, with no charge known: the
+/// run is suspended for `Deadline` before the first executor call.
+#[test]
+fn a_reading_that_is_not_rfc_3339_counts_as_past_the_deadline() {
+    let session = Session::reporting(None);
+    let effects = Effects::reporting(None);
+    let budget = RunBudget {
+        deadline: Some(Timestamp(DEADLINE.to_owned())),
+        ..unlimited()
+    };
+
+    let (end, _) = run_session(
+        &session,
+        &effects,
+        None,
+        &StaticAuthorityProvider::new(),
+        &mut Context::reading(budget, Clock::Fixed("half past nine"), default_policy()),
+    );
+    let end = end.unwrap_or_else(|error| panic!("the loop failed: {error}"));
+
+    assert_eq!(
+        end.outcome,
+        suspended_for(RunBudgetBreach {
+            action: None,
+            limit: BudgetLimit::Deadline,
+            max: DEADLINE_SECONDS,
+            charged: None,
+        })
+    );
+    assert_eq!(session.calls(), 0, "the executor is never called");
+    assert_eq!(effects.invoked(), 0);
+}
+
+/// A deadline given with an offset is the instant it names: a reading before that instant takes
+/// the step, though the reading's written time of day is past the deadline's.
+#[test]
+fn a_deadline_with_an_offset_is_the_instant_it_names() {
+    let session = Session::reporting(Some(call_usage(1, 1)));
+    let effects = Effects::reporting(None);
+    let budget = RunBudget {
+        // 09:30 UTC, written 08:30; the clock reads 09:00 UTC throughout.
+        deadline: Some(Timestamp("2026-10-21T08:30:00-01:00".to_owned())),
+        max_tokens: Some(3),
+        ..unlimited()
+    };
+
+    let (end, _) = run_session(
+        &session,
+        &effects,
+        None,
+        &StaticAuthorityProvider::new(),
+        &mut Context::reading(budget, Clock::Fixed(BEFORE), default_policy()),
+    );
+    let end = end.unwrap_or_else(|error| panic!("the loop failed: {error}"));
+
+    assert_eq!(
+        end.outcome,
+        suspended_for(RunBudgetBreach {
+            action: None,
+            limit: BudgetLimit::MaxTokens,
+            max: 3,
+            charged: Some(4),
+        }),
+        "the deadline never stops the run; the second call's tokens do"
+    );
+    assert_eq!(session.calls(), 2);
+    assert_eq!(effects.invoked(), 1);
+}
+
+/// A resume under a deadline that is not RFC 3339 is refused before it takes the Suspension: the
+/// Suspension stays `Pending`, and nothing is performed.
+#[test]
+fn a_resume_under_a_deadline_that_is_not_rfc_3339_takes_nothing() {
+    let case = CaseId("case-budget-resume".to_owned());
+    let commission = commission(&case);
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join("run-and-action-budgets")
+        .join("resume-invalid-deadline");
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+    let suspensions = FileSuspensionStore::open(&dir).expect("the suspension store opens");
+    let commission_id = commission.data().commission_id.clone();
+    let held = suspensions.hold(HoldSuspension {
+        suspension: SuspensionKey {
+            commission_id: commission_id.clone(),
+        },
+        commission_id: commission_id.clone(),
+        run_id: RunId(uuid(0x101)),
+        run_case_revision: 1,
+        action_request_id: ActionRequestId(uuid(0x301)),
+        case_id: case.clone(),
+        expected_case_revision: 1,
+        action: EVALUATE.to_owned(),
+        arguments: ProposedActionArguments(Value::Null),
+        reason: SuspensionReason::Authority(Value::Null),
+    });
+    assert!(matches!(held, HoldSuspensionOutcome::Held { .. }));
+    let session = Session::reporting(None);
+    let effects = Effects::reporting(None);
+    let budget = RunBudget {
+        deadline: Some(Timestamp("tomorrow at noon".to_owned())),
+        ..unlimited()
+    };
+    let mut runs = RunStore::new(|| RunId(uuid(0x102)));
+
+    let resumed = resume_after_grant(
+        &governor(&case),
+        &session,
+        &StaticAuthorityProvider::new(),
+        &effects,
+        &commission,
+        &mut runs,
+        &suspensions,
+        &mut Context::reading(budget, Clock::Fixed(BEFORE), default_policy()),
+    );
+
+    match resumed {
+        Err(ResumeError::Loop(error)) => assert_eq!(
+            error.failure,
+            LoopFailure::InvalidDeadline("tomorrow at noon".to_owned())
+        ),
+        other => panic!("the resume was not refused for its deadline: {other:?}"),
+    }
+    let stored = suspensions
+        .get(&commission_id)
+        .expect("the store reads")
+        .expect("the Suspension is still stored");
+    assert_eq!(stored.state, SuspensionState::Pending, "nothing was taken");
+    assert_eq!(effects.invoked(), 0, "nothing is performed");
+    assert_eq!(session.calls(), 0);
 }
