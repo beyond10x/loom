@@ -627,6 +627,8 @@ fn a_host_executor_implementing_run_alone_keeps_the_provided_run_with_usage() {
         ExecutorStep {
             outcome: hosts::EXECUTOR_OUTCOME,
             usage: None,
+            transcript_digest: None,
+            summary: None,
         },
         "the provided run_with_usage returns run's outcome with no usage"
     );

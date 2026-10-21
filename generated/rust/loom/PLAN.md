@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest 1d444202ff5ea55b90c19ce388d5b307090dc8b11d651cdd4e3ec3305a5c4630
-  contract digest 747f718a7d6e4cdc7f8cb59838b8d3065716a8e71730de52af6f47cf9f5d6546
+  model digest 53e615001102d5db4bf2a24bfaf7658e84c8763e6c694beeaed3e3944d5b2c5e
+  contract digest 91b11340c21ba91ed1f55878ed7c3283b927534dde34698c5273def13b1a792d
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-136 capabilities: **135 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+148 capabilities: **147 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -96,6 +96,12 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.run.SelectionRecordId` |
 | domain type | `loom.run.SelectionStrategy` |
 | domain type | `loom.run.TurnId` |
+| domain type | `loom.session.AgentSession.State` |
+| domain type | `loom.session.ChangedFile` |
+| domain type | `loom.session.CommissionId` |
+| domain type | `loom.session.FrontierId` |
+| domain type | `loom.session.SessionId` |
+| domain type | `loom.session.SessionKind` |
 | domain type | `loom.slack.ChannelObjectives` |
 | domain type | `loom.slack.SlackConfig` |
 | domain type | `loom.workflow.DeterministicStep` |
@@ -116,6 +122,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | entity lifecycle | `loom.run.ArgumentRequest` |
 | entity lifecycle | `loom.run.Selection` |
 | entity lifecycle | `loom.run.SelectionRecord` |
+| entity lifecycle | `loom.session.AgentSession` |
 | command contract | `loom.run.OverruleSelection` |
 | command behaviour | `loom.run.OverruleSelection` |
 | command contract | `loom.run.ProjectCatalogue` |
@@ -127,6 +134,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command contract | `loom.run.RevalidateSelection` |
 | command behaviour | `loom.run.RevalidateSelection` |
 | command contract | `loom.run.SelectAction` |
+| command contract | `loom.session.ProposeSessionChange` |
+| command behaviour | `loom.session.ProposeSessionChange` |
 | event type | `loom.run.ActionSelected` |
 | event type | `loom.run.ArgumentsRequested` |
 | event type | `loom.run.CatalogueProjected` |
@@ -135,6 +144,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | event type | `loom.run.SelectionOverruled` |
 | event type | `loom.run.SelectionRecorded` |
 | event type | `loom.run.SelectionStale` |
+| event type | `loom.session.SessionChangeProposed` |
 | error type | `loom.run.ActionNotInCatalogue` |
 | error type | `loom.run.CatalogueExists` |
 | error type | `loom.run.CatalogueNotFound` |
@@ -149,6 +159,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | view query | `loom.run.SelectionRecords` |
 | view type | `loom.run.Selections` |
 | view query | `loom.run.Selections` |
+| view type | `loom.session.AgentSessions` |
+| view query | `loom.session.AgentSessions` |
 
 ## Ports — yours to provide
 

@@ -174,6 +174,8 @@ impl AgentExecutor for Session {
                 duration_ms: 2000,
                 cost_micro_usd: Some(300),
             }),
+            transcript_digest: None,
+            summary: None,
         }
     }
 }

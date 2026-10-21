@@ -12,4 +12,5 @@ specification:
   - domains/workflow.yaml
   - domains/metering.yaml
   - domains/models.yaml
+  - domains/session.yaml
 scenarios: []

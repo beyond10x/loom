@@ -1315,7 +1315,7 @@ where
             return budget_ended(runs, run_id, exhausted_for, None, track);
         }
 
-        let ExecutorStep { outcome, usage } = executor.run_with_usage(commission, &handed);
+        let ExecutorStep { outcome, usage, .. } = executor.run_with_usage(commission, &handed);
         if let Some(usage) = &usage {
             charge_step(&mut track.charges, usage);
         }

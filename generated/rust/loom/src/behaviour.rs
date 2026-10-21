@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 1d444202ff5ea55b90c19ce388d5b307090dc8b11d651cdd4e3ec3305a5c4630
-// contract digest 747f718a7d6e4cdc7f8cb59838b8d3065716a8e71730de52af6f47cf9f5d6546
+// model digest 53e615001102d5db4bf2a24bfaf7658e84c8763e6c694beeaed3e3944d5b2c5e
+// contract digest 91b11340c21ba91ed1f55878ed7c3283b927534dde34698c5273def13b1a792d
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -86,6 +86,24 @@ pub trait SelectionRecordStorage {
     /// Every stored instance, in the order the store keeps them: the order a generated query
     /// answers an unordered view in.
     fn list(&self) -> Vec<crate::run::SelectionRecordSnapshot>;
+}
+
+/// Where `loom.session.AgentSession` is stored — a port the implementor provides.
+///
+/// Keyed by the identity `session_id`. Generated network entries supply an ephemeral implementation; durable storage remains a port.
+pub trait AgentSessionStorage {
+    /// The instance with this identity, or `None` where none is stored.
+    fn get(&self, identity: &crate::session::SessionId) -> Option<crate::session::AgentSessionSnapshot>;
+
+    /// Stores this instance under its identity, replacing what was held.
+    fn put(&mut self, snapshot: crate::session::AgentSessionSnapshot);
+
+    /// Removes the instance with this identity.
+    fn delete(&mut self, identity: &crate::session::SessionId);
+
+    /// Every stored instance, in the order the store keeps them: the order a generated query
+    /// answers an unordered view in.
+    fn list(&self) -> Vec<crate::session::AgentSessionSnapshot>;
 }
 
 /// The exact executing command input supplied to an external decision.
@@ -344,6 +362,30 @@ impl<P: crate::run::obligations::SelectActionBehavior> crate::run::obligations::
     }
 }
 
+/// `loom.session.ProposeSessionChange`, generated: every outcome is one the specification fully determines.
+impl<P> crate::session::obligations::ProposeSessionChangeBehavior for Generated<P>
+where
+    P: AgentSessionStorage,
+{
+    fn propose_session_change(&mut self, input: crate::session::ProposeSessionChange) -> Result<crate::session::ProposeSessionChangeOutcome, UnmetObligation> {
+        let _ = &input;
+        // `proposed`: the default.
+        let identity: crate::session::SessionId = input.session_id.clone();
+        let data = crate::session::AgentSessionData {
+            session_id: identity.clone(),
+            kind: input.kind.clone(),
+            commission_id: input.commission_id.clone(),
+            frontier_id: input.frontier_id.clone(),
+            vendor_session_id: input.vendor_session_id.clone(),
+            action: input.action.clone(),
+            files: input.files.clone(),
+        };
+        let answer = crate::session::ProposeSessionChangeOutcome::Proposed { session_change_proposed: crate::session::SessionChangeProposed { session_id: identity.clone(), commission_id: input.commission_id.clone(), frontier_id: input.frontier_id.clone(), action: input.action.clone(), files: input.files.clone() } };
+        AgentSessionStorage::put(&mut self.ports, crate::session::AnyAgentSession::Ended(crate::session::AgentSession::new(data)).snapshot());
+        return Ok(answer);
+    }
+}
+
 /// `loom.run.Catalogues`, generated: every row is one the specification fully determines from the stored `loom.run.ActionCatalogue`s.
 impl<P> crate::run::obligations::CataloguesQuery for Generated<P>
 where
@@ -403,6 +445,29 @@ where
                 strategy: held.data.strategy,
                 case_revision: held.data.case_revision,
                 replaced_by: held.data.replaced_by,
+                state: held.state,
+            })
+            .collect())
+    }
+}
+
+/// `loom.session.AgentSessions`, generated: every row is one the specification fully determines from the stored `loom.session.AgentSession`s.
+impl<P> crate::session::obligations::AgentSessionsQuery for Generated<P>
+where
+    P: AgentSessionStorage,
+{
+    fn agent_sessions(&self) -> Result<Vec<crate::session::AgentSessions>, UnmetObligation> {
+        let admitted = AgentSessionStorage::list(&self.ports);
+        Ok(admitted
+            .into_iter()
+            .map(|held| crate::session::AgentSessions {
+                session_id: held.data.session_id,
+                kind: held.data.kind,
+                commission_id: held.data.commission_id,
+                frontier_id: held.data.frontier_id,
+                vendor_session_id: held.data.vendor_session_id,
+                action: held.data.action,
+                files: held.data.files,
                 state: held.state,
             })
             .collect())

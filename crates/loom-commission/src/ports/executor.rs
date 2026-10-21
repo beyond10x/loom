@@ -44,6 +44,8 @@ pub trait AgentExecutor {
         ExecutorStep {
             outcome: self.run(commission, frontier),
             usage: None,
+            transcript_digest: None,
+            summary: None,
         }
     }
 }

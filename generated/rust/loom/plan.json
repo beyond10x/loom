@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "1d444202ff5ea55b90c19ce388d5b307090dc8b11d651cdd4e3ec3305a5c4630",
-    "contract_digest": "747f718a7d6e4cdc7f8cb59838b8d3065716a8e71730de52af6f47cf9f5d6546"
+    "source_digest": "53e615001102d5db4bf2a24bfaf7658e84c8763e6c694beeaed3e3944d5b2c5e",
+    "contract_digest": "91b11340c21ba91ed1f55878ed7c3283b927534dde34698c5273def13b1a792d"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -586,6 +586,48 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.session.AgentSession.State",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.session.ChangedFile",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.session.CommissionId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.session.FrontierId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.session.SessionId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.session.SessionKind",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.slack.ChannelObjectives",
       "disposition": {
         "disposition": "generated"
@@ -725,6 +767,13 @@
       }
     },
     {
+      "kind": "entity_lifecycle",
+      "source": "loom.session.AgentSession",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
       "kind": "command_contract",
       "source": "loom.run.OverruleSelection",
       "disposition": {
@@ -814,6 +863,20 @@
       }
     },
     {
+      "kind": "command_contract",
+      "source": "loom.session.ProposeSessionChange",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.session.ProposeSessionChange",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
       "kind": "event_type",
       "source": "loom.run.ActionSelected",
       "disposition": {
@@ -865,6 +928,13 @@
     {
       "kind": "event_type",
       "source": "loom.run.SelectionStale",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.session.SessionChangeProposed",
       "disposition": {
         "disposition": "generated"
       }
@@ -963,6 +1033,20 @@
     {
       "kind": "view_query",
       "source": "loom.run.Selections",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_type",
+      "source": "loom.session.AgentSessions",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_query",
+      "source": "loom.session.AgentSessions",
       "disposition": {
         "disposition": "generated"
       }

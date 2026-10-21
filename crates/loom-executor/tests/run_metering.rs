@@ -659,6 +659,8 @@ impl AgentExecutor for Session<'_> {
                 arguments: ProposedActionArguments(CommissionValue::Object(Vec::new())),
             }),
             usage: Some(session_usage()),
+            transcript_digest: None,
+            summary: None,
         }
     }
 }

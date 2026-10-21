@@ -1,0 +1,159 @@
+# The agent session an AgentExecutor runs through metaharness. Sources read, and the only ones
+# modelled from: Atlas ADR 0098 point 2; story:metaharness-session-executor (Outcome, Acceptance,
+# Decisions on the session domain); commission.responsibility.ExecutorOutcomeProposedAction and
+# ExecutorStep (ess/commission/domains/responsibility.yaml); crates/loom-session-executor.
+domain: loom.session
+
+summary: >-
+  The agent session an AgentExecutor runs through metaharness (harness, Claude Code or Codex) in a
+  scratch copy of the workspace, and the change it returns as a proposed action. Proposed and
+  applied are states of Commission's ActionRequest, not of the session: a session is one record.
+
+naming:
+  wire: session
+  display: Session
+
+types:
+  # The id the executor mints for each `run` call, one session per call. The vendor's own session
+  # id is a field of the session, absent when the harness states none.
+  - name: loom.session.SessionId
+    kind: newtype
+    of: Uuid
+
+  # The commission a session ran for: Commission's commission.responsibility.CommissionId. A typed
+  # id, not a relation: ESS cannot name another system's entity.
+  - name: loom.session.CommissionId
+    kind: newtype
+    of: Uuid
+
+  # The frontier a session ran over: Commission's commission.responsibility.FrontierId. The base the
+  # change is made against is that frontier's case revision, which Commission binds as the request's
+  # expected_case_revision; the session carries no base of its own.
+  - name: loom.session.FrontierId
+    kind: newtype
+    of: Uuid
+
+  # ADR 0098 point 2: "harness, Claude Code or Codex".
+  - name: loom.session.SessionKind
+    kind: enum
+    variants: [ClaudeCode, Codex, Harness]
+
+  # One file the session changed in its copy, as the proposal carries it: its path relative to the
+  # workspace and its whole content after the change, absent when the change removes the file. A
+  # rename is a removal and an addition; content that is not UTF-8 text is refused and no session
+  # proposes it; file modes are not carried.
+  - name: loom.session.ChangedFile
+    kind: struct
+    fields:
+      - name: path
+        type: String
+      - name: content
+        type: Optional<String>
+
+entities:
+  # The session one AgentExecutor `run` call ran through metaharness (ADR 0098 point 2), for one
+  # commission over one frontier. A session that fails proposes nothing and is no record: the
+  # executor returns Suspended with ExternalAvailability. A session that changed nothing proposes
+  # an empty list of files.
+  - name: loom.session.AgentSession
+    identity:
+      name: session_id
+      type: loom.session.SessionId
+    fields:
+      - name: kind
+        type: loom.session.SessionKind
+      - name: commission_id
+        type: loom.session.CommissionId
+      - name: frontier_id
+        type: loom.session.FrontierId
+      - name: vendor_session_id
+        type: Optional<String>
+      # The frontier action the change is proposed as
+      # (commission.responsibility.ExecutorOutcomeProposedAction `action`). The proposal's
+      # arguments are `{files}` only; the session's summary and its transcript digest travel on
+      # commission.responsibility.ExecutorStep, never in the arguments and never as evidence.
+      - name: action
+        type: String
+      - name: files
+        type: List<loom.session.ChangedFile>
+    lifecycle:
+      initial: Ended
+      states: [Ended]
+      terminal: [Ended]
+
+events:
+  - name: loom.session.SessionChangeProposed
+    fields:
+      - name: session_id
+        type: loom.session.SessionId
+      - name: commission_id
+        type: loom.session.CommissionId
+      - name: frontier_id
+        type: loom.session.FrontierId
+      - name: action
+        type: String
+      - name: files
+        type: List<loom.session.ChangedFile>
+
+commands:
+  # The executor returns the session's change as a proposed action (ADR 0098 point 2). Commission
+  # rechecks it against the case's revision and an effect applies it or refuses it: those answers
+  # are Commission's (commission.responsibility.RevalidateActionRequest), not the session's.
+  - name: loom.session.ProposeSessionChange
+    input:
+      - name: session_id
+        type: loom.session.SessionId
+      - name: kind
+        type: loom.session.SessionKind
+      - name: commission_id
+        type: loom.session.CommissionId
+      - name: frontier_id
+        type: loom.session.FrontierId
+      - name: vendor_session_id
+        type: Optional<String>
+      - name: action
+        type: String
+      - name: files
+        type: List<loom.session.ChangedFile>
+    outcomes:
+      - name: proposed
+        creates: loom.session.AgentSession
+        instance: session_id
+        sets:
+          kind: input.kind
+          commission_id: input.commission_id
+          frontier_id: input.frontier_id
+          vendor_session_id: input.vendor_session_id
+          action: input.action
+          files: input.files
+        emits: [loom.session.SessionChangeProposed]
+        payload:
+          loom.session.SessionChangeProposed:
+            session_id: input.session_id
+            commission_id: input.commission_id
+            frontier_id: input.frontier_id
+            action: input.action
+            files: input.files
+
+views:
+  # Every session the executor ran, one row per session.
+  - name: loom.session.AgentSessions
+    source: loom.session.AgentSession
+    consistency: read_your_writes
+    fields:
+      - name: session_id
+        type: loom.session.SessionId
+      - name: kind
+        type: loom.session.SessionKind
+      - name: commission_id
+        type: loom.session.CommissionId
+      - name: frontier_id
+        type: loom.session.FrontierId
+      - name: vendor_session_id
+        type: Optional<String>
+      - name: action
+        type: String
+      - name: files
+        type: List<loom.session.ChangedFile>
+      - name: state
+        type: loom.session.AgentSession.State
