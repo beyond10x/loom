@@ -122,18 +122,13 @@ selector took in milliseconds, and the input and output tokens the selector repo
 selection and names the strategy of the selector that replaced it; the replacement's record has
 none. A selector reports latency and tokens on its `Pick`; the reasoning-model selector
 (`model_selector::ModelSelector`) reports no tokens, so its records hold 0, and a run's meter
-counts its turns instead. In a governed run the model's tool call is the
-selection, so the first selection of a turn carries that turn's latency and tokens and a later one
-of the same turn records 0, and a turn's totals are not counted twice.
+counts its model requests instead.
 
 A selection refused at the execution boundary, after it was made, by Commission's admission or by
-revalidation against the current frontier, raises its session's `boundary_refusals` by one
-(`loom.run.CountBoundaryRefusal`) and adds no record: the refused selection keeps the record written
-when it was made. A held call a resumed run refuses is counted the same way. A model call outside
-the catalogue makes no selection and is not counted. Only a governed run (`Loom::run_loop`) has a
-session; a run through `Loom::run` counts none. The count lives in `Loom::sessions`; a filed
-session file keeps its format and does not carry it, and a resume compares the session without it.
-Metaharness reads both from Loom's record. Neither is evidence (Atlas ADR 0074).
+revalidation against the current frontier, adds no record: the refused selection keeps the record
+written when it was made, and its state says it was refused (`loom.run.Selections`). An answer
+naming an action outside the catalogue makes no selection and so no record. Metaharness reads the
+records through `Loom::selection_records`. They are never evidence (Atlas ADR 0074).
 
 ## Safety rules
 
@@ -144,4 +139,4 @@ Metaharness reads both from Loom's record. Neither is evidence (Atlas ADR 0074).
 5. Low confidence falls back to a stronger path.
 6. For >~20 actions, selectors may use family → action hierarchy.
 7. Selection telemetry is available to Metaharness for evaluation: one `SelectionRecord` per
-   selection, and each session's count of boundary refusals. It is never evidence.
+   selection. It is never evidence.
