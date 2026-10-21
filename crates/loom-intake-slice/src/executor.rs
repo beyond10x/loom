@@ -1245,7 +1245,9 @@ struct Finished {
 
 /// Runs `test` in `root`, without a shell, killing it (and on Unix its process group) at its
 /// timeout. Standard output and error are read while it runs; the last [`OUTPUT_TAIL`] bytes of
-/// each are kept.
+/// each are kept. The group is killed only while `try_wait` has not reaped the command: once it
+/// reaped it, nothing is killed, and output still held open is waited for at most
+/// [`OUTPUT_GRACE`].
 fn run_bounded(test: &TestCommand, root: &Path) -> Result<Finished, ExecuteError> {
     let mut command = Command::new(&test.program);
     command
@@ -1316,29 +1318,74 @@ fn run_bounded(test: &TestCommand, root: &Path) -> Result<Finished, ExecuteError
     })
 }
 
-/// Kills `child` and the process group it leads with `SIGKILL`, sent by `killpg` itself and never
-/// through a `kill` program, so what it started dies with it. The caller started `child` with
-/// `process_group(0)` and reaps it after. The group is killed even when `child` itself was
-/// already reaped: a process it started that is still running holds the group's id, so the id
-/// names that group and no other.
+/// Whether `child` has ended, without reaping it: once ended it stays a zombie until the caller
+/// reaps it (`Child::wait`), so its id, and the id of the process group it leads, stays its own
+/// until then and [`kill_group`] can still name that group.
 ///
 /// # Errors
-/// The group could not be signalled. A group with no process left (`ESRCH`) is no error: nothing
-/// it started still runs.
+/// Its status could not be read.
+pub(crate) fn ended_unreaped(child: &Child) -> std::io::Result<bool> {
+    use nix::sys::wait::{Id, WaitPidFlag, WaitStatus, waitid};
+    let leader = leader_pid(child)?;
+    loop {
+        match waitid(
+            Id::Pid(leader),
+            WaitPidFlag::WEXITED | WaitPidFlag::WNOHANG | WaitPidFlag::WNOWAIT,
+        ) {
+            Ok(WaitStatus::StillAlive) => return Ok(false),
+            Ok(_) => return Ok(true),
+            Err(nix::errno::Errno::EINTR) => {}
+            Err(errno) => return Err(std::io::Error::from(errno)),
+        }
+    }
+}
+
+/// Kills `child` and the process group it leads with `SIGKILL`, sent by `killpg` itself and never
+/// through a `kill` program, so what it started dies with it.
+///
+/// The caller started `child` with `process_group(0)` and has not reaped it; it reaps it after.
+/// Only an unreaped leader, running or a zombie, holds the group's id, so only then does the id
+/// name that group and no other: once the leader was reaped, a group whose processes all left
+/// frees the id, and an unrelated process may take it as its own group's. A leader already reaped
+/// is therefore refused and nothing is signalled.
+///
+/// # Errors
+/// The leader was already reaped, its status could not be read, or the group could not be
+/// signalled. A group with no process left (`ESRCH`) is no error: nothing it started still runs.
 pub(crate) fn kill_group(child: &mut Child) -> std::io::Result<()> {
     use nix::errno::Errno;
     use nix::sys::signal::{Signal, killpg};
-    use nix::unistd::Pid;
-    let group = i32::try_from(child.id())
-        .map_err(|_| std::io::Error::other(format!("pid {} is out of range", child.id())))
-        .and_then(
-            |leader| match killpg(Pid::from_raw(leader), Signal::SIGKILL) {
-                Ok(()) | Err(Errno::ESRCH) => Ok(()),
-                Err(errno) => Err(std::io::Error::from(errno)),
-            },
-        );
+    use nix::sys::wait::{Id, WaitPidFlag, waitid};
+    let leader = leader_pid(child)?;
+    loop {
+        match waitid(
+            Id::Pid(leader),
+            WaitPidFlag::WEXITED | WaitPidFlag::WNOHANG | WaitPidFlag::WNOWAIT,
+        ) {
+            Ok(_) => break,
+            Err(Errno::EINTR) => {}
+            Err(Errno::ECHILD) => {
+                return Err(std::io::Error::other(format!(
+                    "the group's leader {leader} was already reaped, so its id may name another \
+                     group; nothing was signalled"
+                )));
+            }
+            Err(errno) => return Err(std::io::Error::from(errno)),
+        }
+    }
+    let group = match killpg(leader, Signal::SIGKILL) {
+        Ok(()) | Err(Errno::ESRCH) => Ok(()),
+        Err(errno) => Err(std::io::Error::from(errno)),
+    };
     let _ = child.kill();
     group
+}
+
+/// `child`'s id as a pid.
+fn leader_pid(child: &Child) -> std::io::Result<nix::unistd::Pid> {
+    i32::try_from(child.id())
+        .map(nix::unistd::Pid::from_raw)
+        .map_err(|_| std::io::Error::other(format!("pid {} is out of range", child.id())))
 }
 
 /// The last [`OUTPUT_TAIL`] bytes of a pipe, read on a thread of its own.

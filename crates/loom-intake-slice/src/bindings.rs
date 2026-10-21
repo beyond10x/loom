@@ -39,7 +39,7 @@ use serde_json::Value;
 
 use crate::case::INTENT;
 use crate::effect::{Console, refuse};
-use crate::executor::{fresh_uuid, kill_group};
+use crate::executor::{ended_unreaped, fresh_uuid, kill_group};
 use crate::run::{SliceError, json_text, printable};
 use crate::selector::Briefing;
 
@@ -412,7 +412,7 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> CommandEffects<'a, 'o, S, 
             // Dropping the pipe at the end of the write closes standard input.
             thread::spawn(move || pipe.write_all(document.as_bytes()));
         }
-        finish(child, deadline, Child::try_wait)
+        finish(child, deadline, |child| ended_unreaped(child))
     }
 
     /// The report `stdout` holds, and the evidence it states, each of a kind `action` declares it
@@ -533,22 +533,24 @@ fn drain(pipe: Option<impl Read + Send + 'static>) -> mpsc::Receiver<Vec<u8>> {
     receiver
 }
 
-/// Waits for `child`, a process-group leader, polling its status with `poll` until it ends and
-/// its output is read, or until `deadline`. At the deadline, and when its status cannot be read,
-/// it and the processes it started are killed and reaped ([`stop`]); that includes a program that
-/// ended while a process it started keeps its output open past the deadline.
+/// Waits for `child`, a process-group leader, asking `poll` whether it ended
+/// ([`ended_unreaped`], which leaves it unreaped) until it ends and its output is read, or until
+/// `deadline`. At the deadline, and when its status cannot be read, it and the processes it
+/// started are killed and reaped ([`stop`]); that includes a program that ended while a process
+/// it started keeps its output open past the deadline. The program is reaped only after its output
+/// was read or its group was killed, so the group's id is its own whenever it is killed.
 fn finish(
     mut child: Child,
     deadline: Instant,
-    mut poll: impl FnMut(&mut Child) -> std::io::Result<Option<ExitStatus>>,
+    mut poll: impl FnMut(&mut Child) -> std::io::Result<bool>,
 ) -> Ended {
     let stdout = drain(child.stdout.take());
     let stderr = drain(child.stderr.take());
-    let status = loop {
+    loop {
         match poll(&mut child) {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => thread::sleep(POLL),
-            Ok(None) => {
+            Ok(true) => break,
+            Ok(false) if Instant::now() < deadline => thread::sleep(POLL),
+            Ok(false) => {
                 return Ended::TimedOut {
                     unkilled: stop(&mut child).err(),
                 };
@@ -560,7 +562,7 @@ fn finish(
                 };
             }
         }
-    };
+    }
     let remaining = deadline.saturating_duration_since(Instant::now());
     let Ok(stdout) = stdout.recv_timeout(remaining) else {
         return Ended::TimedOut {
@@ -573,7 +575,13 @@ fn finish(
             unkilled: stop(&mut child).err(),
         };
     };
-    Ended::Exited(status, stdout, stderr)
+    match child.wait() {
+        Ok(status) => Ended::Exited(status, stdout, stderr),
+        Err(error) => Ended::Unobserved {
+            error,
+            unkilled: stop(&mut child).err(),
+        },
+    }
 }
 
 /// What `program` ended with when it exited, else the reason its action is refused: killed at
@@ -711,6 +719,138 @@ mod tests {
         // The program was killed and reaped: no process and no zombie is left.
         let proc = std::path::Path::new("/proc").join(sleeping.0.to_string());
         assert!(!proc.exists(), "{} is still there", proc.display());
+    }
+
+    /// A program started as `sh -c script`, leading a process group of its own.
+    fn leader(script: &str) -> Child {
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", script])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        {
+            use std::os::unix::process::CommandExt as _;
+            command.process_group(0);
+        }
+        command.spawn().unwrap()
+    }
+
+    #[test]
+    fn a_leader_reaped_before_the_timeout_is_never_signalled_and_never_reported_killed() {
+        let child = leader("exit 0");
+        // The poll reaps the program and still answers that it runs, so the deadline finds the
+        // group's id no longer held by its leader.
+        let ended = finish(
+            child,
+            Instant::now() + Duration::from_millis(300),
+            |child| child.try_wait().map(|_| false),
+        );
+        let Ended::TimedOut {
+            unkilled: Some(why),
+        } = ended
+        else {
+            panic!("a group whose leader was reaped is reported killed");
+        };
+        assert!(why.to_string().contains("already reaped"), "{why}");
+        let reason = exited(
+            "record-note",
+            Duration::from_secs(1),
+            Ended::TimedOut {
+                unkilled: Some(why),
+            },
+        )
+        .unwrap_err();
+        assert!(!reason.contains("was killed"), "{reason}");
+    }
+
+    #[test]
+    fn output_held_past_the_timeout_after_its_leader_was_reaped_is_never_reported_killed() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("pid");
+        let child = leader(&format!(
+            "sleep 30 & echo $! > '{}'; exit 0",
+            pid_file.display()
+        ));
+        let leader_pid = child.id();
+        // The poll reaps the program once it ended, while the `sleep` it started holds its
+        // output open past the deadline.
+        let ended = finish(
+            child,
+            Instant::now() + Duration::from_millis(500),
+            |child| child.try_wait().map(|status| status.is_some()),
+        );
+        let sleeping = Sleeping(
+            std::fs::read_to_string(&pid_file)
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap(),
+        );
+        let Ended::TimedOut {
+            unkilled: Some(why),
+        } = ended
+        else {
+            panic!("a group whose leader {leader_pid} was reaped is reported killed");
+        };
+        assert!(why.to_string().contains("already reaped"), "{why}");
+        // Nothing was signalled: the `sleep` still runs, and its guard kills it.
+        let proc = std::path::Path::new("/proc").join(sleeping.0.to_string());
+        assert!(proc.exists(), "{} was signalled", proc.display());
+    }
+
+    #[test]
+    fn standard_error_held_past_the_timeout_after_its_leader_was_reaped_is_never_reported_killed() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("pid");
+        let child = leader(&format!(
+            "sleep 30 > /dev/null & echo $! > '{}'; exit 0",
+            pid_file.display()
+        ));
+        // Standard output closes with the program; the `sleep` it started holds only its standard
+        // error open past the deadline.
+        let ended = finish(
+            child,
+            Instant::now() + Duration::from_millis(500),
+            |child| child.try_wait().map(|status| status.is_some()),
+        );
+        let sleeping = Sleeping(
+            std::fs::read_to_string(&pid_file)
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap(),
+        );
+        let Ended::TimedOut {
+            unkilled: Some(why),
+        } = ended
+        else {
+            panic!("a group whose leader was reaped is reported killed");
+        };
+        assert!(why.to_string().contains("already reaped"), "{why}");
+        let proc = std::path::Path::new("/proc").join(sleeping.0.to_string());
+        assert!(proc.exists(), "{} was signalled", proc.display());
+    }
+
+    #[test]
+    fn a_status_lost_after_the_program_ended_is_never_reported_killed() {
+        let child = leader("exit 0");
+        let pid = nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap());
+        // The poll reaps the program behind `Child`'s back, so its status cannot be read after.
+        let ended = finish(child, Instant::now() + Duration::from_secs(5), |_| {
+            use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
+            waitpid(pid, Some(WaitPidFlag::WNOHANG))
+                .map(|status| status != WaitStatus::StillAlive)
+                .map_err(std::io::Error::from)
+        });
+        let Ended::Unobserved {
+            unkilled: Some(why),
+            ..
+        } = ended
+        else {
+            panic!("a lost status is not refused naming a group that could not be killed");
+        };
+        assert!(why.to_string().contains("already reaped"), "{why}");
     }
 
     #[test]
