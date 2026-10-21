@@ -1,18 +1,23 @@
 //! `release-check`: a release tag names the workspace version and has a `CHANGELOG.md` entry that
 //! says what breaks for a consumer.
 //!
+//! `CHANGELOG.md` follows Keep a Changelog: an entry names each break for a consumer in a bullet
+//! that starts `**Breaking:**`, or carries the line `No breaking changes.`.
+//!
 //! `.github/workflows/release.yml` runs it on every pushed tag. It fails, reporting every failure
 //! at once, when the tag is not a bare version (`MAJOR.MINOR.PATCH`, digits only, no leading zero),
 //! when it differs from `[workspace.package] version` in `<root>/Cargo.toml`, when
 //! `<root>/CHANGELOG.md` has no heading `## [<tag>]` or `## [<tag>] - YYYY-MM-DD`, when that entry
-//! has no `Breaking:` sentence, or when its only `Breaking:` sentences say `none` while a stable
-//! surface ([`STABLE_SURFACES`]) differs between the previous tag and the tag.
+//! has neither a `**Breaking:**` bullet nor the line `No breaking changes.`, when it has both, when
+//! one of its `**Breaking:**` bullets names nothing or says `none`, or when it says
+//! `No breaking changes.` while a stable surface ([`STABLE_SURFACES`]) differs between the previous
+//! tag and the tag. A `Breaking:` sentence in prose is no statement.
 //!
 //! The previous tag is the highest bare-version tag of `<root>`'s git repository below the tag;
-//! with none, only the sentence is required. The tag's side of the diff is the tag when it exists
+//! with none, only the statement is required. The tag's side of the diff is the tag when it exists
 //! and `HEAD` otherwise, so the check also runs on the release commit before it is tagged. Whether
-//! a change is a break is the release author's to say: the check refuses only a missing sentence,
-//! or `none` beside a changed surface.
+//! a change is a break is the release author's to say: the check refuses only a missing,
+//! contradictory or empty statement, or `No breaking changes.` beside a changed surface.
 
 use std::fs;
 use std::path::Path;
@@ -52,26 +57,43 @@ pub(crate) fn release_check(root: &Path, tag: &str) -> Result<(), String> {
                 "CHANGELOG.md has no `## [{tag}]` entry: {}",
                 changelog.display()
             )),
-            Some(body) => match breaking(&body) {
-                Breaking::Named => {}
-                Breaking::Missing => failures.push(format!(
-                    "CHANGELOG.md entry [{tag}] has no `Breaking:` sentence; name what breaks \
-                     for a consumer, or write `Breaking: none.`: {}",
-                    changelog.display()
-                )),
-                Breaking::None if bare => match changed_surfaces(root, tag) {
-                    Ok(Some((previous, changed))) if !changed.is_empty() => {
-                        failures.push(format!(
-                            "CHANGELOG.md entry [{tag}] says `Breaking: none.` but stable surfaces \
-                             changed since {previous}: {}",
-                            changed.join(", ")
-                        ));
+            Some(body) => {
+                let breaks = breaks(&body);
+                for bullet in &breaks.empty {
+                    failures.push(format!(
+                        "CHANGELOG.md entry [{tag}] has a `**Breaking:**` bullet that names no \
+                         break (`{bullet}`); name the break, or write `{NO_BREAKING_CHANGES}` \
+                         when nothing breaks: {}",
+                        changelog.display()
+                    ));
+                }
+                if breaks.named > 0 && breaks.none {
+                    failures.push(format!(
+                        "CHANGELOG.md entry [{tag}] says `{NO_BREAKING_CHANGES}` beside a \
+                         `{BREAKING}` bullet; keep one: {}",
+                        changelog.display()
+                    ));
+                } else if breaks.named == 0 && !breaks.none && breaks.empty.is_empty() {
+                    failures.push(format!(
+                        "CHANGELOG.md entry [{tag}] has no `{BREAKING}` bullet and no \
+                         `{NO_BREAKING_CHANGES}` line; name each break for a consumer in a \
+                         `- {BREAKING} …` bullet, or write `{NO_BREAKING_CHANGES}`: {}",
+                        changelog.display()
+                    ));
+                } else if breaks.none && breaks.named == 0 && bare {
+                    match changed_surfaces(root, tag) {
+                        Ok(Some((previous, changed))) if !changed.is_empty() => {
+                            failures.push(format!(
+                                "CHANGELOG.md entry [{tag}] says `{NO_BREAKING_CHANGES}` but \
+                                 stable surfaces changed since {previous}: {}",
+                                changed.join(", ")
+                            ));
+                        }
+                        Ok(_) => {}
+                        Err(failure) => failures.push(failure),
                     }
-                    Ok(_) => {}
-                    Err(failure) => failures.push(failure),
-                },
-                Breaking::None => {}
-            },
+                }
+            }
         },
         Err(e) => failures.push(format!("read {}: {e}", changelog.display())),
     }
@@ -156,42 +178,72 @@ fn entry(changelog: &str, tag: &str) -> Option<String> {
     )
 }
 
+/// The marker a bullet naming a break starts with.
+const BREAKING: &str = "**Breaking:**";
+/// The line of an entry that names no break.
+const NO_BREAKING_CHANGES: &str = "No breaking changes.";
+
 /// What an entry says breaks for a consumer.
-#[derive(Debug, PartialEq, Eq)]
-enum Breaking {
-    /// No `Breaking:` sentence.
-    Missing,
-    /// Every `Breaking:` sentence says `none`.
-    None,
-    /// At least one `Breaking:` sentence names a break.
-    Named,
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Breaks {
+    /// The `**Breaking:**` bullets that name a break.
+    named: usize,
+    /// The `**Breaking:**` bullets that name nothing or say `none`, as written.
+    empty: Vec<String>,
+    /// Whether the entry has the line `No breaking changes.`.
+    none: bool,
 }
 
-/// Reads the entry's `Breaking:` sentences, plain or bold (`**Breaking:**`), across line breaks.
-/// A marker quoted in backticks is a mention, not a sentence.
-fn breaking(entry: &str) -> Breaking {
-    let text = entry.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut found = Breaking::Missing;
-    for (at, marker) in text.match_indices("Breaking:") {
-        if text[..at].ends_with('`') {
+/// Reads the entry's `**Breaking:**` bullets (`- ` or `* `, at any depth, with a bullet's
+/// indented continuation lines) and its `No breaking changes.` line. A marker that does not start
+/// a bullet's text (quoted in backticks, inside a sentence) is a mention, and a `Breaking:`
+/// sentence in prose, the form before Keep a Changelog, is no statement.
+fn breaks(entry: &str) -> Breaks {
+    let lines: Vec<&str> = entry.lines().collect();
+    let mut found = Breaks::default();
+    for (at, line) in lines.iter().enumerate() {
+        if line.trim() == NO_BREAKING_CHANGES {
+            found.none = true;
             continue;
         }
-        let rest = text[at + marker.len()..]
-            .trim_start_matches('*')
-            .trim_start();
-        let says_none = rest
-            .get(..4)
-            .is_some_and(|word| word.eq_ignore_ascii_case("none"))
-            && !rest[4..]
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_alphanumeric() || c == '_');
-        if !says_none {
-            return Breaking::Named;
+        let Some(rest) = bullet(line).and_then(|text| text.strip_prefix(BREAKING)) else {
+            continue;
+        };
+        let mut text = rest.trim().to_owned();
+        for next in &lines[at + 1..] {
+            if next.trim().is_empty()
+                || !next.starts_with(char::is_whitespace)
+                || bullet(next).is_some()
+            {
+                break;
+            }
+            text.push(' ');
+            text.push_str(next.trim());
         }
-        found = Breaking::None;
+        if names_nothing(&text) {
+            found.empty.push(line.trim().to_owned());
+        } else {
+            found.named += 1;
+        }
     }
     found
+}
+
+/// The text of a `- ` or `* ` bullet, at any depth.
+fn bullet(line: &str) -> Option<&str> {
+    let item = line.trim_start();
+    item.strip_prefix("- ")
+        .or_else(|| item.strip_prefix("* "))
+        .map(str::trim_start)
+}
+
+/// Whether a break's text is empty or its first word is `none`.
+fn names_nothing(text: &str) -> bool {
+    let word: String = text
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    text.is_empty() || word.eq_ignore_ascii_case("none")
 }
 
 /// The previous tag and the stable-surface files that differ between it and the tag (or `HEAD`
@@ -281,7 +333,7 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Breaking, breaking, entry, is_bare_version, is_entry_heading, version_key};
+    use super::{Breaks, breaks, entry, is_bare_version, is_entry_heading, version_key};
 
     #[test]
     fn bare_versions() {
@@ -324,40 +376,60 @@ mod tests {
 
     #[test]
     fn an_entry_ends_at_the_next_version_heading() {
-        let changelog = "## [0.2.0] - 2026-10-06\n\nSecond.\n\n### Added\n\n- x\n\n\
-                         ## [0.1.0]\n\nBreaking: none.\n";
+        let changelog = "## [0.2.0] - 2026-10-06\n\n### Added\n\n- x\n\n\
+                         ## [0.1.0]\n\nNo breaking changes.\n";
         let body = entry(changelog, "0.2.0").unwrap_or_default();
         assert!(
-            body.contains("### Added") && !body.contains("Breaking"),
+            body.contains("### Added") && !body.contains("No breaking"),
             "{body}"
         );
         assert_eq!(entry(changelog, "0.3.0"), None);
     }
 
     #[test]
-    fn breaking_sentences() {
+    fn breaking_bullets() {
+        let none = Breaks {
+            none: true,
+            ..Breaks::default()
+        };
         for text in [
-            "Breaking: none.",
-            "Breaking:\nnone.",
-            "**Breaking:** None.",
-            "Breaking: none",
+            "No breaking changes.",
+            "No breaking changes.\n\n### Changed\n\n- `x` is faster.",
+            "  No breaking changes.  ",
         ] {
-            assert_eq!(breaking(text), Breaking::None, "{text}");
+            assert_eq!(breaks(text), none, "{text}");
+        }
+        for text in [
+            "- **Breaking:** `LoopStop` gains a variant.",
+            "* **Breaking:** `Port::call` takes a context (story:port-context).",
+            "- `x` is new.\n  - **Breaking:** nested under another bullet.",
+            "- **Breaking:**\n  `Port::call` takes a context.",
+            "- **Breaking:** nonexhaustive matches on `Outcome` break.",
+        ] {
+            assert_eq!(breaks(text).named, 1, "{text}");
+            assert!(
+                breaks(text).empty.is_empty() && !breaks(text).none,
+                "{text}"
+            );
+        }
+        for text in [
+            "- **Breaking:** none.",
+            "- **Breaking:** None",
+            "- **Breaking:**",
+            "- **Breaking:**\n- `x` is new.",
+        ] {
+            let found = breaks(text);
+            assert_eq!((found.named, found.empty.len()), (0, 1), "{text}");
         }
         for text in [
             "Breaking: `Port::call` takes a context.",
-            "- **Breaking:** `LoopStop` gains a variant.",
-            "Breaking: none. Breaking: `x` is removed.",
-            "Breaking: nonexhaustive matches on `Outcome` break.",
+            "**Breaking:** `Port::call` takes a context.",
+            "- A break is named in a `**Breaking:**` bullet.",
+            "- Breaking for exhaustive matches.",
+            "- No breaking changes.",
+            "The release has No breaking changes. Honest.",
         ] {
-            assert_eq!(breaking(text), Breaking::Named, "{text}");
-        }
-        for text in [
-            "Second.",
-            "A break is named here under `Breaking:` with a new version.",
-            "Breaking for exhaustive matches.",
-        ] {
-            assert_eq!(breaking(text), Breaking::Missing, "{text}");
+            assert_eq!(breaks(text), Breaks::default(), "{text}");
         }
     }
 }
