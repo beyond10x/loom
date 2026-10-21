@@ -2,13 +2,16 @@
 format: aep.planning-md/3
 id: epic:loom-on-llm-and-metaharness
 kind: epic
-status: draft
+status: active
 title: Loom calls llm for its decisions and metaharness for agent work, and holds no port of harness
 summary: 'Atlas ADRs 0096, 0098, 0099: delete the harness port, meter at llm Model, host the session executor, close what takt needs from loom-sdk.'
 relations:
 - serves: vision:governed-autonomy
 - serves: vision:O3
-revision: 2
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-21T12:21:08Z", actor: "human:timo", revision: 3, decided_on: {"recorded":{"review_outcome":1}}}
+- {from: "proposed", to: "active", at: "2026-10-21T12:21:08Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"review_outcome":1}}}
 ---
 ## Outcome
 

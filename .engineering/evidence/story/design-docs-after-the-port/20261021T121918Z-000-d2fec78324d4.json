@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-21T12:19:18Z",
+  "actor": "human:timo",
+  "artifact": "story:design-docs-after-the-port",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "full gate on d6561144 under ESS 0.67.0 (task check's steps one by one, intake-conform included, task plan, release-check 0.31.0, task website): 24 of 24 exit 0; cargo test --workspace --no-fail-fast 1667 passed, 0 failed, 14 ignored",
+    "reference": "~/.cache/loom-wave-2026-10-21-w5/full-gate-d656114.log"
+  }
+}

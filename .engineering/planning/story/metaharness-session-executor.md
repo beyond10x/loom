@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:metaharness-session-executor
 kind: story
-status: active
+status: implemented
 title: Loom hosts the metaharness session executor for harness, Claude Code and Codex
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -45,10 +45,11 @@ scope:
   path: website/docs/reference
 - confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 20
+revision: 22
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-21T00:00:06Z", actor: "human:timo", revision: 19, decided_on: {"recorded":{"review_outcome":4}}}
 - {from: "proposed", to: "active", at: "2026-10-21T00:00:06Z", actor: "human:timo", revision: 20, decided_on: {"recorded":{"review_outcome":4}}}
+- {from: "active", to: "implemented", at: "2026-10-21T12:21:02Z", actor: "human:timo", revision: 22, decided_on: {"recorded":{"test_result":1,"review_outcome":6}}}
 ---
 ## Outcome
 
@@ -382,3 +383,7 @@ The crate to move is takt `crates/session-executor` (`b10x-session-executor`) at
 `7f2843bbc6bf70d0fc3b58b0ead2cac2401c6ef2` (last changed in `c933f17f`); it depends on
 `b10x-loom-sdk`, `metaharness`, `metaharness-b10x` and `serde_json` only, and takt's CI on that
 commit is green. The decisions above are made in Loom's copy after the move.
+
+## Shipped
+
+Merged into wave 2026-10-21-w5 as 2a49dd48, after two adversary passes (review-result:adv-w20261021w5-u3-pass-1, -pass-2). The crate came from the downstream factory at 7f2843bb, with the restricted Claude start of 2f11b97b ported. A b10x-harness session is charged the sum of its usage events, or a terminal total when a session states one, counted once. Conformance drives a scripted Claude Code session only.

@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-21T11:42:50Z",
+  "actor": "human:timo",
+  "artifact": "story:delete-harness-port",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "fix ab4363da, merge 6855dbaf",
+    "review": "review-result:adv-w20261021w5-u2-pass-2",
+    "outcome": "fixed"
+  }
+}

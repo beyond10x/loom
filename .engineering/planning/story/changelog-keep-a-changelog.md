@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:changelog-keep-a-changelog
 kind: story
-status: active
+status: implemented
 title: CHANGELOG.md follows Keep a Changelog, and release-check reads Breaking bullets
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -40,10 +40,11 @@ scope:
   path: crates/loom-xtask/src/release.rs
 - confidence: cited
   path: crates/loom-xtask/tests/release_check.rs
-revision: 4
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-21T00:23:30Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-21T00:23:30Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-21T12:20:59Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 
@@ -91,3 +92,7 @@ No noun; documentation and a release check.
   `crates/loom-intake-slice/tests/adversary_w20261020w2_u5.rs`,
   `crates/loom-protocols/tests/adversary_w8_pin.rs`, `crates/loom-protocols/tests/catalog.rs`
 - `crates/loom-docs/src/main.rs`, `crates/loom-sdk/src/lib.rs` (where they name the CHANGELOG)
+
+## Shipped
+
+Merged into wave 2026-10-21-w5 as 4d34d537. The 0.31.0 entry is the first written in this form; release-check --tag 0.31.0 exits 0 on it.

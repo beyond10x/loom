@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:judgement-step-any-executor
 kind: story
-status: active
+status: implemented
 title: A workflow judgement step runs on any AgentExecutor, the chooser by default
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -28,10 +28,11 @@ scope:
   path: crates/loom-executor/tests/workflow_executor.rs
 - confidence: cited
   path: crates/loom-executor/tests/workflow_step_outputs.rs
-revision: 9
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-21T00:00:05Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":2}}}
 - {from: "proposed", to: "active", at: "2026-10-21T00:00:05Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":2}}}
+- {from: "active", to: "implemented", at: "2026-10-21T12:20:58Z", actor: "human:timo", revision: 11, decided_on: {"recorded":{"test_result":1,"review_outcome":3}}}
 ---
 ## Outcome
 
@@ -90,3 +91,7 @@ Crates: `loom-executor`, `loom-commission-testkit`.
   `adversary_w11_u2.rs`, `adversary_w11_u3.rs`
 - `crates/loom-commission-testkit/tests/workflow_run_store.rs`
 - `CHANGELOG.md`, `AGENTS.md` (§ Workflow definitions)
+
+## Shipped
+
+Merged into wave 2026-10-21-w5 as 704b4730, after one adversary pass (review-result:adv-w20261021w5-u1-pass-1). Released in Loom 0.31.0.

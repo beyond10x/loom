@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:delete-harness-port
 kind: story
-status: active
+status: implemented
 title: Loom deletes its port of harness and releases the break
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -56,10 +56,11 @@ scope:
   path: website/docs/reference/crates.md
 - confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 9
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-21T00:00:05Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":5}}}
 - {from: "proposed", to: "active", at: "2026-10-21T00:00:05Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":5}}}
+- {from: "active", to: "implemented", at: "2026-10-21T12:21:00Z", actor: "human:timo", revision: 11, decided_on: {"recorded":{"test_result":1,"review_outcome":7}}}
 ---
 ## Outcome
 
@@ -146,3 +147,7 @@ Crates: `loom-executor`, `loom-sdk`, `loom-governor` (test only), `loom-docs`.
 
 `README.md` and the loom-sdk files are also edited by `story:metaharness-session-executor`, which
 depends on this story.
+
+## Shipped
+
+Merged into wave 2026-10-21-w5 as 6855dbaf, after two adversary passes (review-result:adv-w20261021w5-u2-pass-1, -pass-2). The design documents moved with it as story:design-docs-after-the-port (00d8fdff). After the release commit moved the removals into the 0.31.0 entry, d6561144 makes the pass-2 test read the Breaking bullets of every CHANGELOG entry.

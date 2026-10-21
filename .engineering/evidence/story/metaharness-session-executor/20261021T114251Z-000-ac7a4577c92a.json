@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-21T11:42:51Z",
+  "actor": "human:timo",
+  "artifact": "story:metaharness-session-executor",
+  "kind": "story",
+  "revision": 20,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "fixes a2c4aea 1c31a94 e04579b, merge 2a49dd48",
+    "review": "review-result:adv-w20261021w5-u3-pass-2",
+    "outcome": "fixed"
+  }
+}

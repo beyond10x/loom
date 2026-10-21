@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-21T11:42:49Z",
+  "actor": "human:timo",
+  "artifact": "story:judgement-step-any-executor",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "merge 704b4730",
+    "review": "review-result:adv-w20261021w5-u1-pass-1",
+    "outcome": "fixed"
+  }
+}
