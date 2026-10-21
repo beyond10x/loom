@@ -958,7 +958,10 @@ workspace version and nothing is on a registry. Consumers pin `tag = "<version>"
    job checks out the full history and its tags) and then `check.yml` on
    the tagged commit. It is read-only, needs no secret and creates no release.
 5. The GitHub Release for the tag, created by the bot (`b10x-gates api --method POST --path
-   /repos/beyond10x/loom/releases`), named `<version>`, its notes the version's CHANGELOG entry.
+   /repos/beyond10x/loom/releases`), named `<version>`, with short notes: one or two summary
+   lines, a **Breaking** list and a **Changed** list of one line per item (at most 8 each), and a
+   link to the version's section of `CHANGELOG.md` at the tag. The CHANGELOG entry keeps the full
+   text; every line of the notes is taken from it.
 
 A release is finished when the tag, the green `release` run and the bot's GitHub Release with its
 notes are verified. A pushed tag whose `release` run is not green is queued, not released; never
