@@ -614,17 +614,22 @@ impl SessionExecutor {
             report.output_tokens = usage.output_tokens;
             report.cache_read = usage.cache_read_input_tokens;
             report.cache_creation = usage.cache_creation_input_tokens;
-            // Codex's input figure, and the OpenAI Responses wire's, holds the cached tokens it
-            // also states apart: the input charged is the rest, so no token is counted twice.
-            let responses = self.kind == Kind::Codex
-                || self.endpoint.as_ref().is_some_and(|endpoint| {
-                    self.kind == Kind::B10x && endpoint.wire == "openai-responses"
-                });
-            if responses
-                && let (Some(input), Some(cached)) =
-                    (usage.input_tokens, usage.cache_read_input_tokens)
-            {
-                report.input_tokens = Some(input.saturating_sub(cached));
+            // Codex's input figure holds the cached tokens it also states apart, and
+            // b10x-harness's holds, on every wire, both the cached tokens and the cache-write
+            // tokens it states apart (`harness_wire::Usage`: "`input_tokens` is the whole, and
+            // the cache figures are parts of it"): the input charged is the rest, so no token
+            // is counted twice.
+            let parts = match self.kind {
+                Kind::Codex => usage.cache_read_input_tokens,
+                Kind::B10x => usage
+                    .cache_read_input_tokens
+                    .into_iter()
+                    .chain(usage.cache_creation_input_tokens)
+                    .reduce(u64::saturating_add),
+                Kind::Claude => None,
+            };
+            if let (Some(input), Some(parts)) = (usage.input_tokens, parts) {
+                report.input_tokens = Some(input.saturating_sub(parts));
             }
         }
         if let Some(error) = stream_error {

@@ -206,14 +206,29 @@ fn unpinned_codex(cwd: &Path) -> Vec<ScriptStep> {
 /// A b10x-harness session's own lines: started, the reply naming the action, one `usage` line
 /// per call as `(input, output, cached)`, its cost of 1234 micro-USD, finished.
 fn b10x_session(calls: &[(u64, u64, u64)]) -> Vec<ScriptStep> {
+    let calls: Vec<_> = calls
+        .iter()
+        .map(|&(input, output, cached)| (input, output, cached, None))
+        .collect();
+    b10x_session_writing(&calls)
+}
+
+/// As [`b10x_session`], each call as `(input, output, cached, cache written)`, the cache-write
+/// figure stated only when it is `Some`.
+fn b10x_session_writing(calls: &[(u64, u64, u64, Option<u64>)]) -> Vec<ScriptStep> {
     let mut lines = vec![
         serde_json::json!({"kind": "started", "model": "synthetic", "published_tools": [],
                            "credential_source": "none"}),
         serde_json::json!({"kind": "text-delta", "text": action_line()}),
     ];
-    lines.extend(calls.iter().map(|(input, output, cached)| {
-        serde_json::json!({"kind": "usage", "model": "synthetic", "input_tokens": input,
-                           "output_tokens": output, "cached_input_tokens": cached})
+    lines.extend(calls.iter().map(|(input, output, cached, written)| {
+        let mut line = serde_json::json!({"kind": "usage", "model": "synthetic",
+                                          "input_tokens": input, "output_tokens": output,
+                                          "cached_input_tokens": cached});
+        if let Some(written) = written {
+            line["cache_creation_input_tokens"] = serde_json::json!(written);
+        }
+        line
     }));
     lines.push(serde_json::json!({"kind": "cost", "micro_usd": 1234}));
     lines.push(serde_json::json!({"kind": "finished", "stop": {"kind": "completed"}}));
@@ -232,6 +247,16 @@ fn b10x_one_call(_cwd: &Path) -> Vec<ScriptStep> {
 /// and 10 output.
 fn b10x_two_calls(_cwd: &Path) -> Vec<ScriptStep> {
     b10x_session(&[(100, 20, 40), (50, 10, 0)])
+}
+
+/// One call: 100 input tokens of which 40 read from the cache and 10 written to it, 20 output.
+fn b10x_cache_write(_cwd: &Path) -> Vec<ScriptStep> {
+    b10x_session_writing(&[(100, 20, 40, Some(10))])
+}
+
+/// One call whose cache figures, 40 read and 10 written, exceed its 30 input tokens, 5 output.
+fn b10x_cache_past_input(_cwd: &Path) -> Vec<ScriptStep> {
+    b10x_session_writing(&[(30, 5, 40, Some(10))])
 }
 
 /// A b10x-harness executor over `scratch`, its loop pointed at a closed local port on `wire`,
@@ -433,12 +458,12 @@ fn a_b10x_session_is_observed_and_charged_its_cost_and_tokens() {
     assert_eq!((usage.input_tokens, usage.output_tokens), (100, 20));
 }
 
-/// A b10x-harness session's calls are summed, each counted once: on the OpenAI Responses wire,
-/// whose input figure holds the cached tokens, the input charged is the rest (150 less 40); on
-/// the Anthropic Messages wire, whose input figure does not, it is the whole.
+/// A b10x-harness session's calls are summed, each counted once: b10x-harness states its input
+/// figure as the whole on every wire, the cached tokens a part of it (`harness_wire::Usage`), so
+/// on either wire the input charged is the rest (150 less 40).
 #[test]
-fn a_b10x_sessions_calls_are_summed_less_the_cached_input_on_responses() {
-    for (wire, input) in [("openai-responses", 110), ("anthropic-messages", 150)] {
+fn a_b10x_sessions_calls_are_summed_less_the_cached_input_on_every_wire() {
+    for (wire, input) in [("openai-responses", 110), ("anthropic-messages", 110)] {
         let scratch = Scratch::new(&format!("b10x-sum-{wire}"));
         let executor = b10x_executor(&scratch, wire, Session::new(b10x_two_calls));
 
@@ -453,5 +478,39 @@ fn a_b10x_sessions_calls_are_summed_less_the_cached_input_on_responses() {
         );
         let report = executor.last_report().expect("a report");
         assert_eq!(report.cache_read, Some(40), "{wire}");
+    }
+}
+
+/// The tokens a b10x-harness session wrote to the cache are a part of its input figure too, on
+/// every wire, so the input charged is the whole less both cache figures (100 less 40 and 10),
+/// never below zero (30 less 40 and 10 is 0); the cache figures stay reported as stated.
+#[test]
+fn a_b10x_sessions_cache_writes_are_not_charged_twice() {
+    type Script = fn(&Path) -> Vec<ScriptStep>;
+    let fixtures: [(&str, Script, (i64, i64)); 2] = [
+        ("write", b10x_cache_write, (50, 20)),
+        ("past", b10x_cache_past_input, (0, 5)),
+    ];
+    for wire in ["openai-responses", "anthropic-messages"] {
+        for (name, fixture, charged) in fixtures {
+            let scratch = Scratch::new(&format!("b10x-{name}-{wire}"));
+            let executor = b10x_executor(&scratch, wire, Session::new(fixture));
+
+            let step = step_of(&executor);
+
+            proposal(&step, &executor);
+            let usage = step.usage.expect("the step's usage");
+            assert_eq!(
+                (usage.input_tokens, usage.output_tokens),
+                charged,
+                "{name} on {wire}"
+            );
+            let report = executor.last_report().expect("a report");
+            assert_eq!(
+                (report.cache_read, report.cache_creation),
+                (Some(40), Some(10)),
+                "{name} on {wire}"
+            );
+        }
     }
 }
