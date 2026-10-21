@@ -2,11 +2,14 @@
 format: aep.planning-md/3
 id: story:stop-policy-gate-and-idle-bound
 kind: story
-status: draft
+status: active
 title: A host chooses whether an unchanged frontier awaits approval and how many idle steps end a run
 relations:
 - serves: vision:governed-autonomy
-revision: 1
+revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-21T18:44:05Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-10-21T18:44:06Z", actor: "human:timo", revision: 3}
 ---
 ## Outcome
 

@@ -2,11 +2,14 @@
 format: aep.planning-md/3
 id: story:run-budget-tokens-and-deadline
 kind: story
-status: draft
+status: active
 title: A run is bounded by total tokens and a deadline, and may keep the step that passed a limit
 relations:
 - serves: vision:governed-autonomy
-revision: 1
+revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-21T18:44:06Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-10-21T18:44:06Z", actor: "human:timo", revision: 3}
 ---
 ## Outcome
 

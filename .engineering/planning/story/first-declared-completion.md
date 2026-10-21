@@ -2,11 +2,14 @@
 format: aep.planning-md/3
 id: story:first-declared-completion
 kind: story
-status: draft
+status: active
 title: A governor can complete on the first declared legitimate outcome
 relations:
 - serves: vision:governed-autonomy
-revision: 1
+revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-21T18:44:07Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-10-21T18:44:07Z", actor: "human:timo", revision: 3}
 ---
 ## Outcome
 
