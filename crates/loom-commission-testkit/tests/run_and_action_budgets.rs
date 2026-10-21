@@ -268,8 +268,12 @@ impl EffectPort for Effects {
 enum Clock<'a> {
     /// One reading, always.
     Fixed(&'static str),
-    /// [`BEFORE`] until the session was called once, [`AFTER`] from then on.
+    /// [`BEFORE`] until the session was called once, [`AFTER`] from then on: the first call ends
+    /// past the deadline.
     PastDeadlineAfterFirstCall(&'a Session),
+    /// [`BEFORE`] until the effect port was handed a request once, [`AFTER`] from then on: the
+    /// first step ends before the deadline, and the clock reads past it once its effect ran.
+    PastDeadlineAfterFirstEffect(&'a Effects),
     /// Each reading in turn, the last one from then on.
     Readings(VecDeque<&'static str>),
 }
@@ -320,6 +324,8 @@ impl LoopContext for Context<'_> {
             Clock::Fixed(reading) => *reading,
             Clock::PastDeadlineAfterFirstCall(session) if session.calls() == 0 => BEFORE,
             Clock::PastDeadlineAfterFirstCall(_) => AFTER,
+            Clock::PastDeadlineAfterFirstEffect(effects) if effects.invoked() == 0 => BEFORE,
+            Clock::PastDeadlineAfterFirstEffect(_) => AFTER,
             Clock::Readings(readings) if readings.len() > 1 => {
                 readings.pop_front().unwrap_or(AFTER)
             }
@@ -638,7 +644,7 @@ fn a_passed_deadline_stops_the_run_before_the_next_step() {
         &StaticAuthorityProvider::new(),
         &mut Context::reading(
             budget,
-            Clock::PastDeadlineAfterFirstCall(&session),
+            Clock::PastDeadlineAfterFirstEffect(&effects),
             default_policy(),
         ),
     );
@@ -796,6 +802,132 @@ fn keep_step_still_refuses_an_unadmitted_proposal() {
     assert_eq!(session.calls(), 1, "no further executor call");
 }
 
+/// A deadline is read again once an executor call was observed: a call that ended past it is a
+/// breach, and by default (`DiscardStep`) nothing it proposed is performed.
+#[test]
+fn a_deadline_passed_during_an_executor_call_discards_its_step() {
+    let session = Session::reporting(None);
+    let effects = Effects::reporting(None);
+    let budget = RunBudget {
+        deadline: Some(Timestamp(DEADLINE.to_owned())),
+        ..unlimited()
+    };
+
+    let (end, runs) = run_session(
+        &session,
+        &effects,
+        None,
+        &StaticAuthorityProvider::new(),
+        &mut Context::reading(
+            budget,
+            Clock::PastDeadlineAfterFirstCall(&session),
+            default_policy(),
+        ),
+    );
+    let end = end.unwrap_or_else(|error| panic!("the loop failed: {error}"));
+
+    assert_eq!(
+        effects.invoked(),
+        0,
+        "a proposal from a call that ended past the deadline is never performed"
+    );
+    assert!(end.admitted.is_empty());
+    assert_eq!(
+        end.outcome,
+        suspended_for(RunBudgetBreach {
+            action: None,
+            limit: BudgetLimit::Deadline,
+            max: DEADLINE_SECONDS,
+            charged: Some(AFTER_SECONDS),
+        })
+    );
+    assert_eq!(session.calls(), 1);
+    assert_eq!(
+        RunStorage::get(&runs.ports, &end.run_id).map(|held| held.state),
+        Some(RunState::Suspended)
+    );
+}
+
+/// Under `on_breach: KeepStep`, a call that ended past the deadline is acted on as with no breach:
+/// its proposal is performed once, and the run is then suspended for the deadline with no further
+/// executor call.
+#[test]
+fn keep_step_performs_the_step_whose_call_ended_past_the_deadline() {
+    let session = Session::reporting(None);
+    let effects = Effects::reporting(None);
+    let budget = RunBudget {
+        deadline: Some(Timestamp(DEADLINE.to_owned())),
+        ..unlimited()
+    };
+
+    let (end, _) = run_session(
+        &session,
+        &effects,
+        None,
+        &StaticAuthorityProvider::new(),
+        &mut Context::reading(
+            budget,
+            Clock::PastDeadlineAfterFirstCall(&session),
+            keep_step(),
+        ),
+    );
+    let end = end.unwrap_or_else(|error| panic!("the loop failed: {error}"));
+
+    assert_eq!(
+        effects.invoked(),
+        1,
+        "the kept step's proposal is performed once"
+    );
+    assert_eq!(
+        end.outcome,
+        suspended_for(RunBudgetBreach {
+            action: None,
+            limit: BudgetLimit::Deadline,
+            max: DEADLINE_SECONDS,
+            charged: Some(AFTER_SECONDS),
+        })
+    );
+    assert_eq!(session.calls(), 1, "no further executor call");
+}
+
+/// A call past both a spending limit and the deadline is suspended for the spending limit, which
+/// is checked first, and nothing it proposed is performed.
+#[test]
+fn a_call_past_a_spending_limit_and_the_deadline_is_suspended_for_the_spending_limit() {
+    let session = Session::reporting(Some(call_usage(60, 50)));
+    let effects = Effects::reporting(None);
+    let budget = RunBudget {
+        max_tokens: Some(100),
+        deadline: Some(Timestamp(DEADLINE.to_owned())),
+        ..unlimited()
+    };
+
+    let (end, _) = run_session(
+        &session,
+        &effects,
+        None,
+        &StaticAuthorityProvider::new(),
+        &mut Context::reading(
+            budget,
+            Clock::PastDeadlineAfterFirstCall(&session),
+            default_policy(),
+        ),
+    );
+    let end = end.unwrap_or_else(|error| panic!("the loop failed: {error}"));
+
+    assert_eq!(
+        end.outcome,
+        suspended_for(RunBudgetBreach {
+            action: None,
+            limit: BudgetLimit::MaxTokens,
+            max: 100,
+            charged: Some(110),
+        })
+    );
+    assert_eq!(effects.invoked(), 0);
+    assert_eq!(session.calls(), 1);
+}
+
 /// A deadline reached while a request is pending is read before the request is invoked again: the
 /// run ends `Waiting`, naming the request and the deadline, and the request is not invoked again.
 #[test]
@@ -814,7 +946,7 @@ fn a_deadline_reached_while_a_request_is_pending_ends_the_run_waiting() {
         &StaticAuthorityProvider::new(),
         &mut Context::reading(
             budget,
-            Clock::PastDeadlineAfterFirstCall(&session),
+            Clock::PastDeadlineAfterFirstEffect(&effects),
             default_policy(),
         ),
     );
