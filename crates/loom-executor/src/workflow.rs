@@ -43,10 +43,10 @@
 //! never answered suspends the run for an external availability. Given an input-token budget
 //! ([`WorkflowExecutor::with_max_input_tokens`]), a call whose requests' input tokens reach it, or
 //! whose input tokens a request does not report as final, suspends the run for it
-//! (`LoopBudget`, `{"kind": "max-input-tokens", "limit", "reported"}` or
-//! `{"kind": "budget-unobservable", "name", "reason"}`), and the answer that reached it is not
-//! taken. The chooser's model calls are counted where the host meters the model it gives
-//! ([`crate::metering::MeteredModel`]), so it reports no usage of its own.
+//! (`LoopBudget` carrying the generated `loom.run.LoopStop`: `{"kind": "max-input-tokens",
+//! "limit", "reported"}` or `{"kind": "budget-unobservable", "name", "reason"}`), and the answer
+//! that reached it is not taken. The chooser's model calls are counted where the host meters the
+//! model it gives ([`crate::metering::MeteredModel`]), so it reports no usage of its own.
 //!
 //! When no step is left, the call is `CompletedLocalReasoning`: the executor's reasoning ended, and
 //! completion is still the governor's.
@@ -143,7 +143,9 @@ use crate::metering::RunMeter;
 use crate::model::json::{self as loom_json, Value as LoomValue};
 use crate::model::metering::{CarriedUsage, EffectsUsage};
 use crate::model::primitives::Uuid;
-use crate::model::run::CommissionRunId;
+use crate::model::run::{
+    CommissionRunId, LoopStop, LoopStopBudgetUnobservable, LoopStopMaxInputTokens,
+};
 use crate::model::workflow::{
     DeterministicStep, JudgementStep, OutputReference, OutputType, RecordedOutput, StepCondition,
     StepKind, StepOutput, StepRequest, Truth, UnproducedOutput, WorkflowDefinition,
@@ -2360,8 +2362,7 @@ impl Budgeted<'_> {
     /// Charges `outcome`'s input tokens against `limit`: the stop, when the budget is reached or
     /// cannot be observed.
     fn charge(&self, limit: u64, outcome: &TurnOutcome) -> Option<CommissionValue> {
-        let text = |value: &str| CommissionValue::Text(value.to_owned());
-        let number = |value: u64| CommissionValue::Number(value.to_string());
+        let figure = |count: u64| i64::try_from(count).unwrap_or(i64::MAX);
         let mut spent = self.spent.lock().unwrap_or_else(PoisonError::into_inner);
         let reported = outcome
             .observation
@@ -2370,27 +2371,51 @@ impl Budgeted<'_> {
             .filter(|_| outcome.observation.final_usage)
             .and_then(|usage| usage.input_tokens);
         let stop = match reported {
-            None => CommissionValue::Object(vec![
-                ("kind".to_owned(), text("budget-unobservable")),
-                ("name".to_owned(), text("max_input_tokens")),
-                (
-                    "reason".to_owned(),
-                    text("the model's answer reported no final input-token count"),
-                ),
-            ]),
+            None => LoopStop::BudgetUnobservable(LoopStopBudgetUnobservable {
+                name: "max_input_tokens".to_owned(),
+                reason: "the model's answer reported no final input-token count".to_owned(),
+            }),
             Some(tokens) => {
                 spent.0 = spent.0.saturating_add(tokens);
                 if spent.0 < limit {
                     return None;
                 }
-                CommissionValue::Object(vec![
-                    ("kind".to_owned(), text("max-input-tokens")),
-                    ("limit".to_owned(), number(limit)),
-                    ("reported".to_owned(), number(spent.0)),
-                ])
+                LoopStop::MaxInputTokens(LoopStopMaxInputTokens {
+                    limit: figure(limit),
+                    reported: figure(spent.0),
+                })
             }
         };
-        Some(spent.1.get_or_insert(stop).clone())
+        Some(spent.1.get_or_insert(loop_budget(&stop)).clone())
+    }
+}
+
+/// `stop` as the `LoopBudget` suspension carries it: the generated `loom.run.LoopStop` on its
+/// wire, tagged `kind` with the cause's fields beside it. The match names every cause and every
+/// field, so a cause or field `ess/domains/run.yaml` adds, drops or renames fails the build here.
+fn loop_budget(stop: &LoopStop) -> CommissionValue {
+    let text = |value: &str| CommissionValue::Text(value.to_owned());
+    let number = |value: i64| CommissionValue::Number(value.to_string());
+    let tagged = |kind: &str, fields: Vec<(&str, CommissionValue)>| {
+        CommissionValue::Object(
+            std::iter::once(("kind".to_owned(), text(kind)))
+                .chain(
+                    fields
+                        .into_iter()
+                        .map(|(name, value)| (name.to_owned(), value)),
+                )
+                .collect(),
+        )
+    };
+    match stop {
+        LoopStop::MaxInputTokens(LoopStopMaxInputTokens { limit, reported }) => tagged(
+            "max-input-tokens",
+            vec![("limit", number(*limit)), ("reported", number(*reported))],
+        ),
+        LoopStop::BudgetUnobservable(LoopStopBudgetUnobservable { name, reason }) => tagged(
+            "budget-unobservable",
+            vec![("name", text(name)), ("reason", text(reason))],
+        ),
     }
 }
 
