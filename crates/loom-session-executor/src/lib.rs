@@ -38,7 +38,8 @@
 //! workspace as the frontier was handed: a file written in the workspace while the session runs
 //! is never proposed back. When the session ends, each file it changed is read again in the
 //! workspace, and if any is no longer what the copy was made from (its bytes differ, it is gone,
-//! or a file the session added now exists there) the call proposes nothing and returns
+//! or a file the session added now exists there), or a link of the workspace now reaches a named
+//! path that none reached when the copy was made, the call proposes nothing and returns
 //! `Suspended` with `ExternalAvailability` naming those paths, so a stale change never overwrites
 //! a concurrent write. A write to such a file between the session's end and the edit effect
 //! applying the proposal is not seen here; that window is the effect's own guard to close.
@@ -1346,12 +1347,14 @@ fn through_link(workspace: &Path, path: &str) -> bool {
 /// The scratch copy a session works in: `<scratch>/session-<pid>-<n>/copy`, and beside it
 /// `git`, the git directory the copy's `.git` names when the workspace has one; both removed
 /// when dropped. It keeps the digest of each file it copied, as copied: the base a session's
-/// change is read against.
+/// change is read against; and each named path that no link of the workspace reached when the
+/// copy was made, whether there was a file at it or not.
 struct ScratchCopy {
     root: PathBuf,
     dir: PathBuf,
     workspace: PathBuf,
     base: BTreeMap<String, String>,
+    unlinked: Vec<String>,
 }
 
 impl ScratchCopy {
@@ -1376,6 +1379,7 @@ impl ScratchCopy {
             root,
             workspace: workspace.to_path_buf(),
             base: BTreeMap::new(),
+            unlinked: Vec::new(),
         };
         std::fs::create_dir(&copy.dir)
             .map_err(|error| format!("make {}: {error}", copy.dir.display()))?;
@@ -1387,6 +1391,7 @@ impl ScratchCopy {
             if through_link(workspace, file) {
                 continue;
             }
+            copy.unlinked.push(file.clone());
             let from = workspace.join(file);
             let Ok(meta) = std::fs::symlink_metadata(&from) else {
                 continue;
@@ -1507,12 +1512,14 @@ impl ScratchCopy {
     /// named `.git` ([`plain_relative`]), the copy's git state or a git directory a session
     /// planted anywhere in the copy, which no proposal carries; and never a path that reaches
     /// through a link in the workspace ([`through_link`]), the one thing of the workspace read
-    /// here. A file written there since the copy was made is never proposed back. Content that
-    /// is not UTF-8, or a link the session left, is an error: a proposal carries text files
-    /// only.
+    /// here. A copied file is read as gone only when the copy no longer holds it, never because
+    /// a link of the workspace now reaches it ([`Self::stale`] names that one). A file written
+    /// there since the copy was made is never proposed back. Content that is not UTF-8, or a link
+    /// the session left, is an error: a proposal carries text files only.
     fn changes(&self) -> Result<Vec<ProposedFile>, String> {
         let mut found = Vec::new();
         walk(&self.dir, &self.dir, &mut found)?;
+        let present: std::collections::BTreeSet<String> = found.iter().cloned().collect();
         found.retain(|path| plain_relative(path) && !through_link(&self.workspace, path));
         let mut changes = Vec::new();
         for path in &found {
@@ -1529,9 +1536,8 @@ impl ScratchCopy {
                 content: Some(content),
             });
         }
-        let present: std::collections::BTreeSet<&str> = found.iter().map(String::as_str).collect();
         for path in self.base.keys() {
-            if !present.contains(path.as_str()) {
+            if !present.contains(path) {
                 changes.push(ProposedFile {
                     path: path.clone(),
                     content: None,
@@ -1545,9 +1551,17 @@ impl ScratchCopy {
     /// The paths of `changes` whose file in the workspace is no longer what the copy was made
     /// from: a copied file whose bytes there now differ from the base, or that is gone or no
     /// longer a regular file; a file the session added that now exists there. Proposing such a
-    /// change would overwrite a write made in the workspace while the session ran.
+    /// change would overwrite a write made in the workspace while the session ran. And, changed
+    /// or not, each named path a link of the workspace reaches now and did not when the copy was
+    /// made ([`through_link`]): the workspace moved under it, and a proposal naming it, or
+    /// leaving it out as gone, would read or write wherever the link points.
     fn stale(&self, changes: &[ProposedFile]) -> Vec<String> {
-        changes
+        let linked = self
+            .unlinked
+            .iter()
+            .filter(|path| through_link(&self.workspace, path))
+            .cloned();
+        let mut stale: Vec<String> = changes
             .iter()
             .filter(|change| {
                 let live = self.workspace.join(&change.path);
@@ -1564,7 +1578,11 @@ impl ScratchCopy {
                 }
             })
             .map(|change| change.path.clone())
-            .collect()
+            .chain(linked)
+            .collect();
+        stale.sort();
+        stale.dedup();
+        stale
     }
 }
 
@@ -1957,6 +1975,29 @@ mod tests {
             .map(|file| file.path)
             .collect();
         assert_eq!(paths, ["src/new.rs"]);
+    }
+
+    /// A named directory turned into a link while the session ran: the copied file under it is
+    /// not read as gone, and it and a named path absent at copy time are both stale.
+    #[test]
+    fn a_named_path_a_link_reaches_since_the_copy_is_stale_not_gone() {
+        let scratch = Scratch::new("relinked");
+        let tree = scratch.0.join("tree");
+        let outside = scratch.0.join("outside");
+        std::fs::create_dir_all(tree.join("src")).expect("the tree");
+        std::fs::create_dir_all(&outside).expect("a directory outside");
+        std::fs::write(tree.join("src/lib.rs"), "a\n").expect("a file");
+        std::fs::write(tree.join("README.md"), "r\n").expect("a file");
+        std::fs::write(outside.join("lib.rs"), "a\n").expect("the same bytes outside");
+        let files = ["src/lib.rs", "src/new.rs", "README.md"].map(str::to_owned);
+        let copy = ScratchCopy::make(&scratch.0.join("scratch"), &tree, &files).expect("the copy");
+        std::fs::write(copy.dir.join("README.md"), "edited\n").expect("the session's edit");
+        std::fs::rename(tree.join("src"), scratch.0.join("moved")).expect("src moved away");
+        std::os::unix::fs::symlink(&outside, tree.join("src")).expect("src now a link");
+        let changes = copy.changes().expect("the changes");
+        let paths: Vec<&str> = changes.iter().map(|file| file.path.as_str()).collect();
+        assert_eq!(paths, ["README.md"]);
+        assert_eq!(copy.stale(&changes), ["src/lib.rs", "src/new.rs"]);
     }
 
     /// The arguments of each plan a [`Recording`] runner was started with.
