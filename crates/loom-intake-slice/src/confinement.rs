@@ -1532,11 +1532,14 @@ struct RustClosure {
 impl RustClosure {
     fn discover(workspace: &Path) -> Result<Self, ConfinementError> {
         // The host rustup only resolves an installed compiler. AUTO_INSTALL=0 prevents
-        // a repository's rust-toolchain file from turning resolution into a download.
+        // a repository's rust-toolchain file from turning resolution into a download. The
+        // workspace decides the toolchain: a rustup proxy exports RUSTUP_TOOLCHAIN to whatever
+        // it starts, and that variable would override the workspace's rust-toolchain file.
         let rustc = host_program("rustup", workspace).map(|rustup| {
             Command::new(rustup)
                 .args(["which", "rustc"])
                 .env("RUSTUP_AUTO_INSTALL", "0")
+                .env_remove("RUSTUP_TOOLCHAIN")
                 .current_dir(workspace)
                 .output()
         });
