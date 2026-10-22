@@ -1,7 +1,8 @@
 # Loom
 
-Loom is the runtime for governed agents. It lets a model act as an agent for one bounded run, and
-only through the actions a governed frontier admits at that moment.
+Loom is the agent runtime: it runs governed agents, and `b10x-loom-sdk` is its library for building
+on it. It lets a model act as an agent for one bounded run, and only through the actions a governed
+frontier admits at that moment.
 
 **Documentation: <https://beyond10x.github.io/loom/>**, starting at
 [Getting started](https://beyond10x.github.io/loom/docs/getting-started).

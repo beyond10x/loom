@@ -8,8 +8,9 @@ description: What Loom is, what it holds, where it stops, and which neighbours i
 
 # Loom
 
-Loom is the runtime for governed agents. It makes a model behave like an agent for one bounded
-run, inside a governed frontier, and it holds everything that run needs in one repository:
+Loom is the agent runtime: it runs governed agents, and `b10x-loom-sdk` is its library for building
+on it. It makes a model behave like an agent for one bounded run, inside a governed frontier, and
+it holds everything that run needs in one repository:
 
 | Part | Package | What it does |
 |---|---|---|

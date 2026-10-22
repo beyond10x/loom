@@ -8,7 +8,7 @@
       "A model that acts.",
       "Only inside its frontier."
     ],
-    "lede": "Loom is the runtime for governed agents. It makes a model behave like an agent for one bounded run, and the model acts only through actions the current frontier admits. Commission's runtime, the Canon governor and intake live here too: b10x-loom run takes an intent to a governed run that stops at the merge, and b10x-loom-sdk embeds the same runtime in an application.",
+    "lede": "Loom is the agent runtime: it runs governed agents, and b10x-loom-sdk is its library for building on it. It makes a model behave like an agent for one bounded run, and the model acts only through actions the current frontier admits. Commission's runtime, the Canon governor and intake live here too: b10x-loom run takes an intent to a governed run that stops at the merge, and b10x-loom-sdk embeds the same runtime in an application.",
     "actions": [
       {
         "label": "Get started",
