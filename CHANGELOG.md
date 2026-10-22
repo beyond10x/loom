@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-10-22
+
+No breaking changes.
+
 ### Fixed
 
 - `b10x-loom-intake-slice` builds on macOS: its process-group helpers read `waitid` through rustix, not nix
@@ -961,7 +965,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.34.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.35.0...HEAD
+[0.35.0]: https://github.com/beyond10x/loom/releases/tag/0.35.0
 [0.34.0]: https://github.com/beyond10x/loom/releases/tag/0.34.0
 [0.33.0]: https://github.com/beyond10x/loom/releases/tag/0.33.0
 [0.32.0]: https://github.com/beyond10x/loom/releases/tag/0.32.0
