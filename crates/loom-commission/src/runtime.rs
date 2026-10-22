@@ -489,6 +489,7 @@ pub trait LoopContext {
             approval_gate: true,
             idle_bound: None,
             on_breach: BreachStep::DiscardStep,
+            breach_by_limit: Vec::new(),
         }
     }
 }

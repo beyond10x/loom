@@ -7,27 +7,38 @@
 //! Turning the gate off touches no authority: a proposal of an action that needs approval is still
 //! asked about, and one the provider does not allow is never handed to the effect port. A context
 //! that does not implement `stop_policy` keeps the stops the runtime had before.
+//!
+//! `story:breach-choice-per-limit`: the policy's `breach_by_limit` chooses, per limit of the run
+//! budget, whether an executor step that breached it is discarded or kept; a limit it does not list
+//! takes `on_breach`, and a limit listed twice is refused before the Run starts.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, PoisonError};
 
-use b10x_loom_commission::model::behaviour::Generated;
+use b10x_loom_commission::model::behaviour::{Generated, RunStorage};
 use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
     ActionRequestData, ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext,
-    AuthorityVerdict, AuthorityVerdictApprovalRequired, AuthorityVerdictDeny, BreachStep, CaseId,
-    Commission, CommissionData, CommissionId, EffectOutcome, EffectOutcomePerformed,
-    ExecutorOutcome, ExecutorOutcomeProposedAction, FrontierAction, ObservationId, PrincipalId,
-    ProposedActionArguments, RunId, RunOutcome, RunOutcomeAwaitingApproval, RunOutcomeIdleBound,
-    RunOutcomeNeedsAuthority, RunOutcomeSuspended, StopPolicy, SuspensionReason, SuspensionState,
-    Unit, commission_state,
+    AuthorityVerdict, AuthorityVerdictApprovalRequired, AuthorityVerdictDeny, BreachStep,
+    BudgetLimit, CaseId, Commission, CommissionData, CommissionId, EffectOutcome,
+    EffectOutcomePerformed, ExecutorOutcome, ExecutorOutcomeProposedAction, ExecutorStep,
+    ExecutorUsage, Frontier, FrontierAction, LimitBreachStep, ObservationId, PrincipalId,
+    ProposedActionArguments, RunBudget, RunBudgetBreach, RunId, RunOutcome,
+    RunOutcomeAwaitingApproval, RunOutcomeIdleBound, RunOutcomeNeedsAuthority, RunOutcomeSuspended,
+    RunState, StopPolicy, SuspensionReason, SuspensionState, Unit, commission_state,
+    frontier_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{
     AdmittedRequest, EffectError, EffectPort, invoke_concurrently,
 };
+use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::suspension::{SuspensionPort, SuspensionStore};
-use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked, run_with_suspension};
+use b10x_loom_commission::runtime::{
+    LoopContext, LoopEnd, LoopError, ResumeError, resume_after_grant, run_until_blocked,
+    run_with_suspension,
+};
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
 use b10x_loom_commission_testkit::fake_executor::ScriptedExecutor;
 use b10x_loom_commission_testkit::fake_governor::{Answer, FakeGovernor};
@@ -130,6 +141,7 @@ fn policy(approval_gate: bool, idle_bound: Option<i64>) -> StopPolicy {
         approval_gate,
         idle_bound,
         on_breach: BreachStep::DiscardStep,
+        breach_by_limit: Vec::new(),
     }
 }
 
@@ -637,4 +649,447 @@ fn the_default_stop_policy_keeps_todays_stops() {
     assert_eq!(end.outcome, suspended_at(3), "the budget alone bounds it");
     assert_eq!(executor.calls().len(), 3);
     assert!(effects.invoked().is_empty(), "nothing is invoked");
+}
+
+// --- story:breach-choice-per-limit ---------------------------------------------------------------
+
+/// The trusted time until the session was called, before [`DEADLINE`].
+const BEFORE: &str = NOW;
+/// The deadline the per-limit tests set, between [`BEFORE`] and [`AFTER`].
+const DEADLINE: &str = "2026-10-21T09:30:00Z";
+/// `DEADLINE` in whole seconds since the Unix epoch.
+const DEADLINE_SECONDS: i64 = 1_792_575_000;
+/// The trusted time once the session was called, when the context reads past the deadline then.
+const AFTER: &str = "2026-10-21T10:00:00Z";
+/// `AFTER` in whole seconds since the Unix epoch.
+const AFTER_SECONDS: i64 = 1_792_576_800;
+
+/// An executor over an agent session: each call proposes the inspection with arguments of its own,
+/// so each is progress, and reports `usage` as what the call spent.
+struct Session {
+    usage: ExecutorUsage,
+    calls: AtomicUsize,
+}
+
+impl Session {
+    /// A session whose every call reports `input_tokens` in and `output_tokens` out.
+    fn spending(input_tokens: i64, output_tokens: i64) -> Self {
+        Self {
+            usage: ExecutorUsage {
+                input_tokens,
+                output_tokens,
+                duration_ms: 500,
+                cost_micro_usd: Some(3),
+            },
+            calls: AtomicUsize::new(0),
+        }
+    }
+
+    fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+impl AgentExecutor for Session {
+    fn run(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorOutcome {
+        self.run_with_usage(commission, frontier).outcome
+    }
+
+    fn run_with_usage(
+        &self,
+        _commission: &Commission<commission_state::Assigned>,
+        _frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorStep {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        ExecutorStep {
+            outcome: ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
+                action: INSPECT.to_owned(),
+                arguments: ProposedActionArguments(Value::Number(call.to_string())),
+            }),
+            usage: Some(self.usage.clone()),
+            transcript_digest: None,
+            summary: None,
+        }
+    }
+}
+
+/// A context with a run budget and a stop policy, no step budget, whose trusted clock reads
+/// [`BEFORE`], or, given a session, [`AFTER`] once that session was called: its first call ends
+/// past the deadline.
+struct Budgeted<'a> {
+    ids: Ids,
+    budget: RunBudget,
+    policy: StopPolicy,
+    past_deadline_after: Option<&'a Session>,
+}
+
+impl<'a> Budgeted<'a> {
+    fn new(budget: RunBudget, policy: StopPolicy) -> Self {
+        Self {
+            ids: Ids::new(),
+            budget,
+            policy,
+            past_deadline_after: None,
+        }
+    }
+
+    /// The same context, its clock reading past the deadline once `session` was called.
+    fn past_deadline_after(self, session: &'a Session) -> Self {
+        Self {
+            past_deadline_after: Some(session),
+            ..self
+        }
+    }
+}
+
+impl LoopContext for Budgeted<'_> {
+    fn action_request_id(&mut self) -> ActionRequestId {
+        self.ids.request()
+    }
+
+    fn observation_id(&mut self) -> ObservationId {
+        self.ids.observation()
+    }
+
+    fn now(&mut self) -> Timestamp {
+        let past = self
+            .past_deadline_after
+            .is_some_and(|session| session.calls() > 0);
+        Timestamp(if past { AFTER } else { BEFORE }.to_owned())
+    }
+
+    fn step_budget(&self) -> Option<usize> {
+        None
+    }
+
+    fn run_budget(&self) -> Option<RunBudget> {
+        Some(self.budget.clone())
+    }
+
+    fn stop_policy(&self) -> StopPolicy {
+        self.policy.clone()
+    }
+}
+
+/// A run budget with the deadline [`DEADLINE`], and the input token limit and the input and output
+/// token limit given.
+fn budget(max_tokens_in: Option<i64>, max_tokens: Option<i64>) -> RunBudget {
+    RunBudget {
+        max_steps: None,
+        max_tokens_in,
+        max_tokens_out: None,
+        max_duration_ms: None,
+        max_cost_micro_usd: None,
+        max_tokens,
+        deadline: Some(Timestamp(DEADLINE.to_owned())),
+        per_action: Vec::new(),
+    }
+}
+
+/// The default stop policy, choosing `on_breach` for every limit `breach_by_limit` does not list.
+fn per_limit(on_breach: BreachStep, breach_by_limit: &[(BudgetLimit, BreachStep)]) -> StopPolicy {
+    StopPolicy {
+        on_breach,
+        breach_by_limit: breach_by_limit
+            .iter()
+            .map(|&(limit, step)| LimitBreachStep { limit, step })
+            .collect(),
+        ..policy(true, None)
+    }
+}
+
+/// `MaxTokens` kept and `Deadline` discarded, every other limit discarded.
+fn tokens_kept_deadline_discarded() -> StopPolicy {
+    per_limit(
+        BreachStep::DiscardStep,
+        &[
+            (BudgetLimit::MaxTokens, BreachStep::KeepStep),
+            (BudgetLimit::Deadline, BreachStep::DiscardStep),
+        ],
+    )
+}
+
+/// `run_until_blocked` of `session` on the case `name`, open at revision 1 with only admissible
+/// actions, with the run store it ran on.
+fn run_session(
+    name: &str,
+    session: &Session,
+    effects: &Effects,
+    context: &mut Budgeted<'_>,
+) -> (Result<LoopEnd, LoopError>, Generated<RunStore>) {
+    let case = CaseId(name.to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(case.clone(), [open(1)]);
+    let mut runs = Generated::new(runs());
+    let end = run_until_blocked(
+        &governor,
+        session,
+        &StaticAuthorityProvider::new(),
+        effects,
+        &commission(&case),
+        &mut runs,
+        context,
+    );
+    (end, runs)
+}
+
+fn suspended_for(breach: RunBudgetBreach) -> RunOutcome {
+    RunOutcome::Suspended(RunOutcomeSuspended {
+        reason: SuspensionReason::RunBudget(breach),
+    })
+}
+
+/// The run's own breach of `limit`, set at `max`, charged `charged`.
+fn breach(limit: BudgetLimit, max: i64, charged: i64) -> RunBudgetBreach {
+    RunBudgetBreach {
+        action: None,
+        limit,
+        max,
+        charged: Some(charged),
+    }
+}
+
+fn deadline_passed() -> RunBudgetBreach {
+    breach(BudgetLimit::Deadline, DEADLINE_SECONDS, AFTER_SECONDS)
+}
+
+/// Under `breach_by_limit: [{MaxTokens, KeepStep}, {Deadline, DiscardStep}]` and `on_breach:
+/// DiscardStep`, each limit takes its own choice: a call past the token limit only is kept, its
+/// proposal performed once and the run then suspended for `MaxTokens` with no further call; a call
+/// that ended past the deadline only is discarded, nothing it proposed performed, and the run
+/// suspended for `Deadline`.
+#[test]
+fn a_kept_token_breach_and_a_discarded_deadline_breach_each_take_their_own_choice() {
+    let session = Session::spending(60, 50);
+    let effects = Effects::default();
+    let (end, runs) = run_session(
+        "case-per-limit-tokens-only",
+        &session,
+        &effects,
+        &mut Budgeted::new(budget(None, Some(100)), tokens_kept_deadline_discarded()),
+    );
+    let end = end.unwrap_or_else(|error| panic!("the loop failed: {error}"));
+    assert_eq!(
+        effects.invoked().len(),
+        1,
+        "the step past the token limit alone is kept: its proposal is performed once"
+    );
+    assert_eq!(
+        end.outcome,
+        suspended_for(breach(BudgetLimit::MaxTokens, 100, 110)),
+        "the kept breach suspends the run before the next step"
+    );
+    assert_eq!(session.calls(), 1, "no further executor call");
+    assert_eq!(
+        RunStorage::get(&runs.ports, &end.run_id).map(|held| held.state),
+        Some(RunState::Suspended)
+    );
+
+    let session = Session::spending(10, 10);
+    let effects = Effects::default();
+    let (end, _) = run_session(
+        "case-per-limit-deadline-only",
+        &session,
+        &effects,
+        &mut Budgeted::new(budget(None, Some(100)), tokens_kept_deadline_discarded())
+            .past_deadline_after(&session),
+    );
+    let end = end.unwrap_or_else(|error| panic!("the loop failed: {error}"));
+    assert!(
+        effects.invoked().is_empty(),
+        "the step that ended past the deadline alone is discarded: nothing is performed"
+    );
+    assert!(end.admitted.is_empty(), "nothing is admitted");
+    assert_eq!(end.outcome, suspended_for(deadline_passed()));
+    assert_eq!(session.calls(), 1);
+}
+
+/// A call past both the token limit, whose choice is `KeepStep`, and the deadline, whose choice is
+/// `DiscardStep`, is discarded: nothing it proposed is performed, and the run is suspended for the
+/// deadline, the first breached limit whose choice discards.
+#[test]
+fn a_step_past_a_kept_and_a_discarded_limit_is_discarded() {
+    let session = Session::spending(60, 50);
+    let effects = Effects::default();
+    let (end, _) = run_session(
+        "case-per-limit-both",
+        &session,
+        &effects,
+        &mut Budgeted::new(budget(None, Some(100)), tokens_kept_deadline_discarded())
+            .past_deadline_after(&session),
+    );
+    let end = end.unwrap_or_else(|error| panic!("the loop failed: {error}"));
+
+    assert!(
+        effects.invoked().is_empty(),
+        "a step past a discarded limit is discarded, whatever the other limit's choice"
+    );
+    assert!(end.admitted.is_empty(), "nothing is admitted");
+    assert_eq!(
+        end.outcome,
+        suspended_for(deadline_passed()),
+        "the run is suspended for the breached limit whose choice discards"
+    );
+    assert_eq!(session.calls(), 1);
+}
+
+/// A limit `breach_by_limit` lists twice is a loop error before the Run starts, naming the limit:
+/// no Run is stored, the executor is never called and nothing is performed.
+#[test]
+fn a_limit_listed_twice_is_refused_before_the_run_starts() {
+    let session = Session::spending(10, 10);
+    let effects = Effects::default();
+    let twice = per_limit(
+        BreachStep::DiscardStep,
+        &[
+            (BudgetLimit::Deadline, BreachStep::KeepStep),
+            (BudgetLimit::MaxTokens, BreachStep::KeepStep),
+            (BudgetLimit::Deadline, BreachStep::DiscardStep),
+        ],
+    );
+
+    let (end, runs) = run_session(
+        "case-per-limit-twice",
+        &session,
+        &effects,
+        &mut Budgeted::new(budget(None, Some(100)), twice),
+    );
+
+    let error = match end {
+        Ok(end) => panic!("the loop ran: {:?}", end.outcome),
+        Err(error) => error,
+    };
+    assert_eq!(error.run_id, None, "no Run was started");
+    assert!(
+        error.to_string().contains("Deadline"),
+        "the error names the limit listed twice: {error}"
+    );
+    assert!(
+        !error.to_string().contains("MaxTokens"),
+        "the error names only the limit listed twice: {error}"
+    );
+    assert!(
+        RunStorage::get(&runs.ports, &RunId(uuid(0x101))).is_none(),
+        "the run store holds no Run"
+    );
+    assert_eq!(session.calls(), 0, "the executor is never called");
+    assert!(effects.invoked().is_empty(), "nothing is performed");
+}
+
+/// A resume under a stop policy listing a limit twice is refused as its Run would be, before the
+/// Suspension is taken: nothing is performed, and the Suspension stays `Pending`.
+#[test]
+fn a_resume_under_a_limit_listed_twice_takes_nothing() {
+    let case = CaseId("case-per-limit-twice-resumed".to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(case.clone(), [gated(6)]);
+    let executor = ScriptedExecutor::new([ExecutorOutcome::ProposedAction(proposed(MERGE))]);
+    let withheld = StaticAuthorityProvider::new().answer(
+        CAPABILITY,
+        AuthorityVerdict::ApprovalRequired(AuthorityVerdictApprovalRequired {
+            request: APPROVE.to_owned(),
+        }),
+    );
+    let effects = Effects::default();
+    let suspensions = SuspensionStore::new();
+    let mut store = runs();
+    run_with_suspension(
+        &governor,
+        &executor,
+        &withheld,
+        &effects,
+        &commission(&case),
+        &mut store,
+        &suspensions,
+        &mut Policied::new(None, policy(true, None)),
+    )
+    .unwrap_or_else(|error| panic!("the loop failed: {error:?}"));
+
+    let granted =
+        StaticAuthorityProvider::new().answer(CAPABILITY, AuthorityVerdict::Allow(Unit(true)));
+    let twice = per_limit(
+        BreachStep::KeepStep,
+        &[
+            (BudgetLimit::MaxTokensIn, BreachStep::KeepStep),
+            (BudgetLimit::MaxTokensIn, BreachStep::DiscardStep),
+        ],
+    );
+    let resumed = resume_after_grant(
+        &governor,
+        &executor,
+        &granted,
+        &effects,
+        &commission(&case),
+        &mut store,
+        &suspensions,
+        &mut Budgeted::new(budget(Some(100), None), twice),
+    );
+
+    match resumed {
+        Err(ResumeError::Loop(error)) => assert!(
+            error.to_string().contains("MaxTokensIn"),
+            "the error names the limit listed twice: {error}"
+        ),
+        other => panic!("the resume was not refused for its stop policy: {other:?}"),
+    }
+    let held = SuspensionPort::get(&suspensions, &commission(&case).data().commission_id)
+        .unwrap_or_else(|error| panic!("the store reads: {error:?}"))
+        .unwrap_or_else(|| panic!("the Suspension is still stored"));
+    assert_eq!(held.state, SuspensionState::Pending, "nothing was taken");
+    assert!(effects.invoked().is_empty(), "nothing is performed");
+}
+
+/// A limit `breach_by_limit` does not list takes `on_breach`: under `on_breach: KeepStep` with only
+/// `{Deadline, DiscardStep}` listed, a step past `MaxTokensIn` alone is kept, its proposal
+/// performed once and the run then suspended for `MaxTokensIn`; beside it, the listed deadline
+/// keeps its own choice, so a step past both is discarded and the run suspended for `Deadline`.
+#[test]
+fn a_limit_not_listed_takes_on_breach() {
+    let deadline_discarded = || {
+        per_limit(
+            BreachStep::KeepStep,
+            &[(BudgetLimit::Deadline, BreachStep::DiscardStep)],
+        )
+    };
+
+    let session = Session::spending(60, 10);
+    let effects = Effects::default();
+    let (end, _) = run_session(
+        "case-per-limit-unlisted",
+        &session,
+        &effects,
+        &mut Budgeted::new(budget(Some(50), None), deadline_discarded()),
+    );
+    let end = end.unwrap_or_else(|error| panic!("the loop failed: {error}"));
+    assert_eq!(
+        effects.invoked().len(),
+        1,
+        "the step past the unlisted limit takes on_breach, KeepStep: it is performed once"
+    );
+    assert_eq!(
+        end.outcome,
+        suspended_for(breach(BudgetLimit::MaxTokensIn, 50, 60))
+    );
+    assert_eq!(session.calls(), 1, "no further executor call");
+
+    let session = Session::spending(60, 10);
+    let effects = Effects::default();
+    let (end, _) = run_session(
+        "case-per-limit-unlisted-and-deadline",
+        &session,
+        &effects,
+        &mut Budgeted::new(budget(Some(50), None), deadline_discarded())
+            .past_deadline_after(&session),
+    );
+    let end = end.unwrap_or_else(|error| panic!("the loop failed: {error}"));
+    assert!(
+        effects.invoked().is_empty(),
+        "the listed deadline discards the step, whatever on_breach says"
+    );
+    assert_eq!(end.outcome, suspended_for(deadline_passed()));
+    assert_eq!(session.calls(), 1);
 }
