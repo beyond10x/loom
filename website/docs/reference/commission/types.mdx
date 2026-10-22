@@ -277,6 +277,13 @@ Tagged by `kind`.
 | `obligation` | `string` |
 | `open` | `boolean` |
 
+### LimitBreachStep
+
+| Field | Type |
+|---|---|
+| `limit` | [`BudgetLimit`](#budgetlimit) |
+| `step` | [`BreachStep`](#breachstep) |
+
 ### RunBudget
 
 | Field | Type |
@@ -383,6 +390,7 @@ Tagged by `kind`.
 | `approval_gate` | `boolean` |
 | `idle_bound` | optional `integer` |
 | `on_breach` | [`BreachStep`](#breachstep) |
+| `breach_by_limit` | list of [`LimitBreachStep`](#limitbreachstep) |
 
 ### SuspensionKey
 

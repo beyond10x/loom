@@ -448,6 +448,7 @@ fn policy(approval_gate: bool, idle_bound: Option<i64>, on_breach: BreachStep) -
         approval_gate,
         idle_bound,
         on_breach,
+        breach_by_limit: Vec::new(),
     }
 }
 

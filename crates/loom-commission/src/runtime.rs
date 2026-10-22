@@ -186,7 +186,7 @@
 //!    suspended through `SuspendRun` with `SuspensionReason::Time`, carrying that answer's
 //!    `report`, and the run ends `Waiting` ([`judge_budget_stop`]), naming every request answered
 //!    `Pending` by that step in the order made, with or without `ends_run`; the reason is the first
-//!    one's that asked to end. A breach the stop policy kept (`on_breach: KeepStep`) is the
+//!    one's that asked to end. A breach the stop policy kept (`KeepStep`) is the
 //!    reason instead. Beside a stale request the wait is kept, as a final refusal is, and the move
 //!    is judged first; when the next iteration's load finds no move, the kept wait ends the run,
 //!    after a kept refusal. Commission sets no wait or timer: the host resumes the work;
@@ -268,6 +268,17 @@
 //!   otherwise the Run is suspended for the breach before the next step, at the point and in the
 //!   way the used-up step budget suspends it (0), the kept breach the reason even when the step's
 //!   own effect then passed another limit.
+//! * `breach_by_limit` chooses per limit (`story:breach-choice-per-limit`): a limit it lists takes
+//!   its own `step`, and a limit it does not list takes `on_breach`, so the empty list, the
+//!   default, is `on_breach` for every limit. Once an executor call was observed, every run limit
+//!   it breached is collected, the spending limits in the order `spent_past` checks them, then
+//!   the deadline, which is read whether or not a spending breach was kept. The step is discarded
+//!   when any of them discards it, the Run suspended for the first that does; when every one
+//!   keeps it, it is acted on and the Run suspended before the next step for the first breached
+//!   limit. A limit listed twice is a [`LoopError`] ([`LoopFailure::BreachLimitListedTwice`])
+//!   with nothing started, and [`resume_after_grant`] refuses it before it reads the Suspension.
+//!   `MaxSteps` and `MaxTrials` stop the run before a step, never as an executor step's breach:
+//!   listing them is allowed and changes nothing.
 //!
 //! # Run and action budgets
 //!
@@ -302,8 +313,10 @@
 //!   the Run is suspended for `RunBudget`, limit `Deadline`, `max` the deadline and `charged` the
 //!   reading, each in whole seconds since the Unix epoch, and the run ends suspended, or `Waiting`
 //!   while a request is pending. It is read again once an executor call was observed, after the
-//!   spending limits: a call that ended at or after the deadline is a breach `on_breach` decides,
-//!   so by default nothing it proposed is performed. A reading that is not RFC 3339 counts as past
+//!   spending limits: a call that ended at or after the deadline is a breach the stop policy
+//!   decides (`breach_by_limit`, else `on_breach`), so by default nothing it proposed is
+//!   performed. It is not read there only when a spending limit already discarded the step,
+//!   which is then the reason. A reading that is not RFC 3339 counts as past
 //!   the deadline, its `charged` absent. A resume reads it twice, as it reads the case revision: before the
 //!   Suspension is taken, when a deadline passed takes nothing and leaves the Suspension
 //!   `Pending`, and right before the held request is invoked, when one passed releases the
@@ -319,7 +332,8 @@
 //! after an effect, the run's being the only ones the charge moved: a breach suspends the Run for
 //! `RunBudget` and ends the run suspended with that reason before its outcome is acted on (7-10):
 //! no request is made from a proposal, and an executor's own `Suspended` is not the Run's, unless
-//! the stop policy keeps the step (`on_breach: KeepStep`, above). Nothing
+//! the stop policy keeps the step for every limit it breached (`KeepStep`, through
+//! `breach_by_limit` or `on_breach`, above). Nothing
 //! is pending while an executor runs (8b), so such a run never ends `Waiting`. An executor that
 //! reports no usage, as a model loop metered at its model port does, is charged nothing for its
 //! call, as before.
@@ -482,13 +496,16 @@ pub trait LoopContext {
     /// ends it `AwaitingApproval`, and how many idle iterations in a row end it `IdleBound`. The
     /// default keeps the gate and sets no idle bound: two idle iterations end a run with no step
     /// budget, and a budgeted run is bounded by its budget alone. It also says what becomes of an
-    /// executor step whose reported usage passed a spending limit (`on_breach`); the default,
-    /// `DiscardStep`, ends the run before that step's outcome is acted on.
+    /// executor step whose reported usage passed a spending limit, or whose call ended past the
+    /// deadline, per limit (`breach_by_limit`) and for every limit it does not list
+    /// (`on_breach`); the default lists none and discards: `DiscardStep` ends the run before that
+    /// step's outcome is acted on.
     fn stop_policy(&self) -> StopPolicy {
         StopPolicy {
             approval_gate: true,
             idle_bound: None,
             on_breach: BreachStep::DiscardStep,
+            breach_by_limit: Vec::new(),
         }
     }
 }
@@ -578,6 +595,10 @@ pub enum LoopFailure {
     /// The run budget's `deadline` is not an RFC 3339 date-time; it holds the text. Nothing was
     /// started: the loop refuses it before the Run starts, and a resume before it takes anything.
     InvalidDeadline(String),
+    /// The stop policy's `breach_by_limit` lists this limit more than once
+    /// (`story:breach-choice-per-limit`). Nothing was started: the loop refuses it before the Run
+    /// starts, and a resume before it takes anything.
+    BreachLimitListedTwice(BudgetLimit),
 }
 
 /// A release of the Suspension a resume took that did not remove it: after its request was
@@ -627,6 +648,10 @@ impl fmt::Display for LoopFailure {
             Self::InvalidDeadline(text) => {
                 write!(f, "the run budget's deadline is not RFC 3339: {text:?}")
             }
+            Self::BreachLimitListedTwice(limit) => write!(
+                f,
+                "the stop policy's breach_by_limit lists the limit {limit:?} more than once"
+            ),
         }
     }
 }
@@ -885,8 +910,10 @@ where
     R: StartRunBehavior + SuspendRunBehavior + ?Sized,
     C: LoopContext + ?Sized,
 {
-    // A deadline that names no instant is refused before anything is asked or started.
+    // A deadline that names no instant, and a stop policy that lists a limit twice, are refused
+    // before anything is asked or started.
     deadline_of(context.run_budget().as_ref()).map_err(unstarted)?;
+    check_stop_policy(&context.stop_policy()).map_err(unstarted)?;
     let revision = ports
         .governor
         .current_revision(&commission.data().case_id)
@@ -1484,38 +1511,33 @@ where
         }
         let observed = governor.observe(observation(context, &frontier, &step));
         let ExecutorStep { outcome, usage, .. } = step;
-        // The step's own usage past a spending limit stops the run once the step is observed. By
-        // default (`DiscardStep`) that is before its outcome is acted on: no request is made from
-        // it, and an executor's own suspension is not the Run's. A stop policy that keeps the step
-        // (`KeepStep`) acts on the outcome as with no breach, and the run, unless that outcome
-        // ends it, is suspended for the breach before the next step.
-        if observed.is_ok()
-            && usage.is_some()
-            && let Some(breach) = run_budget
-                .as_ref()
-                .and_then(|limits| spent_past(limits, &track))
-        {
-            match policy.on_breach {
-                BreachStep::KeepStep => kept_breach = Some(breach),
-                BreachStep::DiscardStep => {
-                    let reason = SuspensionReason::RunBudget(breach);
-                    return budget_ended(runs, run_id, reason, None, track);
-                }
+        // Once the step is observed, every run limit the call breached is collected: the spending
+        // limits its own usage passed, in the order `spent_past` checks them, then the deadline,
+        // read again, which a call that ended at or after it breached. Each takes the stop
+        // policy's choice for it ([`breach_step`], `story:breach-choice-per-limit`). When any
+        // discards the step (`DiscardStep`, the default), the run ends suspended for the first
+        // that does, before the outcome is acted on: no request is made from it, and an executor's
+        // own suspension is not the Run's. When every one keeps it (`KeepStep`), the outcome is
+        // acted on as with no breach, and the run, unless that outcome ends it, is suspended for
+        // the first breached limit before the next step.
+        if observed.is_ok() {
+            let mut breached = match (&run_budget, &usage) {
+                (Some(limits), Some(_)) => spent_past_each(limits, &track),
+                _ => Vec::new(),
+            };
+            // The spending limits come first, so a spending limit that discards the step is the
+            // reason whatever the clock reads; the deadline is read whenever none does, kept
+            // spending breaches or not.
+            if let Some(discarded) = first_discarded(&policy, &breached) {
+                let reason = SuspensionReason::RunBudget(discarded);
+                return budget_ended(runs, run_id, reason, None, track);
             }
-        }
-        // The deadline is read again once the step is observed: a call that ended at or after it
-        // is a breach `on_breach` decides as for a spending limit, which is checked first.
-        if observed.is_ok()
-            && kept_breach.is_none()
-            && let Some(breach) = deadline_reached(deadline, context)
-        {
-            match policy.on_breach {
-                BreachStep::KeepStep => kept_breach = Some(breach),
-                BreachStep::DiscardStep => {
-                    let reason = SuspensionReason::RunBudget(breach);
-                    return budget_ended(runs, run_id, reason, None, track);
-                }
+            breached.extend(deadline_reached(deadline, context));
+            if let Some(discarded) = first_discarded(&policy, &breached) {
+                let reason = SuspensionReason::RunBudget(discarded);
+                return budget_ended(runs, run_id, reason, None, track);
             }
+            kept_breach = breached.into_iter().next();
         }
         if let ExecutorOutcome::Suspended(suspended) = &outcome {
             let reason = suspended.reason.clone();
@@ -1980,8 +2002,11 @@ where
     C: LoopContext + ?Sized,
 {
     let refused = |refusal| Err(ResumeError::Refused(refusal));
-    // A deadline that names no instant is refused before the Suspension is read or taken.
+    // A deadline that names no instant, and a stop policy that lists a limit twice, are refused
+    // before the Suspension is read or taken.
     let deadline = deadline_of(context.run_budget().as_ref())
+        .map_err(|failure| ResumeError::Loop(unstarted(failure)))?;
+    check_stop_policy(&context.stop_policy())
         .map_err(|failure| ResumeError::Loop(unstarted(failure)))?;
     let held = commission.data();
     let Some(stored) = suspensions
@@ -3155,13 +3180,13 @@ fn add_usage(
     };
 }
 
-/// The first spending limit of `limits` that `charged` passed, for `action` (`None` for the run's):
-/// a charge above its limit, or an unknown cost under a cost limit.
+/// Every spending limit of `limits` that `charged` passed, for `action` (`None` for the run's), in
+/// the order given: a charge above its limit, or an unknown cost under a cost limit.
 fn spending(
     action: Option<&str>,
     limits: [(BudgetLimit, Option<i64>, Option<i64>); 5],
-) -> Option<RunBudgetBreach> {
-    limits.into_iter().find_map(|(limit, max, charged)| {
+) -> impl Iterator<Item = RunBudgetBreach> + '_ {
+    limits.into_iter().filter_map(move |(limit, max, charged)| {
         let max = max?;
         match charged {
             Some(charged) if charged <= max => None,
@@ -3213,41 +3238,85 @@ fn spent(
 /// The first spending limit of `budget` the charges of `track` passed: an action's, in the order
 /// the budget lists them, then the run's.
 fn spent_past(budget: &RunBudget, track: &Track) -> Option<RunBudgetBreach> {
+    spent_past_each(budget, track).into_iter().next()
+}
+
+/// Every spending limit of `budget` the charges of `track` passed, in the order [`spent_past`]
+/// checks them: each action's, in the order the budget lists the actions and then their limits,
+/// then the run's.
+fn spent_past_each(budget: &RunBudget, track: &Track) -> Vec<RunBudgetBreach> {
     let charges = &track.charges;
-    budget
-        .per_action
-        .iter()
-        .find_map(|limits| {
-            let charged = &charges
-                .actions
-                .iter()
-                .find(|charge| charge.action == limits.action)?
-                .charged;
-            spending(
-                Some(&limits.action),
-                spent(
-                    limits.max_tokens_in,
-                    limits.max_tokens_out,
-                    limits.max_duration_ms,
-                    limits.max_cost_micro_usd,
-                    None,
-                    charged,
-                ),
-            )
-        })
-        .or_else(|| {
-            spending(
+    let mut breached = Vec::new();
+    for limits in &budget.per_action {
+        let Some(charge) = charges
+            .actions
+            .iter()
+            .find(|charge| charge.action == limits.action)
+        else {
+            continue;
+        };
+        breached.extend(spending(
+            Some(&limits.action),
+            spent(
+                limits.max_tokens_in,
+                limits.max_tokens_out,
+                limits.max_duration_ms,
+                limits.max_cost_micro_usd,
                 None,
-                spent(
-                    budget.max_tokens_in,
-                    budget.max_tokens_out,
-                    budget.max_duration_ms,
-                    budget.max_cost_micro_usd,
-                    budget.max_tokens,
-                    &charges.run,
-                ),
-            )
-        })
+                &charge.charged,
+            ),
+        ));
+    }
+    breached.extend(spending(
+        None,
+        spent(
+            budget.max_tokens_in,
+            budget.max_tokens_out,
+            budget.max_duration_ms,
+            budget.max_cost_micro_usd,
+            budget.max_tokens,
+            &charges.run,
+        ),
+    ));
+    breached
+}
+
+/// What the stop policy makes of an executor step that breached `limit`
+/// (`story:breach-choice-per-limit`): the step `breach_by_limit` lists for it, else `on_breach`.
+fn breach_step(policy: &StopPolicy, limit: BudgetLimit) -> BreachStep {
+    policy
+        .breach_by_limit
+        .iter()
+        .find(|entry| entry.limit == limit)
+        .map_or(policy.on_breach, |entry| entry.step)
+}
+
+/// The first of `breached`, in order, whose limit's choice under `policy` discards the step.
+fn first_discarded(policy: &StopPolicy, breached: &[RunBudgetBreach]) -> Option<RunBudgetBreach> {
+    breached
+        .iter()
+        .find(|breach| matches!(breach_step(policy, breach.limit), BreachStep::DiscardStep))
+        .cloned()
+}
+
+/// Refuses a stop policy whose `breach_by_limit` lists a limit more than once
+/// (`story:breach-choice-per-limit`). Listing `MaxSteps` or `MaxTrials` is allowed and changes
+/// nothing: they stop the run before a step, never as an executor step's breach.
+///
+/// # Errors
+///
+/// [`LoopFailure::BreachLimitListedTwice`], naming the first limit listed again.
+fn check_stop_policy(policy: &StopPolicy) -> Result<(), LoopFailure> {
+    let listed = &policy.breach_by_limit;
+    for (index, entry) in listed.iter().enumerate() {
+        if listed[..index]
+            .iter()
+            .any(|earlier| earlier.limit == entry.limit)
+        {
+            return Err(LoopFailure::BreachLimitListedTwice(entry.limit));
+        }
+    }
+    Ok(())
 }
 
 /// The instant `budget`'s deadline names, in whole seconds since the Unix epoch and the
