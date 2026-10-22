@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Fixed
+
+- `b10x-loom-intake-slice` builds on macOS: its process-group helpers read `waitid` through rustix, not nix
+
 ## [0.34.0] - 2026-10-22
 
 ### Added

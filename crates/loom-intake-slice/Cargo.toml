@@ -33,6 +33,7 @@ substrate-wire = { package = "b10x-substrate-wire", git = "https://github.com/be
 intake_model = { package = "intake", path = "../../generated/rust/intake" }
 libc = "0.2"
 nix = { version = "0.31", default-features = false, features = ["process", "signal"] }
+rustix = { version = "1", features = ["process", "std"] }
 tempfile = "3"
 
 [dev-dependencies]

@@ -1349,17 +1349,22 @@ fn run_bounded(test: &TestCommand, root: &Path) -> Result<Finished, ExecuteError
 /// # Errors
 /// Its status could not be read.
 pub(crate) fn ended_unreaped(child: &Child) -> std::io::Result<bool> {
-    use nix::sys::wait::{Id, WaitPidFlag, WaitStatus, waitid};
-    let leader = leader_pid(child)?;
+    peek_ended(leader_pid(child)?).map_err(std::io::Error::from)
+}
+
+/// Whether `leader` has ended, read with `waitid(WEXITED | WNOHANG | WNOWAIT)`, which leaves it
+/// unreaped. Through rustix, which has `waitid` on Linux and macOS alike; nix has it on Linux only.
+fn peek_ended(leader: nix::unistd::Pid) -> Result<bool, rustix::io::Errno> {
+    use rustix::process::{Pid, WaitId, WaitIdOptions, waitid};
+    let pid = Pid::from_raw(leader.as_raw()).ok_or(rustix::io::Errno::SRCH)?;
     loop {
         match waitid(
-            Id::Pid(leader),
-            WaitPidFlag::WEXITED | WaitPidFlag::WNOHANG | WaitPidFlag::WNOWAIT,
+            WaitId::Pid(pid),
+            WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT,
         ) {
-            Ok(WaitStatus::StillAlive) => return Ok(false),
-            Ok(_) => return Ok(true),
-            Err(nix::errno::Errno::EINTR) => {}
-            Err(errno) => return Err(std::io::Error::from(errno)),
+            Ok(status) => return Ok(status.is_some()),
+            Err(rustix::io::Errno::INTR) => {}
+            Err(errno) => return Err(errno),
         }
     }
 }
@@ -1379,23 +1384,16 @@ pub(crate) fn ended_unreaped(child: &Child) -> std::io::Result<bool> {
 pub(crate) fn kill_group(child: &mut Child) -> std::io::Result<()> {
     use nix::errno::Errno;
     use nix::sys::signal::{Signal, killpg};
-    use nix::sys::wait::{Id, WaitPidFlag, waitid};
     let leader = leader_pid(child)?;
-    loop {
-        match waitid(
-            Id::Pid(leader),
-            WaitPidFlag::WEXITED | WaitPidFlag::WNOHANG | WaitPidFlag::WNOWAIT,
-        ) {
-            Ok(_) => break,
-            Err(Errno::EINTR) => {}
-            Err(Errno::ECHILD) => {
-                return Err(std::io::Error::other(format!(
-                    "the group's leader {leader} was already reaped, so its id may name another \
-                     group; nothing was signalled"
-                )));
-            }
-            Err(errno) => return Err(std::io::Error::from(errno)),
+    match peek_ended(leader) {
+        Ok(_) => {}
+        Err(rustix::io::Errno::CHILD) => {
+            return Err(std::io::Error::other(format!(
+                "the group's leader {leader} was already reaped, so its id may name another \
+                 group; nothing was signalled"
+            )));
         }
+        Err(errno) => return Err(std::io::Error::from(errno)),
     }
     let group = match killpg(leader, Signal::SIGKILL) {
         Ok(()) | Err(Errno::ESRCH) => Ok(()),
@@ -1729,5 +1727,31 @@ mod tests {
         assert_eq!(text.len(), 20, "{text}");
         assert!(text.ends_with('Z') && text.as_bytes()[10] == b'T', "{text}");
         assert!(text.as_str() >= "2026-01-01", "{text}");
+    }
+
+    #[test]
+    fn an_ended_leader_is_read_without_reaping_it_and_a_reaped_one_is_never_signalled() {
+        use std::os::unix::process::CommandExt as _;
+        let mut child = Command::new("sh")
+            .args(["-c", "read line; exit 3"])
+            .stdin(Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        assert!(
+            !ended_unreaped(&child).unwrap(),
+            "a running leader reads as ended"
+        );
+        drop(child.stdin.take());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !ended_unreaped(&child).unwrap() {
+            assert!(Instant::now() < deadline, "the leader never read as ended");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // Still unreaped: its own status is there to be reaped once.
+        assert!(ended_unreaped(&child).unwrap());
+        assert_eq!(child.wait().unwrap().code(), Some(3));
+        let why = kill_group(&mut child).unwrap_err();
+        assert!(why.to_string().contains("already reaped"), "{why}");
     }
 }
