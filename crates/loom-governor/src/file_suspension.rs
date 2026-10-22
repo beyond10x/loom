@@ -36,9 +36,10 @@ use b10x_loom_commission::model::json::{
 use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::{
     ActionRequestId, BudgetLimit, CaseId, CommissionId, HoldSuspension, HoldSuspensionOutcome,
-    HumanDecisionRequest, ProposedActionArguments, ReleaseSuspension, ReleaseSuspensionOutcome,
-    RunBudgetBreach, RunId, SuspensionData, SuspensionKey, SuspensionReason, SuspensionSnapshot,
-    SuspensionState, SuspensionStorageFailed, TakeSuspension, TakeSuspensionOutcome,
+    HostStop, HumanDecisionRequest, ProposedActionArguments, ReleaseSuspension,
+    ReleaseSuspensionOutcome, RunBudgetBreach, RunId, SuspensionData, SuspensionKey,
+    SuspensionReason, SuspensionSnapshot, SuspensionState, SuspensionStorageFailed, TakeSuspension,
+    TakeSuspensionOutcome,
 };
 use b10x_loom_commission::ports::suspension::{
     SuspensionPort, SuspensionStoreError, SuspensionWrite, decide_hold, decide_release, decide_take,
@@ -297,6 +298,7 @@ fn encode_reason(out: &mut String, reason: &SuspensionReason) {
         SuspensionReason::LoopBudget(value) => ("LoopBudget", value.clone()),
         SuspensionReason::ExternalAvailability(value) => ("ExternalAvailability", value.clone()),
         SuspensionReason::RunBudget(breach) => ("RunBudget", breach_payload(breach)),
+        SuspensionReason::HostStop(stop) => ("HostStop", host_stop_payload(stop)),
     };
     push_text(out, kind);
     member(out, "payload");
@@ -369,6 +371,30 @@ fn decode_breach(payload: &Value) -> Result<RunBudgetBreach, DecodeError> {
         limit,
         max,
         charged,
+    })
+}
+
+/// A host's stop as `{"name": <its name>, "detail": <its detail>}`, the detail as the host gave it.
+fn host_stop_payload(stop: &HostStop) -> Value {
+    Value::Object(vec![
+        ("name".to_owned(), Value::Text(stop.name.clone())),
+        ("detail".to_owned(), stop.detail.clone()),
+    ])
+}
+
+/// The `HostStop` [`host_stop_payload`] wrote: both members, the name a string and the detail any
+/// JSON, kept as it reads.
+fn decode_host_stop(payload: &Value) -> Result<HostStop, DecodeError> {
+    let at = "reason.payload";
+    exactly(payload, at, &["name", "detail"])?;
+    let name = text_at(
+        member_at(payload, at, "name")?,
+        &nested(at, "name"),
+        "a string",
+    )?;
+    Ok(HostStop {
+        name: name.to_owned(),
+        detail: member_at(payload, at, "detail")?.clone(),
     })
 }
 
@@ -468,6 +494,7 @@ fn decode_reason(value: &Value) -> Result<SuspensionReason, DecodeError> {
         "LoopBudget" => SuspensionReason::LoopBudget(payload),
         "ExternalAvailability" => SuspensionReason::ExternalAvailability(payload),
         "RunBudget" => SuspensionReason::RunBudget(decode_breach(&payload)?),
+        "HostStop" => SuspensionReason::HostStop(decode_host_stop(&payload)?),
         _ => {
             return Err(DecodeError::of(
                 &nested(at, "kind"),

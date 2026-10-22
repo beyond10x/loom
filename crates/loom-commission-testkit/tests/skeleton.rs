@@ -289,7 +289,13 @@ fn skeleton_lands_port_vocabulary_and_modules() {
             ("LoopBudget", "Json"),
             ("ExternalAvailability", "Json"),
             ("RunBudget", "RunBudgetBreach"),
+            ("HostStop", "HostStop"),
         ],
+    );
+    assert_struct(
+        &model,
+        "HostStop",
+        &[("name", "String"), ("detail", "Json")],
     );
     assert_union(
         &model,

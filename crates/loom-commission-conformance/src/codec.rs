@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::{
-    BudgetLimit, CaseId, CommissionId, HumanDecisionRequest, RunBudgetBreach, RunState,
+    BudgetLimit, CaseId, CommissionId, HostStop, HumanDecisionRequest, RunBudgetBreach, RunState,
     SuspensionKey, SuspensionReason, SuspensionState,
 };
 use ess_primitives::facts::{Number, is_canonical_uuid};
@@ -212,6 +212,7 @@ pub fn suspension_reason(node: &Node) -> Option<SuspensionReason> {
         "Human" => SuspensionReason::Human(HumanDecisionRequest(to_json(value)?)),
         "Time" => SuspensionReason::Time(to_json(value)?),
         "RunBudget" => SuspensionReason::RunBudget(run_budget_breach(value)?),
+        "HostStop" => SuspensionReason::HostStop(host_stop(value)?),
         _ => return None,
     })
 }
@@ -239,6 +240,7 @@ pub(crate) fn from_suspension_reason(reason: &SuspensionReason) -> Option<Node> 
         SuspensionReason::Human(request) => ("Human", read_json(&request.0)?),
         SuspensionReason::Time(value) => ("Time", read_json(value)?),
         SuspensionReason::RunBudget(breach) => ("RunBudget", from_run_budget_breach(breach)),
+        SuspensionReason::HostStop(stop) => ("HostStop", from_host_stop(stop)?),
     };
     Some(Node::Map(BTreeMap::from([
         ("kind".to_owned(), Node::Text(kind.to_owned())),
@@ -301,4 +303,51 @@ fn from_run_budget_breach(breach: &RunBudgetBreach) -> Node {
         members.insert("charged".to_owned(), number(charged));
     }
     Node::Map(members)
+}
+
+/// A `HostStop`: its `name` text and its `detail`, any JSON.
+fn host_stop(node: &Node) -> Option<HostStop> {
+    let members = node.as_map()?;
+    Some(HostStop {
+        name: members.get("name")?.as_text()?.to_owned(),
+        detail: to_json(members.get("detail")?)?,
+    })
+}
+
+/// A `HostStop` as a suite value, or `None` when its detail holds a number [`read_json`] refuses.
+fn from_host_stop(stop: &HostStop) -> Option<Node> {
+    Some(Node::Map(BTreeMap::from([
+        ("name".to_owned(), Node::Text(stop.name.clone())),
+        ("detail".to_owned(), read_json(&stop.detail)?),
+    ])))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A host's stop is encoded as the suite reads it and decoded back unchanged
+    /// (`story:host-stop-before-step`). A suite map orders its members by name, as for every
+    /// `Json` payload, so the detail's members are written in that order here.
+    #[test]
+    fn a_host_stop_reason_round_trips_through_the_suite_codec() {
+        let reason = SuspensionReason::HostStop(HostStop {
+            name: "DiskLow".to_owned(),
+            detail: Value::Object(vec![
+                ("free_bytes".to_owned(), Value::Number("1048576".to_owned())),
+                ("path".to_owned(), Value::Text("target".to_owned())),
+                (
+                    "paused".to_owned(),
+                    Value::Array(vec![Value::Bool(true), Value::Null]),
+                ),
+            ]),
+        });
+        let node = from_suspension_reason(&reason).expect("the reason encodes");
+        assert_eq!(
+            node.as_map()
+                .and_then(|members| members.get("kind")?.as_text()),
+            Some("HostStop")
+        );
+        assert_eq!(suspension_reason(&node), Some(reason));
+    }
 }
