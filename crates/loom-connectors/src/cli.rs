@@ -27,7 +27,8 @@
 //! answered, that is empty, starts with `-`, or holds whitespace or a control character starts no
 //! command, and a `--config` or `--state-dir` path starting with `-` starts none either. Each
 //! command is bounded by `timeout_seconds` ([`DEFAULT_TIMEOUT_SECONDS`] when absent): one still
-//! running is killed and reaped, and the read fails naming the timeout and the operation. Nothing
+//! running is killed and reaped, and the read fails naming the timeout and the operation; a
+//! timeout this host's clock cannot hold starts no command and is refused naming it. Nothing
 //! is retried: a refusal Connectors states comes back as a [`ReadRefusal`] naming the source, and
 //! `not_granted`'s names its remedy, `connectors connections revalidate --adapter <alias>`, which
 //! the client never runs itself.
@@ -450,6 +451,11 @@ impl ConnectorsCli {
             .ok_or_else(|| {
                 CliError::Failed(format!("timeout_seconds {seconds} is not a positive bound"))
             })?;
+        if Instant::now().checked_add(timeout).is_none() {
+            return Err(CliError::Failed(format!(
+                "timeout_seconds {seconds} is past what this host's clock can hold"
+            )));
+        }
         command
             .args(arguments)
             .stdin(if piped { Stdio::piped() } else { Stdio::null() })
@@ -532,7 +538,13 @@ impl ConnectorsCli {
         stdin: Option<&str>,
         timeout: Duration,
     ) -> Result<Output, Bounded> {
-        let deadline = Instant::now() + timeout;
+        // Taken before the program starts: a bound the clock cannot hold starts nothing.
+        let deadline = Instant::now().checked_add(timeout).ok_or_else(|| {
+            Bounded::NotStarted(std::io::Error::other(format!(
+                "its timeout of {} s is past what this host's clock can hold",
+                timeout.as_secs()
+            )))
+        })?;
         let mut child = command.spawn().map_err(Bounded::NotStarted)?;
         if let (Some(document), Some(mut pipe)) = (stdin, child.stdin.take()) {
             let document = document.to_owned();

@@ -1249,7 +1249,8 @@ struct Finished {
 }
 
 /// Runs `test` in `root`, without a shell, killing it (and on Unix its process group) at its
-/// timeout. Standard output and error are read while it runs; the last [`OUTPUT_TAIL`] bytes of
+/// timeout; a timeout this host's clock cannot hold is refused, naming it, before the command
+/// starts. Standard output and error are read while it runs; the last [`OUTPUT_TAIL`] bytes of
 /// each are kept. The group is killed only while `try_wait` has not reaped the command: once it
 /// reaped it, nothing is killed, and output still held open is waited for at most
 /// [`OUTPUT_GRACE`].
@@ -1269,12 +1270,22 @@ fn run_bounded(test: &TestCommand, root: &Path) -> Result<Finished, ExecuteError
         use std::os::unix::process::CommandExt as _;
         command.process_group(0);
     }
+    // The deadline is taken before the command starts, so a timeout the clock cannot hold
+    // starts nothing.
+    let deadline = Instant::now().checked_add(test.timeout).ok_or_else(|| {
+        ExecuteError::Workspace {
+            problem: format!(
+                "the test command was not started: its timeout of {:?} is past what this host's \
+                 clock can hold",
+                test.timeout
+            ),
+        }
+    })?;
     let mut child = command.spawn().map_err(|error| ExecuteError::Workspace {
         problem: format!("the test command did not start: {error}"),
     })?;
     let stdout = Tail::read(child.stdout.take());
     let stderr = Tail::read(child.stderr.take());
-    let deadline = Instant::now() + test.timeout;
     let mut timed_out = false;
     let status = loop {
         match child.try_wait() {

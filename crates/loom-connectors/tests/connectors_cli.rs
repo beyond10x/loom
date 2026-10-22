@@ -303,6 +303,33 @@ fn undeclared_kind_starts_no_process() {
     );
 }
 
+/// A configuration whose `timeout_seconds` is the largest one is refused naming the timeout, with
+/// no panic, and starts no process (`story:checked-timeout-deadlines`).
+#[test]
+fn a_timeout_too_large_for_the_clock_starts_no_process() {
+    let fixture = Fixture::new("a_timeout_too_large_for_the_clock_starts_no_process");
+    fixture.answer("describe", LIST, "describe-list.json");
+    fixture.answer("invoke", LIST, "invoke-read.json");
+    let config = ConnectorsCliConfig {
+        timeout_seconds: Some(i64::MAX),
+        ..fixture.config()
+    };
+    let cli = ConnectorsCli::new(config, Vec::new()).with_environment(fixture.environment());
+
+    match cli.invoke_read(&adapter(), &connection(), &operation(LIST), &input()) {
+        Err(CliError::Failed(why)) => assert!(
+            why.contains(&format!("timeout_seconds {}", i64::MAX)),
+            "the refusal names the timeout: {why}"
+        ),
+        other => panic!("the read is refused: {other:?}"),
+    }
+    assert!(
+        !fixture.state().join("argv.log").exists(),
+        "a process started: {:?}",
+        fixture.argv()
+    );
+}
+
 #[test]
 fn write_operation_is_never_invoked() {
     let fixture = Fixture::new("write_operation_is_never_invoked");

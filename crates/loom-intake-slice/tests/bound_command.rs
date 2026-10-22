@@ -87,6 +87,23 @@ fn a_command_that_ends_while_its_child_holds_its_output_leaves_no_process_at_the
     case.child.assert_gone();
 }
 
+/// A run configuration whose `timeout_seconds` is the largest one is refused naming the timeout,
+/// with no panic, and its command never starts (`story:checked-timeout-deadlines`).
+#[test]
+fn a_timeout_too_large_for_the_clock_is_refused_and_starts_no_command() {
+    // The command writes the pid file as soon as it starts.
+    let case = Case::new("#!/bin/sh\necho $$ > \"$PIDFILE\"\necho '{\"note\":\"n-1\"}'\n");
+    let output = case.run_with(i64::MAX);
+    assert!(
+        output.contains(&format!("timeout_seconds {}", i64::MAX)),
+        "{output}"
+    );
+    assert!(
+        !case.child.pidfile.exists(),
+        "the command started: {output}"
+    );
+}
+
 /// One run of `team-notes@1` whose `note.record` is bound to a script.
 struct Case {
     /// First, so it is dropped (and a child still running killed) before `dir` removes the pid
@@ -119,8 +136,14 @@ impl Case {
         }
     }
 
-    /// Runs the intent to its one step and returns what the run printed.
+    /// Runs the intent to its one step under a one-second timeout and returns what the run
+    /// printed.
     fn run(&self) -> String {
+        self.run_with(1)
+    }
+
+    /// Runs the intent to its one step under `timeout_seconds` and returns what the run printed.
+    fn run_with(&self, timeout_seconds: i64) -> String {
         let governor = CanonGovernor::new(MemoryCaseStore::default())
             .with_catalog(&self.catalog)
             .unwrap();
@@ -143,7 +166,7 @@ impl Case {
             test_paths: b10x_loom_intake_slice::test_paths::TestPaths::default(),
             bindings: Some(ActionBindings {
                 protocol: NAME.into(),
-                timeout_seconds: Some(1),
+                timeout_seconds: Some(timeout_seconds),
                 unconfined_bindings: Some(true),
                 bindings: vec![ActionBinding {
                     action: "note.record".into(),

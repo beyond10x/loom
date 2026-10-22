@@ -508,6 +508,45 @@ fn a_test_command_past_its_timeout_is_killed_and_fails() {
     assert_test_result(&held[0], "fail", &fixture.head());
 }
 
+/// A test command whose timeout is too large for the clock is refused naming the timeout, with no
+/// panic, before it starts: no process, no observation and no evidence
+/// (`story:checked-timeout-deadlines`).
+#[test]
+fn a_test_command_timeout_too_large_for_the_clock_is_refused_before_it_starts() {
+    let fixture = Fixture::new();
+    let governor = CanonGovernor::new(MemoryCaseStore::default());
+    let case = case::open(
+        &governor,
+        PICK,
+        INTENT,
+        fixture.workspace(),
+        &b10x_loom_intake_slice::case::RUN_DEFAULTS,
+    )
+    .expect("the case opens");
+    let marker = fixture.workspace().join("started");
+    let executor = LocalExecutor::new(
+        &governor,
+        case.clone(),
+        fixture.workspace(),
+        TestCommand::new("touch", [marker.as_os_str()]).with_timeout(Duration::MAX),
+    )
+    .with_runner(std::sync::Arc::new(
+        b10x_loom_intake_slice::executor::UnconfinedRunner,
+    ));
+    let before = governor.observations().len();
+
+    match executor.execute(&proposal("tests.run", &json!({}))) {
+        Err(ExecuteError::Confinement(error)) => assert!(
+            error.detail.contains(&format!("{:?}", Duration::MAX)),
+            "the refusal names the timeout: {error}"
+        ),
+        other => panic!("the test command is refused: {other:?}"),
+    }
+    assert!(!marker.exists(), "the test command started");
+    assert_eq!(governor.observations().len(), before);
+    assert!(evidence(&governor, &case).is_empty());
+}
+
 /// A test command's output reaches the report as its tail only: `seq 1 200000` prints about 1.3 MB.
 #[test]
 fn a_test_commands_output_is_kept_as_its_tail() {
