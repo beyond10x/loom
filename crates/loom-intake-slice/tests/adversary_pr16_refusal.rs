@@ -11,6 +11,7 @@
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -153,14 +154,20 @@ struct Workspace {
     root: PathBuf,
 }
 
+/// Numbers each workspace: macOS reads the clock in microseconds, so two tests can read one instant.
+static WORKSPACES: AtomicU64 = AtomicU64::new(0);
+
 impl Workspace {
     fn new(contents: &str) -> Self {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-            .join(format!("adversary-pr16-run-{}-{nanos}", std::process::id()));
+        let n = WORKSPACES.fetch_add(1, Ordering::Relaxed);
+        let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+            "adversary-pr16-run-{}-{nanos}-{n}",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&root).unwrap();
         let fixture = Self { root };
         fixture.git(&["init", "--quiet", "--initial-branch=main"]);

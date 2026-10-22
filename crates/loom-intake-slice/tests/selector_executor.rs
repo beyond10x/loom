@@ -25,6 +25,7 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use b10x_loom_commission::model::json as cjson;
@@ -993,14 +994,20 @@ struct Fixture {
     outside: PathBuf,
 }
 
+/// Numbers each fixture: macOS reads the clock in microseconds, so two tests can read one instant.
+static FIXTURES: AtomicU64 = AtomicU64::new(0);
+
 impl Fixture {
     fn new() -> Self {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|elapsed| elapsed.as_nanos())
             .unwrap_or_default();
-        let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-            .join(format!("selector-executor-{}-{nanos}", std::process::id()));
+        let n = FIXTURES.fetch_add(1, Ordering::Relaxed);
+        let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+            "selector-executor-{}-{nanos}-{n}",
+            std::process::id()
+        ));
         let workspace = root.join("workspace");
         let outside = root.join("outside");
         std::fs::create_dir_all(&workspace).expect("create the workspace");

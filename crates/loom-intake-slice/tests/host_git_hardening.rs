@@ -30,7 +30,11 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Numbers each workspace: macOS reads the clock in microseconds, so two tests can read one instant.
+static WORKSPACES: AtomicU64 = AtomicU64::new(0);
 
 use b10x_loom_commission::model::json as cjson;
 use b10x_loom_commission::model::responsibility::{
@@ -703,8 +707,11 @@ impl Fixture {
             .duration_since(UNIX_EPOCH)
             .map(|elapsed| elapsed.as_nanos())
             .unwrap_or_default();
-        let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-            .join(format!("host-git-hardening-{}-{nanos}", std::process::id()));
+        let n = WORKSPACES.fetch_add(1, Ordering::Relaxed);
+        let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+            "host-git-hardening-{}-{nanos}-{n}",
+            std::process::id()
+        ));
         let workspace = root.join("workspace");
         let markers = root.join("markers");
         std::fs::create_dir_all(&workspace).expect("create the workspace");
