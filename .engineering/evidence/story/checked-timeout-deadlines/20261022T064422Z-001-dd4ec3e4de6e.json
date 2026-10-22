@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-22T06:44:22Z",
+  "actor": "human:timo",
+  "artifact": "story:checked-timeout-deadlines",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "security review, 7 cases green at 1b9ba9cb",
+    "reference": "1b9ba9cb",
+    "review": "review-result:w20261022w2-review",
+    "outcome": "no-op"
+  }
+}

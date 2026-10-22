@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-22T06:44:22Z",
+  "actor": "human:timo",
+  "artifact": "story:run-record-names-agent-sessions",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "adversary at 502cff7a; fixes at 56ec2cb4",
+    "reference": "56ec2cb4",
+    "review": "review-result:w20261022w2-review",
+    "outcome": "fixed"
+  }
+}

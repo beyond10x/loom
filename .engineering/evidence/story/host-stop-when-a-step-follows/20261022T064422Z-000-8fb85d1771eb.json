@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-22T06:44:22Z",
+  "actor": "human:timo",
+  "artifact": "story:host-stop-when-a-step-follows",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "full gate on 9fc590f2 under ESS 0.67.0 (task check through b10x-build-slot, task plan, task website): task check exit 0, cargo test 1868 passed, 0 failed, 10 ignored; task plan exit 0; task website exit 0",
+    "reference": "~/.cache/loom-w20261022w2-gate/check.log"
+  }
+}

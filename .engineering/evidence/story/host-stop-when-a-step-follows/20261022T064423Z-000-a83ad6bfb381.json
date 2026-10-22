@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-22T06:44:23Z",
+  "actor": "human:timo",
+  "artifact": "story:host-stop-when-a-step-follows",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "adversary at 96aeed88; fix at 77acf60a",
+    "reference": "77acf60a",
+    "review": "review-result:w20261022w2-review",
+    "outcome": "fixed"
+  }
+}
