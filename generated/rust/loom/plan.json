@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "bc642d94f69cbdf95d14cb3073a6e846e7b335b8f96633ed6adcced128ea5a81",
-    "contract_digest": "c07e0b81375fb91ac34301173b7fefb2d8b8934d257db5f1db8bf32a80e2227f"
+    "source_digest": "9b76779bb7e5cb277fd52c0e808b487deb03186a32014c60f763a42ea252d6d7",
+    "contract_digest": "c128491adaccef8b19d18dc099b9aa51980b7a9464aa60dfa26edb7ad65fbd15"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -600,6 +600,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.session.CallDecision",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.session.ChangedFile",
       "disposition": {
         "disposition": "generated"
@@ -608,6 +615,13 @@
     {
       "kind": "domain_type",
       "source": "loom.session.CommissionId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.session.DecidedBy",
       "disposition": {
         "disposition": "generated"
       }
@@ -629,6 +643,13 @@
     {
       "kind": "domain_type",
       "source": "loom.session.SessionKind",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.session.ToolDecision",
       "disposition": {
         "disposition": "generated"
       }

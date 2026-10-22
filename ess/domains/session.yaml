@@ -50,6 +50,42 @@ types:
       - name: content
         type: Optional<String>
 
+  # story:tool-decisions-read-back (ADR 0104 points 2-3): metaharness decides each tool call of a
+  # session and records it; Loom decides none and reads them back after the session, from the
+  # trace-ir/1 document of the events metaharness delivered. What was decided for one call, as
+  # metaharness 0.13.0's `tool.decided` names it (`metaharness-protocol` `command.rs` Decision):
+  # Allow lets it run, Deny refuses it, Replace runs it with other input, Abstain leaves it to the
+  # vendor's own permission pipeline.
+  - name: loom.session.CallDecision
+    kind: enum
+    variants: [Allow, Deny, Replace, Abstain]
+
+  # Who decided a call, as metaharness 0.13.0's `DecidedBy` names it (`event.rs`): the embedder
+  # answering `tool.decide`, the frame without a round trip, metaharness's own deadline, the
+  # adapter for a reason of its own, or observe mode, which allows every call.
+  - name: loom.session.DecidedBy
+    kind: enum
+    variants: [Embedder, Frame, Deadline, Adapter, Observe]
+
+  # One tool call's decision, in the order the record holds them: the call's id, the tool its
+  # `tool.requested` named (absent when the record names none), the decision, a denial's reason
+  # (absent for any other decision) and who decided it. A report of a session whose record holds
+  # no decision census says the decisions are unknown, never that there were none. It travels on
+  # the executor's report, never as evidence.
+  - name: loom.session.ToolDecision
+    kind: struct
+    fields:
+      - name: call_id
+        type: String
+      - name: tool
+        type: Optional<String>
+      - name: decision
+        type: loom.session.CallDecision
+      - name: reason
+        type: Optional<String>
+      - name: decided_by
+        type: loom.session.DecidedBy
+
 entities:
   # The session one AgentExecutor `run` call ran through metaharness (ADR 0098 point 2), for one
   # commission over one frontier. A session that fails proposes nothing and is no record: the
