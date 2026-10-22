@@ -1,0 +1,460 @@
+# An agent as data (story agent-domain): the typed form of one `loom.agent/1` document. Sources
+# read: the story's Outcome; the Kubernetes design's § 3 table (`loom-kubernetes.md`, D1), merged
+# with the SDK design's `AgentSpec` and `ToolPolicy` (`loom-sdk.md` § 3.2) as one domain
+# (`approval-record:loom-kubernetes-filing`, D1); `loom.plugin.PluginConfig` and
+# `loom.slack.SlackConfig`, whose field names a spec reuses where the meaning is the same, so a
+# spec lowers to a `PluginConfig` without translation.
+#
+# `commission.responsibility.Agent` is the worker an assignment names; an `AgentSpec` defines how
+# such an assigned agent runs and does not shadow it. ESS cannot name another system's type, so a
+# session's run budget and stop policy are declared here field for field as Commission declares
+# them (`RunBudget`, `ActionBudget`, `StopPolicy`, `LimitBreachStep`, `BreachStep`,
+# `BudgetLimit`), and convert one to one. A spec is a document a host reads: it has no lifecycle,
+# so the domain declares types only.
+domain: loom.agent
+
+summary: >-
+  An agent as data: one `loom.agent/1` document naming the agent and its brief, its models, the
+  harness session it may run (kind, run budget, stop policy, confinement and tool policy), its
+  outer and inner loop, the states an item is projected by, the bindings it reads and writes
+  through, its channel, write policy, capabilities, exposure, runtime and deployment.
+
+naming:
+  wire: agent
+  display: Agent
+
+types:
+  # The agent's id, stable across revisions of its spec.
+  - name: loom.agent.AgentId
+    kind: newtype
+    of: String
+
+  # Who the agent is: its id, a display name, and its brief, the standing text of every turn.
+  - name: loom.agent.AgentIdentity
+    kind: struct
+    fields:
+      - name: id
+        type: loom.agent.AgentId
+      - name: name
+        type: String
+      - name: brief
+        type: String
+
+  # What confines the children an agent starts. Q6 A: one value today, `none`; no confinement of
+  # the `connectors` child.
+  - name: loom.agent.ConfinementMode
+    kind: enum
+    variants: [none]
+
+  # Who decides a session's tool calls, as metaharness names the modes: `frame`, the adapter from
+  # the allowed set; `ask`, the embedder, one round trip per call; `observe`, every call allowed
+  # and recorded. Loom never answers a call itself.
+  - name: loom.agent.DecisionMode
+    kind: enum
+    variants: [frame, ask, observe]
+
+  # One network destination a session may reach: Substrate's aperture, its name, host, port and
+  # byte ceiling over both directions summed (absent, none).
+  - name: loom.agent.EgressAperture
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: host
+        type: String
+      - name: port
+        type: Integer
+      - name: max_bytes
+        type: Optional<Integer>
+
+  # What a session's harness may do: the tools allowed and denied by name, the egress apertures
+  # it may reach, and who decides each tool call. Set by the host, never per call.
+  - name: loom.agent.ToolPolicy
+    kind: struct
+    fields:
+      - name: allow
+        type: List<String>
+      - name: deny
+        type: List<String>
+      - name: egress
+        type: List<loom.agent.EgressAperture>
+      - name: decisions
+        type: loom.agent.DecisionMode
+
+  # The limits of one action of a run: commission.responsibility.ActionBudget, field for field.
+  - name: loom.agent.ActionBudget
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: max_trials
+        type: Optional<Integer>
+      - name: max_tokens_in
+        type: Optional<Integer>
+      - name: max_tokens_out
+        type: Optional<Integer>
+      - name: max_duration_ms
+        type: Optional<Integer>
+      - name: max_cost_micro_usd
+        type: Optional<Integer>
+
+  # The limits of one run: commission.responsibility.RunBudget, field for field.
+  - name: loom.agent.RunBudget
+    kind: struct
+    fields:
+      - name: max_steps
+        type: Optional<Integer>
+      - name: max_tokens_in
+        type: Optional<Integer>
+      - name: max_tokens_out
+        type: Optional<Integer>
+      - name: max_duration_ms
+        type: Optional<Integer>
+      - name: max_cost_micro_usd
+        type: Optional<Integer>
+      - name: max_tokens
+        type: Optional<Integer>
+      - name: deadline
+        type: Optional<Timestamp>
+      - name: per_action
+        type: List<loom.agent.ActionBudget>
+
+  # Which limit of a run or action budget: commission.responsibility.BudgetLimit, variant for
+  # variant.
+  - name: loom.agent.BudgetLimit
+    kind: enum
+    variants:
+      [MaxSteps, MaxTrials, MaxTokensIn, MaxTokensOut, MaxDurationMs, MaxCostMicroUsd, MaxTokens,
+       Deadline]
+
+  # What becomes of an executor step past a limit: commission.responsibility.BreachStep.
+  - name: loom.agent.BreachStep
+    kind: enum
+    variants: [DiscardStep, KeepStep]
+
+  # The choice for one limit: commission.responsibility.LimitBreachStep, field for field.
+  - name: loom.agent.LimitBreachStep
+    kind: struct
+    fields:
+      - name: limit
+        type: loom.agent.BudgetLimit
+      - name: step
+        type: loom.agent.BreachStep
+
+  # How a run stops: commission.responsibility.StopPolicy, field for field.
+  - name: loom.agent.StopPolicy
+    kind: struct
+    fields:
+      - name: approval_gate
+        type: Boolean
+      - name: idle_bound
+        type: Optional<Integer>
+      - name: on_breach
+        type: loom.agent.BreachStep
+      - name: breach_by_limit
+        type: List<loom.agent.LimitBreachStep>
+
+  # The harness session an agent runs, for an agent that runs one: the session's kind, its run
+  # budget and stop policy, what confines it, and its tool policy.
+  - name: loom.agent.SessionSpec
+    kind: struct
+    fields:
+      - name: kind
+        type: loom.session.SessionKind
+      - name: budget
+        type: loom.agent.RunBudget
+      - name: stop
+        type: loom.agent.StopPolicy
+      - name: confinement
+        type: loom.agent.ConfinementMode
+      - name: tools
+        type: loom.agent.ToolPolicy
+
+  # The outer loop, the poll: the seconds between two polls (`PluginConfig.poll_interval_seconds`),
+  # the bindings polled for items, the minutes an item must have aged before it is one
+  # (`SlackConfig.min_age_minutes`), and how far back a source never read before is read (absent,
+  # the plugin's default; `SlackConfig.lookback_minutes`).
+  - name: loom.agent.OuterLoop
+    kind: struct
+    fields:
+      - name: poll_interval_seconds
+        type: Integer
+      - name: sources
+        type: List<loom.datasource.SourceName>
+      - name: min_age_minutes
+        type: Integer
+      - name: lookback_minutes
+        type: Optional<Integer>
+
+  # The inner loop, one turn: its protocol by catalog reference (`name@major`), the steps and model
+  # requests a turn may take, and the classification threshold. Q9 C: absent, no classifier
+  # request is made and the spec has one state; present, the classifier's intent keys the states
+  # and an item below it is recorded unclassified (`PluginConfig.classify_threshold`).
+  - name: loom.agent.InnerLoop
+    kind: struct
+    fields:
+      - name: protocol
+        type: String
+      - name: step_budget
+        type: Integer
+      - name: model_budget
+        type: Integer
+      - name: classify_threshold
+        type: Optional<Decimal>
+
+  # Both loops of an agent.
+  - name: loom.agent.Loops
+    kind: struct
+    fields:
+      - name: outer
+        type: loom.agent.OuterLoop
+      - name: inner
+        type: loom.agent.InnerLoop
+
+  # When a state applies: the classified intent it handles.
+  - name: loom.agent.StateWhen
+    kind: struct
+    fields:
+      - name: intent
+        type: loom.plugin.Intent
+
+  # One state of the agent: its name, when it applies, and the actions and sources a turn in it
+  # may use, which lower to one `loom.plugin.Projection` field for field. An intent no state names
+  # gets no turn.
+  - name: loom.agent.AgentState
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: when
+        type: loom.agent.StateWhen
+      - name: actions
+        type: List<String>
+      - name: sources
+        type: List<loom.datasource.SourceName>
+
+  # A binding read and written through the Connectors command line: the fields of a
+  # `loom.datasource.DataSource`, with the same names, plus the write operation it may perform.
+  - name: loom.agent.ConnectorsBinding
+    kind: struct
+    fields:
+      - name: name
+        type: loom.datasource.SourceName
+      - name: adapter
+        type: loom.datasource.AdapterAlias
+      - name: connection
+        type: loom.datasource.ConnectionId
+      - name: list
+        type: Optional<loom.datasource.OperationId>
+      - name: search
+        type: Optional<loom.datasource.OperationId>
+      - name: get
+        type: Optional<loom.datasource.OperationId>
+      - name: write
+        type: Optional<loom.datasource.OperationId>
+
+  # A binding read over HTTP: its base URL, the paths it may request, the method, the environment
+  # variable holding a bearer token (absent, none), and the most bytes an answer may hold.
+  - name: loom.agent.HttpBinding
+    kind: struct
+    fields:
+      - name: name
+        type: loom.datasource.SourceName
+      - name: base_url
+        type: String
+      - name: allow_paths
+        type: List<String>
+      - name: method
+        type: String
+      - name: bearer_env
+        type: Optional<String>
+      - name: max_bytes
+        type: Integer
+
+  # One binding a source of the spec names. On the wire the tag is `kind` and the binding's fields
+  # sit beside it.
+  - name: loom.agent.Binding
+    kind: union
+    tag: kind
+    variants:
+      connectors: loom.agent.ConnectorsBinding
+      http: loom.agent.HttpBinding
+
+  # The channel items come from and replies go to: the binding, the only channel ids read or
+  # written, and the bot's user id (`SlackConfig.bot_user_id`).
+  - name: loom.agent.ChannelSpec
+    kind: struct
+    fields:
+      - name: binding
+        type: loom.datasource.SourceName
+      - name: allow
+        type: List<String>
+      - name: bot_user_id
+        type: String
+
+  # How a write is admitted: sent once admitted (`auto`), after a person's approval (`approval`),
+  # or never (`none`).
+  - name: loom.agent.WriteMode
+    kind: enum
+    variants: [auto, approval, none]
+
+  # The write policy: the mode, and the most writes an hour.
+  - name: loom.agent.WritesSpec
+    kind: struct
+    fields:
+      - name: mode
+        type: loom.agent.WriteMode
+      - name: max_per_hour
+        type: Integer
+
+  # The capabilities the agent's authority grants; every other is denied.
+  - name: loom.agent.PolicySpec
+    kind: struct
+    fields:
+      - name: capabilities
+        type: List<String>
+
+  # The card an A2A listener publishes: a name, a description and the skills it names.
+  - name: loom.agent.A2aCard
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: description
+        type: String
+      - name: skills
+        type: List<String>
+
+  # An A2A listener: its port, its path and its card.
+  - name: loom.agent.A2aExposure
+    kind: struct
+    fields:
+      - name: port
+        type: Integer
+      - name: path
+        type: String
+      - name: card
+        type: loom.agent.A2aCard
+
+  # What the agent exposes; absent, no listener.
+  - name: loom.agent.ExposeSpec
+    kind: struct
+    fields:
+      - name: a2a
+        type: Optional<loom.agent.A2aExposure>
+
+  # Where the agent runs: its state directory, the Connectors command line it reads and writes
+  # through, and what confines the children it starts.
+  - name: loom.agent.RuntimeSpec
+    kind: struct
+    fields:
+      - name: state_dir
+        type: String
+      - name: connectors
+        type: loom.datasource.ConnectorsCliConfig
+      - name: confinement
+        type: loom.agent.ConfinementMode
+
+  # One label of a Kubernetes selector.
+  - name: loom.agent.Label
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: value
+        type: String
+
+  # The resources a pod requests, as Kubernetes spells them.
+  - name: loom.agent.KubernetesResources
+    kind: struct
+    fields:
+      - name: cpu
+        type: String
+      - name: memory
+        type: String
+
+  # One destination the pod may reach: a host outside the cluster, or the pods a selector picks in
+  # a namespace, at a port.
+  - name: loom.agent.KubernetesEgress
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: host
+        type: Optional<String>
+      - name: namespace
+        type: Optional<String>
+      - name: selector
+        type: List<loom.agent.Label>
+      - name: port
+        type: Integer
+
+  # One source the pod may be reached from: a namespace, at a port.
+  - name: loom.agent.KubernetesIngress
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: from_namespace
+        type: String
+      - name: port
+        type: Integer
+
+  # A Kubernetes deployment of the agent, read only when it is projected, never when it is served.
+  - name: loom.agent.KubernetesDeploy
+    kind: struct
+    fields:
+      - name: namespace
+        type: String
+      - name: service_account
+        type: String
+      - name: image_repository
+        type: String
+      - name: resources
+        type: loom.agent.KubernetesResources
+      - name: egress
+        type: List<loom.agent.KubernetesEgress>
+      - name: ingress
+        type: List<loom.agent.KubernetesIngress>
+
+  # How the agent is deployed; absent, nowhere.
+  - name: loom.agent.DeploySpec
+    kind: struct
+    fields:
+      - name: kubernetes
+        type: Optional<loom.agent.KubernetesDeploy>
+
+  # One `loom.agent/1` document: its format (`loom.agent/1`), who the agent is, its models (a role
+  # it does not use is left out), the harness session it runs, its loops, states, bindings,
+  # channel, write policy, capabilities, exposure, runtime and deployment. Only the format, the
+  # agent and its models are required, so one type serves an agent a product runs as a session and
+  # an agent served from its spec; a section left out is absent and a list left out is empty.
+  - name: loom.agent.AgentSpec
+    kind: struct
+    fields:
+      - name: format
+        type: String
+      - name: agent
+        type: loom.agent.AgentIdentity
+      - name: model
+        type: loom.models.ModelsConfig
+      - name: session
+        type: Optional<loom.agent.SessionSpec>
+      - name: loops
+        type: Optional<loom.agent.Loops>
+      - name: states
+        type: List<loom.agent.AgentState>
+      - name: bindings
+        type: List<loom.agent.Binding>
+      - name: channel
+        type: Optional<loom.agent.ChannelSpec>
+      - name: writes
+        type: Optional<loom.agent.WritesSpec>
+      - name: policy
+        type: Optional<loom.agent.PolicySpec>
+      - name: expose
+        type: Optional<loom.agent.ExposeSpec>
+      - name: runtime
+        type: Optional<loom.agent.RuntimeSpec>
+      - name: deploy
+        type: Optional<loom.agent.DeploySpec>

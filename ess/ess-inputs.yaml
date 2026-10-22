@@ -13,4 +13,5 @@ specification:
   - domains/metering.yaml
   - domains/models.yaml
   - domains/session.yaml
+  - domains/agent.yaml
 scenarios: []

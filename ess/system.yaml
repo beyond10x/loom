@@ -19,3 +19,4 @@ domains:
   - loom.metering
   - loom.models
   - loom.session
+  - loom.agent
