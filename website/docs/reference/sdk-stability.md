@@ -72,7 +72,8 @@ implements it through.
 | `WorkflowRunStore` | `loom_sdk::loom::workflow::WorkflowRunStore` | Durable storage of a workflow run's record, so the run resumes after a restart |
 | `ArgumentGenerator` | `loom_sdk::loom::arguments::ArgumentGenerator` | Arguments for the selected action only |
 | `Briefing` | `loom_sdk::loom::model_selector::Briefing` | What `ModelSelector` and `ModelArguments` tell the model: the text every request carries, the standing instructions of a selection request and of an argument request, and each action's argument schema, a `loom_sdk::serde_json::Value`; the provided `send`, `select` and `arguments` make one request each, and a host overrides them to ask otherwise |
-| `LoopContext` | `loom_sdk::commission::runtime::LoopContext` | Ids, the time and the step budget, which no model supplies |
+| `LoopContext` | `loom_sdk::commission::runtime::LoopContext` | Ids, the time and the step budget, which no model supplies, and the event sink a run reports to (`events`, `NoEvents` by default) |
+| `EventSink` | `loom_sdk::commission::ports::events::EventSink` | Receiving every `RuntimeEvent` of a run as it happens: step started, action selected, proposed, authority decided, effect invoked, session closed and stopped; an event is never evidence and never changes the loop |
 | `TestRunner` | `loom_sdk::intake::slice::confinement::TestRunner` | Running the slice's test command in a workspace and reporting the confinement it observed applied, not the one it was asked for; the slice's `LocalExecutor` takes one through `with_runner`, and `loom_sdk::SubstrateRunner` is Loom's |
 
 `LoopContext` and `EffectPort` are also at the top (`loom_sdk::LoopContext`,
@@ -85,6 +86,7 @@ implements it through.
 |---|---|
 | `loom_sdk::run_until_blocked` | Drives a commission until it is blocked |
 | `loom_sdk::LoopEnd` | What `run_until_blocked` returns |
+| `loom_sdk::EventSink`, `loom_sdk::NoEvents` | The event port at the top, and the sink that receives nothing, `LoopContext::events`' default |
 | `loom_sdk::Loom` | The executor: proposes one action per frontier |
 | `loom_sdk::CanonGovernor` | The governor over a case store |
 | `loom_sdk::CompletionRule` | How the governor completes a case when several declared outcomes are legitimate at once (`CanonGovernor::with_completion_rule`): `ExactlyOne`, the default, or `FirstDeclared`, generated from `loom.governor` under `ess/` |

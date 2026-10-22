@@ -3,6 +3,7 @@
 pub mod authority;
 pub mod connector;
 pub mod effect;
+pub mod events;
 pub mod evidence;
 pub mod executor;
 pub mod governor;

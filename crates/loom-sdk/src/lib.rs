@@ -74,6 +74,9 @@ pub mod intake {
 }
 
 pub use b10x_loom_commission::ports::effect::EffectPort;
+/// The event port (`story:runtime-events`): a host's `LoopContext::events` sink receives every
+/// `RuntimeEvent` of a run as it happens; `NoEvents`, the default, receives none.
+pub use b10x_loom_commission::ports::events::{EventSink, NoEvents};
 pub use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked};
 /// A Loom workflow definition run as Commission's executor, and the effect port wrapper it reads
 /// (`loom_sdk::loom::workflow`); a host checks a definition with `workflow::load` against

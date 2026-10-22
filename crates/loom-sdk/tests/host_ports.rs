@@ -64,6 +64,7 @@ host_ports! {
     loom_sdk::loom::workflow::WorkflowRunStore => hosts::RunRecords;
     loom_sdk::loom::arguments::ArgumentGenerator => hosts::Arguments;
     loom_sdk::commission::runtime::LoopContext => hosts::Context;
+    loom_sdk::commission::ports::events::EventSink => hosts::Events;
 }
 
 /// One host type per port, each implemented through `loom_sdk` paths alone.
@@ -77,12 +78,13 @@ mod hosts {
         CommissionId, CompletionDetermination, ConnectorCredentialRef, EffectOutcome,
         ExecutorOutcome, Frontier, GovernorError, HoldSuspension, HoldSuspensionOutcome,
         Observation, ObservationData, ObservationId, ReleaseSuspension, ReleaseSuspensionOutcome,
-        SuspensionSnapshot, TakeSuspension, TakeSuspensionOutcome, Unit, commission_state,
-        frontier_state, observation_state,
+        RuntimeEvent, SuspensionSnapshot, TakeSuspension, TakeSuspensionOutcome, Unit,
+        commission_state, frontier_state, observation_state,
     };
     use loom_sdk::commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
     use loom_sdk::commission::ports::connector::ConnectorInvoker;
     use loom_sdk::commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
+    use loom_sdk::commission::ports::events::EventSink;
     use loom_sdk::commission::ports::evidence::{
         AttributedEvidence, EvidencePort, ObservationPort,
     };
@@ -396,6 +398,16 @@ mod hosts {
             unreachable!("{NEVER_CALLED}")
         }
     }
+
+    /// `Context` leaves `LoopContext::events` at its default, `NoEvents`; a host that wants the
+    /// events implements this sink and returns it there.
+    pub struct Events;
+
+    impl EventSink for Events {
+        fn emit(&mut self, _event: &RuntimeEvent) {
+            unreachable!("{NEVER_CALLED}")
+        }
+    }
 }
 
 /// One `use` per path of the page's control-plane table, read from
@@ -615,6 +627,7 @@ fn a_host_implements_every_port_through_loom_sdk_alone() {
         "WorkflowRunStore",
         "ArgumentGenerator",
         "LoopContext",
+        "EventSink",
     ]
     .into_iter()
     .collect();

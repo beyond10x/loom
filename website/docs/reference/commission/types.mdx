@@ -89,6 +89,20 @@ Tagged by `kind`.
 | `Suspended` | [`RunOutcomeSuspended`](#runoutcomesuspended) |
 | `Waiting` | [`RunOutcomeWaiting`](#runoutcomewaiting) |
 
+### RuntimeEvent
+
+Tagged by `kind`.
+
+| Variant | Payload |
+|---|---|
+| `ActionSelected` | [`RuntimeEventActionSelected`](#runtimeeventactionselected) |
+| `AuthorityDecided` | [`RuntimeEventAuthorityDecided`](#runtimeeventauthoritydecided) |
+| `EffectInvoked` | [`RuntimeEventEffectInvoked`](#runtimeeventeffectinvoked) |
+| `Proposed` | [`RuntimeEventProposed`](#runtimeeventproposed) |
+| `SessionClosed` | [`RuntimeEventSessionClosed`](#runtimeeventsessionclosed) |
+| `StepStarted` | [`RuntimeEventStepStarted`](#runtimeeventstepstarted) |
+| `Stopped` | [`RuntimeEventStopped`](#runtimeeventstopped) |
+
 ### SuspensionReason
 
 Tagged by `kind`.
@@ -391,6 +405,70 @@ Tagged by `kind`.
 | `action_request_ids` | list of [`ActionRequestId`](#actionrequestid) |
 | `reason` | [`SuspensionReason`](#suspensionreason) |
 
+### RuntimeEventActionSelected
+
+| Field | Type |
+|---|---|
+| `run_id` | [`RunId`](#runid) |
+| `action` | `string` |
+| `arguments` | [`ProposedActionArguments`](#proposedactionarguments) |
+
+### RuntimeEventAuthorityDecided
+
+| Field | Type |
+|---|---|
+| `run_id` | [`RunId`](#runid) |
+| `action_request_id` | [`ActionRequestId`](#actionrequestid) |
+| `capability` | `string` |
+| `verdict` | optional [`AuthorityVerdict`](#authorityverdict) |
+
+### RuntimeEventEffectInvoked
+
+| Field | Type |
+|---|---|
+| `run_id` | [`RunId`](#runid) |
+| `action_request_id` | [`ActionRequestId`](#actionrequestid) |
+| `action` | `string` |
+| `outcome` | [`EffectOutcome`](#effectoutcome) |
+
+### RuntimeEventProposed
+
+| Field | Type |
+|---|---|
+| `run_id` | [`RunId`](#runid) |
+| `action_request_id` | [`ActionRequestId`](#actionrequestid) |
+| `action` | `string` |
+| `arguments` | [`ProposedActionArguments`](#proposedactionarguments) |
+| `case_revision` | `integer` |
+| `answer` | [`RevalidationAnswer`](#revalidationanswer) |
+
+### RuntimeEventSessionClosed
+
+| Field | Type |
+|---|---|
+| `run_id` | [`RunId`](#runid) |
+| `step` | `integer` |
+| `transcript_digest` | optional `string` |
+| `summary` | optional `string` |
+| `usage` | optional [`ExecutorUsage`](#executorusage) |
+
+### RuntimeEventStepStarted
+
+| Field | Type |
+|---|---|
+| `run_id` | [`RunId`](#runid) |
+| `step` | `integer` |
+| `case_revision` | `integer` |
+| `frontier_id` | optional [`FrontierId`](#frontierid) |
+
+### RuntimeEventStopped
+
+| Field | Type |
+|---|---|
+| `run_id` | [`RunId`](#runid) |
+| `outcome` | optional [`RunOutcome`](#runoutcome) |
+| `failure` | optional `string` |
+
 ### StopPolicy
 
 | Field | Type |
@@ -427,6 +505,10 @@ Variants: `Read`, `Write`.
 ### GovernorError
 
 Variants: `UnknownCase`, `GovernorUnavailable`.
+
+### RevalidationAnswer
+
+Variants: `Admitted`, `NeedsAuthority`, `NotAdmitted`, `Stale`.
 
 ### Truth
 

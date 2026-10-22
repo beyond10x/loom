@@ -2,8 +2,8 @@
   "provenance": {
     "system": "commission",
     "specification_version": "v1",
-    "source_digest": "5f84120302f2f3604e350d72461697ad6d530ab67a430f0aa07faffcacd1995a",
-    "contract_digest": "e4a2c1dee573531d5c7d476800aab659b687feb3ecc3f1d021b07d8428a7663d"
+    "source_digest": "13cc0558175429879e963bf7c04bdfe9e35b2c66d61ec900197077546340ca2e",
+    "contract_digest": "08d3ce481bae0546b594ce01e47eee1e824d3a2be8bddc909791bd308f005d05"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -467,6 +467,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "commission.responsibility.RevalidationAnswer",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "commission.responsibility.Run.State",
       "disposition": {
         "disposition": "generated"
@@ -580,6 +587,62 @@
     {
       "kind": "domain_type",
       "source": "commission.responsibility.RunOutcomeWaiting",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "commission.responsibility.RuntimeEvent",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "commission.responsibility.RuntimeEventActionSelected",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "commission.responsibility.RuntimeEventAuthorityDecided",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "commission.responsibility.RuntimeEventEffectInvoked",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "commission.responsibility.RuntimeEventProposed",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "commission.responsibility.RuntimeEventSessionClosed",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "commission.responsibility.RuntimeEventStepStarted",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "commission.responsibility.RuntimeEventStopped",
       "disposition": {
         "disposition": "generated"
       }
