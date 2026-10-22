@@ -9,7 +9,10 @@
 //! required member that is missing, a value of the wrong type and an enum spelling the domain does
 //! not declare are refused the same way. An optional member may be absent or `null`; a list may
 //! be absent and is then empty. A decimal is a number or a string spelling one. `format` must be
-//! `loom.agent/1`.
+//! `loom.agent/1`. Text is never empty or blank, no value carries a YAML tag, a `bearer_env` is
+//! an environment variable name (never a token, and a refusal does not repeat it) and a port is
+//! 1 to 65535. A document holding more than [`MAX_FLOW_OPENERS`] `[` or `{` is refused before
+//! it is read.
 //!
 //! Decoding checks the shape only. Whether a spec can be served (a state naming an action its
 //! protocol lacks, a source no binding declares) is a later check's.
@@ -17,13 +20,16 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use models_config::datasource::{
+use serde_yaml_ng::Value;
+
+/// The types of other domains an [`AgentSpec`] holds, so a host builds one in code through this
+/// module alone.
+pub use models_config::datasource::{
     AdapterAlias, ConnectionId, ConnectorsCliConfig, OperationId, SourceName,
 };
-use models_config::plugin::Intent;
-use models_config::primitives::{Decimal, Timestamp};
-use models_config::session::SessionKind;
-use serde_yaml_ng::Value;
+pub use models_config::plugin::Intent;
+pub use models_config::primitives::{Decimal, Timestamp};
+pub use models_config::session::SessionKind;
 
 /// The generated types of the `loom.agent` domain (`ess/domains/agent.yaml`).
 pub use models_config::agent::{
@@ -71,10 +77,48 @@ pub fn parse(text: &str) -> Result<AgentSpec, AgentSpecError> {
     if u64::try_from(text.len()).map_or(true, |length| length > crate::models::MAX_BYTES) {
         return Err(AgentSpecError::new("the document exceeds its byte bound"));
     }
+    if flow_openers(text) > MAX_FLOW_OPENERS {
+        return Err(AgentSpecError::new(format!(
+            "the document opens more than {MAX_FLOW_OPENERS} flow collections"
+        )));
+    }
     crate::models::bound_aliases(text).map_err(|error| AgentSpecError::new(error.to_string()))?;
     let value: Value = serde_yaml_ng::from_str(text)
         .map_err(|error| AgentSpecError::new(format!("invalid YAML or JSON: {error}")))?;
+    untagged(&value, "")?;
     spec(&value)
+}
+
+/// How many `[` and `{` a document may hold. The YAML reader's cost grows with the square of its
+/// flow nesting, so a deeply nested document is refused before it is read. Every such byte
+/// counts, quoted or in a comment too, so nothing can hide an opener; a real spec holds a few
+/// dozen.
+pub const MAX_FLOW_OPENERS: usize = 4096;
+
+fn flow_openers(text: &str) -> usize {
+    text.bytes()
+        .filter(|byte| matches!(byte, b'[' | b'{'))
+        .count()
+}
+
+/// Refuses a YAML tag on any value: the domain declares none, and nothing is ignored.
+fn untagged(value: &Value, at: &str) -> Result<(), AgentSpecError> {
+    match value {
+        Value::Tagged(_) => Err(AgentSpecError::new(format!(
+            "`{}` carries a YAML tag",
+            if at.is_empty() { "the document" } else { at }
+        ))),
+        Value::Sequence(items) => items
+            .iter()
+            .enumerate()
+            .try_for_each(|(index, item)| untagged(item, &format!("{at}[{index}]"))),
+        Value::Mapping(mapping) => mapping.iter().try_for_each(|(key, item)| {
+            let name = key.as_str().map_or_else(|| "?".to_owned(), str::to_owned);
+            untagged(key, &join(at, &name))?;
+            untagged(item, &join(at, &name))
+        }),
+        _ => Ok(()),
+    }
 }
 
 /// The members of one mapping, every one declared.
@@ -173,10 +217,40 @@ fn join(at: &str, name: &str) -> String {
 }
 
 fn text(value: &Value, at: &str) -> Result<String, AgentSpecError> {
-    value
-        .as_str()
-        .map(str::to_owned)
-        .ok_or_else(|| AgentSpecError::new(format!("`{at}` is not text")))
+    match value.as_str() {
+        Some(text) if !text.trim().is_empty() => Ok(text.to_owned()),
+        Some(_) => Err(AgentSpecError::new(format!("`{at}` is empty"))),
+        None => Err(AgentSpecError::new(format!("`{at}` is not text"))),
+    }
+}
+
+/// The name of an environment variable, never its value: `[A-Za-z_][A-Za-z0-9_]*`. A refusal
+/// does not repeat the text, which may be a secret written in the wrong place.
+fn variable_name(value: &Value, at: &str) -> Result<String, AgentSpecError> {
+    let name = text(value, at)?;
+    let mut bytes = name.bytes();
+    let valid = bytes
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == b'_')
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_');
+    if valid {
+        Ok(name)
+    } else {
+        Err(AgentSpecError::new(format!(
+            "`{at}` is not an environment variable name"
+        )))
+    }
+}
+
+fn port(value: &Value, at: &str) -> Result<i64, AgentSpecError> {
+    let port = integer(value, at)?;
+    if (1..=65_535).contains(&port) {
+        Ok(port)
+    } else {
+        Err(AgentSpecError::new(format!(
+            "`{at}` is not a port from 1 to 65535"
+        )))
+    }
 }
 
 fn integer(value: &Value, at: &str) -> Result<i64, AgentSpecError> {
@@ -325,7 +399,7 @@ fn tool_policy(value: &Value, at: &str) -> Result<ToolPolicy, AgentSpecError> {
             Ok(EgressAperture {
                 name: members.get("name", text)?,
                 host: members.get("host", text)?,
-                port: members.get("port", integer)?,
+                port: members.get("port", port)?,
                 max_bytes: members.maybe("max_bytes", integer)?,
             })
         })?,
@@ -551,7 +625,7 @@ fn binding(value: &Value, at: &str) -> Result<Binding, AgentSpecError> {
                 base_url: members.get("base_url", text)?,
                 allow_paths: members.list("allow_paths", text)?,
                 method: members.get("method", text)?,
-                bearer_env: members.maybe("bearer_env", text)?,
+                bearer_env: members.maybe("bearer_env", variable_name)?,
                 max_bytes: members.get("max_bytes", integer)?,
             }))
         }
@@ -595,7 +669,7 @@ fn expose(value: &Value, at: &str) -> Result<ExposeSpec, AgentSpecError> {
         a2a: members.maybe("a2a", |value, at| {
             let members = Members::of(value, at, &["port", "path", "card"])?;
             Ok(A2aExposure {
-                port: members.get("port", integer)?,
+                port: members.get("port", port)?,
                 path: members.get("path", text)?,
                 card: members.get("card", |value, at| {
                     let members = Members::of(value, at, &["name", "description", "skills"])?;
@@ -679,7 +753,7 @@ fn kubernetes(value: &Value, at: &str) -> Result<KubernetesDeploy, AgentSpecErro
                         value: members.get("value", text)?,
                     })
                 })?,
-                port: members.get("port", integer)?,
+                port: members.get("port", port)?,
             })
         })?,
         ingress: members.list("ingress", |value, at| {
@@ -687,7 +761,7 @@ fn kubernetes(value: &Value, at: &str) -> Result<KubernetesDeploy, AgentSpecErro
             Ok(KubernetesIngress {
                 name: members.get("name", text)?,
                 from_namespace: members.get("from_namespace", text)?,
-                port: members.get("port", integer)?,
+                port: members.get("port", port)?,
             })
         })?,
     })

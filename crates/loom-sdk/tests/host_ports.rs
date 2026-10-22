@@ -468,9 +468,19 @@ mod models {
 #[allow(unused_imports)]
 mod agent {
     // agent paths: begin
+    use loom_sdk::agent::AdapterAlias;
     use loom_sdk::agent::AgentSpec;
     use loom_sdk::agent::AgentSpecError;
+    use loom_sdk::agent::ConnectionId;
+    use loom_sdk::agent::ConnectorsCliConfig;
+    use loom_sdk::agent::Decimal;
     use loom_sdk::agent::DecisionMode;
+    use loom_sdk::agent::Intent;
+    use loom_sdk::agent::MAX_FLOW_OPENERS;
+    use loom_sdk::agent::OperationId;
+    use loom_sdk::agent::SessionKind;
+    use loom_sdk::agent::SourceName;
+    use loom_sdk::agent::Timestamp;
     use loom_sdk::agent::ToolPolicy;
     use loom_sdk::agent::parse;
     // agent paths: end

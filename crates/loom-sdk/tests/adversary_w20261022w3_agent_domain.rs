@@ -60,24 +60,27 @@ fn run_budget_back(budget: commission::RunBudget) -> RunBudget {
         max_duration_ms,
         max_cost_micro_usd,
         max_tokens,
-        deadline: deadline.map(|instant| loom_sdk::session::model::primitives::Timestamp(instant.0)),
+        deadline: deadline
+            .map(|instant| loom_sdk::session::model::primitives::Timestamp(instant.0)),
         per_action: per_action
             .into_iter()
-            .map(|commission::ActionBudget {
-                      action,
-                      max_trials,
-                      max_tokens_in,
-                      max_tokens_out,
-                      max_duration_ms,
-                      max_cost_micro_usd,
-                  }| ActionBudget {
-                action,
-                max_trials,
-                max_tokens_in,
-                max_tokens_out,
-                max_duration_ms,
-                max_cost_micro_usd,
-            })
+            .map(
+                |commission::ActionBudget {
+                     action,
+                     max_trials,
+                     max_tokens_in,
+                     max_tokens_out,
+                     max_duration_ms,
+                     max_cost_micro_usd,
+                 }| ActionBudget {
+                    action,
+                    max_trials,
+                    max_tokens_in,
+                    max_tokens_out,
+                    max_duration_ms,
+                    max_cost_micro_usd,
+                },
+            )
             .collect(),
     }
 }
@@ -114,10 +117,12 @@ fn stop_policy(policy: StopPolicy) -> commission::StopPolicy {
         on_breach: breach_step(on_breach),
         breach_by_limit: breach_by_limit
             .into_iter()
-            .map(|LimitBreachStep { limit, step }| commission::LimitBreachStep {
-                limit: budget_limit(limit),
-                step: breach_step(step),
-            })
+            .map(
+                |LimitBreachStep { limit, step }| commission::LimitBreachStep {
+                    limit: budget_limit(limit),
+                    step: breach_step(step),
+                },
+            )
             .collect(),
     }
 }
@@ -208,14 +213,20 @@ fn adversary_every_decoded_budget_and_stop_policy_converts_one_to_one_to_commiss
         .iter()
         .enumerate()
         .map(|(at, limit)| {
-            let step = if at % 2 == 0 { "KeepStep" } else { "DiscardStep" };
+            let step = if at % 2 == 0 {
+                "KeepStep"
+            } else {
+                "DiscardStep"
+            };
             format!("{{limit: {limit}, step: {step}}}")
         })
         .collect::<Vec<_>>()
         .join(", ");
     let text = session(
         "{max_steps: 1, max_tokens_in: 2, max_tokens_out: 3, max_duration_ms: 4, max_cost_micro_usd: 5, max_tokens: 6, deadline: '2026-10-22T10:00:00Z', per_action: [{action: x, max_trials: 7, max_tokens_in: 8, max_tokens_out: 9, max_duration_ms: 10, max_cost_micro_usd: 11}]}",
-        &format!("{{approval_gate: false, idle_bound: 3, on_breach: KeepStep, breach_by_limit: [{breach}]}}"),
+        &format!(
+            "{{approval_gate: false, idle_bound: 3, on_breach: KeepStep, breach_by_limit: [{breach}]}}"
+        ),
     );
     let spec = parse(&text).unwrap_or_else(|error| panic!("{error}"));
     let session = spec.session.expect("a session");
@@ -288,7 +299,11 @@ fn adversary_an_unknown_member_is_refused_at_every_nesting_level() {
     ];
     for (extra, at) in cases {
         let refused = parse(&with(extra)).expect_err(at);
-        assert_eq!(refused.to_string(), format!("unknown member `{at}`"), "{extra}");
+        assert_eq!(
+            refused.to_string(),
+            format!("unknown member `{at}`"),
+            "{extra}"
+        );
     }
     // A binding member of the other kind is unknown to this one.
     let refused = parse(&with(
@@ -304,7 +319,9 @@ fn adversary_an_unknown_member_is_refused_at_every_nesting_level() {
 fn adversary_a_member_given_twice_is_refused() {
     let yaml = "format: loom.agent/1\nagent: {id: a, name: A, brief: b}\nmodel: {routes: routes.yaml, roles: []}\nwrites: {mode: none, max_per_hour: 0}\nwrites: {mode: auto, max_per_hour: 1000}\n";
     assert!(parse(yaml).is_err(), "a top-level member twice decodes");
-    let nested = with("runtime: {state_dir: a, state_dir: b, connectors: {program: p}, confinement: none}\n");
+    let nested = with(
+        "runtime: {state_dir: a, state_dir: b, connectors: {program: p}, confinement: none}\n",
+    );
     assert!(parse(&nested).is_err(), "a nested member twice decodes");
     let json = r#"{"format": "loom.agent/1", "agent": {"id": "a", "id": "b", "name": "A", "brief": "b"}, "model": {"routes": "r", "roles": []}}"#;
     assert!(parse(json).is_err(), "a JSON member twice decodes");
@@ -347,9 +364,7 @@ fn adversary_alias_expansion_past_its_bound_is_refused() {
 fn adversary_a_plain_alias_decodes_and_a_merge_key_is_refused() {
     let alias = with("states:\n  - &s {name: s, when: {intent: Ask}}\n  - *s\n");
     assert_eq!(parse(&alias).expect("an alias decodes").states.len(), 2);
-    let merge = with(
-        "states:\n  - &s {name: s, when: {intent: Ask}}\n  - {<<: *s, name: t}\n",
-    );
+    let merge = with("states:\n  - &s {name: s, when: {intent: Ask}}\n  - {<<: *s, name: t}\n");
     assert!(parse(&merge).is_err(), "a merge key decodes");
 }
 
@@ -373,7 +388,8 @@ fn adversary_a_custom_tag_on_a_value_is_refused() {
 
 #[test]
 fn adversary_a_key_that_is_not_text_is_refused() {
-    let refused = parse(&with("writes: {mode: auto, max_per_hour: 1, 7: x}\n")).expect_err("a number key");
+    let refused =
+        parse(&with("writes: {mode: auto, max_per_hour: 1, 7: x}\n")).expect_err("a number key");
     assert_eq!(refused.to_string(), "`writes` holds a key that is not text");
 }
 
@@ -397,7 +413,10 @@ fn adversary_every_enum_refuses_a_spelling_it_does_not_declare() {
     }
     // `confinement: none` must stay a text, not YAML's null: `~` and `null` are not `none`.
     assert!(
-        parse(&with("runtime: {state_dir: s, connectors: {program: p}, confinement: ~}\n")).is_err(),
+        parse(&with(
+            "runtime: {state_dir: s, connectors: {program: p}, confinement: ~}\n"
+        ))
+        .is_err(),
         "a null confinement decodes"
     );
 }
@@ -423,7 +442,10 @@ fn adversary_a_bearer_token_literal_where_a_variable_name_is_expected_is_refused
     let text = with(
         "bindings: [{kind: http, name: logs, base_url: 'https://logs.example', method: GET, max_bytes: 1, bearer_env: 'Bearer eyJhbGciOiJIUzI1NiJ9.e30.ZRrHA1JJJW8opsbCGfG_HACGpVUMN_a9IV7pAx_Zmeo'}]\n",
     );
-    assert!(parse(&text).is_err(), "a bearer token literal decodes as a variable name");
+    assert!(
+        parse(&text).is_err(),
+        "a bearer token literal decodes as a variable name"
+    );
 }
 
 // ---- integers out of their range ----
