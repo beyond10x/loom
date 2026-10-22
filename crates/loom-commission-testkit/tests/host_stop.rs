@@ -311,7 +311,7 @@ fn run(
 ) -> (LoopEnd, Generated<RunStore>) {
     run_on(
         name,
-        |case| governor(case),
+        governor,
         &StaticAuthorityProvider::new(),
         session,
         effects,
@@ -568,9 +568,16 @@ fn a_granted_request_the_host_stops_is_never_invoked() {
 
     assert_eq!(end.outcome, suspended_for(disk_low()));
     assert_eq!(session.calls(), 1, "the executor runs once, unasked");
-    assert_eq!(authority.requests().len(), 1, "the provider allows the request");
+    assert_eq!(
+        authority.requests().len(),
+        1,
+        "the provider allows the request"
+    );
     assert_eq!(effects.invoked(), 0, "the granted request is never invoked");
-    assert_eq!(context.asked, 1, "the host is asked once, before the effect");
+    assert_eq!(
+        context.asked, 1,
+        "the host is asked once, before the effect"
+    );
     assert_eq!(end.steps, 0, "no step is taken");
     assert_eq!(
         stored_state(&runs, &end.run_id),
@@ -600,7 +607,10 @@ fn a_frontier_admitting_an_action_without_a_grant_asks_the_host_before_the_execu
     assert_eq!(session.calls(), 0, "no executor is called");
     assert!(authority.asked().is_empty(), "no provider is asked");
     assert_eq!(effects.invoked(), 0, "nothing is performed");
-    assert_eq!(context.asked, 1, "the host is asked once, before the executor");
+    assert_eq!(
+        context.asked, 1,
+        "the host is asked once, before the executor"
+    );
     assert_eq!(stored_state(&runs, &end.run_id), Some(RunState::Suspended));
 }
 
@@ -635,7 +645,10 @@ fn a_host_asked_before_the_executor_is_not_asked_again_before_the_effect() {
     );
     assert_eq!(session.calls(), 1);
     assert_eq!(effects.invoked(), 1, "the granted request is invoked");
-    assert_eq!(context.asked, 1, "the host is asked once, before the executor");
+    assert_eq!(
+        context.asked, 1,
+        "the host is asked once, before the executor"
+    );
 }
 
 /// A suspension store under the test's own directory `name`, holding `commission`'s Suspension of

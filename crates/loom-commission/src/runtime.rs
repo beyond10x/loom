@@ -95,8 +95,11 @@
 //!    its action ([`EffectPort::performs`]), the run ends with `NoPerformableAction`, naming that
 //!    action alone and the open claims of the frontier the request was made on, as in 4, the
 //!    request recorded with its revalidation in [`LoopEnd::requests`] but not admitted, and the
-//!    port is never handed it. Otherwise the request is recorded as admitted and handed to
-//!    [`EffectPort::invoke`] once, as an [`AdmittedRequest`]. Its
+//!    port is never handed it. When the host's stop was not asked before this executor call (its
+//!    handed frontier admitting nothing without a grant), it is asked now, and a stop it names
+//!    suspends the Run for `HostStop` with nothing invoked (§ Run and action budgets). Otherwise
+//!    the request is recorded as admitted and handed to [`EffectPort::invoke`] once, as an
+//!    [`AdmittedRequest`]. Its
 //!    [`EffectOutcome`] is recorded ([`LoopEnd::effects`]) and delivered as one observation: id and
 //!    time from the context, source [`EFFECT_SOURCE`], subject `<case>@<request revision>`, payload
 //!    `outcome` (`Performed`, `Refused` or `Pending`), `action_request`, `action`, `arguments`, and
@@ -325,17 +328,27 @@
 //!
 //! A host stops a run for a reason only it can read, its active time less its own pauses or the
 //! free space of a disk (`story:host-stop-before-step`), through [`LoopContext::host_stop`]. It is
-//! asked exactly where the deadline is read before a step, right after the deadline and only when
-//! the deadline did not stop the run: before each executor call, before a pending request is
-//! invoked again (8b), and on a resume before the Suspension is taken and right before the held
-//! request is invoked. A stop it names ends the run as a passed deadline there does, the Run
-//! suspended for `SuspensionReason::HostStop`, carrying the host's `name` and `detail` unchanged:
-//! suspended, or `Waiting` while a request is pending; a stop before the take leaves the
-//! Suspension `Pending`, and one right before the invoke releases it and performs nothing. What
-//! stops a run without a step (the step budget and a kept breach, 0; `NoPerformableAction`, 4;
-//! the approval gate, 5) comes first, and the host is not asked then. It is never asked after an
-//! executor call. `None`, the default, never stops the run, so a context that does not implement
-//! it runs as before.
+//! asked where a step would follow the admissibility and authority checks
+//! (`story:host-stop-when-a-step-follows`), right after the deadline and only when the deadline did
+//! not stop the run: before an executor call whose handed frontier admits an action without a
+//! grant ([`admit`] answers it `Admissible`), before a pending request is invoked again (8b), and
+//! on a resume before the Suspension is taken and right before the held request is invoked. A
+//! frontier that admits no action without a grant (each action it lists needs a grant or is
+//! blocked, or it lists none) goes to the executor unasked, so the run ends as the authority or
+//! admissibility check says (`NeedsAuthority`, `NoAdmissibleAction`), never for the host's stop;
+//! a request that executor call's proposal is admitted to, the provider's allow included, is asked
+//! about once the case revision was read again and right before the effect is invoked (8), after
+//! its action's trial limit. A host asked before the call is not asked again before that effect.
+//! A stop it names ends the run as a passed deadline there does, the Run suspended for
+//! `SuspensionReason::HostStop`, carrying the host's `name` and `detail` unchanged: suspended, or
+//! `Waiting` while a request is pending; a stop right before an effect invokes nothing; a stop
+//! before the take leaves the Suspension `Pending`, and one right before the invoke releases it and
+//! performs nothing. What stops a run without a step (the step budget and a kept breach, 0;
+//! `NoPerformableAction`, 4; the approval gate, 5) comes first, and the host is not asked then. It
+//! is never asked after an effect was invoked, and no effect is invoked past a stop it names. A
+//! fan-out of reads (8a) is admitted only on a handed frontier that admits each read without a
+//! grant, so the host was asked before its executor call. `None`, the default, never stops the
+//! run, so a context that does not implement it runs as before.
 //!
 //! An executor call that reports what it spent ([`ExecutorStep`]'s `usage`, through
 //! [`AgentExecutor::run_with_usage`], `story:executor-reports-usage`: an executor that is not a
@@ -444,6 +457,7 @@
 use std::fmt;
 
 use crate::action_request::{request, revalidate};
+use crate::admission::admit;
 use crate::model::behaviour::RunStorage;
 use crate::model::json::Value;
 use crate::model::obligation::UnmetObligation;
@@ -456,7 +470,7 @@ use crate::model::responsibility::{
 };
 use crate::model::responsibility::{
     ActionNeedsAuthority, ActionNotAdmitted, ActionRequest, ActionRequestData, ActionRequestId,
-    ActionRequestStale, ActionStatus, AnyRun, AuthorityVerdict, CaseId, Commission,
+    ActionRequestStale, ActionStatus, Admission, AnyRun, AuthorityVerdict, CaseId, Commission,
     CompletionDetermination, EffectOutcome, ExecutorOutcome, ExecutorOutcomeProposedAction,
     ExecutorStep, ExecutorUsage, Frontier, FrontierAction, FrontierData, GovernorError,
     HoldSuspension, HoldSuspensionOutcome, HostStop, JudgeBudgetStop, JudgeBudgetStopOutcome,
@@ -527,8 +541,10 @@ pub trait LoopContext {
     }
     /// The host's own stop before a step, for a reason only the host can read (its active time
     /// less its own pauses, the free space of a disk), as the module documents
-    /// (`ess/commission/domains/responsibility.yaml`, `HostStop`). `None`, the default, never
-    /// stops the run.
+    /// (`ess/commission/domains/responsibility.yaml`, `HostStop`). It is asked only where a step
+    /// would follow the admissibility and authority checks: before an executor call whose
+    /// frontier admits an action without a grant, otherwise right before an admitted request's
+    /// effect is invoked. `None`, the default, never stops the run.
     fn host_stop(&mut self) -> Option<HostStop> {
         None
     }
@@ -1522,9 +1538,18 @@ where
         if let Some(reason) = stop {
             return budget_ended(runs, run_id, reason, None, track);
         }
-        // A deadline the trusted clock reads as reached, or else the host's own stop, stops the
-        // run before the executor runs.
-        if let Some(reason) = stopped_before_step(deadline, context) {
+        // A deadline the trusted clock reads as reached stops the run before the executor runs.
+        // The host's own stop does too, asked only when a step can follow this call without a
+        // grant: the handed frontier admits an action without one. Otherwise it is asked right
+        // before an effect this call's proposal is admitted to (8), and a frontier only a grant
+        // moves ends the run as the authority check says (`story:host-stop-when-a-step-follows`).
+        let host_asked = admits_without_grant(&handed);
+        let before = if host_asked {
+            stopped_before_step(deadline, context)
+        } else {
+            deadline_reached(deadline, context).map(SuspensionReason::RunBudget)
+        };
+        if let Some(reason) = before {
             return budget_ended(runs, run_id, reason, None, track);
         }
 
@@ -1677,6 +1702,13 @@ where
                     .and_then(|limits| trials_past(limits, &track, &[data.action.as_str()]))
                 {
                     let reason = SuspensionReason::RunBudget(breach);
+                    return budget_ended(runs, run_id, reason, None, track);
+                }
+                // The host not asked before this executor call, its frontier admitting nothing
+                // without a grant, is asked right before the effect: a stop suspends the Run for
+                // it, nothing invoked (`story:host-stop-when-a-step-follows`).
+                if !host_asked && let Some(stop) = context.host_stop() {
+                    let reason = SuspensionReason::HostStop(stop);
                     return budget_ended(runs, run_id, reason, None, track);
                 }
                 track.admitted.push(data.clone());
@@ -3389,6 +3421,14 @@ fn stopped_before_step<C: LoopContext + ?Sized>(
         return Some(SuspensionReason::RunBudget(breach));
     }
     context.host_stop().map(SuspensionReason::HostStop)
+}
+
+/// Whether `frontier` admits a listed action without a grant ([`admit`] answers it
+/// `Admissible`), so a step can follow an executor call on it without the provider's allow. The
+/// host's own stop is asked before the call only then (`story:host-stop-when-a-step-follows`).
+fn admits_without_grant(frontier: &Frontier<frontier_state::Issued>) -> bool {
+    listed_actions(frontier.data())
+        .any(|action| matches!(admit(frontier, action), Admission::Admissible(_)))
 }
 
 /// The trial limit of `budget` that handing requests for `actions` to the effect port would pass,
