@@ -7,7 +7,7 @@ title: ESS synthesis cannot reach a guard on an existing selection id
 relations:
 - blocks: story:refused-selection-stays-refused
 withholds: test_result
-revision: 1
+revision: 2
 ---
 ## Question
 
@@ -59,3 +59,14 @@ and the ESS gate refuses that change while synthesis refuses it. The test
 Runtime note for that story: `selection::select_action` replaces a selection held under the same
 id, and `Loom::prepare` stores a selection without checking the id. Ids come from a per-`Loom`
 counter; no path through `Loom::run` that reuses one is known.
+
+## ESS answer (2026-10-22)
+
+The ESS repository tracks the fix as `story:an-existence-outcome-passes-a-related-list-membership-guard`
+for ESS 0.70.0. The orchestrator wrote on 2026-10-22: "The blocker is the list-membership guard
+that is not in the catalogue (ess synthesize/existence.rs:1074), and it is not patchback's
+seeded-state cause."
+
+Until 0.70.0 is verified against this repository, the workaround stays: `SelectAction` declares no
+`selection-exists` guard, and `a_refused_selection_is_never_selected_or_admitted_again` stays
+ignored.
