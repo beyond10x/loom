@@ -91,6 +91,10 @@ pub use b10x_loom_intake_slice::confinement::{
 pub use b10x_loom_intake_slice::confinement::{
     ConfinementError, SubstrateRunner, TestExecution, TestRunner,
 };
+/// A host directory or file a [`ChildCommand`] reads where it names it
+/// ([`ChildCommand::with_read_only_root`], [`ChildCommand::with_read_only_file`]), and the
+/// projection of a read-only file in the confinement Substrate applied.
+pub use b10x_loom_intake_slice::confinement::{ReadOnlyFile, ReadOnlyMount};
 pub use b10x_loom_intake_slice::executor::UnconfinedRunner;
 pub use loom_governor::{
     CanonGovernor, CaseIndependence, CaseInputs, CaseStore, CompletionRule, MemoryCaseStore,

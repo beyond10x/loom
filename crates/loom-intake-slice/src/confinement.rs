@@ -16,7 +16,7 @@ use std::time::Duration;
 use crate::executor::TestCommand;
 pub use intake_model::confinement::{
     AppliedConfinement, Backend, ChildExit, ChildOutput, ChildStream, ConfinementProfile,
-    ConfinementRefusal, EnvironmentEntry, ToolchainRoot,
+    ConfinementRefusal, EnvironmentEntry, ReadOnlyFile, ToolchainRoot,
 };
 use sha2::{Digest as _, Sha256};
 /// Substrate's own declaration of the egress aperture a [`ChildCommand`] may reach: its name, the
@@ -25,10 +25,13 @@ use sha2::{Digest as _, Sha256};
 pub use substrate_host::EgressAperture;
 use substrate_host::{DispatchOutcome, Driver as _, ExecObservation, HostConfig, HostDriver};
 use substrate_wire::{
-    APERTURE_CA_BUNDLE_PATH, APERTURE_LOOPBACK_ADDRESS, ApertureMechanism, ApertureMode,
-    AppliedNetwork, CapabilityFacts, CaptureMode, ConfinementRequest, ExecExit, ExecLimits,
-    ExecRefusal, ExecSignalInput, ExecStartInput, ExecState, MAX_WORKSPACE_WRITABLE_SUBTREES,
-    PipeSessionStartInput, ReadOnlyRoot, SessionMode, Signal, WorkspaceAccess,
+    APERTURE_CA_BUNDLE_PATH, APERTURE_HOSTS_PATH, APERTURE_LOOPBACK_ADDRESS, ApertureMechanism,
+    ApertureMode, AppliedNetwork, CapabilityFacts, CaptureMode, ConfinementRequest,
+    EXEC_SCRATCH_MOUNT, EXECUTION_CAPSULE_MOUNT, ExecExit, ExecLimits, ExecRefusal,
+    ExecSignalInput, ExecStartInput, ExecState, MAX_PATH_DEPTH, MAX_READ_ONLY_FILE_COMPONENT_BYTES,
+    MAX_READ_ONLY_FILE_PATH_BYTES, MAX_READ_ONLY_FILES, MAX_READ_ONLY_ROOTS,
+    MAX_WORKSPACE_WRITABLE_SUBTREES, PipeSessionStartInput, RESERVED_MOUNTS, ReadOnlyRoot,
+    SessionMode, Signal, WorkspaceAccess, validate_read_only_files, validate_read_only_roots,
     validate_relative_path, validate_workspace_access,
 };
 /// Substrate's own wire types a host names a [`ChildCommand`] with.
@@ -217,7 +220,7 @@ struct OpenDriver {
     driver: Arc<HostDriver>,
     cgroup_root: PathBuf,
     egress: DriverEgress,
-    _state: tempfile::TempDir,
+    state: tempfile::TempDir,
 }
 
 /// The confined launches running in this process, by cgroup root, over every runner.
@@ -411,7 +414,7 @@ impl SubstrateRunner {
             driver,
             cgroup_root,
             egress: egress.clone(),
-            _state: state,
+            state,
         })
     }
 
@@ -443,6 +446,8 @@ impl SubstrateRunner {
         // Read once, here: the child trusts these bytes, whatever the path holds later.
         let ca_bundle = check_ca_bundle(child)?;
         let writable = check_writable(&child.writable)?;
+        let child = check_mounts(child, ca_bundle.as_ref())?;
+        let child = child.as_ref();
         let root = validate_workspace(&child.directory, &writable)?;
         let egress = DriverEgress {
             aperture: child.egress.clone(),
@@ -451,6 +456,7 @@ impl SubstrateRunner {
         let open = self.driver(&root, &egress)?;
         let workspace = workspace_name(&root)?;
         let machine = open.driver.machine();
+        check_driver_mounts(&open, child, &machine.facts)?;
         let launched = match child.stdin.as_deref() {
             None => Self::launch(&open, workspace, &child.input(workspace, machine.snapshot))?,
             Some(stdin) => {
@@ -491,6 +497,8 @@ impl SubstrateRunner {
         check_network(child.network, child.egress.as_ref())?;
         let ca_bundle = check_ca_bundle(child)?;
         let writable = check_writable(&child.writable)?;
+        let child = check_mounts(child, ca_bundle.as_ref())?;
+        let child = child.as_ref();
         let root = validate_workspace(&child.directory, &writable)?;
         let egress = DriverEgress {
             aperture: child.egress.clone(),
@@ -498,6 +506,7 @@ impl SubstrateRunner {
         };
         let open = self.driver(&root, &egress)?;
         let machine = open.driver.machine();
+        check_driver_mounts(&open, child, &machine.facts)?;
         check_pipe_sessions(&machine.facts)?;
         let workspace = workspace_name(&root)?;
         let session = child.session_input(workspace, machine.snapshot);
@@ -682,6 +691,7 @@ impl Prepared {
             &input.env.allow,
             egress,
             open.egress.ca_bundle.as_ref(),
+            &input.read_only_files,
         );
         let root_identity = open
             .driver
@@ -793,6 +803,7 @@ fn settle(
             .unwrap_or_default()
             .to_vec(),
         read_only_roots: roots_projection(&record.read_only_roots),
+        read_only_files: files_projection(&record.read_only_files),
     };
     let described = format!(
         "state {}, refusal {}, output complete {}",
@@ -941,6 +952,14 @@ impl TestRunner for SubstrateRunner {
 /// that aperture alone, every other guarantee kept. Substrate gives one run at most one aperture.
 /// A child reaching that host over TLS also names the certificate bundle it trusts there
 /// ([`ChildCommand::with_ca_bundle`]); without one it cannot verify the host's certificate.
+///
+/// Beside `/usr`, `/bin`, `/lib`, `/lib64`, `/proc`, `/dev`, a private `/tmp` and its workspace,
+/// a child sees only the host directories and files the host names, read-only, each at the mount
+/// the host names ([`ChildCommand::with_read_only_root`], [`ChildCommand::with_read_only_file`])
+/// or at its own host path ([`ChildCommand::at_host_path`]). [`ChildCommand::sandbox_path`] says
+/// where a host path is inside. The child always starts in `/workspace`, and Substrate 0.7.18
+/// offers no writable path outside the workspace: a directory outside it, such as a linked
+/// worktree's common git directory, can be given read-only only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChildCommand {
     program: String,
@@ -954,6 +973,17 @@ pub struct ChildCommand {
     ca_bundle: Option<PathBuf>,
     timeout: Duration,
     stdin: Option<Vec<u8>>,
+    read_only_roots: Vec<ReadOnlyMount>,
+    read_only_files: Vec<ReadOnlyMount>,
+    host_paths: Vec<PathBuf>,
+}
+
+/// A host directory or file a [`ChildCommand`] reads, and where the child sees it: its host path
+/// and its mount, both as the host named them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadOnlyMount {
+    pub host_path: PathBuf,
+    pub mount: PathBuf,
 }
 
 impl ChildCommand {
@@ -988,7 +1018,87 @@ impl ChildCommand {
             ca_bundle: None,
             timeout: Self::DEFAULT_TIMEOUT,
             stdin: None,
+            read_only_roots: Vec::new(),
+            read_only_files: Vec::new(),
+            host_paths: Vec::new(),
         }
+    }
+
+    /// At most this many read-only roots a child is given, the roots
+    /// [`ChildCommand::at_host_path`] names included: Substrate's bound.
+    pub const MAX_READ_ONLY_ROOTS: usize = MAX_READ_ONLY_ROOTS as usize;
+
+    /// At most this many read-only files a child is given, the files
+    /// [`ChildCommand::at_host_path`] names included: Substrate's bound.
+    pub const MAX_READ_ONLY_FILES: usize = MAX_READ_ONLY_FILES as usize;
+
+    /// The same child also reading the host directory `host_path`, and everything under it, at
+    /// `mount`, read-only. Bubblewrap binds the directory by its path when the child starts.
+    ///
+    /// Refused [`ConfinementRefusal::ScopeInvalid`] before anything starts or `target` is created,
+    /// naming the path:
+    ///
+    /// - a host path or mount that is not UTF-8, not absolute, or not canonical (a `.`, `..` or
+    ///   empty component, a trailing `/`, more than 64 components);
+    /// - a host path that does not exist, is no directory, or is reached through a symbolic link
+    ///   in any component;
+    /// - a mount on, under or containing one Substrate owns: `/`, `/usr`, `/bin`, `/lib`, `/lib64`,
+    ///   `/proc`, `/dev`, `/tmp`, `/workspace`, `/runtime`, `/scratch`, `/etc/hosts` and
+    ///   `/etc/ssl/certs/ca-certificates.crt`, so no mount shadows the workspace or the
+    ///   certificate bundle a child trusts;
+    /// - a mount equal to, under or containing another root's or file's mount (`/opt/a` and
+    ///   `/opt/ab` do not overlap);
+    /// - more than [`ChildCommand::MAX_READ_ONLY_ROOTS`] roots;
+    /// - a host path that is, holds or lies inside the workspace, or holds the certificate bundle
+    ///   the child names ([`ChildCommand::with_ca_bundle`]) or the directory the driver's private
+    ///   state is made in ([`std::env::temp_dir`]), and, once the driver opened, one that is,
+    ///   holds or lies inside that state directory.
+    ///
+    /// The applied confinement must name exactly the roots and files requested, or the result is
+    /// refused.
+    #[must_use]
+    pub fn with_read_only_root(
+        mut self,
+        host_path: impl Into<PathBuf>,
+        mount: impl Into<PathBuf>,
+    ) -> Self {
+        self.read_only_roots.push(ReadOnlyMount {
+            host_path: host_path.into(),
+            mount: mount.into(),
+        });
+        self
+    }
+
+    /// The same child also reading the host file `host_path`, alone, at `mount`, read-only.
+    /// Substrate opens the file without following a symbolic link in any component and binds what
+    /// it opened, so nothing else of its directory is visible. Refused as
+    /// [`ChildCommand::with_read_only_root`] refuses a root, with a regular file in place of a
+    /// directory, a path bounded at 4000 bytes and each component at 255, and at most
+    /// [`ChildCommand::MAX_READ_ONLY_FILES`] files; and refused
+    /// [`ConfinementRefusal::CapabilityUnserved`] on a driver that does not publish
+    /// `exec.read-only-files` (it proves its mechanism when it opens).
+    #[must_use]
+    pub fn with_read_only_file(
+        mut self,
+        host_path: impl Into<PathBuf>,
+        mount: impl Into<PathBuf>,
+    ) -> Self {
+        self.read_only_files.push(ReadOnlyMount {
+            host_path: host_path.into(),
+            mount: mount.into(),
+        });
+        self
+    }
+
+    /// The same child reading `host_path` read-only at that same path, so a host path in its
+    /// arguments or configuration resolves inside: a read-only root when it is a directory, a
+    /// read-only file when it is a regular file, decided on disk at each launch. `host_path`
+    /// must be canonical, as both are; anything else is refused as they refuse it, naming the
+    /// path, and so is a host path that is neither a directory nor a regular file.
+    #[must_use]
+    pub fn at_host_path(mut self, host_path: impl Into<PathBuf>) -> Self {
+        self.host_paths.push(host_path.into());
+        self
     }
 
     /// The same child, also writing under `path`, a directory of the workspace named relative to
@@ -1181,6 +1291,81 @@ impl ChildCommand {
         self.stdin.as_deref()
     }
 
+    /// The host directories the child reads at the mounts the host named, as named.
+    pub fn read_only_roots(&self) -> &[ReadOnlyMount] {
+        &self.read_only_roots
+    }
+
+    /// The host files the child reads at the mounts the host named, as named.
+    pub fn read_only_files(&self) -> &[ReadOnlyMount] {
+        &self.read_only_files
+    }
+
+    /// The host paths the child reads at their own path ([`ChildCommand::at_host_path`]), as
+    /// named.
+    pub fn host_paths(&self) -> &[PathBuf] {
+        &self.host_paths
+    }
+
+    /// Where the child sees the host path `path`: a path inside the workspace directory at
+    /// `/workspace/<relative>` (the child starts in `/workspace`), one inside a read-only root at
+    /// the same place under its mount, a read-only file at its mount, and a path given at its
+    /// own host path, or inside such a directory, at itself. Anything else is `None`: a relative
+    /// path, one with a `..` component, one that leads through a symbolic link, a path beneath a
+    /// file, and a path outside the workspace and every mount, one sharing only a prefix of a
+    /// root's text (`/a/bc` beside the root `/a/b`) included. A path not created yet maps as its
+    /// directory does.
+    ///
+    /// The answer holds for the disk as it was read here: a link put on the path later is the
+    /// launch's to refuse for a mount, and inside the workspace the child resolves its links
+    /// through its own mounts.
+    pub fn sandbox_path(&self, path: &Path) -> Option<PathBuf> {
+        if !path.is_absolute()
+            || path.to_str().is_none()
+            || path
+                .components()
+                .any(|part| matches!(part, Component::ParentDir | Component::CurDir))
+            || !no_link_on(path)
+        {
+            return None;
+        }
+        // The workspace as a launch adopts it: absolute, through no link, canonical.
+        if let Ok(workspace) = canonical_workspace(&self.directory)
+            && let Some(inside) = beneath(path, &workspace)
+        {
+            return Some(under(Path::new(SANDBOX_WORKSPACE), inside));
+        }
+        for root in &self.read_only_roots {
+            if is_canonical_text(&root.host_path)
+                && is_canonical_text(&root.mount)
+                && let Some(inside) = beneath(path, &root.host_path)
+            {
+                return Some(under(&root.mount, inside));
+            }
+        }
+        for file in &self.read_only_files {
+            if is_canonical_text(&file.host_path)
+                && is_canonical_text(&file.mount)
+                && path == file.host_path
+            {
+                return Some(file.mount.clone());
+            }
+        }
+        for host in &self.host_paths {
+            if !is_canonical_text(host) {
+                continue;
+            }
+            if path == host {
+                return Some(path.to_owned());
+            }
+            let directory = std::fs::symlink_metadata(host).is_ok_and(|meta| meta.is_dir());
+            if directory && beneath(path, host).is_some() {
+                return Some(path.to_owned());
+            }
+        }
+        None
+    }
+
     /// The child as a Substrate raw-pipe session: the same execution as [`ChildCommand::input`],
     /// not waited for at its start, recorded, with pipes, at most
     /// [`ChildCommand::MAX_INPUT_BYTES`] of input in frames of at most 64 KiB, and at most 16
@@ -1223,13 +1408,97 @@ impl ChildCommand {
             },
             scratch: None,
             measurements: Default::default(),
-            read_only_roots: Vec::new(),
-            read_only_files: Vec::new(),
+            // In the order named; `check_mounts` resolved every host path to a root or a file
+            // and refused a path that is not UTF-8 before a launch builds this.
+            read_only_roots: self
+                .read_only_roots
+                .iter()
+                .map(|root| ReadOnlyRoot {
+                    host_path: root.host_path.to_string_lossy().into_owned(),
+                    mount: root.mount.to_string_lossy().into_owned(),
+                })
+                .collect(),
+            read_only_files: self
+                .read_only_files
+                .iter()
+                .map(|file| substrate_wire::ReadOnlyFile {
+                    host_path: file.host_path.to_string_lossy().into_owned(),
+                    mount: file.mount.to_string_lossy().into_owned(),
+                })
+                .collect(),
             secret_slots: Vec::new(),
             capsule: None,
             lease_ttl_ms: None,
         }
     }
+}
+
+/// The workspace inside the sandbox: where Substrate mounts the workspace and starts the child.
+const SANDBOX_WORKSPACE: &str = "/workspace";
+
+/// `inside` under `mount`: `mount` itself for the empty path, never with a trailing `/`.
+fn under(mount: &Path, inside: &Path) -> PathBuf {
+    if inside.as_os_str().is_empty() {
+        mount.to_owned()
+    } else {
+        mount.join(inside)
+    }
+}
+
+/// `path` below `ancestor`, component by component, so `/a/bc` is not below `/a/b`: the empty
+/// path for `ancestor` itself, `None` for a path outside it.
+fn beneath<'a>(path: &'a Path, ancestor: &Path) -> Option<&'a Path> {
+    path.strip_prefix(ancestor).ok()
+}
+
+/// Whether no existing prefix of the absolute `path` is a symbolic link: a component not there
+/// (yet) ends the walk, and one that cannot be read is no answer.
+fn no_link_on(path: &Path) -> bool {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(meta) if meta.file_type().is_symlink() => return false,
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return true,
+            Err(_) => return false,
+        }
+    }
+    true
+}
+
+/// Whether `path` is UTF-8, absolute and canonical as Substrate's wire requires of a mount and a
+/// host path: no `.`, `..` or empty component, no trailing `/`, no NUL, between 1 and 64
+/// components.
+fn is_canonical_text(path: &Path) -> bool {
+    path.to_str()
+        .is_some_and(|text| canonical_text(text).is_ok())
+}
+
+/// Why the path `text` is not absolute and canonical as Substrate's wire requires, if it is not.
+fn canonical_text(text: &str) -> Result<(), &'static str> {
+    if !text.starts_with('/') {
+        return Err("is not absolute; name it by an absolute path");
+    }
+    if text.contains('\0') {
+        return Err("holds a NUL");
+    }
+    if text.contains("//") || (text.len() > 1 && text.ends_with('/')) {
+        return Err(
+            "is not canonical: it has an empty component or a trailing `/`; name it without them",
+        );
+    }
+    let components: Vec<&str> = text.split('/').skip(1).filter(|c| !c.is_empty()).collect();
+    if components.iter().any(|c| *c == "." || *c == "..") {
+        return Err("is not canonical: it has a `.` or `..` component; name it without them");
+    }
+    if components.is_empty() {
+        return Err("names the root `/`");
+    }
+    if components.len() > MAX_PATH_DEPTH {
+        return Err("is not canonical: it has more than the 64 components Substrate admits");
+    }
+    Ok(())
 }
 
 /// Refuse a program Substrate's `/usr/bin/env` would read as one of its own operands instead of
@@ -1669,6 +1938,410 @@ fn check_ca_bundle(child: &ChildCommand) -> Result<Option<CaBundle>, Confinement
     }))
 }
 
+/// Whether a read-only mount is a directory or a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MountKind {
+    Root,
+    File,
+}
+
+impl MountKind {
+    fn noun(self) -> &'static str {
+        match self {
+            Self::Root => "read-only root",
+            Self::File => "read-only file",
+        }
+    }
+}
+
+/// One read-only mount as a launch checks it: what it is (`None` for a host path given at its own
+/// path, until the disk says), its host path and its mount, both UTF-8.
+struct Mount<'a> {
+    kind: Option<MountKind>,
+    host: &'a str,
+    mount: &'a str,
+}
+
+impl Mount<'_> {
+    /// The mount as every refusal names it: its kind and its host path.
+    fn label(&self) -> String {
+        let noun = self.kind.map_or("host path", MountKind::noun);
+        format!("{noun} `{}`", self.host)
+    }
+}
+
+/// The mounts Substrate owns, which no read-only root or file may equal, lie under or contain:
+/// Substrate's reserved mounts, the execution capsule, the scratch directory, the hosts file and
+/// the certificate bundle path of an egress aperture.
+const OWNED_MOUNTS: [&str; 13] = [
+    RESERVED_MOUNTS[0],
+    RESERVED_MOUNTS[1],
+    RESERVED_MOUNTS[2],
+    RESERVED_MOUNTS[3],
+    RESERVED_MOUNTS[4],
+    RESERVED_MOUNTS[5],
+    RESERVED_MOUNTS[6],
+    RESERVED_MOUNTS[7],
+    RESERVED_MOUNTS[8],
+    EXECUTION_CAPSULE_MOUNT,
+    EXEC_SCRATCH_MOUNT,
+    APERTURE_HOSTS_PATH,
+    APERTURE_CA_BUNDLE_PATH,
+];
+
+/// Whether the path text `path` lies below `ancestor`, component by component: `/a/bc` is not
+/// below `/a/b`.
+fn text_beneath(path: &str, ancestor: &str) -> bool {
+    path.strip_prefix(ancestor)
+        .is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// Whether the path texts `a` and `b` are the same path or one lies below the other.
+fn text_overlaps(a: &str, b: &str) -> bool {
+    a == b || text_beneath(a, b) || text_beneath(b, a)
+}
+
+/// The workspace `root` named by a launch, absolute, through no symbolic link, canonical.
+fn canonical_workspace(root: &Path) -> Result<PathBuf, ConfinementError> {
+    let absolute = if root.is_absolute() {
+        root.to_owned()
+    } else {
+        std::env::current_dir().map_err(scope_error)?.join(root)
+    };
+    reject_links(&absolute)?;
+    absolute.canonicalize().map_err(scope_error)
+}
+
+/// Refuse, before anything starts or `target` is created, a read-only root or file the child
+/// cannot be given exactly as named ([`ChildCommand::with_read_only_root`],
+/// [`ChildCommand::with_read_only_file`], [`ChildCommand::at_host_path`]), naming the path, and
+/// return the child with each host path given at its own path resolved to a root or a file. A
+/// child naming none passes as it is, the disk untouched. In order:
+///
+/// 1. each host path and mount as text: UTF-8, absolute, canonical, a file's within Substrate's
+///    byte bounds; a mount on, under or containing one Substrate owns ([`OWNED_MOUNTS`]);
+/// 2. each host path on disk, every component read without following it: none a symbolic link,
+///    the path there, a directory for a root, a regular file for a file;
+/// 3. at most 4 roots and 16 files, Substrate's bounds;
+/// 4. no two mounts equal, and none under another;
+/// 5. no host path that holds the certificate bundle the child names ([`check_ca_bundle`]), as
+///    named or as it resolves, or the directory the driver's private state is made in;
+/// 6. no host path that is, holds or lies inside the workspace;
+/// 7. Substrate's own rules for the request's roots and files, which its driver applies again.
+///
+/// What remains between this check and the bind: Substrate checks a root's last component only
+/// and bubblewrap binds it by its path, so a directory renamed or replaced by a link along the
+/// path after this check is bound as it is then; a file is opened by Substrate without following
+/// any link and bound as opened, so only a regular file put in its place in that window is
+/// bound instead.
+fn check_mounts<'a>(
+    child: &'a ChildCommand,
+    ca_bundle: Option<&CaBundle>,
+) -> Result<std::borrow::Cow<'a, ChildCommand>, ConfinementError> {
+    if child.read_only_roots.is_empty()
+        && child.read_only_files.is_empty()
+        && child.host_paths.is_empty()
+    {
+        return Ok(std::borrow::Cow::Borrowed(child));
+    }
+    let utf8 = |noun: &str, path: &'a Path| {
+        path.to_str()
+            .ok_or_else(|| scope_error(format!("the {noun} {path:?} is not UTF-8")))
+    };
+    let mut mounts: Vec<Mount<'a>> = Vec::new();
+    for (kind, named) in child
+        .read_only_roots
+        .iter()
+        .map(|root| (MountKind::Root, root))
+        .chain(
+            child
+                .read_only_files
+                .iter()
+                .map(|file| (MountKind::File, file)),
+        )
+    {
+        let host = utf8(kind.noun(), named.host_path.as_path())?;
+        let mount = utf8(
+            &format!("mount of the {} `{host}`", kind.noun()),
+            named.mount.as_path(),
+        )?;
+        mounts.push(Mount {
+            kind: Some(kind),
+            host,
+            mount,
+        });
+    }
+    for host in &child.host_paths {
+        let host = utf8("host path", host.as_path())?;
+        mounts.push(Mount {
+            kind: None,
+            host,
+            mount: host,
+        });
+    }
+    // 1. Text. A mount Substrate owns is named as such before its text is judged, so `/` reads
+    // as Substrate's.
+    for mount in &mounts {
+        let label = mount.label();
+        canonical_text(mount.host).map_err(|why| scope_error(format!("the {label} {why}")))?;
+        if let Some(owned) = OWNED_MOUNTS.iter().find(|owned| {
+            mount.mount == **owned || (**owned != "/" && text_overlaps(mount.mount, owned))
+        }) {
+            return Err(scope_error(format!(
+                "the mount `{}` of the {label} is on, under or contains `{owned}`, which Substrate owns; mount it elsewhere, such as under `/opt`",
+                mount.mount
+            )));
+        }
+        canonical_text(mount.mount).map_err(|why| {
+            scope_error(format!("the mount `{}` of the {label} {why}", mount.mount))
+        })?;
+    }
+    // 2. Disk.
+    for mount in &mut mounts {
+        let metadata = host_on_disk(&mount.label(), Path::new(mount.host))?;
+        let kind = match mount.kind {
+            Some(kind) => kind,
+            None if metadata.is_dir() => MountKind::Root,
+            None if metadata.is_file() => MountKind::File,
+            None => {
+                return Err(scope_error(format!(
+                    "the {} is neither a directory nor a regular file (a socket, device or FIFO)",
+                    mount.label()
+                )));
+            }
+        };
+        match kind {
+            MountKind::Root if !metadata.is_dir() => {
+                return Err(scope_error(format!(
+                    "the {} is no directory (a file, socket, device or FIFO); name a file with ChildCommand::with_read_only_file",
+                    mount.label()
+                )));
+            }
+            MountKind::File if !metadata.is_file() => {
+                return Err(scope_error(format!(
+                    "the {} is no regular file (a directory, socket, device or FIFO); name a directory with ChildCommand::with_read_only_root",
+                    mount.label()
+                )));
+            }
+            _ => {}
+        }
+        mount.kind = Some(kind);
+    }
+    // 3. Bounds.
+    for mount in mounts
+        .iter()
+        .filter(|mount| mount.kind == Some(MountKind::File))
+    {
+        for (what, text) in [("host path", mount.host), ("mount", mount.mount)] {
+            if text.len() > MAX_READ_ONLY_FILE_PATH_BYTES
+                || text
+                    .split('/')
+                    .any(|part| part.len() > MAX_READ_ONLY_FILE_COMPONENT_BYTES)
+            {
+                return Err(scope_error(format!(
+                    "the {what} `{text}` of the {} passes Substrate's bounds for a read-only file: {MAX_READ_ONLY_FILE_PATH_BYTES} bytes, {MAX_READ_ONLY_FILE_COMPONENT_BYTES} per component",
+                    mount.label()
+                )));
+            }
+        }
+    }
+    for (kind, bound) in [
+        (MountKind::Root, ChildCommand::MAX_READ_ONLY_ROOTS),
+        (MountKind::File, ChildCommand::MAX_READ_ONLY_FILES),
+    ] {
+        if let Some(past) = mounts
+            .iter()
+            .filter(|mount| mount.kind == Some(kind))
+            .nth(bound)
+        {
+            return Err(scope_error(format!(
+                "the {} is one more than the {bound} {}s Substrate gives a child",
+                past.label(),
+                kind.noun()
+            )));
+        }
+    }
+    // 4. Mounts against each other.
+    for (index, mount) in mounts.iter().enumerate() {
+        for earlier in &mounts[..index] {
+            if mount.mount == earlier.mount {
+                return Err(scope_error(format!(
+                    "the mount `{}` is named twice, for the {} and the {}",
+                    mount.mount,
+                    earlier.label(),
+                    mount.label()
+                )));
+            }
+            if text_overlaps(mount.mount, earlier.mount) {
+                return Err(scope_error(format!(
+                    "the mounts `{}` of the {} and `{}` of the {} overlap: one lies under the other",
+                    earlier.mount,
+                    earlier.label(),
+                    mount.mount,
+                    mount.label()
+                )));
+            }
+        }
+    }
+    // 5. What a host path may not reach: the bundle the child trusts, and the driver's state.
+    if let Some(bundle) = ca_bundle {
+        let named = bundle.named.to_string_lossy().into_owned();
+        let resolved = bundle
+            .named
+            .canonicalize()
+            .ok()
+            .and_then(|path| path.to_str().map(str::to_owned));
+        for mount in &mounts {
+            if [Some(&named), resolved.as_ref()]
+                .into_iter()
+                .flatten()
+                .any(|bundle| bundle == mount.host || text_beneath(bundle, mount.host))
+            {
+                return Err(scope_error(format!(
+                    "the {} is or holds the certificate bundle `{named}` the child names; the child gets the bundle at {APERTURE_CA_BUNDLE_PATH}",
+                    mount.label()
+                )));
+            }
+        }
+    }
+    if let Some(temp) = std::env::temp_dir()
+        .canonicalize()
+        .ok()
+        .as_deref()
+        .and_then(Path::to_str)
+    {
+        for mount in &mounts {
+            if temp == mount.host || text_beneath(temp, mount.host) {
+                return Err(scope_error(format!(
+                    "the {} holds `{temp}`, where the Substrate driver keeps its private state; name a directory that does not hold it",
+                    mount.label()
+                )));
+            }
+        }
+    }
+    // 6. The workspace.
+    let workspace = canonical_workspace(&child.directory)?;
+    let workspace = workspace.to_string_lossy();
+    for mount in &mounts {
+        let label = mount.label();
+        if mount.host == workspace {
+            return Err(scope_error(format!(
+                "the {label} is the workspace; the child sees the workspace at {SANDBOX_WORKSPACE} already"
+            )));
+        }
+        if text_beneath(&workspace, mount.host) {
+            return Err(scope_error(format!(
+                "the {label} holds the workspace `{workspace}`; name a directory beside it"
+            )));
+        }
+        if text_beneath(mount.host, &workspace) {
+            return Err(scope_error(format!(
+                "the {label} lies inside the workspace `{workspace}`; the child sees it under {SANDBOX_WORKSPACE} already"
+            )));
+        }
+    }
+    // 7. Substrate's own rules, which its driver applies again.
+    let mut resolved = child.clone();
+    resolved.host_paths.clear();
+    for host in &child.host_paths {
+        let host = host.to_str().expect("checked as UTF-8 above");
+        let mount = ReadOnlyMount {
+            host_path: PathBuf::from(host),
+            mount: PathBuf::from(host),
+        };
+        let kind = mounts
+            .iter()
+            .find(|checked| checked.host == host && checked.mount == host)
+            .and_then(|checked| checked.kind);
+        match kind {
+            Some(MountKind::File) => resolved.read_only_files.push(mount),
+            _ => resolved.read_only_roots.push(mount),
+        }
+    }
+    let input = resolved.input("workspace", String::new());
+    validate_read_only_roots(&input.read_only_roots)
+        .and_then(|()| validate_read_only_files(&input.read_only_files, &input.read_only_roots))
+        .map_err(|e| {
+            scope_error(format!(
+                "the read-only roots and files are refused by Substrate: {e}"
+            ))
+        })?;
+    Ok(std::borrow::Cow::Owned(resolved))
+}
+
+/// The metadata of the host path `path`, named `label` in a refusal, read without following any
+/// of its components: refused when one is a symbolic link, when it does not exist, or when it
+/// cannot be read.
+fn host_on_disk(label: &str, path: &Path) -> Result<std::fs::Metadata, ConfinementError> {
+    let mut current = PathBuf::new();
+    let mut last = None;
+    for component in path.components() {
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(scope_error(if current == path {
+                    format!("the {label} is a symbolic link; name the path it leads to")
+                } else {
+                    format!(
+                        "the {label} passes through the symbolic link `{}`; name the path it leads to",
+                        current.display()
+                    )
+                }));
+            }
+            Ok(metadata) => last = Some(metadata),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(scope_error(format!("the {label} does not exist")));
+            }
+            Err(e) => return Err(scope_error(format!("the {label} cannot be read: {e}"))),
+        }
+    }
+    last.ok_or_else(|| scope_error(format!("the {label} names nothing")))
+}
+
+/// Refuse, once the driver for a launch opened and before anything starts, what only the driver
+/// decides: a read-only root or file that is, holds or lies inside the driver's private state
+/// directory (refused [`ConfinementRefusal::ScopeInvalid`]), and read-only files on a driver that
+/// does not publish `exec.read-only-files` (refused [`ConfinementRefusal::CapabilityUnserved`]).
+fn check_driver_mounts(
+    open: &OpenDriver,
+    child: &ChildCommand,
+    facts: &CapabilityFacts,
+) -> Result<(), ConfinementError> {
+    let state = open
+        .state
+        .path()
+        .canonicalize()
+        .unwrap_or_else(|_| open.state.path().to_owned());
+    for (kind, named) in child
+        .read_only_roots
+        .iter()
+        .map(|root| (MountKind::Root, root))
+        .chain(
+            child
+                .read_only_files
+                .iter()
+                .map(|file| (MountKind::File, file)),
+        )
+    {
+        let host = &named.host_path;
+        if host == &state || state.starts_with(host) || host.starts_with(&state) {
+            return Err(scope_error(format!(
+                "the {} `{}` is, holds or lies inside the Substrate driver's private state `{}`",
+                kind.noun(),
+                host.display(),
+                state.display()
+            )));
+        }
+    }
+    if !child.read_only_files.is_empty() && facts.exec_read_only_files.is_none() {
+        return Err(refuse(
+            ConfinementRefusal::CapabilityUnserved,
+            "Substrate does not serve read-only files on this machine: its mechanism did not prove itself when the driver opened",
+        ));
+    }
+    Ok(())
+}
+
 /// Accept Substrate's record of what it applied only when it is the confinement `input` required:
 /// its workspace access (exactly the writable paths requested, so a record reporting a wider or
 /// another writable set is refused), profile, read-only roots, read-only files and capability
@@ -1761,13 +2434,7 @@ fn enum_name(value: &impl serde::Serialize) -> String {
 /// Validate the workspace `root` and what a launch in it may write: `target`, created here, and the
 /// `writable` paths a host named ([`check_writable`]; empty for a test). Returns the canonical root.
 fn validate_workspace(root: &Path, writable: &[String]) -> Result<PathBuf, ConfinementError> {
-    let absolute = if root.is_absolute() {
-        root.to_owned()
-    } else {
-        std::env::current_dir().map_err(scope_error)?.join(root)
-    };
-    reject_links(&absolute)?;
-    let root = absolute.canonicalize().map_err(scope_error)?;
+    let root = canonical_workspace(root)?;
     let name = root
         .file_name()
         .and_then(|s| s.to_str())
@@ -2111,6 +2778,15 @@ fn roots_projection(roots: &[ReadOnlyRoot]) -> Vec<ToolchainRoot> {
         })
         .collect()
 }
+fn files_projection(files: &[substrate_wire::ReadOnlyFile]) -> Vec<ReadOnlyFile> {
+    files
+        .iter()
+        .map(|f| ReadOnlyFile {
+            host_path: f.host_path.clone(),
+            mount: f.mount.clone(),
+        })
+        .collect()
+}
 fn requested_profile(
     input: &ExecStartInput,
     egress: Option<&EgressAperture>,
@@ -2149,6 +2825,7 @@ fn profile_digest(
     inherited: &[BaselineEnvironment],
     egress: Option<&EgressAperture>,
     ca_bundle: Option<&CaBundle>,
+    read_only_files: &[substrate_wire::ReadOnlyFile],
 ) -> String {
     // Generated ESS model types deliberately have no serialization dependency.
     let mut json = serde_json::json!({ "backend":"substrate", "network":profile.network, "writable_scopes":profile.writable_scopes,
@@ -2170,6 +2847,14 @@ fn profile_digest(
     if let Some(bundle) = ca_bundle {
         json["ca_bundle"] = serde_json::json!({ "path":bundle.named.to_string_lossy(),
             "sha256":format!("{:x}", Sha256::digest(&bundle.bytes)) });
+    }
+    // The read-only files the child reads, each host path and mount, absent without one for the
+    // same reason: [`ConfinementProfile`] names roots only.
+    if !read_only_files.is_empty() {
+        json["read_only_files"] = read_only_files
+            .iter()
+            .map(|f| serde_json::json!({"host_path":f.host_path,"mount":f.mount}))
+            .collect();
     }
     format!("{:x}", Sha256::digest(json.to_string().as_bytes()))
 }
@@ -2361,8 +3046,8 @@ mod tests {
         let bare = ChildCommand::new("true", [] as [&str; 0], "/work/space");
         let plain = requested_profile(&bare.input("space", "snapshot".to_owned()), None);
         assert_ne!(
-            profile_digest(&profile, &[], None, None),
-            profile_digest(&plain, &[], None, None)
+            profile_digest(&profile, &[], None, None, &[]),
+            profile_digest(&plain, &[], None, None, &[])
         );
         let named = 63;
         let most = (0..named).fold(bare.clone(), |child, n| {
@@ -2599,6 +3284,7 @@ mod tests {
             profile: "workspace".to_owned(),
             writable_scopes: vec!["target".to_owned()],
             read_only_roots: Vec::new(),
+            read_only_files: Vec::new(),
         }
     }
 
@@ -3152,6 +3838,89 @@ mod tests {
         );
     }
 
+    /// The story's case, on the check every launch shares: a child's read-only roots and files go
+    /// to Substrate as named, a record naming exactly them is accepted and projected, and a record
+    /// naming none, another, or one more is refused, for a child run to its end and a live child
+    /// alike.
+    #[test]
+    fn a_record_naming_other_read_only_roots_is_refused() {
+        let root = |host: &str, mount: &str| substrate_wire::ReadOnlyRoot {
+            host_path: host.to_owned(),
+            mount: mount.to_owned(),
+        };
+        let file = |host: &str, mount: &str| substrate_wire::ReadOnlyFile {
+            host_path: host.to_owned(),
+            mount: mount.to_owned(),
+        };
+        let child = ChildCommand::new("true", [] as [&str; 0], "/work/space")
+            .with_read_only_root("/srv/tools", "/opt/tools")
+            .with_read_only_file("/srv/policy.toml", "/etc/loom/policy.toml");
+        let run = child.input("space", "snapshot".to_owned());
+        let live = child.session_input("space", "snapshot".to_owned()).exec;
+        for input in [&run, &live] {
+            assert_eq!(input.read_only_roots, [root("/srv/tools", "/opt/tools")]);
+            assert_eq!(
+                input.read_only_files,
+                [file("/srv/policy.toml", "/etc/loom/policy.toml")]
+            );
+            let exact = record_for(input, AppliedNetwork::None);
+            check_record(input, None, &exact).unwrap();
+            let others = [
+                (Vec::new(), exact.read_only_files.clone()),
+                (
+                    vec![root("/srv/other", "/opt/tools")],
+                    exact.read_only_files.clone(),
+                ),
+                (
+                    vec![root("/srv/tools", "/opt/other")],
+                    exact.read_only_files.clone(),
+                ),
+                (
+                    vec![
+                        root("/srv/tools", "/opt/tools"),
+                        root("/srv/more", "/opt/more"),
+                    ],
+                    exact.read_only_files.clone(),
+                ),
+                (exact.read_only_roots.clone(), Vec::new()),
+                (
+                    exact.read_only_roots.clone(),
+                    vec![file("/srv/other.toml", "/etc/loom/policy.toml")],
+                ),
+                (
+                    exact.read_only_roots.clone(),
+                    vec![file("/srv/policy.toml", "/etc/loom/other.toml")],
+                ),
+            ];
+            for (read_only_roots, read_only_files) in others {
+                let record = substrate_wire::AppliedConfinement {
+                    read_only_roots,
+                    read_only_files,
+                    ..exact.clone()
+                };
+                let error = check_record(input, None, &record).unwrap_err();
+                assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
+            }
+            let ending = live_ending(input, AppliedNetwork::None, ExecState::Exited, EXITED, None);
+            let settled = settle(input, None, "digest".to_owned(), ending).unwrap();
+            let result = live_result(settled, false).unwrap();
+            assert_eq!(
+                result.applied.read_only_roots,
+                [ToolchainRoot {
+                    host_path: "/srv/tools".to_owned(),
+                    mount: "/opt/tools".to_owned(),
+                }]
+            );
+            assert_eq!(
+                result.applied.read_only_files,
+                [ReadOnlyFile {
+                    host_path: "/srv/policy.toml".to_owned(),
+                    mount: "/etc/loom/policy.toml".to_owned(),
+                }]
+            );
+        }
+    }
+
     #[test]
     fn an_egress_aperture_naming_no_host_or_one_substrate_cannot_serve_is_refused() {
         check_network(NetworkMode::None, None).unwrap();
@@ -3329,8 +4098,8 @@ mod tests {
             profile.network
         );
         assert_eq!(applied_network_name(&AppliedNetwork::None), "none");
-        let digest = profile_digest(&profile, &[], Some(&model()), None);
-        assert_ne!(digest, profile_digest(&profile, &[], None, None));
+        let digest = profile_digest(&profile, &[], Some(&model()), None, &[]);
+        assert_ne!(digest, profile_digest(&profile, &[], None, None, &[]));
         for other in [
             EgressAperture {
                 host: "other.example.test".to_owned(),
@@ -3341,7 +4110,10 @@ mod tests {
                 ..model()
             },
         ] {
-            assert_ne!(digest, profile_digest(&profile, &[], Some(&other), None));
+            assert_ne!(
+                digest,
+                profile_digest(&profile, &[], Some(&other), None, &[])
+            );
         }
     }
 
@@ -3353,16 +4125,44 @@ mod tests {
         assert_eq!(profile.network, "none");
         assert_eq!(profile.writable_scopes, ["target"]);
         assert_ne!(
-            profile_digest(&profile, &[], None, None),
-            profile_digest(&profile, &[BaselineEnvironment::Path], None, None)
+            profile_digest(&profile, &[], None, None, &[]),
+            profile_digest(&profile, &[BaselineEnvironment::Path], None, None, &[])
         );
         // With no inherited name the digest is the one a test's profile always had.
         let before = serde_json::json!({ "backend":"substrate", "network":"none", "writable_scopes":["target"],
             "read_only_roots":[], "environment":[],
             "timeout_ms":300_000, "memory_bytes":8_589_934_592_i64, "processes":2048, "cpu_millis":3_600_000 });
         assert_eq!(
-            profile_digest(&profile, &[], None, None),
+            profile_digest(&profile, &[], None, None, &[]),
             format!("{:x}", Sha256::digest(before.to_string().as_bytes()))
+        );
+    }
+
+    #[test]
+    fn read_only_files_change_the_digest_and_their_absence_does_not() {
+        let child = ChildCommand::new("true", [] as [&str; 0], "/work/space")
+            .with_read_only_file("/srv/policy.toml", "/etc/loom/policy.toml");
+        let input = child.input("space", "snapshot".to_owned());
+        let profile = requested_profile(&input, None);
+        let digest = profile_digest(&profile, &[], None, None, &input.read_only_files);
+        assert_ne!(digest, profile_digest(&profile, &[], None, None, &[]));
+        for other in [
+            ("/srv/other.toml", "/etc/loom/policy.toml"),
+            ("/srv/policy.toml", "/etc/loom/other.toml"),
+        ] {
+            let other = [substrate_wire::ReadOnlyFile {
+                host_path: other.0.to_owned(),
+                mount: other.1.to_owned(),
+            }];
+            assert_ne!(digest, profile_digest(&profile, &[], None, None, &other));
+        }
+        // Roots are in the profile itself, so a root changes the digest with no file named.
+        let rooted = ChildCommand::new("true", [] as [&str; 0], "/work/space")
+            .with_read_only_root("/srv/tools", "/opt/tools")
+            .input("space", "snapshot".to_owned());
+        assert_ne!(
+            profile_digest(&requested_profile(&rooted, None), &[], None, None, &[]),
+            profile_digest(&profile, &[], None, None, &[])
         );
     }
 
@@ -3457,7 +4257,7 @@ mod tests {
             .input("space", "snapshot".to_owned());
         let profile = requested_profile(&input, Some(&model()));
         let digest = |bundle: Option<CaBundle>| {
-            profile_digest(&profile, &[], Some(&model()), bundle.as_ref())
+            profile_digest(&profile, &[], Some(&model()), bundle.as_ref(), &[])
         };
         let bare = digest(None);
         let first = digest(read_as("/anchors/first.pem", b"one"));
