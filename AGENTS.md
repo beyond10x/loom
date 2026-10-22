@@ -1062,6 +1062,10 @@ Every commit and push is `b10x-bot[bot]`'s through `b10x-gates bot`. Every other
 `gh` is read-only here. Loom is enrolled in common Gates (`shared-gates.yml`); its
 `common / Security and privacy` check scans every commit since the policy baseline, so a
 `/home/<name>/` path literal in any commit fails it and admits no exception.
+A pull request merges only once its head carries the required check `b10x-gates / local evidence`:
+run `b10x-gates --repository beyond10x/loom check --receipt <file>`, then `publish --receipt
+<file>`, in a tree at that head. The bot push scans every blob since the baseline, so a partial
+clone (`blob:none`) needs `git backfill` first.
 
 ## Releases
 

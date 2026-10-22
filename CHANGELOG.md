@@ -12,6 +12,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-10-22
+
 ### Added
 
 - `StopPolicy.breach_by_limit`: a `LimitBreachStep` keeps or discards a step per budget limit, `on_breach` for the rest (story:breach-choice-per-limit)
@@ -30,6 +32,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `TestExecution` gains `child_output`: the child's stdout and stderr apart, each flagged when cut (story:live-confined-child)
 - **Breaking:** `SuspensionReason` gains `HostStop`, a `HostStop { name, detail }`; an exhaustive match adds the arm (story:host-stop-before-step)
 - **Breaking:** `AppliedConfinement` gains `read_only_files` (`intake.confinement.ReadOnlyFile`); a struct literal sets it (story:child-read-only-roots-and-host-paths)
+- README, AGENTS.md and the site overview describe Loom as the agent runtime, `b10x-loom-sdk` its library
 
 ## [0.32.0] - 2026-10-21
 
@@ -928,7 +931,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.32.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.33.0...HEAD
+[0.33.0]: https://github.com/beyond10x/loom/releases/tag/0.33.0
 [0.32.0]: https://github.com/beyond10x/loom/releases/tag/0.32.0
 [0.31.0]: https://github.com/beyond10x/loom/releases/tag/0.31.0
 [0.30.0]: https://github.com/beyond10x/loom/releases/tag/0.30.0
