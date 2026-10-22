@@ -2,7 +2,8 @@
 //!
 //! The story's design says a stop that takes no step (`NoAdmissibleAction`, `AwaitingApproval`,
 //! `NoPerformableAction`) comes before the host's stop, and that the host is asked once per check
-//! and never after the run ended. These cases hold the host stop against the other stops of an
+//! and never after the run ended. `NoAdmissibleAction` is the exception: it is judged only after
+//! the executor call, so a host stop or a passed deadline comes first there. These cases hold the host stop against the other stops of an
 //! iteration (a kept breach, the approval gate, a frontier admitting nothing), against reads
 //! pending together, and against a resume the host stopped before the take.
 
@@ -336,13 +337,12 @@ fn run(
     (end, runs)
 }
 
-/// RED. The story's design (`.engineering/planning/story/host-stop-before-step.md`, § Design):
-/// "A stop that takes no step (`NoAdmissibleAction`, `AwaitingApproval`, `NoPerformableAction`)
-/// comes first, as it does for the deadline." A frontier admitting nothing ends the run
-/// `NoAdmissibleAction` when the host does not stop it; with the host's stop it must end the same
-/// way, the host not asked.
+/// A frontier admitting nothing ends the run `NoAdmissibleAction` only once the executor's outcome
+/// is derived (`crates/loom-commission/src/runtime.rs`), so the host, asked before the executor
+/// call, is asked first: without a stop the run ends `NoAdmissibleAction`; with one it is suspended
+/// for `HostStop`, the host asked once and the executor never called.
 #[test]
-fn adversary_a_frontier_admitting_nothing_ends_no_admissible_action_before_the_host_is_asked() {
+fn adversary_a_host_stop_comes_before_a_frontier_admitting_nothing() {
     let case = CaseId("case-adversary-h-nothing-admissible".to_owned());
     let blocked = || listing(&case, vec![listed(EVALUATE, ActionStatus::Blocked, None)]);
 
@@ -361,17 +361,17 @@ fn adversary_a_frontier_admitting_nothing_ends_no_admissible_action_before_the_h
     let mut context = Context::answering([Some(disk_low())]);
     let (end, _) = run(&case, &blocked(), &session, &effects, &mut context);
     assert_eq!(
-        (end.outcome, context.asked),
-        (RunOutcome::NoAdmissibleAction(Unit(true)), 0),
-        "a stop that takes no step comes first and the host is not asked"
+        (end.outcome, context.asked, session.calls()),
+        (suspended_for(SuspensionReason::HostStop(disk_low())), 1, 0),
+        "the host's stop, asked before the executor call, comes before a frontier admitting nothing"
     );
 }
 
-/// RED, and not this story's code: the story's design says the frontier admitting nothing comes
-/// first "as it does for the deadline". A deadline already passed, under a frontier that admits
-/// nothing, must then end the run `NoAdmissibleAction` too, the executor never called.
+/// A deadline already passed is read before the executor call, as the host's stop is, so under a
+/// frontier that admits nothing it suspends the run for `RunBudget` (`Deadline`), the executor
+/// never called and the host not asked.
 #[test]
-fn adversary_a_frontier_admitting_nothing_ends_no_admissible_action_before_a_passed_deadline() {
+fn adversary_a_passed_deadline_comes_before_a_frontier_admitting_nothing() {
     let case = CaseId("case-adversary-h-nothing-admissible-deadline".to_owned());
     let governor = listing(&case, vec![listed(EVALUATE, ActionStatus::Blocked, None)]);
     let session = Session::proposing(Proposing::One);
@@ -386,8 +386,17 @@ fn adversary_a_frontier_admitting_nothing_ends_no_admissible_action_before_a_pas
 
     assert_eq!(
         (end.outcome, session.calls(), context.asked),
-        (RunOutcome::NoAdmissibleAction(Unit(true)), 0, 0),
-        "the story says a frontier admitting nothing comes first, as it does for the deadline"
+        (
+            suspended_for(SuspensionReason::RunBudget(RunBudgetBreach {
+                action: None,
+                limit: BudgetLimit::Deadline,
+                max: 1_792_657_800,
+                charged: Some(1_792_659_600),
+            })),
+            0,
+            0
+        ),
+        "a passed deadline, read before the executor call, comes before a frontier admitting nothing"
     );
 }
 

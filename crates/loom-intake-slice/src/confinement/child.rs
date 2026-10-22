@@ -3,7 +3,7 @@
 
 use std::fmt;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use substrate_host::{
     Driver as _, DriverError, ExecObservation, HostDriver, PipeFrame, PipeStream,
@@ -12,7 +12,7 @@ use substrate_wire::{ExecSignalInput, ExecStartInput, PipeSessionStartInput, Sig
 
 use super::{
     AppliedConfinement, ChildExit, ChildOutput, ChildStream, ConfinementError, ConfinementRefusal,
-    DRAIN_MARGIN, Ending, FRAME_BYTES, OpenDriver, Prepared, READ_STEP, Running, dispatched,
+    Ending, FRAME_BYTES, OpenDriver, Prepared, READ_STEP, Running, dispatched, drain_deadline,
     is_terminal, live_result, observation_error, refuse, settle,
 };
 
@@ -112,9 +112,9 @@ impl From<DriverError> for ChildError {
 /// (its output, its timeout) running between calls; call them outside an async runtime, as
 /// `run_child` is. Its output must be read: a child whose 16 queued frames are not read for a
 /// second is ended by Substrate, and its result is refused naming
-/// `session.output-backpressure`. Dropped before it ended, it is killed; either way its
-/// execution is released from the driver and it stops counting as a launch under its cgroup
-/// root.
+/// `session.output-backpressure`. Dropped before it ended, inside an async runtime or not, it is
+/// killed; either way its execution is released from the driver and it stops counting as a
+/// launch under its cgroup root.
 pub struct ConfinedChild {
     open: Arc<OpenDriver>,
     id: String,
@@ -123,7 +123,7 @@ pub struct ConfinedChild {
     runtime: Option<tokio::runtime::Runtime>,
     signalled: bool,
     ended: bool,
-    deadline: Instant,
+    deadline: tokio::time::Instant,
     // Last: the count is released only once the child was killed and released.
     _running: Running,
 }
@@ -147,6 +147,7 @@ impl ConfinedChild {
         session: PipeSessionStartInput,
         timeout: Duration,
     ) -> Result<Self, ConfinementError> {
+        let deadline = drain_deadline(timeout)?;
         let Prepared {
             _running,
             digest,
@@ -166,7 +167,7 @@ impl ConfinedChild {
             runtime: Some(runtime),
             signalled: false,
             ended: false,
-            deadline: Instant::now() + timeout + DRAIN_MARGIN,
+            deadline,
             _running,
         };
         let started =
@@ -238,7 +239,7 @@ impl ConfinedChild {
     /// signal the host sent did. A child still running past its timeout and a margin is killed
     /// here, and so refused.
     pub fn wait(mut self) -> Result<ChildResult, ConfinementError> {
-        let deadline = tokio::time::Instant::from_std(self.deadline);
+        let deadline = self.deadline;
         let observed = self.block_on(|driver, id| async move {
             // Already closed, or a child that ended, is no reason not to wait for it.
             let _ = driver.close_pipe_session_input(id).await;
@@ -294,8 +295,19 @@ async fn terminal(driver: &HostDriver, id: &str) -> Result<ExecObservation, Conf
 
 impl Drop for ConfinedChild {
     fn drop(&mut self) {
-        if !self.ended {
-            let _ = self.block_on(terminal);
+        // A drop runs wherever its host drops the child, inside an async runtime too, where no
+        // runtime may be blocked on: the kill runs as a task on the child's own runtime, and this
+        // thread waits for it on a plain channel.
+        if !self.ended
+            && let Some(runtime) = &self.runtime
+        {
+            let (open, id) = (Arc::clone(&self.open), self.id.clone());
+            let (done, killed) = std::sync::mpsc::channel();
+            runtime.spawn(async move {
+                let _ = terminal(&open.driver, &id).await;
+                let _ = done.send(());
+            });
+            let _ = killed.recv();
         }
         self.open.driver.discard_superseded_exec(&self.id);
         if let Some(runtime) = self.runtime.take() {

@@ -569,7 +569,7 @@ impl SubstrateRunner {
             .enable_all()
             .build()
             .map_err(|e| refuse(ConfinementRefusal::BackendMissing, e))?;
-        let deadline = tokio::time::Instant::now() + timeout + DRAIN_MARGIN;
+        let deadline = drain_deadline(timeout)?;
         let observed = runtime.block_on(async {
             dispatched(
                 driver
@@ -650,6 +650,20 @@ impl SubstrateRunner {
 /// How long a child given standard input, or a live child being waited for, is read past its
 /// timeout before it is killed: Substrate ends it at its timeout itself.
 const DRAIN_MARGIN: Duration = Duration::from_secs(30);
+
+/// When a child given `timeout` and still running is killed: its timeout and [`DRAIN_MARGIN`]
+/// from now. A timeout past what the clock can hold is refused
+/// [`ConfinementRefusal::ScopeInvalid`] before the child starts, never a panic.
+fn drain_deadline(timeout: Duration) -> Result<tokio::time::Instant, ConfinementError> {
+    timeout
+        .checked_add(DRAIN_MARGIN)
+        .and_then(|after| tokio::time::Instant::now().checked_add(after))
+        .ok_or_else(|| {
+            scope_error(format!(
+                "a timeout of {timeout:?} is past what this host's clock can hold"
+            ))
+        })
+}
 /// The longest one read of a child's output waits, so a deadline is looked at again.
 const READ_STEP: Duration = Duration::from_secs(1);
 /// The largest frame of standard input Substrate takes in one write.

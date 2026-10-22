@@ -7,7 +7,7 @@ title: A host's own stop, read before every step, ends the run suspended for it
 summary: LoopContext host stop for takt's ActiveTime and DiskLow
 relations:
 - serves: vision:governed-autonomy
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-22T00:08:43Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-22T00:08:43Z", actor: "human:timo", revision: 4}
@@ -42,8 +42,9 @@ and any later host-only stop, and keeps disk and pause accounting out of Commiss
   asks it where it reads the deadline before a step, right after the deadline: before each
   executor call and before a pending request is invoked again. `Some` suspends the Run for
   `HostStop` and ends the run `Suspended`, or `Waiting` while a request is pending, as at any
-  budget stop. A stop that takes no step (`NoAdmissibleAction`, `AwaitingApproval`,
-  `NoPerformableAction`) comes first, as it does for the deadline.
+  budget stop. The step budget, a kept breach, `NoPerformableAction` and the approval gate come
+  first, as they do for the deadline. `NoAdmissibleAction` is judged only after an executor call,
+  so a host stop, like a passed deadline, comes before it (adversary, wave 2026-10-22-w1).
 - A resume (`resume_after_grant`) asks it where it reads the deadline: before the Suspension is
   taken (a stop takes nothing and leaves the Suspension `Pending`) and right before the request is
   invoked (a stop releases the Suspension and performs nothing).
