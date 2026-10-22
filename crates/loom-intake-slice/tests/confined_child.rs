@@ -1,7 +1,9 @@
 //! A child process the host names runs confined through Substrate (`SubstrateRunner::run_child`),
 //! with the test runner's guarantees: a missing guarantee is a typed refusal and nothing runs, the
 //! child's environment holds only what the host named, it writes only `target` and the workspace
-//! paths the host named, and the applied confinement comes back with the result.
+//! paths the host named, and the applied confinement comes back with the result. A child also runs
+//! live (`SubstrateRunner::spawn_child`): the host writes its standard input, reads its two
+//! streams as they arrive, signals it and waits for its end, under the same checks.
 //!
 //! The delegated cases need bubblewrap and a delegated cgroup v2 scope. Each starts its own test
 //! binary again under `systemd-run --user --scope -p Delegate=yes`, as `b10x-loom` starts itself,
@@ -24,8 +26,9 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use b10x_loom_intake_slice::confinement::{
-    Backend, ChildCommand, ConfinementError, ConfinementRefusal, EgressAperture, ExecEnvironment,
-    NetworkMode, SandboxProfile, SubstrateRunner, TestExecution, TestRunner as _,
+    Backend, ChildCommand, ChildError, ChildExit, ChildSignal, ChildStream, ConfinedChild,
+    ConfinementError, ConfinementRefusal, EgressAperture, ExecEnvironment, NetworkMode,
+    SandboxProfile, SubstrateRunner, TestExecution, TestRunner as _,
 };
 use b10x_loom_intake_slice::executor::TestCommand;
 use substrate_wire::{APERTURE_CA_BUNDLE_PATH, ApertureMechanism, AppliedNetwork};
@@ -1132,6 +1135,299 @@ fn a_bundle_swapped_for_a_link_after_it_was_named_is_never_followed() {
             );
         },
     );
+}
+
+/// Read `child`'s frames until both its streams closed, within 60 s: what each stream carried.
+fn read_to_end(child: &mut ConfinedChild) -> (Vec<u8>, Vec<u8>) {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "the child's streams closed within 60 s"
+        );
+        match child.read(Duration::from_secs(1)) {
+            Ok(Some(frame)) => match frame.stream {
+                ChildStream::Stdout => stdout.extend(frame.bytes),
+                ChildStream::Stderr => stderr.extend(frame.bytes),
+            },
+            Ok(None) => return (stdout, stderr),
+            Err(ChildError::ReadTimedOut) => {}
+            Err(error) => panic!("the read failed: {error}"),
+        }
+    }
+}
+
+/// Read `child`'s standard output until it holds `expected`, within 30 s; nothing arrives on its
+/// standard error meanwhile.
+fn read_stdout(child: &mut ConfinedChild, expected: &[u8]) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut stdout = Vec::new();
+    while stdout.len() < expected.len() {
+        assert!(
+            Instant::now() < deadline,
+            "{expected:?} came back within 30 s, read {stdout:?}"
+        );
+        match child.read(Duration::from_secs(1)) {
+            Ok(Some(frame)) => {
+                assert_eq!(frame.stream, ChildStream::Stdout, "{frame:?}");
+                stdout.extend(frame.bytes);
+            }
+            Ok(None) => panic!("the child's output closed after {stdout:?}"),
+            Err(ChildError::ReadTimedOut) => {}
+            Err(error) => panic!("the read failed: {error}"),
+        }
+    }
+    assert_eq!(stdout, expected);
+}
+
+/// The story's case: `cat` started live reads what the host writes to its standard input and
+/// writes it back, frame by frame, as it arrives; closing its standard input ends it with exit 0,
+/// and its result carries the confinement applied and both streams whole.
+#[test]
+fn a_live_child_echoes_what_it_is_written() {
+    delegated(
+        "a_live_child_echoes_what_it_is_written",
+        |runner, workspace| {
+            let mut child = runner
+                .spawn_child(&ChildCommand::new("cat", [] as [&str; 0], workspace))
+                .expect("cat starts live, confined");
+            child.write_stdin(b"first\n").unwrap();
+            read_stdout(&mut child, b"first\n");
+            child.write_stdin(b"second\n").unwrap();
+            read_stdout(&mut child, b"second\n");
+            child.close_stdin().unwrap();
+            assert_eq!(read_to_end(&mut child), (Vec::new(), Vec::new()));
+            let result = child.wait().expect("the child's result");
+            assert_eq!(
+                result.exit,
+                ChildExit {
+                    exit_code: Some(0),
+                    signal: None,
+                    timed_out: false
+                }
+            );
+            assert_eq!(result.output.stdout, b"first\nsecond\n");
+            assert!(result.output.stderr.is_empty());
+            assert!(!result.output.stdout_truncated && !result.output.stderr_truncated);
+            assert_eq!(result.applied.backend, Backend::Substrate);
+            assert_eq!(result.applied.network, "none");
+            assert_eq!(result.applied.writable_scopes, ["target"]);
+            assert_eq!(result.applied.profile_digest.len(), 64);
+            assert_eq!(result.driver_record.network, AppliedNetwork::None);
+            assert_eq!(result.driver_record.cgroup, result.applied.cgroup);
+        },
+    );
+}
+
+/// The story's case: a live child's standard output and standard error arrive as frames of their
+/// own stream, never merged, and come back apart in its result.
+#[test]
+fn a_live_child_keeps_its_streams_apart() {
+    delegated(
+        "a_live_child_keeps_its_streams_apart",
+        |runner, workspace| {
+            let mut child = runner
+                .spawn_child(&ChildCommand::new(
+                    "sh",
+                    [
+                        "-c",
+                        "printf out; printf err >&2; printf more; printf less >&2",
+                    ],
+                    workspace,
+                ))
+                .expect("the shell starts live");
+            assert_eq!(
+                read_to_end(&mut child),
+                (b"outmore".to_vec(), b"errless".to_vec())
+            );
+            let result = child.wait().expect("the child's result");
+            assert_eq!(result.exit.exit_code, Some(0));
+            assert_eq!(result.output.stdout, b"outmore");
+            assert_eq!(result.output.stderr, b"errless");
+        },
+    );
+}
+
+/// The story's case: a live child the host kills ends at once with signal 9, well before its
+/// timeout, and is a result.
+#[test]
+fn a_live_child_can_be_killed() {
+    delegated("a_live_child_can_be_killed", |runner, workspace| {
+        let mut child = runner
+            .spawn_child(&ChildCommand::new("sleep", ["600"], workspace))
+            .expect("sleep starts live");
+        let started = Instant::now();
+        child
+            .signal(ChildSignal::Kill)
+            .expect("the child is killed");
+        let result = child.wait().expect("a child the host killed is a result");
+        assert_eq!(
+            result.exit,
+            ChildExit {
+                exit_code: None,
+                signal: Some(9),
+                timed_out: false
+            }
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "killed in {:?}",
+            started.elapsed()
+        );
+    });
+}
+
+/// A live child is bounded by its timeout as a child run to its end is: past it, the child is
+/// ended and its result is marked timed out, with no exit status.
+#[test]
+fn a_live_child_is_ended_at_its_timeout() {
+    delegated(
+        "a_live_child_is_ended_at_its_timeout",
+        |runner, workspace| {
+            let started = Instant::now();
+            let child = runner
+                .spawn_child(
+                    &ChildCommand::new("sleep", ["600"], workspace)
+                        .with_timeout(Duration::from_millis(500)),
+                )
+                .expect("sleep starts live");
+            let result = child.wait().expect("a timed-out child is a result");
+            assert!(result.exit.timed_out, "{:?}", result.exit);
+            assert_eq!(result.exit.exit_code, None);
+            assert!(started.elapsed() < Duration::from_secs(30));
+        },
+    );
+}
+
+/// A live child dropped before it ended is killed: it never reaches what it would have done next,
+/// and the runner then opens a driver for another directory, which it refuses while a launch still
+/// runs under the same cgroup root.
+#[test]
+fn a_dropped_live_child_is_killed() {
+    delegated("a_dropped_live_child_is_killed", |runner, workspace| {
+        let started = workspace.join("target/started");
+        let child = runner
+            .spawn_child(&ChildCommand::new(
+                "sh",
+                ["-c", "touch target/started; sleep 2; touch target/survived"],
+                workspace,
+            ))
+            .expect("the shell starts live");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !started.exists() {
+            assert!(Instant::now() < deadline, "the child started within 30 s");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        drop(child);
+        std::thread::sleep(Duration::from_secs(3));
+        assert!(
+            !workspace.join("target/survived").exists(),
+            "the dropped child was killed"
+        );
+        // A driver opening on the cgroup root kills what runs there, so it opens only now.
+        let elsewhere = workspace.parent().unwrap().join("other/elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let after = runner
+            .run_child(&ChildCommand::new("true", [] as [&str; 0], &elsewhere))
+            .expect("the dropped child no longer counts as a launch running there");
+        assert_eq!(after.exit_code, Some(0), "{}", after.output);
+    });
+}
+
+/// The story's case: a child run to its end gets the bytes the host gave it on its standard input
+/// once, then end of file.
+#[test]
+fn run_child_passes_standard_input_once() {
+    delegated(
+        "run_child_passes_standard_input_once",
+        |runner, workspace| {
+            let result = runner
+                .run_child(&ChildCommand::new("cat", [] as [&str; 0], workspace).with_stdin(b"abc"))
+                .expect("cat runs confined");
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            assert_eq!(result.output, "abc");
+            assert_eq!(result.child_output.stdout, b"abc");
+            assert!(result.child_output.stderr.is_empty());
+            assert_eq!(result.applied.writable_scopes, ["target"]);
+            let empty = runner
+                .run_child(&ChildCommand::new("cat", [] as [&str; 0], workspace))
+                .expect("cat runs confined");
+            assert_eq!(
+                (empty.exit_code, empty.child_output.stdout.as_slice()),
+                (Some(0), b"".as_slice()),
+                "without stdin the child reads an empty, closed input"
+            );
+        },
+    );
+}
+
+/// The story's case: a child run to its end returns its standard output and standard error whole
+/// and apart, each with its own truncation flag; `output` keeps the tail of each, as before.
+#[test]
+fn run_child_returns_both_streams_whole() {
+    delegated(
+        "run_child_returns_both_streams_whole",
+        |runner, workspace| {
+            let script = "i=0; while [ $i -lt 2000 ]; do printf oooooooooo; printf eeeeeeeeee >&2; i=$((i+1)); done";
+            let result = runner
+                .run_child(&ChildCommand::new("sh", ["-c", script], workspace))
+                .expect("the shell runs confined");
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            assert_eq!(result.child_output.stdout, vec![b'o'; 20_000]);
+            assert_eq!(result.child_output.stderr, vec![b'e'; 20_000]);
+            assert!(!result.child_output.stdout_truncated);
+            assert!(!result.child_output.stderr_truncated);
+            assert_eq!(
+                result.output,
+                format!("{}{}", "o".repeat(8192), "e".repeat(8192)),
+                "`output` is the tail of each stream, as before"
+            );
+        },
+    );
+}
+
+/// More standard input than a pipe session admits is refused before anything starts, as a live
+/// child given standard input through `with_stdin` is (it is written through `write_stdin`); at
+/// the limit the launch goes on to the driver. A live child is checked before launch as a child
+/// run to its end is.
+#[test]
+fn stdin_over_the_input_limit_is_refused_before_launch() {
+    let fixture = tempfile::tempdir().unwrap();
+    let workspace = fixture.path().join("workspace");
+    std::fs::create_dir(&workspace).unwrap();
+    // A directory that is no cgroup: no driver is established, so a launch past the checks is
+    // refused naming the missing cgroup or backend, never `ScopeInvalid`.
+    let runner = SubstrateRunner::new(Some(fixture.path().to_owned()));
+    let limit = ChildCommand::MAX_INPUT_BYTES;
+    let over =
+        ChildCommand::new("cat", [] as [&str; 0], &workspace).with_stdin(vec![b'x'; limit + 1]);
+    let error = runner.run_child(&over).unwrap_err();
+    assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
+    assert!(error.detail.contains(&limit.to_string()), "{error}");
+    assert!(
+        !workspace.join("target").exists(),
+        "the workspace is untouched and no driver was opened"
+    );
+    let at = ChildCommand::new("cat", [] as [&str; 0], &workspace).with_stdin(vec![b'x'; limit]);
+    let error = runner.run_child(&at).unwrap_err();
+    assert_ne!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
+
+    let error = runner
+        .spawn_child(&ChildCommand::new("cat", [] as [&str; 0], &workspace).with_stdin(b"abc"))
+        .err()
+        .expect("a live child is written through write_stdin");
+    assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
+    let error = runner
+        .spawn_child(&ChildCommand::new(
+            "GH_TOKEN=synthetic-value",
+            ["/usr/bin/env"],
+            &workspace,
+        ))
+        .err()
+        .expect("a program env reads as an assignment is refused");
+    assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
+    assert!(!error.detail.contains("synthetic-value"), "{error}");
 }
 
 /// Wait until the child running on `handle` created `marker`.

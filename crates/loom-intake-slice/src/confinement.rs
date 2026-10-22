@@ -2451,6 +2451,228 @@ mod tests {
         assert!(check_record(&input, Some(&other), &record).is_err());
     }
 
+    /// How Substrate observed a live child of `input` end: its record names `network`, it ended
+    /// in `state` with `exit` and `refusal`, and both its streams are whole.
+    fn live_ending(
+        input: &ExecStartInput,
+        network: AppliedNetwork,
+        state: ExecState,
+        exit: ExecExit,
+        refusal: Option<&str>,
+    ) -> Ending {
+        Ending {
+            record: Some(record_for(input, network)),
+            state,
+            exit: Some(exit),
+            refusal: refusal.map(|code| ExecRefusal {
+                class: substrate_wire::ErrorClass::Failed,
+                code: code.to_owned(),
+                message: "ended".to_owned(),
+            }),
+            output: ChildOutput {
+                stdout: b"out".to_vec(),
+                stderr: b"err".to_vec(),
+                stdout_truncated: false,
+                stderr_truncated: false,
+            },
+            output_complete: true,
+        }
+    }
+
+    const EXITED: ExecExit = ExecExit {
+        code: Some(0),
+        signal: None,
+    };
+
+    #[test]
+    fn a_live_child_whose_record_names_another_network_is_refused() {
+        let child = ChildCommand::new("cat", [] as [&str; 0], "/work/space");
+        let session = child.session_input("space", "snapshot".to_owned());
+        assert!(
+            !session.exec.wait,
+            "a live child is not waited for at its start"
+        );
+        assert_eq!(session.exec, {
+            let mut run = child.input("space", "snapshot".to_owned());
+            run.wait = false;
+            run
+        });
+        let input = &session.exec;
+        let ending = |network| live_ending(input, network, ExecState::Exited, EXITED, None);
+        let settled = settle(
+            input,
+            None,
+            "digest".to_owned(),
+            ending(AppliedNetwork::None),
+        )
+        .expect("the record is the one requested");
+        let result = live_result(settled, false).expect("a child that exited is a result");
+        assert_eq!(
+            result.exit,
+            ChildExit {
+                exit_code: Some(0),
+                signal: None,
+                timed_out: false
+            }
+        );
+        assert_eq!(result.output.stdout, b"out");
+        assert_eq!(result.output.stderr, b"err");
+        assert_eq!(result.applied.network, "none");
+        assert_eq!(result.applied.profile_digest, "digest");
+        assert_eq!(
+            result.driver_record,
+            record_for(input, AppliedNetwork::None)
+        );
+
+        let error = settle(
+            input,
+            None,
+            "digest".to_owned(),
+            ending(applied_aperture("model", PINNED, None)),
+        )
+        .err()
+        .expect("a wider network than requested is refused");
+        assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
+        assert_eq!(
+            error.detail,
+            "Substrate's applied confinement does not match the required profile"
+        );
+        let mut unrecorded = ending(AppliedNetwork::None);
+        unrecorded.record = None;
+        let error = settle(input, None, "digest".to_owned(), unrecorded)
+            .err()
+            .expect("an end with no record is refused");
+        assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
+
+        let session = child
+            .with_egress(model())
+            .session_input("space", "snapshot".to_owned());
+        let input = &session.exec;
+        let ending = |network| live_ending(input, network, ExecState::Exited, EXITED, None);
+        settle(
+            input,
+            Some(&model()),
+            "digest".to_owned(),
+            ending(applied_aperture("model", PINNED, None)),
+        )
+        .expect("the aperture requested");
+        for other in [
+            AppliedNetwork::None,
+            applied_aperture("other", PINNED, None),
+            applied_aperture("model", "10.0.0.2:443", None),
+        ] {
+            let error = settle(
+                input,
+                Some(&model()),
+                "digest".to_owned(),
+                ending(other.clone()),
+            )
+            .err()
+            .expect("another network than requested is refused");
+            assert_eq!(
+                error.reason,
+                ConfinementRefusal::CapabilityUnserved,
+                "{other:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_live_child_the_host_signalled_is_a_result_and_one_ended_otherwise_is_not() {
+        let input = ChildCommand::new("sleep", ["600"], "/work/space")
+            .session_input("space", "snapshot".to_owned())
+            .exec;
+        let ended = |state, exit, refusal| {
+            settle(
+                &input,
+                None,
+                "digest".to_owned(),
+                live_ending(&input, AppliedNetwork::None, state, exit, refusal),
+            )
+            .expect("the record is the one requested")
+        };
+        let killed = ExecExit {
+            code: None,
+            signal: Some(Signal::Kill),
+        };
+        let result = live_result(ended(ExecState::Cancelled, killed.clone(), None), true)
+            .expect("a child the host killed is a result");
+        assert_eq!(
+            result.exit,
+            ChildExit {
+                exit_code: None,
+                signal: Some(9),
+                timed_out: false
+            }
+        );
+        let error = live_result(ended(ExecState::Cancelled, killed.clone(), None), false)
+            .err()
+            .expect("a child killed by nobody the host knows is refused");
+        assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
+        assert!(error.detail.contains("state cancelled"), "{error}");
+
+        let timed_out = live_result(
+            ended(ExecState::Cancelled, killed.clone(), Some("exec.timeout")),
+            false,
+        )
+        .expect("a child its timeout ended is a result");
+        assert!(timed_out.exit.timed_out);
+        assert_eq!(timed_out.exit.exit_code, None);
+
+        let error = live_result(
+            ended(
+                ExecState::Cancelled,
+                killed,
+                Some("session.output-backpressure"),
+            ),
+            true,
+        )
+        .err()
+        .expect("a child Substrate ended because its output was not read is refused");
+        assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
+        assert!(
+            error.detail.contains("session.output-backpressure"),
+            "{error}"
+        );
+
+        let interrupted = live_result(
+            ended(
+                ExecState::Exited,
+                ExecExit {
+                    code: Some(130),
+                    signal: None,
+                },
+                None,
+            ),
+            true,
+        )
+        .expect("a child that exited after the host's signal is a result");
+        assert_eq!(interrupted.exit.exit_code, Some(130));
+    }
+
+    #[test]
+    fn a_live_childs_frame_names_its_stream() {
+        for (stream, expected) in [
+            (substrate_host::PipeStream::Stdout, ChildStream::Stdout),
+            (substrate_host::PipeStream::Stderr, ChildStream::Stderr),
+        ] {
+            let frame = ChildFrame::from(substrate_host::PipeFrame {
+                stream,
+                bytes: b"bytes".to_vec(),
+            });
+            assert_eq!(
+                frame,
+                ChildFrame {
+                    stream: expected,
+                    bytes: b"bytes".to_vec()
+                }
+            );
+        }
+        assert_eq!(ChildSignal::Interrupt.wire(), Signal::Int);
+        assert_eq!(ChildSignal::Terminate.wire(), Signal::Term);
+        assert_eq!(ChildSignal::Kill.wire(), Signal::Kill);
+    }
+
     #[test]
     fn a_record_binding_a_read_only_file_the_request_did_not_name_is_refused() {
         let child = ChildCommand::new("true", [] as [&str; 0], "/work/space");
