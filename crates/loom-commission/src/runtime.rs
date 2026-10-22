@@ -1459,10 +1459,11 @@ where
             return budget_ended(runs, run_id, reason, None, track);
         }
         let current = governor.current_revision(&data.case_id)?;
-        // The resume's revalidation and authority check were its answer, before its Run resumed,
-        // and are no events; the step it takes is.
-        step_started(context, &mut track, run_id, current, None);
         if current == data.expected_case_revision {
+            // The resume's revalidation and authority check were its answer, before its Run
+            // resumed, and are no events; the invocation it makes is. A case that moved is
+            // invoked nothing, so no step is announced for it.
+            step_started(context, &mut track, run_id, current, None);
             track.requests.push(Revalidated {
                 request: data.clone(),
                 outcome: answer,
