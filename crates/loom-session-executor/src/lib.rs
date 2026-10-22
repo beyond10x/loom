@@ -61,7 +61,7 @@
 //! applying the proposal is not seen here; that window is the effect's own guard to close.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -991,10 +991,12 @@ fn events_document(bytes: &[u8]) -> Result<metaharness::protocol::TraceIrDocumen
 
 /// Each tool call's decision the session's events hold, read from their `trace-ir/1` document
 /// (metaharness 0.13.0): every `tool.decided` node in order, each with the tool its `tool_call`
-/// node names. The decisions are known only when the document carries metaharness's decision
-/// census (`metaharness.census`, from the terminal record) and they add up to it; otherwise, or
-/// when the events do not project or a decision does not read, they are unknown (none), never
-/// an empty or partial list. Loom decides nothing here: it reads what metaharness recorded.
+/// node names (none for an empty name). The decisions are known only when the document carries
+/// metaharness's decision census (`metaharness.census`, from the terminal record), every call
+/// the record requested was decided, and the decisions agree with the census in each count:
+/// allowed, denied, replaced, abstained, and per decider (`by_decider`). Otherwise, or when the
+/// events do not project or a decision does not read, they are unknown (none), never an empty or
+/// partial list. Loom decides nothing here: it reads what metaharness recorded.
 #[must_use]
 pub fn tool_decisions(events: &[u8]) -> Option<Vec<ToolDecision>> {
     if events.is_empty() {
@@ -1017,16 +1019,15 @@ pub fn tool_decisions(events: &[u8]) -> Option<Vec<ToolDecision>> {
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned)
     };
-    let mut tools: BTreeMap<String, String> = BTreeMap::new();
+    // Every call the record requested, with the tool it names (none for an empty name).
+    let mut tools: BTreeMap<String, Option<String>> = BTreeMap::new();
     let mut decided = Vec::new();
     for node in &document.events {
         let family = text(&node.kind, "event");
         if family.as_deref() == Some(tool_call) {
-            if let (Some(call), Some(name)) =
-                (text(&node.kind, "call_id"), text(&node.kind, "name"))
-            {
-                tools.entry(call).or_insert(name);
-            }
+            let call = text(&node.kind, "call_id")?;
+            let name = text(&node.kind, "name").filter(|name| !name.is_empty());
+            tools.entry(call).or_insert(name);
         } else if family.as_deref() == Some(metaharness::protocol::UNK_FAMILY)
             && text(&node.kind, "event_kind").as_deref() == Some(decided_kind)
         {
@@ -1046,16 +1047,44 @@ pub fn tool_decisions(events: &[u8]) -> Option<Vec<ToolDecision>> {
             decided.push((call_id, decision, decided_by));
         }
     }
-    let total = [
+    // A call requested and never decided (an observed b10x-harness call, which metaharness does
+    // not decide) leaves the decisions unknown, whatever the census says.
+    let decided_calls: BTreeSet<&str> = decided.iter().map(|(call, ..)| call.as_str()).collect();
+    if tools
+        .keys()
+        .any(|call| !decided_calls.contains(call.as_str()))
+    {
+        return None;
+    }
+    // The decisions add up to the census only when every count agrees: each kind, and who
+    // decided, kind by kind.
+    let mut kinds = [0_u64; 4];
+    let mut deciders: BTreeMap<String, u64> = BTreeMap::new();
+    for (_, decision, decided_by) in &decided {
+        let kind = match decision {
+            Decision::Allow => 0,
+            Decision::Deny { .. } => 1,
+            Decision::Replace { .. } => 2,
+            Decision::Abstain => 3,
+        };
+        kinds[kind] += 1;
+        let decider = serde_json::to_value(decided_by).ok()?.as_str()?.to_owned();
+        *deciders.entry(decider).or_default() += 1;
+    }
+    let census_kinds = [
         census.allowed,
         census.denied,
         census.replaced,
         census.abstained,
     ]
-    .into_iter()
-    .map(u64::from)
-    .sum::<u64>();
-    if u64::try_from(decided.len()).ok()? != total {
+    .map(u64::from);
+    let census_deciders: BTreeMap<String, u64> = census
+        .by_decider
+        .iter()
+        .filter(|(_, count)| **count > 0)
+        .map(|(decider, count)| (decider.clone(), u64::from(*count)))
+        .collect();
+    if kinds != census_kinds || deciders != census_deciders {
         return None;
     }
     Some(
@@ -1076,7 +1105,7 @@ pub fn tool_decisions(events: &[u8]) -> Option<Vec<ToolDecision>> {
                     metaharness::protocol::DecidedBy::Observe => DecidedBy::Observe,
                 };
                 ToolDecision {
-                    tool: tools.get(&call_id).cloned(),
+                    tool: tools.get(&call_id).cloned().flatten(),
                     call_id,
                     decision,
                     reason,
