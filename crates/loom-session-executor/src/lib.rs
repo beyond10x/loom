@@ -37,6 +37,15 @@
 //! step's. A record metaharness does not project keeps its digest and says why, and changes
 //! nothing about the call's outcome; a session that never started has no trace.
 //!
+//! Metaharness decides each tool call of a session and records it (`tool.decided`). The report
+//! reads those decisions back ([`SessionReport::tool_decisions`], `loom.session.ToolDecision`):
+//! each call's id, its tool, the decision, a denial's reason and who decided it, in record order,
+//! from the `trace-ir/1` document of the events the executor received, never from a vendor
+//! record, which holds none of metaharness's decisions. They are known only when that document
+//! carries metaharness's decision census and they add up to it; otherwise the report says they
+//! are unknown, never that there were none. Loom makes none of these decisions beyond its answer
+//! to `tool.decide`, and the decisions are never evidence and never in a proposal.
+//!
 //! A session that fails proposes nothing and is no record: the call returns `Suspended` with
 //! `ExternalAvailability` naming why. A session that changed nothing proposes an empty list of
 //! files.
@@ -68,9 +77,9 @@ use loom::obligation::UnmetObligation;
 use loom::primitives::Uuid;
 use loom::session::obligations::{AgentSessionsQuery as _, ProposeSessionChangeBehavior as _};
 use loom::session::{
-    AgentSessionSnapshot, AgentSessions, ChangedFile, CommissionId, FrontierId,
-    ProposeSessionChange, ProposeSessionChangeOutcome, SessionChangeProposed, SessionId,
-    SessionKind,
+    AgentSessionSnapshot, AgentSessions, CallDecision, ChangedFile, CommissionId, DecidedBy,
+    FrontierId, ProposeSessionChange, ProposeSessionChangeOutcome, SessionChangeProposed,
+    SessionId, SessionKind, ToolDecision,
 };
 use metaharness::protocol::{
     Command, Decision, DecisionMode, Event, HermeticMode, HermeticRow, RunSpec, SeamFactory,
@@ -231,6 +240,12 @@ pub struct SessionReport {
     /// The session's record, projected to `trace-ir/1` and summarized ([`SessionTrace`]); none
     /// when no session started.
     pub trace: Option<SessionTrace>,
+    /// Each tool call's decision and who made it, in the order the session's record holds them
+    /// (`loom.session.ToolDecision`), read from the `trace-ir/1` document of the events
+    /// metaharness delivered ([`tool_decisions`]). None when they are unknown: the record holds
+    /// no decision census, its decisions do not add up to the census, or no session started. An
+    /// empty list is a census of no decision. Never evidence.
+    pub tool_decisions: Option<Vec<ToolDecision>>,
 }
 
 /// A session's record as metaharness projects it: the `trace-ir/1` document named by its digest
@@ -636,6 +651,9 @@ impl SessionExecutor {
                 _ => {}
             }
         }
+        // Read while the transcript is still the events metaharness delivered: a vendor record
+        // kept in its place holds no decision of metaharness's.
+        report.tool_decisions = tool_decisions(&report.transcript);
         if let Some(usage) = charged_usage(ended_usage.as_ref(), &usage_events) {
             report.input_tokens = usage.input_tokens;
             report.output_tokens = usage.output_tokens;
@@ -969,6 +987,104 @@ fn events_document(bytes: &[u8]) -> Result<metaharness::protocol::TraceIrDocumen
         lines.push(event);
     }
     Ok(metaharness::protocol::project_document(&lines, bytes))
+}
+
+/// Each tool call's decision the session's events hold, read from their `trace-ir/1` document
+/// (metaharness 0.13.0): every `tool.decided` node in order, each with the tool its `tool_call`
+/// node names. The decisions are known only when the document carries metaharness's decision
+/// census (`metaharness.census`, from the terminal record) and they add up to it; otherwise, or
+/// when the events do not project or a decision does not read, they are unknown (none), never
+/// an empty or partial list. Loom decides nothing here: it reads what metaharness recorded.
+#[must_use]
+pub fn tool_decisions(events: &[u8]) -> Option<Vec<ToolDecision>> {
+    if events.is_empty() {
+        return None;
+    }
+    let document = events_document(events).ok()?;
+    let census = document.metaharness.census.as_ref()?;
+    let decided_kind = Event::ToolDecided {
+        call_id: String::new(),
+        decision: Decision::Abstain,
+        decided_by: metaharness::protocol::DecidedBy::Adapter,
+        seam: metaharness::protocol::Seam::None,
+        latency_ms: None,
+    }
+    .name();
+    let tool_call = metaharness::protocol::IrFamily::ToolCall.as_str();
+    let text = |value: &serde_json::Value, key: &str| {
+        value
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    };
+    let mut tools: BTreeMap<String, String> = BTreeMap::new();
+    let mut decided = Vec::new();
+    for node in &document.events {
+        let family = text(&node.kind, "event");
+        if family.as_deref() == Some(tool_call) {
+            if let (Some(call), Some(name)) =
+                (text(&node.kind, "call_id"), text(&node.kind, "name"))
+            {
+                tools.entry(call).or_insert(name);
+            }
+        } else if family.as_deref() == Some(metaharness::protocol::UNK_FAMILY)
+            && text(&node.kind, "event_kind").as_deref() == Some(decided_kind)
+        {
+            let mut payload = node.kind.get("payload")?.clone();
+            payload
+                .as_object_mut()?
+                .insert("event".to_owned(), decided_kind.into());
+            let Event::ToolDecided {
+                call_id,
+                decision,
+                decided_by,
+                ..
+            } = serde_json::from_value(payload).ok()?
+            else {
+                return None;
+            };
+            decided.push((call_id, decision, decided_by));
+        }
+    }
+    let total = [
+        census.allowed,
+        census.denied,
+        census.replaced,
+        census.abstained,
+    ]
+    .into_iter()
+    .map(u64::from)
+    .sum::<u64>();
+    if u64::try_from(decided.len()).ok()? != total {
+        return None;
+    }
+    Some(
+        decided
+            .into_iter()
+            .map(|(call_id, decision, decided_by)| {
+                let (decision, reason) = match decision {
+                    Decision::Allow => (CallDecision::Allow, None),
+                    Decision::Deny { reason } => (CallDecision::Deny, Some(reason)),
+                    Decision::Replace { .. } => (CallDecision::Replace, None),
+                    Decision::Abstain => (CallDecision::Abstain, None),
+                };
+                let decided_by = match decided_by {
+                    metaharness::protocol::DecidedBy::Embedder => DecidedBy::Embedder,
+                    metaharness::protocol::DecidedBy::Frame => DecidedBy::Frame,
+                    metaharness::protocol::DecidedBy::Deadline => DecidedBy::Deadline,
+                    metaharness::protocol::DecidedBy::Adapter => DecidedBy::Adapter,
+                    metaharness::protocol::DecidedBy::Observe => DecidedBy::Observe,
+                };
+                ToolDecision {
+                    tool: tools.get(&call_id).cloned(),
+                    call_id,
+                    decision,
+                    reason,
+                    decided_by,
+                }
+            })
+            .collect(),
+    )
 }
 
 /// A new [`SessionId`]: a version-8 UUID from the SHA-256 digest of the process, the time and a

@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest bc642d94f69cbdf95d14cb3073a6e846e7b335b8f96633ed6adcced128ea5a81
-// contract digest c07e0b81375fb91ac34301173b7fefb2d8b8934d257db5f1db8bf32a80e2227f
+// model digest 9b76779bb7e5cb277fd52c0e808b487deb03186a32014c60f763a42ea252d6d7
+// contract digest c128491adaccef8b19d18dc099b9aa51980b7a9464aa60dfa26edb7ad65fbd15
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Session — `loom.session`.
@@ -19,6 +19,19 @@ pub enum AgentSessionState {
     Ended,
 }
 
+/// CallDecision — `loom.session.CallDecision`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallDecision {
+    /// `Allow`.
+    Allow,
+    /// `Deny`.
+    Deny,
+    /// `Replace`.
+    Replace,
+    /// `Abstain`.
+    Abstain,
+}
+
 /// ChangedFile — `loom.session.ChangedFile`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChangedFile {
@@ -31,6 +44,21 @@ pub struct ChangedFile {
 /// CommissionId — `loom.session.CommissionId`: a distinct wrapper around `Uuid`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommissionId(pub crate::primitives::Uuid);
+
+/// DecidedBy — `loom.session.DecidedBy`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecidedBy {
+    /// `Embedder`.
+    Embedder,
+    /// `Frame`.
+    Frame,
+    /// `Deadline`.
+    Deadline,
+    /// `Adapter`.
+    Adapter,
+    /// `Observe`.
+    Observe,
+}
 
 /// FrontierId — `loom.session.FrontierId`: a distinct wrapper around `Uuid`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +77,21 @@ pub enum SessionKind {
     Codex,
     /// `Harness`.
     Harness,
+}
+
+/// ToolDecision — `loom.session.ToolDecision`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolDecision {
+    /// `call_id` — `String`.
+    pub call_id: String,
+    /// `tool` — `Optional<String>`.
+    pub tool: Option<String>,
+    /// `decision` — `loom.session.CallDecision`.
+    pub decision: CallDecision,
+    /// `reason` — `Optional<String>`.
+    pub reason: Option<String>,
+    /// `decided_by` — `loom.session.DecidedBy`.
+    pub decided_by: DecidedBy,
 }
 
 /// What AgentSession — `loom.session.AgentSession` — holds, apart from where it is in its lifecycle.
