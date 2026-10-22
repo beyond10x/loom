@@ -12,6 +12,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-10-22
+
 ### Added
 
 - Run event `Session`: one per agent session, its `trace-ir/1` digest and its `trace-ir-summary/1` (story:run-record-names-agent-sessions)
@@ -955,7 +957,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.33.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.34.0...HEAD
+[0.34.0]: https://github.com/beyond10x/loom/releases/tag/0.34.0
 [0.33.0]: https://github.com/beyond10x/loom/releases/tag/0.33.0
 [0.32.0]: https://github.com/beyond10x/loom/releases/tag/0.32.0
 [0.31.0]: https://github.com/beyond10x/loom/releases/tag/0.31.0
