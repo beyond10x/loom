@@ -442,7 +442,7 @@ use crate::model::responsibility::{
     ActionRequestStale, ActionStatus, AnyRun, AuthorityVerdict, CaseId, Commission,
     CompletionDetermination, EffectOutcome, ExecutorOutcome, ExecutorOutcomeProposedAction,
     ExecutorStep, ExecutorUsage, Frontier, FrontierAction, FrontierData, GovernorError,
-    HoldSuspension, HoldSuspensionOutcome, JudgeBudgetStop, JudgeBudgetStopOutcome,
+    HoldSuspension, HoldSuspensionOutcome, HostStop, JudgeBudgetStop, JudgeBudgetStopOutcome,
     JudgeEffectRefusal, JudgeEffectRefusalOutcome, JudgeIdleIteration, JudgeIdleIterationOutcome,
     JudgePerformableActions, JudgePerformableActionsOutcome, Observation, ObservationData,
     ObservationId, ReleaseSuspension, ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome,
@@ -507,6 +507,13 @@ pub trait LoopContext {
             on_breach: BreachStep::DiscardStep,
             breach_by_limit: Vec::new(),
         }
+    }
+    /// The host's own stop before a step, for a reason only the host can read (its active time
+    /// less its own pauses, the free space of a disk), as the module documents
+    /// (`ess/commission/domains/responsibility.yaml`, `HostStop`). `None`, the default, never
+    /// stops the run.
+    fn host_stop(&mut self) -> Option<HostStop> {
+        None
     }
 }
 
