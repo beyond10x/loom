@@ -4,7 +4,8 @@ summary: >-
   The machine-readable record of one b10x-loom run, written as one JSON object per line on
   standard output when the operator asks for it. Every line carries the stream's schema version.
   The records project what the run already does: the route it took, each model turn, each tool
-  call a model made, the usage a provider reported, the approvals the run stopped for, and exactly
+  call a model made, the usage a provider reported, each agent session metaharness ran for it,
+  named by its trace-ir/1 digest and summarized, the approvals the run stopped for, and exactly
   one terminal record, last, with the stop reason and the process exit status. A record adds no
   authority and is not evidence.
 
@@ -37,6 +38,7 @@ types:
       ToolCall: intake.events.ToolCallEvent
       Usage: intake.events.UsageEvent
       Approval: intake.events.ApprovalEvent
+      Session: intake.events.SessionEvent
       Terminal: intake.events.TerminalEvent
 
   # The protocol the router picked, and whether the run went on to execute it. A refused pick
@@ -103,6 +105,94 @@ types:
     fields:
       - name: actions
         type: List<String>
+
+  # story:run-record-names-agent-sessions: one agent session metaharness ran for the run, named by
+  # its trace-ir/1 document and summarized by metaharness's trace-ir-summary/1 (amendment a42),
+  # which metaharness owns: every field after `source` is the summary's field of the same name,
+  # absent where the summary is null. `transcript_digest` is the lowercase hex SHA-256 of the
+  # session's record, the document's own digest; `source` is the format the record was read as
+  # (`claude-code-stream-json`, `codex-rollout`, `harness-json`, or `metaharness.event/1` for the
+  # event stream when the session left no vendor record). The session's own turns, tool calls and
+  # usage are in that document and have no Turn, ToolCall or Usage record. A record metaharness
+  # cannot project leaves every summary field absent and says why in `projection_error`; the run
+  # goes on. Written once per session, after the session ended.
+  - name: intake.events.SessionEvent
+    kind: struct
+    fields:
+      - name: transcript_digest
+        type: Optional<String>
+      - name: source
+        type: Optional<String>
+      - name: adapter
+        type: Optional<String>
+      - name: model
+        type: Optional<String>
+      - name: models
+        type: Optional<List<intake.events.SessionModel>>
+      - name: turns
+        type: Optional<Integer>
+      - name: tokens_basis
+        type: Optional<String>
+      - name: input_tokens
+        type: Optional<Integer>
+      - name: output_tokens
+        type: Optional<Integer>
+      - name: cache_read_input_tokens
+        type: Optional<Integer>
+      - name: cache_creation_input_tokens
+        type: Optional<Integer>
+      - name: cost_usd
+        type: Optional<Decimal>
+      - name: duration_ms
+        type: Optional<Integer>
+      - name: duration_api_ms
+        type: Optional<Integer>
+      - name: first_timestamp_ms
+        type: Optional<Integer>
+      - name: last_timestamp_ms
+        type: Optional<Integer>
+      - name: is_error
+        type: Optional<Boolean>
+      - name: stop_reason
+        type: Optional<String>
+      - name: tool_calls
+        type: Optional<List<intake.events.SessionToolCall>>
+      - name: unk
+        type: Optional<Integer>
+      - name: projection_error
+        type: Optional<String>
+
+  # One model a session's summary names, with the figures its record states for that model
+  # alone (trace-ir-summary/1 `models`); a figure it does not state is absent.
+  - name: intake.events.SessionModel
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: input_tokens
+        type: Optional<Integer>
+      - name: output_tokens
+        type: Optional<Integer>
+      - name: cache_read_input_tokens
+        type: Optional<Integer>
+      - name: cache_creation_input_tokens
+        type: Optional<Integer>
+      - name: cost_usd
+        type: Optional<Decimal>
+
+  # One tool call a session made, in its record's order (trace-ir-summary/1 `tool_calls`).
+  # `answered` says whether a result names the call; `error` is that result's own error flag.
+  - name: intake.events.SessionToolCall
+    kind: struct
+    fields:
+      - name: call_id
+        type: Optional<String>
+      - name: name
+        type: Optional<String>
+      - name: answered
+        type: Boolean
+      - name: error
+        type: Optional<Boolean>
 
   # The one last record: why the run stopped and the exit status the process returns. A run that
   # failed has no stop reason, exit status 1 and the failure's message.
