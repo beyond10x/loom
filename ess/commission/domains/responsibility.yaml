@@ -877,6 +877,145 @@ types:
       - name: reasons
         type: List<String>
 
+  # story:runtime-events: what a host's event sink receives while a run happens, one event for each
+  # thing the loop did, in the order it did it, each naming the Run. The runtime hands each event to
+  # the sink as it happens and reads nothing back: an event is never evidence, never an observation
+  # and never changes the loop, and a sink that panics is the host's. A host that passes no sink gets
+  # none and pays nothing for it.
+  #
+  # An event is emitted only for a step that took place: StepStarted before each executor call and
+  # before each invocation of a request that is no executor call (a pending request invoked again,
+  # a resumed Run's request); ActionSelected for each action an executor call proposed, a fan-out's
+  # reads each in the order proposed; Proposed for each revalidation of an action request, with its
+  # answer; AuthorityDecided each time the authority provider is asked about a request; EffectInvoked
+  # for each answer the effect port gave for an admitted request; SessionClosed when an executor call
+  # was an agent session, one that stated its transcript digest or summary; Stopped last, exactly
+  # once, for every Run the loop started or resumed. A refused proposal emits its Proposed (and its
+  # AuthorityDecided when the provider was asked), never an EffectInvoked. A loop that started no
+  # Run, and a resume refused before its Run resumed, emit nothing; a resume's checks before its Run
+  # resumed (its revalidation and authority check) are its answer, not events.
+  #
+  # metaharness.event/1 records stay metaharness's (ADR 0096 point 7): SessionClosed names a session
+  # by its transcript digest and carries its report, and never re-emits its events.
+  - name: commission.responsibility.RuntimeEvent
+    kind: union
+    tag: kind
+    variants:
+      StepStarted: commission.responsibility.RuntimeEventStepStarted
+      ActionSelected: commission.responsibility.RuntimeEventActionSelected
+      Proposed: commission.responsibility.RuntimeEventProposed
+      AuthorityDecided: commission.responsibility.RuntimeEventAuthorityDecided
+      EffectInvoked: commission.responsibility.RuntimeEventEffectInvoked
+      SessionClosed: commission.responsibility.RuntimeEventSessionClosed
+      Stopped: commission.responsibility.RuntimeEventStopped
+
+  # story:runtime-events: a step began. `step` counts the steps the Run began, from 1, in this loop.
+  # `frontier_id` is the frontier an executor call is handed, absent for a step that invokes a
+  # request again without an executor call; `case_revision` is the revision the step acts at.
+  - name: commission.responsibility.RuntimeEventStepStarted
+    kind: struct
+    fields:
+      - name: run_id
+        type: commission.responsibility.RunId
+      - name: step
+        type: Integer
+      - name: case_revision
+        type: Integer
+      - name: frontier_id
+        type: Optional<commission.responsibility.FrontierId>
+
+  # story:runtime-events: an executor call proposed this action with these arguments. Nothing is
+  # requested or performed yet.
+  - name: commission.responsibility.RuntimeEventActionSelected
+    kind: struct
+    fields:
+      - name: run_id
+        type: commission.responsibility.RunId
+      - name: action
+        type: String
+      - name: arguments
+        type: commission.responsibility.ProposedActionArguments
+
+  # story:runtime-events: how a revalidation of an action request answered
+  # (`RevalidateActionRequest`'s outcomes).
+  - name: commission.responsibility.RevalidationAnswer
+    kind: enum
+    variants: [Admitted, NeedsAuthority, NotAdmitted, Stale]
+
+  # story:runtime-events: an action request was made, or made again, and revalidated, bound to
+  # `case_revision`; `answer` is its revalidation's answer.
+  - name: commission.responsibility.RuntimeEventProposed
+    kind: struct
+    fields:
+      - name: run_id
+        type: commission.responsibility.RunId
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
+      - name: action
+        type: String
+      - name: arguments
+        type: commission.responsibility.ProposedActionArguments
+      - name: case_revision
+        type: Integer
+      - name: answer
+        type: commission.responsibility.RevalidationAnswer
+
+  # story:runtime-events: the authority provider was asked about a request under `capability`;
+  # `verdict` is its answer, absent when it failed to decide, which grants nothing.
+  - name: commission.responsibility.RuntimeEventAuthorityDecided
+    kind: struct
+    fields:
+      - name: run_id
+        type: commission.responsibility.RunId
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
+      - name: capability
+        type: String
+      - name: verdict
+        type: Optional<commission.responsibility.AuthorityVerdict>
+
+  # story:runtime-events: the effect port answered for an admitted request.
+  - name: commission.responsibility.RuntimeEventEffectInvoked
+    kind: struct
+    fields:
+      - name: run_id
+        type: commission.responsibility.RunId
+      - name: action_request_id
+        type: commission.responsibility.ActionRequestId
+      - name: action
+        type: String
+      - name: outcome
+        type: commission.responsibility.EffectOutcome
+
+  # story:runtime-events: an executor call that was an agent session returned. The session is named
+  # by its transcript digest; its report is its summary and what the call reported it spent, each
+  # absent when the step states none (ExecutorStep).
+  - name: commission.responsibility.RuntimeEventSessionClosed
+    kind: struct
+    fields:
+      - name: run_id
+        type: commission.responsibility.RunId
+      - name: step
+        type: Integer
+      - name: transcript_digest
+        type: Optional<String>
+      - name: summary
+        type: Optional<String>
+      - name: usage
+        type: Optional<commission.responsibility.ExecutorUsage>
+
+  # story:runtime-events: the loop stopped. `outcome` is the run outcome; when the loop stopped
+  # without one, `failure` says why.
+  - name: commission.responsibility.RuntimeEventStopped
+    kind: struct
+    fields:
+      - name: run_id
+        type: commission.responsibility.RunId
+      - name: outcome
+        type: Optional<commission.responsibility.RunOutcome>
+      - name: failure
+        type: Optional<String>
+
 entities:
   # Reusable worker configuration.
   - name: commission.responsibility.Agent
