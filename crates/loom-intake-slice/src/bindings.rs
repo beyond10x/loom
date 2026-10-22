@@ -668,6 +668,13 @@ mod tests {
     /// test run.
     struct Sleeping(u32);
 
+    /// Whether a process with this pid exists, a zombie included: `kill` with no signal, which
+    /// works where there is no `/proc`.
+    fn alive(pid: u32) -> bool {
+        i32::try_from(pid)
+            .is_ok_and(|pid| nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok())
+    }
+
     impl Drop for Sleeping {
         fn drop(&mut self) {
             let proc = std::path::Path::new("/proc").join(self.0.to_string());
@@ -740,8 +747,7 @@ mod tests {
         );
         assert!(!reason.contains("killed after"), "{reason}");
         // The program was killed and reaped: no process and no zombie is left.
-        let proc = std::path::Path::new("/proc").join(sleeping.0.to_string());
-        assert!(!proc.exists(), "{} is still there", proc.display());
+        assert!(!alive(sleeping.0), "{} is still there", sleeping.0);
     }
 
     /// A program started as `sh -c script`, leading a process group of its own.
@@ -818,8 +824,7 @@ mod tests {
         };
         assert!(why.to_string().contains("already reaped"), "{why}");
         // Nothing was signalled: the `sleep` still runs, and its guard kills it.
-        let proc = std::path::Path::new("/proc").join(sleeping.0.to_string());
-        assert!(proc.exists(), "{} was signalled", proc.display());
+        assert!(alive(sleeping.0), "{} was signalled", sleeping.0);
     }
 
     #[test]
@@ -851,8 +856,7 @@ mod tests {
             panic!("a group whose leader was reaped is reported killed");
         };
         assert!(why.to_string().contains("already reaped"), "{why}");
-        let proc = std::path::Path::new("/proc").join(sleeping.0.to_string());
-        assert!(proc.exists(), "{} was signalled", proc.display());
+        assert!(alive(sleeping.0), "{} was signalled", sleeping.0);
     }
 
     #[test]

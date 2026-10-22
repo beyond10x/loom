@@ -94,4 +94,6 @@ jobs:
         run: cargo build --locked -p b10x-loom-sdk -p b10x-loom-intake-slice --all-targets
 
       - name: Test the SDK and the intake slice
-        run: cargo test --locked -p b10x-loom-sdk -p b10x-loom-intake-slice
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: cargo test --locked --no-fail-fast -p b10x-loom-sdk -p b10x-loom-intake-slice
