@@ -956,6 +956,23 @@ because opening a driver kills every `substrate-ex_*` cgroup under its root; eac
 its finished execution from the driver (`discard_superseded_exec`), which tracks at most 128; no
 driver opens on a root while a launch of this process runs there (the process-wide count in
 `confinement.rs`, keyed by the canonical root), so the launch needing it is refused instead.
+A `TestExecution` carries the child's two streams apart (`child_output`, `intake.confinement.ChildOutput`),
+each whole up to Substrate's output limit and flagged cut past it; `output` stays the 8 KiB
+merged tail. `ChildCommand::with_stdin` (at most `MAX_INPUT_BYTES`, 16 MiB, refused before launch)
+runs the child as a Substrate raw-pipe session, writes the bytes once in 64 KiB frames and closes
+its input. `SubstrateRunner::spawn_child` (`story:live-confined-child`) makes every check
+`run_child` makes before launch and returns a `ConfinedChild` (`confinement/child.rs`) running
+in the same kind of session: the host writes and closes its input, reads `ChildFrame`s naming
+their stream (`intake.confinement.ChildStream`), signals it (`ChildSignal`: an interrupt or
+termination is followed by a kill 5 s later) and waits for it; `wait` drains its output and
+settles the result as `run_child` does, the applied confinement checked against the request, and
+a missing exit status is a result only when its timeout or a signal the host sent explains it.
+A pipe session runs only on a driver whose capability facts publish the namespaces, cgroup
+limits, cgroup kill, the three signals, no egress and an output limit (`check_pipe_sessions`),
+else `CapabilityUnserved`; a command with `with_stdin` handed to `spawn_child` is refused. A live
+child holds its launch in the process-wide count and a multi-thread runtime of its own, so
+Substrate keeps supervising it between calls (call its methods outside an async runtime); dropped
+before it ended, it is killed, and either way its execution is discarded from the driver.
 `crates/loom-intake-slice/tests/confined_child.rs` holds it; its delegated
 cases start their own test binary under `systemd-run --user --scope -p Delegate=yes` and skip
 naming the missing prerequisite where bubblewrap, a user systemd manager or the driver is absent,

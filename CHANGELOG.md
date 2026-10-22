@@ -12,6 +12,16 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `SubstrateRunner::spawn_child` starts a `ConfinedChild`: written, read by frame, signalled and waited, as confined as `run_child` (story:live-confined-child)
+- `ChildCommand::with_stdin`: `run_child` writes the bytes to the child's standard input once, up to 16 MiB (story:live-confined-child)
+- `ChildFrame`, `ChildSignal`, `ChildResult`, `ChildError`, and `ChildOutput`, `ChildExit`, `ChildStream` from `intake.confinement` (story:live-confined-child)
+
+### Changed
+
+- **Breaking:** `TestExecution` gains `child_output`: the child's stdout and stderr apart, each flagged when cut (story:live-confined-child)
+
 ## [0.32.0] - 2026-10-21
 
 ### Added

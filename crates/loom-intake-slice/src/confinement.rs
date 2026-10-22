@@ -15,23 +15,27 @@ use std::time::Duration;
 
 use crate::executor::TestCommand;
 pub use intake_model::confinement::{
-    AppliedConfinement, Backend, ConfinementProfile, ConfinementRefusal, EnvironmentEntry,
-    ToolchainRoot,
+    AppliedConfinement, Backend, ChildExit, ChildOutput, ChildStream, ConfinementProfile,
+    ConfinementRefusal, EnvironmentEntry, ToolchainRoot,
 };
 use sha2::{Digest as _, Sha256};
 /// Substrate's own declaration of the egress aperture a [`ChildCommand`] may reach: its name, the
 /// host and port the host names, the address that host was resolved to and an optional byte
 /// ceiling.
 pub use substrate_host::EgressAperture;
-use substrate_host::{DispatchOutcome, Driver as _, HostConfig, HostDriver};
+use substrate_host::{DispatchOutcome, Driver as _, ExecObservation, HostConfig, HostDriver};
 use substrate_wire::{
     APERTURE_CA_BUNDLE_PATH, APERTURE_LOOPBACK_ADDRESS, ApertureMechanism, ApertureMode,
-    AppliedNetwork, ConfinementRequest, ExecLimits, ExecStartInput,
-    MAX_WORKSPACE_WRITABLE_SUBTREES, ReadOnlyRoot, WorkspaceAccess, validate_relative_path,
-    validate_workspace_access,
+    AppliedNetwork, CapabilityFacts, CaptureMode, ConfinementRequest, ExecExit, ExecLimits,
+    ExecRefusal, ExecSignalInput, ExecStartInput, ExecState, MAX_WORKSPACE_WRITABLE_SUBTREES,
+    PipeSessionStartInput, ReadOnlyRoot, SessionMode, Signal, WorkspaceAccess,
+    validate_relative_path, validate_workspace_access,
 };
 /// Substrate's own wire types a host names a [`ChildCommand`] with.
 pub use substrate_wire::{BaselineEnvironment, ExecEnvironment, NetworkMode, SandboxProfile};
+
+mod child;
+pub use child::{ChildError, ChildFrame, ChildResult, ChildSignal, ConfinedChild};
 
 static NEXT_EXEC: AtomicU64 = AtomicU64::new(0);
 const WRITABLE: &str = "target";
@@ -53,6 +57,11 @@ pub struct TestExecution {
     pub output: String,
     pub applied: AppliedConfinement,
     pub driver_record: Option<substrate_wire::AppliedConfinement>,
+    /// The standard output and standard error apart, as bytes. Substrate keeps each whole up to
+    /// its output limit (1 MiB) and flags it cut past that; `output` holds only the last 8 KiB of
+    /// each, as text. The unconfined runner keeps the last 8 KiB of each, flagged cut when the
+    /// command wrote more.
+    pub child_output: ChildOutput,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -421,8 +430,15 @@ impl SubstrateRunner {
     /// aperture's byte ceiling ended it; otherwise it carries the applied confinement, listing the
     /// writable paths, and the driver's own record of it. Substrate's record names no certificate
     /// bundle, so the bundle is not checked after the child ran.
+    ///
+    /// The child's standard input is empty and closed, unless the host gave it bytes
+    /// ([`ChildCommand::with_stdin`]): those it reads once, then end of file, through a Substrate
+    /// raw-pipe session under the same checks; more than [`ChildCommand::MAX_INPUT_BYTES`] is
+    /// refused before anything starts. Its result holds its standard output and standard error
+    /// whole and apart ([`TestExecution::child_output`]) beside the tail of each in `output`.
     pub fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
         check_program(&child.program)?;
+        check_stdin(child.stdin.as_deref())?;
         check_network(child.network, child.egress.as_ref())?;
         // Read once, here: the child trusts these bytes, whatever the path holds later.
         let ca_bundle = check_ca_bundle(child)?;
@@ -434,8 +450,58 @@ impl SubstrateRunner {
         };
         let open = self.driver(&root, &egress)?;
         let workspace = workspace_name(&root)?;
-        let input = child.input(workspace, open.driver.machine().snapshot);
-        child_result(Self::launch(&open, workspace, &input)?)
+        let machine = open.driver.machine();
+        let launched = match child.stdin.as_deref() {
+            None => Self::launch(&open, workspace, &child.input(workspace, machine.snapshot))?,
+            Some(stdin) => {
+                check_pipe_sessions(&machine.facts)?;
+                Self::launch_with_stdin(
+                    &open,
+                    workspace,
+                    &child.session_input(workspace, machine.snapshot),
+                    stdin,
+                    child.timeout,
+                )?
+            }
+        };
+        child_result(launched)
+    }
+
+    /// Start a child the host names live, confined as [`SubstrateRunner::run_child`] confines
+    /// one, every check before launch the same, and return it running: the host writes its
+    /// standard input ([`ConfinedChild::write_stdin`], [`ConfinedChild::close_stdin`]), reads its
+    /// standard output and standard error as frames of their own stream as they arrive
+    /// ([`ConfinedChild::read`]), signals it ([`ConfinedChild::signal`]) and waits for its result
+    /// ([`ConfinedChild::wait`]), which is checked once it ended as `run_child`'s is. It runs as a
+    /// Substrate raw-pipe session; a driver that does not publish what one needs is refused
+    /// [`ConfinementRefusal::CapabilityUnserved`] and nothing starts. Its timeout ends it as it
+    /// ends any child, and a child dropped before it ended is killed. While it runs it counts as
+    /// a launch under its cgroup root, so no driver opens there.
+    ///
+    /// A child named with standard input ([`ChildCommand::with_stdin`]) is refused
+    /// [`ConfinementRefusal::ScopeInvalid`] before anything starts: a live child is written
+    /// through `write_stdin`.
+    pub fn spawn_child(&self, child: &ChildCommand) -> Result<ConfinedChild, ConfinementError> {
+        check_program(&child.program)?;
+        if child.stdin.is_some() {
+            return Err(scope_error(
+                "a live child is given standard input through ConfinedChild::write_stdin, never ChildCommand::with_stdin",
+            ));
+        }
+        check_network(child.network, child.egress.as_ref())?;
+        let ca_bundle = check_ca_bundle(child)?;
+        let writable = check_writable(&child.writable)?;
+        let root = validate_workspace(&child.directory, &writable)?;
+        let egress = DriverEgress {
+            aperture: child.egress.clone(),
+            ca_bundle,
+        };
+        let open = self.driver(&root, &egress)?;
+        let machine = open.driver.machine();
+        check_pipe_sessions(&machine.facts)?;
+        let workspace = workspace_name(&root)?;
+        let session = child.session_input(workspace, machine.snapshot);
+        ConfinedChild::start(open, workspace, session, child.timeout)
     }
 
     /// Start `input` in the adopted workspace, wait for it, and accept its result only when the
@@ -447,12 +513,169 @@ impl SubstrateRunner {
         workspace: &str,
         input: &ExecStartInput,
     ) -> Result<Launched, ConfinementError> {
+        let prepared = Prepared::new(open, workspace, input)?;
+        let driver = &open.driver;
+        let id = prepared.id.as_str();
+        // Declared before anything that can return, so every path releases the execution.
+        let _release = Release {
+            driver: driver.as_ref(),
+            id,
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| refuse(ConfinementRefusal::BackendMissing, e))?;
+        dispatched(runtime.block_on(driver.start_exec(id, &prepared.root_identity, input)))?;
+        let observed = runtime
+            .block_on(driver.observe_exec(id))
+            .map_err(observation_error)?;
+        settle(
+            input,
+            open.egress.aperture.as_ref(),
+            prepared.digest,
+            Ending::from(observed),
+        )
+    }
+
+    /// Start `session` in the adopted workspace as a Substrate raw-pipe session, write `stdin` to
+    /// it and close it, read its output until it closed, and settle its end as
+    /// [`SubstrateRunner::launch`] does. Its output is taken from Substrate's terminal
+    /// observation, which records both streams whatever was read live. A write the child ended
+    /// first is no failure: it read what it read. Every path ends the child before it returns,
+    /// killing it when it ran past its timeout and a margin, which leaves it with no exit status
+    /// and so refused.
+    fn launch_with_stdin(
+        open: &OpenDriver,
+        workspace: &str,
+        session: &PipeSessionStartInput,
+        stdin: &[u8],
+        timeout: Duration,
+    ) -> Result<Launched, ConfinementError> {
+        let input = &session.exec;
+        let prepared = Prepared::new(open, workspace, input)?;
+        let driver = open.driver.as_ref();
+        let id = prepared.id.as_str();
+        let _release = Release { driver, id };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| refuse(ConfinementRefusal::BackendMissing, e))?;
+        let deadline = tokio::time::Instant::now() + timeout + DRAIN_MARGIN;
+        let observed = runtime.block_on(async {
+            dispatched(
+                driver
+                    .start_pipe_session(id, &prepared.root_identity, session)
+                    .await,
+            )?;
+            let write = async {
+                let mut written = Ok(());
+                for frame in stdin.chunks(FRAME_BYTES) {
+                    written = driver.write_pipe_session(id, frame).await;
+                    if written.is_err() {
+                        break;
+                    }
+                }
+                let closed = driver.close_pipe_session_input(id).await;
+                written.and(closed)
+            };
+            let drain = async {
+                loop {
+                    let step = deadline
+                        .saturating_duration_since(tokio::time::Instant::now())
+                        .min(READ_STEP);
+                    if step.is_zero() {
+                        return Ok(());
+                    }
+                    match driver.read_pipe_session(id, step).await {
+                        Ok(Some(_)) => {}
+                        Ok(None) => return Ok(()),
+                        Err(e) if e.code == substrate_wire::SESSION_READ_TIMEOUT => {}
+                        Err(e) => return Err(e),
+                    }
+                }
+            };
+            let (written, drained) = tokio::join!(write, drain);
+            let observed = match driver.observe_exec(id).await {
+                Ok(observed) if is_terminal(observed.resource.state) => observed,
+                // Still running past its deadline, or unobservable: it is ended here, and a child
+                // ended so has no exit status.
+                _ => driver
+                    .signal(
+                        id,
+                        &ExecSignalInput {
+                            signal: Signal::Kill,
+                            grace_ms: 0,
+                        },
+                    )
+                    .await
+                    .map_err(observation_error)?,
+            };
+            if let Err(e) = drained {
+                return Err(refuse(
+                    ConfinementRefusal::CapabilityUnserved,
+                    format!("Substrate pipe session output: {e:?}"),
+                ));
+            }
+            match written {
+                Err(e)
+                    if e.code != substrate_wire::SESSION_WRITE_FAILED
+                        || !is_terminal(observed.resource.state) =>
+                {
+                    Err(refuse(
+                        ConfinementRefusal::CapabilityUnserved,
+                        format!("Substrate pipe session input: {e:?}"),
+                    ))
+                }
+                _ => Ok(observed),
+            }
+        })?;
+        settle(
+            input,
+            open.egress.aperture.as_ref(),
+            prepared.digest,
+            Ending::from(observed),
+        )
+    }
+}
+
+/// How long a child given standard input, or a live child being waited for, is read past its
+/// timeout before it is killed: Substrate ends it at its timeout itself.
+const DRAIN_MARGIN: Duration = Duration::from_secs(30);
+/// The longest one read of a child's output waits, so a deadline is looked at again.
+const READ_STEP: Duration = Duration::from_secs(1);
+/// The largest frame of standard input Substrate takes in one write.
+const FRAME_BYTES: usize = 64 * 1024;
+/// The most frames of output Substrate queues for a pipe session before it waits for a read.
+const QUEUED_FRAMES: u32 = 16;
+
+/// Whether Substrate observed `state` as an end.
+fn is_terminal(state: ExecState) -> bool {
+    !matches!(state, ExecState::Accepted | ExecState::Running)
+}
+
+/// What a launch holds from before its start until its result is read: its count under the
+/// cgroup root, the digest of the profile it asks for, the adopted workspace's identity and the
+/// id of its execution.
+struct Prepared {
+    _running: Running,
+    digest: String,
+    root_identity: String,
+    id: String,
+}
+
+impl Prepared {
+    /// Prepare `input` on `open`, refusing a program Substrate's `/usr/bin/env` would read as a
+    /// variable assignment or an option before anything starts.
+    fn new(
+        open: &OpenDriver,
+        workspace: &str,
+        input: &ExecStartInput,
+    ) -> Result<Self, ConfinementError> {
         if let Some(program) = input.argv.first() {
             check_program(program)?;
         }
-        let driver = &open.driver;
         let egress = open.egress.aperture.as_ref();
-        let _running = Running::enter(&open.cgroup_root);
+        let running = Running::enter(&open.cgroup_root);
         let profile = requested_profile(input, egress);
         let digest = profile_digest(
             &profile,
@@ -460,7 +683,8 @@ impl SubstrateRunner {
             egress,
             open.egress.ca_bundle.as_ref(),
         );
-        let root_identity = driver
+        let root_identity = open
+            .driver
             .workspace_root_identity(workspace)
             .map_err(|e| scope_error(format!("Substrate adopt: {e:?}")))?;
         let id = format!(
@@ -468,124 +692,157 @@ impl SubstrateRunner {
             std::process::id(),
             NEXT_EXEC.fetch_add(1, Ordering::Relaxed)
         );
-        // Declared before anything that can return, so every path releases the execution.
-        let _release = Release {
-            driver: driver.as_ref(),
-            id: &id,
-        };
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| refuse(ConfinementRefusal::BackendMissing, e))?;
-        match runtime.block_on(driver.start_exec(&id, &root_identity, input)) {
-            DispatchOutcome::Observed(_) => {}
-            DispatchOutcome::NotDispatched(e) => {
-                return Err(refuse(
-                    ConfinementRefusal::CapabilityUnserved,
-                    format!("Substrate exec not dispatched: {e:?}"),
-                ));
-            }
-            DispatchOutcome::ContainedAbsent(e) => {
-                return Err(refuse(
-                    ConfinementRefusal::CapabilityUnserved,
-                    format!("Substrate exec contained absent: {e:?}"),
-                ));
-            }
-            DispatchOutcome::OutcomeUnknown(e) => {
-                return Err(refuse(
-                    ConfinementRefusal::CapabilityUnserved,
-                    format!("Substrate exec outcome unknown; do not retry blindly: {e:?}"),
-                ));
-            }
-        }
-        let observed = runtime.block_on(driver.observe_exec(&id)).map_err(|e| {
-            refuse(
-                ConfinementRefusal::CapabilityUnserved,
-                format!("Substrate observation: {e:?}"),
-            )
-        })?;
-        let record = observed.resource.applied.ok_or_else(|| {
-            refuse(
-                ConfinementRefusal::CapabilityUnserved,
-                "Substrate returned no applied confinement",
-            )
-        })?;
-        check_record(input, egress, &record)?;
-        let timed_out = observed
-            .resource
-            .refusal
-            .as_ref()
-            .is_some_and(|r| r.code == "exec.timeout");
-        let exit_code = if observed.resource.refusal.is_some()
-            || observed.resource.state != substrate_wire::ExecState::Exited
-            || !observed.output_complete
-        {
-            None
-        } else {
-            observed
-                .resource
-                .exit
-                .as_ref()
-                .and_then(|e| e.code)
-                .map(i32::from)
-        };
-        let applied = AppliedConfinement {
-            backend: Backend::Substrate,
-            profile_digest: digest,
-            capability_snapshot: record.capability_snapshot.clone(),
-            cgroup: record.cgroup.clone(),
-            filesystem: enum_name(&record.filesystem),
-            network: applied_network_name(&record.network),
-            profile: enum_name(&record.profile),
-            writable_scopes: record
-                .workspace_access
-                .writable_subtrees()
-                .unwrap_or_default()
-                .to_vec(),
-            read_only_roots: roots_projection(&record.read_only_roots),
-        };
-        let ending = format!(
-            "state {}, refusal {}, output complete {}",
-            enum_name(&observed.resource.state),
-            observed
-                .resource
-                .refusal
-                .as_ref()
-                .map_or("none", |r| r.code.as_str()),
-            observed.output_complete
-        );
-        let mut output = format!(
-            "{}{}",
-            String::from_utf8_lossy(tail(&observed.stdout)),
-            String::from_utf8_lossy(tail(&observed.stderr))
-        );
-        if observed.stdout_truncated || observed.stderr_truncated {
-            output.push_str("\n[Substrate output truncated]\n");
-        }
-        let refusal = observed.resource.refusal.map(|refusal| {
-            output.push_str(&format!("\n{}: {}\n", refusal.code, refusal.message));
-            refusal.code
-        });
-        Ok(Launched {
-            execution: TestExecution {
-                exit_code,
-                timed_out,
-                output,
-                applied,
-                driver_record: Some(record),
-            },
-            ending,
-            refusal,
+        Ok(Self {
+            _running: running,
+            digest,
+            root_identity,
+            id,
         })
     }
 }
 
-/// What one launch returned, how Substrate observed its end, and the code of the refusal it ended
-/// with, if any.
+/// Refuse a start Substrate did not dispatch, or whose outcome it does not know.
+fn dispatched(outcome: DispatchOutcome<ExecObservation>) -> Result<(), ConfinementError> {
+    let detail = match outcome {
+        DispatchOutcome::Observed(_) => return Ok(()),
+        DispatchOutcome::NotDispatched(e) => format!("Substrate exec not dispatched: {e:?}"),
+        DispatchOutcome::ContainedAbsent(e) => format!("Substrate exec contained absent: {e:?}"),
+        DispatchOutcome::OutcomeUnknown(e) => {
+            format!("Substrate exec outcome unknown; do not retry blindly: {e:?}")
+        }
+    };
+    Err(refuse(ConfinementRefusal::CapabilityUnserved, detail))
+}
+
+fn observation_error(e: substrate_host::DriverError) -> ConfinementError {
+    refuse(
+        ConfinementRefusal::CapabilityUnserved,
+        format!("Substrate observation: {e:?}"),
+    )
+}
+
+/// How Substrate observed one execution end: its record of the applied confinement, its state,
+/// exit and refusal, and its two streams as it kept them.
+struct Ending {
+    record: Option<substrate_wire::AppliedConfinement>,
+    state: ExecState,
+    exit: Option<ExecExit>,
+    refusal: Option<ExecRefusal>,
+    output: ChildOutput,
+    output_complete: bool,
+}
+
+impl From<ExecObservation> for Ending {
+    fn from(observed: ExecObservation) -> Self {
+        Self {
+            record: observed.resource.applied,
+            state: observed.resource.state,
+            exit: observed.resource.exit,
+            refusal: observed.resource.refusal,
+            output: ChildOutput {
+                stdout: observed.stdout,
+                stderr: observed.stderr,
+                stdout_truncated: observed.stdout_truncated,
+                stderr_truncated: observed.stderr_truncated,
+            },
+            output_complete: observed.output_complete,
+        }
+    }
+}
+
+/// Accept `ending`, an execution of `input`, only when the confinement Substrate applied is the
+/// one `input` required, with the egress aperture the driver declares when `input` asks for one,
+/// and project it: the applied confinement (with `digest`, the requested profile's), how it
+/// ended, and its output, the tail of each stream as text and both whole. Every launch, a child
+/// run to its end and a live child alike, is checked here once it ended.
+fn settle(
+    input: &ExecStartInput,
+    egress: Option<&EgressAperture>,
+    digest: String,
+    ending: Ending,
+) -> Result<Launched, ConfinementError> {
+    let record = ending.record.ok_or_else(|| {
+        refuse(
+            ConfinementRefusal::CapabilityUnserved,
+            "Substrate returned no applied confinement",
+        )
+    })?;
+    check_record(input, egress, &record)?;
+    let timed_out = ending
+        .refusal
+        .as_ref()
+        .is_some_and(|r| r.code == "exec.timeout");
+    let exit_code =
+        if ending.refusal.is_some() || ending.state != ExecState::Exited || !ending.output_complete
+        {
+            None
+        } else {
+            ending.exit.as_ref().and_then(|e| e.code).map(i32::from)
+        };
+    let applied = AppliedConfinement {
+        backend: Backend::Substrate,
+        profile_digest: digest,
+        capability_snapshot: record.capability_snapshot.clone(),
+        cgroup: record.cgroup.clone(),
+        filesystem: enum_name(&record.filesystem),
+        network: applied_network_name(&record.network),
+        profile: enum_name(&record.profile),
+        writable_scopes: record
+            .workspace_access
+            .writable_subtrees()
+            .unwrap_or_default()
+            .to_vec(),
+        read_only_roots: roots_projection(&record.read_only_roots),
+    };
+    let described = format!(
+        "state {}, refusal {}, output complete {}",
+        enum_name(&ending.state),
+        ending.refusal.as_ref().map_or("none", |r| r.code.as_str()),
+        ending.output_complete
+    );
+    let streams = ending.output;
+    let mut output = format!(
+        "{}{}",
+        String::from_utf8_lossy(tail(&streams.stdout)),
+        String::from_utf8_lossy(tail(&streams.stderr))
+    );
+    if streams.stdout_truncated || streams.stderr_truncated {
+        output.push_str("\n[Substrate output truncated]\n");
+    }
+    let refusal = ending.refusal.map(|refusal| {
+        output.push_str(&format!("\n{}: {}\n", refusal.code, refusal.message));
+        refusal.code
+    });
+    let exit = ChildExit {
+        exit_code: exit_code.map(i64::from),
+        signal: ending
+            .exit
+            .and_then(|e| e.signal)
+            .map(|s| i64::from(s.number())),
+        timed_out,
+    };
+    Ok(Launched {
+        execution: TestExecution {
+            exit_code,
+            timed_out,
+            output,
+            applied,
+            driver_record: Some(record),
+            child_output: streams,
+        },
+        ending: described,
+        refusal,
+        exit,
+    })
+}
+
+/// What one launch returned, how Substrate observed its end, the code of the refusal it ended
+/// with, if any, and how the child ended.
 struct Launched {
     execution: TestExecution,
     ending: String,
     refusal: Option<String>,
+    exit: ChildExit,
 }
 
 /// The refusal Substrate ends a run with once its egress aperture's declared byte ceiling is
@@ -614,6 +871,31 @@ fn child_result(launched: Launched) -> Result<TestExecution, ConfinementError> {
         ));
     }
     Ok(execution)
+}
+
+/// A live child's result, once it ended: a child the host signalled that the signal ended is a
+/// result with no exit status, naming the signal; any other end is judged as a child run to its
+/// end is ([`child_result`]). The driver's record is required, as [`settle`] already checked it.
+fn live_result(launched: Launched, signalled: bool) -> Result<ChildResult, ConfinementError> {
+    let exit = launched.exit.clone();
+    let ended_by_host = signalled && launched.refusal.is_none() && exit.signal.is_some();
+    let execution = if ended_by_host {
+        launched.execution
+    } else {
+        child_result(launched)?
+    };
+    let driver_record = execution.driver_record.ok_or_else(|| {
+        refuse(
+            ConfinementRefusal::CapabilityUnserved,
+            "Substrate returned no applied confinement",
+        )
+    })?;
+    Ok(ChildResult {
+        exit,
+        output: execution.child_output,
+        applied: execution.applied,
+        driver_record,
+    })
 }
 
 impl TestRunner for SubstrateRunner {
@@ -671,11 +953,18 @@ pub struct ChildCommand {
     egress: Option<EgressAperture>,
     ca_bundle: Option<PathBuf>,
     timeout: Duration,
+    stdin: Option<Vec<u8>>,
 }
 
 impl ChildCommand {
     /// How long a child may run unless [`ChildCommand::with_timeout`] says otherwise.
     pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
+
+    /// The most bytes a child takes on its standard input, given through
+    /// [`ChildCommand::with_stdin`] or written to a live child through
+    /// [`ConfinedChild::write_stdin`]: 16 MiB, the bound Substrate's daemon admits for a pipe
+    /// session.
+    pub const MAX_INPUT_BYTES: usize = 16 * 1024 * 1024;
 
     /// `program` with `args` in `directory`, with an empty environment, under the workspace
     /// profile with no network.
@@ -698,6 +987,7 @@ impl ChildCommand {
             egress: None,
             ca_bundle: None,
             timeout: Self::DEFAULT_TIMEOUT,
+            stdin: None,
         }
     }
 
@@ -822,6 +1112,20 @@ impl ChildCommand {
         Self { timeout, ..self }
     }
 
+    /// The same child given `bytes` on its standard input by [`SubstrateRunner::run_child`]: it
+    /// reads them once, then end of file. Without them its standard input is empty and closed.
+    /// More than [`ChildCommand::MAX_INPUT_BYTES`] is refused
+    /// [`ConfinementRefusal::ScopeInvalid`] before anything starts, naming the limit. A live child
+    /// ([`SubstrateRunner::spawn_child`]) is written through [`ConfinedChild::write_stdin`]
+    /// instead, and one named with standard input is refused.
+    #[must_use]
+    pub fn with_stdin(self, bytes: impl Into<Vec<u8>>) -> Self {
+        Self {
+            stdin: Some(bytes.into()),
+            ..self
+        }
+    }
+
     /// The program the host named.
     pub fn program(&self) -> &str {
         &self.program
@@ -872,6 +1176,30 @@ impl ChildCommand {
         self.timeout
     }
 
+    /// The bytes the child is given on its standard input, if the host gave it any.
+    pub fn stdin(&self) -> Option<&[u8]> {
+        self.stdin.as_deref()
+    }
+
+    /// The child as a Substrate raw-pipe session: the same execution as [`ChildCommand::input`],
+    /// not waited for at its start, recorded, with pipes, at most
+    /// [`ChildCommand::MAX_INPUT_BYTES`] of input in frames of at most 64 KiB, and at most 16
+    /// frames of output queued, Substrate's bounds.
+    fn session_input(&self, workspace: &str, snapshot: String) -> PipeSessionStartInput {
+        PipeSessionStartInput {
+            capture: CaptureMode::Recorded,
+            exec: ExecStartInput {
+                wait: false,
+                ..self.input(workspace, snapshot)
+            },
+            input_limit_bytes: Self::MAX_INPUT_BYTES as u64,
+            frame_limit_bytes: FRAME_BYTES as u64,
+            queued_frames: QUEUED_FRAMES,
+            mode: SessionMode::Pipes,
+            window: None,
+        }
+    }
+
     fn input(&self, workspace: &str, snapshot: String) -> ExecStartInput {
         ExecStartInput {
             workspace: workspace.to_owned(),
@@ -918,6 +1246,58 @@ fn check_program(program: &str) -> Result<(), ConfinementError> {
             "the program `{program}` starts with '-': Substrate starts a program through /usr/bin/env, which would read it as an option"
         ))),
         None => Ok(()),
+    }
+}
+
+/// Refuse more standard input than a pipe session admits ([`ChildCommand::MAX_INPUT_BYTES`]),
+/// naming the limit, before anything starts.
+fn check_stdin(stdin: Option<&[u8]>) -> Result<(), ConfinementError> {
+    match stdin {
+        Some(bytes) if bytes.len() > ChildCommand::MAX_INPUT_BYTES => Err(scope_error(format!(
+            "standard input of {} bytes exceeds the {} bytes a Substrate pipe session admits",
+            bytes.len(),
+            ChildCommand::MAX_INPUT_BYTES
+        ))),
+        _ => Ok(()),
+    }
+}
+
+/// Refuse a live child on a driver that does not publish what a confined pipe session needs:
+/// every namespace, the process, memory and cpu limits of its cgroup, a cgroup kill, no egress,
+/// an output limit, and the three signals the host may send. These are the facts Substrate's
+/// daemon requires before it serves a pipe session, except explicit leases, which a host driver
+/// does not hold.
+fn check_pipe_sessions(facts: &CapabilityFacts) -> Result<(), ConfinementError> {
+    let namespaces = facts.exec_namespaces.as_ref().is_some_and(|namespaces| {
+        namespaces.user
+            && namespaces.mount
+            && namespaces.pid
+            && namespaces.ipc
+            && namespaces.uts
+            && namespaces.network
+    });
+    let limits = facts
+        .exec_cgroup_limits
+        .as_ref()
+        .is_some_and(|limits| limits.processes && limits.memory && limits.cpu);
+    let signals = facts.exec_signals.as_ref().is_some_and(|signals| {
+        [Signal::Int, Signal::Term, Signal::Kill]
+            .iter()
+            .all(|signal| signals.contains(signal))
+    });
+    if namespaces
+        && limits
+        && signals
+        && facts.exec_cgroup_kill == Some(true)
+        && facts.exec_no_egress == Some(true)
+        && facts.exec_output_limit_bytes.is_some_and(|bytes| bytes > 0)
+    {
+        Ok(())
+    } else {
+        Err(refuse(
+            ConfinementRefusal::CapabilityUnserved,
+            "Substrate does not serve a confined pipe session on this machine: it needs every namespace, cgroup limits and kill, no egress, an output limit and the interrupt, terminate and kill signals",
+        ))
     }
 }
 
@@ -2222,6 +2602,16 @@ mod tests {
         }
     }
 
+    /// A child's streams, both empty.
+    fn no_output() -> ChildOutput {
+        ChildOutput {
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+            stdout_truncated: false,
+            stderr_truncated: false,
+        }
+    }
+
     #[test]
     fn a_child_result_with_no_exit_status_and_no_timeout_is_refused() {
         let launched = |exit_code, timed_out| Launched {
@@ -2231,9 +2621,15 @@ mod tests {
                 output: String::new(),
                 applied: projection("none"),
                 driver_record: None,
+                child_output: no_output(),
             },
             ending: "state unknown, refusal none, output complete true".to_owned(),
             refusal: None,
+            exit: ChildExit {
+                exit_code: exit_code.map(i64::from),
+                signal: None,
+                timed_out,
+            },
         };
         let error = child_result(launched(None, false)).unwrap_err();
         assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
@@ -2263,12 +2659,18 @@ mod tests {
                 ),
                 applied: projection("aperture:model@10.0.0.1:443"),
                 driver_record: Some(record_for(&input, network)),
+                child_output: no_output(),
             },
             ending: format!(
                 "state cancelled, refusal {}, output complete true",
                 refusal.unwrap_or("none")
             ),
             refusal: refusal.map(str::to_owned),
+            exit: ChildExit {
+                exit_code: None,
+                signal: None,
+                timed_out: false,
+            },
         };
         let result = child_result(ended(
             applied_aperture("model", PINNED, Some(1024)),
@@ -2606,8 +3008,7 @@ mod tests {
             }
         );
         let error = live_result(ended(ExecState::Cancelled, killed.clone(), None), false)
-            .err()
-            .expect("a child killed by nobody the host knows is refused");
+            .expect_err("a child killed by nobody the host knows is refused");
         assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
         assert!(error.detail.contains("state cancelled"), "{error}");
 
@@ -2627,8 +3028,7 @@ mod tests {
             ),
             true,
         )
-        .err()
-        .expect("a child Substrate ended because its output was not read is refused");
+        .expect_err("a child Substrate ended because its output was not read is refused");
         assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
         assert!(
             error.detail.contains("session.output-backpressure"),
@@ -2648,6 +3048,67 @@ mod tests {
         )
         .expect("a child that exited after the host's signal is a result");
         assert_eq!(interrupted.exit.exit_code, Some(130));
+    }
+
+    #[test]
+    fn a_driver_missing_a_pipe_session_fact_serves_no_live_child() {
+        let facts = |exec: serde_json::Value| -> CapabilityFacts {
+            let mut members = serde_json::json!({
+                "operation.ledger-subject-max-rows": 1,
+                "operation.ledger-subject-max-bytes": 1,
+                "operation.ledger-global-max-rows": 1,
+                "operation.ledger-global-max-bytes": 1,
+            });
+            members
+                .as_object_mut()
+                .unwrap()
+                .extend(exec.as_object().unwrap().clone());
+            serde_json::from_value(members).unwrap()
+        };
+        let served = serde_json::json!({
+            "exec.namespaces": {"user": true, "mount": true, "pid": true, "ipc": true, "uts": true, "network": true},
+            "exec.cgroup-limits": {"processes": true, "memory": true, "cpu": true},
+            "exec.cgroup-kill": true,
+            "exec.no-egress": true,
+            "exec.output-limit-bytes": 1_048_576,
+            "exec.signals": ["INT", "TERM", "KILL"],
+        });
+        check_pipe_sessions(&facts(served.clone())).expect("every fact served");
+        for (fact, value) in [
+            (
+                "exec.namespaces",
+                serde_json::json!({"user": true, "mount": true, "pid": true, "ipc": true, "uts": true, "network": false}),
+            ),
+            (
+                "exec.cgroup-limits",
+                serde_json::json!({"processes": true, "memory": false, "cpu": true}),
+            ),
+            ("exec.cgroup-kill", serde_json::json!(false)),
+            ("exec.no-egress", serde_json::json!(false)),
+            ("exec.output-limit-bytes", serde_json::json!(0)),
+            ("exec.signals", serde_json::json!(["INT", "KILL"])),
+        ] {
+            for exec in [
+                {
+                    let mut exec = served.clone();
+                    exec[fact] = value.clone();
+                    exec
+                },
+                {
+                    let mut exec = served.clone();
+                    exec.as_object_mut().unwrap().remove(fact);
+                    exec
+                },
+            ] {
+                let error = check_pipe_sessions(&facts(exec))
+                    .expect_err("a fact missing or not served refuses the live child");
+                assert_eq!(
+                    error.reason,
+                    ConfinementRefusal::CapabilityUnserved,
+                    "{fact}"
+                );
+            }
+        }
     }
 
     #[test]

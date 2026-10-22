@@ -1415,8 +1415,7 @@ fn stdin_over_the_input_limit_is_refused_before_launch() {
 
     let error = runner
         .spawn_child(&ChildCommand::new("cat", [] as [&str; 0], &workspace).with_stdin(b"abc"))
-        .err()
-        .expect("a live child is written through write_stdin");
+        .expect_err("a live child is written through write_stdin");
     assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
     let error = runner
         .spawn_child(&ChildCommand::new(
@@ -1424,8 +1423,7 @@ fn stdin_over_the_input_limit_is_refused_before_launch() {
             ["/usr/bin/env"],
             &workspace,
         ))
-        .err()
-        .expect("a program env reads as an assignment is refused");
+        .expect_err("a program env reads as an assignment is refused");
     assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
     assert!(!error.detail.contains("synthetic-value"), "{error}");
 }

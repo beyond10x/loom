@@ -96,7 +96,7 @@ use std::fmt;
 use std::io::{Read, Write as _};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -117,7 +117,7 @@ use crate::confinement::{ConfinementError, SubstrateRunner, TestExecution, TestR
 use crate::git::{self, HostGitRefusal};
 pub use crate::test_paths::TestPaths;
 use chrono::{DateTime, SecondsFormat, Utc};
-use intake_model::confinement::{AppliedConfinement, Backend, ConfinementRefusal};
+use intake_model::confinement::{AppliedConfinement, Backend, ChildOutput, ConfinementRefusal};
 
 /// `repository.inspect`.
 pub const INSPECT: &str = "repository.inspect";
@@ -1188,6 +1188,7 @@ impl TestRunner for UnconfinedRunner {
                 read_only_roots: Vec::new(),
             },
             driver_record: None,
+            child_output: finished.child_output,
         })
     }
 }
@@ -1241,6 +1242,9 @@ struct Finished {
     exit_code: Option<i32>,
     timed_out: bool,
     output: String,
+    /// The last [`OUTPUT_TAIL`] bytes of each stream, apart, each flagged cut when the command
+    /// wrote more.
+    child_output: ChildOutput,
 }
 
 /// Runs `test` in `root`, without a shell, killing it (and on Unix its process group) at its
@@ -1301,9 +1305,11 @@ fn run_bounded(test: &TestCommand, root: &Path) -> Result<Finished, ExecuteError
             }
         }
     };
+    let (stdout, stdout_truncated) = stdout.finish();
+    let (stderr, stderr_truncated) = stderr.finish();
     let mut output = String::new();
-    for (name, tail) in [("stdout", stdout), ("stderr", stderr)] {
-        let text = tail.finish();
+    for (name, bytes) in [("stdout", &stdout), ("stderr", &stderr)] {
+        let text = String::from_utf8_lossy(bytes);
         if !text.is_empty() {
             output.push_str(&format!("{name}:\n{text}"));
             if !text.ends_with('\n') {
@@ -1315,6 +1321,12 @@ fn run_bounded(test: &TestCommand, root: &Path) -> Result<Finished, ExecuteError
         exit_code: if timed_out { None } else { status.code() },
         timed_out,
         output,
+        child_output: ChildOutput {
+            stdout,
+            stderr,
+            stdout_truncated,
+            stderr_truncated,
+        },
     })
 }
 
@@ -1388,18 +1400,22 @@ fn leader_pid(child: &Child) -> std::io::Result<nix::unistd::Pid> {
         .map_err(|_| std::io::Error::other(format!("pid {} is out of range", child.id())))
 }
 
-/// The last [`OUTPUT_TAIL`] bytes of a pipe, read on a thread of its own.
+/// The last [`OUTPUT_TAIL`] bytes of a pipe, read on a thread of its own, and whether anything
+/// before them was dropped.
 struct Tail {
     kept: Arc<Mutex<VecDeque<u8>>>,
+    cut: Arc<AtomicBool>,
     done: mpsc::Receiver<()>,
 }
 
 impl Tail {
     fn read(pipe: Option<impl Read + Send + 'static>) -> Self {
         let kept = Arc::new(Mutex::new(VecDeque::new()));
+        let cut = Arc::new(AtomicBool::new(false));
         let (sender, done) = mpsc::channel();
         if let Some(mut pipe) = pipe {
             let held = Arc::clone(&kept);
+            let dropped = Arc::clone(&cut);
             std::thread::spawn(move || {
                 let mut buffer = [0u8; 8192];
                 loop {
@@ -1409,6 +1425,9 @@ impl Tail {
                             let mut kept = held.lock().unwrap_or_else(PoisonError::into_inner);
                             kept.extend(&buffer[..read]);
                             let excess = kept.len().saturating_sub(OUTPUT_TAIL);
+                            if excess > 0 {
+                                dropped.store(true, Ordering::Release);
+                            }
                             kept.drain(..excess);
                         }
                         Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
@@ -1418,16 +1437,16 @@ impl Tail {
                 let _ = sender.send(());
             });
         }
-        Self { kept, done }
+        Self { kept, cut, done }
     }
 
-    /// What was kept, once the pipe closed or [`OUTPUT_GRACE`] passed: a process the command left
-    /// behind may hold the pipe open.
-    fn finish(self) -> String {
+    /// What was kept, and whether anything before it was dropped, once the pipe closed or
+    /// [`OUTPUT_GRACE`] passed: a process the command left behind may hold the pipe open.
+    fn finish(self) -> (Vec<u8>, bool) {
         let _ = self.done.recv_timeout(OUTPUT_GRACE);
         let kept = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
         let bytes: Vec<u8> = kept.iter().copied().collect();
-        String::from_utf8_lossy(&bytes).into_owned()
+        (bytes, self.cut.load(Ordering::Acquire))
     }
 }
 
