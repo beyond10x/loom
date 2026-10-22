@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:live-confined-child
 kind: story
-status: active
+status: implemented
 title: A host runs a confined child live, with standard input and both output streams whole
 summary: spawn_child over a Substrate pipe session; stdin; whole stdout and stderr (takt G1-G3)
 relations:
 - serves: vision:governed-autonomy
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-22T00:08:44Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-22T00:08:44Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-22T03:00:31Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 

@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:breach-choice-per-limit
 kind: story
-status: active
+status: implemented
 title: A stop policy chooses what becomes of a breaching step for each limit
 summary: per-limit DiscardStep or KeepStep beside on_breach (takt gap C)
 relations:
 - serves: vision:governed-autonomy
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-22T00:08:43Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-22T00:08:43Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-22T03:00:31Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 
