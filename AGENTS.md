@@ -219,8 +219,8 @@ Before a change is reported done, in this order:
    `task commission:docs-drift`. CI runs exactly this (`check.yml`, job `loom / task check`).
    `task consumer-check` copies the root `Cargo.lock` to `consumers/pinned/` and builds and tests
    that crate offline into its own `consumers/pinned/target/`; it is outside the workspace, so
-   `cargo test --workspace` does not reach it. Beside it, job `loom / macos build` builds
-   `b10x-loom-intake-slice` on macOS and runs its `executor` unit tests; the slice reads a
+   `cargo test --workspace` does not reach it. Beside it, job `loom / macos build` (`macos-15`) builds
+   `b10x-loom-sdk` and `b10x-loom-intake-slice` with every target and runs their tests; the slice reads a
    process's end through `rustix::process::waitid`, because nix has `waitid` on Linux only.
 2. `task plan` (`aep plan artifact validate`) when the planning store changed. `task check` does
    not run it.
