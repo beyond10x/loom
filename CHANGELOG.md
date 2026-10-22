@@ -15,7 +15,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Changed
 
 - `LoopContext::host_stop` is asked only where a step follows: a frontier only a grant moves ends `NeedsAuthority` (story:host-stop-when-a-step-follows)
-- `LoopContext::host_stop` is asked right before a granted request's effect when not asked before its executor call (story:host-stop-when-a-step-follows)
+- `LoopContext::host_stop` is asked right before a granted request's effect when not asked before its executor call; a kept breach is the reason (story:host-stop-when-a-step-follows)
 
 ## [0.33.0] - 2026-10-22
 

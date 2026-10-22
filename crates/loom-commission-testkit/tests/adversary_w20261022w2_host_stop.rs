@@ -181,14 +181,15 @@ enum Clock<'a> {
 }
 
 /// New ids from counters, the clock it was given, no step budget, the run budget it was given, the
-/// approval gate off and every breach kept (`KeepStep`), and a host that always stops for low
-/// disk, counting each time it was asked.
+/// approval gate off and every breach kept (`KeepStep`), and a host that stops for low disk
+/// unless it was built never to stop, counting each time it was asked.
 struct Context<'a> {
     requests: u64,
     observations: u64,
     budget: RunBudget,
     clock: Clock<'a>,
     asked: usize,
+    stops: bool,
 }
 
 impl<'a> Context<'a> {
@@ -199,7 +200,14 @@ impl<'a> Context<'a> {
             budget,
             clock,
             asked: 0,
+            stops: true,
         }
+    }
+
+    /// The same host, never stopping.
+    fn never_stopping(mut self) -> Self {
+        self.stops = false;
+        self
     }
 }
 
@@ -242,7 +250,7 @@ impl LoopContext for Context<'_> {
 
     fn host_stop(&mut self) -> Option<HostStop> {
         self.asked += 1;
-        Some(disk_low())
+        self.stops.then(disk_low)
     }
 }
 
@@ -362,5 +370,42 @@ fn adversary_a_kept_deadline_breach_is_the_reason_when_the_host_stops_a_granted_
             charged: Some(AFTER_SECONDS),
         }),
         "the deadline the kept step passed is the reason, not the host's stop"
+    );
+}
+
+/// A kept step is acted on as with no breach (`KeepStep`): with a host that does not stop, asked
+/// right before the effect, the granted merge the call past `max_tokens` proposed is invoked once,
+/// and the Run is suspended for the spending limit before the next step.
+#[test]
+fn a_kept_steps_granted_request_the_host_does_not_stop_is_invoked_once() {
+    let session = Session::reporting(Some(call_usage(60, 50)));
+    let effects = Effects::default();
+    let budget = RunBudget {
+        max_tokens: Some(100),
+        ..unlimited()
+    };
+    let mut context = Context::keeping(budget, Clock::Fixed(BEFORE)).never_stopping();
+
+    let end = run(&session, &effects, &mut context);
+
+    assert_eq!(session.calls(), 1, "no further executor call");
+    assert_eq!(
+        context.asked, 1,
+        "the host is asked once, before the effect"
+    );
+    assert_eq!(
+        effects.invoked(),
+        1,
+        "the kept step's merge is invoked once"
+    );
+    assert_eq!(
+        end.outcome,
+        suspended_for(RunBudgetBreach {
+            action: None,
+            limit: BudgetLimit::MaxTokens,
+            max: 100,
+            charged: Some(110),
+        }),
+        "the kept breach suspends the run before the next step"
     );
 }

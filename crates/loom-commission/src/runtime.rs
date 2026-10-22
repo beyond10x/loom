@@ -97,7 +97,8 @@
 //!    request recorded with its revalidation in [`LoopEnd::requests`] but not admitted, and the
 //!    port is never handed it. When the host's stop was not asked before this executor call (its
 //!    handed frontier admitting nothing without a grant), it is asked now, and a stop it names
-//!    suspends the Run for `HostStop` with nothing invoked (§ Run and action budgets). Otherwise
+//!    suspends the Run for `HostStop` with nothing invoked (§ Run and action budgets), or, for a
+//!    step kept past a breach (`KeepStep`), for that breach, which ends the run first. Otherwise
 //!    the request is recorded as admitted and handed to [`EffectPort::invoke`] once, as an
 //!    [`AdmittedRequest`]. Its
 //!    [`EffectOutcome`] is recorded ([`LoopEnd::effects`]) and delivered as one observation: id and
@@ -341,7 +342,8 @@
 //! its action's trial limit. A host asked before the call is not asked again before that effect.
 //! A stop it names ends the run as a passed deadline there does, the Run suspended for
 //! `SuspensionReason::HostStop`, carrying the host's `name` and `detail` unchanged: suspended, or
-//! `Waiting` while a request is pending; a stop right before an effect invokes nothing; a stop
+//! `Waiting` while a request is pending; a stop right before an effect invokes nothing, and the Run
+//! is suspended for the breach a step kept past (`KeepStep`) was, when there is one; a stop
 //! before the take leaves the Suspension `Pending`, and one right before the invoke releases it and
 //! performs nothing. What stops a run without a step (the step budget and a kept breach, 0;
 //! `NoPerformableAction`, 4; the approval gate, 5) comes first, and the host is not asked then. It
@@ -1706,9 +1708,14 @@ where
                 }
                 // The host not asked before this executor call, its frontier admitting nothing
                 // without a grant, is asked right before the effect: a stop suspends the Run for
-                // it, nothing invoked (`story:host-stop-when-a-step-follows`).
+                // it, nothing invoked (`story:host-stop-when-a-step-follows`). A breach this step
+                // was kept past ends the run first, so it is the reason given, as beside a pending
+                // answer that ends the run.
                 if !host_asked && let Some(stop) = context.host_stop() {
-                    let reason = SuspensionReason::HostStop(stop);
+                    let reason = kept_breach.clone().map_or(
+                        SuspensionReason::HostStop(stop),
+                        SuspensionReason::RunBudget,
+                    );
                     return budget_ended(runs, run_id, reason, None, track);
                 }
                 track.admitted.push(data.clone());
