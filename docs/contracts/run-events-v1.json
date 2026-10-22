@@ -42,6 +42,138 @@
         }
       }
     },
+    "Session": {
+      "fields": {
+        "adapter": {
+          "optional": true,
+          "type": "String"
+        },
+        "cache_creation_input_tokens": {
+          "optional": true,
+          "type": "Integer"
+        },
+        "cache_read_input_tokens": {
+          "optional": true,
+          "type": "Integer"
+        },
+        "cost_usd": {
+          "optional": true,
+          "type": "Decimal"
+        },
+        "duration_api_ms": {
+          "optional": true,
+          "type": "Integer"
+        },
+        "duration_ms": {
+          "optional": true,
+          "type": "Integer"
+        },
+        "first_timestamp_ms": {
+          "optional": true,
+          "type": "Integer"
+        },
+        "input_tokens": {
+          "optional": true,
+          "type": "Integer"
+        },
+        "is_error": {
+          "optional": true,
+          "type": "Boolean"
+        },
+        "last_timestamp_ms": {
+          "optional": true,
+          "type": "Integer"
+        },
+        "model": {
+          "optional": true,
+          "type": "String"
+        },
+        "models": {
+          "fields": {
+            "cache_creation_input_tokens": {
+              "optional": true,
+              "type": "Integer"
+            },
+            "cache_read_input_tokens": {
+              "optional": true,
+              "type": "Integer"
+            },
+            "cost_usd": {
+              "optional": true,
+              "type": "Decimal"
+            },
+            "input_tokens": {
+              "optional": true,
+              "type": "Integer"
+            },
+            "name": {
+              "optional": false,
+              "type": "String"
+            },
+            "output_tokens": {
+              "optional": true,
+              "type": "Integer"
+            }
+          },
+          "optional": true,
+          "type": "List<intake.events.SessionModel>"
+        },
+        "output_tokens": {
+          "optional": true,
+          "type": "Integer"
+        },
+        "projection_error": {
+          "optional": true,
+          "type": "String"
+        },
+        "source": {
+          "optional": true,
+          "type": "String"
+        },
+        "stop_reason": {
+          "optional": true,
+          "type": "String"
+        },
+        "tokens_basis": {
+          "optional": true,
+          "type": "String"
+        },
+        "tool_calls": {
+          "fields": {
+            "answered": {
+              "optional": false,
+              "type": "Boolean"
+            },
+            "call_id": {
+              "optional": true,
+              "type": "String"
+            },
+            "error": {
+              "optional": true,
+              "type": "Boolean"
+            },
+            "name": {
+              "optional": true,
+              "type": "String"
+            }
+          },
+          "optional": true,
+          "type": "List<intake.events.SessionToolCall>"
+        },
+        "transcript_digest": {
+          "optional": true,
+          "type": "String"
+        },
+        "turns": {
+          "optional": true,
+          "type": "Integer"
+        },
+        "unk": {
+          "optional": true,
+          "type": "Integer"
+        }
+      }
+    },
     "Terminal": {
       "fields": {
         "error": {

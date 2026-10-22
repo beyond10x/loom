@@ -3,7 +3,7 @@ title: Run events
 sidebar_label: Run events
 sidebar_position: 3
 description: The JSON Lines record b10x-loom run writes with --output jsonl, its schema version, every record kind and the terminal record.
-source: ess/intake/domains/events.yaml, docs/contracts/run-events-v1.json, crates/loom-docs/src/run_events.rs, crates/loom-cli/src/events.rs, crates/loom-cli/src/main.rs, crates/loom-cli/tests/run_events.rs
+source: ess/intake/domains/events.yaml, docs/contracts/run-events-v1.json, crates/loom-docs/src/run_events.rs, crates/loom-cli/src/events.rs, crates/loom-cli/src/main.rs, crates/loom-cli/tests/run_events.rs, crates/loom-cli/tests/session_events.rs, crates/loom-session-executor/src/lib.rs
 ---
 
 # Run events
@@ -29,7 +29,7 @@ Every line is one JSON object with these two members, beside the record's own fi
 | Member | Value |
 |---|---|
 | `schema_version` | The line format's version, `1` (`intake.events.SchemaVersion` `V1`). A consumer refuses a version it does not know. |
-| `kind` | The record kind: `Route`, `Turn`, `ToolCall`, `Usage`, `Approval` or `Terminal`. |
+| `kind` | The record kind: `Route`, `Turn`, `ToolCall`, `Usage`, `Approval`, `Session` or `Terminal`. |
 
 A field the run does not have is absent, never `null` or zero. Members are written in alphabetical
 order; read them by name. Each line is flushed when it is written.
@@ -92,6 +92,48 @@ Written just before the terminal record when the run stopped `ApprovalRequired`.
 |---|---|---|
 | `actions` | list of strings | The actions the run awaits approval for, in frontier order |
 
+### Session
+
+One agent session metaharness ran for the run, through the session executor
+(`b10x-loom-session-executor`), written once after the session ended. `b10x-loom run` itself runs
+no session executor, so its stream has no `Session` line; a host that runs its agent work through
+one writes the line with `EventStream::sessions` (`b10x_loom_cli::events`). It names the session's
+`trace-ir/1` document by its digest and holds metaharness's `trace-ir-summary/1` of it
+(`metaharness::protocol::summarize`, metaharness 0.13.0). The session's own turns, tool calls and
+usage are in that document: they have no `Turn`, `ToolCall` or `Usage` record, and the stream's
+`Turn` numbers count Loom's own model calls only.
+
+Every field after `source` is the summary's field of the same name, and metaharness owns what it
+means; a field the summary leaves `null` is absent. A record metaharness cannot project leaves
+every summary field absent and says why in `projection_error`; the run goes on.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `transcript_digest` | string, optional | The lowercase hex SHA-256 of the session's record: the `trace-ir/1` document's own digest and the digest on the executor's step; absent when the session left no record |
+| `source` | string, optional | What the record was read as: `claude-code-stream-json`, `codex-rollout`, `harness-json`, or `metaharness.event/1` for the events the executor received when metaharness kept no vendor record |
+| `adapter` | string, optional | The adapter the session's opening record names |
+| `model` | string, optional | The model the session opened with |
+| `models` | list, optional | Every model the record names, in first-seen order, each with `name` and the figures the record states for it alone: `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens` (integers) and `cost_usd` (number) |
+| `turns` | integer, optional | The session's own turn count, as its terminal record states it |
+| `tokens_basis` | string, optional | Where the four token counts come from: `session` (the terminal record's totals) or `sum-of-requests` (each request's usage, summed) |
+| `input_tokens` | integer, optional | Input tokens, read as `tokens_basis` says, not normalized |
+| `output_tokens` | integer, optional | Output tokens |
+| `cache_read_input_tokens` | integer, optional | Input tokens read from a cache |
+| `cache_creation_input_tokens` | integer, optional | Input tokens written to a cache |
+| `cost_usd` | number, optional | The session's total cost in US dollars, the vendor's figure passed through |
+| `duration_ms` | integer, optional | The terminal record's `duration_ms` |
+| `duration_api_ms` | integer, optional | The terminal record's `duration_api_ms` |
+| `first_timestamp_ms` | integer, optional | The first timestamp the record states, in Unix milliseconds |
+| `last_timestamp_ms` | integer, optional | The last timestamp the record states |
+| `is_error` | boolean, optional | The terminal record's error flag |
+| `stop_reason` | string, optional | The terminal record's stop reason |
+| `tool_calls` | list, optional | One entry per tool call in the record, in its order: `call_id` and `name` (strings), `answered` (boolean: a result names the call) and `error` (boolean: that result's error flag) |
+| `unk` | integer, optional | The document's unk count: the sum over its `metaharness.unk_kinds` |
+| `projection_error` | string, optional | Why the record could not be projected; present only then, with `transcript_digest` and `source` |
+
+A session refused before it started (its scratch copy could not be made, for one) has no record
+and no `Session` line.
+
 ### Terminal
 
 The last line, exactly once per run.
@@ -120,10 +162,13 @@ The records and the exit statuses are a contract at `schema_version` 1. Within i
 - a record kind or a field is never removed, renamed or retyped, a field's optionality never
   changes, and a value is never added to or removed from a field's listed values;
 - an exit status never changes meaning;
-- a new optional field of an existing record kind is not a break: a reader that reads members by
-  name ignores it;
-- anything else, a new record kind included, is a break. It changes the schema version and is
-  named in that release's CHANGELOG entry, in a bullet that starts `**Breaking:**`.
+- a new optional field of an existing record kind, or of a record one of its fields holds (an entry
+  of `models` or `tool_calls`), is not a break: a reader that reads members by name ignores it;
+- anything else, a new record kind included, is a break. It is named in that release's CHANGELOG
+  entry, in a bullet that starts `**Breaking:**`, and the committed contract moves with it.
+
+The `Session` kind was added at `schema_version` 1 as such a break: a reader that refuses a record
+kind it does not know refuses a `Session` line.
 
 The contract is committed as
 [`docs/contracts/run-events-v1.json`](https://github.com/beyond10x/loom/blob/main/docs/contracts/run-events-v1.json):
@@ -176,6 +221,31 @@ test every_line_is_one_object_carrying_the_schema_version ... ok
 
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.13s
 ```
+
+## A recorded session
+
+The session acceptance test runs a commission whose agent is the session executor over a committed
+recorded Claude Code session (`crates/loom-cli/tests/fixtures/session/claude-code.jsonl`, synthetic
+ids), replayed by metaharness's `ScriptedRunner`: no harness program runs, no model is called and
+nothing reaches the network. The session read one file and proposed one edit, which the run
+performed; its two turns and its `Read` call are in the `Session` line, not in `Turn` or
+`ToolCall` lines:
+
+```console
+$ cargo test -p b10x-loom-cli --locked --test session_events a_session_event_holds_the_summary_of_the_recorded_session -- --nocapture
+
+running 1 test
+{"accepted":true,"kind":"Route","protocol":"software-change@1","schema_version":1}
+{"adapter":"claude","cache_creation_input_tokens":0,"cache_read_input_tokens":1900,"cost_usd":0.0123,"duration_api_ms":4100,"duration_ms":5200,"first_timestamp_ms":1792659600000,"input_tokens":2500,"is_error":false,"kind":"Session","last_timestamp_ms":1792659605000,"model":"a-model","models":[{"cache_creation_input_tokens":0,"cache_read_input_tokens":1900,"cost_usd":0.0123,"input_tokens":2500,"name":"a-model","output_tokens":78}],"output_tokens":78,"schema_version":1,"source":"claude-code-stream-json","tokens_basis":"session","tool_calls":[{"answered":true,"call_id":"call-0001","error":false,"name":"Read"}],"transcript_digest":"9cbac1617fed75f100f71e426282bcc0fab2f36c372077fecd8c459991b8f6b6","turns":2,"unk":0}
+{"exit_status":0,"kind":"Terminal","protocol":"software-change@1","schema_version":1,"steps":1,"stop_reason":"Completed"}
+test a_session_event_holds_the_summary_of_the_recorded_session ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.01s
+```
+
+The test prints each line as it parsed it back. Its assertions hold the `Session` line's fields to
+metaharness's `summarize` of the same record; `loom_s_own_records_are_as_without_the_session_record`
+holds the run's other lines to those the same run writes without `EventStream::sessions`.
 
 ## A failed run
 
