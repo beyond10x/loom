@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:tool-decisions-read-back
 kind: story
-status: active
+status: implemented
 title: A session's report lists each tool decision its trace-ir/1 record holds
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-22T08:58:30Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-22T08:58:30Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-22T10:13:07Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 

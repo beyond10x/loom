@@ -8,7 +8,7 @@ relations:
 - decides: story:agent-domain
 - decides: story:runtime-events
 - decides: story:tool-decisions-read-back
-revision: 1
+revision: 2
 ---
 # Wave 2026-10-22-w3 proposal, accepted with no operator turn
 
@@ -34,3 +34,22 @@ wave candidate. Report the wave merge sha."
     `website/docs/reference/sdk-stability.md`; merged one at a time.
   - D3: `story:release-binaries` is filed as a draft under `epic:loom-sdk-for-products`, a
     candidate for the next wave, not this one.
+
+- Decisions taken while the wave ran (2026-10-22):
+  - D4: `story:agent-domain`'s decoder `loom_sdk::agent::parse` is hand-written over the generated
+    types, as `models.rs` is, because ESS 0.67 generates no decoder; `RunBudget` and `StopPolicy`
+    in `loom.agent` are field-for-field copies of Commission's, because ESS cannot reference
+    another system's types.
+  - D5: `story:tool-decisions-read-back` puts the decisions on `SessionReport` only; the step's
+    observation carries `transcript_digest`, which names the record they were read from. Adding
+    them to `ExecutorStep` changes `ess/commission/` and about 45 construction sites in 22 files,
+    outside the story's scope; it is filed as a draft story for a later wave.
+  - D6: disk at 27G free (orchestrator, 2026-10-22: "Run `worktree discard-cache` on each unit
+    tree as soon as it merges into the wave branch, not at the end of the wave."): each unit's
+    cache is discarded at its merge, and the wave's one full gate runs after the last.
+  - D7: `loom_sdk::agent::parse` bounds nesting by refusing more than `MAX_FLOW_OPENERS` (4096) `[`
+    or `{` bytes anywhere in a document, checked before loading, because libyaml's flow scan is
+    quadratic before any depth check runs; `models::parse_config` is not changed in this wave.
+  - D8: on a resume whose case moved after its take, no `StepStarted` is emitted, since nothing is
+    invoked (security finding on `story:runtime-events`); `EffectInvoked` stays before the
+    governor observes the effect, as the specification allows.
