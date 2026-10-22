@@ -8,7 +8,7 @@ relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
 - depends_on: story:agent-check
-revision: 1
+revision: 2
 ---
 ## Outcome
 
@@ -69,3 +69,15 @@ README.md, AGENTS.md, CHANGELOG.md.
 ## Ready
 
 After `story:agent-check`.
+
+## Q2 after Connectors' standing approval
+
+Session `b10x-chef-orchestrator`, 2026-10-22: "FYI for loom-kubernetes Q2: Timo chose standing scoped
+approval in connectors ("a" to decision-blocker:standing-write-approval-mode). Connectors builds it in
+the wave after its current one. Until it ships, the operator agent stays in approval mode (C), as
+planned. Afterwards, auto mode binds to a standing grant id. Note it on the agent-serve story; no
+other change now."
+
+- This story ships approval mode (C) only: `reply.send` is performed once per approved proposal.
+- Once Connectors ships standing scoped approval, a later story adds `auto` mode, bound to a
+  standing grant id. That story is not filed yet, and this story's scope does not change.
