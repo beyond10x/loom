@@ -7,7 +7,7 @@ title: Timo has not decided how a confined child gets a writable mount outside /
 relations:
 - blocks: story:writable-host-root
 withholds: test_result
-revision: 4
+revision: 5
 transitions:
 - {from: "open", to: "cleared", at: "2026-10-22T14:06:55Z", actor: "human:timo", revision: 4}
 ---
@@ -60,3 +60,10 @@ Git checkout" (`adr/0038-writable-roots-are-named-host-paths-or-git-checkouts.md
   your store with that citation (store-only, aep validate). Then stay idle until substrate 0.10.0
   ships."
 - `story:writable-host-root` waits for the Substrate release that implements ADR 0038 (0.10.0).
+
+## Landing (2026-10-22)
+
+The branch carrying this clear began before the 0.34.0 release, and its pull request conflicted
+with main on this file. It was brought up to date by a merge commit that takes main's version
+and applies the decision again through `aep`; nothing was force-pushed. The orchestrator wrote
+on 2026-10-22: "Accepted: merge main into the branch (bc41ec3e), a 1-file diff, no force-push."
