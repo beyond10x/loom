@@ -2,12 +2,15 @@
 format: aep.planning-md/3
 id: story:runtime-events
 kind: story
-status: draft
+status: active
 title: A host receives every RuntimeEvent of a run through an EventSink
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
-revision: 1
+revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-22T08:58:29Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-10-22T08:58:29Z", actor: "human:timo", revision: 3}
 ---
 ## Outcome
 
