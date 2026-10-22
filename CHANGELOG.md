@@ -17,6 +17,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - Run event `Session`: one per agent session, its `trace-ir/1` digest and its `trace-ir-summary/1` (story:run-record-names-agent-sessions)
 - `EventStream::sessions` writes a `Session` record for each session a `SessionExecutor` runs (story:run-record-names-agent-sessions)
 - `SessionReport::trace` (`SessionTrace`): the session's record summarized by metaharness, or why not (story:run-record-names-agent-sessions)
+- `EventSink` (`loom_sdk::EventSink`) and `LoopContext::events`: a host receives every `RuntimeEvent` of a run as it happens (story:runtime-events)
+- `NoEvents`, the default sink of `LoopContext::events`, which receives nothing and makes the runtime build no event (story:runtime-events)
 
 ### Changed
 

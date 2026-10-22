@@ -251,6 +251,10 @@ the selector, the argument generator, the authority provider and the effect port
 bound to Connector operations, the effect port is Commission's `ConnectorEffects` over
 `loom_sdk::connectors::ConnectorsInvoker`, which invokes each admitted request once on the host's
 Connectors endpoint for the operation's instance and reports the attempt Connectors recorded.
+A host that wants to watch a run returns its own `loom_sdk::EventSink` from
+`LoopContext::events` and receives every step of it as it happens (step started, action selected,
+proposed, authority decided, effect invoked, session closed, stopped); the default, `NoEvents`,
+receives nothing. An event is never evidence and never changes the run.
 
 Since `0.2.0`, `CanonGovernor::with_protocol` admits host-reviewed Canon protocols;
 `with_evaluation_time` supplies trusted freshness time. Durable hosts implement

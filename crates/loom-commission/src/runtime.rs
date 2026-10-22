@@ -454,6 +454,20 @@
 //! may have been performed, so it is never performed again from the Suspension, which stays stored
 //! as its durable trace; every later resume is refused [`ResumeRefusal::InDoubt`], and settling the
 //! request is the host's.
+//!
+//! Every loop hands its events to the sink [`LoopContext::events`] returns (`story:runtime-events`;
+//! [`crate::ports::events`]), in the order it does what they report: `StepStarted` before each
+//! executor call (naming the frontier it is handed) and before each invocation that is no executor
+//! call (a pending request invoked again, a resumed Run's request); `SessionClosed`, when the
+//! call's step states a transcript digest or summary, then `ActionSelected` for each action it
+//! proposed; `Proposed` at each revalidation, with its answer; `AuthorityDecided` each time the
+//! provider is asked; `EffectInvoked` for each answer the effect port gives; and `Stopped` last,
+//! once for every Run a loop started or resumed, with its outcome or its failure. A loop that
+//! started no Run, and a resume refused before its Run resumed, emit nothing; a resume's own
+//! revalidation and authority check are its answer, not events. The default sink, `NoEvents`,
+//! receives nothing and the loop builds no event for it. An event is never evidence or an
+//! observation, and the sink returns nothing the loop reads; a sink that panics unwinds out of
+//! the loop as any port does.
 #![forbid(unsafe_code)]
 
 use std::fmt;
@@ -474,7 +488,7 @@ use crate::model::responsibility::{
     ActionNeedsAuthority, ActionNotAdmitted, ActionRequest, ActionRequestData, ActionRequestId,
     ActionRequestStale, ActionStatus, Admission, AnyRun, AuthorityVerdict, CaseId, Commission,
     CompletionDetermination, EffectOutcome, ExecutorOutcome, ExecutorOutcomeProposedAction,
-    ExecutorStep, ExecutorUsage, Frontier, FrontierAction, FrontierData, GovernorError,
+    ExecutorStep, ExecutorUsage, Frontier, FrontierAction, FrontierData, FrontierId, GovernorError,
     HoldSuspension, HoldSuspensionOutcome, HostStop, JudgeBudgetStop, JudgeBudgetStopOutcome,
     JudgeEffectRefusal, JudgeEffectRefusalOutcome, JudgeIdleIteration, JudgeIdleIterationOutcome,
     JudgePerformableActions, JudgePerformableActionsOutcome, Observation, ObservationData,
@@ -487,12 +501,18 @@ use crate::model::responsibility::{
     SuspensionStateConflict, TakeSuspension, TakeSuspensionOutcome, Truth, Unit, commission_state,
     frontier_state, observation_state,
 };
+use crate::model::responsibility::{
+    RevalidationAnswer, RuntimeEvent, RuntimeEventActionSelected, RuntimeEventAuthorityDecided,
+    RuntimeEventEffectInvoked, RuntimeEventProposed, RuntimeEventSessionClosed,
+    RuntimeEventStepStarted, RuntimeEventStopped,
+};
 use crate::outcome::{
     CapabilityVerdict, Derived, derive, judge_budget_stop, judge_idle, judge_performable,
     judge_refusal,
 };
 use crate::ports::authority::{AuthorityCheck, AuthorityProvider, check_authority};
 use crate::ports::effect::{AdmittedRequest, EffectError, EffectPort};
+use crate::ports::events::{EventSink, NoEvents};
 use crate::ports::evidence::ObservationPort;
 use crate::ports::executor::AgentExecutor;
 use crate::ports::governor::Governor;
@@ -549,6 +569,16 @@ pub trait LoopContext {
     /// effect is invoked. `None`, the default, never stops the run.
     fn host_stop(&mut self) -> Option<HostStop> {
         None
+    }
+
+    /// Where the run's events go as they happen (`story:runtime-events`, [`EventSink`]): every
+    /// step started, action selected, request proposed, authority decided, effect invoked and
+    /// session closed, and the loop's stop, last and once, as the module documents. The default is
+    /// [`NoEvents`], for which the runtime builds no event. An event is never evidence and never
+    /// changes the loop.
+    fn events(&mut self) -> &mut dyn EventSink {
+        // `NoEvents` has no size, so this allocates nothing and leaks nothing.
+        Box::leak(Box::new(NoEvents))
     }
 }
 
@@ -814,6 +844,141 @@ impl fmt::Display for ResumeError {
 
 impl std::error::Error for ResumeError {}
 
+/// Hands the event `event` builds to the context's sink, building it only for a sink that receives
+/// events (`story:runtime-events`). Nothing is read back.
+fn emit<C: LoopContext + ?Sized>(context: &mut C, event: impl FnOnce() -> RuntimeEvent) {
+    let sink = context.events();
+    if sink.receives() {
+        sink.emit(&event());
+    }
+}
+
+/// How a revalidation answered, as a [`RuntimeEvent`] names it.
+fn revalidation_answer(outcome: &RevalidateActionRequestOutcome) -> RevalidationAnswer {
+    match outcome {
+        RevalidateActionRequestOutcome::Admitted => RevalidationAnswer::Admitted,
+        RevalidateActionRequestOutcome::NeedsAuthority { .. } => RevalidationAnswer::NeedsAuthority,
+        RevalidateActionRequestOutcome::NotAdmitted { .. } => RevalidationAnswer::NotAdmitted,
+        RevalidateActionRequestOutcome::Stale { .. } => RevalidationAnswer::Stale,
+    }
+}
+
+/// Emits that the step `track` counts next started, at `case_revision`, handed `frontier_id` when
+/// it is an executor call.
+fn step_started<C: LoopContext + ?Sized>(
+    context: &mut C,
+    track: &mut Track,
+    run_id: &RunId,
+    case_revision: i64,
+    frontier_id: Option<&FrontierId>,
+) {
+    track.started = track.started.saturating_add(1);
+    let step = track.started;
+    emit(context, || {
+        RuntimeEvent::StepStarted(RuntimeEventStepStarted {
+            run_id: run_id.clone(),
+            step,
+            case_revision,
+            frontier_id: frontier_id.cloned(),
+        })
+    });
+}
+
+/// Emits that `request` was made, or made again, and revalidated with `outcome`.
+fn request_proposed<C: LoopContext + ?Sized>(
+    context: &mut C,
+    request: &ActionRequestData,
+    outcome: &RevalidateActionRequestOutcome,
+) {
+    emit(context, || {
+        RuntimeEvent::Proposed(RuntimeEventProposed {
+            run_id: request.run_id.clone(),
+            action_request_id: request.action_request_id.clone(),
+            action: request.action.clone(),
+            arguments: request.arguments.clone(),
+            case_revision: request.expected_case_revision,
+            answer: revalidation_answer(outcome),
+        })
+    });
+}
+
+/// Emits that the authority provider was asked about `request` under `capability` and answered
+/// `check`: its verdict, or none when it failed.
+fn authority_decided<C: LoopContext + ?Sized>(
+    context: &mut C,
+    request: &ActionRequestData,
+    capability: &str,
+    check: &AuthorityCheck,
+) {
+    emit(context, || {
+        RuntimeEvent::AuthorityDecided(RuntimeEventAuthorityDecided {
+            run_id: request.run_id.clone(),
+            action_request_id: request.action_request_id.clone(),
+            capability: capability.to_owned(),
+            verdict: match check {
+                AuthorityCheck::Decided(verdict) => Some(verdict.clone()),
+                AuthorityCheck::Refused(_) => None,
+            },
+        })
+    });
+}
+
+/// Emits what an executor call proposed, once it returned: the session it was, when its step
+/// states a transcript digest or summary, then each action it selected, a fan-out's reads in the
+/// order proposed.
+fn executor_returned<C: LoopContext + ?Sized>(
+    context: &mut C,
+    run_id: &RunId,
+    step: i64,
+    returned: &ExecutorStep,
+) {
+    if returned.transcript_digest.is_some() || returned.summary.is_some() {
+        emit(context, || {
+            RuntimeEvent::SessionClosed(RuntimeEventSessionClosed {
+                run_id: run_id.clone(),
+                step,
+                transcript_digest: returned.transcript_digest.clone(),
+                summary: returned.summary.clone(),
+                usage: returned.usage.clone(),
+            })
+        });
+    }
+    let selected: &[ExecutorOutcomeProposedAction] = match &returned.outcome {
+        ExecutorOutcome::ProposedAction(proposed) => std::slice::from_ref(proposed),
+        ExecutorOutcome::ProposedReads(proposed) => &proposed.reads,
+        _ => &[],
+    };
+    for action in selected {
+        emit(context, || {
+            RuntimeEvent::ActionSelected(RuntimeEventActionSelected {
+                run_id: run_id.clone(),
+                action: action.action.clone(),
+                arguments: action.arguments.clone(),
+            })
+        });
+    }
+}
+
+/// Emits that the loop of the Run `run_id` stopped, with its outcome or why it has none: last, and
+/// once for every Run a loop started or resumed.
+fn stopped<C: LoopContext + ?Sized, E: fmt::Display>(
+    context: &mut C,
+    run_id: &RunId,
+    result: Result<&LoopEnd, &E>,
+) {
+    emit(context, || {
+        let (outcome, failure) = match result {
+            Ok(end) => (Some(end.outcome.clone()), None),
+            Err(error) => (None, Some(error.to_string())),
+        };
+        RuntimeEvent::Stopped(RuntimeEventStopped {
+            run_id: run_id.clone(),
+            outcome,
+            failure,
+        })
+    });
+}
+
 /// A failure before the Run started.
 fn unstarted(failure: impl Into<LoopFailure>) -> LoopError {
     LoopError {
@@ -981,7 +1146,9 @@ where
         run_started.case_revision,
         None,
     );
-    finish(runs, run_started.run_id, result)
+    let ended = finish(runs, run_started.run_id.clone(), result);
+    stopped(context, &run_started.run_id, ended.as_ref());
+    ended
 }
 
 /// The loop's answer for the Run `run_id`: its end, or the error naming it, after suspending the
@@ -1112,6 +1279,9 @@ struct Track {
     admitted: Vec<ActionRequestData>,
     effects: Vec<EffectOutcome>,
     steps: usize,
+    /// The steps the loop began, which [`RuntimeEventStepStarted::step`] counts: every step, one
+    /// that ended the run included.
+    started: i64,
     last_frontier: Option<FrontierData>,
     charges: RunCharges,
 }
@@ -1123,6 +1293,7 @@ impl Default for Track {
             admitted: Vec::new(),
             effects: Vec::new(),
             steps: 0,
+            started: 0,
             last_frontier: None,
             charges: RunCharges {
                 run: uncharged(),
@@ -1146,10 +1317,24 @@ impl Track {
         }
     }
 
-    /// Records `effect`, which the port answered for `request`, and charges it ([`charge`]).
-    fn record(&mut self, request: &ActionRequestData, effect: &EffectOutcome) {
+    /// Records `effect`, which the port answered for `request`, charges it ([`charge`]) and emits
+    /// that the effect was invoked.
+    fn record<C: LoopContext + ?Sized>(
+        &mut self,
+        context: &mut C,
+        request: &ActionRequestData,
+        effect: &EffectOutcome,
+    ) {
         self.effects.push(effect.clone());
         charge(&mut self.charges, &request.action, effect);
+        emit(context, || {
+            RuntimeEvent::EffectInvoked(RuntimeEventEffectInvoked {
+                run_id: request.run_id.clone(),
+                action_request_id: request.action_request_id.clone(),
+                action: request.action.clone(),
+                outcome: effect.clone(),
+            })
+        });
     }
 }
 
@@ -1274,6 +1459,9 @@ where
             return budget_ended(runs, run_id, reason, None, track);
         }
         let current = governor.current_revision(&data.case_id)?;
+        // The resume's revalidation and authority check were its answer, before its Run resumed,
+        // and are no events; the step it takes is.
+        step_started(context, &mut track, run_id, current, None);
         if current == data.expected_case_revision {
             track.requests.push(Revalidated {
                 request: data.clone(),
@@ -1283,7 +1471,7 @@ where
             let effect = effects
                 .invoke(commission, &AdmittedRequest::new(data.clone()))
                 .map_err(|error| Stopped::from(LoopFailure::Effect(error)))?;
-            track.record(&data, &effect);
+            track.record(context, &data, &effect);
             governor.observe(effect_observation(context, &data, &effect))?;
             release_taken(suspensions, taken, &data)?;
             effected = matches!(effect, EffectOutcome::Performed(_));
@@ -1420,6 +1608,7 @@ where
             if let Some(reason) = stopped_before_step(deadline, context) {
                 return budget_ended(runs, run_id, reason, Some(&pending), track);
             }
+            step_started(context, &mut track, run_id, loaded, None);
             let again = invoke_again(
                 governor,
                 authority,
@@ -1555,7 +1744,15 @@ where
             return budget_ended(runs, run_id, reason, None, track);
         }
 
+        step_started(
+            context,
+            &mut track,
+            run_id,
+            handed.data().case_revision,
+            Some(&handed.data().frontier_id),
+        );
         let step = executor.run_with_usage(commission, &handed);
+        executor_returned(context, run_id, track.started, &step);
         if let Some(usage) = &step.usage {
             charge_step(&mut track.charges, usage);
         }
@@ -1642,6 +1839,7 @@ where
             );
             let answer = revalidate(governor, &made)?;
             let data = made.into_data();
+            request_proposed(context, &data, &answer);
             track.requests.push(Revalidated {
                 request: data.clone(),
                 outcome: answer.clone(),
@@ -1659,9 +1857,9 @@ where
                 RevalidateActionRequestOutcome::Stale { .. } => stale = true,
                 RevalidateActionRequestOutcome::NeedsAuthority { error } => {
                     pending = Some(data.clone());
-                    if let AuthorityCheck::Decided(answer) =
-                        check_authority(authority, commission, &data, &error.capability)
-                    {
+                    let check = check_authority(authority, commission, &data, &error.capability);
+                    authority_decided(context, &data, &error.capability, &check);
+                    if let AuthorityCheck::Decided(answer) = check {
                         match &answer {
                             AuthorityVerdict::Allow(Unit(true)) => admitted = true,
                             AuthorityVerdict::Deny(_) => denied.push(error.action.clone()),
@@ -1724,7 +1922,7 @@ where
                 let effect = effects
                     .invoke(commission, &AdmittedRequest::new(data.clone()))
                     .map_err(|error| Stopped::from(LoopFailure::Effect(error)))?;
-                track.record(&data, &effect);
+                track.record(context, &data, &effect);
                 governor.observe(effect_observation(context, &data, &effect))?;
                 // A pending answer leaves the request to be invoked again at the next
                 // iteration (8b).
@@ -2182,7 +2380,9 @@ where
     // the Suspension stays `Pending`, and the Run is suspended for it, as before an executor call.
     if let Some(reason) = stopped_before_step(deadline, context) {
         let ended = budget_ended(runs, &run_id, reason, None, Track::default());
-        return finish(runs, run_id, ended).map_err(ResumeError::Loop);
+        let ended = finish(runs, run_id.clone(), ended);
+        stopped(context, &run_id, ended.as_ref());
+        return ended.map_err(ResumeError::Loop);
     }
     // Taken before anything is performed, for the request read and revalidated above: of two
     // resumes one takes it, a Suspension a resume took and never released is never taken again,
@@ -2210,15 +2410,18 @@ where
     };
     if let Some(failure) = failure {
         let suspension = suspend(runs, &run_id, stored.reason.clone()).err();
-        return Err(match failure {
+        let error = match failure {
             Err(refusal) => ResumeError::Refused(refusal),
             Ok(failure) => ResumeError::Loop(LoopError {
-                run_id: Some(run_id),
+                run_id: Some(run_id.clone()),
                 failure,
                 suspension: suspension.map(Box::new),
                 suspension_reason: Some(Box::new(stored.reason)),
             }),
-        });
+        };
+        // The Run resumed and is suspended again with nothing performed: its loop stopped.
+        stopped(context, &run_id, Err(&error));
+        return Err(error);
     }
 
     let ports = Ports {
@@ -2246,7 +2449,9 @@ where
             taken: key,
         }),
     );
-    finish(runs, run_id, result).map_err(ResumeError::Loop)
+    let ended = finish(runs, run_id.clone(), result);
+    stopped(context, &run_id, ended.as_ref());
+    ended.map_err(ResumeError::Loop)
 }
 
 /// How a run ends when the effect port performs none of the actions it needs
@@ -2438,6 +2643,7 @@ where
         );
         let answer = revalidate(governor, &made)?;
         let data = made.into_data();
+        request_proposed(context, &data, &answer);
         track.requests.push(Revalidated {
             request: data.clone(),
             outcome: answer.clone(),
@@ -2561,7 +2767,7 @@ where
         match answer {
             Ok(effect) => {
                 answered.performed |= matches!(effect, EffectOutcome::Performed(_));
-                track.record(data, &effect);
+                track.record(context, data, &effect);
                 governor.observe(effect_observation(context, data, &effect))?;
                 if matches!(effect, EffectOutcome::Pending(_)) {
                     answered.pending.push(data.clone());
@@ -2664,20 +2870,22 @@ where
     };
     for data in &waiting.requests {
         let mut answer = revalidate(governor, &ActionRequest::new(data.clone()))?;
+        // A read is admitted again only as a read of a fan-out is (8a).
+        if matches!(answer, RevalidateActionRequestOutcome::Admitted)
+            && waiting.reads
+            && !fan_out_read(&data.action, handed, effects)
+        {
+            answer = refused_read(&data.action, handed);
+        }
+        request_proposed(context, data, &answer);
         let mut admitted = false;
         match &answer {
-            // A read is admitted again only as a read of a fan-out is (8a).
-            RevalidateActionRequestOutcome::Admitted
-                if waiting.reads && !fan_out_read(&data.action, handed, effects) =>
-            {
-                answer = refused_read(&data.action, handed);
-            }
             RevalidateActionRequestOutcome::Admitted => admitted = true,
             RevalidateActionRequestOutcome::Stale { .. } => again.stale = true,
             RevalidateActionRequestOutcome::NeedsAuthority { error } if !waiting.reads => {
-                if let AuthorityCheck::Decided(verdict) =
-                    check_authority(authority, commission, data, &error.capability)
-                {
+                let check = check_authority(authority, commission, data, &error.capability);
+                authority_decided(context, data, &error.capability, &check);
+                if let AuthorityCheck::Decided(verdict) = check {
                     match verdict {
                         AuthorityVerdict::Allow(Unit(true)) => {
                             let current = governor.current_revision(&data.case_id)?;
