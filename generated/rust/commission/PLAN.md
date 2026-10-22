@@ -1,14 +1,14 @@
 <!--
   generated from commission v1
-  model digest 24f933215e98a20ff4758a4c398276a46849806e95ade4524297a92f95fe25fc
-  contract digest 079c52a5c30f36a2d41adc343a508d804fd1658d2217aeeefa310d5094f46d2c
+  model digest 055b7c3e91f023c0eb2fd5c842304274a9c9dba5374e6639684e1545706152d6
+  contract digest df38ea01c1e1b1e860bcde154e83aa20e7cf1a02e88d16d49073f69c18425718
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — commission v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-146 capabilities: **139 generated**, **7 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+147 capabilities: **140 generated**, **7 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -73,6 +73,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `commission.responsibility.FrontierObligation` |
 | domain type | `commission.responsibility.GovernorError` |
 | domain type | `commission.responsibility.HumanDecisionRequest` |
+| domain type | `commission.responsibility.LimitBreachStep` |
 | domain type | `commission.responsibility.Observation.State` |
 | domain type | `commission.responsibility.ObservationId` |
 | domain type | `commission.responsibility.PrincipalId` |

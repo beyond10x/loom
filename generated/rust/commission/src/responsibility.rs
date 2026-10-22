@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 24f933215e98a20ff4758a4c398276a46849806e95ade4524297a92f95fe25fc
-// contract digest 079c52a5c30f36a2d41adc343a508d804fd1658d2217aeeefa310d5094f46d2c
+// model digest 055b7c3e91f023c0eb2fd5c842304274a9c9dba5374e6639684e1545706152d6
+// contract digest df38ea01c1e1b1e860bcde154e83aa20e7cf1a02e88d16d49073f69c18425718
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Responsibility — `commission.responsibility`.
@@ -518,6 +518,15 @@ pub enum GovernorError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HumanDecisionRequest(pub crate::json::Value);
 
+/// LimitBreachStep — `commission.responsibility.LimitBreachStep`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LimitBreachStep {
+    /// `limit` — `commission.responsibility.BudgetLimit`.
+    pub limit: BudgetLimit,
+    /// `step` — `commission.responsibility.BreachStep`.
+    pub step: BreachStep,
+}
+
 /// The states of `commission.responsibility.Observation`, as runtime values.
 ///
 /// Synthesised from the lifecycle, so the two cannot disagree. Which *moves* are legal is not
@@ -722,6 +731,8 @@ pub struct StopPolicy {
     pub idle_bound: Option<i64>,
     /// `on_breach` — `commission.responsibility.BreachStep`.
     pub on_breach: BreachStep,
+    /// `breach_by_limit` — `List<commission.responsibility.LimitBreachStep>`.
+    pub breach_by_limit: Vec<LimitBreachStep>,
 }
 
 /// The states of `commission.responsibility.Suspension`, as runtime values.

@@ -386,6 +386,11 @@ types:
   # ended at or after its deadline. DiscardStep, the default, ends the run before the step's
   # outcome is acted on. KeepStep acts on it as with no breach, and suspends the Run for the breach
   # before the next step.
+  # story:breach-choice-per-limit: `breach_by_limit` chooses per limit of the run budget. A limit
+  # it lists takes its own `step`; a limit it does not list takes `on_breach`, so the empty list,
+  # the default, gives `on_breach` for every limit. A limit listed twice is refused before the Run
+  # starts, naming the limit. MaxSteps and MaxTrials are count limits that stop the run before a
+  # step and are never an executor step's breach: listing them is allowed and changes nothing.
   - name: commission.responsibility.StopPolicy
     kind: struct
     fields:
@@ -394,6 +399,18 @@ types:
       - name: idle_bound
         type: Optional<Integer>
       - name: on_breach
+        type: commission.responsibility.BreachStep
+      - name: breach_by_limit
+        type: List<commission.responsibility.LimitBreachStep>
+
+  # story:breach-choice-per-limit: what becomes of an executor step that breached `limit`, the
+  # host's choice for that limit alone (StopPolicy.breach_by_limit).
+  - name: commission.responsibility.LimitBreachStep
+    kind: struct
+    fields:
+      - name: limit
+        type: commission.responsibility.BudgetLimit
+      - name: step
         type: commission.responsibility.BreachStep
 
   # story:run-budget-tokens-and-deadline: what becomes of an executor step whose reported usage
@@ -407,6 +424,13 @@ types:
   # the deadline was passed. A spending limit is checked first, so a step past both is suspended
   # for the spending limit. An effect's own usage breach is the same under both: that effect is
   # already performed.
+  # story:breach-choice-per-limit: once an executor call was observed, every run limit it breached
+  # is collected, the spending limits in the order they are checked and then the deadline, which
+  # is read whether or not a spending breach was kept; each takes its own choice
+  # (StopPolicy.breach_by_limit, else `on_breach`). The step is discarded when any breached limit's
+  # choice is DiscardStep, and the Run is suspended for the first breached limit whose choice is
+  # DiscardStep. When every breached limit's choice is KeepStep the step is kept, and the Run is
+  # suspended before the next step for the first breached limit.
   - name: commission.responsibility.BreachStep
     kind: enum
     variants: [DiscardStep, KeepStep]
@@ -572,6 +596,9 @@ types:
   # is read again. At or after the deadline the first takes nothing and the Suspension stays
   # Pending; the second releases the Suspension; neither performs anything, and the resume ends as
   # a passed deadline ends a run before an executor call.
+  # story:breach-choice-per-limit: the stop policy decides an executor call's breach per limit
+  # (`breach_by_limit`, else `on_breach`), the deadline read after the call whether or not a
+  # spending breach was kept.
   - name: commission.responsibility.RunBudget
     kind: struct
     fields:
