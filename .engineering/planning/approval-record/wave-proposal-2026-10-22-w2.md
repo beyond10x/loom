@@ -8,7 +8,7 @@ relations:
 - decides: story:checked-timeout-deadlines
 - decides: story:run-record-names-agent-sessions
 - decides: story:host-stop-when-a-step-follows
-revision: 4
+revision: 5
 ---
 # Wave 2026-10-22-w2 proposal, accepted with no operator turn
 
@@ -61,3 +61,14 @@ unit in its own worktree, with adversary passes in parallel.
   - Metaharness 0.11.0 to 0.13.0 (read for the orchestrator's Q7): its CHANGELOG has 7
     `Breaking` bullets; no item they name appears in Loom's source (grep, 0 hits). H7, which reads
     the recorded working directory, required the u2 fixture to record its own.
+
+  - D12: a step kept past a breach whose granted request the host stops is suspended for that
+    breach (`RunBudget`), never `HostStop`, and nothing is invoked; a kept step the host does not
+    stop is invoked once, as `KeepStep` says. Not asking the host there would either let an effect
+    run unasked or change `KeepStep` for hosts with no `host_stop`.
+  - Left open after the adversary rounds, for a later wave:
+    - Turn usage records saturate a count past `i64::MAX` (`crates/loom-cli/src/events.rs`,
+      `Observed::record`); predates the wave, and a refusal there needs a field the V1 contract
+      does not have.
+    - The comment on `SuspensionReason` in `ess/commission/domains/responsibility.yaml` does not
+      say a kept breach comes before `HostStop`.
