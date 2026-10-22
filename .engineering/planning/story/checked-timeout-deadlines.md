@@ -2,9 +2,14 @@
 format: aep.planning-md/3
 id: story:checked-timeout-deadlines
 kind: story
-status: draft
+status: active
 title: Every timeout becomes a deadline through checked arithmetic
-revision: 1
+relations:
+- serves: vision:governed-autonomy
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-22T04:27:47Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-10-22T04:27:48Z", actor: "human:timo", revision: 4}
 ---
 ## Outcome
 
@@ -28,3 +33,11 @@ since wave 2026-10-22-w1.
 
 - `crates/loom-intake-slice/src/bindings.rs`, `crates/loom-intake-slice/src/executor.rs`,
   `crates/loom-connectors/src/cli.rs`, their tests, `CHANGELOG.md`
+
+## ESS first
+
+No declaration changes: the refusal is a value of the errors each path already returns
+(`bindings` refuses as it refuses an empty argv, the executor as `ExecuteError::Workspace`, the
+Connectors client as a refusal naming the source). The red commit is the story's own new tests,
+one per path, each with `Duration::MAX` (or the largest `timeout_seconds`) as the timeout, failing
+by panic on `3d56bca9`.

@@ -2,12 +2,15 @@
 format: aep.planning-md/3
 id: story:run-record-names-agent-sessions
 kind: story
-status: draft
+status: active
 title: The run record names each agent session by its trace-ir/1 digest and summary
 summary: One jsonl event per metaharness session, holding its trace-ir-summary/1 (ADR 0096)
 relations:
 - serves: vision:governed-autonomy
-revision: 2
+revision: 6
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-22T04:27:48Z", actor: "human:timo", revision: 5}
+- {from: "proposed", to: "active", at: "2026-10-22T04:27:48Z", actor: "human:timo", revision: 6}
 ---
 ## Outcome
 
@@ -35,11 +38,18 @@ holds its `trace-ir-summary/1`. It does not re-encode that session's turns, tool
 
 - ESS first: `ess/intake/domains/events.yaml` gains a session event holding the `trace-ir/1`
   document's `transcript_digest`, its `source` and the `trace-ir-summary/1` fields.
-- The `metaharness` binary is pinned at 0.13.0; no metaharness crate is added for this (metaharness
-  `AGENTS.md`: binary first).
+- The summary is computed by `metaharness::protocol::summarize` (metaharness 0.13.0, the function
+  `metaharness project --to trace-ir-summary` calls, `crates/metaharness-cli/src/lib.rs:325` at
+  tag `0.13.0`). `crates/loom-session-executor` moves its `metaharness` and `metaharness-b10x`
+  pins from `0.10.1` to `0.13.0` together; no new metaharness crate and no `metaharness` binary
+  is run (tests have no such program, and Loom's tests start no harness program). Decision of
+  wave 2026-10-22-w2, replacing the earlier binary design.
+- The session executor projects each session's record to `trace-ir/1`, summarizes it and returns
+  the summary on its step, as it returns the transcript digest today; the command line writes the
+  event from it. A session whose record cannot be projected writes the event with the summary
+  fields `null` and says why, and never fails the run.
 - A new record kind breaks `docs/contracts/run-events-v1.json` (`a_new_record_kind_is_a_break`):
-  the story moves the committed contract and carries a `**Breaking:**` CHANGELOG bullet, or adds
-  the event within `schema_version` 1 only if the contract allows it.
+  the story moves the committed contract and carries a `**Breaking:**` CHANGELOG bullet.
 
 ## ESS first
 
@@ -63,7 +73,9 @@ The session event in `ess/intake/domains/events.yaml`; `task intake-generate` an
 ## Scope
 
 - `crates/loom-cli/src/events.rs`, `crates/loom-cli/src/main.rs`
-- `crates/loom-session-executor`
+- `crates/loom-session-executor` (its `Cargo.toml` pins), `Cargo.lock`
 - `ess/intake/domains/events.yaml`, `generated/rust/intake/`, `docs/contracts/run-events-v1.json`,
-  `website/docs/reference/run-events.md`
-- their tests, `CHANGELOG.md`
+  `website/docs/reference/run-events.md`, `website/docs/reference/ess/`, `website/data/ess/`
+- their tests, `CHANGELOG.md`, `AGENTS.md`
+- Shares `CHANGELOG.md` and `AGENTS.md` with `story:checked-timeout-deadlines`; merged one at a
+  time.
