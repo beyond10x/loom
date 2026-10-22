@@ -8,7 +8,7 @@ relations:
 - decides: story:checked-timeout-deadlines
 - decides: story:run-record-names-agent-sessions
 - decides: story:host-stop-when-a-step-follows
-revision: 3
+revision: 4
 ---
 # Wave 2026-10-22-w2 proposal, accepted with no operator turn
 
@@ -50,3 +50,14 @@ unit in its own worktree, with adversary passes in parallel.
     host-stop tests; adversary pass.
   - D9 is superseded: nothing is filed in Substrate's store; the `ChildCommand` story is filed
     once Substrate's tag arrives.
+
+- Decisions taken while the wave ran (2026-10-22):
+  - D10: `b10x-loom run` writes no `Session` line; a host running agent sessions writes them
+    through `EventStream::sessions(&SessionExecutor)`. The acceptance covers runs through
+    `loom-session-executor`, which `b10x-loom run` does not use.
+  - D11: `## [Unreleased]` keeps Added, Changed, Fixed in Keep a Changelog order, with three
+    `**Breaking:**` bullets: the `Session` record kind, `SessionReport::trace`, and metaharness
+    `0.13.0` behind `loom_sdk::session::metaharness`.
+  - Metaharness 0.11.0 to 0.13.0 (read for the orchestrator's Q7): its CHANGELOG has 7
+    `Breaking` bullets; no item they name appears in Loom's source (grep, 0 hits). H7, which reads
+    the recorded working directory, required the u2 fixture to record its own.
