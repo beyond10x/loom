@@ -2,12 +2,14 @@
 format: aep.planning-md/3
 id: decision-blocker:sdk-writable-host-root
 kind: decision-blocker
-status: open
+status: cleared
 title: Timo has not decided how a confined child gets a writable mount outside /workspace (Q2)
 relations:
 - blocks: story:writable-host-root
 withholds: test_result
-revision: 2
+revision: 5
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-22T14:06:55Z", actor: "human:timo", revision: 4}
 ---
 ## Question
 
@@ -44,3 +46,24 @@ substrate's ADR lands. Don't build ahead of it."
   given to the run as a writable checkout.
 - No Loom code changes before Substrate's ADR is accepted; the blocker stays open until then, as
   its § Cleared when says.
+
+## Decision (2026-10-22)
+
+Timo, quoted by session `b10x-chef-orchestrator` on 2026-10-22: "either name physical paths, or
+provide git source". Substrate accepted it as ADR 0038, "a writable root is a named host path or a
+Git checkout" (`adr/0038-writable-roots-are-named-host-paths-or-git-checkouts.md`, status
+`accepted`, beyond10x/substrate `main` at `44aacec7b0f593527e348100366ae30823aa30af`).
+
+- Option B, narrowed to two kinds: a host path the operator names, or a Git source given to the run
+  as a writable checkout.
+- The orchestrator cleared this blocker on the accepted ADR (2026-10-22): "Close the blocker in
+  your store with that citation (store-only, aep validate). Then stay idle until substrate 0.10.0
+  ships."
+- `story:writable-host-root` waits for the Substrate release that implements ADR 0038 (0.10.0).
+
+## Landing (2026-10-22)
+
+The branch carrying this clear began before the 0.34.0 release, and its pull request conflicted
+with main on this file. It was brought up to date by a merge commit that takes main's version
+and applies the decision again through `aep`; nothing was force-pushed. The orchestrator wrote
+on 2026-10-22: "Accepted: merge main into the branch (bc41ec3e), a 1-file diff, no force-push."

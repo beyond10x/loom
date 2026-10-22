@@ -1122,7 +1122,8 @@ llm `Model`, and a Claude Code session is metaharness's to run (ADR 0098).
   story merged into the wave branch, then `plan: close wave …`, and `main` fast-forwards to the
   wave head. Work outside a wave lands as a bot pull request.
 - Use a managed worktree (`worktree create --repo ~/beyond10x/loom --purpose …`); keep the primary
-  checkout clean.
+  checkout clean. Run `git fetch origin` first and pass `--base origin/main`: `--base main` takes
+  the local `main`, which can be behind, and a branch cut from it conflicts or cannot fast-forward.
 
 ## Commits, pushes and GitHub writes
 
