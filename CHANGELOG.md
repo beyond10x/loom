@@ -12,6 +12,15 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `StopPolicy.breach_by_limit`: a `LimitBreachStep` keeps or discards a step per budget limit, `on_breach` for the rest (story:breach-choice-per-limit)
+
+### Changed
+
+- **Breaking:** `StopPolicy` gains `breach_by_limit`; a struct literal sets it, `Vec::new()` keeping 0.32.0's stops (story:breach-choice-per-limit)
+- **Breaking:** `LoopFailure` gains `BreachLimitListedTwice`: a limit listed twice is refused before a Run starts (story:breach-choice-per-limit)
+
 ## [0.32.0] - 2026-10-21
 
 ### Added
