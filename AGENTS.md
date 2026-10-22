@@ -568,6 +568,30 @@ links `b10x-loom-mandate`, the one crate that does (the SDK does not), and `appr
 use it only behind `--mandate`; `b10x-loom run` does not use it. Over the closure of `Cargo.lock`,
 only `b10x-loom-cli` and `loom-docs`, which links it for its help text, reach Mandate.
 
+## Agent spec
+
+An agent as data is the `loom.agent` domain (`ess/domains/agent.yaml`, `story:agent-domain`):
+`AgentSpec`, the typed `loom.agent/1` document, with its `ToolPolicy` (tools allowed and denied,
+egress apertures and the metaharness `DecisionMode`, `frame`, `ask` or `observe`). `model` is
+exactly `loom.models.ModelsConfig`. Its run budget and stop policy mirror Commission's
+`RunBudget` and `StopPolicy` field for field, because an ESS system cannot name another system's
+type; a change to either changes both. `bindings` is a union tagged `kind` (`connectors`, `http`),
+and a Kubernetes selector is a list of `Label`s, ESS having no map. ESS generates no decoder, so
+`loom_sdk::agent::parse` (`crates/loom-sdk/src/agent.rs`) decodes YAML or JSON into the generated
+types, refusing an undeclared member, a missing required one, a wrong type, an undeclared enum
+spelling and a `format` other than `loom.agent/1`, each naming the member; the models section goes
+through the models configuration's own decoder. It checks the shape only: whether a spec can be
+served is `story:agent-check`'s. `examples/agents/operator.yaml` decodes
+(`crates/loom-sdk/tests/agent_spec.rs`, `the_operator_example_decodes`; the unknown-member unit test
+is `agent::tests::a_spec_with_an_unknown_member_is_refused_in_yaml_and_json`). It also refuses
+empty or blank text, a YAML tag on any value, a `bearer_env` that is no environment variable name
+(`[A-Za-z_][A-Za-z0-9_]*`, the text never repeated) and a port outside 1 to 65535. Before reading
+YAML it refuses a document holding more than `MAX_FLOW_OPENERS` (4096) `[` or `{` bytes, counted
+anywhere, because the YAML reader's cost grows with the square of flow nesting
+(`crates/loom-sdk/tests/adversary_w20261022w3_agent_domain.rs`). The types of other domains a spec
+holds (`Decimal`, `Timestamp`, `SessionKind`, `Intent`, the datasource ids and
+`ConnectorsCliConfig`) are re-exported from `loom_sdk::agent`.
+
 ## Plugin host
 
 `b10x-loom-plugin` (`crates/loom-plugin`) hosts a plugin (ADR `plugin-hooks`): a crate linked at

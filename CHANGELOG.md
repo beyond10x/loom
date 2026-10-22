@@ -18,6 +18,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `EventStream::sessions` writes a `Session` record for each session a `SessionExecutor` runs (story:run-record-names-agent-sessions)
 - `SessionReport::trace` (`SessionTrace`): the session's record summarized by metaharness, or why not (story:run-record-names-agent-sessions)
 - `SessionReport::tool_decisions` (`ToolDecision`): each tool call's decision and who made it, or unknown (story:tool-decisions-read-back)
+- `loom_sdk::agent`: `AgentSpec`, `ToolPolicy`, `DecisionMode` from ESS `loom.agent`, the primitives a spec holds, and `parse` (story:agent-domain)
+- `loom_sdk::agent::parse` refuses unknown members, blank text, YAML tags, a `bearer_env` that is no variable name, ports outside 1–65535, more than `MAX_FLOW_OPENERS` `[`/`{` (story:agent-domain)
 
 ### Changed
 
