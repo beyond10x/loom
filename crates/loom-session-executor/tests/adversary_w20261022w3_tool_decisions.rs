@@ -19,7 +19,7 @@ use b10x_loom_session_executor::metaharness::{
 };
 use b10x_loom_session_executor::model::session::{CallDecision, DecidedBy, ToolDecision};
 use b10x_loom_session_executor::{
-    CredentialSource, Endpoint, Kind, ProcessRunner, SessionExecutor, tool_decisions,
+    tool_decisions, CredentialSource, Endpoint, Kind, ProcessRunner, SessionExecutor,
 };
 use serde_json::json;
 
@@ -116,7 +116,11 @@ fn adversary_every_decider_and_decision_kind_maps_to_its_own_name() {
         .requested("c4", "Grep")
         .decided("c4", allow(), "observe")
         .requested("c5", "Edit")
-        .decided("c5", json!({"decision": "replace", "input": {}}), "embedder")
+        .decided(
+            "c5",
+            json!({"decision": "replace", "input": {}}),
+            "embedder",
+        )
         .requested("c6", "Glob")
         .decided("c6", json!({"decision": "abstain"}), "embedder")
         .ended(
@@ -137,8 +141,18 @@ fn adversary_every_decider_and_decision_kind_maps_to_its_own_name() {
             denied_deadline,
             denied_adapter,
             decision("c4", Some("Grep"), CallDecision::Allow, DecidedBy::Observe),
-            decision("c5", Some("Edit"), CallDecision::Replace, DecidedBy::Embedder),
-            decision("c6", Some("Glob"), CallDecision::Abstain, DecidedBy::Embedder),
+            decision(
+                "c5",
+                Some("Edit"),
+                CallDecision::Replace,
+                DecidedBy::Embedder
+            ),
+            decision(
+                "c6",
+                Some("Glob"),
+                CallDecision::Abstain,
+                DecidedBy::Embedder
+            ),
         ]
     );
 }
@@ -202,7 +216,12 @@ fn adversary_an_empty_tool_name_is_no_tool() {
     let decisions = tool_decisions(&record.bytes()).expect("known");
     assert_eq!(
         decisions,
-        vec![decision("c1", None, CallDecision::Allow, DecidedBy::Embedder)]
+        vec![decision(
+            "c1",
+            None,
+            CallDecision::Allow,
+            DecidedBy::Embedder
+        )]
     );
 }
 
@@ -213,7 +232,9 @@ fn adversary_a_large_record_reads_every_decision_in_order() {
     let mut record = Record::new();
     for n in 0..CALLS {
         let call = format!("c{n}");
-        record.requested(&call, "Bash").decided(&call, allow(), "embedder");
+        record
+            .requested(&call, "Bash")
+            .decided(&call, allow(), "embedder");
     }
     record.ended([CALLS, 0, 0, 0], json!({"embedder": CALLS}));
 
@@ -296,10 +317,13 @@ fn adversary_a_b10x_session_with_calls_does_not_report_a_known_none() {
     let scratch = Scratch::new("b10x");
     let token = scratch.0.join("token.json");
     std::fs::write(&token, "{\"token\": \"scripted\"}\n").expect("a token file");
-    let mut executor =
-        SessionExecutor::new(scratch.0.join("tree"), vec!["src/lib.rs".to_owned()], "fix a")
-            .of_kind(Kind::B10x)
-            .with_runner(Box::new(Session(b10x_with_calls)));
+    let mut executor = SessionExecutor::new(
+        scratch.0.join("tree"),
+        vec!["src/lib.rs".to_owned()],
+        "fix a",
+    )
+    .of_kind(Kind::B10x)
+    .with_runner(Box::new(Session(b10x_with_calls)));
     executor.credentials = CredentialSource::None;
     executor.scratch = scratch.0.join("scratch");
     executor.endpoint = Some(Endpoint {
