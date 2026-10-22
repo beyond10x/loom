@@ -18,12 +18,16 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `SubstrateRunner::spawn_child` starts a `ConfinedChild`: written, read by frame, signalled and waited, as confined as `run_child` (story:live-confined-child)
 - `ChildCommand::with_stdin`: `run_child` writes the bytes to the child's standard input once, up to 16 MiB (story:live-confined-child)
 - `ChildFrame`, `ChildSignal`, `ChildResult`, `ChildError`, and `ChildOutput`, `ChildExit`, `ChildStream` from `intake.confinement` (story:live-confined-child)
+- `ChildCommand::with_read_only_root`, `with_read_only_file`, `at_host_path`: a child reads host paths where named (story:child-read-only-roots-and-host-paths)
+- `ChildCommand::sandbox_path` says where the child sees a host path; `ReadOnlyMount` names a root or file (story:child-read-only-roots-and-host-paths)
+- A child still starts in `/workspace` and writes only in it: Substrate 0.7.18 offers no writable mount or workdir outside (story:child-read-only-roots-and-host-paths)
 
 ### Changed
 
 - **Breaking:** `StopPolicy` gains `breach_by_limit`; a struct literal sets it, `Vec::new()` keeping 0.32.0's stops (story:breach-choice-per-limit)
 - **Breaking:** `LoopFailure` gains `BreachLimitListedTwice`: a limit listed twice is refused before a Run starts (story:breach-choice-per-limit)
 - **Breaking:** `TestExecution` gains `child_output`: the child's stdout and stderr apart, each flagged when cut (story:live-confined-child)
+- **Breaking:** `AppliedConfinement` gains `read_only_files` (`intake.confinement.ReadOnlyFile`); a struct literal sets it (story:child-read-only-roots-and-host-paths)
 
 ## [0.32.0] - 2026-10-21
 

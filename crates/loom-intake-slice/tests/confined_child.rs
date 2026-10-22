@@ -1500,7 +1500,7 @@ fn a_read_only_root_at_its_host_path_is_readable_and_not_writable() {
             );
             let child =
                 ChildCommand::new("sh", ["-c", script.as_str()], workspace).at_host_path(&root);
-            assert_eq!(child.host_paths(), [root.clone()]);
+            assert_eq!(child.host_paths(), std::slice::from_ref(&root));
             assert_eq!(
                 child.sandbox_path(&root.join("data.txt")),
                 Some(root.join("data.txt"))
@@ -1517,7 +1517,7 @@ fn a_read_only_root_at_its_host_path_is_readable_and_not_writable() {
                 host_path: shown.clone(),
                 mount: shown.clone(),
             };
-            assert_eq!(result.applied.read_only_roots, [named.clone()]);
+            assert_eq!(result.applied.read_only_roots, std::slice::from_ref(&named));
             assert!(result.applied.read_only_files.is_empty());
             let record = result.driver_record.as_ref().expect("the driver's record");
             assert_eq!(
