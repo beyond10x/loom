@@ -1,19 +1,55 @@
 <!--
   generated from loom v1
-  model digest bc642d94f69cbdf95d14cb3073a6e846e7b335b8f96633ed6adcced128ea5a81
-  contract digest c07e0b81375fb91ac34301173b7fefb2d8b8934d257db5f1db8bf32a80e2227f
+  model digest 0999c854723de4629133772b5f59080f508280a406e9df93a4bf9bc245f36d5a
+  contract digest 6f0a6aacf25c40b7be3094dd863742744c8204cc24b4fb40aec7bb8c68013671
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-149 capabilities: **148 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+185 capabilities: **184 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
 | capability | source |
 | --- | --- |
+| domain type | `loom.agent.A2aCard` |
+| domain type | `loom.agent.A2aExposure` |
+| domain type | `loom.agent.ActionBudget` |
+| domain type | `loom.agent.AgentId` |
+| domain type | `loom.agent.AgentIdentity` |
+| domain type | `loom.agent.AgentSpec` |
+| domain type | `loom.agent.AgentState` |
+| domain type | `loom.agent.Binding` |
+| domain type | `loom.agent.BreachStep` |
+| domain type | `loom.agent.BudgetLimit` |
+| domain type | `loom.agent.ChannelSpec` |
+| domain type | `loom.agent.ConfinementMode` |
+| domain type | `loom.agent.ConnectorsBinding` |
+| domain type | `loom.agent.DecisionMode` |
+| domain type | `loom.agent.DeploySpec` |
+| domain type | `loom.agent.EgressAperture` |
+| domain type | `loom.agent.ExposeSpec` |
+| domain type | `loom.agent.HttpBinding` |
+| domain type | `loom.agent.InnerLoop` |
+| domain type | `loom.agent.KubernetesDeploy` |
+| domain type | `loom.agent.KubernetesEgress` |
+| domain type | `loom.agent.KubernetesIngress` |
+| domain type | `loom.agent.KubernetesResources` |
+| domain type | `loom.agent.Label` |
+| domain type | `loom.agent.LimitBreachStep` |
+| domain type | `loom.agent.Loops` |
+| domain type | `loom.agent.OuterLoop` |
+| domain type | `loom.agent.PolicySpec` |
+| domain type | `loom.agent.RunBudget` |
+| domain type | `loom.agent.RuntimeSpec` |
+| domain type | `loom.agent.SessionSpec` |
+| domain type | `loom.agent.StateWhen` |
+| domain type | `loom.agent.StopPolicy` |
+| domain type | `loom.agent.ToolPolicy` |
+| domain type | `loom.agent.WriteMode` |
+| domain type | `loom.agent.WritesSpec` |
 | domain type | `loom.authority.Answer` |
 | domain type | `loom.authority.CaseResource` |
 | domain type | `loom.authority.HostContext` |

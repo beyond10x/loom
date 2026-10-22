@@ -461,6 +461,21 @@ mod models {
     // models paths: end
 }
 
+/// One `use` per `loom_sdk::agent` path of the page's embedding table: an agent as data.
+///
+/// [`every_agent_path_on_the_page_resolves`] reads these lines out of this file, between the two
+/// marker comments, so keep one path per `use` and nothing else between them.
+#[allow(unused_imports)]
+mod agent {
+    // agent paths: begin
+    use loom_sdk::agent::AgentSpec;
+    use loom_sdk::agent::AgentSpecError;
+    use loom_sdk::agent::DecisionMode;
+    use loom_sdk::agent::ToolPolicy;
+    use loom_sdk::agent::parse;
+    // agent paths: end
+}
+
 /// The `loom_sdk::connectors` paths the page's embedding table lists: the command-line client and
 /// its governed write, and the host evidence adapter.
 ///
@@ -743,6 +758,34 @@ fn every_models_path_on_the_page_resolves() {
         "loom_sdk::models::from_routes",
         "loom_sdk::models::parse_config",
         "loom_sdk::models::ModelsConfig",
+    ] {
+        assert!(listed.contains(path), "the page lists {path}");
+    }
+}
+
+#[test]
+fn every_agent_path_on_the_page_resolves() {
+    let imported = unique(used_paths("agent paths"), "the agent block");
+    assert!(!imported.is_empty(), "the agent block holds the imports");
+
+    let page = page();
+    let listed = unique(
+        table_column(&page, EMBEDDING_HEADING, 0)
+            .iter()
+            .flat_map(|cell| cell.split(','))
+            .map(|path| path.trim().trim_matches('`').to_owned())
+            .filter(|path| path.starts_with("loom_sdk::agent::"))
+            .collect(),
+        "the embedding table",
+    );
+    assert_eq!(
+        listed, imported,
+        "the page's embedding table lists exactly the `loom_sdk::agent` paths that resolve here"
+    );
+    for path in [
+        "loom_sdk::agent::AgentSpec",
+        "loom_sdk::agent::ToolPolicy",
+        "loom_sdk::agent::DecisionMode",
     ] {
         assert!(listed.contains(path), "the page lists {path}");
     }

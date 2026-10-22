@@ -17,6 +17,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - Run event `Session`: one per agent session, its `trace-ir/1` digest and its `trace-ir-summary/1` (story:run-record-names-agent-sessions)
 - `EventStream::sessions` writes a `Session` record for each session a `SessionExecutor` runs (story:run-record-names-agent-sessions)
 - `SessionReport::trace` (`SessionTrace`): the session's record summarized by metaharness, or why not (story:run-record-names-agent-sessions)
+- `loom_sdk::agent`: `AgentSpec`, `ToolPolicy`, `DecisionMode` from ESS `loom.agent`, and `parse` refusing unknown members (story:agent-domain)
 
 ### Changed
 

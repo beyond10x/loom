@@ -2,10 +2,10 @@
 
 //! The Loom SDK: one crate an application depends on to embed a governed agent.
 //!
-//! It re-exports the crates an embedder needs, under stable module names. Its one module of its
-//! own is [`models`], a host's llm models loaded from a models configuration or a routes document;
-//! the executor's own selector and argument generator over an llm `Model` are
-//! [`loom::model_selector`].
+//! It re-exports the crates an embedder needs, under stable module names. Its modules of its own
+//! are [`agent`], an agent as data, and [`models`], a host's llm models loaded from a models
+//! configuration or a routes document; the executor's own selector and argument generator over an
+//! llm `Model` are [`loom::model_selector`].
 //!
 //! | Module | Crate | What it is for |
 //! | --- | --- | --- |
@@ -14,6 +14,7 @@
 //! | [`loom`] | `b10x-loom-executor` | The executor: [`Loom`] proposes one action per frontier through an [`ActionSelector`] and an [`ArgumentGenerator`] the embedder supplies, or the ones over an llm `Model` in [`loom::model_selector`], told the embedder's `Briefing`, on which a plugin turn runs. |
 //! | [`session`] | `b10x-loom-session-executor` | The session executor: [`session::SessionExecutor`] runs one harness, Claude Code or Codex session through metaharness per frontier in a scratch copy of the workspace, and returns the change it made there as a proposed action whose arguments are its files; an effect applies it once Commission admits it. |
 //! | [`governor`] | `b10x-loom-governor` | The governor: [`CanonGovernor`] evaluates a case's protocol with Canon over a [`CaseStore`] and issues its frontier. |
+//! | [`agent`] | `loom` (generated) | An agent as data: the `loom.agent` domain's types ([`agent::AgentSpec`], [`agent::ToolPolicy`], [`agent::DecisionMode`]) and [`agent::parse`], which decodes one `loom.agent/1` document and refuses a member the domain does not declare. |
 //! | [`intake`] | `b10x-loom-intake-router`, `b10x-loom-intake-slice` | Intake: the router that proposes a protocol for an intent ([`intake::router`]), and the slice's case opening, local executor, test-result verifier and local effect adapter ([`intake::slice`]). |
 //!
 //! The items an embedding always touches are also re-exported at the top: [`run_until_blocked`],
@@ -49,6 +50,7 @@ pub use b10x_loom_connectors as connectors;
 /// The Loom executor (`b10x-loom-executor`).
 pub use b10x_loom_executor as loom;
 
+pub mod agent;
 pub mod models;
 
 /// The session executor (`b10x-loom-session-executor`): an `AgentExecutor` over a metaharness

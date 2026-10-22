@@ -252,6 +252,11 @@ bound to Connector operations, the effect port is Commission's `ConnectorEffects
 `loom_sdk::connectors::ConnectorsInvoker`, which invokes each admitted request once on the host's
 Connectors endpoint for the operation's instance and reports the attempt Connectors recorded.
 
+An agent can be written as data: a `loom.agent/1` document, YAML or JSON, which
+`loom_sdk::agent::parse` decodes into an `AgentSpec` (identity, models, session and tool policy,
+loops, states, bindings, channel, writes, capabilities, exposure, runtime and deployment),
+refusing a member the domain does not declare. `examples/agents/operator.yaml` is one.
+
 Since `0.2.0`, `CanonGovernor::with_protocol` admits host-reviewed Canon protocols;
 `with_evaluation_time` supplies trusted freshness time. Durable hosts implement
 `governor::FallibleCaseStore`, while existing `CaseStore` users remain compatible. Protocol

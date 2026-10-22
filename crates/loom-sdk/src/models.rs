@@ -42,7 +42,7 @@ pub use models_config::models::ModelsConfig;
 pub use models_config::models::RoleModel;
 
 /// The most bytes of a configuration or routes document read.
-const MAX_BYTES: u64 = 2 * 1024 * 1024;
+pub(crate) const MAX_BYTES: u64 = 2 * 1024 * 1024;
 
 /// Why models could not be loaded; the message names the file and the role or name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -182,7 +182,12 @@ pub fn parse_config(text: &str) -> Result<ModelsConfig, ModelsError> {
     bound_aliases(text)?;
     let value: Value = serde_yaml_ng::from_str(text)
         .map_err(|error| ModelsError::new(format!("invalid YAML: {error}")))?;
-    let document = fields(&value, "the configuration", &["routes", "roles"])?;
+    decode_config(&value)
+}
+
+/// Decodes a models configuration from a YAML value, as [`parse_config`] does after reading it.
+pub(crate) fn decode_config(value: &Value) -> Result<ModelsConfig, ModelsError> {
+    let document = fields(value, "the configuration", &["routes", "roles"])?;
     let routes = text_field(document.get("routes"), "routes")?;
     let list = document
         .get("roles")
@@ -342,7 +347,7 @@ impl<'de> Visitor<'de> for Measure<'_> {
 
 /// Refuses a configuration whose YAML aliases make it cost more than the densest document of its
 /// length without aliases, before any owned value is built.
-fn bound_aliases(text: &str) -> Result<(), ModelsError> {
+pub(crate) fn bound_aliases(text: &str) -> Result<(), ModelsError> {
     let budget = Budget {
         left: Cell::new(expansion_budget(text)),
         exhausted: Cell::new(false),
