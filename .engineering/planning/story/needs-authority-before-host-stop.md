@@ -8,7 +8,7 @@ relations:
 - decomposes: epic:loom-on-llm-and-metaharness
 - serves: vision:governed-autonomy
 - depends_on: story:frontier-names-movers
-revision: 1
+revision: 2
 ---
 ## Outcome
 
@@ -62,3 +62,12 @@ The unperformable stop (`story:unperformable-names-the-claim`). Both edit `runti
 - `ess/commission/domains/responsibility.yaml`, `generated/rust/commission/`
 - AGENTS.md rows 130 and 150 and :332-342; `website/data/status.json:23`;
   `website/docs/reference/commission/` (regenerated); CHANGELOG Breaking line
+
+## Decision status (2026-10-22)
+
+The orchestrator wrote on 2026-10-22: "The stop-order fork (A/B/C) is part of a change to the
+documented Loom contract, so it is Timo's; I put it in his queue. Build nothing from #110 until I
+send his answer."
+
+Open: options A, B and C above wait on Timo's answer. Until it comes, none of the three stories in
+https://github.com/beyond10x/loom/pull/110 is built.
