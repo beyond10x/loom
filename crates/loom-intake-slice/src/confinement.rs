@@ -793,6 +793,7 @@ fn settle(
             .unwrap_or_default()
             .to_vec(),
         read_only_roots: roots_projection(&record.read_only_roots),
+        read_only_files: Vec::new(),
     };
     let described = format!(
         "state {}, refusal {}, output complete {}",
@@ -2599,6 +2600,7 @@ mod tests {
             profile: "workspace".to_owned(),
             writable_scopes: vec!["target".to_owned()],
             read_only_roots: Vec::new(),
+            read_only_files: Vec::new(),
         }
     }
 
@@ -3150,6 +3152,89 @@ mod tests {
             error.detail,
             "Substrate's applied confinement does not match the required profile"
         );
+    }
+
+    /// The story's case, on the check every launch shares: a child's read-only roots and files go
+    /// to Substrate as named, a record naming exactly them is accepted and projected, and a record
+    /// naming none, another, or one more is refused, for a child run to its end and a live child
+    /// alike.
+    #[test]
+    fn a_record_naming_other_read_only_roots_is_refused() {
+        let root = |host: &str, mount: &str| substrate_wire::ReadOnlyRoot {
+            host_path: host.to_owned(),
+            mount: mount.to_owned(),
+        };
+        let file = |host: &str, mount: &str| substrate_wire::ReadOnlyFile {
+            host_path: host.to_owned(),
+            mount: mount.to_owned(),
+        };
+        let child = ChildCommand::new("true", [] as [&str; 0], "/work/space")
+            .with_read_only_root("/srv/tools", "/opt/tools")
+            .with_read_only_file("/srv/policy.toml", "/etc/loom/policy.toml");
+        let run = child.input("space", "snapshot".to_owned());
+        let live = child.session_input("space", "snapshot".to_owned()).exec;
+        for input in [&run, &live] {
+            assert_eq!(input.read_only_roots, [root("/srv/tools", "/opt/tools")]);
+            assert_eq!(
+                input.read_only_files,
+                [file("/srv/policy.toml", "/etc/loom/policy.toml")]
+            );
+            let exact = record_for(input, AppliedNetwork::None);
+            check_record(input, None, &exact).unwrap();
+            let others = [
+                (Vec::new(), exact.read_only_files.clone()),
+                (
+                    vec![root("/srv/other", "/opt/tools")],
+                    exact.read_only_files.clone(),
+                ),
+                (
+                    vec![root("/srv/tools", "/opt/other")],
+                    exact.read_only_files.clone(),
+                ),
+                (
+                    vec![
+                        root("/srv/tools", "/opt/tools"),
+                        root("/srv/more", "/opt/more"),
+                    ],
+                    exact.read_only_files.clone(),
+                ),
+                (exact.read_only_roots.clone(), Vec::new()),
+                (
+                    exact.read_only_roots.clone(),
+                    vec![file("/srv/other.toml", "/etc/loom/policy.toml")],
+                ),
+                (
+                    exact.read_only_roots.clone(),
+                    vec![file("/srv/policy.toml", "/etc/loom/other.toml")],
+                ),
+            ];
+            for (read_only_roots, read_only_files) in others {
+                let record = substrate_wire::AppliedConfinement {
+                    read_only_roots,
+                    read_only_files,
+                    ..exact.clone()
+                };
+                let error = check_record(input, None, &record).unwrap_err();
+                assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
+            }
+            let ending = live_ending(input, AppliedNetwork::None, ExecState::Exited, EXITED, None);
+            let settled = settle(input, None, "digest".to_owned(), ending).unwrap();
+            let result = live_result(settled, false).unwrap();
+            assert_eq!(
+                result.applied.read_only_roots,
+                [ToolchainRoot {
+                    host_path: "/srv/tools".to_owned(),
+                    mount: "/opt/tools".to_owned(),
+                }]
+            );
+            assert_eq!(
+                result.applied.read_only_files,
+                [ReadOnlyFile {
+                    host_path: "/srv/policy.toml".to_owned(),
+                    mount: "/etc/loom/policy.toml".to_owned(),
+                }]
+            );
+        }
     }
 
     #[test]

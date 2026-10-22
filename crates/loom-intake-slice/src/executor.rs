@@ -1186,6 +1186,7 @@ impl TestRunner for UnconfinedRunner {
                 profile: "none".to_owned(),
                 writable_scopes: Vec::new(),
                 read_only_roots: Vec::new(),
+                read_only_files: Vec::new(),
             },
             driver_record: None,
             child_output: finished.child_output,

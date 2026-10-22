@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 use b10x_loom_intake_slice::confinement::{
     Backend, ChildCommand, ChildError, ChildExit, ChildSignal, ChildStream, ConfinedChild,
     ConfinementError, ConfinementRefusal, EgressAperture, ExecEnvironment, NetworkMode,
-    SandboxProfile, SubstrateRunner, TestExecution, TestRunner as _,
+    ReadOnlyFile, SandboxProfile, SubstrateRunner, TestExecution, TestRunner as _, ToolchainRoot,
 };
 use b10x_loom_intake_slice::executor::TestCommand;
 use substrate_wire::{APERTURE_CA_BUNDLE_PATH, ApertureMechanism, AppliedNetwork};
@@ -1426,6 +1426,582 @@ fn stdin_over_the_input_limit_is_refused_before_launch() {
         .expect_err("a program env reads as an assignment is refused");
     assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
     assert!(!error.detail.contains("synthetic-value"), "{error}");
+}
+
+/// A directory of this test's own `target/` (Cargo's `CARGO_TARGET_TMPDIR`), never `/tmp`,
+/// and its canonical path: the host directories and files a child is given read-only live there.
+fn host_directory() -> (tempfile::TempDir, PathBuf) {
+    let directory = tempfile::Builder::new()
+        .prefix("loom-host-")
+        .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+        .unwrap();
+    let canonical = directory.path().canonicalize().unwrap();
+    (directory, canonical)
+}
+
+/// `path` as the child and the applied confinement name it.
+fn text(path: &Path) -> String {
+    path.to_str().expect("a test path is UTF-8").to_owned()
+}
+
+/// The refusal a launch gets once every check before the driver passed, on a runner whose cgroup
+/// root is no cgroup: the missing cgroup, or the missing backend.
+fn past_every_check() -> ConfinementRefusal {
+    if bubblewrap_present() {
+        ConfinementRefusal::CgroupUndelegated
+    } else {
+        ConfinementRefusal::BackendMissing
+    }
+}
+
+/// A child given `refused`, which the launch refuses `ScopeInvalid` before anything starts, naming
+/// `named` and saying `why`, both through `run_child` and through `spawn_child`; the workspace is
+/// left as it was, without `target`.
+fn assert_refused(
+    runner: &SubstrateRunner,
+    workspace: &Path,
+    refused: &ChildCommand,
+    named: &str,
+    why: &str,
+) {
+    for error in [
+        runner.run_child(refused).unwrap_err(),
+        runner.spawn_child(refused).unwrap_err(),
+    ] {
+        assert_eq!(
+            error.reason,
+            ConfinementRefusal::ScopeInvalid,
+            "{named}: {error}"
+        );
+        assert!(error.detail.contains(named), "{named}: {error}");
+        assert!(error.detail.contains(why), "{named} ({why}): {error}");
+        assert!(
+            !workspace.join("target").exists(),
+            "{named}: a refused mount leaves the workspace as it was"
+        );
+    }
+}
+
+/// The story's case: a directory under the test's `target/`, mounted at its own host path, is
+/// readable inside at that path and not writable there, through `run_child` and a live child
+/// alike; the applied confinement and the driver's record name exactly that root and no file.
+#[test]
+fn a_read_only_root_at_its_host_path_is_readable_and_not_writable() {
+    delegated(
+        "a_read_only_root_at_its_host_path_is_readable_and_not_writable",
+        |runner, workspace| {
+            let (_held, root) = host_directory();
+            std::fs::write(root.join("data.txt"), "from the host\n").unwrap();
+            let shown = text(&root);
+            let script = format!(
+                "cat '{shown}/data.txt'; \
+                 if {{ echo x > '{shown}/written'; }} 2>/dev/null; then echo writable; else echo read-only; fi; \
+                 if {{ echo x >> '{shown}/data.txt'; }} 2>/dev/null; then echo changed; fi"
+            );
+            let child =
+                ChildCommand::new("sh", ["-c", script.as_str()], workspace).at_host_path(&root);
+            assert_eq!(child.host_paths(), [root.clone()]);
+            assert_eq!(
+                child.sandbox_path(&root.join("data.txt")),
+                Some(root.join("data.txt"))
+            );
+            let result = runner.run_child(&child).expect("the child reads its root");
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            assert_eq!(result.output, "from the host\nread-only\n");
+            assert!(!root.join("written").exists(), "nothing was written");
+            assert_eq!(
+                std::fs::read_to_string(root.join("data.txt")).unwrap(),
+                "from the host\n"
+            );
+            let named = ToolchainRoot {
+                host_path: shown.clone(),
+                mount: shown.clone(),
+            };
+            assert_eq!(result.applied.read_only_roots, [named.clone()]);
+            assert!(result.applied.read_only_files.is_empty());
+            let record = result.driver_record.as_ref().expect("the driver's record");
+            assert_eq!(
+                record.read_only_roots,
+                [substrate_wire::ReadOnlyRoot {
+                    host_path: shown.clone(),
+                    mount: shown.clone(),
+                }]
+            );
+            assert!(record.read_only_files.is_empty());
+
+            let live = ChildCommand::new("cat", [format!("{shown}/data.txt")], workspace)
+                .at_host_path(&root);
+            let mut live = runner
+                .spawn_child(&live)
+                .expect("a live child reads its root");
+            assert_eq!(
+                read_to_end(&mut live),
+                (b"from the host\n".to_vec(), Vec::new())
+            );
+            let result = live.wait().expect("the live child's result");
+            assert_eq!(result.exit.exit_code, Some(0));
+            assert_eq!(result.applied.read_only_roots, [named]);
+            assert!(result.applied.read_only_files.is_empty());
+            assert_eq!(result.driver_record.read_only_roots, record.read_only_roots);
+        },
+    );
+}
+
+/// The story's case: a host file mounted where the host names it is readable there and not
+/// writable, and nothing else of its directory is visible; a file named at its own host path
+/// appears at that path. The applied confinement names exactly those files. Where Substrate does
+/// not serve read-only files on this machine, the launch is refused `CapabilityUnserved` and the
+/// case skips naming it.
+#[test]
+fn a_read_only_file_is_mounted_where_named() {
+    delegated(
+        "a_read_only_file_is_mounted_where_named",
+        |runner, workspace| {
+            let (_held, host) = host_directory();
+            let policy = host.join("policy.toml");
+            let own = host.join("own.toml");
+            std::fs::write(&policy, "allow = true\n").unwrap();
+            std::fs::write(&own, "at its own path\n").unwrap();
+            std::fs::write(host.join("sibling.toml"), "not named\n").unwrap();
+            let mount = "/opt/loom/policy.toml";
+            let shown = text(&host);
+            let script = format!(
+                "cat {mount}; ls /opt/loom; cat '{shown}/own.toml'; \
+                 if {{ echo x >> {mount}; }} 2>/dev/null; then echo changed; fi; \
+                 if test -e '{shown}/sibling.toml'; then echo sibling; fi"
+            );
+            let child = ChildCommand::new("sh", ["-c", script.as_str()], workspace)
+                .with_read_only_file(&policy, mount)
+                .at_host_path(&own);
+            assert_eq!(child.sandbox_path(&policy), Some(PathBuf::from(mount)));
+            assert_eq!(child.sandbox_path(&own), Some(own.clone()));
+            let result = match runner.run_child(&child) {
+                Err(error)
+                    if error.reason == ConfinementRefusal::CapabilityUnserved
+                        && error.detail.contains("read-only files") =>
+                {
+                    return skip(&format!("Substrate read-only files ({error})"));
+                }
+                result => result.expect("the child reads its file"),
+            };
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            assert_eq!(
+                result.output,
+                "allow = true\npolicy.toml\nat its own path\n"
+            );
+            assert_eq!(std::fs::read_to_string(&policy).unwrap(), "allow = true\n");
+            let files = [
+                ReadOnlyFile {
+                    host_path: text(&policy),
+                    mount: mount.to_owned(),
+                },
+                ReadOnlyFile {
+                    host_path: text(&own),
+                    mount: text(&own),
+                },
+            ];
+            assert_eq!(result.applied.read_only_files, files);
+            assert!(result.applied.read_only_roots.is_empty());
+            let record = result.driver_record.as_ref().expect("the driver's record");
+            assert_eq!(record.read_only_files.len(), 2);
+            assert!(record.read_only_roots.is_empty());
+
+            let live =
+                ChildCommand::new("cat", [mount], workspace).with_read_only_file(&policy, mount);
+            let mut live = runner
+                .spawn_child(&live)
+                .expect("a live child reads its file");
+            assert_eq!(
+                read_to_end(&mut live),
+                (b"allow = true\n".to_vec(), Vec::new())
+            );
+            let result = live.wait().expect("the live child's result");
+            assert_eq!(result.applied.read_only_files, files[..1]);
+        },
+    );
+}
+
+/// A mount on, under or containing a mount Substrate owns (`/`, `/usr`, `/bin`, `/lib`,
+/// `/lib64`, `/proc`, `/dev`, `/tmp`, `/workspace`, `/runtime`, `/scratch`, `/etc/hosts`,
+/// `/etc/ssl/certs/ca-certificates.crt`) is refused `ScopeInvalid` before anything starts, naming
+/// the mount, for a root and a file, through `run_child` and `spawn_child`; a mount beside them
+/// gets past every check, to the missing cgroup.
+#[test]
+fn a_mount_under_a_reserved_path_is_refused_before_launch() {
+    let (_held, base) = host_directory();
+    let workspace = base.join("workspace");
+    let host = base.join("host");
+    let file = base.join("host.toml");
+    std::fs::create_dir(&workspace).unwrap();
+    std::fs::create_dir(&host).unwrap();
+    std::fs::write(&file, "a file").unwrap();
+    let runner = SubstrateRunner::new(Some(base.clone()));
+    let child = || ChildCommand::new("true", [] as [&str; 0], &workspace);
+    for mount in [
+        "/usr/x",
+        "/workspace/x",
+        "/tmp/x",
+        "/",
+        "/usr",
+        "/bin",
+        "/lib/x",
+        "/lib64",
+        "/proc/self",
+        "/dev/shm",
+        "/workspace",
+        "/runtime/x",
+        "/scratch",
+        "/etc",
+        "/etc/hosts",
+        "/etc/ssl",
+        APERTURE_CA_BUNDLE_PATH,
+    ] {
+        assert_refused(
+            &runner,
+            &workspace,
+            &child().with_read_only_root(&host, mount),
+            mount,
+            "Substrate owns",
+        );
+        assert_refused(
+            &runner,
+            &workspace,
+            &child().with_read_only_file(&file, mount),
+            mount,
+            "Substrate owns",
+        );
+    }
+    for placed in [
+        child().with_read_only_root(&host, "/opt/host"),
+        child().with_read_only_root(&host, "/etc/loom"),
+        child().with_read_only_file(&file, "/etc/loom.toml"),
+        child().with_read_only_file(&file, "/usrx"),
+    ] {
+        let error = runner.run_child(&placed).unwrap_err();
+        assert_eq!(error.reason, past_every_check(), "{placed:?}: {error}");
+    }
+}
+
+/// Mounts that overlap or repeat, and a host path that overlaps the workspace or holds the
+/// certificate bundle the child names, are refused `ScopeInvalid` before anything starts, naming
+/// the paths; mounts that share only a prefix of their text (`/opt/a`, `/opt/ab`) do not overlap.
+#[test]
+fn overlapping_mounts_are_refused_before_launch() {
+    let (_held, base) = host_directory();
+    let workspace = base.join("workspace");
+    let first = base.join("first");
+    let second = base.join("second");
+    let file = base.join("file.toml");
+    let bundle = base.join("bundle.pem");
+    std::fs::create_dir_all(workspace.join("sub")).unwrap();
+    std::fs::write(workspace.join("in-workspace.toml"), "a file").unwrap();
+    std::fs::create_dir(&first).unwrap();
+    std::fs::create_dir(&second).unwrap();
+    std::fs::write(&file, "a file").unwrap();
+    std::fs::write(&bundle, "not a certificate, but not empty").unwrap();
+    let runner = SubstrateRunner::new(Some(base.clone()));
+    let child = || ChildCommand::new("true", [] as [&str; 0], &workspace);
+    let cases = [
+        (
+            child()
+                .with_read_only_root(&first, "/opt/a")
+                .with_read_only_root(&second, "/opt/a/b"),
+            "/opt/a/b",
+            "overlap",
+        ),
+        (
+            child()
+                .with_read_only_root(&first, "/opt/a")
+                .with_read_only_root(&second, "/opt/a"),
+            "/opt/a",
+            "twice",
+        ),
+        (
+            child()
+                .with_read_only_root(&first, "/opt/a")
+                .with_read_only_file(&file, "/opt/a/file.toml"),
+            "/opt/a/file.toml",
+            "overlap",
+        ),
+        (
+            child()
+                .with_read_only_file(&file, "/opt/file.toml")
+                .with_read_only_file(&file, "/opt/file.toml"),
+            "/opt/file.toml",
+            "twice",
+        ),
+        (
+            child()
+                .with_read_only_file(&file, "/opt/f")
+                .with_read_only_file(&file, "/opt/f/g"),
+            "/opt/f/g",
+            "overlap",
+        ),
+        (
+            child().with_read_only_root(&base, "/opt/base"),
+            &text(&base),
+            "workspace",
+        ),
+        (
+            child().with_read_only_root(&workspace, "/opt/workspace"),
+            &text(&workspace),
+            "workspace",
+        ),
+        (
+            child().with_read_only_root(workspace.join("sub"), "/opt/sub"),
+            &text(&workspace.join("sub")),
+            "workspace",
+        ),
+        (
+            child().with_read_only_file(workspace.join("in-workspace.toml"), "/opt/f.toml"),
+            &text(&workspace.join("in-workspace.toml")),
+            "workspace",
+        ),
+        (
+            child().at_host_path(&workspace),
+            &text(&workspace),
+            "workspace",
+        ),
+    ];
+    for (refused, named, why) in &cases {
+        assert_refused(&runner, &workspace, refused, named, why);
+    }
+    let (_listener, address) = loopback_host();
+    let trusting = || {
+        child()
+            .with_egress(model_aperture(address))
+            .with_ca_bundle(&bundle)
+    };
+    assert_refused(
+        &runner,
+        &workspace,
+        &trusting().with_read_only_root(&base, "/opt/base"),
+        &text(&bundle),
+        "certificate bundle",
+    );
+    assert_refused(
+        &runner,
+        &workspace,
+        &trusting().with_read_only_file(&bundle, "/opt/bundle.pem"),
+        &text(&bundle),
+        "certificate bundle",
+    );
+    let error = runner
+        .run_child(&trusting().with_read_only_root(&first, "/opt/first"))
+        .unwrap_err();
+    assert_eq!(error.reason, past_every_check(), "{error}");
+    let prefixes = child()
+        .with_read_only_root(&first, "/opt/a")
+        .with_read_only_root(&second, "/opt/ab")
+        .with_read_only_file(&file, "/opt/a.toml");
+    let error = runner.run_child(&prefixes).unwrap_err();
+    assert_eq!(error.reason, past_every_check(), "{error}");
+}
+
+/// More than 4 read-only roots, or 16 read-only files, Substrate's bounds, is refused
+/// `ScopeInvalid` before anything starts, naming the first one past the bound; 4 and 16 get past
+/// every check, to the missing cgroup.
+#[test]
+fn a_fifth_root_is_refused_before_launch() {
+    let (_held, base) = host_directory();
+    let workspace = base.join("workspace");
+    std::fs::create_dir(&workspace).unwrap();
+    let runner = SubstrateRunner::new(Some(base.clone()));
+    let roots: Vec<PathBuf> = (0..5)
+        .map(|n| {
+            let root = base.join(format!("root{n}"));
+            std::fs::create_dir(&root).unwrap();
+            root
+        })
+        .collect();
+    let files: Vec<PathBuf> = (0..17)
+        .map(|n| {
+            let file = base.join(format!("file{n}.toml"));
+            std::fs::write(&file, "a file").unwrap();
+            file
+        })
+        .collect();
+    let with_roots = |count: usize| {
+        roots[..count].iter().enumerate().fold(
+            ChildCommand::new("true", [] as [&str; 0], &workspace),
+            |child, (n, root)| child.with_read_only_root(root, format!("/opt/root{n}")),
+        )
+    };
+    let with_files = |count: usize| {
+        files[..count].iter().enumerate().fold(
+            ChildCommand::new("true", [] as [&str; 0], &workspace),
+            |child, (n, file)| child.with_read_only_file(file, format!("/opt/file{n}.toml")),
+        )
+    };
+    assert_refused(&runner, &workspace, &with_roots(5), &text(&roots[4]), "4");
+    assert_refused(
+        &runner,
+        &workspace,
+        &with_files(17),
+        &text(&files[16]),
+        "16",
+    );
+    for within in [with_roots(4), with_files(16)] {
+        let error = runner.run_child(&within).unwrap_err();
+        assert_eq!(error.reason, past_every_check(), "{error}");
+    }
+}
+
+/// A host path the child could be led elsewhere through, or that names nothing it can be given, is
+/// refused `ScopeInvalid` before anything starts, naming it: a symbolic link, a path through one,
+/// an absent path, a relative one, one with a `.`, `..` or empty component or a trailing `/`, one
+/// that is not UTF-8, a root that is no directory, a file that is no regular file, and a host path
+/// that is neither; so is a mount that is relative or not canonical.
+#[test]
+fn a_symlinked_or_absent_host_path_is_refused_naming_it() {
+    use std::os::unix::ffi::OsStrExt as _;
+    let (_held, base) = host_directory();
+    let workspace = base.join("workspace");
+    let host = base.join("host");
+    let file = host.join("file.toml");
+    std::fs::create_dir(&workspace).unwrap();
+    std::fs::create_dir(&host).unwrap();
+    std::fs::write(&file, "a file").unwrap();
+    std::os::unix::fs::symlink(&host, base.join("linked")).unwrap();
+    std::os::unix::fs::symlink(&file, base.join("linked.toml")).unwrap();
+    let _socket = UnixListener::bind(base.join("socket")).unwrap();
+    let runner = SubstrateRunner::new(Some(base.clone()));
+    let child = || ChildCommand::new("true", [] as [&str; 0], &workspace);
+    let shown = text(&base);
+    let roots = [
+        (base.join("linked"), "symbolic link"),
+        (base.join("linked/inner"), "symbolic link"),
+        (base.join("absent"), "does not exist"),
+        (PathBuf::from("relative/host"), "absolute"),
+        (PathBuf::from(format!("{shown}/host/../host")), "canonical"),
+        (PathBuf::from(format!("{shown}/./host")), "canonical"),
+        (PathBuf::from(format!("{shown}//host")), "canonical"),
+        (PathBuf::from(format!("{shown}/host/")), "canonical"),
+        (file.clone(), "no directory"),
+    ];
+    std::fs::create_dir(host.join("inner")).unwrap();
+    for (path, why) in &roots {
+        assert_refused(
+            &runner,
+            &workspace,
+            &child().with_read_only_root(path, "/opt/host"),
+            &path.to_string_lossy(),
+            why,
+        );
+    }
+    let files = [
+        (base.join("linked.toml"), "symbolic link"),
+        (base.join("linked/file.toml"), "symbolic link"),
+        (base.join("absent.toml"), "does not exist"),
+        (PathBuf::from("relative.toml"), "absolute"),
+        (host.clone(), "no regular file"),
+        (base.join("socket"), "no regular file"),
+    ];
+    for (path, why) in &files {
+        assert_refused(
+            &runner,
+            &workspace,
+            &child().with_read_only_file(path, "/opt/file.toml"),
+            &path.to_string_lossy(),
+            why,
+        );
+    }
+    for (path, why) in [
+        (base.join("linked"), "symbolic link"),
+        (base.join("absent"), "does not exist"),
+        (
+            base.join("socket"),
+            "neither a directory nor a regular file",
+        ),
+    ] {
+        assert_refused(
+            &runner,
+            &workspace,
+            &child().at_host_path(&path),
+            &text(&path),
+            why,
+        );
+    }
+    let not_utf8 = PathBuf::from(std::ffi::OsStr::from_bytes(b"/opt/\xff"));
+    let error = runner
+        .run_child(&child().with_read_only_root(&not_utf8, "/opt/host"))
+        .unwrap_err();
+    assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
+    assert!(error.detail.contains("UTF-8"), "{error}");
+    for (mount, why) in [
+        ("opt/host", "absolute"),
+        ("/opt/../host", "canonical"),
+        ("/opt//host", "canonical"),
+        ("/opt/host/", "canonical"),
+    ] {
+        assert_refused(
+            &runner,
+            &workspace,
+            &child().with_read_only_root(&host, mount),
+            mount,
+            why,
+        );
+    }
+    let error = runner
+        .run_child(&child().with_read_only_root(&host, "/opt/host"))
+        .unwrap_err();
+    assert_eq!(error.reason, past_every_check(), "{error}");
+}
+
+/// The story's case: a host path inside the workspace maps to `/workspace/…`, one inside a
+/// read-only root to the same place under its mount, a read-only file to its mount and a path
+/// given at its host path to itself; anything else maps to nothing: a path outside them, one that
+/// shares only a prefix of a root's text, one that climbs out with `..`, one through a symbolic
+/// link, a path beneath a file, and a relative path.
+#[test]
+fn sandbox_path_maps_the_workspace_and_each_root() {
+    let (_held, base) = host_directory();
+    let workspace = base.join("workspace");
+    let tools = base.join("tools");
+    let policy = base.join("policy.toml");
+    let shared = base.join("shared");
+    std::fs::create_dir_all(workspace.join("src")).unwrap();
+    std::fs::write(workspace.join("src/main.rs"), "fn main() {}").unwrap();
+    std::fs::create_dir_all(tools.join("bin")).unwrap();
+    std::fs::create_dir(base.join("toolsx")).unwrap();
+    std::fs::create_dir(base.join("elsewhere")).unwrap();
+    std::fs::create_dir(&shared).unwrap();
+    std::fs::write(&policy, "allow = true").unwrap();
+    std::os::unix::fs::symlink(base.join("elsewhere"), workspace.join("out")).unwrap();
+    std::os::unix::fs::symlink(base.join("elsewhere"), tools.join("out")).unwrap();
+    let child = ChildCommand::new("true", [] as [&str; 0], &workspace)
+        .with_read_only_root(&tools, "/opt/tools")
+        .with_read_only_file(&policy, "/etc/loom/policy.toml")
+        .at_host_path(&shared);
+    let maps = |path: &Path| child.sandbox_path(path);
+    let to = |path: &str| Some(PathBuf::from(path));
+    assert_eq!(maps(&workspace), to("/workspace"));
+    assert_eq!(
+        maps(&workspace.join("src/main.rs")),
+        to("/workspace/src/main.rs")
+    );
+    assert_eq!(
+        maps(&workspace.join("transcript.jsonl")),
+        to("/workspace/transcript.jsonl"),
+        "a path not created yet maps too"
+    );
+    assert_eq!(maps(&tools), to("/opt/tools"));
+    assert_eq!(maps(&tools.join("bin/tool")), to("/opt/tools/bin/tool"));
+    assert_eq!(maps(&policy), to("/etc/loom/policy.toml"));
+    assert_eq!(maps(&shared), Some(shared.clone()));
+    assert_eq!(maps(&shared.join("data")), Some(shared.join("data")));
+
+    assert_eq!(maps(&base), None);
+    assert_eq!(maps(&base.join("elsewhere")), None);
+    assert_eq!(maps(Path::new("/usr/bin/sh")), None);
+    assert_eq!(maps(&base.join("toolsx/bin")), None);
+    assert_eq!(maps(&base.join("workspacex")), None);
+    assert_eq!(maps(&workspace.join("../elsewhere")), None);
+    assert_eq!(maps(&tools.join("../policy.toml")), None);
+    assert_eq!(maps(&workspace.join("out/file")), None);
+    assert_eq!(maps(&tools.join("out")), None);
+    assert_eq!(maps(&policy.join("inner")), None);
+    assert_eq!(maps(Path::new("src/main.rs")), None);
 }
 
 /// Wait until the child running on `handle` created `marker`.
