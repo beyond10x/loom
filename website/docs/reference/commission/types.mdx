@@ -100,6 +100,7 @@ Tagged by `kind`.
 | `Dependency` | list of [`CaseId`](#caseid) |
 | `Evidence` | list of `string` |
 | `ExternalAvailability` | `json` |
+| `HostStop` | [`HostStop`](#hoststop) |
 | `Human` | [`HumanDecisionRequest`](#humandecisionrequest) |
 | `LoopBudget` | `json` |
 | `RunBudget` | [`RunBudgetBreach`](#runbudgetbreach) |
@@ -276,6 +277,13 @@ Tagged by `kind`.
 |---|---|
 | `obligation` | `string` |
 | `open` | `boolean` |
+
+### HostStop
+
+| Field | Type |
+|---|---|
+| `name` | `string` |
+| `detail` | `json` |
 
 ### LimitBreachStep
 

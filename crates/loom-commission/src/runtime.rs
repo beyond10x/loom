@@ -323,6 +323,20 @@
 //!   Suspension and performs nothing; either way the resumed Run ends suspended for `RunBudget`
 //!   as above.
 //!
+//! A host stops a run for a reason only it can read, its active time less its own pauses or the
+//! free space of a disk (`story:host-stop-before-step`), through [`LoopContext::host_stop`]. It is
+//! asked exactly where the deadline is read before a step, right after the deadline and only when
+//! the deadline did not stop the run: before each executor call, before a pending request is
+//! invoked again (8b), and on a resume before the Suspension is taken and right before the held
+//! request is invoked. A stop it names ends the run as a passed deadline there does, the Run
+//! suspended for `SuspensionReason::HostStop`, carrying the host's `name` and `detail` unchanged:
+//! suspended, or `Waiting` while a request is pending; a stop before the take leaves the
+//! Suspension `Pending`, and one right before the invoke releases it and performs nothing. What
+//! stops a run without a step (the step budget and a kept breach, 0; `NoPerformableAction`, 4;
+//! the approval gate, 5) comes first, and the host is not asked then. It is never asked after an
+//! executor call. `None`, the default, never stops the run, so a context that does not implement
+//! it runs as before.
+//!
 //! An executor call that reports what it spent ([`ExecutorStep`]'s `usage`, through
 //! [`AgentExecutor::run_with_usage`], `story:executor-reports-usage`: an executor that is not a
 //! model loop, such as an agent session) is charged to the run alone ([`LoopEnd::charges`]'s
@@ -385,7 +399,9 @@
 //! `Suspended` at the case revision it started at, and resumed through `ResumeRun`. A run budget's
 //! deadline passed by then (read from [`LoopContext::now`], as above) takes nothing: the Run is
 //! suspended again for `RunBudget`, limit `Deadline`, the Suspension stays `Pending`, and the
-//! resume ends as a passed deadline ends a run. The Suspension
+//! resume ends as a passed deadline ends a run; a host's stop asked then
+//! ([`LoopContext::host_stop`], as above) does the same, the Run suspended for `HostStop`. The
+//! Suspension
 //! is then taken through the port for the request read and revalidated (`TakeSuspension`,
 //! `Pending` → `Resuming`): of two resumes one takes it, and the other is refused,
 //! [`ResumeRefusal::NothingSuspended`] when the first already released it,
@@ -396,8 +412,9 @@
 //! `taken` the Run is suspended again in the run store with its stored reason, no Suspension is
 //! held, and nothing is performed. Then the case is loaded once more
 //! ([`Governor::current_revision`]), since somebody else may have moved it while the resume wrote
-//! the Run and took the Suspension; before that load, a deadline passed since the take releases
-//! the Suspension, invokes nothing and ends the resumed Run as before the take. At the request's
+//! the Run and took the Suspension; before that load, a deadline passed since the take, or else a
+//! host's stop, releases the Suspension, invokes nothing and ends the resumed Run as before the
+//! take. At the request's
 //! revision, the request, under its own id and
 //! at its own revision, is handed to [`EffectPort::invoke`] once, recorded and observed as the loop
 //! does (8), and the Suspension is released for that request (`ReleaseSuspension`), removed; a
@@ -1224,8 +1241,9 @@ where
     // is released, nothing is invoked, and the next iteration judges the move, as after a stale
     // proposal (8). A request the port answered `Pending` is invoked again as in 8b, unless the
     // answer ends the run (`ends_run`), which then waits on it. A deadline the trusted clock reads
-    // as reached right before the invoke releases the Suspension the resume took, and the Run is
-    // suspended for it with nothing invoked, as before an executor call.
+    // as reached right before the invoke, or else the host's own stop, releases the Suspension the
+    // resume took, and the Run is suspended for it with nothing invoked, as before an executor
+    // call.
     if let Some(Resumed {
         request: data,
         answer,
@@ -1233,9 +1251,8 @@ where
     }) = resumed
     {
         first = false;
-        if let Some(breach) = deadline_reached(deadline, context) {
+        if let Some(reason) = stopped_before_step(deadline, context) {
             release_taken(suspensions, taken, &data)?;
-            let reason = SuspensionReason::RunBudget(breach);
             return budget_ended(runs, run_id, reason, None, track);
         }
         let current = governor.current_revision(&data.case_id)?;
@@ -1380,10 +1397,9 @@ where
             if let Some(reason) = &stop {
                 return budget_ended(runs, run_id, reason.clone(), Some(&pending), track);
             }
-            // A deadline the trusted clock reads as reached stops the run before the requests
-            // are invoked again; they are still pending.
-            if let Some(breach) = deadline_reached(deadline, context) {
-                let reason = SuspensionReason::RunBudget(breach);
+            // A deadline the trusted clock reads as reached, or else the host's own stop, stops
+            // the run before the requests are invoked again; they are still pending.
+            if let Some(reason) = stopped_before_step(deadline, context) {
                 return budget_ended(runs, run_id, reason, Some(&pending), track);
             }
             let again = invoke_again(
@@ -1506,9 +1522,9 @@ where
         if let Some(reason) = stop {
             return budget_ended(runs, run_id, reason, None, track);
         }
-        // A deadline the trusted clock reads as reached stops the run before the executor runs.
-        if let Some(breach) = deadline_reached(deadline, context) {
-            let reason = SuspensionReason::RunBudget(breach);
+        // A deadline the trusted clock reads as reached, or else the host's own stop, stops the
+        // run before the executor runs.
+        if let Some(reason) = stopped_before_step(deadline, context) {
             return budget_ended(runs, run_id, reason, None, track);
         }
 
@@ -1973,7 +1989,8 @@ fn suspend_for_approval<R: SuspendRunBehavior + ?Sized>(
 /// released, and the loop goes on until the Run ends. A run budget's deadline passed before the
 /// take, or between the take and the invocation, performs nothing and ends the resumed Run
 /// suspended for `RunBudget` (limit `Deadline`): the Suspension stays `Pending` in the first case
-/// and is released in the second.
+/// and is released in the second. A host's stop ([`LoopContext::host_stop`]), asked at both places
+/// right after the deadline, does the same, the Run suspended for `HostStop`.
 ///
 /// `runs` need not hold the Run: a store of a new process gets it back, `Suspended`, from the
 /// Suspension.
@@ -2122,10 +2139,9 @@ where
         }
         other => return refused(ResumeRefusal::RunNotSuspended(other)),
     }
-    // A deadline the trusted clock reads as reached takes nothing: the Suspension stays
-    // `Pending`, and the Run is suspended for the deadline, as before an executor call.
-    if let Some(breach) = deadline_reached(deadline, context) {
-        let reason = SuspensionReason::RunBudget(breach);
+    // A deadline the trusted clock reads as reached, or else the host's own stop, takes nothing:
+    // the Suspension stays `Pending`, and the Run is suspended for it, as before an executor call.
+    if let Some(reason) = stopped_before_step(deadline, context) {
         let ended = budget_ended(runs, &run_id, reason, None, Track::default());
         return finish(runs, run_id, ended).map_err(ResumeError::Loop);
     }
@@ -3360,6 +3376,19 @@ fn deadline_reached<C: LoopContext + ?Sized>(
         max: deadline.0,
         charged: reading.map(|(seconds, _)| seconds),
     })
+}
+
+/// Why the run stops before a step, when it does: the deadline the trusted clock reads as reached
+/// (`RunBudget`), else the host's own stop (`HostStop`), which is asked only when the deadline did
+/// not stop the run.
+fn stopped_before_step<C: LoopContext + ?Sized>(
+    deadline: Option<(i64, u32)>,
+    context: &mut C,
+) -> Option<SuspensionReason> {
+    if let Some(breach) = deadline_reached(deadline, context) {
+        return Some(SuspensionReason::RunBudget(breach));
+    }
+    context.host_stop().map(SuspensionReason::HostStop)
 }
 
 /// The trial limit of `budget` that handing requests for `actions` to the effect port would pass,
