@@ -7,9 +7,9 @@ title: Timo has not decided how a confined child gets a writable mount outside /
 relations:
 - blocks: story:writable-host-root
 withholds: test_result
-revision: 3
+revision: 4
 transitions:
-- {from: "open", to: "cleared", at: "2026-10-22T12:21:39Z", actor: "human:timo", revision: 3}
+- {from: "open", to: "cleared", at: "2026-10-22T14:06:55Z", actor: "human:timo", revision: 4}
 ---
 ## Question
 
@@ -33,6 +33,19 @@ Loom side (`ChildCommand::with_writable_root(name)`) is the same for A and B; C 
 ## Cleared when
 
 A Substrate ADR on writable roots is accepted and a Substrate release implements it.
+
+## Answer
+
+Session `b10x-chef-orchestrator`, 2026-10-22, quoting Timo verbatim: "either name physical paths, or
+provide git source". The orchestrator's reading: "A writable mount outside /workspace is either a
+host path the operator names, or a git source given to the run as a writable checkout. Substrate
+writes the ADR and the daemon side now. … shape the loom-sdk side to those two kinds once
+substrate's ADR lands. Don't build ahead of it."
+
+- Loom's side gets two kinds of writable mount: a host path the operator names, and a git source
+  given to the run as a writable checkout.
+- No Loom code changes before Substrate's ADR is accepted; the blocker stays open until then, as
+  its § Cleared when says.
 
 ## Decision (2026-10-22)
 
