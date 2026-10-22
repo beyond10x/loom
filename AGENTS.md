@@ -476,7 +476,8 @@ passes (`no_invoke_ever_carries_an_approval_file` holds `src/cli.rs`, where the 
 adapter publishes under another profile. A kind the source declares no operation for starts no
 process. Each command is bounded by the configuration's `timeout_seconds` (60 when absent) and the
 process it started is killed and reaped past it; a process that process forked is not killed, and
-outlives the read. A Connectors refusal is a
+outlives the read. A timeout this host's clock cannot hold starts no command and fails naming it
+(`a_timeout_too_large_for_the_clock_starts_no_process`). A Connectors refusal is a
 `ReadRefusal` naming the source, never retried; `not_granted`'s names the remedy, `connectors
 connections revalidate --adapter <alias>`, which the client never runs.
 `crates/loom-connectors/tests/connectors_cli.rs` and `connectors_cli_adversary.rs` hold it against
@@ -897,8 +898,10 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   shell) with the arguments as JSON on stdin, only `PATH` in its environment and a timeout past
   which it and the processes it started are killed and reaped: exit 0 is `Performed` with its
   stdout (one JSON object) as the report, anything else `Refused`, a status that cannot be read
-  included, naming the error (`crates/loom-intake-slice/tests/bound_command.rs`,
-  `a_timed_out_command_leaves_no_process_it_started`). Evidence comes only from the report's `evidence` list
+  included, naming the error; a timeout this host's clock cannot hold is `Refused`, naming it,
+  before the program starts (`crates/loom-intake-slice/tests/bound_command.rs`,
+  `a_timed_out_command_leaves_no_process_it_started`,
+  `a_timeout_too_large_for_the_clock_is_refused_and_starts_no_command`). Evidence comes only from the report's `evidence` list
   (`intake.bindings.CommandEvidence`), each of a kind the action declares it may produce, about
   `intent`; another kind fails the run. A binding confers no authority: the slice's
   authority provider still answers every capability with approval required, and `resume`

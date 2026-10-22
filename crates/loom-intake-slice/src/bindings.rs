@@ -8,7 +8,8 @@
 //! program directly, never through a shell, with the action's arguments as JSON on standard input,
 //! a cleared environment that keeps only `PATH`, and the configuration's timeout
 //! ([`DEFAULT_TIMEOUT_SECONDS`] when absent), past which the program and the processes it started
-//! are killed and reaped. Exit status 0 is `Performed`, with the program's standard output, one
+//! are killed and reaped; a timeout this host's clock cannot hold is refused, naming it, before
+//! the program starts. Exit status 0 is `Performed`, with the program's standard output, one
 //! JSON object, as the report; any other end is `Refused`, a status that cannot be read included,
 //! naming the error. The report's `evidence` member (a list of
 //! `intake.bindings.CommandEvidence`) states evidence about the intent, each of a kind the action
@@ -313,11 +314,20 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> CommandEffects<'a, 'o, S, 
             ));
         }
         let program = &binding.argv[0];
-        let (status, stdout, stderr) =
-            match exited(program, self.timeout(), self.run(binding, &arguments)) {
-                Ok(exited) => exited,
-                Err(reason) => return refused(reason),
-            };
+        // The deadline is taken before the program starts, so a timeout the clock cannot hold
+        // starts nothing.
+        let deadline = match self.deadline() {
+            Ok(deadline) => deadline,
+            Err(why) => return refused(format!("{program} was not started: {why}")),
+        };
+        let (status, stdout, stderr) = match exited(
+            program,
+            self.timeout(),
+            self.run(binding, &arguments, deadline),
+        ) {
+            Ok(exited) => exited,
+            Err(reason) => return refused(reason),
+        };
         if !status.success() {
             let stderr = String::from_utf8_lossy(&stderr);
             let tail: String = stderr
@@ -384,11 +394,24 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> CommandEffects<'a, 'o, S, 
         Duration::from_secs(u64::try_from(seconds).unwrap_or(1))
     }
 
-    /// Runs `binding`'s program with `arguments` on standard input, to its end or for the
-    /// timeout, whichever is first; one still running is killed and reaped with the processes it
-    /// started.
-    fn run(&self, binding: &ActionBinding, arguments: &str) -> Ended {
-        let deadline = Instant::now() + self.timeout();
+    /// The instant the timeout ends, from now, added with checked arithmetic.
+    ///
+    /// # Errors
+    /// The timeout is past what this host's clock can hold, naming it.
+    fn deadline(&self) -> Result<Instant, String> {
+        Instant::now().checked_add(self.timeout()).ok_or_else(|| {
+            format!(
+                "timeout_seconds {} is past what this host's clock can hold",
+                self.bindings
+                    .timeout_seconds
+                    .unwrap_or(DEFAULT_TIMEOUT_SECONDS)
+            )
+        })
+    }
+
+    /// Runs `binding`'s program with `arguments` on standard input, to its end or to `deadline`,
+    /// whichever is first; one still running is killed and reaped with the processes it started.
+    fn run(&self, binding: &ActionBinding, arguments: &str, deadline: Instant) -> Ended {
         let mut command = Command::new(&binding.argv[0]);
         command
             .args(&binding.argv[1..])

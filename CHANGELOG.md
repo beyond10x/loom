@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Fixed
+
+- A bound command, an `UnconfinedRunner` test command or a `ConnectorsCli` command whose timeout the clock cannot hold is refused naming it, never a panic (story:checked-timeout-deadlines)
+
 ## [0.33.0] - 2026-10-22
 
 ### Added
