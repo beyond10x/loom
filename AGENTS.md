@@ -1,7 +1,8 @@
 # AGENTS.md — loom
 
-This file is for an agent changing the repository. What Loom is, how to install it and how to embed
-it are in [README.md](README.md) and on the site, <https://beyond10x.github.io/loom/>; neither is
+Loom is the agent runtime: it runs governed agents, and `b10x-loom-sdk` is its library for building
+on it. This file is for an agent changing the repository. How to install Loom and how to embed it
+are in [README.md](README.md) and on the site, <https://beyond10x.github.io/loom/>; neither is
 repeated here. The architecture behind it is in Atlas (private): ADRs 0066–0076, 0080, 0082, 0089
 and 0090 under `architecture/adr/`, and `docs/design/governed-autonomy/`. ADR 0090 made Loom the
 one runtime repository, with Commission, the governor and intake moved in.
