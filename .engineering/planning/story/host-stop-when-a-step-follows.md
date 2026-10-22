@@ -2,14 +2,15 @@
 format: aep.planning-md/3
 id: story:host-stop-when-a-step-follows
 kind: story
-status: active
+status: implemented
 title: A host stop stops a Run only where a step would follow the authority checks
 relations:
 - serves: vision:governed-autonomy
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-22T04:32:07Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-22T04:32:08Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-22T06:44:23Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 

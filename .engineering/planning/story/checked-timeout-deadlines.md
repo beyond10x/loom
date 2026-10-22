@@ -2,14 +2,15 @@
 format: aep.planning-md/3
 id: story:checked-timeout-deadlines
 kind: story
-status: active
+status: implemented
 title: Every timeout becomes a deadline through checked arithmetic
 relations:
 - serves: vision:governed-autonomy
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-22T04:27:47Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-22T04:27:48Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-22T06:44:23Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 

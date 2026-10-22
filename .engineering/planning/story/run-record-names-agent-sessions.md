@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:run-record-names-agent-sessions
 kind: story
-status: active
+status: implemented
 title: The run record names each agent session by its trace-ir/1 digest and summary
 summary: One jsonl event per metaharness session, holding its trace-ir-summary/1 (ADR 0096)
 relations:
 - serves: vision:governed-autonomy
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-22T04:27:48Z", actor: "human:timo", revision: 5}
 - {from: "proposed", to: "active", at: "2026-10-22T04:27:48Z", actor: "human:timo", revision: 6}
+- {from: "active", to: "implemented", at: "2026-10-22T06:44:23Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 
