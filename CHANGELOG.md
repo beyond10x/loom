@@ -12,6 +12,11 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Changed
+
+- `LoopContext::host_stop` is asked only where a step follows: a frontier only a grant moves ends `NeedsAuthority` (story:host-stop-when-a-step-follows)
+- `LoopContext::host_stop` is asked right before a granted request's effect when not asked before its executor call (story:host-stop-when-a-step-follows)
+
 ### Fixed
 
 - A bound command, an `UnconfinedRunner` test command or a `ConnectorsCli` command whose timeout the clock cannot hold is refused naming it, never a panic (story:checked-timeout-deadlines)

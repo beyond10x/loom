@@ -2,10 +2,12 @@
 //!
 //! The story's design says a stop that takes no step (`NoAdmissibleAction`, `AwaitingApproval`,
 //! `NoPerformableAction`) comes before the host's stop, and that the host is asked once per check
-//! and never after the run ended. `NoAdmissibleAction` is the exception: it is judged only after
-//! the executor call, so a host stop or a passed deadline comes first there. These cases hold the host stop against the other stops of an
-//! iteration (a kept breach, the approval gate, a frontier admitting nothing), against reads
-//! pending together, and against a resume the host stopped before the take.
+//! and never after the run ended. `NoAdmissibleAction` is judged only after the executor call, so
+//! a passed deadline comes first there; since `story:host-stop-when-a-step-follows` the host is
+//! not asked before that call when the frontier admits nothing without a grant, so the run ends
+//! `NoAdmissibleAction` there, never `HostStop`. These cases hold the host stop against the other
+//! stops of an iteration (a kept breach, the approval gate, a frontier admitting nothing), against
+//! reads pending together, and against a resume the host stopped before the take.
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -337,12 +339,12 @@ fn run(
     (end, runs)
 }
 
-/// A frontier admitting nothing ends the run `NoAdmissibleAction` only once the executor's outcome
-/// is derived (`crates/loom-commission/src/runtime.rs`), so the host, asked before the executor
-/// call, is asked first: without a stop the run ends `NoAdmissibleAction`; with one it is suspended
-/// for `HostStop`, the host asked once and the executor never called.
+/// A frontier admitting nothing ends the run `NoAdmissibleAction` once the executor's outcome is
+/// derived (`crates/loom-commission/src/runtime.rs`). No step follows the admissibility check
+/// there, so the host is not asked (`story:host-stop-when-a-step-follows`): with or without a
+/// stop the run ends `NoAdmissibleAction`, the executor called once and the host never asked.
 #[test]
-fn adversary_a_host_stop_comes_before_a_frontier_admitting_nothing() {
+fn adversary_a_frontier_admitting_nothing_ends_the_run_before_the_host_is_asked() {
     let case = CaseId("case-adversary-h-nothing-admissible".to_owned());
     let blocked = || listing(&case, vec![listed(EVALUATE, ActionStatus::Blocked, None)]);
 
@@ -362,8 +364,8 @@ fn adversary_a_host_stop_comes_before_a_frontier_admitting_nothing() {
     let (end, _) = run(&case, &blocked(), &session, &effects, &mut context);
     assert_eq!(
         (end.outcome, context.asked, session.calls()),
-        (suspended_for(SuspensionReason::HostStop(disk_low())), 1, 0),
-        "the host's stop, asked before the executor call, comes before a frontier admitting nothing"
+        (RunOutcome::NoAdmissibleAction(Unit(true)), 0, 1),
+        "a frontier admitting nothing ends the run as no admissible action, the host not asked"
     );
 }
 

@@ -131,6 +131,17 @@ types:
   # while a request is pending (`JudgeBudgetStop`), as at any budget stop; on a resume, one before
   # the take takes nothing and leaves the Suspension Pending, and one right before the invoke
   # releases the Suspension and performs nothing. A host that supplies no stop is never stopped.
+  # story:host-stop-when-a-step-follows: the host is asked only where a step would follow the
+  # admissibility and authority checks. Before an executor call it is asked, after the deadline,
+  # only when the frontier the executor is handed admits an action without a grant. When that
+  # frontier admits none (each action it lists needs a grant or is blocked, or it lists none), the
+  # executor runs unasked, and the run ends as the authority or admissibility outcome says
+  # (NeedsAuthority, NoAdmissibleAction), never HostStop. A request admitted after such a call, the
+  # authority provider's allow included, is asked about once the case revision was read again and
+  # right before the effect is invoked: a stop there suspends the Run for HostStop, the run ending
+  # Suspended, with nothing invoked. The deadline stays where it was read, a pending request is
+  # still asked about before it is invoked again and a resume as above; no effect is invoked past
+  # a host stop.
   - name: commission.responsibility.SuspensionReason
     kind: union
     tag: kind
@@ -152,6 +163,9 @@ types:
   # `detail` is the host's own data about it, which Commission carries and never reads. Commission
   # measures neither: it reads no disk and sees no pause inside an effect. The host supplies the
   # stop, asked once per check and never after the run ended; the model never supplies it.
+  # story:host-stop-when-a-step-follows: "before a step" is before a step that follows the
+  # admissibility and authority checks: before the executor call when its frontier admits an
+  # action without a grant, otherwise right before an admitted request's effect is invoked.
   - name: commission.responsibility.HostStop
     kind: struct
     fields:
