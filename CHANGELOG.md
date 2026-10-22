@@ -12,6 +12,23 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- Run event `Session`: one per agent session, its `trace-ir/1` digest and its `trace-ir-summary/1` (story:run-record-names-agent-sessions)
+- `EventStream::sessions` writes a `Session` record for each session a `SessionExecutor` runs (story:run-record-names-agent-sessions)
+- `SessionReport::trace` (`SessionTrace`): the session's record summarized by metaharness, or why not (story:run-record-names-agent-sessions)
+
+### Changed
+
+- **Breaking:** `docs/contracts/run-events-v1.json` gains the record kind `Session` at `schema_version` 1 (story:run-record-names-agent-sessions)
+- **Breaking:** `SessionReport` gains the field `trace` (story:run-record-names-agent-sessions)
+- **Breaking:** `loom_sdk::session::metaharness` is metaharness `0.13.0` (was `0.10.1`), with `metaharness-b10x` (story:run-record-names-agent-sessions)
+- `LoopContext::host_stop` is asked only where a step follows: a frontier only a grant moves ends `NeedsAuthority` (story:host-stop-when-a-step-follows)
+- `LoopContext::host_stop` is asked right before a granted request's effect when not asked before its executor call; a kept breach is the reason (story:host-stop-when-a-step-follows)
+
+### Fixed
+
+- A bound command, an `UnconfinedRunner` test command or a `ConnectorsCli` command whose timeout the clock cannot hold is refused naming it, never a panic (story:checked-timeout-deadlines)
 
 ## [0.33.0] - 2026-10-22
 
