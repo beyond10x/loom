@@ -82,6 +82,12 @@ pub use b10x_loom_executor::{MeteredExecutor, MeteredModel, RateCard, RunMeter};
 /// A child process a host names, run confined by [`SubstrateRunner::run_child`] with the guarantees
 /// a test has; Substrate's types it is named with are at `loom_sdk::intake::slice::confinement`.
 pub use b10x_loom_intake_slice::confinement::ChildCommand;
+/// A child a host runs confined and live, started by [`SubstrateRunner::spawn_child`]: written,
+/// read frame by frame, signalled and waited for, with the guarantees `run_child` gives.
+pub use b10x_loom_intake_slice::confinement::{
+    ChildError, ChildExit, ChildFrame, ChildOutput, ChildResult, ChildSignal, ChildStream,
+    ConfinedChild,
+};
 pub use b10x_loom_intake_slice::confinement::{
     ConfinementError, SubstrateRunner, TestExecution, TestRunner,
 };

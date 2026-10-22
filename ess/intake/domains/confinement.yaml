@@ -46,3 +46,19 @@ types:
       - {name: profile, type: String}
       - {name: writable_scopes, type: "List<String>"}
       - {name: read_only_roots, type: "List<intake.confinement.ToolchainRoot>"}
+  - name: intake.confinement.ChildStream
+    kind: enum
+    variants: [Stdout, Stderr]
+  - name: intake.confinement.ChildOutput
+    kind: struct
+    fields:
+      - {name: stdout, type: Bytes}
+      - {name: stderr, type: Bytes}
+      - {name: stdout_truncated, type: Boolean}
+      - {name: stderr_truncated, type: Boolean}
+  - name: intake.confinement.ChildExit
+    kind: struct
+    fields:
+      - {name: exit_code, type: "Optional<Integer>"}
+      - {name: signal, type: "Optional<Integer>"}
+      - {name: timed_out, type: Boolean}

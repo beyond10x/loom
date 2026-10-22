@@ -2,8 +2,8 @@
   "provenance": {
     "system": "intake",
     "specification_version": "v1",
-    "source_digest": "2a59652ab491db177093a51b12cb1d894a0ff42a20987b04063808facb649edc",
-    "contract_digest": "db46c510661ee718435d3a62dd0d8ea8b6d9c604c4695b5def4edfba4fad0dcb"
+    "source_digest": "cf1fbbfc1206e350609f5f4f3522b47696f03a8049cc32a47b5ed52b150d1d84",
+    "contract_digest": "7dd547604a8ca8784e13b80a1979b25542e31ca93b347da47fcc3787eeb2950c"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -41,6 +41,27 @@
     {
       "kind": "domain_type",
       "source": "intake.confinement.Backend",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.confinement.ChildExit",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.confinement.ChildOutput",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.confinement.ChildStream",
       "disposition": {
         "disposition": "generated"
       }

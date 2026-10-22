@@ -1,6 +1,6 @@
 // generated from intake v1
-// model digest 2a59652ab491db177093a51b12cb1d894a0ff42a20987b04063808facb649edc
-// contract digest db46c510661ee718435d3a62dd0d8ea8b6d9c604c4695b5def4edfba4fad0dcb
+// model digest cf1fbbfc1206e350609f5f4f3522b47696f03a8049cc32a47b5ed52b150d1d84
+// contract digest 7dd547604a8ca8784e13b80a1979b25542e31ca93b347da47fcc3787eeb2950c
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! confinement — `intake.confinement`.
@@ -39,6 +39,39 @@ pub enum Backend {
     Substrate,
     /// `None`.
     None,
+}
+
+/// ChildExit — `intake.confinement.ChildExit`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChildExit {
+    /// `exit_code` — `Optional<Integer>`.
+    pub exit_code: Option<i64>,
+    /// `signal` — `Optional<Integer>`.
+    pub signal: Option<i64>,
+    /// `timed_out` — `Boolean`.
+    pub timed_out: bool,
+}
+
+/// ChildOutput — `intake.confinement.ChildOutput`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChildOutput {
+    /// `stdout` — `Bytes`.
+    pub stdout: Vec<u8>,
+    /// `stderr` — `Bytes`.
+    pub stderr: Vec<u8>,
+    /// `stdout_truncated` — `Boolean`.
+    pub stdout_truncated: bool,
+    /// `stderr_truncated` — `Boolean`.
+    pub stderr_truncated: bool,
+}
+
+/// ChildStream — `intake.confinement.ChildStream`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChildStream {
+    /// `Stdout`.
+    Stdout,
+    /// `Stderr`.
+    Stderr,
 }
 
 /// ConfinementProfile — `intake.confinement.ConfinementProfile`.

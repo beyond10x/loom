@@ -15,11 +15,15 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Added
 
 - `StopPolicy.breach_by_limit`: a `LimitBreachStep` keeps or discards a step per budget limit, `on_breach` for the rest (story:breach-choice-per-limit)
+- `SubstrateRunner::spawn_child` starts a `ConfinedChild`: written, read by frame, signalled and waited, as confined as `run_child` (story:live-confined-child)
+- `ChildCommand::with_stdin`: `run_child` writes the bytes to the child's standard input once, up to 16 MiB (story:live-confined-child)
+- `ChildFrame`, `ChildSignal`, `ChildResult`, `ChildError`, and `ChildOutput`, `ChildExit`, `ChildStream` from `intake.confinement` (story:live-confined-child)
 
 ### Changed
 
 - **Breaking:** `StopPolicy` gains `breach_by_limit`; a struct literal sets it, `Vec::new()` keeping 0.32.0's stops (story:breach-choice-per-limit)
 - **Breaking:** `LoopFailure` gains `BreachLimitListedTwice`: a limit listed twice is refused before a Run starts (story:breach-choice-per-limit)
+- **Breaking:** `TestExecution` gains `child_output`: the child's stdout and stderr apart, each flagged when cut (story:live-confined-child)
 
 ## [0.32.0] - 2026-10-21
 
