@@ -144,6 +144,7 @@ fn a_duplicate_key_or_unknown_entry_field_is_refused_naming_file_and_field() {
 /// byte bound: llm's routes parser walks aliases against a budget for exactly this reason. A
 /// configuration of under 100 KiB must not cost 128 MiB.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "its child reads /proc/self/status")]
 fn an_alias_bomb_in_a_configuration_is_refused_before_it_expands() {
     child("child_alias_bomb", |_| {});
 }
@@ -365,6 +366,10 @@ routes:
 }
 
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "llm's file secret adapter serves Linux only"
+)]
 fn a_missing_secret_is_refused_unauthorized_before_any_connection() {
     assert!(std::env::var_os("LOOM_SDK_ADVERSARY_NEVER_SET").is_none());
     let listener = TcpListener::bind("127.0.0.1:0").expect("a listener");

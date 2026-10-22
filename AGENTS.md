@@ -221,7 +221,9 @@ Before a change is reported done, in this order:
    that crate offline into its own `consumers/pinned/target/`; it is outside the workspace, so
    `cargo test --workspace` does not reach it. Beside it, job `loom / macos build` (`macos-15`) builds
    `b10x-loom-sdk` and `b10x-loom-intake-slice` with every target and runs their tests; the slice reads a
-   process's end through `rustix::process::waitid`, because nix has `waitid` on Linux only.
+   process's end through `rustix::process::waitid`, because nix has `waitid` on Linux only. A test
+   that needs Linux (confinement, `/proc`, a Linux program path) carries
+   `#[cfg_attr(not(target_os = "linux"), ignore = "<why>")]`, so macOS still builds it.
 2. `task plan` (`aep plan artifact validate`) when the planning store changed. `task check` does
    not run it.
 3. `task website` when anything under `website/` changed, or a generated page did. CI's

@@ -2954,6 +2954,7 @@ mod tests {
     /// process it starts. The workspace's toolchain file still decides the compiler: a custom path
     /// it names is refused, never swapped for the toolchain the launching process ran under.
     #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "confinement runs on Linux only")]
     fn the_workspace_toolchain_file_decides_whatever_the_launching_process_inherited() {
         let root = tempfile::tempdir().unwrap();
         let workspace = root.path().join("workspace");

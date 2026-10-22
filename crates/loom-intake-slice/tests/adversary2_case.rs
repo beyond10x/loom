@@ -54,6 +54,10 @@ fn adversary2_a_work_tree_root_whose_name_ends_in_a_space_opens() {
 /// A Unix path need not be UTF-8. Git runs in such a work tree and prints its root, and the slice
 /// refuses the root because git's output is not UTF-8, although only the object name is needed.
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "macOS file systems refuse a name that is not UTF-8"
+)]
 fn adversary2_a_work_tree_root_whose_path_is_not_utf8_opens() {
     let mut name = OsString::from(format!("adversary2-case-latin1-{}-", std::process::id()));
     name.push(OsStr::from_bytes(b"caf\xe9"));

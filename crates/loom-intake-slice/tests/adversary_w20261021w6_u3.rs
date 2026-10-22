@@ -74,6 +74,10 @@ outcomes:
 /// program, as an operator's minimal service `PATH` may not. The run reports the command killed;
 /// the child it started must be gone as well, or the report is false.
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "the scripts name /usr/bin/sleep and the checks read /proc"
+)]
 fn adversary_a_timed_out_command_leaves_no_process_when_no_kill_program_is_on_path() {
     if let Some(dir) = std::env::var_os(CHILD_DIR) {
         // The re-executed binary: run the case with the `PATH` the parent gave it.
@@ -119,6 +123,10 @@ fn adversary_a_timed_out_command_leaves_no_process_when_no_kill_program_is_on_pa
 /// A chain three processes deep that ignores SIGTERM, under a command that outlives its timeout:
 /// every process of the chain is gone, and the run returns within a bound.
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "the scripts name /usr/bin/sleep and the checks read /proc"
+)]
 fn adversary_a_deep_chain_that_ignores_sigterm_is_gone_and_the_run_returns_in_bounded_time() {
     let case = Case::new(
         "trap '' TERM\n\
@@ -140,6 +148,10 @@ fn adversary_a_deep_chain_that_ignores_sigterm_is_gone_and_the_run_returns_in_bo
 /// A command that ends at once while the child it started holds only its standard error open:
 /// the run reports the timeout within a bound and the child is gone.
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "the scripts name /usr/bin/sleep and the checks read /proc"
+)]
 fn adversary_a_child_holding_only_stderr_is_gone_and_the_run_returns_in_bounded_time() {
     let case = Case::new(
         "/usr/bin/sleep 120 > /dev/null &\necho $! >> PIDS\necho '{\"note\":\"n-1\"}'\nexit 0\n",

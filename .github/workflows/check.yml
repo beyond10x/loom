@@ -90,6 +90,9 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Fetch locked dependencies for offline checks
+        run: cargo fetch --locked
+
       - name: Build the SDK and the intake slice
         run: cargo build --locked -p b10x-loom-sdk -p b10x-loom-intake-slice --all-targets
 

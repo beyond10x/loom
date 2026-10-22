@@ -14,6 +14,7 @@ fn symlinked_target_is_refused_before_launch() {
 }
 
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "confinement runs on Linux only")]
 fn undelegated_root_produces_a_typed_refusal_without_running_code() {
     let root = tempfile::tempdir().unwrap();
     let workspace = root.path().join("workspace");
