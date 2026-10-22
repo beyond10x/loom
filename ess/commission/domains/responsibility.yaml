@@ -122,6 +122,15 @@ types:
   #
   # story:run-and-action-budgets adds RunBudget: a run or action budget the host set was reached
   # (`Budget` stays the step budget's and a model-loop budget's).
+  #
+  # story:host-stop-before-step adds HostStop: the host stopped the run before a step, for a reason
+  # only the host can read (HostStop). The runtime asks the host where it reads the run's deadline
+  # before a step, right after the deadline: before each executor call and before a pending request
+  # is invoked again, and on a resume before the Suspension is taken and right before the held
+  # request is invoked. A stop suspends the Run for HostStop, the run ending Suspended, or Waiting
+  # while a request is pending (`JudgeBudgetStop`), as at any budget stop; on a resume, one before
+  # the take takes nothing and leaves the Suspension Pending, and one right before the invoke
+  # releases the Suspension and performs nothing. A host that supplies no stop is never stopped.
   - name: commission.responsibility.SuspensionReason
     kind: union
     tag: kind
@@ -135,6 +144,21 @@ types:
       LoopBudget: Json
       ExternalAvailability: Json
       RunBudget: commission.responsibility.RunBudgetBreach
+      HostStop: commission.responsibility.HostStop
+
+  # story:host-stop-before-step: why the host stopped a run before a step, as the host names it.
+  # `name` is the host's label for the stop (for takt, ActiveTime, its wall time less its own
+  # pauses inside an effect, or DiskLow, the free space of a file system under its threshold);
+  # `detail` is the host's own data about it, which Commission carries and never reads. Commission
+  # measures neither: it reads no disk and sees no pause inside an effect. The host supplies the
+  # stop, asked once per check and never after the run ended; the model never supplies it.
+  - name: commission.responsibility.HostStop
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: detail
+        type: Json
 
   # docs/commission/contracts/commission-executor.md: what an executor may hand back. It proposes; it never
   # completes a case. story:executor-reports-usage: the runtime takes it in an ExecutorStep, beside
@@ -459,6 +483,8 @@ types:
   # answered Pending, in proposal order, and the reason Time carrying the report of the first that
   # asked to end the run; a run budget breach found after the same answer ends the run first, with
   # the breach as the reason.
+  # story:host-stop-before-step: or the requests pending when the host stopped the run before
+  # invoking them again, and the reason HostStop as the host named it.
   - name: commission.responsibility.RunOutcomeWaiting
     kind: struct
     fields:
@@ -1725,6 +1751,9 @@ commands:
   # and is judged here the same way: `pending` lists the request so answered (for a fan-out, every
   # read answered Pending, in proposal order), and `reason` is Time carrying the port's report, so
   # the outcome is `waiting`.
+  # story:host-stop-before-step: a host's stop before a step is judged here the same way, `reason`
+  # HostStop as the host named it: `waiting` before a pending request is invoked again, otherwise
+  # `suspended`.
   - name: commission.responsibility.JudgeBudgetStop
     input:
       - name: pending
