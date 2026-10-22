@@ -660,7 +660,7 @@ impl SessionExecutor {
             }
         }
         if let Some(error) = stream_error {
-            report.trace = Some(trace(self.kind, None, &report.transcript));
+            report.trace = Some(trace(self.kind, &copy, None, &report.transcript));
             return Err(error);
         }
         // The floor: every gating row that is not `ok` is reported, and every row's verdict is
@@ -714,7 +714,7 @@ impl SessionExecutor {
         }
         // Projected while the record is still there: it lives in the run's scratch, which goes
         // with the run.
-        report.trace = Some(trace(self.kind, kept, &report.transcript));
+        report.trace = Some(trace(self.kind, &copy, kept, &report.transcript));
         drop(run);
         if halted {
             return Err("the session was halted: the step's time ran out".to_owned());
@@ -869,8 +869,9 @@ fn digest(bytes: &[u8]) -> String {
 /// (`metaharness::project_vendor_record`); without one, `bytes` are the events the executor
 /// received, one `metaharness.event/1` line each (`metaharness::protocol::project_document`).
 /// A record read again with other bytes than `bytes` is not summarized, so the summary always
-/// describes the record the digest names.
-fn trace(kind: Kind, record: Option<&Path>, bytes: &[u8]) -> SessionTrace {
+/// describes the record the digest names. Why a record was not summarized names no directory of
+/// the machine ([`unrooted`]).
+fn trace(kind: Kind, copy: &ScratchCopy, record: Option<&Path>, bytes: &[u8]) -> SessionTrace {
     if bytes.is_empty() {
         return SessionTrace {
             transcript_digest: None,
@@ -902,8 +903,42 @@ fn trace(kind: Kind, record: Option<&Path>, bytes: &[u8]) -> SessionTrace {
     SessionTrace {
         transcript_digest: Some(named),
         source: Some(source.to_owned()),
-        summary,
+        summary: summary.map_err(|why| unrooted(&why, copy, record)),
     }
+}
+
+/// `why` with every host path the session's call knows written as what it is: the record by its
+/// file name, and its directory, the copy, the scratch root and directory and the workspace by
+/// name. A refusal metaharness states names the record it read by its absolute path, and a run
+/// record is read beside the run, where the machine's directories are nothing a reader can open.
+/// Longer paths are replaced first, so a path under another is never left half written.
+fn unrooted(why: &str, copy: &ScratchCopy, record: Option<&Path>) -> String {
+    let mut known: Vec<(String, String)> = Vec::new();
+    let mut know = |path: &Path, name: String| {
+        if path.is_absolute() && path.parent().is_some() {
+            known.push((path.display().to_string(), name));
+        }
+    };
+    if let Some(record) = record {
+        let name = record.file_name().map_or_else(
+            || "the session's record".to_owned(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        know(record, name);
+        if let Some(directory) = record.parent() {
+            know(directory, "the session's record directory".to_owned());
+        }
+    }
+    know(&copy.dir, "the session's copy".to_owned());
+    know(&copy.root, "the session's scratch".to_owned());
+    if let Some(scratch) = copy.root.parent() {
+        know(scratch, "the scratch directory".to_owned());
+    }
+    know(&copy.workspace, "the workspace".to_owned());
+    known.sort_by_key(|(path, _)| std::cmp::Reverse(path.len()));
+    known.into_iter().fold(why.to_owned(), |why, (path, name)| {
+        why.replace(&path, &name)
+    })
 }
 
 /// The vendor record format a session of `kind` leaves, as metaharness names it.

@@ -104,8 +104,10 @@ usage are in that document: they have no `Turn`, `ToolCall` or `Usage` record, a
 `Turn` numbers count Loom's own model calls only.
 
 Every field after `source` is the summary's field of the same name, and metaharness owns what it
-means; a field the summary leaves `null` is absent. A record metaharness cannot project leaves
-every summary field absent and says why in `projection_error`; the run goes on.
+means; a field the summary leaves `null` is absent. A record metaharness cannot project, and a
+summary the line cannot hold as stated (a cost that is no finite number, a count past the largest
+integer, 9223372036854775807), leaves every summary field absent and says why in
+`projection_error`; the run goes on.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -129,7 +131,7 @@ every summary field absent and says why in `projection_error`; the run goes on.
 | `stop_reason` | string, optional | The terminal record's stop reason |
 | `tool_calls` | list, optional | One entry per tool call in the record, in its order: `call_id` and `name` (strings), `answered` (boolean: a result names the call) and `error` (boolean: that result's error flag) |
 | `unk` | integer, optional | The document's unk count: the sum over its `metaharness.unk_kinds` |
-| `projection_error` | string, optional | Why the record could not be projected; present only then, with `transcript_digest` and `source` |
+| `projection_error` | string, optional | Why the record could not be projected or its summary not written, naming no directory of the machine; present only then. A session that left a record has `transcript_digest` and `source` beside it; one that left none (`the session left no record`) has neither |
 
 A session refused before it started (its scratch copy could not be made, for one) has no record
 and no `Session` line.
