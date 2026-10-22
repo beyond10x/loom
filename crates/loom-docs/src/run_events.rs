@@ -843,9 +843,12 @@ mod tests {
         );
     }
 
+    /// A declared record's members, each a name and its type.
+    type Members<'n> = Vec<(&'n str, Value)>;
+
     /// `base()`'s kinds and a `Session` kind whose `models` field is an optional list of the
     /// record `SessionModel`, declaring `members`.
-    fn with_records(members: Vec<(&str, Value)>) -> Value {
+    fn with_records(members: Members<'_>) -> Value {
         let record = "intake.events.SessionModel";
         let list = json!({"kind": "list", "of": {"kind": "declared", "name": record}});
         let mut model = typed(
@@ -886,7 +889,7 @@ mod tests {
                 }
             })
         );
-        let changed = |change: &dyn Fn(&mut Vec<(&str, Value)>)| {
+        let changed = |change: &dyn Fn(&mut Members<'_>)| {
             let mut members = members();
             change(&mut members);
             differences(
