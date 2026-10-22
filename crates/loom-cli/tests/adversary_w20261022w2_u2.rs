@@ -61,7 +61,7 @@ struct Recorded {
     record: Vec<u8>,
     starts: usize,
     calls: Rc<Cell<usize>>,
-    transcripts: Rc<RefCell<Vec<PathBuf>>>,
+    transcripts: Transcripts,
 }
 
 impl ProcessRunner for Recorded {
@@ -175,6 +175,9 @@ fn fixture() -> Fixture {
     }
 }
 
+/// The record paths metaharness planned, one per session started.
+type Transcripts = Rc<RefCell<Vec<PathBuf>>>;
+
 /// The session executor over `fixture`, its sessions scripted to leave `record`; the first
 /// `starts` calls start a session.
 fn executor(
@@ -182,7 +185,7 @@ fn executor(
     brief: &str,
     record: Vec<u8>,
     starts: usize,
-) -> (SessionExecutor, Rc<Cell<usize>>, Rc<RefCell<Vec<PathBuf>>>) {
+) -> (SessionExecutor, Rc<Cell<usize>>, Transcripts) {
     let calls = Rc::new(Cell::new(0));
     let transcripts = Rc::new(RefCell::new(Vec::new()));
     let mut executor =

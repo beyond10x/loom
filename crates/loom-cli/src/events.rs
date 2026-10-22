@@ -332,8 +332,9 @@ fn cost(cost: Option<&Decimal>) -> Value {
 
 /// The `Session` record of `trace`: its digest and source, and either every field its summary
 /// states or why the record did not project. A summary cost that has no JSON spelling (not a
-/// finite number) is not written as absent, which would read as a record that stated none: the
-/// summary is refused as a whole, naming the cost.
+/// finite number) is not written as absent, which would read as a record that stated none, and a
+/// count past the largest integer the record holds is not written as another count: either way
+/// the summary is refused as a whole, naming the field.
 #[must_use]
 pub fn session_event(trace: &SessionTrace) -> SessionEvent {
     let named = |projection_error: String| SessionEvent {
@@ -371,12 +372,19 @@ fn summarized(summary: &TraceIrSummary) -> Result<SessionEvent, String> {
         .models
         .iter()
         .map(|model| {
+            let field = |name: &str| format!("models[{:?}].{name}", model.name);
             Ok(SessionModel {
                 name: model.name.clone(),
-                input_tokens: model.input_tokens.map(count),
-                output_tokens: model.output_tokens.map(count),
-                cache_read_input_tokens: model.cache_read_input_tokens.map(count),
-                cache_creation_input_tokens: model.cache_creation_input_tokens.map(count),
+                input_tokens: counted(&field("input_tokens"), model.input_tokens)?,
+                output_tokens: counted(&field("output_tokens"), model.output_tokens)?,
+                cache_read_input_tokens: counted(
+                    &field("cache_read_input_tokens"),
+                    model.cache_read_input_tokens,
+                )?,
+                cache_creation_input_tokens: counted(
+                    &field("cache_creation_input_tokens"),
+                    model.cache_creation_input_tokens,
+                )?,
                 cost_usd: model.cost_usd.map(decimal).transpose()?,
             })
         })
@@ -403,28 +411,46 @@ fn summarized(summary: &TraceIrSummary) -> Result<SessionEvent, String> {
         adapter: summary.adapter.clone(),
         model: summary.model.clone(),
         models: Some(models),
-        turns: summary.turns.map(count),
+        turns: counted("turns", summary.turns)?,
         tokens_basis,
-        input_tokens: summary.input_tokens.map(count),
-        output_tokens: summary.output_tokens.map(count),
-        cache_read_input_tokens: summary.cache_read_input_tokens.map(count),
-        cache_creation_input_tokens: summary.cache_creation_input_tokens.map(count),
+        input_tokens: counted("input_tokens", summary.input_tokens)?,
+        output_tokens: counted("output_tokens", summary.output_tokens)?,
+        cache_read_input_tokens: counted(
+            "cache_read_input_tokens",
+            summary.cache_read_input_tokens,
+        )?,
+        cache_creation_input_tokens: counted(
+            "cache_creation_input_tokens",
+            summary.cache_creation_input_tokens,
+        )?,
         cost_usd: summary.cost_usd.map(decimal).transpose()?,
-        duration_ms: summary.duration_ms.map(count),
-        duration_api_ms: summary.duration_api_ms.map(count),
+        duration_ms: counted("duration_ms", summary.duration_ms)?,
+        duration_api_ms: counted("duration_api_ms", summary.duration_api_ms)?,
         first_timestamp_ms: summary.first_timestamp_ms,
         last_timestamp_ms: summary.last_timestamp_ms,
         is_error: summary.is_error,
         stop_reason: summary.stop_reason.clone(),
         tool_calls: Some(tool_calls),
-        unk: Some(count(summary.unk)),
+        unk: counted("unk", Some(summary.unk))?,
         projection_error: None,
     })
 }
 
-/// A count as the integer it is written as; one past the largest is the largest.
-fn count(value: u64) -> i64 {
-    i64::try_from(value).unwrap_or(i64::MAX)
+/// A summary's count `field` as the integer it is written as, or why it cannot be: a count past
+/// the largest integer the record holds is never written as another count.
+fn counted(field: &str, value: Option<u64>) -> Result<Option<i64>, String> {
+    value
+        .map(|value| {
+            i64::try_from(value).map_err(|_| {
+                format!(
+                    "a summary {field} of {value} is past the largest count the record holds \
+                     ({}), and writing it as another count would state a figure the record does \
+                     not",
+                    i64::MAX
+                )
+            })
+        })
+        .transpose()
 }
 
 /// A cost as the decimal JSON spells it, or why it has no JSON spelling.
