@@ -2,12 +2,14 @@
 format: aep.planning-md/3
 id: decision-blocker:sdk-writable-host-root
 kind: decision-blocker
-status: open
+status: cleared
 title: Timo has not decided how a confined child gets a writable mount outside /workspace (Q2)
 relations:
 - blocks: story:writable-host-root
 withholds: test_result
-revision: 1
+revision: 3
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-22T12:21:39Z", actor: "human:timo", revision: 3}
 ---
 ## Question
 
@@ -31,3 +33,17 @@ Loom side (`ChildCommand::with_writable_root(name)`) is the same for A and B; C 
 ## Cleared when
 
 A Substrate ADR on writable roots is accepted and a Substrate release implements it.
+
+## Decision (2026-10-22)
+
+Timo, quoted by session `b10x-chef-orchestrator` on 2026-10-22: "either name physical paths, or
+provide git source". Substrate accepted it as ADR 0038, "a writable root is a named host path or a
+Git checkout" (`adr/0038-writable-roots-are-named-host-paths-or-git-checkouts.md`, status
+`accepted`, beyond10x/substrate `main` at `44aacec7b0f593527e348100366ae30823aa30af`).
+
+- Option B, narrowed to two kinds: a host path the operator names, or a Git source given to the run
+  as a writable checkout.
+- The orchestrator cleared this blocker on the accepted ADR (2026-10-22): "Close the blocker in
+  your store with that citation (store-only, aep validate). Then stay idle until substrate 0.10.0
+  ships."
+- `story:writable-host-root` waits for the Substrate release that implements ADR 0038 (0.10.0).
