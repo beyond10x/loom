@@ -1,14 +1,14 @@
 <!--
   generated from intake v1
-  model digest 658e9837e24af803139df759451a1a1e281e71b63a0eb807b011f2f39571b844
-  contract digest d43e152349e894ad5a14a2ef075f0d0b6d695254b3dd2b9d7d3abed451b558cc
+  model digest 4ed9220e25a096d3ee91fdabe8d0f6b9cdd3b59b5a826a2dfa07924bac771607
+  contract digest 0d10146dd4b2743e959d71f4eeb3cfb293bf2dba47c285732ceb93672da1b95c
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — intake v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-93 capabilities: **90 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+96 capabilities: **93 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -40,6 +40,9 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `intake.events.RunEvent` |
 | domain type | `intake.events.RunEventLine` |
 | domain type | `intake.events.SchemaVersion` |
+| domain type | `intake.events.SessionEvent` |
+| domain type | `intake.events.SessionModel` |
+| domain type | `intake.events.SessionToolCall` |
 | domain type | `intake.events.TerminalEvent` |
 | domain type | `intake.events.ToolCallEvent` |
 | domain type | `intake.events.TurnEvent` |

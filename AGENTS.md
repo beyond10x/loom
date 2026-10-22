@@ -152,7 +152,8 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | Package and library names are the `loom-` names | `crates/loom-executor/tests/crate_names.rs` |
 | No manifest names an archived Commission, governor or intake repository | `crates/loom-executor/tests/governor_import.rs`, `intake_import.rs`, `commission_import.rs` |
 | The SDK stability page (`website/docs/reference/sdk-stability.md`) lists exactly the ports a host implements and the `loom_sdk` paths control-plane imports, each resolving through `loom_sdk`; a change to that surface updates the page and names any break in a `**Breaking:**` bullet of `CHANGELOG.md` | `crates/loom-sdk/tests/host_ports.rs` (`a_host_implements_every_port_through_loom_sdk_alone`, `the_stability_page_lists_exactly_the_ports_this_test_implements`, `every_control_plane_path_on_the_page_resolves`) |
-| The `run --output jsonl` records and exit statuses change within `schema_version` 1 only by a new optional field; any other change fails the gate until the committed contract moves | `task docs-check` (`crates/loom-docs/src/run_events.rs`, `the_v1_contract_matches_the_declared_events`, `a_removed_renamed_or_retyped_field_is_a_break`, `a_new_record_kind_is_a_break`, `a_new_optional_field_is_not_a_break`) |
+| The `run --output jsonl` records and exit statuses change within `schema_version` 1 only by a new optional field, of a record kind or of a record one of its fields holds; any other change fails the gate until the committed contract moves | `task docs-check` (`crates/loom-docs/src/run_events.rs`, `the_v1_contract_matches_the_declared_events`, `a_removed_renamed_or_retyped_field_is_a_break`, `a_new_record_kind_is_a_break`, `a_new_optional_field_is_not_a_break`, `a_record_field_states_its_fields_each_judged_as_a_kinds_field`, `a_field_of_a_nested_record_the_page_leaves_out_is_named`) |
+| A run whose agent is the session executor, wrapped by `EventStream::sessions`, writes one `Session` record per session, its fields equal to `metaharness::protocol::summarize` of the session's record and its digest the step's, and no `Turn`, `ToolCall` or `Usage` record for the session's own turns; Loom's own records are as without it; a record that does not project writes its digest, source and `projection_error`, and the run goes on | `crates/loom-cli/tests/session_events.rs` (`a_session_event_holds_the_summary_of_the_recorded_session`, `loom_s_own_records_are_as_without_the_session_record`, `a_record_that_does_not_project_is_named_with_why_and_fails_nothing`), `crates/loom-session-executor/tests/proposes.rs` (`the_session_record_is_summarized_by_metaharness`) |
 | A release tag equals the workspace version and has a CHANGELOG entry | `loom-xtask release-check`, run by `release.yml` (`crates/loom-xtask/tests/release_check.rs`) |
 | A release's CHANGELOG entry says what breaks for a consumer: a `**Breaking:**` bullet per break or the line `No breaking changes.`, never both, and no `**Breaking:**` bullet that names nothing or says `none`; a `Breaking:` sentence in prose does not count; `No breaking changes.` is refused when `consumers/pinned/`, `crates/loom-sdk/tests/host_ports.rs` or `docs/contracts/run-events-v1.json` changed since the previous tag; `release.yml` fetches the history and tags it diffs | `loom-xtask release-check` (`crates/loom-xtask/tests/release_check.rs`: `release_check_names_an_entry_without_a_breaking_bullet`, `release_check_refuses_no_breaking_changes_when_a_stable_surface_changed_since_the_previous_tag`, `release_check_accepts_no_breaking_changes_when_no_stable_surface_changed`, `release_check_refuses_a_breaking_bullet_that_names_no_break`, `release_check_refuses_an_entry_with_both_a_breaking_bullet_and_no_breaking_changes`, `release_check_passes_on_the_first_tag`, `release_workflow_verifies_the_tag_and_reuses_the_check`) |
 | The documented embedding builds and runs to `ApprovalRequired (repository.merge)` as an external crate: `consumers/pinned/` is its own workspace, depends on `b10x-loom-sdk` alone by path, includes `crates/loom-sdk/examples/software_change.rs` by `#[path]` and resolves one copy of each Loom and Canon crate | `task consumer-check` (`consumers/pinned/tests/embedding.rs`, `the_pinned_consumer_stops_at_approval_required`), `crates/loom-xtask/tests/pinned_consumer.rs` |
@@ -674,10 +675,17 @@ step the same way, and is never read as gone. A named file spelled other than as
 path (a `.`, `..` or empty part, a root) suspends the step before any copy. It records each
 session through the generated `loom.session` behaviour (`ess/domains/session.yaml`), a new
 `SessionId` per call; the summary and the SHA-256 transcript digest travel on `ExecutorStep`,
-never as evidence; a failed session suspends with `ExternalAvailability` and is no record. It is
-the one crate that links metaharness; `b10x-loom-sdk` and `b10x-loom-conformance` reach it
-through it. Its tests run scripted sessions only (metaharness's `ScriptedRunner`): no harness
-program, no model, no network.
+never as evidence; a failed session suspends with `ExternalAvailability` and is no record. Each
+call's `SessionReport::trace` (`SessionTrace`, read through `last_report`) is the session's
+record projected to `trace-ir/1` and summarized by `metaharness::protocol::summarize`: the vendor
+record metaharness kept, read again by its kind's reader (`project_vendor_record`), else the
+`metaharness.event/1` lines the executor received; its digest is the step's. A record that does
+not project keeps its digest and source, says why and changes nothing about the call; a session
+that never started has no trace. It is the one crate that links metaharness (`metaharness` and
+`metaharness-b10x` at tag `0.13.0`; move them together); `b10x-loom-sdk` and
+`b10x-loom-conformance` reach it through it. No `metaharness` program runs. Its tests run
+scripted sessions only (metaharness's `ScriptedRunner`): no harness program, no model, no
+network.
 
 ## Workflow definitions
 
@@ -847,7 +855,11 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   `run --output jsonl`: one `intake.events` record per line (`ess/intake/domains/events.yaml`),
   built from the generated types, the terminal record last and exactly once.
   `crates/loom-cli/tests/run_events.rs` holds it; `loom-docs` checks the hand-written
-  `website/docs/reference/run-events.md` against the declaration.
+  `website/docs/reference/run-events.md` against the declaration, the fields of a record a kind's
+  field holds included. `EventStream::sessions` wraps a `SessionExecutor` so each agent session
+  writes one `Session` record from its `SessionTrace`, and none of its turns writes a `Turn`,
+  `ToolCall` or `Usage` record; `b10x-loom run` itself runs no session executor
+  (`crates/loom-cli/tests/session_events.rs`).
 - `run --state <DIR>` puts the case in a `FileCaseStore` and the commission's Suspension in a
   `FileSuspensionStore` over `<DIR>`, keeps the commission's resume context
   (`intake.routing.ResumeContext`, `b10x_loom_intake_slice::resume::ResumeContextStore`, under

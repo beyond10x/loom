@@ -393,11 +393,11 @@ impl ProcessRunner for B10xSession {
 }
 
 /// The executor's rule: an input figure that "holds the cached tokens it also states apart" is
-/// charged less them, "so no token is counted twice". b10x-harness 0.13.3, the version
-/// metaharness 0.10.1 pins, states `input_tokens` as the whole on every wire: `harness_wire::Usage`
-/// ("`input_tokens` is the whole, and the cache figures are parts of it"), and the Anthropic
-/// Messages projection (`harness-messages/src/project.rs`) sums input, cache read and cache
-/// creation before writing it. So a b10x-harness session on `anthropic-messages` reporting 100
+/// charged less them, "so no token is counted twice". b10x-harness 0.15.1, the version
+/// metaharness 0.13.0 pins, states `input_tokens` as the whole on every wire: `harness_wire::Usage`
+/// ("`input_tokens` is the whole, and the cache figures are parts of it"; the wire that reports
+/// its three input figures disjointly has "its projection sums them" before writing it). So a
+/// b10x-harness session on `anthropic-messages` reporting 100
 /// input tokens with 40 cached is charged 60, as on `openai-responses`.
 #[test]
 fn a_b10x_session_on_the_anthropic_wire_is_charged_its_input_less_the_cached_tokens() {

@@ -427,7 +427,7 @@ fn a_codex_session_outside_the_pin_is_held_by_h9() {
 
 /// A b10x-harness session is recorded as `Harness` and proposes its change; the executor decides
 /// none of its calls (it observes them) and charges it the cost it stated and the tokens of its
-/// one `usage` line, which metaharness 0.10.1's b10x adapter states as a `usage` event only.
+/// one `usage` line, which metaharness 0.13.0's b10x adapter states as a `usage` event only.
 #[test]
 fn a_b10x_session_is_observed_and_charged_its_cost_and_tokens() {
     let scratch = Scratch::new("b10x");

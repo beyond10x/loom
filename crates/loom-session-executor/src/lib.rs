@@ -30,6 +30,13 @@
 //! charged to the run and its budget: the total its terminal record states, or for a
 //! b10x-harness session that states none the sum of its per-call usage, never both.
 //!
+//! The session's record is also projected to `trace-ir/1` by metaharness and summarized
+//! (`trace-ir-summary/1`) while it is still in the run's scratch, as the report's
+//! [`SessionTrace`] ([`SessionReport::trace`]): the vendor record through its kind's production
+//! reader when metaharness kept one, else the events the executor received. Its digest is the
+//! step's. A record metaharness does not project keeps its digest and says why, and changes
+//! nothing about the call's outcome; a session that never started has no trace.
+//!
 //! A session that fails proposes nothing and is no record: the call returns `Suspended` with
 //! `ExternalAvailability` naming why. A session that changed nothing proposes an empty list of
 //! files.
@@ -221,6 +228,26 @@ pub struct SessionReport {
     /// Whether metaharness started the harness program. A call that failed before it did (the
     /// copy, the spec, or a program that could not be started) made no model call.
     pub started: bool,
+    /// The session's record, projected to `trace-ir/1` and summarized ([`SessionTrace`]); none
+    /// when no session started.
+    pub trace: Option<SessionTrace>,
+}
+
+/// A session's record as metaharness projects it: the `trace-ir/1` document named by its digest
+/// and source, and its `trace-ir-summary/1` (`metaharness::protocol::summarize`), or why the
+/// record does not project. The summary is a projection of what the session's record says, never
+/// evidence, and a record that does not project fails nothing.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionTrace {
+    /// The SHA-256 digest of the session's record, lowercase hex: the `trace-ir/1` document's
+    /// `transcript_digest`, and the step's. None when the session left no record.
+    pub transcript_digest: Option<String>,
+    /// The format the record was read as: the vendor record's (`claude-code-stream-json`,
+    /// `codex-rollout`, `harness-json`) when metaharness kept one, else `metaharness.event/1`, the
+    /// events the executor received. None when the session left no record.
+    pub source: Option<String>,
+    /// The record's summary, or why metaharness did not project it.
+    pub summary: Result<metaharness::protocol::TraceIrSummary, String>,
 }
 
 /// The executor: one call runs one session over a scratch copy of `workspace` holding the
@@ -441,7 +468,7 @@ impl SessionExecutor {
         let mut seams: Box<dyn SeamFactory> = match self.kind {
             Kind::Claude => Box::new(ClaudeSeams),
             Kind::Codex => Box::new(CodexSeams),
-            Kind::B10x => Box::new(metaharness_b10x::B10xSeams::new(None, None, None)),
+            Kind::B10x => Box::new(metaharness_b10x::B10xSeams::new(None, None)),
         };
         // A Codex session's home is its own, in the scratch root ([`Homed`]).
         let home = match self.kind {
@@ -633,6 +660,7 @@ impl SessionExecutor {
             }
         }
         if let Some(error) = stream_error {
+            report.trace = Some(trace(self.kind, None, &report.transcript));
             return Err(error);
         }
         // The floor: every gating row that is not `ok` is reported, and every row's verdict is
@@ -672,17 +700,21 @@ impl SessionExecutor {
         }
         // What the program printed, as metaharness kept it: the transcript, in place of the
         // events, and the reply, the result record's `result`, where there is one.
-        let raw = run
-            .transcript()
-            .path
-            .as_ref()
+        let record = run.transcript().path.as_ref().map(PathBuf::from);
+        let raw = record
+            .as_deref()
             .and_then(|path| std::fs::read(path).ok())
             .filter(|raw| !raw.is_empty());
         let mut replied = None;
+        let mut kept = None;
         if let Some(raw) = raw {
             replied = result_of(&String::from_utf8_lossy(&raw));
             report.transcript = raw;
+            kept = record.as_deref();
         }
+        // Projected while the record is still there: it lives in the run's scratch, which goes
+        // with the run.
+        report.trace = Some(trace(self.kind, kept, &report.transcript));
         drop(run);
         if halted {
             return Err("the session was halted: the step's time ran out".to_owned());
@@ -790,7 +822,7 @@ pub fn usage_of(report: &SessionReport, took: Duration) -> ExecutorUsage {
 
 /// The tokens a session is charged, counted once: the total its terminal record states when it
 /// states one, else the sum of the per-call `usage` events it emitted (b10x-harness's, whose
-/// terminal record states none in metaharness 0.10.1), else none. Each figure of the sum is
+/// terminal record states none in metaharness 0.13.0), else none. Each figure of the sum is
 /// absent only when no event stated it.
 fn charged_usage(total: Option<&Usage>, events: &[Usage]) -> Option<Usage> {
     if let Some(total) = total {
@@ -829,6 +861,79 @@ fn digest(bytes: &[u8]) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+/// The session's record, `bytes`, projected to `trace-ir/1` by metaharness and summarized
+/// ([`SessionTrace`]). `record` names the vendor record `bytes` were read from, when metaharness
+/// kept one, and its kind's production reader reads it again
+/// (`metaharness::project_vendor_record`); without one, `bytes` are the events the executor
+/// received, one `metaharness.event/1` line each (`metaharness::protocol::project_document`).
+/// A record read again with other bytes than `bytes` is not summarized, so the summary always
+/// describes the record the digest names.
+fn trace(kind: Kind, record: Option<&Path>, bytes: &[u8]) -> SessionTrace {
+    if bytes.is_empty() {
+        return SessionTrace {
+            transcript_digest: None,
+            source: None,
+            summary: Err("the session left no record".to_owned()),
+        };
+    }
+    let named = digest(bytes);
+    let (source, document) = match record {
+        Some(path) => {
+            let source = vendor_source(kind);
+            let document = metaharness::project_vendor_record(path, source).map_err(|refusal| {
+                format!(
+                    "metaharness did not project the {} record: {refusal}",
+                    source.as_str()
+                )
+            });
+            (source.as_str(), document)
+        }
+        None => (metaharness::protocol::EVENT_FORMAT, events_document(bytes)),
+    };
+    let summary = document.and_then(|document| {
+        if document.transcript_digest == named {
+            Ok(metaharness::protocol::summarize(&document))
+        } else {
+            Err("the session's record changed after it was read".to_owned())
+        }
+    });
+    SessionTrace {
+        transcript_digest: Some(named),
+        source: Some(source.to_owned()),
+        summary,
+    }
+}
+
+/// The vendor record format a session of `kind` leaves, as metaharness names it.
+fn vendor_source(kind: Kind) -> metaharness::VendorSource {
+    match kind {
+        Kind::Claude => metaharness::VendorSource::ClaudeCodeStreamJson,
+        Kind::Codex => metaharness::VendorSource::CodexRollout,
+        Kind::B10x => metaharness::VendorSource::HarnessJson,
+    }
+}
+
+/// The `trace-ir/1` document of the events a session delivered, one `metaharness.event/1` line
+/// each in `bytes`, or why a line does not read as one.
+fn events_document(bytes: &[u8]) -> Result<metaharness::protocol::TraceIrDocument, String> {
+    let text = std::str::from_utf8(bytes)
+        .map_err(|error| format!("the session's events are not UTF-8: {error}"))?;
+    let mut lines = Vec::new();
+    for (at, line) in text.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let event = metaharness::protocol::parse_event_line(line).map_err(|error| {
+            format!(
+                "line {} of the session's events does not read: {error}",
+                at + 1
+            )
+        })?;
+        lines.push(event);
+    }
+    Ok(metaharness::protocol::project_document(&lines, bytes))
 }
 
 /// A new [`SessionId`]: a version-8 UUID from the SHA-256 digest of the process, the time and a
@@ -1936,7 +2041,7 @@ mod tests {
     }
 
     /// A session's tokens are counted once: the terminal total when the session states one, even
-    /// beside per-call events (metaharness 0.10.1's b10x adapter states no total, so this is
+    /// beside per-call events (metaharness 0.13.0's b10x adapter states no total, so this is
     /// pinned here and not through a scripted session); else the events summed, a figure no event
     /// stated staying absent; else none.
     #[test]

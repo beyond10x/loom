@@ -93,13 +93,40 @@ pub fn problems(model: &Value, page: &str, schema_version: u64) -> Result<Vec<St
         let record = payload["name"]
             .as_str()
             .with_context(|| format!("compiled model: {UNION} {kind} carries no record"))?;
-        for field in field_names(declared(model, record)?) {
-            if !text.contains(&format!("`{field}`")) {
-                problems.push(format!("the field `{field}` of `{kind}`"));
+        for field in declared(model, record)?["fields"]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
+            let Some(name) = field["name"].as_str() else {
+                continue;
+            };
+            if !text.contains(&format!("`{name}`")) {
+                problems.push(format!("the field `{name}` of `{kind}`"));
+            }
+            let Some(nested) = record_of(model, &field["type_ref"]) else {
+                continue;
+            };
+            for member in field_names(declared(model, nested)?) {
+                if !text.contains(&format!("`{member}`")) {
+                    problems.push(format!("the field `{member}` of `{kind}` (in `{name}`)"));
+                }
             }
         }
     }
     Ok(problems)
+}
+
+/// The record a field of type `type_ref` holds, alone, optional or in a list.
+fn record_of<'a>(model: &Value, type_ref: &'a Value) -> Option<&'a str> {
+    match type_ref["kind"].as_str()? {
+        "optional" | "list" => record_of(model, &type_ref["of"]),
+        "declared" => {
+            let name = type_ref["name"].as_str()?;
+            (declared(model, name).ok()?["kind"] == "struct").then_some(name)
+        }
+        _ => None,
+    }
 }
 
 /// The committed V1 contract, relative to the repository root.
@@ -126,10 +153,23 @@ fn variants(model: &Value, name: &str) -> Result<Vec<String>> {
     Ok(variants)
 }
 
-/// A field's type as the contract states it: its type, whether it may be absent, and the values
-/// of an enum it names. A field of a record type is refused: the contract states flat records.
+/// A field's type as the contract states it: its type, whether it may be absent, the values of an
+/// enum it names and, for a record it holds (alone, optional or in a list), the record's own
+/// fields, each stated the same way. A record inside such a record is refused: the contract states
+/// one level of records.
 fn field_type(model: &Value, type_ref: &Value) -> Result<Value> {
-    fn name(model: &Value, type_ref: &Value, values: &mut Option<Vec<String>>) -> Result<String> {
+    stated_type(model, type_ref, true)
+}
+
+/// What a field's type names besides primitives and lists: at most one enum or record.
+#[derive(Default)]
+struct Named {
+    values: Option<Vec<String>>,
+    record: Option<String>,
+}
+
+fn stated_type(model: &Value, type_ref: &Value, records: bool) -> Result<Value> {
+    fn name(model: &Value, type_ref: &Value, named: &mut Named, records: bool) -> Result<String> {
         match type_ref["kind"].as_str() {
             Some("primitive") => {
                 let primitive = type_ref["name"]
@@ -141,17 +181,28 @@ fn field_type(model: &Value, type_ref: &Value) -> Result<Value> {
                     .map(|first| first.to_uppercase().chain(chars).collect())
                     .unwrap_or_default())
             }
-            Some("list") => Ok(format!("List<{}>", name(model, &type_ref["of"], values)?)),
+            Some("list") => Ok(format!(
+                "List<{}>",
+                name(model, &type_ref["of"], named, records)?
+            )),
             Some("declared") => {
                 let declared_name = type_ref["name"]
                     .as_str()
                     .context("compiled model: a declared type has no name")?;
+                let kind = &declared(model, declared_name)?["kind"];
                 ensure!(
-                    declared(model, declared_name)?["kind"] == "enum" && values.is_none(),
-                    "the run events contract states fields of primitive, list and enum types, \
+                    named.values.is_none()
+                        && named.record.is_none()
+                        && (kind == "enum" || (kind == "struct" && records)),
+                    "the run events contract states fields of primitive, list, enum and record \
+                     types, and a record's own fields of primitive, list and enum types, \
                      not {declared_name}"
                 );
-                *values = Some(variants(model, declared_name)?);
+                if kind == "enum" {
+                    named.values = Some(variants(model, declared_name)?);
+                } else {
+                    named.record = Some(declared_name.to_owned());
+                }
                 Ok(declared_name.to_owned())
             }
             other => bail!("the run events contract cannot state a field of kind {other:?}"),
@@ -161,15 +212,32 @@ fn field_type(model: &Value, type_ref: &Value) -> Result<Value> {
         Some("optional") => (true, &type_ref["of"]),
         _ => (false, type_ref),
     };
-    let mut values = None;
+    let mut named = Named::default();
     let mut stated = Map::new();
     stated.insert(
         "type".into(),
-        Value::String(name(model, inner, &mut values)?),
+        Value::String(name(model, inner, &mut named, records)?),
     );
     stated.insert("optional".into(), Value::Bool(optional));
-    if let Some(values) = values {
+    if let Some(values) = named.values {
         stated.insert("values".into(), json!(values));
+    }
+    if let Some(record) = named.record {
+        let mut fields = BTreeMap::new();
+        for field in declared(model, &record)?["fields"]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
+            let name = field["name"]
+                .as_str()
+                .with_context(|| format!("compiled model: a field of {record} has no name"))?;
+            fields.insert(
+                name.to_owned(),
+                stated_type(model, &field["type_ref"], false)?,
+            );
+        }
+        stated.insert("fields".into(), json!(fields));
     }
     Ok(Value::Object(stated))
 }
@@ -282,7 +350,8 @@ pub fn contract(
     }))
 }
 
-/// A field as the contract states it, in one line: `Integer, optional`, `StopReason [A, B]`.
+/// A field as the contract states it, in one line: `Integer, optional`, `StopReason [A, B]`,
+/// `List<Model> {name: String; cost: Decimal, optional}`.
 fn describe(field: &Value) -> String {
     let mut text = field["type"].as_str().unwrap_or("?").to_owned();
     if field["optional"] == true {
@@ -291,6 +360,13 @@ fn describe(field: &Value) -> String {
     if let Some(values) = field["values"].as_array() {
         let values: Vec<&str> = values.iter().filter_map(Value::as_str).collect();
         text.push_str(&format!(" [{}]", values.join(", ")));
+    }
+    if let Some(fields) = field["fields"].as_object() {
+        let fields: Vec<String> = fields
+            .iter()
+            .map(|(name, field)| format!("{name}: {}", describe(field)))
+            .collect();
+        text.push_str(&format!(" {{{}}}", fields.join("; ")));
     }
     text
 }
@@ -334,11 +410,47 @@ impl std::fmt::Display for Difference {
     }
 }
 
+/// How the field `subject` names differs between `old` and `new`, either absent as null; `None`
+/// when it does not.
+fn field_difference(subject: String, old: &Value, new: &Value) -> Option<Difference> {
+    if old == new {
+        return None;
+    }
+    Some(match (old.is_null(), new.is_null()) {
+        (false, true) => Difference {
+            subject,
+            change: format!("removed or renamed (was {})", describe(old)),
+            breaking: true,
+        },
+        (true, false) => Difference {
+            subject,
+            change: format!("added ({})", describe(new)),
+            breaking: new["optional"] != true,
+        },
+        _ => Difference {
+            subject,
+            change: format!("retyped from {} to {}", describe(old), describe(new)),
+            breaking: true,
+        },
+    })
+}
+
+/// Whether `old` and `new` state the same record field but for the record's own fields.
+fn record_changed_alone(old: &Value, new: &Value) -> bool {
+    let rest = |field: &Value| {
+        let mut field = object(field);
+        field.remove("fields");
+        field
+    };
+    old["fields"].is_object() && new["fields"].is_object() && rest(old) == rest(new)
+}
+
 /// Every difference between the `committed` contract and the `declared` one.
 ///
-/// Within one schema version only a new optional field of an existing record kind is not a
-/// break: a reader by name ignores it. A record kind, field or exit status removed, renamed,
-/// retyped or added, an enum value added or removed, and any other change of the contract are.
+/// Within one schema version only a new optional field of an existing record kind, or of a record
+/// one of its fields holds, is not a break: a reader by name ignores it. A record kind, field or
+/// exit status removed, renamed, retyped or added, an enum value added or removed, and any other
+/// change of the contract are.
 pub fn differences(committed: &Value, declared: &Value) -> Vec<Difference> {
     let mut found = Vec::new();
     let breaking = |subject: String, change: String| Difference {
@@ -359,29 +471,23 @@ pub fn differences(committed: &Value, declared: &Value) -> Vec<Difference> {
                         (true, false) => found.push(breaking(subject, "added".into())),
                         _ => {
                             for (field, (old, new)) in paired(&old["fields"], &new["fields"]) {
-                                let subject = format!("field `{field}` of `{kind}`");
-                                if old == new {
-                                    continue;
+                                if record_changed_alone(&old, &new) {
+                                    for (member, (old, new)) in
+                                        paired(&old["fields"], &new["fields"])
+                                    {
+                                        found.extend(field_difference(
+                                            format!("field `{member}` of `{kind}` (in `{field}`)"),
+                                            &old,
+                                            &new,
+                                        ));
+                                    }
+                                } else {
+                                    found.extend(field_difference(
+                                        format!("field `{field}` of `{kind}`"),
+                                        &old,
+                                        &new,
+                                    ));
                                 }
-                                found.push(match (old.is_null(), new.is_null()) {
-                                    (false, true) => breaking(
-                                        subject,
-                                        format!("removed or renamed (was {})", describe(&old)),
-                                    ),
-                                    (true, false) => Difference {
-                                        subject,
-                                        change: format!("added ({})", describe(&new)),
-                                        breaking: new["optional"] != true,
-                                    },
-                                    _ => breaking(
-                                        subject,
-                                        format!(
-                                            "retyped from {} to {}",
-                                            describe(&old),
-                                            describe(&new)
-                                        ),
-                                    ),
-                                });
                             }
                         }
                     }
@@ -522,9 +628,15 @@ mod tests {
         let committed: Value = serde_json::from_str(&text).unwrap();
         assert_eq!(differences(&committed, &declared), []);
         assert_eq!(committed, declared);
-        for kind in ["Route", "Turn", "ToolCall", "Usage", "Approval", "Terminal"] {
+        for kind in [
+            "Route", "Turn", "ToolCall", "Usage", "Approval", "Session", "Terminal",
+        ] {
             assert!(committed["kinds"][kind].is_object(), "{kind}");
         }
+        assert_eq!(
+            committed["kinds"]["Session"]["fields"]["tool_calls"]["fields"]["answered"],
+            json!({"type": "Boolean", "optional": false})
+        );
         assert_eq!(
             committed["kinds"]["Usage"]["fields"]["input_tokens"],
             json!({"type": "Integer", "optional": true})
@@ -729,6 +841,103 @@ mod tests {
                 "the record kind `Terminal` (a `### Terminal` section)",
             ]
         );
+    }
+
+    /// `base()`'s kinds and a `Session` kind whose `models` field is an optional list of the
+    /// record `SessionModel`, declaring `members`.
+    fn with_records(members: Vec<(&str, Value)>) -> Value {
+        let record = "intake.events.SessionModel";
+        let list = json!({"kind": "list", "of": {"kind": "declared", "name": record}});
+        let mut model = typed(
+            &[
+                route(),
+                terminal(),
+                ("Session", vec![("models", optional(list))]),
+            ],
+            &["Completed", "Refused"],
+        );
+        let fields: Vec<Value> = members
+            .into_iter()
+            .map(|(name, type_ref)| json!({"name": name, "type_ref": type_ref}))
+            .collect();
+        model["types"][record] = json!({"body": {"kind": "struct", "fields": fields}});
+        model
+    }
+
+    /// A field holding a record states the record's own fields, each judged as a field of a
+    /// record kind is: a new optional one is no break, any other change is.
+    #[test]
+    fn a_record_field_states_its_fields_each_judged_as_a_kinds_field() {
+        let members = || {
+            vec![
+                ("name", prim("string")),
+                ("cost_usd", optional(prim("decimal"))),
+            ]
+        };
+        let stated = contract(&with_records(members()), HELP, 1, 4, 1).unwrap();
+        assert_eq!(
+            stated["kinds"]["Session"]["fields"]["models"],
+            json!({
+                "type": "List<intake.events.SessionModel>",
+                "optional": true,
+                "fields": {
+                    "cost_usd": {"type": "Decimal", "optional": true},
+                    "name": {"type": "String", "optional": false}
+                }
+            })
+        );
+        let changed = |change: &dyn Fn(&mut Vec<(&str, Value)>)| {
+            let mut members = members();
+            change(&mut members);
+            differences(
+                &stated,
+                &contract(&with_records(members), HELP, 1, 4, 1).unwrap(),
+            )
+        };
+        let found = changed(&|members| members.push(("turns", optional(prim("integer")))));
+        assert_eq!(
+            subjects(&found),
+            [("field `turns` of `Session` (in `models`)", false)]
+        );
+        let found = changed(&|members| members.push(("turns", prim("integer"))));
+        assert_eq!(
+            subjects(&found),
+            [("field `turns` of `Session` (in `models`)", true)]
+        );
+        let found = changed(&|members| members[0].1 = prim("integer"));
+        assert_eq!(
+            subjects(&found),
+            [("field `name` of `Session` (in `models`)", true)]
+        );
+        let found = changed(&|members| {
+            members.remove(1);
+        });
+        assert_eq!(
+            subjects(&found),
+            [("field `cost_usd` of `Session` (in `models`)", true)]
+        );
+
+        let looped = with_records(vec![(
+            "again",
+            json!({"kind": "declared", "name": "intake.events.SessionModel"}),
+        )]);
+        assert!(contract(&looped, HELP, 1, 4, 1).is_err());
+    }
+
+    /// The page names every field of a record a kind's field holds, in the kind's section.
+    #[test]
+    fn a_field_of_a_nested_record_the_page_leaves_out_is_named() {
+        let model = with_records(vec![
+            ("name", prim("string")),
+            ("cost_usd", optional(prim("decimal"))),
+        ]);
+        let page = "# Run events\n\n`schema_version` `kind` `V1`\n\n### Route\n\n`protocol` `accepted`\n\n### Terminal\n\n`stop_reason` `exit_status`\n\n### Session\n\n`models`: `name`\n\n## Run\n\n{\"schema_version\":1}\n";
+        assert_eq!(
+            problems(&model, page, 1).unwrap(),
+            ["the field `cost_usd` of `Session` (in `models`)"]
+        );
+        let page = page.replace("`name`", "`name` `cost_usd`");
+        assert!(problems(&model, &page, 1).unwrap().is_empty());
     }
 
     #[test]

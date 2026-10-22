@@ -30,8 +30,12 @@ use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::runtime::{EXECUTOR_SOURCE, LoopContext, LoopEnd, run_until_blocked};
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
 use b10x_loom_commission_testkit::fake_governor::{Answer, FakeGovernor};
+use b10x_loom_session_executor::metaharness::protocol::{
+    EVENT_FORMAT, parse_event_line, project_document, summarize,
+};
 use b10x_loom_session_executor::metaharness::{
-    HarnessProcess, LaunchPlanView, ScriptedLog, ScriptedRunner,
+    HarnessProcess, LaunchPlanView, ScriptedLog, ScriptedRunner, VendorSource,
+    project_vendor_record,
 };
 use b10x_loom_session_executor::model::session::{
     AgentSessionState, ChangedFile, SessionChangeProposed, SessionKind,
@@ -125,7 +129,7 @@ impl Drop for Fixture {
 /// content removes the file), writes `meanwhile` into the live workspace when there is one, as
 /// somebody else would while the session runs, and replies naming `action` with the next of
 /// `summaries`. Its records state `vendor` as the session's id, and what it spent: 1000 input
-/// and 50 output tokens, 2000 ms and USD 0.0003.
+/// and 50 output tokens, 2000 ms and USD 0.0003. It leaves the vendor record `kept` says.
 #[derive(Clone)]
 struct Script {
     edits: Vec<(String, Option<String>)>,
@@ -133,7 +137,20 @@ struct Script {
     action: String,
     summaries: Vec<String>,
     vendor: Option<String>,
+    kept: Kept,
     calls: Rc<Cell<usize>>,
+}
+
+/// The vendor record a scripted session leaves where metaharness keeps one, as a program writes
+/// what it prints there.
+#[derive(Clone)]
+enum Kept {
+    /// None: a `ScriptedRunner` writes no record, so the executor has only the events.
+    Nothing,
+    /// The records it prints, one line each.
+    Printed,
+    /// These bytes, whatever it prints.
+    Bytes(Vec<u8>),
 }
 
 const FIXED: &str = "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n";
@@ -154,6 +171,7 @@ impl Script {
             action: EDIT.to_owned(),
             summaries: vec!["fixed add".to_owned()],
             vendor: Some("vendor-session-1".to_owned()),
+            kept: Kept::Nothing,
             calls: Rc::new(Cell::new(0)),
         }
     }
@@ -217,11 +235,13 @@ impl ProcessRunner for Script {
             "duration_ms": 2000, "total_cost_usd": 0.0003,
             "usage": {"input_tokens": 1000, "output_tokens": 50},
         });
-        ScriptedRunner::of_lines(
-            [init.to_string(), reply.to_string(), result.to_string()],
-            ScriptedLog::new(),
-        )
-        .start(plan)
+        let printed = [init.to_string(), reply.to_string(), result.to_string()];
+        match &self.kept {
+            Kept::Nothing => {}
+            Kept::Printed => std::fs::write(plan.transcript, printed.join("\n") + "\n")?,
+            Kept::Bytes(bytes) => std::fs::write(plan.transcript, bytes)?,
+        }
+        ScriptedRunner::of_lines(printed, ScriptedLog::new()).start(plan)
     }
 }
 
@@ -822,6 +842,76 @@ fn the_session_trace_is_never_evidence() {
     };
     let names: Vec<&str> = arguments.iter().map(|(name, _)| name.as_str()).collect();
     assert_eq!(names, vec!["files"], "the arguments are the files only");
+}
+
+/// `story:run-record-names-agent-sessions`: the report's trace is metaharness's `trace-ir/1`
+/// projection of the session's record, summarized by `summarize`, under the step's digest: the
+/// events the executor received when the program left no vendor record, the vendor record through
+/// its kind's reader when it left one. A record metaharness does not project keeps its digest and
+/// says why, and the call proposes as before.
+#[test]
+fn the_session_record_is_summarized_by_metaharness() {
+    let fixture = Fixture::new("summarized");
+    let case = CaseId("case-summarized".to_owned());
+
+    let executor = fixture.executor(&Script::fixing());
+    let step = executor.run_with_usage(&commission(&case), &frontier(&case, 0xf1));
+    let report = executor.last_report().expect("a report");
+    let trace = report.trace.expect("a session that started has a trace");
+    assert_eq!(trace.source.as_deref(), Some(EVENT_FORMAT));
+    assert_eq!(trace.transcript_digest, step.transcript_digest);
+    let lines: Vec<_> = std::str::from_utf8(&report.transcript)
+        .expect("the events are UTF-8")
+        .lines()
+        .map(|line| parse_event_line(line).expect("an event line"))
+        .collect();
+    let summary = trace.summary.expect("the events project");
+    assert_eq!(
+        summary,
+        summarize(&project_document(&lines, &report.transcript))
+    );
+    assert_eq!(summary.turns, Some(1));
+    assert_eq!(summary.cost_usd, Some(0.0003));
+
+    let printed = Script {
+        kept: Kept::Printed,
+        ..Script::fixing()
+    };
+    let executor = fixture.executor(&printed);
+    let step = executor.run_with_usage(&commission(&case), &frontier(&case, 0xf2));
+    let report = executor.last_report().expect("a report");
+    let trace = report.trace.expect("a trace");
+    assert_eq!(trace.source.as_deref(), Some("claude-code-stream-json"));
+    assert_eq!(trace.transcript_digest, step.transcript_digest);
+    let record = fixture.root.join("transcript.jsonl");
+    std::fs::write(&record, &report.transcript).expect("the record, again");
+    let document =
+        project_vendor_record(&record, VendorSource::ClaudeCodeStreamJson).expect("it projects");
+    assert_eq!(trace.summary, Ok(summarize(&document)));
+    assert_eq!(
+        trace.transcript_digest.as_deref(),
+        Some(document.transcript_digest.as_str())
+    );
+
+    let unreadable = Script {
+        kept: Kept::Bytes(b"not a session record\n".to_vec()),
+        ..Script::fixing()
+    };
+    let executor = fixture.executor(&unreadable);
+    let step = executor.run_with_usage(&commission(&case), &frontier(&case, 0xf3));
+    let report = executor.last_report().expect("a report");
+    assert_eq!(report.transcript, b"not a session record\n");
+    let trace = report.trace.expect("a trace");
+    assert_eq!(trace.source.as_deref(), Some("claude-code-stream-json"));
+    assert_eq!(trace.transcript_digest, step.transcript_digest);
+    let why = trace.summary.expect_err("the record does not project");
+    assert!(
+        why.contains("did not project the claude-code-stream-json record"),
+        "{why}"
+    );
+    Proposal::from_outcome(&step.outcome)
+        .expect("the call still proposes")
+        .unwrap_or_else(|why| panic!("{why}"));
 }
 
 /// The executor implements `run_with_usage`: each session's tokens and cost reach the Run's

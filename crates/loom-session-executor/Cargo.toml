@@ -9,8 +9,8 @@ repository.workspace = true
 [dependencies]
 b10x-loom-commission = { path = "../loom-commission" }
 loom = { path = "../../generated/rust/loom" }
-metaharness = { git = "https://github.com/beyond10x/metaharness", tag = "0.10.1" }
-metaharness-b10x = { git = "https://github.com/beyond10x/metaharness", tag = "0.10.1" }
+metaharness = { git = "https://github.com/beyond10x/metaharness", tag = "0.13.0" }
+metaharness-b10x = { git = "https://github.com/beyond10x/metaharness", tag = "0.13.0" }
 serde_json = "1"
 sha2 = "0.11.0"
 
