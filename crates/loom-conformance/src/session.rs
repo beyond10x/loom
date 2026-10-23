@@ -7,7 +7,9 @@
 //! the workspace holds for it), names the input's `vendor_session_id` as the session's own id, and
 //! replies naming the input's `action`. The commission and the frontier the executor runs for carry
 //! the input's ids, and the executor records the input's `agent` as the agent it runs for
-//! (`SessionExecutor::agent`, as `from_spec` sets it).
+//! (`SessionExecutor::agent`, as `from_spec` sets it). An input naming `continues` runs the
+//! executor `continuing` a predecessor of that id and of the input's commission, the session a
+//! host would hand it ([`predecessor`]); the executor records the id it was given.
 //!
 //! What is published is what the executor recorded through its generated behaviour: the
 //! `SessionChangeProposed` event it returned and the `AgentSessions` rows it holds. The executor
@@ -31,8 +33,10 @@ use b10x_loom_session_executor::metaharness::{
     HarnessProcess, LaunchPlanView, ScriptedLog, ScriptedRunner,
 };
 use b10x_loom_session_executor::model::agent::{AgentId, ToolPolicy};
+use b10x_loom_session_executor::model::primitives::Uuid as SessionUuid;
 use b10x_loom_session_executor::model::session::{
-    AgentSessions, ChangedFile, SessionId, SessionKind,
+    AgentSessionState, AgentSessions, ChangedFile, CommissionId as SessionCommissionId,
+    FrontierId as SessionFrontierId, SessionId, SessionKind,
 };
 use b10x_loom_session_executor::{
     CredentialSource, Kind, ProcessRunner, SessionExecutor, ToolPolicyDefaults as _,
@@ -186,6 +190,9 @@ pub(crate) fn propose_session_change(
     executor.credentials = CredentialSource::None;
     executor.scratch = invocation.0.join("scratch");
     executor.agent = decoded.agent.clone().map(AgentId);
+    if let Some(continues) = &decoded.continues {
+        executor = executor.continuing(&predecessor(continues, &decoded));
+    }
 
     let case = CaseId("case".to_owned());
     let commission = Commission::new(CommissionData {
@@ -226,6 +233,7 @@ pub(crate) fn propose_session_change(
             .with("session_id", codec::id(&proposed.session_id.0))
             .with("commission_id", codec::id(&proposed.commission_id.0))
             .with("frontier_id", codec::id(&proposed.frontier_id.0))
+            .with("continues", optional_id(proposed.continues.as_ref()))
             .with("action", codec::text_node(&proposed.action))
             .with("files", codec::changed_files_node(&proposed.files)),
         correlation,
@@ -242,6 +250,7 @@ struct Decoded {
     commission_id: String,
     frontier_id: String,
     vendor_session_id: Option<String>,
+    continues: Option<SessionId>,
     agent: Option<String>,
     action: String,
     files: Vec<ChangedFile>,
@@ -255,6 +264,7 @@ fn decode(input: &Input) -> Option<Decoded> {
         frontier_id: codec::uuid(input, "frontier_id")?.0,
         vendor_session_id: codec::optional_text(input, "vendor_session_id")?,
         agent: codec::optional_text(input, "agent")?,
+        continues: codec::optional_uuid(input, "continues")?.map(SessionId),
         action: codec::text(input, "action")?,
         files: codec::changed_files(input, "files")?,
     })
@@ -281,8 +291,32 @@ pub(crate) fn row(held: &AgentSessions) -> ess_conformance::target::ViewRow {
                     codec::text_node(&agent.0)
                 }),
         ),
+        ("continues".to_owned(), optional_id(held.continues.as_ref())),
         ("action".to_owned(), codec::text_node(&held.action)),
         ("files".to_owned(), codec::changed_files_node(&held.files)),
         ("state".to_owned(), codec::agent_session_state(held.state)),
     ])
+}
+
+/// The session `continues` names, as a host holding it would hand it to `continuing`: a row of
+/// the input's commission and frontier, its other fields the input's. The executor reads only its
+/// id and its commission.
+fn predecessor(continues: &SessionId, decoded: &Decoded) -> AgentSessions {
+    AgentSessions {
+        session_id: continues.clone(),
+        kind: decoded.kind,
+        commission_id: SessionCommissionId(SessionUuid(decoded.commission_id.clone())),
+        frontier_id: SessionFrontierId(SessionUuid(decoded.frontier_id.clone())),
+        vendor_session_id: None,
+        agent: None,
+        continues: None,
+        action: decoded.action.clone(),
+        files: Vec::new(),
+        state: AgentSessionState::Ended,
+    }
+}
+
+/// An `Optional<loom.session.SessionId>` as a suite value, an absent one null.
+fn optional_id(id: Option<&SessionId>) -> ess_primitives::node::Node {
+    id.map_or(ess_primitives::node::Node::Null, |id| codec::id(&id.0))
 }

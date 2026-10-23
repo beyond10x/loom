@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest f2a57c28b9dedf89d885e21d88505e82f9e0d450ad71865a98d3f44a0d0f47fa
-// contract digest ef8b0a20ee908e334d511ea5d69e5daaed756883259da3794ac06f16bdd89107
+// model digest b774beb53c36941f484cfdcfb927b46287a34f934f9b43c3d7e49306ebe94f34
+// contract digest 7b9385bd4805d85156d0039e947a53ea05aeda4435f2bebd60af8072091657ce
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Session — `loom.session`.
@@ -112,6 +112,10 @@ pub struct AgentSessionData {
     pub vendor_session_id: Option<String>,
     /// `agent` — `Optional<loom.agent.AgentId>`.
     pub agent: Option<crate::agent::AgentId>,
+    /// `continues` — `Optional<loom.session.SessionId>`.
+    ///
+    /// Carries `predecessor`: `loom.session.AgentSession` references one `loom.session.AgentSession`.
+    pub continues: Option<SessionId>,
     /// `action` — `String`.
     pub action: String,
     /// `files` — `List<loom.session.ChangedFile>`.
@@ -251,6 +255,8 @@ pub struct ProposeSessionChange {
     pub vendor_session_id: Option<String>,
     /// `agent` — `Optional<loom.agent.AgentId>`.
     pub agent: Option<crate::agent::AgentId>,
+    /// `continues` — `Optional<loom.session.SessionId>`.
+    pub continues: Option<SessionId>,
     /// `action` — `String`.
     pub action: String,
     /// `files` — `List<loom.session.ChangedFile>`.
@@ -280,6 +286,8 @@ pub struct SessionChangeProposed {
     pub commission_id: CommissionId,
     /// `frontier_id` — `loom.session.FrontierId`.
     pub frontier_id: FrontierId,
+    /// `continues` — `Optional<loom.session.SessionId>`.
+    pub continues: Option<SessionId>,
     /// `action` — `String`.
     pub action: String,
     /// `files` — `List<loom.session.ChangedFile>`.
@@ -305,6 +313,8 @@ pub struct AgentSessions {
     pub vendor_session_id: Option<String>,
     /// `agent` — `Optional<loom.agent.AgentId>`.
     pub agent: Option<crate::agent::AgentId>,
+    /// `continues` — `Optional<loom.session.SessionId>`.
+    pub continues: Option<SessionId>,
     /// `action` — `String`.
     pub action: String,
     /// `files` — `List<loom.session.ChangedFile>`.

@@ -46,6 +46,12 @@
 //! are unknown, never that there were none. Loom makes none of these decisions beyond its answer
 //! to `tool.decide`, and the decisions are never evidence and never in a proposal.
 //!
+//! A session may continue an earlier one of the same commission
+//! ([`SessionExecutor::continuing`]): the next session the executor records names it as
+//! `loom.session.AgentSession.continues`. The lineage is recorded only: the request to
+//! metaharness is the one a fresh session gets, and the harness session itself is not resumed.
+//! A predecessor of another commission than the call's is refused before any copy or session.
+//!
 //! A session that fails proposes nothing and is no record: the call returns `Suspended` with
 //! `ExternalAvailability` naming why. A session that changed nothing proposes an empty list of
 //! files.
@@ -453,6 +459,15 @@ pub struct SessionExecutor {
     last: RefCell<Option<SessionReport>>,
     ids: RefCell<Box<dyn FnMut() -> SessionId>>,
     record: RefCell<SessionRecord>,
+    predecessor: RefCell<Option<Predecessor>>,
+}
+
+/// The earlier session the next recorded session continues ([`SessionExecutor::continuing`]):
+/// its id and the commission it ran for.
+#[derive(Debug, Clone)]
+struct Predecessor {
+    session_id: SessionId,
+    commission_id: CommissionId,
 }
 
 impl std::fmt::Debug for SessionExecutor {
@@ -494,6 +509,7 @@ impl SessionExecutor {
             last: RefCell::new(None),
             ids: RefCell::new(Box::new(fresh_session_id)),
             record: RefCell::new(SessionRecord::default()),
+            predecessor: RefCell::new(None),
         }
     }
 
@@ -614,6 +630,69 @@ impl SessionExecutor {
         self
     }
 
+    /// The same executor, its next recorded session continuing `previous`, a session this or
+    /// another executor recorded ([`Self::sessions`]): that session names `previous.session_id`
+    /// as `loom.session.AgentSession.continues`. The predecessor is the next recorded session's
+    /// only; a later one continues none unless built again. A call that records no session (it
+    /// failed or was refused) leaves the predecessor to the next call. The request to
+    /// metaharness is unchanged and the harness session is not resumed: Loom records the
+    /// lineage only.
+    ///
+    /// A call for another commission than `previous.commission_id` is refused before any copy is
+    /// made or session started: it returns `Suspended` with `ExternalAvailability` naming the
+    /// predecessor's session id and both commissions (compared as UUIDs, whatever their case),
+    /// and records nothing. So is a call whose session id is the predecessor's own or one this
+    /// executor already recorded, naming the id.
+    #[must_use]
+    pub fn continuing(self, previous: &AgentSessions) -> Self {
+        *self.predecessor.borrow_mut() = Some(Predecessor {
+            session_id: previous.session_id.clone(),
+            commission_id: previous.commission_id.clone(),
+        });
+        self
+    }
+
+    /// The predecessor of the next session ([`Self::continuing`]), refused when it ran for
+    /// another commission than `commission`. The two are compared as UUIDs, so a commission
+    /// written in capitals is the same commission; the refusal names each as written.
+    fn predecessor_for(&self, commission: &CommissionId) -> Result<Option<SessionId>, String> {
+        match self.predecessor.borrow().as_ref() {
+            None => Ok(None),
+            Some(previous) if same_uuid(&previous.commission_id.0.0, &commission.0.0) => {
+                Ok(Some(previous.session_id.clone()))
+            }
+            Some(previous) => Err(format!(
+                "the session {} this one continues ran for the commission {}, not for this \
+                 call's commission {}",
+                previous.session_id.0.0, previous.commission_id.0.0, commission.0.0
+            )),
+        }
+    }
+
+    /// The id of the call's session, taken before any copy or session
+    /// ([`Self::with_session_ids`]): refused, naming it, when it is the predecessor's own or this
+    /// executor already recorded a session under it, so no session continues itself, no lineage
+    /// of this executor loops and no recorded row is replaced. Ids are compared as UUIDs.
+    fn session_id_for(&self, continues: Option<&SessionId>) -> Result<SessionId, String> {
+        let session_id = (self.ids.borrow_mut())();
+        let id = &session_id.0.0;
+        if continues.is_some_and(|previous| same_uuid(&previous.0.0, id)) {
+            return Err(format!(
+                "the session id {id} is the id of the session this one continues"
+            ));
+        }
+        if self
+            .sessions()
+            .iter()
+            .any(|held| same_uuid(&held.session_id.0.0, id) || held.session_id.0.0 == *id)
+        {
+            return Err(format!(
+                "the session id {id} names a session this executor already recorded"
+            ));
+        }
+        Ok(session_id)
+    }
+
     /// Every session this executor recorded, one row of the `loom.session.AgentSessions` view
     /// each, in the order they ran: a session that failed is not among them.
     #[must_use]
@@ -629,15 +708,17 @@ impl SessionExecutor {
     }
 
     /// Records `proposal`, the change of the session `report` describes, as one `AgentSession`
-    /// for `commission` over `frontier`, under a new [`SessionId`].
+    /// for `commission` over `frontier`, under `session_id` ([`Self::session_id_for`]), continuing `continues` when
+    /// it names an earlier session.
     fn record(
         &self,
-        commission: &Commission<commission_state::Assigned>,
+        commission: &CommissionId,
         frontier: &Frontier<frontier_state::Issued>,
         report: &SessionReport,
         proposal: &Proposal,
+        session_id: SessionId,
+        continues: Option<SessionId>,
     ) -> Result<SessionChangeProposed, String> {
-        let session_id = (self.ids.borrow_mut())();
         let kind = match self.kind {
             Kind::Claude => SessionKind::ClaudeCode,
             Kind::Codex => SessionKind::Codex,
@@ -648,10 +729,11 @@ impl SessionExecutor {
             .propose(ProposeSessionChange {
                 session_id,
                 kind,
-                commission_id: CommissionId(Uuid(commission.data().commission_id.0.0.clone())),
+                commission_id: commission.clone(),
                 frontier_id: FrontierId(Uuid(frontier.data().frontier_id.0.0.clone())),
                 vendor_session_id: report.vendor_session_id.clone(),
                 agent: self.agent.clone(),
+                continues,
                 action: proposal.action.clone(),
                 files: proposal
                     .files
@@ -1060,9 +1142,23 @@ impl AgentExecutor for SessionExecutor {
     ) -> ExecutorStep {
         let started = Instant::now();
         let mut report = SessionReport::default();
-        let proposed = self.session(&mut report).and_then(|proposal| {
-            self.record(commission, frontier, &report, &proposal)
-                .map(|_| proposal)
+        let commission = CommissionId(Uuid(commission.data().commission_id.0.0.clone()));
+        // A predecessor of another commission is refused before any copy or session.
+        let proposed = self.predecessor_for(&commission).and_then(|continues| {
+            // So is an id that is the predecessor's or one this executor already recorded.
+            let session_id = self.session_id_for(continues.as_ref())?;
+            let proposal = self.session(&mut report)?;
+            self.record(
+                &commission,
+                frontier,
+                &report,
+                &proposal,
+                session_id,
+                continues,
+            )?;
+            // The predecessor is the recorded session's only.
+            self.predecessor.borrow_mut().take();
+            Ok(proposal)
         });
         let (outcome, summary) = match proposed {
             Ok(proposal) => {
@@ -1087,6 +1183,26 @@ impl AgentExecutor for SessionExecutor {
             summary,
         }
     }
+}
+
+/// Whether `a` and `b` are one UUID, each read in the canonical `8-4-4-4-12` form whatever the
+/// case of its hexadecimal digits; text that is no UUID equals nothing.
+fn same_uuid(a: &str, b: &str) -> bool {
+    matches!((parse_uuid(a), parse_uuid(b)), (Some(a), Some(b)) if a == b)
+}
+
+/// The 128 bits of a UUID written `8-4-4-4-12` in hexadecimal digits of either case.
+fn parse_uuid(text: &str) -> Option<u128> {
+    let groups: Vec<&str> = text.split('-').collect();
+    let lengths: Vec<usize> = groups.iter().map(|group| group.len()).collect();
+    if lengths != [8, 4, 4, 4, 12] {
+        return None;
+    }
+    let digits = groups.concat();
+    if !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    u128::from_str_radix(&digits, 16).ok()
 }
 
 /// What a session spent, as its report states it: its input and output tokens (0 where it stated

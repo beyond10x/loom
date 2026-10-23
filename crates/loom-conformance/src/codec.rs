@@ -32,6 +32,16 @@ pub fn uuid(input: &Input, name: &str) -> Option<Uuid> {
         .map(Uuid)
 }
 
+/// The `Optional<Uuid>` field `name` (or of a newtype of one), canonical as [`uuid`] reads it;
+/// `None` for any other value.
+pub fn optional_uuid(input: &Input, name: &str) -> Option<Option<Uuid>> {
+    match input.get(name) {
+        None | Some(Node::Null) => Some(None),
+        Some(Node::Text(text)) if is_canonical_uuid(text) => Some(Some(Uuid(text.clone()))),
+        Some(_) => None,
+    }
+}
+
 /// The `Integer` field `name`.
 pub fn integer(input: &Input, name: &str) -> Option<i64> {
     integer_of(input.get(name)?)

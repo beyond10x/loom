@@ -885,6 +885,12 @@ fn a_host_reaches_the_session_executor_through_loom_sdk() {
     executor(&session);
     assert_eq!(session.kind, Kind::Codex);
     assert!(session.sessions().is_empty(), "no session ran");
+    // The page's row names `continuing`: a host names the earlier session a session continues
+    // with a row `sessions()` returned.
+    let _continuing: fn(
+        SessionExecutor,
+        &loom_sdk::session::model::session::AgentSessions,
+    ) -> SessionExecutor = SessionExecutor::continuing;
 }
 
 /// A host reads the `canon-decision/1` document behind a frontier the governor issued, by its id,
