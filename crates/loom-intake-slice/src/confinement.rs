@@ -3210,6 +3210,76 @@ mod tests {
         }
     }
 
+    /// Substrate 0.10.0 can apply a working directory, writable roots and several apertures. Loom
+    /// requests none of them, so a record reporting any of them, for a child run to its end or a
+    /// live child, is not the confinement requested and is refused.
+    #[test]
+    fn a_record_reporting_a_workdir_writable_roots_or_apertures_is_refused() {
+        let child = ChildCommand::new("true", [] as [&str; 0], "/work/space").with_egress(model());
+        let run = child.input("space", "snapshot".to_owned());
+        let live = child.session_input("space", "snapshot".to_owned()).exec;
+        for input in [&run, &live] {
+            assert_eq!(input.workdir, None);
+            assert!(input.writable_roots.is_empty());
+            assert!(input.sandbox.apertures.is_empty());
+            let single = applied_aperture("model", PINNED, None);
+            let exact = record_for(input, single.clone());
+            check_record(input, Some(&model()), &exact).unwrap();
+            let AppliedNetwork::Aperture(applied) = single else {
+                unreachable!("an applied aperture");
+            };
+            let others = [
+                substrate_wire::AppliedConfinement {
+                    workdir: Some(SANDBOX_WORKSPACE.to_owned()),
+                    ..exact.clone()
+                },
+                substrate_wire::AppliedConfinement {
+                    workdir: Some("/workspace/src".to_owned()),
+                    ..exact.clone()
+                },
+                substrate_wire::AppliedConfinement {
+                    writable_roots: vec![substrate_wire::AppliedWritableRoot::Host {
+                        name: "cache".to_owned(),
+                        host_path: "/srv/cache".to_owned(),
+                        mount: "/cache".to_owned(),
+                    }],
+                    ..exact.clone()
+                },
+                substrate_wire::AppliedConfinement {
+                    writable_roots: vec![substrate_wire::AppliedWritableRoot::Git {
+                        workspace: "ws_other".to_owned(),
+                        host_path: "/srv/workspaces/other".to_owned(),
+                        mount: "/checkout".to_owned(),
+                    }],
+                    ..exact.clone()
+                },
+                substrate_wire::AppliedConfinement {
+                    network: AppliedNetwork::Apertures(vec![applied.clone()]),
+                    ..exact.clone()
+                },
+                substrate_wire::AppliedConfinement {
+                    network: AppliedNetwork::Apertures(vec![
+                        applied.clone(),
+                        substrate_wire::AppliedAperture {
+                            name: "other".to_owned(),
+                            listen: Some("127.0.0.2".to_owned()),
+                            ..applied.clone()
+                        },
+                    ]),
+                    ..exact.clone()
+                },
+            ];
+            for record in others {
+                let error = check_record(input, Some(&model()), &record).unwrap_err();
+                assert_eq!(
+                    error.reason,
+                    ConfinementRefusal::CapabilityUnserved,
+                    "{record:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn a_child_request_is_exactly_what_the_host_named_and_requires_substrate() {
         let environment = ExecEnvironment {
