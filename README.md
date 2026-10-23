@@ -300,6 +300,15 @@ step 2: tests.run {}
 stopped: ApprovalRequired (repository.merge)
 ```
 
+A second example loops: a scripted agent rewrites `fizzbuzz.sh` until the slice's verifier
+records a passing check, which is the only thing that puts `repository.merge` in its catalogue.
+Its early merge is refused at selection, its merge after the passing check stops for approval, and
+the same agent under a step budget of 4 is suspended for its budget.
+
+```console
+cargo run --locked -p b10x-loom-sdk --example governed_loop
+```
+
 A workflow whose steps are known needs no model for them. `loom_sdk::loom::workflow::load` reads a
 YAML definition over a catalog protocol, checked against `ProtocolEntry::actions`, and
 `loom_sdk::WorkflowExecutor` runs it as the executor: a deterministic step proposes its action

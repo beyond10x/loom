@@ -32,7 +32,9 @@
 //!
 //! `examples/software_change.rs` embeds the runtime end to end: it opens a case on
 //! `software-change@1`, runs the loop over scripted fake models and stops at
-//! `ApprovalRequired (repository.merge)`.
+//! `ApprovalRequired (repository.merge)`. `examples/governed_loop.rs` loops an agent on a failing
+//! check until the frontier offers the merge, and shows a refused selection, an approval stop and
+//! a step budget.
 //!
 //! # Stability
 //!
