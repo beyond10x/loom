@@ -3,13 +3,14 @@
 //!
 //! The consumer's library parses the document with `loom_sdk::agent::parse`, maps its
 //! `session.budget` and `session.stop` onto Commission's types as the agent's `Limits`, and runs
-//! one commission on `system-query@1` through `loom_sdk::Runtime`, with `NoEvents` and a memory
+//! one commission on `system-query@1` through `loom_sdk::Runtime`, at a fixed instant, with `NoEvents` and a memory
 //! case store, on a recorded executor answer and a recorded clock reading. A reading is never
 //! evidence, so the case never completes: only the spec's limits end the run. No model, network
 //! or harness program is reached.
 
-use loom_pinned_consumer::agency::{self, SPEC};
+use loom_pinned_consumer::agency::{self, FixedNow, SPEC};
 use loom_sdk::agent;
+use loom_sdk::commission::model::primitives::Timestamp;
 use loom_sdk::commission::model::responsibility::{
     BudgetLimit, EffectOutcome, RunBudgetBreach, RunOutcome, RunOutcomeIdleBound,
     RunOutcomeSuspended, SuspensionReason,
@@ -27,7 +28,11 @@ fn with(from: &str, to: &str) -> String {
 
 fn run(text: &str) -> loom_sdk::LoopEnd {
     let spec = agent::parse(text).unwrap_or_else(|e| panic!("the spec decodes: {e}\n{text}"));
-    agency::run(&spec).unwrap_or_else(|e| panic!("the agent runs: {e}"))
+    agency::run(
+        &spec,
+        FixedNow(Timestamp("2026-01-01T00:00:00Z".to_owned())),
+    )
+    .unwrap_or_else(|e| panic!("the agent runs: {e}"))
 }
 
 #[test]

@@ -4,8 +4,9 @@
 //! spec names, on the consumer's own recorded executor and effect port. No model, network or
 //! harness program is reached.
 
-use loom_pinned_consumer::agency::{self, AgentLimits, SPEC};
+use loom_pinned_consumer::agency::{self, AgentLimits, FixedNow, SPEC};
 use loom_sdk::agent;
+use loom_sdk::commission::model::primitives::Timestamp;
 use loom_sdk::commission::model::responsibility::{
     BreachStep, BudgetLimit, LimitBreachStep, RunBudgetBreach, RunOutcome, RunOutcomeIdleBound,
     RunOutcomeSuspended, SuspensionReason,
@@ -25,14 +26,23 @@ fn parse(text: &str) -> agent::AgentSpec {
     agent::parse(text).unwrap_or_else(|e| panic!("the spec decodes: {e}\n{text}"))
 }
 
+/// The instant the consumer's tests run at unless a case names another.
+const NOW: &str = "2026-01-01T00:00:00Z";
+
 fn run(text: &str) -> loom_sdk::LoopEnd {
-    agency::run(&parse(text)).unwrap_or_else(|e| panic!("the agent runs: {e}"))
+    run_at(text, NOW)
+}
+
+/// Runs the spec `text` on a host clock reading `now`.
+fn run_at(text: &str, now: &str) -> loom_sdk::LoopEnd {
+    agency::run(&parse(text), FixedNow(Timestamp(now.to_owned())))
+        .unwrap_or_else(|e| panic!("the agent runs: {e}"))
 }
 
 /// A deadline the spec states that is already past on the day the run starts stops the run
-/// before any step. `2026-06-01T00:00:00Z` is in the past for every run of this test from the
-/// wave that added it onward; the consumer's clock is frozen at `2026-01-01T00:00:00Z`, so it
-/// reads the deadline as still ahead and runs the agent to its idle bound.
+/// before any step. The consumer once froze its clock at `2026-01-01T00:00:00Z`, so it read
+/// `2026-06-01T00:00:00Z` as still ahead whatever the day, and ran the agent to its idle bound.
+/// The clock is the host's now: this case hands it the day the wave that added it ran.
 #[test]
 fn adversary_a_deadline_already_past_when_the_run_starts_stops_it_before_any_step() {
     let text = with(
@@ -40,7 +50,7 @@ fn adversary_a_deadline_already_past_when_the_run_starts_stops_it_before_any_ste
         "max_steps: 20",
         "max_steps: 20, deadline: '2026-06-01T00:00:00Z'",
     );
-    let end = run(&text);
+    let end = run_at(&text, "2026-10-23T00:00:00Z");
     assert!(
         matches!(
             &end.outcome,

@@ -3,8 +3,10 @@
 //! [`SPEC`] is a `loom.agent/1` document; a host decodes it with `loom_sdk::agent::parse`. [`run`]
 //! maps the spec's `session.budget` and `session.stop` onto Commission's `RunBudget` and
 //! `StopPolicy` (the `loom.agent` domain mirrors both field for field) and keeps them as the
-//! agent's [`Limits`]; ids, the clock and the host's control (`NoEvents`, no host stop) are the
-//! host's own parts of the loop context. It opens a case on `system-query@1` in a memory case
+//! agent's [`Limits`]; ids and the host's control (`NoEvents`, no host stop) are the host's own
+//! parts of the loop context, and its [`Clock`] is the one the caller hands [`run`]: [`SystemNow`],
+//! the operating system's, for a real host, or [`FixedNow`] for a host that names its instant. A
+//! deadline the spec states is judged against that clock. It opens a case on `system-query@1` in a memory case
 //! store and runs one commission through a [`Runtime`].
 //!
 //! The executor answers what a recorded agent answered: read the clock. The effect port performs
@@ -31,6 +33,7 @@ use loom_sdk::commission::outcome::RunStore;
 use loom_sdk::commission::ports::authority::{AuthorityProvider, AuthorityProviderError};
 use loom_sdk::commission::ports::effect::{AdmittedRequest, EffectError};
 use loom_sdk::commission::ports::executor::AgentExecutor;
+use loom_sdk::intake::slice::clock::{self, SystemClock};
 use loom_sdk::{
     CanonGovernor, CaseInputs, Clock, EffectPort, EventSink, HostControl, Ids, Limits, LoopEnd,
     MemoryCaseStore, NoEvents, ProtocolCatalog, Runtime,
@@ -48,12 +51,12 @@ pub const ACTION: &str = "system.time.read";
 /// The recorded clock reading the effect port reports.
 const READING: &str = r#"{"local":"2026-01-01T01:00:00+01:00","utc":"2026-01-01T00:00:00Z"}"#;
 
-/// Runs `spec`'s agent on one `system-query@1` case until the runtime stops it, returning how the
-/// loop ended.
+/// Runs `spec`'s agent on one `system-query@1` case until the runtime stops it, reading the time
+/// from `now`, and returns how the loop ended.
 ///
 /// # Errors
 /// When the catalog or the case cannot be opened, or the runtime fails without a run outcome.
-pub fn run(spec: &AgentSpec) -> Result<LoopEnd, Box<dyn Error>> {
+pub fn run<K: Clock>(spec: &AgentSpec, now: K) -> Result<LoopEnd, Box<dyn Error>> {
     let catalog = ProtocolCatalog::bundled()?;
     let governor = CanonGovernor::new(MemoryCaseStore::default()).with_catalog(&catalog)?;
     let case = governor.open(
@@ -65,6 +68,7 @@ pub fn run(spec: &AgentSpec) -> Result<LoopEnd, Box<dyn Error>> {
     let context = Host {
         limits: AgentLimits::of(spec),
         events: NoEvents,
+        now,
     };
     let runs = Generated::new(RunStore::new(|| RunId(fresh(Kind::Run))));
     let mut runtime = Runtime::new(
@@ -191,13 +195,37 @@ impl Limits for Defaults {
     }
 }
 
-/// The loop context: the host's ids, clock and control, and the agent's limits.
-struct Host {
-    limits: AgentLimits,
-    events: NoEvents,
+/// The operating system's clock, read through the slice's `SystemClock` at every call, in UTC to
+/// the second. A reading that fails is no RFC 3339 instant, which Commission counts as past any
+/// deadline, so a run under one stops rather than runs on.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SystemNow;
+
+impl Clock for SystemNow {
+    fn now(&mut self) -> Timestamp {
+        clock::instant(&SystemClock)
+            .unwrap_or_else(|error| Timestamp(format!("unreadable host clock: {error}")))
+    }
 }
 
-impl Ids for Host {
+/// A clock that always reads the instant it holds, for a host that fixes the time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FixedNow(pub Timestamp);
+
+impl Clock for FixedNow {
+    fn now(&mut self) -> Timestamp {
+        self.0.clone()
+    }
+}
+
+/// The loop context: the host's ids, clock and control, and the agent's limits.
+struct Host<K> {
+    limits: AgentLimits,
+    events: NoEvents,
+    now: K,
+}
+
+impl<K> Ids for Host<K> {
     fn action_request_id(&mut self) -> ActionRequestId {
         ActionRequestId(fresh(Kind::ActionRequest))
     }
@@ -207,13 +235,13 @@ impl Ids for Host {
     }
 }
 
-impl Clock for Host {
+impl<K: Clock> Clock for Host<K> {
     fn now(&mut self) -> Timestamp {
-        Timestamp("2026-01-01T00:00:00Z".to_owned())
+        self.now.now()
     }
 }
 
-impl Limits for Host {
+impl<K> Limits for Host<K> {
     fn step_budget(&self) -> Option<usize> {
         self.limits.step_budget()
     }
@@ -227,7 +255,7 @@ impl Limits for Host {
     }
 }
 
-impl HostControl for Host {
+impl<K> HostControl for Host<K> {
     fn events(&mut self) -> &mut dyn EventSink {
         &mut self.events
     }
