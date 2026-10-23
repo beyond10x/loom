@@ -109,6 +109,12 @@ entities:
       # policy. Absent for a session an executor built without a spec ran.
       - name: agent
         type: Optional<loom.agent.AgentId>
+      # story:session-lineage: the earlier session of the same commission this one continues,
+      # by its session id; absent for a session that continues none. Lineage is recorded only:
+      # the harness session is not resumed, and the request to metaharness is the same either
+      # way. A predecessor of another commission is refused before the session starts.
+      - name: continues
+        type: Optional<loom.session.SessionId>
       # The frontier action the change is proposed as
       # (commission.responsibility.ExecutorOutcomeProposedAction `action`). The proposal's
       # arguments are `{files}` only; the session's summary and its transcript digest travel on
@@ -117,6 +123,13 @@ entities:
         type: String
       - name: files
         type: List<loom.session.ChangedFile>
+    relations:
+      # Zero or one: ESS has only `one` and `many`, and the Optional field makes it zero or one.
+      - name: predecessor
+        kind: references
+        target: loom.session.AgentSession
+        cardinality: one
+        via: continues
     lifecycle:
       initial: Ended
       states: [Ended]
@@ -131,6 +144,8 @@ events:
         type: loom.session.CommissionId
       - name: frontier_id
         type: loom.session.FrontierId
+      - name: continues
+        type: Optional<loom.session.SessionId>
       - name: action
         type: String
       - name: files
@@ -154,6 +169,8 @@ commands:
         type: Optional<String>
       - name: agent
         type: Optional<loom.agent.AgentId>
+      - name: continues
+        type: Optional<loom.session.SessionId>
       - name: action
         type: String
       - name: files
@@ -168,6 +185,7 @@ commands:
           frontier_id: input.frontier_id
           vendor_session_id: input.vendor_session_id
           agent: input.agent
+          continues: input.continues
           action: input.action
           files: input.files
         emits: [loom.session.SessionChangeProposed]
@@ -176,6 +194,7 @@ commands:
             session_id: input.session_id
             commission_id: input.commission_id
             frontier_id: input.frontier_id
+            continues: input.continues
             action: input.action
             files: input.files
 
@@ -197,6 +216,8 @@ views:
         type: Optional<String>
       - name: agent
         type: Optional<loom.agent.AgentId>
+      - name: continues
+        type: Optional<loom.session.SessionId>
       - name: action
         type: String
       - name: files
