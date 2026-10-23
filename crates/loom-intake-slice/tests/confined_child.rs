@@ -79,7 +79,7 @@ fn a_named_child_runs_confined_and_reports_what_was_applied() {
 
             assert_eq!(result.applied.backend, Backend::Substrate);
             assert_eq!(result.applied.profile, "workspace");
-            assert!(result.applied.network.is_empty());
+            assert_eq!(result.applied.network, Some(Vec::new()));
             assert_eq!(result.applied.writable_scopes, ["target"]);
             assert!(result.applied.read_only_roots.is_empty());
             assert!(!result.applied.cgroup.is_empty());
@@ -657,7 +657,8 @@ fn a_child_reaches_each_named_aperture_and_nothing_else() {
                 })
                 .collect();
             assert_eq!(
-                result.applied.network, listed,
+                result.applied.network,
+                Some(listed),
                 "the applied confinement lists every aperture"
             );
             assert_eq!(child.egress(), [first, second]);
@@ -730,11 +731,11 @@ fn the_applied_record_names_the_egress() {
             assert_eq!(result.exit_code, Some(0), "{}", result.output);
             assert_eq!(
                 result.applied.network,
-                [AppliedAperture {
+                Some(vec![AppliedAperture {
                     name: "model".to_owned(),
                     destination: address.to_string(),
                     listen: None,
-                }]
+                }])
             );
             assert_eq!(result.applied.profile, "workspace");
             assert_eq!(result.applied.writable_scopes, ["target"]);
@@ -752,7 +753,7 @@ fn the_applied_record_names_the_egress() {
             let plain = runner
                 .run_child(&ChildCommand::new("true", [] as [&str; 0], workspace))
                 .expect("a child with no egress runs beside it");
-            assert!(plain.applied.network.is_empty());
+            assert_eq!(plain.applied.network, Some(Vec::new()));
             assert_eq!(
                 plain.driver_record.as_ref().map(|record| &record.network),
                 Some(&AppliedNetwork::None)
@@ -1327,7 +1328,7 @@ fn a_live_child_echoes_what_it_is_written() {
             assert!(result.output.stderr.is_empty());
             assert!(!result.output.stdout_truncated && !result.output.stderr_truncated);
             assert_eq!(result.applied.backend, Backend::Substrate);
-            assert!(result.applied.network.is_empty());
+            assert_eq!(result.applied.network, Some(Vec::new()));
             assert_eq!(result.applied.writable_scopes, ["target"]);
             assert_eq!(result.applied.profile_digest.len(), 64);
             assert_eq!(result.driver_record.network, AppliedNetwork::None);

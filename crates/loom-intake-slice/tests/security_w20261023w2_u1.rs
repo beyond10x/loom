@@ -52,7 +52,11 @@ fn with_all(workspace: &Path, apertures: &[EgressAperture]) -> ChildCommand {
 
 fn assert_scope_refused(apertures: &[EgressAperture], named: &str) {
     let (error, started) = launch(|workspace| with_all(workspace, apertures));
-    assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{named}: {error}");
+    assert_eq!(
+        error.reason,
+        ConfinementRefusal::ScopeInvalid,
+        "{named}: {error}"
+    );
     assert!(error.detail.contains(named), "{named}: {error}");
     assert!(!started, "refused before anything starts: {error}");
 }
@@ -86,7 +90,11 @@ fn security_a_later_aperture_naming_a_numeric_host_is_refused() {
     for host in ["2130706434", "127.2", "0x7f.0.0.2"] {
         let later = aperture("search", host, "10.0.0.2:443");
         let (error, started) = launch(|workspace| with_all(workspace, &[model(), later]));
-        assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{host}: {error}");
+        assert_eq!(
+            error.reason,
+            ConfinementRefusal::ScopeInvalid,
+            "{host}: {error}"
+        );
         assert!(!started, "{host}: {error}");
     }
 }
@@ -127,7 +135,11 @@ fn security_a_trust_store_variable_beside_a_bundle_is_refused_with_several_apert
                 .with_environment(environment)
                 .with_ca_bundle(&bundle)
         });
-        assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{variable}: {error}");
+        assert_eq!(
+            error.reason,
+            ConfinementRefusal::ScopeInvalid,
+            "{variable}: {error}"
+        );
         assert!(error.detail.contains(variable), "{variable}: {error}");
         assert!(!started, "{variable}: {error}");
     }

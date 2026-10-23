@@ -63,6 +63,9 @@ fn more_than_four_apertures_are_refused_naming_the_count() {
         .collect();
     assert_refused(&five, "5 egress apertures");
     assert_refused(&five, &format!("at most {MAX_EGRESS_APERTURES}"));
+    for n in 1..=5 {
+        assert_refused(&five, &format!("`api{n}` (api{n}.example.test)"));
+    }
 }
 
 #[test]
@@ -71,7 +74,77 @@ fn one_aperture_name_given_twice_is_refused_naming_it() {
         host: "other.example.test".to_owned(),
         ..model()
     };
-    assert_refused(&[model(), again], "`model` is named twice");
+    assert_refused(&[model(), again.clone()], "`model` is named twice");
+    assert_refused(
+        &[model(), again],
+        "the hosts api.example.test and other.example.test",
+    );
+}
+
+/// Every spelling `inet_aton` reads as an IPv4 address, which glibc dials before it reads the
+/// child's `/etc/hosts`: decimal, hexadecimal, octal and mixed, in one to four labels.
+const NUMERIC_HOSTS: [&str; 12] = [
+    "0x7f000001",
+    "0X7F000001",
+    "0x7f.0x1",
+    "0x7f.0.0.0x1",
+    "0177.0.0.1",
+    "0177.1",
+    "0x7f.0.01",
+    "2130706433",
+    "127.1",
+    "127.0.1",
+    "0x0a000002",
+    "0x7f000001.",
+];
+
+#[test]
+fn a_numeric_host_in_any_spelling_inet_aton_reads_is_numeric() {
+    for host in NUMERIC_HOSTS {
+        assert!(numeric_host(host), "{host}");
+    }
+    for host in [
+        "api.example.test",
+        "0x7g000001",
+        "0xdead.example",
+        "1.2.3.4.5",
+        "",
+        "1..2",
+        "x0x7f",
+    ] {
+        assert!(!numeric_host(host), "{host}");
+    }
+}
+
+#[test]
+fn a_later_aperture_naming_a_numeric_host_in_any_spelling_is_refused_naming_it() {
+    for host in NUMERIC_HOSTS {
+        let numeric = aperture("search", host, "10.0.0.2:443");
+        assert_refused(&[model(), numeric], &format!("names the host {host}"));
+    }
+}
+
+/// On the first aperture the only numeric host is `127.0.0.1` spelled so: `0x7f000001` names the
+/// same address, and `0x0a000001` the pinned one, yet neither is allowed.
+#[test]
+fn the_first_aperture_allows_no_numeric_host_but_127_0_0_1_spelled_so() {
+    for (host, pinned) in [
+        ("0x7f000001", "127.0.0.1:443"),
+        ("0177.0.0.1", "127.0.0.1:443"),
+        ("127.1", "127.0.0.1:443"),
+        ("0x0a000001", "10.0.0.1:443"),
+        ("0x7f.0.0.0x1", "127.0.0.1:443"),
+    ] {
+        assert_refused(
+            &[aperture("model", host, pinned)],
+            &format!("names the host {host}"),
+        );
+    }
+    check_network(
+        NetworkMode::Aperture,
+        &[aperture("model", "127.0.0.1", "127.0.0.1:443")],
+    )
+    .unwrap();
 }
 
 #[test]

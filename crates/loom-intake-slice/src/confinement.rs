@@ -430,9 +430,10 @@ impl SubstrateRunner {
     /// has. A guarantee Substrate does not serve is a [`ConfinementError`] and nothing runs, never
     /// an unconfined fall-back. The child's environment is exactly [`ChildCommand::environment`],
     /// it writes only under `target` and the workspace paths the host named
-    /// ([`ChildCommand::with_writable`]), and its network is none or exactly the egress aperture
-    /// it names ([`ChildCommand::with_egress`]), where it trusts the certificate bundle the host
-    /// names ([`ChildCommand::with_ca_bundle`]); an aperture naming no host, a bundle the child
+    /// ([`ChildCommand::with_writable`]), and its network is none or exactly the egress apertures
+    /// it names, at most [`MAX_EGRESS_APERTURES`] ([`ChildCommand::with_egress`]), where it trusts
+    /// the certificate bundle the host names ([`ChildCommand::with_ca_bundle`]); an aperture
+    /// declaration Substrate never makes or the child could not reach by name, a bundle the child
     /// cannot be given as named, or a writable path that names no directory of the workspace by
     /// itself, is refused before anything starts.
     /// Once the child has run, its result is refused as a [`ConfinementError`] when the
@@ -817,7 +818,7 @@ fn settle(
         capability_snapshot: record.capability_snapshot.clone(),
         cgroup: record.cgroup.clone(),
         filesystem: enum_name(&record.filesystem),
-        network: applied_apertures(&record.network),
+        network: Some(applied_apertures(&record.network)),
         profile: enum_name(&record.profile),
         writable_scopes: record
             .workspace_access
@@ -1725,19 +1726,24 @@ fn check_network(network: NetworkMode, egress: &[EgressAperture]) -> Result<(), 
     }
     let most = usize::try_from(MAX_EGRESS_APERTURES).unwrap_or(usize::MAX);
     if egress.len() > most {
+        let named = egress
+            .iter()
+            .map(|aperture| format!("`{}` ({})", aperture.name, aperture.host))
+            .collect::<Vec<_>>()
+            .join(", ");
         return Err(scope_error(format!(
-            "{} egress apertures are named; a child reaches at most {MAX_EGRESS_APERTURES}",
+            "{} egress apertures are named, {named}; a child reaches at most {MAX_EGRESS_APERTURES}",
             egress.len()
         )));
     }
     for (index, aperture) in egress.iter().enumerate() {
-        if egress[..index]
+        if let Some(earlier) = egress[..index]
             .iter()
-            .any(|earlier| earlier.name == aperture.name)
+            .find(|earlier| earlier.name == aperture.name)
         {
             return Err(scope_error(format!(
-                "egress aperture `{}` is named twice",
-                aperture.name
+                "egress aperture `{}` is named twice, for the hosts {} and {}: Substrate declares each aperture name once",
+                aperture.name, earlier.host, aperture.host
             )));
         }
         check_aperture(network, aperture, index)?;
@@ -1801,7 +1807,7 @@ fn check_aperture(
     }
     if index > 0 {
         let host = aperture.host.strip_suffix('.').unwrap_or(&aperture.host);
-        if host.parse::<Ipv4Addr>().is_ok() || host.eq_ignore_ascii_case("localhost") {
+        if numeric_host(host) || host.eq_ignore_ascii_case("localhost") {
             return Err(scope_error(format!(
                 "egress aperture `{name}` names the host {}: only the first aperture listens on {APERTURE_LOOPBACK_ADDRESS}, so a later one is reached by its host name alone; name the host by its name",
                 aperture.host
@@ -1811,26 +1817,49 @@ fn check_aperture(
     check_host(name, &aperture.host, *pinned.ip())
 }
 
+/// Whether the C resolver reads `host` as an IPv4 address rather than a name: one to four
+/// dot-separated labels (a trailing `.` ignored), each a number as `inet_aton` reads one, decimal,
+/// `0x` or `0X` hexadecimal, or octal with a leading `0`. glibc's `getaddrinfo` parses such a host
+/// numerically before it reads `/etc/hosts`, so `0x7f000001` or `0177.0.0.1` reaches `127.0.0.1`
+/// whatever Substrate maps the name to there. A label holding digits an octal or decimal number
+/// cannot hold counts as numeric too: such a host is refused either way.
+fn numeric_host(host: &str) -> bool {
+    let host = host.strip_suffix('.').unwrap_or(host);
+    let labels = host.split('.').count();
+    (1..=4).contains(&labels)
+        && host.split('.').all(|label| {
+            match label
+                .strip_prefix("0x")
+                .or_else(|| label.strip_prefix("0X"))
+            {
+                Some(hex) => hex.bytes().all(|byte| byte.is_ascii_hexdigit()),
+                None => !label.is_empty() && label.bytes().all(|byte| byte.is_ascii_digit()),
+            }
+        })
+}
+
 /// Refuse an aperture's host unless it is a declaration Substrate's daemon makes for an address
 /// pinned at `pinned` and one the child can reach by: a host name, dot-separated labels of ASCII
 /// letters, digits and inner hyphens, at most 63 bytes each and 253 in all, the last not all
-/// digits, or the IPv4 literal `127.0.0.1` pinned there. Anything else (whitespace, a second line,
-/// a port, a URL, an IPv6 literal) never resolves to an IPv4 address there. Another IPv4 literal is
-/// refused too: Substrate maps only a host name to the forwarder it starts on
-/// [`APERTURE_LOOPBACK_ADDRESS`] inside the sandbox, so a child dialling any other literal would
-/// never reach the host; a literal also resolves to itself, so it must be `pinned`.
+/// digits and not every one a number ([`numeric_host`]), or exactly the IPv4 literal `127.0.0.1`
+/// pinned there. Anything else (whitespace, a second line, a port, a URL, an IPv6 literal) never
+/// resolves to an IPv4 address there. Any other numeric host, in whatever spelling `inet_aton`
+/// reads (`10.0.0.1`, `0x0a000001`, `0177.0.0.1`), is refused too: Substrate maps only a host name
+/// to the forwarder it starts on [`APERTURE_LOOPBACK_ADDRESS`] inside the sandbox, so a child
+/// dialling any other address would never reach the host; a literal also resolves to itself, so it
+/// must be `pinned`.
 fn check_host(name: &str, host: &str, pinned: Ipv4Addr) -> Result<(), ConfinementError> {
-    if let Ok(literal) = host.parse::<Ipv4Addr>() {
+    if numeric_host(host) {
         let forwarder: Ipv4Addr = APERTURE_LOOPBACK_ADDRESS
             .parse()
             .expect("Substrate's forwarder address is an IPv4 literal");
-        return if literal != forwarder {
+        return if host != APERTURE_LOOPBACK_ADDRESS {
             Err(scope_error(format!(
-                "egress aperture `{name}` names the host {literal}: a child reaches an aperture by its host name, or at {forwarder}, where Substrate's forwarder listens in the sandbox; name the host by its name"
+                "egress aperture `{name}` names the host {host}: the resolver reads it as an IPv4 address, and a child reaches an aperture by its host name, or at {forwarder} spelled so, where Substrate's forwarder listens in the sandbox; name the host by its name"
             )))
-        } else if literal != pinned {
+        } else if forwarder != pinned {
             Err(scope_error(format!(
-                "egress aperture `{name}` names the address {literal} but is pinned to {pinned}"
+                "egress aperture `{name}` names the address {forwarder} but is pinned to {pinned}"
             )))
         } else {
             Ok(())
@@ -3575,7 +3604,7 @@ mod tests {
             capability_snapshot: String::new(),
             cgroup: "substrate-ex_loom_1_0".to_owned(),
             filesystem: "workspace-rw-system-ro".to_owned(),
-            network,
+            network: Some(network),
             profile: "workspace".to_owned(),
             writable_scopes: vec!["target".to_owned()],
             read_only_roots: Vec::new(),
@@ -3911,7 +3940,7 @@ mod tests {
         );
         assert_eq!(result.output.stdout, b"out");
         assert_eq!(result.output.stderr, b"err");
-        assert!(result.applied.network.is_empty());
+        assert_eq!(result.applied.network, Some(Vec::new()));
         assert_eq!(result.applied.profile_digest, "digest");
         assert_eq!(
             result.driver_record,
@@ -4335,6 +4364,8 @@ mod tests {
             ("10.0.0.1", "10.0.0.1:443"),
             ("10.0.0.2", "10.0.0.1:443"),
             ("127.0.0.2", "127.0.0.2:443"),
+            ("10.0.1", "10.0.0.1:443"),
+            ("1", "10.0.0.1:443"),
         ] {
             let aperture = EgressAperture {
                 host: host.to_owned(),
@@ -4362,8 +4393,6 @@ mod tests {
             "api-.example.test",
             "api_model.example.test",
             "api.example.tést",
-            "10.0.1",
-            "1",
             "::1",
             "[::1]",
             "#api.example.test",
