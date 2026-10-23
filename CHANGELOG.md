@@ -25,6 +25,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** Loom links Substrate 0.10.0 (`rev = "105cf718bc6a5314486c78f5fd93fabed290e30e"`); `TestExecution::driver_record` gains `workdir`, `writable_roots` and `AppliedNetwork::Apertures` (story:substrate-0-8-pin)
 - Every Claude Code session is launched with `--tools` naming only its offered tools, a supplied runner's included (story:session-executor-from-spec)
 - **Breaking:** `loom.session.ProposeSessionChange` and `AgentSessions` gain the field `agent`; struct literals must set it (story:session-executor-from-spec)
+- **Breaking:** Loom requires ESS 0.68.0; the conformance crates take `ess-conformance` and `ess-primitives` at tag `0.68.0`
 
 ### Deprecated
 
