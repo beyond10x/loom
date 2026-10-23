@@ -2,16 +2,17 @@
 format: aep.planning-md/3
 id: story:child-workdir
 kind: story
-status: active
+status: implemented
 title: A confined child starts in the working directory the host names
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
 - depends_on: story:substrate-0-8-pin
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-23T03:54:53Z", actor: "human:timo", revision: 5, correlation: "wave-2026-10-23-w2"}
 - {from: "proposed", to: "active", at: "2026-10-23T03:54:53Z", actor: "human:timo", revision: 6, correlation: "wave-2026-10-23-w2"}
+- {from: "active", to: "implemented", at: "2026-10-23T05:38:13Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}, correlation: "wave-2026-10-23-w2"}
 ---
 ## Outcome
 

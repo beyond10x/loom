@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-23T05:38:12Z",
+  "actor": "human:timo",
+  "artifact": "story:child-workdir",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check",
+    "reference": "wave/2026-10-23-w2@756d3dc5: the task check steps exit 0 (cargo test 1999 passed, 0 failed, 10 ignored), task website exit 0, task plan exit 0, release-check --tag 0.36.0 exit 0"
+  }
+}

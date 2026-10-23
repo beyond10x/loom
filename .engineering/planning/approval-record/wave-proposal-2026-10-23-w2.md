@@ -9,7 +9,7 @@ tags:
 relations:
 - decides: story:several-egress-apertures
 - decides: story:child-workdir
-revision: 1
+revision: 2
 ---
 # Wave 2026-10-23-w2 proposal, accepted with no operator turn
 
@@ -39,3 +39,15 @@ under 25G, discard at merge."
   - D4: one build at a time, test binaries under `systemd-run --user --scope -p MemoryMax=8G`,
     builds pause under 25G free, each unit's build cache discarded at merge, one full gate on the
     wave head; release 0.37.0 names its `**Breaking:**` line in `CHANGELOG.md`.
+
+- Decisions taken while the wave ran:
+  - D5: every numeric aperture host that `inet_aton` reads as an address (decimal, hex or octal
+    labels) is refused on apertures 2 to 4, and on the first only `127.0.0.1` is accepted; the
+    adversary reached aperture 1's destination through a hex host on a later aperture.
+  - D6: `AppliedConfinement.network` is `Option<Vec<AppliedAperture>>`, absent for an unconfined
+    run, so an unconfined run never reads as no network; a third `**Breaking:**` bullet.
+  - D7: a workdir the process cannot search is refused before launch, and a run whose output
+    carries bubblewrap's chdir diagnostic for its workdir is refused after it; the second check is
+    held by a unit test only.
+  - D8: the implementor's `### Security` bullet for the numeric-host refusal stays in
+    `CHANGELOG.md`.
