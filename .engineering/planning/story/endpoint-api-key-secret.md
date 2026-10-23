@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:endpoint-api-key-secret
 kind: story
-status: active
+status: implemented
 title: A b10x-harness session reads its endpoint's API key from the secret store by name
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
 - serves: vision:governed-autonomy
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-23T22:03:33Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-23T22:03:34Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-23T22:58:51Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 

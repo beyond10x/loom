@@ -8,7 +8,7 @@ tags:
 - non-interactive
 relations:
 - decides: story:endpoint-api-key-secret
-revision: 1
+revision: 2
 ---
 # Wave 2026-10-24-w1 proposal, accepted with no operator turn
 
@@ -33,3 +33,11 @@ story, test first, then wave, merge and release it as 0.39.1 on ess 0.68.0. Do n
   refuses two credentials for one request, so a host leaves `token_file` empty on the secret route.
 - D3: no ESS change. The executor's launch configuration is host configuration `ess/` does not
   declare; the red run is the story's new test file.
+
+## Decisions taken while the wave ran
+
+- D4: a b10x-harness endpoint naming no token file and no secret is refused before the copy (the
+  adversary's finding): launching the loop with `--oauth-token-file ""` points it at no credential.
+- D5: a secret name holding any control character is refused before the copy, not only a NUL byte
+  (the security review's finding); a newline in a name has no use and would break a log line.
+- D6: a security review ran beside the adversary, because the unit carries a credential route.
