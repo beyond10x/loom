@@ -11,7 +11,7 @@ relations:
 - decides: story:session-lineage
 - decides: story:loop-context-split
 - decides: story:pinned-consumers-agency-shape
-revision: 2
+revision: 4
 ---
 # Wave 2026-10-23-w3 proposal, accepted with no operator turn
 
@@ -41,3 +41,19 @@ under 25G, and discard each unit's cache after it merges."
   - D4: if the blanket `impl LoopContext for T` makes an existing direct `impl LoopContext`
     overlap, each implementor that must change is a `**Breaking:**` bullet, and release 0.38.0 is
     a minor version move in any case.
+
+- Decisions taken while the wave ran:
+  - D5: the SDK's loop clock trait keeps the name the story uses, `Clock`, although the slice also
+    has a `clock::Clock`; the SDK exports it as `loom_sdk::Clock`.
+  - D6: the pinned agent consumer takes its clock from the host (`agency::run(spec, now)`, with
+    `SystemNow` and `FixedNow`), after the adversary found the frozen 2026-01-01 clock read a
+    passed deadline as ahead.
+  - D7: main (PR 120, the `governed_loop` example, 45dcfe4c) merged into the wave before it
+    closed; the `CHANGELOG.md` conflict kept both sides' bullets.
+  - D8: D4's overlap did not occur (the adversary's consumer shapes compile), but release 0.38.0
+    carries one `**Breaking:**` bullet: `continues`, added to the generated `loom.session` structs
+    (`AgentSessionData`, `ProposeSessionChange`), breaks a consumer that builds them with a struct
+    literal.
+
+  - `b10x-chef-orchestrator` accepted D5 and D8 on 2026-10-23: "D5 and D8 are accepted; record
+    both in your store."

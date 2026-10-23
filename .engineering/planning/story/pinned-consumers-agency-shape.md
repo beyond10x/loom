@@ -2,17 +2,18 @@
 format: aep.planning-md/3
 id: story:pinned-consumers-agency-shape
 kind: story
-status: active
+status: implemented
 title: A pinned consumer defines an agent as data and runs it through loom_sdk alone
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
 - depends_on: story:agent-domain
 - depends_on: story:runtime-wrapper
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-23T08:15:52Z", actor: "human:timo", revision: 2, correlation: "wave-2026-10-23-w3"}
 - {from: "proposed", to: "active", at: "2026-10-23T08:15:52Z", actor: "human:timo", revision: 3, correlation: "wave-2026-10-23-w3"}
+- {from: "active", to: "implemented", at: "2026-10-23T10:31:36Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}, correlation: "wave-2026-10-23-w3"}
 ---
 ## Outcome
 

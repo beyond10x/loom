@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-23T10:31:36Z",
+  "actor": "human:timo",
+  "artifact": "story:pinned-consumers-agency-shape",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check",
+    "reference": "wave/2026-10-23-w3@0b1a0cf3: every task check step exits 0, over two runs on that head (the first stopped by the 25G disk rule at cargo test; cargo test and the later steps rerun: 2012 passed, 0 failed, 10 ignored), task website exit 0, task plan exit 0"
+  }
+}
