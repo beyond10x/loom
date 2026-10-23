@@ -971,9 +971,9 @@ impl TestRunner for SubstrateRunner {
 /// a child sees only the host directories and files the host names, read-only, each at the mount
 /// the host names ([`ChildCommand::with_read_only_root`], [`ChildCommand::with_read_only_file`])
 /// or at its own host path ([`ChildCommand::at_host_path`]). [`ChildCommand::sandbox_path`] says
-/// where a host path is inside. The child always starts in `/workspace`, and Substrate 0.7.18
-/// offers no writable path outside the workspace: a directory outside it, such as a linked
-/// worktree's common git directory, can be given read-only only.
+/// where a host path is inside. The child always starts in `/workspace`, and Loom requests no
+/// writable path outside the workspace, though Substrate 0.10.0 offers writable roots: a directory
+/// outside it, such as a linked worktree's common git directory, can be given read-only only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChildCommand {
     program: String,
@@ -1412,6 +1412,7 @@ impl ChildCommand {
                 network: self.network,
                 // A name only: the destination is the driver's declaration, never the request's.
                 aperture: self.egress.as_ref().map(|aperture| aperture.name.clone()),
+                apertures: Vec::new(),
                 profile: self.profile,
                 required: true,
             },
@@ -1443,6 +1444,8 @@ impl ChildCommand {
             secret_slots: Vec::new(),
             capsule: None,
             lease_ttl_ms: None,
+            workdir: None,
+            writable_roots: Vec::new(),
         }
     }
 }
@@ -2414,13 +2417,19 @@ fn network_name(aperture: Option<(&str, &str)>) -> String {
     )
 }
 
-/// The network Substrate applied, named as [`network_name`] names it.
+/// The network Substrate applied, named as [`network_name`] names it; several apertures, which
+/// [`check_record`] never accepts, are each named so and joined with `,`.
 fn applied_network_name(network: &AppliedNetwork) -> String {
     match network {
         AppliedNetwork::None => network_name(None),
         AppliedNetwork::Aperture(applied) => {
             network_name(Some((&applied.name, &applied.destination)))
         }
+        AppliedNetwork::Apertures(applied) => applied
+            .iter()
+            .map(|applied| network_name(Some((&applied.name, &applied.destination))))
+            .collect::<Vec<_>>()
+            .join(","),
     }
 }
 
@@ -2719,6 +2728,7 @@ impl RustClosure {
                 capability_snapshot: snapshot,
                 network: NetworkMode::None,
                 aperture: None,
+                apertures: Vec::new(),
                 profile: SandboxProfile::Workspace,
                 required: true,
             },
@@ -2734,6 +2744,8 @@ impl RustClosure {
             secret_slots: Vec::new(),
             capsule: None,
             lease_ttl_ms: None,
+            workdir: None,
+            writable_roots: Vec::new(),
         })
     }
 }
@@ -3217,6 +3229,7 @@ mod tests {
                 capability_snapshot: "snapshot".to_owned(),
                 network: NetworkMode::None,
                 aperture: None,
+                apertures: Vec::new(),
                 profile: SandboxProfile::Workspace,
                 required: true,
             }
@@ -3450,6 +3463,7 @@ mod tests {
                 from_destination: 11,
             },
             max_bytes,
+            listen: None,
         })
     }
 
@@ -3469,6 +3483,8 @@ mod tests {
             read_only_roots: input.read_only_roots.clone(),
             read_only_files: input.read_only_files.clone(),
             secret_slots: Vec::new(),
+            workdir: None,
+            writable_roots: Vec::new(),
         }
     }
 
@@ -4102,6 +4118,7 @@ mod tests {
                 capability_snapshot: "snapshot".to_owned(),
                 network: NetworkMode::Aperture,
                 aperture: Some("model".to_owned()),
+                apertures: Vec::new(),
                 profile: SandboxProfile::Workspace,
                 required: true,
             }
