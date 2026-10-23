@@ -46,6 +46,12 @@
 //! are unknown, never that there were none. Loom makes none of these decisions beyond its answer
 //! to `tool.decide`, and the decisions are never evidence and never in a proposal.
 //!
+//! A session may continue an earlier one of the same commission
+//! ([`SessionExecutor::continuing`]): the next session the executor records names it as
+//! `loom.session.AgentSession.continues`. The lineage is recorded only: the request to
+//! metaharness is the one a fresh session gets, and the harness session itself is not resumed.
+//! A predecessor of another commission than the call's is refused before any copy or session.
+//!
 //! A session that fails proposes nothing and is no record: the call returns `Suspended` with
 //! `ExternalAvailability` naming why. A session that changed nothing proposes an empty list of
 //! files.
@@ -453,6 +459,15 @@ pub struct SessionExecutor {
     last: RefCell<Option<SessionReport>>,
     ids: RefCell<Box<dyn FnMut() -> SessionId>>,
     record: RefCell<SessionRecord>,
+    predecessor: RefCell<Option<Predecessor>>,
+}
+
+/// The earlier session the next recorded session continues ([`SessionExecutor::continuing`]):
+/// its id and the commission it ran for.
+#[derive(Debug, Clone)]
+struct Predecessor {
+    session_id: SessionId,
+    commission_id: CommissionId,
 }
 
 impl std::fmt::Debug for SessionExecutor {
@@ -494,6 +509,7 @@ impl SessionExecutor {
             last: RefCell::new(None),
             ids: RefCell::new(Box::new(fresh_session_id)),
             record: RefCell::new(SessionRecord::default()),
+            predecessor: RefCell::new(None),
         }
     }
 
@@ -614,6 +630,42 @@ impl SessionExecutor {
         self
     }
 
+    /// The same executor, its next recorded session continuing `previous`, a session this or
+    /// another executor recorded ([`Self::sessions`]): that session names `previous.session_id`
+    /// as `loom.session.AgentSession.continues`. The predecessor is the next recorded session's
+    /// only; a later one continues none unless built again. A call that records no session (it
+    /// failed or was refused) leaves the predecessor to the next call. The request to
+    /// metaharness is unchanged and the harness session is not resumed: Loom records the
+    /// lineage only.
+    ///
+    /// A call for another commission than `previous.commission_id` is refused before any copy is
+    /// made or session started: it returns `Suspended` with `ExternalAvailability` naming the
+    /// predecessor's session id and both commissions, and records nothing.
+    #[must_use]
+    pub fn continuing(self, previous: &AgentSessions) -> Self {
+        *self.predecessor.borrow_mut() = Some(Predecessor {
+            session_id: previous.session_id.clone(),
+            commission_id: previous.commission_id.clone(),
+        });
+        self
+    }
+
+    /// The predecessor of the next session ([`Self::continuing`]), refused when it ran for
+    /// another commission than `commission`.
+    fn predecessor_for(&self, commission: &CommissionId) -> Result<Option<SessionId>, String> {
+        match self.predecessor.borrow().as_ref() {
+            None => Ok(None),
+            Some(previous) if &previous.commission_id == commission => {
+                Ok(Some(previous.session_id.clone()))
+            }
+            Some(previous) => Err(format!(
+                "the session {} this one continues ran for the commission {}, not for this \
+                 call's commission {}",
+                previous.session_id.0.0, previous.commission_id.0.0, commission.0.0
+            )),
+        }
+    }
+
     /// Every session this executor recorded, one row of the `loom.session.AgentSessions` view
     /// each, in the order they ran: a session that failed is not among them.
     #[must_use]
@@ -629,13 +681,15 @@ impl SessionExecutor {
     }
 
     /// Records `proposal`, the change of the session `report` describes, as one `AgentSession`
-    /// for `commission` over `frontier`, under a new [`SessionId`].
+    /// for `commission` over `frontier`, under a new [`SessionId`], continuing `continues` when
+    /// it names an earlier session.
     fn record(
         &self,
-        commission: &Commission<commission_state::Assigned>,
+        commission: &CommissionId,
         frontier: &Frontier<frontier_state::Issued>,
         report: &SessionReport,
         proposal: &Proposal,
+        continues: Option<SessionId>,
     ) -> Result<SessionChangeProposed, String> {
         let session_id = (self.ids.borrow_mut())();
         let kind = match self.kind {
@@ -648,10 +702,11 @@ impl SessionExecutor {
             .propose(ProposeSessionChange {
                 session_id,
                 kind,
-                commission_id: CommissionId(Uuid(commission.data().commission_id.0.0.clone())),
+                commission_id: commission.clone(),
                 frontier_id: FrontierId(Uuid(frontier.data().frontier_id.0.0.clone())),
                 vendor_session_id: report.vendor_session_id.clone(),
                 agent: self.agent.clone(),
+                continues,
                 action: proposal.action.clone(),
                 files: proposal
                     .files
@@ -1060,9 +1115,14 @@ impl AgentExecutor for SessionExecutor {
     ) -> ExecutorStep {
         let started = Instant::now();
         let mut report = SessionReport::default();
-        let proposed = self.session(&mut report).and_then(|proposal| {
-            self.record(commission, frontier, &report, &proposal)
-                .map(|_| proposal)
+        let commission = CommissionId(Uuid(commission.data().commission_id.0.0.clone()));
+        // A predecessor of another commission is refused before any copy or session.
+        let proposed = self.predecessor_for(&commission).and_then(|continues| {
+            let proposal = self.session(&mut report)?;
+            self.record(&commission, frontier, &report, &proposal, continues)?;
+            // The predecessor is the recorded session's only.
+            self.predecessor.borrow_mut().take();
+            Ok(proposal)
         });
         let (outcome, summary) = match proposed {
             Ok(proposal) => {

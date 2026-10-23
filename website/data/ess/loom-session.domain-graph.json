@@ -30,6 +30,10 @@
           "type": "Optional<AgentId>"
         },
         {
+          "name": "continues",
+          "type": "Optional<SessionId>"
+        },
+        {
           "name": "action",
           "type": "string"
         },
@@ -56,5 +60,14 @@
     }
   ],
   "format": "b10x-domain-graph/1",
-  "relations": []
+  "relations": [
+    {
+      "cardinality": "one",
+      "from": "loom.session.AgentSession",
+      "kind": "references",
+      "name": "predecessor",
+      "to": "loom.session.AgentSession",
+      "via": "continues"
+    }
+  ]
 }
