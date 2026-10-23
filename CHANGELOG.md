@@ -15,6 +15,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Added
 
 - `loom_sdk::Runtime` holds a run's ports, run store and context; `run`, `run_suspending`, `resume` call the free functions (story:runtime-wrapper)
+- `loom-xtask release-check` refuses a break on a patch tag and removing an SDK path no release deprecated (story:stability-version-rule)
 
 ### Changed
 

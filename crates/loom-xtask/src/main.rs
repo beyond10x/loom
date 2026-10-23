@@ -23,7 +23,9 @@
 //!
 //! `release-check --tag <tag>` fails unless the tag is the workspace version and `CHANGELOG.md`
 //! has its entry with a `**Breaking:**` bullet or the line `No breaking changes.`, which it may
-//! say only when no stable surface changed since the previous tag;
+//! say only when no stable surface changed since the previous tag, never with a break on a tag
+//! that moves only the patch version, and never removing a path the SDK stability page lists
+//! that no earlier release deprecated;
 //! `.github/workflows/release.yml` runs it on every pushed tag (see `release`).
 
 use clap::{Parser, Subcommand};
@@ -110,7 +112,9 @@ enum Command {
     /// `consumers/pinned/`, `crates/loom-sdk/tests/host_ports.rs` or
     /// `docs/contracts/run-events-v1.json` differs
     /// between the previous bare-version tag of `<root>`'s git repository and the tag (or `HEAD`
-    /// before the tag exists).
+    /// before the tag exists). A `**Breaking:**` bullet fails on a tag that moves only the patch
+    /// version from the previous tag, and removing a path the previous tag's SDK stability page
+    /// lists fails unless an earlier release listed it under `### Deprecated`.
     ReleaseCheck {
         /// The release tag, e.g. `0.1.0`.
         #[arg(long)]
