@@ -12,6 +12,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-10-23
+
 ### Added
 
 - `ChildCommand::with_egress` takes up to `MAX_EGRESS_APERTURES` (4) apertures; the child reaches each host by name (story:several-egress-apertures)
@@ -1005,7 +1007,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.36.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.37.0...HEAD
+[0.37.0]: https://github.com/beyond10x/loom/releases/tag/0.37.0
 [0.36.0]: https://github.com/beyond10x/loom/releases/tag/0.36.0
 [0.35.0]: https://github.com/beyond10x/loom/releases/tag/0.35.0
 [0.34.0]: https://github.com/beyond10x/loom/releases/tag/0.34.0
