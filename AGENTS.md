@@ -312,6 +312,9 @@ with the behaviour ESS generates for `JudgeIdleIteration`; when the last one's e
 performed, the case is loaded first, as at the step budget, and a case the governor holds complete
 ends the run completed. A frontier that admits nothing still ends it `NoAdmissibleAction`, and the
 slice stops both `NothingAdmissible` (`crates/loom-commission-testkit/tests/idle_bound_outcome.rs`).
+`LoopContext` is four parts a host may supply apart, `Ids`, `Clock`, `Limits` and `HostControl`,
+and every type implementing all four is a `LoopContext` (`story:loop-context-split`,
+`crates/loom-commission-testkit/tests/loop_context_split.rs`).
 A host chooses both stops per run through `LoopContext::stop_policy` (`StopPolicy`): with
 `approval_gate: false` no step arms the approval gate, so an unchanged frontier goes to the
 executor and is judged idle, while authority is still asked and a withheld request is never

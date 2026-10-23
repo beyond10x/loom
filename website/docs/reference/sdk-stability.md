@@ -94,10 +94,15 @@ implements it through.
 | `ArgumentGenerator` | `loom_sdk::loom::arguments::ArgumentGenerator` | Arguments for the selected action only |
 | `Briefing` | `loom_sdk::loom::model_selector::Briefing` | What `ModelSelector` and `ModelArguments` tell the model: the text every request carries, the standing instructions of a selection request and of an argument request, and each action's argument schema, a `loom_sdk::serde_json::Value`; the provided `send`, `select` and `arguments` make one request each, and a host overrides them to ask otherwise |
 | `LoopContext` | `loom_sdk::commission::runtime::LoopContext` | Ids, the time and the step budget, which no model supplies, and the event sink a run reports to (`events`, `NoEvents` by default) |
+| `Ids` | `loom_sdk::commission::runtime::Ids` | The new ids a run needs (`action_request_id`, `observation_id`), a part of a `LoopContext`: a type implementing `Ids`, `Clock`, `Limits` and `HostControl` is one, each method answering as its part does |
+| `Clock` | `loom_sdk::commission::runtime::Clock` | The trusted time a run reads (`now`), a part of a `LoopContext` |
+| `Limits` | `loom_sdk::commission::runtime::Limits` | The step budget, run budget and stop policy the host chose, a part of a `LoopContext` a host may keep per agent; `run_budget` and `stop_policy` default as on `LoopContext` |
+| `HostControl` | `loom_sdk::commission::runtime::HostControl` | The host's own stop (`host_stop`) and the event sink (`events`), a part of a `LoopContext` a host may keep per process; both default as on `LoopContext` |
 | `EventSink` | `loom_sdk::commission::ports::events::EventSink` | Receiving every `RuntimeEvent` of a run as it happens: step started, action selected, proposed, authority decided, effect invoked, session closed and stopped; an event is never evidence and never changes the loop |
 | `TestRunner` | `loom_sdk::intake::slice::confinement::TestRunner` | Running the slice's test command in a workspace and reporting the confinement it observed applied, not the one it was asked for; the slice's `LocalExecutor` takes one through `with_runner`, and `loom_sdk::SubstrateRunner` is Loom's |
 
-`LoopContext` and `EffectPort` are also at the top (`loom_sdk::LoopContext`,
+`LoopContext`, its four parts and `EffectPort` are also at the top (`loom_sdk::LoopContext`,
+`loom_sdk::Ids`, `loom_sdk::Clock`, `loom_sdk::Limits`, `loom_sdk::HostControl`,
 `loom_sdk::EffectPort`), as are `ActionSelector`, `ArgumentGenerator`, `CaseStore` and
 `TestRunner`.
 

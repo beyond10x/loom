@@ -527,6 +527,12 @@ pub const EFFECT_SOURCE: &str = "effect";
 
 /// What the loop needs that neither the model nor the executor may supply: new ids, trusted time
 /// and the budgets and stop policy the host chose.
+///
+/// It is four parts a host may supply apart (`story:loop-context-split`): [`Ids`], [`Clock`],
+/// [`Limits`] and [`HostControl`]. Every type that implements the four is a `LoopContext`, each
+/// method answering as its part does, so a host keeps its limits per agent and its stop and event
+/// sink per process and assembles a run's context from them. A type that implements none of the
+/// four may still implement `LoopContext` itself, as before.
 pub trait LoopContext {
     /// A new id for an action request.
     fn action_request_id(&mut self) -> ActionRequestId;
@@ -554,12 +560,7 @@ pub trait LoopContext {
     /// (`on_breach`); the default lists none and discards: `DiscardStep` ends the run before that
     /// step's outcome is acted on.
     fn stop_policy(&self) -> StopPolicy {
-        StopPolicy {
-            approval_gate: true,
-            idle_bound: None,
-            on_breach: BreachStep::DiscardStep,
-            breach_by_limit: Vec::new(),
-        }
+        default_stop_policy()
     }
     /// The host's own stop before a step, for a reason only the host can read (its active time
     /// less its own pauses, the free space of a disk), as the module documents
@@ -577,9 +578,124 @@ pub trait LoopContext {
     /// [`NoEvents`], for which the runtime builds no event. An event is never evidence and never
     /// changes the loop.
     fn events(&mut self) -> &mut dyn EventSink {
-        // `NoEvents` has no size, so this allocates nothing and leaks nothing.
-        Box::leak(Box::new(NoEvents))
+        no_events()
     }
+}
+
+/// The new ids a run needs, which no model supplies: one part of a [`LoopContext`].
+pub trait Ids {
+    /// A new id for an action request.
+    fn action_request_id(&mut self) -> ActionRequestId;
+    /// A new id for an observation.
+    fn observation_id(&mut self) -> ObservationId;
+}
+
+/// The trusted time a run reads, which no model supplies: one part of a [`LoopContext`].
+pub trait Clock {
+    /// The current time, from a trusted clock.
+    fn now(&mut self) -> Timestamp;
+}
+
+/// The budgets and stop policy the host chose for a run, which a host may keep per agent: one
+/// part of a [`LoopContext`].
+pub trait Limits {
+    /// The most steps the loop takes before it suspends the Run for `Budget`. `None` sets no
+    /// budget: the idle bound then ends a loop that makes no progress, and [`UNBUDGETED_STEP_LIMIT`]
+    /// ends any other, so the loop always ends.
+    fn step_budget(&self) -> Option<usize>;
+    /// The run's budget and its actions' budgets, as the module documents
+    /// (`ess/commission/domains/responsibility.yaml`, `RunBudget`). `None`, the default, sets
+    /// none: only the step budget bounds the run.
+    fn run_budget(&self) -> Option<RunBudget> {
+        None
+    }
+    /// How the run stops where its frontier does not change, as the module documents
+    /// (`ess/commission/domains/responsibility.yaml`, `StopPolicy`): whether the approval gate (5)
+    /// ends it `AwaitingApproval`, and how many idle iterations in a row end it `IdleBound`. The
+    /// default keeps the gate and sets no idle bound: two idle iterations end a run with no step
+    /// budget, and a budgeted run is bounded by its budget alone. It also says what becomes of an
+    /// executor step whose reported usage passed a spending limit, or whose call ended past the
+    /// deadline, per limit (`breach_by_limit`) and for every limit it does not list
+    /// (`on_breach`); the default lists none and discards: `DiscardStep` ends the run before that
+    /// step's outcome is acted on.
+    fn stop_policy(&self) -> StopPolicy {
+        default_stop_policy()
+    }
+}
+
+/// The host's own stop and the sink of a run's events, which a host may keep per process: one
+/// part of a [`LoopContext`].
+pub trait HostControl {
+    /// The host's own stop before a step, for a reason only the host can read (its active time
+    /// less its own pauses, the free space of a disk), as the module documents
+    /// (`ess/commission/domains/responsibility.yaml`, `HostStop`). It is asked only where a step
+    /// would follow the admissibility and authority checks: before an executor call whose
+    /// frontier admits an action without a grant, otherwise right before an admitted request's
+    /// effect is invoked. `None`, the default, never stops the run.
+    fn host_stop(&mut self) -> Option<HostStop> {
+        None
+    }
+
+    /// Where the run's events go as they happen (`story:runtime-events`, [`EventSink`]): every
+    /// step started, action selected, request proposed, authority decided, effect invoked and
+    /// session closed, and the loop's stop, last and once, as the module documents. The default is
+    /// [`NoEvents`], for which the runtime builds no event. An event is never evidence and never
+    /// changes the loop.
+    fn events(&mut self) -> &mut dyn EventSink {
+        no_events()
+    }
+}
+
+/// A context from four parts: each method answers as the part that holds it.
+impl<T: Clock + Ids + Limits + HostControl> LoopContext for T {
+    fn action_request_id(&mut self) -> ActionRequestId {
+        Ids::action_request_id(self)
+    }
+
+    fn observation_id(&mut self) -> ObservationId {
+        Ids::observation_id(self)
+    }
+
+    fn now(&mut self) -> Timestamp {
+        Clock::now(self)
+    }
+
+    fn step_budget(&self) -> Option<usize> {
+        Limits::step_budget(self)
+    }
+
+    fn run_budget(&self) -> Option<RunBudget> {
+        Limits::run_budget(self)
+    }
+
+    fn stop_policy(&self) -> StopPolicy {
+        Limits::stop_policy(self)
+    }
+
+    fn host_stop(&mut self) -> Option<HostStop> {
+        HostControl::host_stop(self)
+    }
+
+    fn events(&mut self) -> &mut dyn EventSink {
+        HostControl::events(self)
+    }
+}
+
+/// The stop policy a context that sets none gives: the gate kept, no idle bound, and a step past
+/// a limit discarded.
+fn default_stop_policy() -> StopPolicy {
+    StopPolicy {
+        approval_gate: true,
+        idle_bound: None,
+        on_breach: BreachStep::DiscardStep,
+        breach_by_limit: Vec::new(),
+    }
+}
+
+/// The sink a context that sets none gives: [`NoEvents`].
+fn no_events() -> &'static mut dyn EventSink {
+    // `NoEvents` has no size, so this allocates nothing and leaks nothing.
+    Box::leak(Box::new(NoEvents))
 }
 
 /// The steps a loop with no step budget takes at most before it suspends the Run for `Budget`.

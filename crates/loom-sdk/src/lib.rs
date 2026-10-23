@@ -19,7 +19,8 @@
 //! | [`intake`] | `b10x-loom-intake-router`, `b10x-loom-intake-slice` | Intake: the router that proposes a protocol for an intent ([`intake::router`]), and the slice's case opening, local executor, test-result verifier and local effect adapter ([`intake::slice`]). |
 //!
 //! The items an embedding always touches are also re-exported at the top: [`run_until_blocked`],
-//! [`LoopContext`], [`LoopEnd`], [`EffectPort`], [`Loom`], [`ActionSelector`],
+//! [`LoopContext`] and its four parts [`Ids`], [`Clock`], [`Limits`] and [`HostControl`],
+//! [`LoopEnd`], [`EffectPort`], [`Loom`], [`ActionSelector`],
 //! [`ArgumentGenerator`], [`CanonGovernor`], [`CaseStore`] and [`MemoryCaseStore`].
 //! [`Runtime`] holds a run's ports, run store and loop context, and its `run`, `run_suspending`
 //! and `resume` call [`run_until_blocked`], `run_with_suspension` and `resume_after_grant` with
@@ -82,6 +83,10 @@ pub use b10x_loom_commission::ports::effect::EffectPort;
 /// The event port (`story:runtime-events`): a host's `LoopContext::events` sink receives every
 /// `RuntimeEvent` of a run as it happens; `NoEvents`, the default, receives none.
 pub use b10x_loom_commission::ports::events::{EventSink, NoEvents};
+/// The four parts of a `LoopContext` a host may supply apart (`story:loop-context-split`): every
+/// type implementing them is a `LoopContext`, so limits can be kept per agent and the stop and
+/// event sink per process.
+pub use b10x_loom_commission::runtime::{Clock, HostControl, Ids, Limits};
 pub use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked};
 /// A Loom workflow definition run as Commission's executor, and the effect port wrapper it reads
 /// (`loom_sdk::loom::workflow`); a host checks a definition with `workflow::load` against
