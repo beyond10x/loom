@@ -10,9 +10,9 @@
 
 use loom_pinned_consumer::agency::{self, SPEC};
 use loom_sdk::agent;
-use loom_sdk::commission::model::json;
 use loom_sdk::commission::model::responsibility::{
-    EffectOutcome, RunOutcome, RunOutcomeIdleBound, RunOutcomeSuspended, SuspensionReason,
+    BudgetLimit, EffectOutcome, RunBudgetBreach, RunOutcome, RunOutcomeIdleBound,
+    RunOutcomeSuspended, SuspensionReason,
 };
 
 /// `SPEC` with `from` replaced by `to`, which it holds exactly once.
@@ -57,13 +57,18 @@ fn an_agent_defined_as_data_runs() {
         "the spec's idle bound of 5 ends the run: {end:?}"
     );
 
-    // A step budget below the idle bound suspends the Run for that budget instead.
+    // The spec's `max_steps` is its run budget's: below the idle bound, the Run is suspended
+    // for that limit, two steps charged.
     let end = run(&with("max_steps: 20", "max_steps: 2"));
-    let budget = json::parse(r#"{"max_steps":2}"#).expect("a JSON object");
     assert_eq!(
         end.outcome,
         RunOutcome::Suspended(RunOutcomeSuspended {
-            reason: SuspensionReason::Budget(budget),
+            reason: SuspensionReason::RunBudget(RunBudgetBreach {
+                action: None,
+                limit: BudgetLimit::MaxSteps,
+                max: 2,
+                charged: Some(2),
+            }),
         }),
         "the spec's max_steps suspends the run: {end:?}"
     );

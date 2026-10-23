@@ -1,0 +1,18 @@
+format: loom.agent/1
+agent:
+  id: clock-reader
+  name: Clock reader
+  brief: >-
+    Read this machine's clock when asked for the time, and answer only from what a verifier
+    recorded. A reading you were shown is not evidence.
+model:
+  routes: routes.yaml
+  roles:
+    - {role: agent, model: recorded}
+session:
+  kind: ClaudeCode
+  budget: {max_steps: 20}
+  stop: {approval_gate: true, idle_bound: 3, on_breach: DiscardStep}
+  confinement: none
+  tools:
+    decisions: ask
