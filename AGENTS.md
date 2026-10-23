@@ -755,7 +755,7 @@ abstained, and `by_decider`), else none (unknown), never an empty list: a b10x-h
 session's observed, undecided calls are unknown. They travel on the report only: never evidence, never in a
 proposal, and not on `ExecutorStep`, whose `transcript_digest` names the record they were read
 from. It is the one crate that links metaharness (`metaharness` and
-`metaharness-b10x` at tag `0.13.0`; move them together); `b10x-loom-sdk` and
+`metaharness-b10x` at tag `0.15.0`; move them together); `b10x-loom-sdk` and
 `b10x-loom-conformance` reach it through it. No `metaharness` program runs. Its tests run
 scripted sessions only (metaharness's `ScriptedRunner`): no harness program, no model, no
 network.

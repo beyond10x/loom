@@ -44,9 +44,9 @@ draws the whole boundary.
 
 ## Status
 
-Version `0.38.0`, released from source at the tag `0.38.0`
-([release](https://github.com/beyond10x/loom/releases/tag/0.38.0)). Nothing is on a registry: you
-install from the tag or depend on it with `tag = "0.38.0"`. `b10x-loom run` completed a live run
+Version `0.39.0`, released from source at the tag `0.39.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.39.0)). Nothing is on a registry: you
+install from the tag or depend on it with `tag = "0.39.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -155,14 +155,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.38.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.39.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.38.0
+b10x-loom 0.39.0
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -276,7 +276,7 @@ on a held case ([the governor](https://beyond10x.github.io/loom/docs/concepts/go
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.38.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.39.0" }
 ```
 
 The example below
@@ -355,7 +355,7 @@ surface kept stable within a release line, every port a host implements among it
 | `b10x-loom-cli` | The `b10x-loom` command line |
 | `b10x-loom-sdk` | The one crate an embedding depends on |
 | `b10x-loom-executor` | The executor: catalogue, action selection and argument generation, each model request one turn of an llm `Model` |
-| `b10x-loom-session-executor` | An `AgentExecutor` over a harness, Claude Code or Codex session run through metaharness (`0.13.0`) in a scratch copy: it proposes the session's change, never applies it, and summarizes the session's record as `trace-ir-summary/1`, with each tool call's decision and who made it; `SessionExecutor::from_spec` builds it from a `loom.agent/1` spec, offering only the spec's allowed tools |
+| `b10x-loom-session-executor` | An `AgentExecutor` over a harness, Claude Code or Codex session run through metaharness (`0.15.0`) in a scratch copy: it proposes the session's change, never applies it, and summarizes the session's record as `trace-ir-summary/1`, with each tool call's decision and who made it; `SessionExecutor::from_spec` builds it from a `loom.agent/1` spec, offering only the spec's allowed tools |
 | `b10x-loom-commission` | Commission's contracts and runtime loop, generated from its ESS specification |
 | `b10x-loom-connectors` | Commission's `ConnectorInvoker` over a Connectors service (Connectors `v0.35.0`) |
 | `b10x-loom-plugin` | The plugin host: polls a plugin, classifies each item and answers it in a governed read-only turn over Connectors data sources, one record line per item |
