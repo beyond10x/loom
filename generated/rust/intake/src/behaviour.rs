@@ -1,6 +1,6 @@
 // generated from intake v1
-// model digest c5457c9e4735af8938031585724e656e9eaa6bc6ff00f6761d8287a591db7f8c
-// contract digest f815c76fa97e91e076dd53cce6f3557b05973d54a2494e2d06a54f7355fd9c76
+// model digest b73c7b0c0fe67cd4954a2c476b82dcd2c06a3c8c05c68909779d45d9fe022c22
+// contract digest 3721cb55e566bb360e83554215936dbbf09b60969c7d8df9b1a04c19ff05b22b
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan

@@ -930,3 +930,60 @@ fn a_host_holds_a_run_in_loom_sdk_runtime() {
         "the page's embedding table lists loom_sdk::Runtime"
     );
 }
+
+/// A host declares a child's confinement as one `loom_sdk::ConfinementSpec` and applies it with
+/// `ChildCommand::confined`, every type resolved through `loom_sdk` alone, and the page's
+/// embedding table lists each (`story:confinement-spec`).
+#[test]
+fn a_host_declares_a_childs_confinement_through_loom_sdk() {
+    use loom_sdk::intake::slice::confinement::{EnvironmentEntry, ToolchainRoot};
+    use loom_sdk::{
+        BaselineVariable, ChildAperture, ChildCommand, ChildEnvironment, ChildNetwork,
+        ChildProfile, ConfinementSpec, WritableRoot,
+    };
+
+    let spec = ConfinementSpec {
+        read_only_roots: Vec::<ToolchainRoot>::new(),
+        read_only_files: Vec::new(),
+        host_paths: Vec::new(),
+        writable: Vec::new(),
+        writable_roots: Vec::<WritableRoot>::new(),
+        workdir: None,
+        environment: ChildEnvironment {
+            allow: vec![BaselineVariable::Path],
+            set: vec![EnvironmentEntry {
+                name: "MODE".into(),
+                value: "check".into(),
+            }],
+        },
+        profile: ChildProfile::Workspace,
+        network: ChildNetwork::None,
+        egress: Vec::<ChildAperture>::new(),
+        ca_bundle: None,
+        timeout_ms: None,
+        stdin: None,
+    };
+    let command = ChildCommand::new("child", Vec::<String>::new(), "workspace");
+    assert!(command.confined(&spec).is_ok(), "a plain spec applies");
+
+    let page = page();
+    let listed: BTreeSet<String> = table_column(&page, EMBEDDING_HEADING, 0)
+        .iter()
+        .flat_map(|cell| cell.split(','))
+        .map(|path| path.trim().trim_matches('`').to_owned())
+        .collect();
+    for path in [
+        "loom_sdk::ConfinementSpec",
+        "loom_sdk::ChildEnvironment",
+        "loom_sdk::BaselineVariable",
+        "loom_sdk::ChildProfile",
+        "loom_sdk::ChildNetwork",
+        "loom_sdk::ChildAperture",
+        "loom_sdk::WritableRoot",
+    ] {
+        assert!(
+            listed.contains(path),
+            "the page's embedding table lists {path}"
+        );
+    }
+}

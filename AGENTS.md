@@ -1122,7 +1122,12 @@ child alone: one under a directory another confined child may write can change w
 `ChildCommand::sandbox_path` maps a host path to the workspace (`/workspace/...`), a root's mount
 or a file's mount, never a path with `..`, through a link, or sharing only a text prefix. Substrate
 0.10.0 offers writable roots; Loom requests none (`story:writable-host-root`), so a child writes
-only in its workspace. A child starts in `/workspace` unless the host names another directory
+only in its workspace. A host may declare all of this as one value, `intake.confinement.ConfinementSpec`
+(`story:confinement-spec`): `ChildCommand::confined(&spec)` (`confinement/spec.rs`) applies each
+field through its builder, so the launch checks it as it checks the builder calls, refuses a
+non-empty `writable_roots` `CapabilityUnserved` naming it, and refuses `ScopeInvalid`, naming the
+field, a value the builder's type cannot carry (`crates/loom-intake-slice/tests/confinement_spec.rs`).
+A child starts in `/workspace` unless the host names another directory
 (`story:child-workdir`): `ChildCommand::with_workdir` takes the path as the child sees it, the
 text Substrate's wire and record carry (a host holding a host path names it through
 `sandbox_path`). `check_workdir` refuses `ScopeInvalid` before `target/` is created, naming it, a

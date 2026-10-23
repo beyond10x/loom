@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `ConfinementSpec` declares a child's confinement as one value; `ChildCommand::confined` applies it through the builders (story:confinement-spec)
+
 ## [0.37.0] - 2026-10-23
 
 ### Added
