@@ -415,7 +415,10 @@ impl<'g> Effects<'g> {
             .map_err(|e| failed(&e))?;
         let facts = Value::Object(vec![
             ("format".to_owned(), Value::Text("canon-evidence/1".into())),
-            ("id".to_owned(), Value::Text(format!("tests-{implementation}"))),
+            (
+                "id".to_owned(),
+                Value::Text(format!("tests-{implementation}")),
+            ),
             ("kind".to_owned(), Value::Text("test_result".into())),
             ("result".to_owned(), Value::Text("pass".into())),
             ("subject".to_owned(), Value::Text("implementation".into())),

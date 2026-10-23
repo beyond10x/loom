@@ -905,3 +905,28 @@ fn a_host_reads_the_decision_document_through_loom_sdk() {
         "a case the governor does not hold has no document"
     );
 }
+
+/// A host holds a run's parts in `loom_sdk::Runtime`, resolved through `loom_sdk` alone, and the
+/// page's embedding table lists it. `tests/runtime_wrapper.rs` holds what its methods return.
+#[test]
+fn a_host_holds_a_run_in_loom_sdk_runtime() {
+    use loom_sdk::Runtime;
+
+    fn parts<G: ?Sized, E: ?Sized, A: ?Sized, F: ?Sized, R, C>(
+        runtime: Runtime<'_, G, E, A, F, R, C>,
+    ) -> (R, C) {
+        runtime.into_parts()
+    }
+    let _ = parts::<(), (), (), (), (), ()>;
+
+    let page = page();
+    let listed: BTreeSet<String> = table_column(&page, EMBEDDING_HEADING, 0)
+        .iter()
+        .flat_map(|cell| cell.split(','))
+        .map(|path| path.trim().trim_matches('`').to_owned())
+        .collect();
+    assert!(
+        listed.contains("loom_sdk::Runtime"),
+        "the page's embedding table lists loom_sdk::Runtime"
+    );
+}

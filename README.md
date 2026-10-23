@@ -251,6 +251,9 @@ the selector, the argument generator, the authority provider and the effect port
 bound to Connector operations, the effect port is Commission's `ConnectorEffects` over
 `loom_sdk::connectors::ConnectorsInvoker`, which invokes each admitted request once on the host's
 Connectors endpoint for the operation's instance and reports the attempt Connectors recorded.
+`loom_sdk::Runtime` holds those parts with the governor, a run store and the loop context, and its
+`run`, `run_suspending` and `resume` call `run_until_blocked`, `run_with_suspension` and
+`resume_after_grant` with them; the free functions stay public.
 A host that wants to watch a run returns its own `loom_sdk::EventSink` from
 `LoopContext::events` and receives every step of it as it happens (step started, action selected,
 proposed, authority decided, effect invoked, session closed, stopped); the default, `NoEvents`,

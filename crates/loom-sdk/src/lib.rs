@@ -3,9 +3,10 @@
 //! The Loom SDK: one crate an application depends on to embed a governed agent.
 //!
 //! It re-exports the crates an embedder needs, under stable module names. Its modules of its own
-//! are [`agent`], an agent as data, and [`models`], a host's llm models loaded from a models
-//! configuration or a routes document; the executor's own selector and argument generator over an
-//! llm `Model` are [`loom::model_selector`].
+//! are [`agent`], an agent as data, [`models`], a host's llm models loaded from a models
+//! configuration or a routes document, and [`runtime`], a run's parts held together; the
+//! executor's own selector and argument generator over an llm `Model` are
+//! [`loom::model_selector`].
 //!
 //! | Module | Crate | What it is for |
 //! | --- | --- | --- |
@@ -20,6 +21,9 @@
 //! The items an embedding always touches are also re-exported at the top: [`run_until_blocked`],
 //! [`LoopContext`], [`LoopEnd`], [`EffectPort`], [`Loom`], [`ActionSelector`],
 //! [`ArgumentGenerator`], [`CanonGovernor`], [`CaseStore`] and [`MemoryCaseStore`].
+//! [`Runtime`] holds a run's ports, run store and loop context, and its `run`, `run_suspending`
+//! and `resume` call [`run_until_blocked`], `run_with_suspension` and `resume_after_grant` with
+//! them and return what they return.
 //! [`RunMeter`], [`MeteredModel`] and [`MeteredExecutor`] report a run's model calls, tokens
 //! and cost per executor call (`loom::metering`): a [`MeteredModel`] is an llm `Model` over
 //! the one a host built, each of its turns one call, priced with the run's [`RateCard`].
@@ -52,6 +56,7 @@ pub use b10x_loom_executor as loom;
 
 pub mod agent;
 pub mod models;
+pub mod runtime;
 
 /// The session executor (`b10x-loom-session-executor`): an `AgentExecutor` over a metaharness
 /// session in a scratch copy, which proposes the session's change and never performs it.
@@ -104,6 +109,10 @@ pub use b10x_loom_intake_slice::executor::UnconfinedRunner;
 pub use loom_governor::{
     CanonGovernor, CaseIndependence, CaseInputs, CaseStore, CompletionRule, MemoryCaseStore,
 };
+/// A run's parts held together (`story:runtime-wrapper`): its `run`, `run_suspending` and `resume`
+/// call `run_until_blocked`, `run_with_suspension` and `resume_after_grant` and return what they
+/// return.
+pub use runtime::Runtime;
 
 /// The protocol catalog shared by routing, case initialization and governor admission.
 pub use loom_protocols::ProtocolCatalog;
