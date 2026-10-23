@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `cargo run -p b10x-loom-sdk --example governed_loop`: an agent loops on a failing check until the frontier offers the merge; shows a refused selection, an approval stop and a step budget
+
 ## [0.37.0] - 2026-10-23
 
 ### Added
