@@ -2,13 +2,16 @@
 format: aep.planning-md/3
 id: story:session-executor-from-spec
 kind: story
-status: draft
+status: active
 title: SessionExecutor is built from an AgentSpec, its tools from the spec's ToolPolicy
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
 - depends_on: story:agent-domain
-revision: 1
+revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-23T01:01:33Z", actor: "human:timo", revision: 2, correlation: "wave-2026-10-23-w1"}
+- {from: "proposed", to: "active", at: "2026-10-23T01:01:34Z", actor: "human:timo", revision: 3, correlation: "wave-2026-10-23-w1"}
 ---
 ## Outcome
 

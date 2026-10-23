@@ -2,12 +2,15 @@
 format: aep.planning-md/3
 id: story:runtime-wrapper
 kind: story
-status: draft
+status: active
 title: loom_sdk::Runtime runs, suspends and resumes a commission with the parts it owns
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
-revision: 1
+revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-23T01:01:31Z", actor: "human:timo", revision: 2, correlation: "wave-2026-10-23-w1"}
+- {from: "proposed", to: "active", at: "2026-10-23T01:01:33Z", actor: "human:timo", revision: 3, correlation: "wave-2026-10-23-w1"}
 ---
 ## Outcome
 
