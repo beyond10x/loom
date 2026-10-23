@@ -26,9 +26,10 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use b10x_loom_intake_slice::confinement::{
-    Backend, ChildCommand, ChildError, ChildExit, ChildSignal, ChildStream, ConfinedChild,
-    ConfinementError, ConfinementRefusal, EgressAperture, ExecEnvironment, NetworkMode,
-    ReadOnlyFile, SandboxProfile, SubstrateRunner, TestExecution, TestRunner as _, ToolchainRoot,
+    AppliedAperture, Backend, ChildCommand, ChildError, ChildExit, ChildSignal, ChildStream,
+    ConfinedChild, ConfinementError, ConfinementRefusal, EgressAperture, ExecEnvironment,
+    NetworkMode, ReadOnlyFile, SandboxProfile, SubstrateRunner, TestExecution, TestRunner as _,
+    ToolchainRoot,
 };
 use b10x_loom_intake_slice::executor::TestCommand;
 use substrate_wire::{APERTURE_CA_BUNDLE_PATH, ApertureMechanism, AppliedNetwork};
@@ -78,7 +79,7 @@ fn a_named_child_runs_confined_and_reports_what_was_applied() {
 
             assert_eq!(result.applied.backend, Backend::Substrate);
             assert_eq!(result.applied.profile, "workspace");
-            assert_eq!(result.applied.network, "none");
+            assert!(result.applied.network.is_empty());
             assert_eq!(result.applied.writable_scopes, ["target"]);
             assert!(result.applied.read_only_roots.is_empty());
             assert!(!result.applied.cgroup.is_empty());
@@ -556,6 +557,114 @@ fn a_child_reaches_only_the_named_egress() {
     );
 }
 
+/// The host name the second aperture of the several-apertures case names its host by.
+const SEARCH_HOST: &str = "search.example.test";
+
+/// The story's case for several apertures: a child given two, each naming a loopback listener by
+/// its host name, reaches both, and fails to reach a third listener of this machine it was not
+/// given. The two named hosts listen on 127.0.0.2 and 127.0.0.3, so only the apertures carry the
+/// connections. The driver's record lists both apertures in the order named, each with the
+/// loopback address it listened on inside the sandbox, and the applied confinement names both.
+#[test]
+fn a_child_reaches_each_named_aperture_and_nothing_else() {
+    delegated(
+        "a_child_reaches_each_named_aperture_and_nothing_else",
+        |runner, workspace| {
+            if !Path::new(BASH).is_file() {
+                return skip(&format!("executable {BASH}"));
+            }
+            let (model, model_at) = loopback_host_at(Ipv4Addr::new(127, 0, 0, 2));
+            let (search, search_at) = loopback_host_at(Ipv4Addr::new(127, 0, 0, 3));
+            let (unnamed, unnamed_at) = loopback_host();
+            unnamed.set_nonblocking(true).unwrap();
+            let model_answered = answer_once(model, b"model-host\n");
+            let search_answered = answer_once(search, b"search-host\n");
+            let script = format!(
+                "read -r line < /dev/tcp/{NAMED_HOST}/{model}; printf 'model:%s\\n' \"$line\"; \
+                 read -r line < /dev/tcp/{SEARCH_HOST}/{search}; printf 'search:%s\\n' \"$line\"; \
+                 if : 2>/dev/null 3<>/dev/tcp/127.0.0.1/{unnamed}; \
+                 then echo unnamed:reached; else echo unnamed:refused; fi",
+                model = model_at.port(),
+                search = search_at.port(),
+                unnamed = unnamed_at.port(),
+            );
+            let first = EgressAperture {
+                host: NAMED_HOST.to_owned(),
+                ..model_aperture(model_at)
+            };
+            let second = EgressAperture {
+                name: "search".to_owned(),
+                host: SEARCH_HOST.to_owned(),
+                ..model_aperture(search_at)
+            };
+            let child = ChildCommand::new(BASH, ["-c", script.as_str()], workspace)
+                .with_egress(first.clone())
+                .with_egress(second.clone());
+            assert_eq!(child.network(), NetworkMode::Aperture);
+            let Some(result) = egress_result(runner.run_child(&child)) else {
+                return;
+            };
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            assert_eq!(
+                result.output,
+                "model:model-host\nsearch:search-host\nunnamed:refused\n"
+            );
+            assert!(model_answered.join().unwrap(), "the first host was reached");
+            assert!(
+                search_answered.join().unwrap(),
+                "the second host was reached"
+            );
+            assert_eq!(
+                unnamed.accept().map(|_| ()).unwrap_err().kind(),
+                std::io::ErrorKind::WouldBlock,
+                "nothing reached the host no aperture names"
+            );
+            let record = result.driver_record.as_ref().expect("the driver's record");
+            let AppliedNetwork::Apertures(applied) = &record.network else {
+                panic!("the driver applied both apertures: {:?}", record.network);
+            };
+            let named: Vec<_> = applied
+                .iter()
+                .map(|applied| {
+                    (
+                        applied.name.as_str(),
+                        applied.destination.clone(),
+                        applied.listen.clone(),
+                    )
+                })
+                .collect();
+            assert_eq!(
+                named,
+                [
+                    (
+                        "model",
+                        model_at.to_string(),
+                        Some(format!("127.0.0.1:{}", model_at.port()))
+                    ),
+                    (
+                        "search",
+                        search_at.to_string(),
+                        Some(format!("127.0.0.2:{}", search_at.port()))
+                    ),
+                ]
+            );
+            let listed: Vec<_> = applied
+                .iter()
+                .map(|applied| AppliedAperture {
+                    name: applied.name.clone(),
+                    destination: applied.destination.clone(),
+                    listen: applied.listen.clone(),
+                })
+                .collect();
+            assert_eq!(
+                result.applied.network, listed,
+                "the applied confinement lists every aperture"
+            );
+            assert_eq!(child.egress(), [first, second]);
+        },
+    );
+}
+
 /// An egress profile that names no host, by asking for an aperture without one or naming one with
 /// no host, is refused before anything starts: no driver opens and the workspace is untouched.
 #[test]
@@ -614,12 +723,19 @@ fn the_applied_record_names_the_egress() {
             let (_named, address) = loopback_host();
             let child = ChildCommand::new("true", [] as [&str; 0], workspace)
                 .with_egress(model_aperture(address));
-            assert_eq!(child.egress(), Some(&model_aperture(address)));
+            assert_eq!(child.egress(), [model_aperture(address)]);
             let Some(result) = egress_result(runner.run_child(&child)) else {
                 return;
             };
             assert_eq!(result.exit_code, Some(0), "{}", result.output);
-            assert_eq!(result.applied.network, format!("aperture:model@{address}"));
+            assert_eq!(
+                result.applied.network,
+                [AppliedAperture {
+                    name: "model".to_owned(),
+                    destination: address.to_string(),
+                    listen: None,
+                }]
+            );
             assert_eq!(result.applied.profile, "workspace");
             assert_eq!(result.applied.writable_scopes, ["target"]);
             assert!(result.applied.read_only_roots.is_empty());
@@ -636,7 +752,7 @@ fn the_applied_record_names_the_egress() {
             let plain = runner
                 .run_child(&ChildCommand::new("true", [] as [&str; 0], workspace))
                 .expect("a child with no egress runs beside it");
-            assert_eq!(plain.applied.network, "none");
+            assert!(plain.applied.network.is_empty());
             assert_eq!(
                 plain.driver_record.as_ref().map(|record| &record.network),
                 Some(&AppliedNetwork::None)
@@ -1211,7 +1327,7 @@ fn a_live_child_echoes_what_it_is_written() {
             assert!(result.output.stderr.is_empty());
             assert!(!result.output.stdout_truncated && !result.output.stderr_truncated);
             assert_eq!(result.applied.backend, Backend::Substrate);
-            assert_eq!(result.applied.network, "none");
+            assert!(result.applied.network.is_empty());
             assert_eq!(result.applied.writable_scopes, ["target"]);
             assert_eq!(result.applied.profile_digest.len(), 64);
             assert_eq!(result.driver_record.network, AppliedNetwork::None);

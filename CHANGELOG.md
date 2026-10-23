@@ -12,6 +12,15 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `ChildCommand::with_egress` takes up to `MAX_EGRESS_APERTURES` (4) apertures; the child reaches each host by name (story:several-egress-apertures)
+
+### Changed
+
+- **Breaking:** `AppliedConfinement.network` is a `Vec<AppliedAperture>` listing every aperture, no longer a `String` (story:several-egress-apertures)
+- **Breaking:** `ChildCommand::egress` returns `&[EgressAperture]`, no longer `Option<&EgressAperture>` (story:several-egress-apertures)
+
 ## [0.36.0] - 2026-10-23
 
 ### Added

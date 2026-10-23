@@ -138,7 +138,8 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | A session's change returns as a `ProposedAction` whose arguments are `{files}` only, a removed file's content null, and reaches the workspace only through the effect after revalidation; a proposal on a moved case is refused and never invoked; a workspace write made while the session runs is never proposed back, and one to a file the session changed (or added), or a link that now reaches a named path, suspends the step with `ExternalAvailability` instead of proposing it, as a named file not spelled as one plain relative path does before any session; each call mints a session id and records the session under the real commission and frontier ids; its summary and transcript digest ride on `ExecutorStep` and the step's observation, never as evidence; its usage is charged to the run; two sessions proposing the same files are the same request for the idle check | `crates/loom-session-executor/tests/proposes.rs`, `crates/loom-session-executor/src/lib.rs` (`a_named_path_a_link_reaches_since_the_copy_is_stale_not_gone`, `a_file_has_one_plain_spelling`) |
 | A Codex session is recorded `Codex`, its every call decided by the executor, its home and XDG directories its own beside the copy, and its input charged less the cached tokens; one written by a codex outside the pin is held by H9 and suspends with `ExternalAvailability`; a b10x-harness session is recorded `Harness`, none of its calls decided, and charged the cost it stated and its calls' tokens summed, its input less the cached and cache-write tokens on every wire (b10x-harness states its input figure as the whole, those two parts of it), never below zero; a terminal usage total, where a session states one, is charged instead of the sum, never beside it | `crates/loom-session-executor/tests/kinds.rs` (`a_b10x_sessions_cache_writes_are_not_charged_twice`), `crates/loom-session-executor/src/lib.rs` (`a_terminal_usage_total_is_charged_once_and_events_only_without_one`) |
 | A session's report lists each tool call's decision and who decided it, in record order, read from the `trace-ir/1` document of the events metaharness delivered; a record without a decision census, with a requested call it did not decide, or whose decisions disagree with any census count (each kind, `by_decider`) reports them unknown, never none; an empty tool name is no tool; they are never evidence nor in a proposal | `crates/loom-session-executor/tests/tool_decisions.rs` (`each_tool_decision_of_the_record_is_in_the_report`, `a_record_without_decisions_says_so`), `crates/loom-session-executor/tests/adversary_w20261022w3_tool_decisions.rs` |
-| A confined child reads a host directory or file only where the host names it, read-only, at a mount Substrate does not own and no other mount overlaps, never the workspace, its bundle or the driver's state; a path that is absent, linked, of the wrong kind, not canonical or past 4 roots or 16 files is refused `ScopeInvalid` before launch, naming it; the record must name exactly the requested roots and files, and no working directory, writable root or list of apertures; `sandbox_path` maps only the workspace and the mounts | `crates/loom-intake-slice/tests/confined_child.rs` (`a_read_only_root_at_its_host_path_is_readable_and_not_writable`, `a_read_only_file_is_mounted_where_named`, `a_mount_under_a_reserved_path_is_refused_before_launch`, `overlapping_mounts_are_refused_before_launch`, `a_fifth_root_is_refused_before_launch`, `a_symlinked_or_absent_host_path_is_refused_naming_it`, `sandbox_path_maps_the_workspace_and_each_root`), `crates/loom-intake-slice/src/confinement.rs` (`a_record_naming_other_read_only_roots_is_refused`, `a_record_reporting_a_workdir_writable_roots_or_apertures_is_refused`) |
+| A confined child reads a host directory or file only where the host names it, read-only, at a mount Substrate does not own and no other mount overlaps, never the workspace, its bundle or the driver's state; a path that is absent, linked, of the wrong kind, not canonical or past 4 roots or 16 files is refused `ScopeInvalid` before launch, naming it; the record must name exactly the requested roots and files, and no working directory, writable root or list of apertures it did not ask for; `sandbox_path` maps only the workspace and the mounts | `crates/loom-intake-slice/tests/confined_child.rs` (`a_read_only_root_at_its_host_path_is_readable_and_not_writable`, `a_read_only_file_is_mounted_where_named`, `a_mount_under_a_reserved_path_is_refused_before_launch`, `overlapping_mounts_are_refused_before_launch`, `a_fifth_root_is_refused_before_launch`, `a_symlinked_or_absent_host_path_is_refused_naming_it`, `sandbox_path_maps_the_workspace_and_each_root`), `crates/loom-intake-slice/src/confinement.rs` (`a_record_naming_other_read_only_roots_is_refused`, `a_record_reporting_a_workdir_writable_roots_or_apertures_is_refused`) |
+| A confined child given up to four egress apertures reaches each by its host's name and no other host; the applied confinement lists every aperture, and a record naming another set, order or listen address is refused; the shared driver is keyed by the whole set in order; more than four, a name given twice, two apertures naming one host, and a later aperture naming an IPv4 literal or `localhost` are refused `ScopeInvalid` before launch, naming the count or the host | `crates/loom-intake-slice/tests/confined_child.rs` (`a_child_reaches_each_named_aperture_and_nothing_else`), `crates/loom-intake-slice/src/confinement/several_apertures.rs` (`more_than_four_apertures_are_refused_naming_the_count`, `one_aperture_name_given_twice_is_refused_naming_it`, `a_later_aperture_naming_an_ipv4_literal_or_localhost_is_refused_naming_the_host`, `two_apertures_naming_one_host_are_refused_naming_it`, `a_record_must_list_exactly_the_apertures_requested_in_order`, `a_driver_is_keyed_by_the_whole_set_and_declares_each_aperture`) |
 | The executor answers the commands of `ess/` as their synthesized scenarios specify, except `not-in-frontier`, which the conformance target answers; the session executor answers `loom.session.ProposeSessionChange` over a scripted Claude Code session | `task conform` (`crates/loom-conformance/tests/conform.rs`, `ess_conformance_report`); the membership rule: `crates/loom-executor/tests/adversary_run_revalidation.rs` (`not_in_frontier_follows_the_frontier_actions`) |
 | The intake slice answers the commands of `ess/intake/` as their synthesized scenarios specify: a resume context is kept once (`KeepResumeContext`) and dropped (`DropResumeContext`), a merge hand-off is recorded once per request and per `HEAD` (`RecordMergeHandoff`), and the stores read back what the views `ResumeContexts` and `MergeHandoffs` publish | `task intake-conform` (`crates/loom-intake-conformance/tests/conform.rs`, `ess_conformance_report`) |
 | The router refuses a pick outside the registry or below the threshold | `crates/loom-intake-router/tests/adversary_classify.rs` |
@@ -1006,8 +1007,9 @@ a skip with a named missing prerequisite establishes no qualification.
 `SubstrateRunner::run_child` confines a child process the host names (`ChildCommand`: program and
 arguments, the directory adopted as the workspace, the workspace directories it may write beside
 `target/` (`with_writable`), and Substrate's `ExecEnvironment`,
-`SandboxProfile` and `NetworkMode`, `NetworkMode::None` by default, or with `with_egress` the one
-Substrate `EgressAperture` it may reach, and with `with_ca_bundle` the certificate bundle it
+`SandboxProfile` and `NetworkMode`, `NetworkMode::None` by default, or with `with_egress`, once
+per aperture, the Substrate `EgressAperture`s it may reach, at most `MAX_EGRESS_APERTURES` (4),
+and with `with_ca_bundle` the certificate bundle it
 trusts there) on the same launch path:
 writes only under `target/` and the directories named (Substrate's `WorkspaceAccess::Scoped`;
 `.git` only when named; a path that is absolute, climbs out with `..`, passes a symlink, is absent
@@ -1016,18 +1018,25 @@ or no directory, holds a special file or a hard link from outside, or overlaps a
 confinement's `writable_scopes` lists them, a record naming another set refused), no toolchain or
 cache mounted, exactly the named environment (with a bundle, plus `SSL_CERT_FILE`), a typed
 refusal for a missing guarantee, only the requested network accepted as applied, no network or
-exactly the named aperture (name, pinned destination, mechanism, ceiling), checked after the child
+exactly the named apertures, in order (name, pinned destination, mechanism, ceiling, and for
+several the address `127.0.0.<n>` each listens on), checked after the child
 ran and refusing its result as a test's is refused, a result with no exit status refused unless
 its timeout or its aperture's byte ceiling (`exec.aperture-byte-limit`, named in its output, its
 driver record counting the bytes) ended it, and the applied confinement in its `TestExecution`,
-whose `network` names an aperture `aperture:<name>@<destination>`. The child reaches the aperture
-by the host's name, which Substrate maps to its forwarder on `127.0.0.1` inside the sandbox. An
+whose `network` lists every aperture (`intake.confinement.AppliedAperture`: name, destination
+and, for several, `listen`), a record naming another set, order or address refused. The child
+reaches each aperture by its host's name, which Substrate maps to its forwarder inside the
+sandbox: `127.0.0.1` for one aperture, `127.0.0.<n>` for the n-th of several. An
 aperture declaration Substrate's daemon never makes (no host or port, a name it refuses, a zero
 byte ceiling, a host that is no host name or IPv4 literal, an IPv4 literal other than the pinned
 address, a pinned address that is no IPv4 one or not at the named port), and an IPv4 literal host
 other than `127.0.0.1`, which the child could not reach the host by, are refused `ScopeInvalid`
 before anything starts, the refusal naming the host; one Substrate did not publish when the driver opened (its mechanism unproven) is refused
-`CapabilityUnserved`. Substrate gives a run at most one aperture. A certificate bundle
+`CapabilityUnserved`. Several apertures are refused `ScopeInvalid` before anything starts when
+there are more than four (naming the count), when one name is given twice, when two name one host
+(ASCII case aside, a trailing `.` ignored; Substrate maps a name to one aperture) and when the
+second to fourth names its host by an IPv4 literal or `localhost`, which only the first listens on;
+each refusal names the aperture and its host. A certificate bundle
 (`with_ca_bundle`) is read once per launch through an open with its last component not followed
 (`O_NOFOLLOW`), and the child trusts the bytes read then: the driver is given a private
 read-only copy of them in its own state directory (`CaBundle::write_private_copy`, removed with
@@ -1038,7 +1047,7 @@ store the child gets through `SSL_CERT_FILE`; beside it, the environment may not
 variables, so a host does not override by accident the bundle it named. That is no guarantee
 about what the child trusts: configuration under `HOME`, a program's own flags and variables not
 listed can still point a client elsewhere or turn verification off; what the child reaches is
-bounded by the aperture. A bundle for a child with no aperture, a path that is not UTF-8 or not
+bounded by the apertures. A bundle for a child with no aperture, a path that is not UTF-8 or not
 absolute, one beside an environment naming a listed variable (`TRUST_STORE_VARIABLES`:
 `SSL_CERT_FILE`, `SSL_CERT_DIR`, `CURL_CA_BUNDLE`, `CURL_CA_PATH`, `CURL_HOME`,
 `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`,
@@ -1050,8 +1059,9 @@ empty, holds more than 1 MiB (`MAX_CA_BUNDLE_BYTES`, Substrate's ceiling) or can
 on the path and again on the file opened, are refused `ScopeInvalid` before anything starts,
 naming the path (`check_ca_bundle`). A program containing `=` or starting with `-` (test or child)
 is refused before anything starts: Substrate execs through `/usr/bin/env`, which reads it as an
-assignment or an option. A runner and its clones share one driver per workspace directory, egress
-aperture and certificate bundle, the bundle compared as its path and the bytes read
+assignment or an option. A runner and its clones share one driver per workspace directory, set
+of egress apertures (the whole set, in order) and certificate bundle, the bundle compared as its
+path and the bytes read
 (`DriverEgress`: Substrate fixes a driver's apertures and bundle when it opens), so children naming
 different bundles, or a bundle whose bytes changed, never share one,
 because opening a driver kills every `substrate-ex_*` cgroup under its root; each launch discards
@@ -1089,8 +1099,8 @@ own `validate_read_only_roots` and `validate_read_only_files`. Once the driver o
 `check_driver_mounts` refuses a mount reaching its state directory and files on a driver without
 `exec.read-only-files` (`CapabilityUnserved`). The record must name exactly the roots and files
 requested, for `run_child` and a live child alike (`check_record`), and `AppliedConfinement`
-projects both; a record naming a working directory, a writable root or several apertures, which
-Loom never requests, is refused (`a_record_reporting_a_workdir_writable_roots_or_apertures_is_refused`),
+projects both; a record naming a working directory or a writable root, which Loom never
+requests, or several apertures where it asked for one or none, is refused (`a_record_reporting_a_workdir_writable_roots_or_apertures_is_refused`),
 as is one naming an execution capsule or its filesystem, or a single aperture naming a listen
 address (`security_a_record_naming_an_unrequested_capsule_is_refused`,
 `security_a_single_aperture_record_naming_a_listen_address_is_refused`); `check_record` takes

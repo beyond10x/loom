@@ -1,14 +1,14 @@
 <!--
   generated from intake v1
-  model digest 4ed9220e25a096d3ee91fdabe8d0f6b9cdd3b59b5a826a2dfa07924bac771607
-  contract digest 0d10146dd4b2743e959d71f4eeb3cfb293bf2dba47c285732ceb93672da1b95c
+  model digest 03ca6d3152cdf9e92b78bf5ba33c285e6da58b46352672d4f2efc355fb35043a
+  contract digest ca8ccdc30704d0dff46a99a90c7cb17156bb786caa37ba194a7b9e3f80caed97
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — intake v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-96 capabilities: **93 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+97 capabilities: **94 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -17,6 +17,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `intake.bindings.ActionBinding` |
 | domain type | `intake.bindings.ActionBindings` |
 | domain type | `intake.bindings.CommandEvidence` |
+| domain type | `intake.confinement.AppliedAperture` |
 | domain type | `intake.confinement.AppliedConfinement` |
 | domain type | `intake.confinement.Backend` |
 | domain type | `intake.confinement.ChildExit` |

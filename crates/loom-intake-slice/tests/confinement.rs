@@ -78,7 +78,7 @@ fn real_confinement_rust_system_tools_and_cleanup() {
             .unwrap();
         assert_eq!(result.exit_code, Some(0), "{}", result.output);
         assert_eq!(result.applied.backend, Backend::Substrate);
-        assert_eq!(result.applied.network, "none");
+        assert!(result.applied.network.is_empty());
         assert_eq!(result.applied.writable_scopes, ["target"]);
         let record = result.driver_record.as_ref().expect("actual driver record");
         assert_eq!(record.cgroup, result.applied.cgroup);

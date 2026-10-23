@@ -57,13 +57,13 @@ fn security_a_single_aperture_record_naming_a_listen_address_is_refused() {
     let input = child.input("space", "snapshot".to_owned());
     check_record(
         &input,
-        Some(&model()),
+        &[model()],
         &exact(&input, AppliedNetwork::Aperture(aperture(None))),
     )
     .unwrap();
     for listen in ["127.0.0.2:443", "0.0.0.0:443"] {
         let record = exact(&input, AppliedNetwork::Aperture(aperture(Some(listen))));
-        let refused = check_record(&input, Some(&model()), &record);
+        let refused = check_record(&input, &[model()], &record);
         assert!(
             refused.is_err(),
             "a record whose single aperture listened on {listen} was accepted as the requested aperture"
@@ -78,7 +78,7 @@ fn security_a_record_naming_an_unrequested_capsule_is_refused() {
     let child = ChildCommand::new("true", [] as [&str; 0], "/work/space");
     let input = child.input("space", "snapshot".to_owned());
     assert!(input.capsule.is_none());
-    check_record(&input, None, &exact(&input, AppliedNetwork::None)).unwrap();
+    check_record(&input, &[], &exact(&input, AppliedNetwork::None)).unwrap();
     let record = substrate_wire::AppliedConfinement {
         filesystem:
             substrate_wire::AppliedFilesystem::WorkspaceReadWriteCapsuleReadOnlySystemReadOnly,
@@ -92,7 +92,7 @@ fn security_a_record_naming_an_unrequested_capsule_is_refused() {
         ..exact(&input, AppliedNetwork::None)
     };
     assert!(
-        check_record(&input, None, &record).is_err(),
+        check_record(&input, &[], &record).is_err(),
         "a record reporting a capsule Loom did not request was accepted"
     );
 }

@@ -1182,7 +1182,7 @@ impl TestRunner for UnconfinedRunner {
                 capability_snapshot: String::new(),
                 cgroup: String::new(),
                 filesystem: "unconfined".to_owned(),
-                network: "unconfined".to_owned(),
+                network: Vec::new(),
                 profile: "none".to_owned(),
                 writable_scopes: Vec::new(),
                 read_only_roots: Vec::new(),
@@ -1210,7 +1210,9 @@ fn observation_confinement(execution: &TestExecution) -> Value {
         "capability_snapshot": applied.capability_snapshot,
         "cgroup": applied.cgroup,
         "filesystem": applied.filesystem,
-        "network": applied.network,
+        "network": applied.network.iter().map(|aperture|
+            serde_json::json!({"name": aperture.name, "destination": aperture.destination, "listen": aperture.listen})
+        ).collect::<Vec<_>>(),
         "profile": applied.profile,
         "writable_scopes": applied.writable_scopes,
         "read_only_roots": applied.read_only_roots.iter().map(|root|

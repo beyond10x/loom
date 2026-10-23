@@ -1,6 +1,6 @@
 // generated from intake v1
-// model digest 4ed9220e25a096d3ee91fdabe8d0f6b9cdd3b59b5a826a2dfa07924bac771607
-// contract digest 0d10146dd4b2743e959d71f4eeb3cfb293bf2dba47c285732ceb93672da1b95c
+// model digest 03ca6d3152cdf9e92b78bf5ba33c285e6da58b46352672d4f2efc355fb35043a
+// contract digest ca8ccdc30704d0dff46a99a90c7cb17156bb786caa37ba194a7b9e3f80caed97
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Run events — `intake.events`.
