@@ -80,3 +80,63 @@ types:
       - {name: exit_code, type: "Optional<Integer>"}
       - {name: signal, type: "Optional<Integer>"}
       - {name: timed_out, type: Boolean}
+  # A host directory a child would write at a mount outside its workspace (Substrate's writable
+  # host root). Declared so a confinement spec can name one; no Loom release honours it yet.
+  - name: intake.confinement.WritableRoot
+    kind: struct
+    fields:
+      - {name: host_path, type: String}
+      - {name: mount, type: String}
+  # A variable of the host's environment a child may keep by name (Substrate's baseline
+  # environment): LANG, LC_ALL, PATH, TERM and TZ, in this order.
+  - name: intake.confinement.BaselineVariable
+    kind: enum
+    variants: [Lang, LcAll, Path, Term, Tz]
+  # A child's whole environment: the baseline variables it keeps and the variables it is set, each
+  # name at most once.
+  - name: intake.confinement.ChildEnvironment
+    kind: struct
+    fields:
+      - {name: allow, type: "List<intake.confinement.BaselineVariable>"}
+      - {name: set, type: "List<intake.confinement.EnvironmentEntry>"}
+  # The sandbox profile a child asks for (Substrate's sandbox profile).
+  - name: intake.confinement.ChildProfile
+    kind: enum
+    variants: [Workspace]
+  # The network a child asks for (Substrate's network mode): none, or its egress apertures alone.
+  - name: intake.confinement.ChildNetwork
+    kind: enum
+    variants: [None, Aperture]
+  # One egress aperture a child may reach (Substrate's egress aperture): its name, the host and port
+  # the host names, the socket address that host was resolved to, and an optional byte ceiling.
+  - name: intake.confinement.ChildAperture
+    kind: struct
+    fields:
+      - {name: name, type: String}
+      - {name: host, type: String}
+      - {name: port, type: Integer}
+      - {name: pinned, type: String}
+      - {name: max_bytes, type: "Optional<Integer>"}
+  # A child's confinement as one value: each field means what the child command's builder of the
+  # same name means, and applying the spec runs those builders, so every check at launch is the
+  # same. `writable` are workspace directories beside `target`; `host_paths` are read at their own
+  # path; `egress` apertures make the network the apertures alone, whatever `network` says;
+  # `timeout_ms` absent is the default timeout; `stdin` absent leaves standard input empty.
+  # `writable_roots` is refused while it is not empty, naming it: Loom requests no writable root
+  # outside the workspace.
+  - name: intake.confinement.ConfinementSpec
+    kind: struct
+    fields:
+      - {name: read_only_roots, type: "List<intake.confinement.ToolchainRoot>"}
+      - {name: read_only_files, type: "List<intake.confinement.ReadOnlyFile>"}
+      - {name: host_paths, type: "List<String>"}
+      - {name: writable, type: "List<String>"}
+      - {name: writable_roots, type: "List<intake.confinement.WritableRoot>"}
+      - {name: workdir, type: "Optional<String>"}
+      - {name: environment, type: intake.confinement.ChildEnvironment}
+      - {name: profile, type: intake.confinement.ChildProfile}
+      - {name: network, type: intake.confinement.ChildNetwork}
+      - {name: egress, type: "List<intake.confinement.ChildAperture>"}
+      - {name: ca_bundle, type: "Optional<String>"}
+      - {name: timeout_ms, type: "Optional<Integer>"}
+      - {name: stdin, type: "Optional<Bytes>"}
