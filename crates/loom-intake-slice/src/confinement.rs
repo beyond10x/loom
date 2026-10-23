@@ -38,6 +38,8 @@ use substrate_wire::{
 pub use substrate_wire::{BaselineEnvironment, ExecEnvironment, NetworkMode, SandboxProfile};
 
 mod child;
+#[cfg(test)]
+mod security_w20261023w1_u3;
 pub use child::{ChildError, ChildFrame, ChildResult, ChildSignal, ConfinedChild};
 
 static NEXT_EXEC: AtomicU64 = AtomicU64::new(0);
@@ -971,9 +973,9 @@ impl TestRunner for SubstrateRunner {
 /// a child sees only the host directories and files the host names, read-only, each at the mount
 /// the host names ([`ChildCommand::with_read_only_root`], [`ChildCommand::with_read_only_file`])
 /// or at its own host path ([`ChildCommand::at_host_path`]). [`ChildCommand::sandbox_path`] says
-/// where a host path is inside. The child always starts in `/workspace`, and Substrate 0.7.18
-/// offers no writable path outside the workspace: a directory outside it, such as a linked
-/// worktree's common git directory, can be given read-only only.
+/// where a host path is inside. The child always starts in `/workspace`, and Loom requests no
+/// writable path outside the workspace, though Substrate 0.10.0 offers writable roots: a directory
+/// outside it, such as a linked worktree's common git directory, can be given read-only only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChildCommand {
     program: String,
@@ -1412,6 +1414,7 @@ impl ChildCommand {
                 network: self.network,
                 // A name only: the destination is the driver's declaration, never the request's.
                 aperture: self.egress.as_ref().map(|aperture| aperture.name.clone()),
+                apertures: Vec::new(),
                 profile: self.profile,
                 required: true,
             },
@@ -1443,6 +1446,8 @@ impl ChildCommand {
             secret_slots: Vec::new(),
             capsule: None,
             lease_ttl_ms: None,
+            workdir: None,
+            writable_roots: Vec::new(),
         }
     }
 }
@@ -2043,11 +2048,11 @@ fn canonical_workspace(root: &Path) -> Result<PathBuf, ConfinementError> {
 /// 6. no host path that is, holds or lies inside the workspace;
 /// 7. Substrate's own rules for the request's roots and files, which its driver applies again.
 ///
-/// What remains between this check and the bind: Substrate checks a root's last component only
-/// and bubblewrap binds it by its path, so a directory renamed or replaced by a link along the
-/// path after this check is bound as it is then; a file is opened by Substrate without following
-/// any link and bound as opened, so only a regular file put in its place in that window is
-/// bound instead.
+/// What remains between this check and the bind: Substrate's admission opens each root and file
+/// once, refusing a link at any component, and bubblewrap binds the descriptor it opened
+/// (`--ro-bind-fd`; Substrate's `crates/substrate-host/src/read_only_roots.rs` and
+/// `read_only_files.rs`), so only a directory or regular file put in its place between this check
+/// and that admission is bound instead; nothing swapped after admission is.
 fn check_mounts<'a>(
     child: &'a ChildCommand,
     ca_bundle: Option<&CaBundle>,
@@ -2359,22 +2364,46 @@ fn check_driver_mounts(
 /// Accept Substrate's record of what it applied only when it is the confinement `input` required:
 /// its workspace access (exactly the writable paths requested, so a record reporting a wider or
 /// another writable set is refused), profile, read-only roots, read-only files and capability
-/// snapshot, no secret slot, a cgroup, and exactly the requested network ([`network_applied`]). A
-/// test's launch and a child's are held to the same record.
+/// snapshot, no secret slot, a cgroup, and exactly the requested network ([`network_applied`]); no
+/// working directory, writable root, list of apertures or execution capsule, which Loom never
+/// requests, and so the filesystem Substrate applies without a capsule. A test's launch and a
+/// child's are held to the same record. The record is taken apart without `..`, so a member a
+/// later Substrate adds does not compile until it is judged here.
 fn check_record(
     input: &ExecStartInput,
     egress: Option<&EgressAperture>,
     record: &substrate_wire::AppliedConfinement,
 ) -> Result<(), ConfinementError> {
-    if record.workspace_access != input.workspace_access
-        || !network_applied(input.sandbox.network, egress, &record.network)
+    let substrate_wire::AppliedConfinement {
+        capability_snapshot,
+        cgroup,
+        filesystem,
+        network,
+        profile,
+        workspace_access,
+        capsule,
+        read_only_roots,
+        read_only_files,
+        secret_slots,
+        workdir,
+        writable_roots,
+    } = record;
+    if *workspace_access != input.workspace_access
+        || !network_applied(input.sandbox.network, egress, network)
         || input.sandbox.aperture.as_deref() != egress.map(|aperture| aperture.name.as_str())
-        || record.profile != input.sandbox.profile
-        || record.read_only_roots != input.read_only_roots
-        || record.read_only_files != input.read_only_files
-        || !record.secret_slots.is_empty()
-        || record.capability_snapshot != input.sandbox.capability_snapshot
-        || record.cgroup.is_empty()
+        || *profile != input.sandbox.profile
+        || *read_only_roots != input.read_only_roots
+        || *read_only_files != input.read_only_files
+        || *workdir != input.workdir
+        || !input.writable_roots.is_empty()
+        || !writable_roots.is_empty()
+        || !input.sandbox.apertures.is_empty()
+        || input.capsule.is_some()
+        || capsule.is_some()
+        || *filesystem != substrate_wire::AppliedFilesystem::WorkspaceReadWriteSystemReadOnly
+        || !secret_slots.is_empty()
+        || *capability_snapshot != input.sandbox.capability_snapshot
+        || cgroup.is_empty()
     {
         return Err(refuse(
             ConfinementRefusal::CapabilityUnserved,
@@ -2386,8 +2415,10 @@ fn check_record(
 
 /// Whether the network Substrate applied is the one requested: no network for
 /// [`NetworkMode::None`], and for [`NetworkMode::Aperture`] exactly the declared aperture, by its
-/// name, pinned destination, mechanism and byte ceiling. Any other network, wider or narrower, is
-/// not the one requested.
+/// name, pinned destination, mechanism and byte ceiling, with no listen address, which Substrate
+/// sets only on the elements of a list of apertures. Any other network, wider or narrower, is
+/// not the one requested. The aperture is taken apart without `..`, as [`check_record`] takes the
+/// record; its byte counts are what crossed and judge nothing.
 fn network_applied(
     requested: NetworkMode,
     egress: Option<&EgressAperture>,
@@ -2396,11 +2427,21 @@ fn network_applied(
     match (requested, egress, applied) {
         (NetworkMode::None, None, AppliedNetwork::None) => true,
         (NetworkMode::Aperture, Some(declared), AppliedNetwork::Aperture(applied)) => {
-            applied.mode == ApertureMode::Aperture
-                && applied.name == declared.name
-                && applied.destination == declared.pinned.to_string()
-                && applied.mechanism == ApertureMechanism::LoopbackForwarder
-                && applied.max_bytes == declared.max_bytes
+            let substrate_wire::AppliedAperture {
+                mode,
+                name,
+                destination,
+                mechanism,
+                bytes: _,
+                max_bytes,
+                listen,
+            } = applied;
+            *mode == ApertureMode::Aperture
+                && *name == declared.name
+                && *destination == declared.pinned.to_string()
+                && *mechanism == ApertureMechanism::LoopbackForwarder
+                && *max_bytes == declared.max_bytes
+                && listen.is_none()
         }
         _ => false,
     }
@@ -2414,13 +2455,19 @@ fn network_name(aperture: Option<(&str, &str)>) -> String {
     )
 }
 
-/// The network Substrate applied, named as [`network_name`] names it.
+/// The network Substrate applied, named as [`network_name`] names it; several apertures, which
+/// [`check_record`] never accepts, are each named so and joined with `,`.
 fn applied_network_name(network: &AppliedNetwork) -> String {
     match network {
         AppliedNetwork::None => network_name(None),
         AppliedNetwork::Aperture(applied) => {
             network_name(Some((&applied.name, &applied.destination)))
         }
+        AppliedNetwork::Apertures(applied) => applied
+            .iter()
+            .map(|applied| network_name(Some((&applied.name, &applied.destination))))
+            .collect::<Vec<_>>()
+            .join(","),
     }
 }
 
@@ -2719,6 +2766,7 @@ impl RustClosure {
                 capability_snapshot: snapshot,
                 network: NetworkMode::None,
                 aperture: None,
+                apertures: Vec::new(),
                 profile: SandboxProfile::Workspace,
                 required: true,
             },
@@ -2734,6 +2782,8 @@ impl RustClosure {
             secret_slots: Vec::new(),
             capsule: None,
             lease_ttl_ms: None,
+            workdir: None,
+            writable_roots: Vec::new(),
         })
     }
 }
@@ -3198,6 +3248,76 @@ mod tests {
         }
     }
 
+    /// Substrate 0.10.0 can apply a working directory, writable roots and several apertures. Loom
+    /// requests none of them, so a record reporting any of them, for a child run to its end or a
+    /// live child, is not the confinement requested and is refused.
+    #[test]
+    fn a_record_reporting_a_workdir_writable_roots_or_apertures_is_refused() {
+        let child = ChildCommand::new("true", [] as [&str; 0], "/work/space").with_egress(model());
+        let run = child.input("space", "snapshot".to_owned());
+        let live = child.session_input("space", "snapshot".to_owned()).exec;
+        for input in [&run, &live] {
+            assert_eq!(input.workdir, None);
+            assert!(input.writable_roots.is_empty());
+            assert!(input.sandbox.apertures.is_empty());
+            let single = applied_aperture("model", PINNED, None);
+            let exact = record_for(input, single.clone());
+            check_record(input, Some(&model()), &exact).unwrap();
+            let AppliedNetwork::Aperture(applied) = single else {
+                unreachable!("an applied aperture");
+            };
+            let others = [
+                substrate_wire::AppliedConfinement {
+                    workdir: Some(SANDBOX_WORKSPACE.to_owned()),
+                    ..exact.clone()
+                },
+                substrate_wire::AppliedConfinement {
+                    workdir: Some("/workspace/src".to_owned()),
+                    ..exact.clone()
+                },
+                substrate_wire::AppliedConfinement {
+                    writable_roots: vec![substrate_wire::AppliedWritableRoot::Host {
+                        name: "cache".to_owned(),
+                        host_path: "/srv/cache".to_owned(),
+                        mount: "/cache".to_owned(),
+                    }],
+                    ..exact.clone()
+                },
+                substrate_wire::AppliedConfinement {
+                    writable_roots: vec![substrate_wire::AppliedWritableRoot::Git {
+                        workspace: "ws_other".to_owned(),
+                        host_path: "/srv/workspaces/other".to_owned(),
+                        mount: "/checkout".to_owned(),
+                    }],
+                    ..exact.clone()
+                },
+                substrate_wire::AppliedConfinement {
+                    network: AppliedNetwork::Apertures(vec![applied.clone()]),
+                    ..exact.clone()
+                },
+                substrate_wire::AppliedConfinement {
+                    network: AppliedNetwork::Apertures(vec![
+                        applied.clone(),
+                        substrate_wire::AppliedAperture {
+                            name: "other".to_owned(),
+                            listen: Some("127.0.0.2".to_owned()),
+                            ..applied.clone()
+                        },
+                    ]),
+                    ..exact.clone()
+                },
+            ];
+            for record in others {
+                let error = check_record(input, Some(&model()), &record).unwrap_err();
+                assert_eq!(
+                    error.reason,
+                    ConfinementRefusal::CapabilityUnserved,
+                    "{record:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn a_child_request_is_exactly_what_the_host_named_and_requires_substrate() {
         let environment = ExecEnvironment {
@@ -3217,6 +3337,7 @@ mod tests {
                 capability_snapshot: "snapshot".to_owned(),
                 network: NetworkMode::None,
                 aperture: None,
+                apertures: Vec::new(),
                 profile: SandboxProfile::Workspace,
                 required: true,
             }
@@ -3450,6 +3571,7 @@ mod tests {
                 from_destination: 11,
             },
             max_bytes,
+            listen: None,
         })
     }
 
@@ -3469,6 +3591,8 @@ mod tests {
             read_only_roots: input.read_only_roots.clone(),
             read_only_files: input.read_only_files.clone(),
             secret_slots: Vec::new(),
+            workdir: None,
+            writable_roots: Vec::new(),
         }
     }
 
@@ -4102,6 +4226,7 @@ mod tests {
                 capability_snapshot: "snapshot".to_owned(),
                 network: NetworkMode::Aperture,
                 aperture: Some("model".to_owned()),
+                apertures: Vec::new(),
                 profile: SandboxProfile::Workspace,
                 required: true,
             }
