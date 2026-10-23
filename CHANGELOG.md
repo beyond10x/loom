@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `loom_sdk::Runtime` holds a run's ports, run store and context; `run`, `run_suspending`, `resume` call the free functions (story:runtime-wrapper)
+
 ## [0.35.0] - 2026-10-22
 
 No breaking changes.
