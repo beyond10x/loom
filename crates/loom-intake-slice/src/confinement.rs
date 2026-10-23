@@ -38,6 +38,8 @@ use substrate_wire::{
 pub use substrate_wire::{BaselineEnvironment, ExecEnvironment, NetworkMode, SandboxProfile};
 
 mod child;
+#[cfg(test)]
+mod security_w20261023w1_u3;
 pub use child::{ChildError, ChildFrame, ChildResult, ChildSignal, ConfinedChild};
 
 static NEXT_EXEC: AtomicU64 = AtomicU64::new(0);
