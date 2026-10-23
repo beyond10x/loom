@@ -2048,11 +2048,11 @@ fn canonical_workspace(root: &Path) -> Result<PathBuf, ConfinementError> {
 /// 6. no host path that is, holds or lies inside the workspace;
 /// 7. Substrate's own rules for the request's roots and files, which its driver applies again.
 ///
-/// What remains between this check and the bind: Substrate checks a root's last component only
-/// and bubblewrap binds it by its path, so a directory renamed or replaced by a link along the
-/// path after this check is bound as it is then; a file is opened by Substrate without following
-/// any link and bound as opened, so only a regular file put in its place in that window is
-/// bound instead.
+/// What remains between this check and the bind: Substrate's admission opens each root and file
+/// once, refusing a link at any component, and bubblewrap binds the descriptor it opened
+/// (`--ro-bind-fd`; Substrate's `crates/substrate-host/src/read_only_roots.rs` and
+/// `read_only_files.rs`), so only a directory or regular file put in its place between this check
+/// and that admission is bound instead; nothing swapped after admission is.
 fn check_mounts<'a>(
     child: &'a ChildCommand,
     ca_bundle: Option<&CaBundle>,
@@ -2365,26 +2365,45 @@ fn check_driver_mounts(
 /// its workspace access (exactly the writable paths requested, so a record reporting a wider or
 /// another writable set is refused), profile, read-only roots, read-only files and capability
 /// snapshot, no secret slot, a cgroup, and exactly the requested network ([`network_applied`]); no
-/// working directory, writable root or list of apertures, which Loom never requests. A test's
-/// launch and a child's are held to the same record.
+/// working directory, writable root, list of apertures or execution capsule, which Loom never
+/// requests, and so the filesystem Substrate applies without a capsule. A test's launch and a
+/// child's are held to the same record. The record is taken apart without `..`, so a member a
+/// later Substrate adds does not compile until it is judged here.
 fn check_record(
     input: &ExecStartInput,
     egress: Option<&EgressAperture>,
     record: &substrate_wire::AppliedConfinement,
 ) -> Result<(), ConfinementError> {
-    if record.workspace_access != input.workspace_access
-        || !network_applied(input.sandbox.network, egress, &record.network)
+    let substrate_wire::AppliedConfinement {
+        capability_snapshot,
+        cgroup,
+        filesystem,
+        network,
+        profile,
+        workspace_access,
+        capsule,
+        read_only_roots,
+        read_only_files,
+        secret_slots,
+        workdir,
+        writable_roots,
+    } = record;
+    if *workspace_access != input.workspace_access
+        || !network_applied(input.sandbox.network, egress, network)
         || input.sandbox.aperture.as_deref() != egress.map(|aperture| aperture.name.as_str())
-        || record.profile != input.sandbox.profile
-        || record.read_only_roots != input.read_only_roots
-        || record.read_only_files != input.read_only_files
-        || record.workdir != input.workdir
+        || *profile != input.sandbox.profile
+        || *read_only_roots != input.read_only_roots
+        || *read_only_files != input.read_only_files
+        || *workdir != input.workdir
         || !input.writable_roots.is_empty()
-        || !record.writable_roots.is_empty()
+        || !writable_roots.is_empty()
         || !input.sandbox.apertures.is_empty()
-        || !record.secret_slots.is_empty()
-        || record.capability_snapshot != input.sandbox.capability_snapshot
-        || record.cgroup.is_empty()
+        || input.capsule.is_some()
+        || capsule.is_some()
+        || *filesystem != substrate_wire::AppliedFilesystem::WorkspaceReadWriteSystemReadOnly
+        || !secret_slots.is_empty()
+        || *capability_snapshot != input.sandbox.capability_snapshot
+        || cgroup.is_empty()
     {
         return Err(refuse(
             ConfinementRefusal::CapabilityUnserved,
@@ -2396,8 +2415,10 @@ fn check_record(
 
 /// Whether the network Substrate applied is the one requested: no network for
 /// [`NetworkMode::None`], and for [`NetworkMode::Aperture`] exactly the declared aperture, by its
-/// name, pinned destination, mechanism and byte ceiling. Any other network, wider or narrower, is
-/// not the one requested.
+/// name, pinned destination, mechanism and byte ceiling, with no listen address, which Substrate
+/// sets only on the elements of a list of apertures. Any other network, wider or narrower, is
+/// not the one requested. The aperture is taken apart without `..`, as [`check_record`] takes the
+/// record; its byte counts are what crossed and judge nothing.
 fn network_applied(
     requested: NetworkMode,
     egress: Option<&EgressAperture>,
@@ -2406,11 +2427,21 @@ fn network_applied(
     match (requested, egress, applied) {
         (NetworkMode::None, None, AppliedNetwork::None) => true,
         (NetworkMode::Aperture, Some(declared), AppliedNetwork::Aperture(applied)) => {
-            applied.mode == ApertureMode::Aperture
-                && applied.name == declared.name
-                && applied.destination == declared.pinned.to_string()
-                && applied.mechanism == ApertureMechanism::LoopbackForwarder
-                && applied.max_bytes == declared.max_bytes
+            let substrate_wire::AppliedAperture {
+                mode,
+                name,
+                destination,
+                mechanism,
+                bytes: _,
+                max_bytes,
+                listen,
+            } = applied;
+            *mode == ApertureMode::Aperture
+                && *name == declared.name
+                && *destination == declared.pinned.to_string()
+                && *mechanism == ApertureMechanism::LoopbackForwarder
+                && *max_bytes == declared.max_bytes
+                && listen.is_none()
         }
         _ => false,
     }

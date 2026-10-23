@@ -1080,12 +1080,17 @@ own `validate_read_only_roots` and `validate_read_only_files`. Once the driver o
 `exec.read-only-files` (`CapabilityUnserved`). The record must name exactly the roots and files
 requested, for `run_child` and a live child alike (`check_record`), and `AppliedConfinement`
 projects both; a record naming a working directory, a writable root or several apertures, which
-Loom never requests, is refused (`a_record_reporting_a_workdir_writable_roots_or_apertures_is_refused`).
-What remains after the check: bubblewrap binds a root by its path and Substrate checks only its
-last component, so a component swapped for a link before the bind is followed; a
-file is opened without following links, so only a regular file put in its place is bound.
-A root is bound by its path, so it must not lie under a directory another confined child may
-write.
+Loom never requests, is refused (`a_record_reporting_a_workdir_writable_roots_or_apertures_is_refused`),
+as is one naming an execution capsule or its filesystem, or a single aperture naming a listen
+address (`security_a_record_naming_an_unrequested_capsule_is_refused`,
+`security_a_single_aperture_record_naming_a_listen_address_is_refused`); `check_record` takes
+the record apart without `..`, so a member a later Substrate adds does not compile until judged.
+What remains after the check: Substrate 0.10.0's admission opens each root and file once,
+refusing a link at any component (`openat2` with `RESOLVE_NO_SYMLINKS`), and bubblewrap binds
+the descriptor it opened (`--ro-bind-fd`; Substrate's `crates/substrate-host/src/read_only_roots.rs`
+and `read_only_files.rs`), so only a directory or regular file put in its place between Loom's
+check and that admission is bound; nothing swapped after admission is. A root is read-only to the
+child alone: one under a directory another confined child may write can change while it is read.
 `ChildCommand::sandbox_path` maps a host path to the workspace (`/workspace/...`), a root's mount
 or a file's mount, never a path with `..`, through a link, or sharing only a text prefix. Substrate
 0.10.0 offers writable roots and a working directory outside `/workspace`; Loom requests neither

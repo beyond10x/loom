@@ -16,6 +16,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 - **Breaking:** Loom links Substrate 0.10.0 (`rev = "105cf718bc6a5314486c78f5fd93fabed290e30e"`); `TestExecution::driver_record` gains `workdir`, `writable_roots` and `AppliedNetwork::Apertures` (story:substrate-0-8-pin)
 
+### Security
+
+- `SubstrateRunner` refuses a Substrate record naming a capsule, the capsule filesystem or a single aperture's `listen` (story:substrate-0-8-pin)
+
 ## [0.35.0] - 2026-10-22
 
 No breaking changes.
