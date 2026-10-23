@@ -2,13 +2,16 @@
 format: aep.planning-md/3
 id: story:child-workdir
 kind: story
-status: draft
+status: active
 title: A confined child starts in the working directory the host names
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
 - depends_on: story:substrate-0-8-pin
-revision: 1
+revision: 6
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-23T03:54:53Z", actor: "human:timo", revision: 5, correlation: "wave-2026-10-23-w2"}
+- {from: "proposed", to: "active", at: "2026-10-23T03:54:53Z", actor: "human:timo", revision: 6, correlation: "wave-2026-10-23-w2"}
 ---
 ## Outcome
 
@@ -26,8 +29,9 @@ gap 3).
 - `crates/loom-intake-slice/tests/confined_child.rs`
   (`a_child_starts_in_its_named_workdir`): the child prints its working directory and it is the
   named one.
-- A workdir that is not a mount the child has (workspace, read-only root, writable root) is refused
-  `ScopeInvalid` before launch, naming it.
+- A workdir that is not at or beneath a mount the child has (the workspace or a read-only root) is
+  refused `ScopeInvalid` before launch, naming it. A workdir under a writable root waits on
+  `story:writable-host-root` (Timo's Q2) and is not accepted here.
 - The applied confinement names the workdir; a record naming another is refused.
 
 ## ESS first
@@ -43,9 +47,11 @@ A writable mount outside `/workspace` (`story:writable-host-root`).
 
 Crates: `loom-intake-slice`, `ess/intake/`. `crates/loom-intake-slice/src/confinement.rs`,
 `confinement/child.rs`, AGENTS.md, CHANGELOG.md. Same files as `story:several-egress-apertures`:
-not in one wave with it.
+not in parallel with it; in wave 2026-10-23-w2 it starts from the wave branch after that story
+merged.
 
 ## Ready
 
-Waits on `story:substrate-0-8-pin` and a Substrate release with a working directory outside
-`/workspace`.
+Ready since Substrate 0.10.0 (`105cf718`, linked by Loom 0.36.0): an exec or session start may
+name `workdir` at or beneath `/workspace` or a declared read-only root, served under the
+`exec.workdir` fact (Substrate CHANGELOG 0.9.0 § Added). Accepted in wave 2026-10-23-w2.
