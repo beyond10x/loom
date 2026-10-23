@@ -17,7 +17,9 @@ own Cargo workspace, depends on `b10x-loom-sdk` alone (by path, so it checks the
 tagged), includes the example by `#[path]` and runs it to `ApprovalRequired (repository.merge)`.
 `task consumer-check`, a step of `task check`, builds it over the workspace's `Cargo.lock` and
 fails when it no longer compiles, stops anywhere else, or resolves a second copy of a Loom or
-Canon crate. A change that breaks what this page tells you to compile against fails Loom's CI
+Canon crate. Its library, `consumers/pinned/src/agency.rs`, is a second consumer: an agent
+defined as data, a `loom.agent/1` document, run through the SDK alone until the budget and stop
+policy the document states end it. A change that breaks what this page tells you to compile against fails Loom's CI
 before a release, not your build after one.
 
 ## Depend on the SDK
