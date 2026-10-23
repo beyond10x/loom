@@ -2362,8 +2362,9 @@ fn check_driver_mounts(
 /// Accept Substrate's record of what it applied only when it is the confinement `input` required:
 /// its workspace access (exactly the writable paths requested, so a record reporting a wider or
 /// another writable set is refused), profile, read-only roots, read-only files and capability
-/// snapshot, no secret slot, a cgroup, and exactly the requested network ([`network_applied`]). A
-/// test's launch and a child's are held to the same record.
+/// snapshot, no secret slot, a cgroup, and exactly the requested network ([`network_applied`]); no
+/// working directory, writable root or list of apertures, which Loom never requests. A test's
+/// launch and a child's are held to the same record.
 fn check_record(
     input: &ExecStartInput,
     egress: Option<&EgressAperture>,
@@ -2375,6 +2376,10 @@ fn check_record(
         || record.profile != input.sandbox.profile
         || record.read_only_roots != input.read_only_roots
         || record.read_only_files != input.read_only_files
+        || record.workdir != input.workdir
+        || !input.writable_roots.is_empty()
+        || !record.writable_roots.is_empty()
+        || !input.sandbox.apertures.is_empty()
         || !record.secret_slots.is_empty()
         || record.capability_snapshot != input.sandbox.capability_snapshot
         || record.cgroup.is_empty()
