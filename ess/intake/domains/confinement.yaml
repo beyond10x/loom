@@ -40,7 +40,8 @@ types:
   # One egress aperture Substrate applied: its declared name, the pinned destination its forwarder
   # dialled, and the loopback address it listened on inside the sandbox, which Substrate reports
   # only for an aperture of a list of several. The applied network lists every aperture applied, in
-  # the order requested; an empty list is no network.
+  # the order requested; an empty list is no network, and an absent one is no network confinement
+  # applied at all (an unconfined run), never no network.
   - name: intake.confinement.AppliedAperture
     kind: struct
     fields:
@@ -57,7 +58,7 @@ types:
       - {name: capability_snapshot, type: String}
       - {name: cgroup, type: String}
       - {name: filesystem, type: String}
-      - {name: network, type: "List<intake.confinement.AppliedAperture>"}
+      - {name: network, type: "Optional<List<intake.confinement.AppliedAperture>>"}
       - {name: profile, type: String}
       - {name: writable_scopes, type: "List<String>"}
       - {name: read_only_roots, type: "List<intake.confinement.ToolchainRoot>"}
