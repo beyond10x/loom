@@ -458,11 +458,12 @@ pub struct SessionExecutor {
     /// session as `loom.session.AgentSession.agent`; none for an executor built without one.
     pub agent: Option<AgentId>,
     /// For `Kind::B10x`, the name of [`Self::endpoint`]'s API key in the operator's secret store,
-    /// as `<namespace>/<name>`: the loop is launched with `--credentials api-key` and
-    /// `--api-key-secret <name>`, and opens the store itself, so the key never enters this
-    /// process, metaharness or the child's environment. The endpoint then names no subscription
-    /// token (`token_file` empty, `token_pointer` none). A call with a name on another kind,
-    /// beside a token, or not of that shape fails before the copy is made.
+    /// as `<namespace>/<name>`: metaharness runs the session under `CredentialSource::ApiKey`
+    /// and launches the loop with `--api-key-secret <name>`, and the loop opens the store itself,
+    /// so the key never enters this process, metaharness or the child's environment. The endpoint
+    /// then names no subscription token (`token_file` empty, `token_pointer` none). A call with a
+    /// name on another kind, beside a token, or not of that shape fails before the copy is made,
+    /// as does a b10x-harness call naming neither a name nor a token file.
     pub api_key_secret: Option<String>,
     runner: RefCell<Option<Box<dyn ProcessRunner>>>,
     last: RefCell<Option<SessionReport>>,
@@ -835,9 +836,20 @@ impl SessionExecutor {
 
     /// [`Self::api_key_secret`], when named, is for a b10x-harness session, is the endpoint's only
     /// credential, and has the shape `<namespace>/<name>` (metaharness's check, so the two cannot
-    /// disagree); the value is quoted escaped.
+    /// disagree); the value is quoted escaped. Without one, a b10x-harness endpoint names its
+    /// token file: an empty one points the loop at no credential.
     fn check_api_key_secret(&self) -> Result<(), String> {
         let Some(name) = &self.api_key_secret else {
+            if self.kind == Kind::B10x
+                && let Some(endpoint) = &self.endpoint
+                && endpoint.token_file.as_os_str().is_empty()
+            {
+                return Err(
+                    "a b10x-harness session's endpoint names no token file and no API \
+                            key secret is named; name one of the two"
+                        .to_owned(),
+                );
+            }
             return Ok(());
         };
         let quoted = name.escape_debug();
