@@ -869,6 +869,12 @@ impl SessionExecutor {
                  token_pointer unset"
             ));
         }
+        // No exec carries a NUL byte, and the loop reads no other control character in a name.
+        if name.chars().any(char::is_control) {
+            return Err(format!(
+                "the API key secret `{quoted}` holds a control character"
+            ));
+        }
         metaharness_b10x::validate_api_key_secret(name)
     }
 
