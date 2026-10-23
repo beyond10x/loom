@@ -2,12 +2,14 @@
 format: aep.planning-md/3
 id: decision-blocker:ess-existing-selection-guard
 kind: decision-blocker
-status: open
+status: cleared
 title: ESS synthesis cannot reach a guard on an existing selection id
 relations:
 - blocks: story:refused-selection-stays-refused
 withholds: test_result
-revision: 2
+revision: 4
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-23T22:02:30Z", actor: "human:timo", revision: 4}
 ---
 ## Question
 
@@ -70,3 +72,16 @@ seeded-state cause."
 Until 0.70.0 is verified against this repository, the workaround stays: `SelectAction` declares no
 `selection-exists` guard, and `a_refused_selection_is_never_selected_or_admitted_again` stays
 ignored.
+
+## Answer (2026-10-24)
+
+Answered with the first option: wait for the ESS release that reaches the guard. Session
+`b10x-chef-orchestrator` wrote on 2026-10-24: "decision-blocker:ess-existing-selection-guard is
+answered with option 1 (wait for ESS 0.69.0, which ships G-U34/G-U35; external outcomes rejected
+because they weaken conformance)."
+
+- The `external:` outcomes option is rejected.
+- The wait now has its own record, `upstream-blocker:ess-0-69-existing-selection-guard`, which blocks
+  `story:refused-selection-stays-refused` until the selection guard is re-tested on ESS 0.69.0.
+- The workaround stays until then: `SelectAction` declares no `selection-exists` guard, and
+  `a_refused_selection_is_never_selected_or_admitted_again` stays ignored.
