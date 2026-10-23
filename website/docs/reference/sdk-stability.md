@@ -34,7 +34,18 @@ control-plane path, and fails when either table here and the code disagree.
     `loom_sdk::session::model`, `loom_sdk::governor::model`). They change with their ESS declaration under `ess/`, and a
     release names such a change as a break when it makes one.
 
-There is no 1.0 promise, deprecation window or version rule beyond the two lines above.
+- Deprecation window: a path this page lists is deprecated for at least one release before it is
+  removed. The release that deprecates it names it in a bullet under `### Deprecated` of its
+  `CHANGELOG.md` entry; a later release may then remove it.
+- Tag rule: a release whose entry carries a `**Breaking:**` bullet moves the minor version before
+  1.0 (`0.35.0` to `0.36.0`); a tag that moves only the patch version (`0.35.1`) breaks nothing.
+
+`loom-xtask release-check` holds both rules on every release tag
+([`crates/loom-xtask/tests/release_check.rs`](https://github.com/beyond10x/loom/blob/main/crates/loom-xtask/tests/release_check.rs)):
+it refuses an entry that removes a path the previous tag's version of this page lists, as a
+bullet under `### Removed` or a `**Breaking:**` bullet saying `removed`, when no earlier release
+listed it under `### Deprecated`; and it refuses a `**Breaking:**` bullet on a tag with the same
+major and minor version as the previous tag. There is no 1.0 promise.
 
 ## The Canon release a Loom release links
 

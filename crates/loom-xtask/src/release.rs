@@ -13,11 +13,23 @@
 //! `No breaking changes.` while a stable surface ([`STABLE_SURFACES`]) differs between the previous
 //! tag and the tag. A `Breaking:` sentence in prose is no statement.
 //!
+//! It also holds the SDK stability page's two rules (`story:stability-version-rule`). The tag
+//! rule: an entry with a `**Breaking:**` bullet on a tag that moves only the patch version from
+//! the previous tag (the same major and minor) fails, naming both tags. The deprecation window: an
+//! entry fails for each item it removes that the previous tag's [`STABILITY_PAGE`] lists (as a
+//! backticked span outside a code fence) and that no entry of a release below the tag lists under
+//! `### Deprecated`, naming the item. An entry removes the subjects of each bullet under
+//! `### Removed` and of each `**Breaking:**` bullet elsewhere that says `removed`; a bullet's
+//! subjects are its backticked spans before its first `;` and before the word (`removed`,
+//! `deprecated`), so `` `a` is removed; use `b` `` removes `a` alone. An item the page does not
+//! list is outside the window.
+//!
 //! The previous tag is the highest bare-version tag of `<root>`'s git repository below the tag;
 //! with none, only the statement is required. The tag's side of the diff is the tag when it exists
 //! and `HEAD` otherwise, so the check also runs on the release commit before it is tagged. Whether
 //! a change is a break is the release author's to say: the check refuses only a missing,
-//! contradictory or empty statement, or `No breaking changes.` beside a changed surface.
+//! contradictory or empty statement, `No breaking changes.` beside a changed surface, a break on
+//! a patch tag, or a removal the window does not allow.
 
 use std::fs;
 use std::path::Path;
@@ -90,6 +102,28 @@ pub(crate) fn release_check(root: &Path, tag: &str) -> Result<(), String> {
                             ));
                         }
                         Ok(_) => {}
+                        Err(failure) => failures.push(failure),
+                    }
+                }
+                let removed = removed_items(&body);
+                if bare && (breaks.named > 0 || !removed.is_empty()) {
+                    match previous_tag(root, tag) {
+                        Ok(Some(previous)) => {
+                            if breaks.named > 0 && moves_only_patch(tag, &previous) {
+                                failures.push(format!(
+                                    "tag {tag} moves only the patch version from {previous} but \
+                                     its CHANGELOG.md entry has a `{BREAKING}` bullet; a break \
+                                     moves the minor version before 1.0: {}",
+                                    changelog.display()
+                                ));
+                            }
+                            if !removed.is_empty() {
+                                failures.extend(undeprecated_removals(
+                                    root, &text, tag, &previous, &removed,
+                                ));
+                            }
+                        }
+                        Ok(None) => {}
                         Err(failure) => failures.push(failure),
                     }
                 }
@@ -246,20 +280,204 @@ fn names_nothing(text: &str) -> bool {
     text.is_empty() || word.eq_ignore_ascii_case("none")
 }
 
-/// The previous tag and the stable-surface files that differ between it and the tag (or `HEAD`
-/// when the tag does not exist yet); `None` when no bare-version tag precedes the tag.
-fn changed_surfaces(root: &Path, tag: &str) -> Result<Option<(String, Vec<String>)>, String> {
+/// The highest bare-version tag of `<root>`'s git repository below the tag; `None` when there is
+/// none or the tag is no bare version.
+fn previous_tag(root: &Path, tag: &str) -> Result<Option<String>, String> {
     let Some(key) = version_key(tag) else {
         return Ok(None);
     };
     let tags = git(root, &["tag", "--list"])?;
-    let Some(previous) = tags
+    Ok(tags
         .lines()
         .filter_map(|line| version_key(line.trim()).map(|k| (k, line.trim())))
         .filter(|(k, _)| *k < key)
         .max()
-        .map(|(_, name)| name.to_owned())
-    else {
+        .map(|(_, name)| name.to_owned()))
+}
+
+/// The SDK stability page, whose listed paths the deprecation window covers.
+const STABILITY_PAGE: &str = "website/docs/reference/sdk-stability.md";
+
+/// Whether `tag` moves only the patch version from `previous` (the same major and minor).
+fn moves_only_patch(tag: &str, previous: &str) -> bool {
+    match (version_key(tag), version_key(previous)) {
+        (Some((major, minor, _)), Some((p_major, p_minor, _))) => {
+            major == p_major && minor == p_minor
+        }
+        _ => false,
+    }
+}
+
+/// The top-level and nested bullets of an entry (`- ` or `* `, with a bullet's indented
+/// continuation lines joined), each with the `### ` section it stands under (empty before any).
+fn bullets_by_section(entry: &str) -> Vec<(String, String)> {
+    let lines: Vec<&str> = entry.lines().collect();
+    let mut section = String::new();
+    let mut found = Vec::new();
+    for (at, line) in lines.iter().enumerate() {
+        if let Some(heading) = line.strip_prefix("### ") {
+            section = heading.trim().to_owned();
+            continue;
+        }
+        let Some(text) = bullet(line) else {
+            continue;
+        };
+        let mut text = text.trim().to_owned();
+        for next in &lines[at + 1..] {
+            if next.trim().is_empty()
+                || !next.starts_with(char::is_whitespace)
+                || bullet(next).is_some()
+            {
+                break;
+            }
+            text.push(' ');
+            text.push_str(next.trim());
+        }
+        found.push((section.clone(), text));
+    }
+    found
+}
+
+/// The backticked spans of a text, in order.
+fn spans(text: &str) -> Vec<&str> {
+    text.split('`').skip(1).step_by(2).collect()
+}
+
+/// Whether `word` is a whole word of `text`, ignoring ASCII case.
+fn has_word(text: &str, word: &str) -> bool {
+    text.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .any(|w| w.eq_ignore_ascii_case(word))
+}
+
+/// The backticked spans a bullet names as the subject of `verb` (`removed`, `deprecated`): the
+/// spans before its first `;`, and before the first whole word `verb` in that clause, so
+/// `` `a` is removed; use `b` `` names `a` alone.
+fn subjects<'a>(text: &'a str, verb: &str) -> Vec<&'a str> {
+    let clause = text.split(';').next().unwrap_or_default();
+    let mut end = clause.len();
+    let mut at = 0;
+    for word in clause.split_inclusive(|c: char| !(c.is_alphanumeric() || c == '_')) {
+        let bare = word.trim_end_matches(|c: char| !(c.is_alphanumeric() || c == '_'));
+        if bare.eq_ignore_ascii_case(verb) && clause[..at].matches('`').count().is_multiple_of(2) {
+            end = at;
+            break;
+        }
+        at += word.len();
+    }
+    spans(&clause[..end])
+}
+
+/// The items an entry removes: the subjects of each bullet under `### Removed`, and of each
+/// `**Breaking:**` bullet elsewhere that says `removed`.
+fn removed_items(entry: &str) -> Vec<String> {
+    let mut items = Vec::new();
+    for (section, text) in bullets_by_section(entry) {
+        let breaking_removal = text.starts_with(BREAKING) && has_word(&text, "removed");
+        if section != "Removed" && !breaking_removal {
+            continue;
+        }
+        let text = text.strip_prefix(BREAKING).unwrap_or(&text);
+        for item in subjects(text, "removed") {
+            if !item.is_empty() && !items.iter().any(|i| i == item) {
+                items.push(item.to_owned());
+            }
+        }
+    }
+    items
+}
+
+/// The items listed under `### Deprecated` in the entries of releases below the tag: each such
+/// bullet's subjects.
+fn deprecated_before(changelog: &str, tag: &str) -> Vec<String> {
+    let Some(key) = version_key(tag) else {
+        return Vec::new();
+    };
+    let mut items = Vec::new();
+    let mut lines = changelog.lines().peekable();
+    while let Some(line) = lines.next() {
+        let Some(version) = line
+            .strip_prefix("## [")
+            .and_then(|rest| rest.split(']').next())
+        else {
+            continue;
+        };
+        if !version_key(version).is_some_and(|k| k < key) || !is_entry_heading(line, version) {
+            continue;
+        }
+        let mut body = Vec::new();
+        while let Some(next) = lines.peek() {
+            if next.starts_with("## ") {
+                break;
+            }
+            body.push(*next);
+            lines.next();
+        }
+        for (section, text) in bullets_by_section(&body.join("\n")) {
+            if section == "Deprecated" {
+                items.extend(subjects(&text, "deprecated").into_iter().map(str::to_owned));
+            }
+        }
+    }
+    items
+}
+
+/// One failure per item the entry removes that the previous tag's SDK stability page lists and no
+/// release below the tag listed under `### Deprecated`.
+fn undeprecated_removals(
+    root: &Path,
+    changelog: &str,
+    tag: &str,
+    previous: &str,
+    removed: &[String],
+) -> Vec<String> {
+    let listed = match listed_at(root, previous) {
+        Ok(listed) => listed,
+        Err(failure) => return vec![failure],
+    };
+    let deprecated = deprecated_before(changelog, tag);
+    removed
+        .iter()
+        .filter(|item| listed.contains(item) && !deprecated.contains(item))
+        .map(|item| {
+            format!(
+                "CHANGELOG.md entry [{tag}] removes `{item}`, which the SDK stability page of \
+                 {previous} lists ({STABILITY_PAGE}), but no earlier release lists it under \
+                 `### Deprecated`; deprecate it for at least one release before removing it"
+            )
+        })
+        .collect()
+}
+
+/// The backticked spans of the SDK stability page at `refs/tags/<previous>`, empty when the page
+/// is not in that tag.
+fn listed_at(root: &Path, previous: &str) -> Result<Vec<String>, String> {
+    let tree = format!("refs/tags/{previous}");
+    if git(
+        root,
+        &["ls-tree", "--name-only", &tree, "--", STABILITY_PAGE],
+    )?
+    .trim()
+    .is_empty()
+    {
+        return Ok(Vec::new());
+    }
+    let page = git(root, &["show", &format!("{tree}:{STABILITY_PAGE}")])?;
+    let mut fenced = false;
+    let mut listed = Vec::new();
+    for line in page.lines() {
+        if line.trim_start().starts_with("```") {
+            fenced = !fenced;
+        } else if !fenced {
+            listed.extend(spans(line).into_iter().map(str::to_owned));
+        }
+    }
+    Ok(listed)
+}
+
+/// The previous tag and the stable-surface files that differ between it and the tag (or `HEAD`
+/// when the tag does not exist yet); `None` when no bare-version tag precedes the tag.
+fn changed_surfaces(root: &Path, tag: &str) -> Result<Option<(String, Vec<String>)>, String> {
+    let Some(previous) = previous_tag(root, tag)? else {
         return Ok(None);
     };
     let tag_ref = format!("refs/tags/{tag}");
@@ -333,7 +551,43 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Breaks, breaks, entry, is_bare_version, is_entry_heading, version_key};
+    use super::{
+        Breaks, breaks, deprecated_before, entry, is_bare_version, is_entry_heading,
+        moves_only_patch, removed_items, subjects, version_key,
+    };
+
+    #[test]
+    fn a_bullet_names_its_subjects_before_the_verb_and_the_first_semicolon() {
+        assert_eq!(
+            subjects("`a` and `b` are removed; use `c`", "removed"),
+            ["a", "b"]
+        );
+        assert_eq!(
+            subjects("the harness `R`, `p::R`, is removed, see `x`", "removed"),
+            ["R", "p::R"]
+        );
+        assert_eq!(subjects("`removed` is removed", "removed"), ["removed"]);
+        assert_eq!(subjects("`a` drops `b`", "removed"), ["a", "b"]);
+    }
+
+    #[test]
+    fn removals_are_removed_bullets_and_breaking_removals() {
+        let entry = "### Changed\n\n- **Breaking:** `a` is removed\n- `b` is removed\n\
+                     - **Breaking:** `c` takes a context\n\n### Removed\n\n- `d` is gone\n\
+                     - **Breaking:**\n  `e` is removed";
+        assert_eq!(removed_items(entry), ["a", "d", "e"]);
+    }
+
+    #[test]
+    fn deprecations_count_only_below_the_tag() {
+        let changelog = "## [Unreleased]\n\n### Deprecated\n\n- `u` is deprecated\n\n\
+                         ## [0.3.0] - 2026-10-07\n\n### Deprecated\n\n- `c` is deprecated\n\n\
+                         ## [0.2.0] - 2026-10-06\n\n### Deprecated\n\n\
+                         - `b` is deprecated; use `x`\n\n## [0.1.0]\n\n### Added\n\n- `a`\n";
+        assert_eq!(deprecated_before(changelog, "0.3.0"), ["b"]);
+        assert!(moves_only_patch("0.3.1", "0.3.0") && !moves_only_patch("0.4.0", "0.3.9"));
+        assert!(!moves_only_patch("1.0.0", "0.9.9"));
+    }
 
     #[test]
     fn bare_versions() {

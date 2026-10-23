@@ -508,7 +508,8 @@ fn a_removal_without_a_deprecated_release_is_refused() {
 
 #[test]
 fn a_breaking_entry_on_a_patch_tag_is_refused() {
-    let breaking = "### Changed\n\n- **Breaking:** `Port::call` takes a context (story:port-context)";
+    let breaking =
+        "### Changed\n\n- **Breaking:** `Port::call` takes a context (story:port-context)";
     for tag_second in [true, false] {
         let root = release_pair(
             &format!("patch-{tag_second}"),

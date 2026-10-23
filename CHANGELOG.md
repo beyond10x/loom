@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `loom-xtask release-check` refuses a break on a patch tag and removing an SDK path no release deprecated (story:stability-version-rule)
+
 ## [0.35.0] - 2026-10-22
 
 No breaking changes.
