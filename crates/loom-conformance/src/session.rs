@@ -6,7 +6,8 @@
 //! input's `files` in the scratch copy the session is started in (a null `content` removes a file
 //! the workspace holds for it), names the input's `vendor_session_id` as the session's own id, and
 //! replies naming the input's `action`. The commission and the frontier the executor runs for carry
-//! the input's ids.
+//! the input's ids, and the executor records the input's `agent` as the agent it runs for
+//! (`SessionExecutor::agent`, as `from_spec` sets it).
 //!
 //! What is published is what the executor recorded through its generated behaviour: the
 //! `SessionChangeProposed` event it returned and the `AgentSessions` rows it holds. The executor
@@ -29,10 +30,13 @@ use b10x_loom_commission::ports::executor::AgentExecutor as _;
 use b10x_loom_session_executor::metaharness::{
     HarnessProcess, LaunchPlanView, ScriptedLog, ScriptedRunner,
 };
+use b10x_loom_session_executor::model::agent::{AgentId, ToolPolicy};
 use b10x_loom_session_executor::model::session::{
     AgentSessions, ChangedFile, SessionId, SessionKind,
 };
-use b10x_loom_session_executor::{CredentialSource, Kind, ProcessRunner, SessionExecutor, TOOLS};
+use b10x_loom_session_executor::{
+    CredentialSource, Kind, ProcessRunner, SessionExecutor, ToolPolicyDefaults as _,
+};
 use ess_conformance::target::{SemanticCommandResult, TargetError};
 use ess_primitives::ids::CorrelationId;
 
@@ -127,7 +131,7 @@ impl ProcessRunner for Scripted {
         }
         let mut init = serde_json::json!({
             "type": "system", "subtype": "init", "claude_code_version": "2.1.304",
-            "cwd": plan.cwd.display().to_string(), "tools": TOOLS, "mcp_servers": [],
+            "cwd": plan.cwd.display().to_string(), "tools": ToolPolicy::claude_default().allow, "mcp_servers": [],
             "plugins": [], "output_style": "default", "apiKeySource": "none",
             "model": "scripted", "permissionMode": "default",
         });
@@ -181,6 +185,7 @@ pub(crate) fn propose_session_change(
         .with_session_ids(move || session_id.clone());
     executor.credentials = CredentialSource::None;
     executor.scratch = invocation.0.join("scratch");
+    executor.agent = decoded.agent.clone().map(AgentId);
 
     let case = CaseId("case".to_owned());
     let commission = Commission::new(CommissionData {
@@ -237,6 +242,7 @@ struct Decoded {
     commission_id: String,
     frontier_id: String,
     vendor_session_id: Option<String>,
+    agent: Option<String>,
     action: String,
     files: Vec<ChangedFile>,
 }
@@ -248,6 +254,7 @@ fn decode(input: &Input) -> Option<Decoded> {
         commission_id: codec::uuid(input, "commission_id")?.0,
         frontier_id: codec::uuid(input, "frontier_id")?.0,
         vendor_session_id: codec::optional_text(input, "vendor_session_id")?,
+        agent: codec::optional_text(input, "agent")?,
         action: codec::text(input, "action")?,
         files: codec::changed_files(input, "files")?,
     })
@@ -265,6 +272,14 @@ pub(crate) fn row(held: &AgentSessions) -> ess_conformance::target::ViewRow {
             held.vendor_session_id
                 .as_deref()
                 .map_or(ess_primitives::node::Node::Null, codec::text_node),
+        ),
+        (
+            "agent".to_owned(),
+            held.agent
+                .as_ref()
+                .map_or(ess_primitives::node::Node::Null, |agent| {
+                    codec::text_node(&agent.0)
+                }),
         ),
         ("action".to_owned(), codec::text_node(&held.action)),
         ("files".to_owned(), codec::changed_files_node(&held.files)),

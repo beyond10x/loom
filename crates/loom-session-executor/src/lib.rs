@@ -12,8 +12,8 @@
 //!
 //! | kind | harness | hermetic | calls |
 //! |---|---|---|---|
-//! | `Claude` | Claude Code | `Strict` | decided here (`Ask`): the file tools [`TOOLS`] on paths inside the copy; restricted, auto-memory and the cross-session inbox off ([`CLAUDE_ARGUMENTS`]) |
-//! | `Codex` | Codex (`codex exec`) | `On`, H9 gating | decided here (`Ask`): `Bash` and `apply_patch` ([`CODEX_TOOLS`]) naming no path outside the copy; its own sandbox (`workspace-write` on the copy, no network) confines what a command writes; its home is its own ([`HOME_VARIABLES`]) |
+//! | `Claude` | Claude Code | `Strict` | decided here (`Ask`): the file tools of [`ToolPolicyDefaults::claude_default`] on paths inside the copy, and no other offered (`--tools`); restricted, auto-memory and the cross-session inbox off ([`CLAUDE_ARGUMENTS`]) |
+//! | `Codex` | Codex (`codex exec`) | `On`, H9 gating | decided here (`Ask`): `Bash` and `apply_patch` ([`ToolPolicyDefaults::codex_default`]) naming no path outside the copy; its own sandbox (`workspace-write` on the copy, no network) confines what a command writes; its home is its own ([`HOME_VARIABLES`]) |
 //! | `B10x` | b10x-harness | `On`, a gap holds the proposal | observed, never decided: metaharness's b10x adapter decides no call; the loop's toolset is what substrate confines to the copy |
 //!
 //! # One call, one session
@@ -72,7 +72,9 @@ use b10x_loom_commission::model::responsibility::{
     commission_state, frontier_state,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
+use loom::agent::{AgentId, AgentSpec, DecisionMode as PolicyDecisions, ToolPolicy};
 use loom::behaviour::{AgentSessionStorage, Generated};
+use loom::models::ModelRole;
 use loom::obligation::UnmetObligation;
 use loom::primitives::Uuid;
 use loom::session::obligations::{AgentSessionsQuery as _, ProposeSessionChangeBehavior as _};
@@ -96,11 +98,155 @@ pub use metaharness::protocol::{CredentialSource, Kind};
 
 /// The native tools a Claude Code session may use, on paths inside its copy: read, edit, write,
 /// list and search the files, and nothing else.
-pub const TOOLS: [&str; 5] = ["Read", "Edit", "Write", "Glob", "Grep"];
+#[deprecated(
+    since = "0.36.0",
+    note = "use `ToolPolicy::claude_default().allow` (`ToolPolicyDefaults`); removed in the release after 0.36.0"
+)]
+pub const TOOLS: [&str; 5] = CLAUDE_FILE_TOOLS;
 
 /// The tools a Codex session may use, as its `PreToolUse` hook names them: the shell, to read
 /// the copy, and `apply_patch`, to change it.
-pub const CODEX_TOOLS: [&str; 2] = ["Bash", "apply_patch"];
+#[deprecated(
+    since = "0.36.0",
+    note = "use `ToolPolicy::codex_default().allow` (`ToolPolicyDefaults`); removed in the release after 0.36.0"
+)]
+pub const CODEX_TOOLS: [&str; 2] = CODEX_SHELL_TOOLS;
+
+/// The file tools of [`ToolPolicyDefaults::claude_default`]: the only Claude Code tools whose
+/// calls this executor can check ([`decide`]).
+const CLAUDE_FILE_TOOLS: [&str; 5] = ["Read", "Edit", "Write", "Glob", "Grep"];
+
+/// The tools of [`ToolPolicyDefaults::codex_default`]: the only Codex tools whose calls this
+/// executor can check ([`decide_codex`]).
+const CODEX_SHELL_TOOLS: [&str; 2] = ["Bash", "apply_patch"];
+
+/// The tool policies a session runs under when its agent spec does not say otherwise, as
+/// associated functions of the generated `loom.agent.ToolPolicy` (`ToolPolicy::claude_default()`
+/// with this trait in scope).
+pub trait ToolPolicyDefaults {
+    /// A Claude Code session's: the file tools `Read`, `Edit`, `Write`, `Glob` and `Grep` on
+    /// paths inside the copy, nothing denied, no egress, every call decided here (`ask`).
+    fn claude_default() -> Self;
+    /// A Codex session's: `Bash`, to read the copy, and `apply_patch`, to change it, nothing
+    /// denied, no egress, every call decided here (`ask`).
+    fn codex_default() -> Self;
+}
+
+impl ToolPolicyDefaults for ToolPolicy {
+    fn claude_default() -> Self {
+        Self {
+            allow: CLAUDE_FILE_TOOLS
+                .iter()
+                .map(|tool| (*tool).to_owned())
+                .collect(),
+            deny: Vec::new(),
+            egress: Vec::new(),
+            decisions: PolicyDecisions::Ask,
+        }
+    }
+
+    fn codex_default() -> Self {
+        Self {
+            allow: CODEX_SHELL_TOOLS
+                .iter()
+                .map(|tool| (*tool).to_owned())
+                .collect(),
+            deny: Vec::new(),
+            egress: Vec::new(),
+            decisions: PolicyDecisions::Ask,
+        }
+    }
+}
+
+/// Why [`SessionExecutor::from_spec`] refused an agent spec; nothing was built.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpecError {
+    /// The spec names no `session`, so it runs no agent session.
+    NoSession {
+        /// The spec's `agent.id`.
+        agent: String,
+    },
+    /// The spec names a decision mode its session kind does not run under a policy Loom
+    /// enforces: Claude Code and Codex only under `ask`, where this executor decides every call
+    /// (under `frame` Loom supplies no frame, so every call is abstained on; under `observe`
+    /// none is decided), and b10x-harness only under `observe`, the one mode metaharness runs it
+    /// in.
+    DecisionModeUnenforced {
+        /// The spec's `agent.id`.
+        agent: String,
+        /// The session kind, as the spec names it.
+        kind: SessionKind,
+        /// The decision mode the spec names.
+        mode: PolicyDecisions,
+    },
+    /// The spec denies tools its session kind cannot withhold: a b10x-harness session's calls
+    /// are observed and never decided, so no tool can be denied it.
+    DenyUnenforced {
+        /// The spec's `agent.id`.
+        agent: String,
+        /// The session kind, as the spec names it.
+        kind: SessionKind,
+        /// The tools denied.
+        deny: Vec<String>,
+    },
+    /// The spec allows tools other than its session kind's default, which the kind cannot be
+    /// narrowed or widened to: a b10x-harness session runs its loop's own toolset, observed.
+    AllowUnenforced {
+        /// The spec's `agent.id`.
+        agent: String,
+        /// The session kind, as the spec names it.
+        kind: SessionKind,
+        /// The tools allowed.
+        allow: Vec<String>,
+    },
+    /// An `allow` or `deny` entry holds a comma or whitespace, so it is no one tool name: the
+    /// offered tools are handed to the session joined by commas.
+    ToolNameInvalid {
+        /// The spec's `agent.id`.
+        agent: String,
+        /// The entry, as the spec writes it.
+        tool: String,
+    },
+}
+
+impl std::fmt::Display for SpecError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoSession { agent } => {
+                write!(f, "the agent spec {agent} names no session to run")
+            }
+            Self::DecisionModeUnenforced { agent, kind, mode } => {
+                let runs = match kind {
+                    SessionKind::Harness => "Observe",
+                    SessionKind::ClaudeCode | SessionKind::Codex => "Ask",
+                };
+                write!(
+                    f,
+                    "the agent spec {agent} runs a {kind:?} session under `decisions: {mode:?}`, \
+                     which Loom does not enforce; a {kind:?} session runs only under \
+                     `decisions: {runs}`"
+                )
+            }
+            Self::DenyUnenforced { agent, kind, deny } => write!(
+                f,
+                "the agent spec {agent} denies {deny:?}, which a {kind:?} session cannot \
+                 withhold: its calls are observed and never decided; leave them out of `deny`"
+            ),
+            Self::AllowUnenforced { agent, kind, allow } => write!(
+                f,
+                "the agent spec {agent} allows {allow:?}, but a {kind:?} session runs its own \
+                 toolset and cannot be narrowed to a list; leave `allow` empty"
+            ),
+            Self::ToolNameInvalid { agent, tool } => write!(
+                f,
+                "the agent spec {agent} names the tool {tool:?}, which holds a comma or \
+                 whitespace and so is no one tool name"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for SpecError {}
 
 /// The model endpoint a `Kind::B10x` session's loop is pointed at, and the subscription token
 /// it reads there: the loop reads the file itself, and metaharness copies nothing.
@@ -293,6 +439,16 @@ pub struct SessionExecutor {
     pub program: Option<PathBuf>,
     /// For `Kind::B10x`, the endpoint its loop is pointed at; the session is refused without one.
     pub endpoint: Option<Endpoint>,
+    /// The tool policy the session runs under (`loom.agent.ToolPolicy`): the tools it is offered
+    /// (`allow` less `deny`), and who decides each call (`decisions`), handed to metaharness
+    /// as the session's decision mode. None for its kind's default: Claude Code's
+    /// [`ToolPolicyDefaults::claude_default`], Codex's [`ToolPolicyDefaults::codex_default`],
+    /// and for b10x-harness none offered by name and every call observed. Its `egress` is not
+    /// applied here.
+    pub tools: Option<ToolPolicy>,
+    /// The agent whose spec the executor was built from ([`Self::from_spec`]), recorded on each
+    /// session as `loom.session.AgentSession.agent`; none for an executor built without one.
+    pub agent: Option<AgentId>,
     runner: RefCell<Option<Box<dyn ProcessRunner>>>,
     last: RefCell<Option<SessionReport>>,
     ids: RefCell<Box<dyn FnMut() -> SessionId>>,
@@ -332,11 +488,121 @@ impl SessionExecutor {
             timeout: None,
             program: None,
             endpoint: None,
+            tools: None,
+            agent: None,
             runner: RefCell::new(None),
             last: RefCell::new(None),
             ids: RefCell::new(Box::new(fresh_session_id)),
             record: RefCell::new(SessionRecord::default()),
         }
+    }
+
+    /// An executor over `workspace`'s `files` built from an agent's data (`loom.agent/1`):
+    /// the session kind, the tool policy and the prompt (`agent.brief`) of `spec`, and as its
+    /// model the name `spec.model` gives the `agent` role, as written (routes are the host's to
+    /// resolve). Otherwise as [`Self::new`]: the copy under the system's temporary directory, on
+    /// the operator's login. Each session it runs records the spec's `agent.id`. The spec's
+    /// budget, stop policy and egress apertures are not applied here; a host bounds the run
+    /// through Commission.
+    ///
+    /// # Errors
+    ///
+    /// It builds an executor only for a policy Loom enforces itself, and refuses any other spec
+    /// before any session: [`SpecError::NoSession`] for a spec that runs no session;
+    /// [`SpecError::ToolNameInvalid`] for an `allow` or `deny` entry holding a comma or
+    /// whitespace; [`SpecError::DecisionModeUnenforced`] for Claude Code or Codex under any mode
+    /// but `ask`, and b10x-harness under any but `observe`; and for b10x-harness,
+    /// [`SpecError::AllowUnenforced`] for an `allow` other than its default (none) and
+    /// [`SpecError::DenyUnenforced`] for any `deny`.
+    pub fn from_spec(
+        spec: &AgentSpec,
+        workspace: impl Into<PathBuf>,
+        files: Vec<String>,
+    ) -> Result<Self, SpecError> {
+        let agent = spec.agent.id.clone();
+        let Some(session) = &spec.session else {
+            return Err(SpecError::NoSession { agent: agent.0 });
+        };
+        let tools = &session.tools;
+        if let Some(tool) = tools
+            .allow
+            .iter()
+            .chain(&tools.deny)
+            .find(|tool| tool.contains(|c: char| c == ',' || c.is_whitespace()))
+        {
+            return Err(SpecError::ToolNameInvalid {
+                agent: agent.0,
+                tool: tool.clone(),
+            });
+        }
+        let (kind, enforced) = match session.kind {
+            SessionKind::ClaudeCode => (Kind::Claude, PolicyDecisions::Ask),
+            SessionKind::Codex => (Kind::Codex, PolicyDecisions::Ask),
+            SessionKind::Harness => (Kind::B10x, PolicyDecisions::Observe),
+        };
+        if tools.decisions != enforced {
+            return Err(SpecError::DecisionModeUnenforced {
+                agent: agent.0,
+                kind: session.kind,
+                mode: tools.decisions,
+            });
+        }
+        if kind == Kind::B10x {
+            if !tools.allow.is_empty() {
+                return Err(SpecError::AllowUnenforced {
+                    agent: agent.0,
+                    kind: session.kind,
+                    allow: tools.allow.clone(),
+                });
+            }
+            if !tools.deny.is_empty() {
+                return Err(SpecError::DenyUnenforced {
+                    agent: agent.0,
+                    kind: session.kind,
+                    deny: tools.deny.clone(),
+                });
+            }
+        }
+        let mut executor = Self::new(workspace, files, spec.agent.brief.clone()).of_kind(kind);
+        executor.model = spec
+            .model
+            .roles
+            .iter()
+            .find(|role| role.role == ModelRole::Agent)
+            .map(|role| role.model.clone());
+        executor.tools = Some(session.tools.clone());
+        executor.agent = Some(agent);
+        Ok(executor)
+    }
+
+    /// The tool policy the session runs under: [`Self::tools`], else its kind's default.
+    #[must_use]
+    pub fn policy(&self) -> ToolPolicy {
+        self.tools.clone().unwrap_or_else(|| match self.kind {
+            Kind::Claude => ToolPolicy::claude_default(),
+            Kind::Codex => ToolPolicy::codex_default(),
+            Kind::B10x => ToolPolicy {
+                allow: Vec::new(),
+                deny: Vec::new(),
+                egress: Vec::new(),
+                decisions: PolicyDecisions::Observe,
+            },
+        })
+    }
+
+    /// The tools the session is offered: the policy's `allow` less its `deny`, in `allow`'s
+    /// order, each once. A Claude Code session is launched with these and no other; a call of a
+    /// tool outside them is denied wherever this executor decides it.
+    #[must_use]
+    pub fn offered(&self) -> Vec<String> {
+        let policy = self.policy();
+        let mut offered: Vec<String> = Vec::new();
+        for tool in policy.allow {
+            if !policy.deny.contains(&tool) && !offered.contains(&tool) {
+                offered.push(tool);
+            }
+        }
+        offered
     }
 
     /// The same executor, each call's [`SessionId`] taken from `ids` instead of a fresh one
@@ -385,6 +651,7 @@ impl SessionExecutor {
                 commission_id: CommissionId(Uuid(commission.data().commission_id.0.0.clone())),
                 frontier_id: FrontierId(Uuid(frontier.data().frontier_id.0.0.clone())),
                 vendor_session_id: report.vendor_session_id.clone(),
+                agent: self.agent.clone(),
                 action: proposal.action.clone(),
                 files: proposal
                     .files
@@ -419,10 +686,11 @@ impl SessionExecutor {
         self.last.borrow().clone()
     }
 
-    /// The run metaharness is asked for, by kind: Claude Code `Strict` with every call decided
-    /// here; Codex `On` with every call decided here (its strict floor fails on four rows its
+    /// The run metaharness is asked for, its decision mode the tool policy's ([`Self::policy`];
+    /// by default every Claude Code and Codex call decided here, every b10x-harness call
+    /// observed), and by kind: Claude Code `Strict`; Codex `On` (its strict floor fails on four rows its
     /// opening record does not carry, H1a, H1b, H4 and H5, which metaharness cannot decide for
-    /// it yet); b10x-harness `On`, observed, pointed at [`Self::endpoint`] with its subscription
+    /// it yet); b10x-harness `On`, pointed at [`Self::endpoint`] with its subscription
     /// token, confined by substrate in the loop's own process so its write tools reach the copy
     /// and nothing else. Each with the copy as its declared scratch working directory.
     fn spec(&self, copy: &Path) -> Result<RunSpec, String> {
@@ -432,22 +700,25 @@ impl SessionExecutor {
         spec.scratch_cwd = true;
         spec.prompt = Some(self.brief.clone());
         spec.model.clone_from(&self.model);
+        let decisions = match self.policy().decisions {
+            PolicyDecisions::Frame => DecisionMode::Frame,
+            PolicyDecisions::Ask => DecisionMode::Ask,
+            PolicyDecisions::Observe => DecisionMode::Observe,
+        };
+        spec.decisions = decisions;
         match self.kind {
             Kind::Claude => {
                 spec.hermetic = HermeticMode::Strict;
-                spec.decisions = DecisionMode::Ask;
                 spec.max_turns = self.max_turns;
             }
             Kind::Codex => {
                 spec.hermetic = HermeticMode::On;
-                spec.decisions = DecisionMode::Ask;
             }
             Kind::B10x => {
                 let endpoint = self.endpoint.as_ref().ok_or(
                     "a b10x-harness session needs the endpoint its loop is pointed at; none given",
                 )?;
                 spec.hermetic = HermeticMode::On;
-                spec.decisions = DecisionMode::Observe;
                 spec.max_turns = self.max_turns;
                 spec.credentials = CredentialSource::None;
                 spec.model_endpoint = Some(endpoint.base_url.clone());
@@ -477,6 +748,7 @@ impl SessionExecutor {
                 "the named files {unplain:?} are not plain paths relative to the workspace"
             ));
         }
+        let offered = self.offered();
         let copy = ScratchCopy::make(&self.scratch, &self.workspace, &self.files)?;
         report.cwd = Some(copy.dir.clone());
         let builder = Metaharness::from_spec(self.spec(&copy.dir)?);
@@ -515,7 +787,10 @@ impl SessionExecutor {
                 builder.start_with(Input::FromSpec, &mut homed, &mut *seams)
             }
             (Some(inner), None) if self.kind == Kind::Claude => {
-                let mut restricted = Restricted { inner };
+                let mut restricted = Restricted {
+                    inner,
+                    offered: &offered,
+                };
                 builder.start_with(Input::FromSpec, &mut restricted, &mut *seams)
             }
             (Some(runner), None) => builder.start_with(Input::FromSpec, runner, &mut *seams),
@@ -597,8 +872,8 @@ impl SessionExecutor {
                     ..
                 } => {
                     let decided = match self.kind {
-                        Kind::Codex => decide_codex(name, input, &copy.dir),
-                        _ => decide(name, input, &copy.dir),
+                        Kind::Codex => decide_codex_among(&offered, name, input, &copy.dir),
+                        _ => decide_among(&offered, name, input, &copy.dir),
                     };
                     let decision = match decided {
                         Ok(()) => Decision::Allow,
@@ -1210,8 +1485,8 @@ impl SessionRecord {
 /// embedder resolved, never another found first on the `PATH` metaharness gives its child) or,
 /// named without a `/`, the first executable file of that name on that `PATH`, found when the
 /// child starts ([`on_path`]): the file that runs is the one whose version the session's opening
-/// record states and H9 reads. Claude Code offered the file tools [`TOOLS`] and no other; Codex
-/// with its sandbox's network stated off and `/tmp` left out of what it may write
+/// record states and H9 reads. Claude Code as planned (its offered tools are [`Restricted`]'s);
+/// Codex with its sandbox's network stated off and `/tmp` left out of what it may write
 /// ([`CODEX_SANDBOX`]).
 struct Named {
     kind: Kind,
@@ -1276,9 +1551,13 @@ impl ProcessRunner for Homed<'_> {
 pub const CLAUDE_ARGUMENTS: [&str; 1] = ["--restricted"];
 
 /// The runner a Claude Code session starts through: its child's arguments are the ones
-/// metaharness planned, then [`CLAUDE_ARGUMENTS`].
+/// metaharness planned, then [`CLAUDE_ARGUMENTS`], then `--tools` naming the tools the session
+/// is offered ([`SessionExecutor::offered`]) and no other, so a tool outside them, a denied one
+/// included, is never offered and costs no schema in any call; `--tools ""` offers none. Each call
+/// of an offered tool is still decided where the policy says.
 struct Restricted<'a> {
     inner: &'a mut dyn ProcessRunner,
+    offered: &'a [String],
 }
 
 impl ProcessRunner for Restricted<'_> {
@@ -1292,6 +1571,7 @@ impl ProcessRunner for Restricted<'_> {
     ) -> std::io::Result<Box<dyn metaharness::HarnessProcess>> {
         let mut args = plan.args.to_vec();
         args.extend(CLAUDE_ARGUMENTS.iter().map(|arg| (*arg).to_owned()));
+        args.extend(["--tools".to_owned(), self.offered.join(",")]);
         let restricted = metaharness::LaunchPlanView {
             args: &args,
             ..*plan
@@ -1383,12 +1663,8 @@ impl ProcessRunner for Named {
                 args.extend(CODEX_SANDBOX.iter().map(|arg| (*arg).to_owned()));
                 args.extend(planned);
             }
-            _ => {
-                args.extend(plan.args.iter().cloned());
-                // Offered only the file tools, so no other tool costs its schema in every call:
-                // each call of one is still decided at the seam ([`decide`]).
-                args.extend(["--tools".to_owned(), TOOLS.join(",")]);
-            }
+            // Claude Code's offered tools are [`Restricted`]'s to name, on every start.
+            _ => args.extend(plan.args.iter().cloned()),
         }
         let named = metaharness::LaunchPlanView {
             program,
@@ -1418,14 +1694,40 @@ fn result_of(printed: &str) -> Option<String> {
         .and_then(|doc| doc["result"].as_str().map(str::to_owned))
 }
 
-/// Whether a tool call is allowed: one of [`TOOLS`], every path it names inside `copy`, and an
-/// Edit or Write on no path with a part named `.git` (the copy's git state, or a git directory
-/// planted in it); else the reason the model is told.
+/// [`decide_among`] the default Claude Code tools.
+#[cfg(test)]
 fn decide(name: &str, input: &serde_json::Value, copy: &Path) -> Result<(), String> {
-    if !TOOLS.contains(&name) {
+    decide_among(&ToolPolicy::claude_default().allow, name, input, copy)
+}
+
+/// Whether a Claude Code tool call is allowed: one of the tools `offered`
+/// ([`SessionExecutor::offered`]) that is a file tool this executor checks
+/// ([`ToolPolicyDefaults::claude_default`]'s), every path it names inside `copy`, and an Edit or
+/// Write on no path with a part named `.git` (the copy's git state, or a git directory planted in
+/// it); else the reason the model is told. An offered tool this executor cannot check is denied,
+/// never allowed unchecked.
+fn decide_among(
+    offered: &[String],
+    name: &str,
+    input: &serde_json::Value,
+    copy: &Path,
+) -> Result<(), String> {
+    if !offered.iter().any(|tool| tool == name) {
         return Err(format!(
             "{name} is not offered here: use only the file tools {} on the files of this directory",
-            TOOLS.join(", ")
+            offered.join(", ")
+        ));
+    }
+    if !CLAUDE_FILE_TOOLS.contains(&name) {
+        return Err(format!(
+            "{name} is offered, but its calls cannot be checked here: use only the file tools \
+             {} on the files of this directory",
+            offered
+                .iter()
+                .filter(|tool| CLAUDE_FILE_TOOLS.contains(&tool.as_str()))
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
     for key in ["file_path", "path", "notebook_path"] {
@@ -1461,13 +1763,32 @@ fn decide(name: &str, input: &serde_json::Value, copy: &Path) -> Result<(), Stri
     Ok(())
 }
 
-/// Whether a Codex tool call is allowed: one of [`CODEX_TOOLS`]; a `Bash` command naming no
-/// place outside `copy` ([`outside_word`]); an `apply_patch` whose every file is a path inside
-/// `copy` with no part named `.git`; else the reason the model is told. What a command writes is
-/// confined by Codex's own sandbox (`workspace-write` on the copy, no network, [`CODEX_SANDBOX`]);
-/// this check keeps a command from reading or naming a place outside the copy, read lexically
-/// and so a floor, not a wall: a command that builds a path at run time is not read here.
+/// [`decide_codex_among`] the default Codex tools.
+#[cfg(test)]
 fn decide_codex(name: &str, input: &serde_json::Value, copy: &Path) -> Result<(), String> {
+    decide_codex_among(&ToolPolicy::codex_default().allow, name, input, copy)
+}
+
+/// Whether a Codex tool call is allowed: one of the tools `offered`
+/// ([`SessionExecutor::offered`]), and of those only the two this executor checks
+/// ([`ToolPolicyDefaults::codex_default`]'s): a `Bash` command naming no place outside `copy`
+/// ([`outside_word`]); an `apply_patch` whose every file is a path inside `copy` with no part
+/// named `.git`; else the reason the model is told. What a command writes is confined by Codex's
+/// own sandbox (`workspace-write` on the copy, no network, [`CODEX_SANDBOX`]); this check keeps a
+/// command from reading or naming a place outside the copy, read lexically and so a floor, not a
+/// wall: a command that builds a path at run time is not read here.
+fn decide_codex_among(
+    offered: &[String],
+    name: &str,
+    input: &serde_json::Value,
+    copy: &Path,
+) -> Result<(), String> {
+    if !offered.iter().any(|tool| tool == name) {
+        return Err(format!(
+            "{name} is not offered here: use only {} on the files of this directory",
+            offered.join(", ")
+        ));
+    }
     let text = |key: &str| match input.get(key) {
         Some(serde_json::Value::String(text)) => Some(text.clone()),
         Some(serde_json::Value::Array(words)) => Some(
@@ -2355,7 +2676,7 @@ mod tests {
             self.0.borrow_mut().push(plan.args.to_vec());
             let init = serde_json::json!({
                 "type": "system", "subtype": "init", "claude_code_version": "2.1.304",
-                "cwd": plan.cwd.display().to_string(), "tools": TOOLS, "mcp_servers": [],
+                "cwd": plan.cwd.display().to_string(), "tools": ToolPolicy::claude_default().allow, "mcp_servers": [],
                 "plugins": [], "output_style": "default", "apiKeySource": "none",
                 "model": "scripted", "permissionMode": "default", "session_id": "s-1",
             });
@@ -2410,6 +2731,68 @@ mod tests {
             "{:?}",
             plans[0]
         );
+    }
+
+    /// The tool policy's decision mode is the one metaharness's session request carries, for
+    /// each mode, and with no policy given it is the kind's default: `ask` for Claude Code and
+    /// Codex.
+    #[test]
+    fn the_policys_decision_mode_reaches_the_session_request() {
+        let copy = Path::new("/s/copy");
+        for kind in [Kind::Claude, Kind::Codex] {
+            let mut executor =
+                SessionExecutor::new("/s/workspace", vec!["a.txt".to_owned()], "brief")
+                    .of_kind(kind);
+            assert_eq!(
+                executor.spec(copy).map(|spec| spec.decisions),
+                Ok(DecisionMode::Ask),
+                "{kind:?} by default"
+            );
+            for (mode, expected) in [
+                (PolicyDecisions::Frame, DecisionMode::Frame),
+                (PolicyDecisions::Ask, DecisionMode::Ask),
+                (PolicyDecisions::Observe, DecisionMode::Observe),
+            ] {
+                let mut policy = executor.policy();
+                policy.decisions = mode;
+                executor.tools = Some(policy);
+                assert_eq!(
+                    executor.spec(copy).map(|spec| spec.decisions),
+                    Ok(expected),
+                    "{kind:?} under {mode:?}"
+                );
+            }
+        }
+    }
+
+    /// The offered tools are `allow` less `deny`, in `allow`'s order, each once; an offered tool
+    /// this executor cannot check is denied at the seam, as is one not offered.
+    #[test]
+    fn the_offered_tools_are_allow_less_deny() {
+        let mut executor = SessionExecutor::new("/s/workspace", Vec::new(), "brief");
+        let tool = |name: &str| name.to_owned();
+        executor.tools = Some(ToolPolicy {
+            allow: vec![tool("Read"), tool("Bash"), tool("Read"), tool("Edit")],
+            deny: vec![tool("Edit"), tool("Grep")],
+            egress: Vec::new(),
+            decisions: PolicyDecisions::Ask,
+        });
+        assert_eq!(executor.offered(), [tool("Read"), tool("Bash")]);
+        let copy = Path::new("/s/copy");
+        let offered = executor.offered();
+        let read = serde_json::json!({"file_path": "/s/copy/a.txt"});
+        assert!(decide_among(&offered, "Read", &read, copy).is_ok());
+        assert!(decide_among(&offered, "Edit", &read, copy).is_err());
+        assert!(
+            decide_among(
+                &offered,
+                "Bash",
+                &serde_json::json!({"command": "ls"}),
+                copy
+            )
+            .is_err()
+        );
+        assert!(decide_codex_among(&[tool("Bash")], "apply_patch", &read, copy).is_err());
     }
 
     /// Set in the child [`a_claude_session_metaharness_spawns_starts_with_auto_memory_off`]

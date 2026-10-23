@@ -27,9 +27,10 @@ use b10x_loom_commission_testkit::fake_governor::{Answer, FakeGovernor};
 use b10x_loom_session_executor::metaharness::{
     HarnessProcess, LaunchPlanView, ScriptStep, ScriptedLog, ScriptedRunner,
 };
+use b10x_loom_session_executor::model::agent::ToolPolicy;
 use b10x_loom_session_executor::{
     CredentialSource, Endpoint, Kind, ProcessRunner, Proposal, ProposedFile, SessionExecutor,
-    TOOLS, plain_relative,
+    ToolPolicyDefaults as _, plain_relative,
 };
 
 const EDIT: &str = "implementation.edit";
@@ -96,7 +97,7 @@ impl ProcessRunner for Probe {
         }
         let init = serde_json::json!({
             "type": "system", "subtype": "init", "claude_code_version": "2.1.304",
-            "cwd": plan.cwd.display().to_string(), "tools": TOOLS, "mcp_servers": [],
+            "cwd": plan.cwd.display().to_string(), "tools": ToolPolicy::claude_default().allow, "mcp_servers": [],
             "plugins": [], "output_style": "default", "apiKeySource": "none",
             "model": "scripted", "permissionMode": "default", "session_id": "vendor-adv2",
         });

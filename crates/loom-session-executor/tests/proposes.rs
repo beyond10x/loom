@@ -37,11 +37,13 @@ use b10x_loom_session_executor::metaharness::{
     HarnessProcess, LaunchPlanView, ScriptedLog, ScriptedRunner, VendorSource,
     project_vendor_record,
 };
+use b10x_loom_session_executor::model::agent::ToolPolicy;
 use b10x_loom_session_executor::model::session::{
     AgentSessionState, ChangedFile, SessionChangeProposed, SessionKind,
 };
 use b10x_loom_session_executor::{
-    CredentialSource, ProcessRunner, Proposal, ProposedFile, SessionExecutor, TOOLS,
+    CredentialSource, ProcessRunner, Proposal, ProposedFile, SessionExecutor,
+    ToolPolicyDefaults as _,
 };
 
 const EDIT: &str = "implementation.edit";
@@ -212,7 +214,7 @@ impl ProcessRunner for Script {
         }
         let mut init = serde_json::json!({
             "type": "system", "subtype": "init", "claude_code_version": "2.1.304",
-            "cwd": plan.cwd.display().to_string(), "tools": TOOLS, "mcp_servers": [],
+            "cwd": plan.cwd.display().to_string(), "tools": ToolPolicy::claude_default().allow, "mcp_servers": [],
             "plugins": [], "output_style": "default", "apiKeySource": "none",
             "model": "scripted", "permissionMode": "default",
         });

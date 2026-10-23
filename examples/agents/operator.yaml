@@ -20,7 +20,7 @@ session:
     deny: [Bash]
     egress:
       - {name: logs, host: logs.example, port: 3100, max_bytes: 262144}
-    decisions: frame
+    decisions: ask
 loops:
   outer: {poll_interval_seconds: 60, sources: [chat], min_age_minutes: 0, lookback_minutes: 120}
   inner: {protocol: operator-reply@1, step_budget: 8, model_budget: 16, classify_threshold: 0.5}

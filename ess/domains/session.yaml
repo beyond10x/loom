@@ -104,6 +104,11 @@ entities:
         type: loom.session.FrontierId
       - name: vendor_session_id
         type: Optional<String>
+      # story:session-executor-from-spec (ADR 0104): the agent whose `loom.agent.AgentSpec` the
+      # session ran under, by the spec's `agent.id`: its brief, session kind, model and tool
+      # policy. Absent for a session an executor built without a spec ran.
+      - name: agent
+        type: Optional<loom.agent.AgentId>
       # The frontier action the change is proposed as
       # (commission.responsibility.ExecutorOutcomeProposedAction `action`). The proposal's
       # arguments are `{files}` only; the session's summary and its transcript digest travel on
@@ -147,6 +152,8 @@ commands:
         type: loom.session.FrontierId
       - name: vendor_session_id
         type: Optional<String>
+      - name: agent
+        type: Optional<loom.agent.AgentId>
       - name: action
         type: String
       - name: files
@@ -160,6 +167,7 @@ commands:
           commission_id: input.commission_id
           frontier_id: input.frontier_id
           vendor_session_id: input.vendor_session_id
+          agent: input.agent
           action: input.action
           files: input.files
         emits: [loom.session.SessionChangeProposed]
@@ -187,6 +195,8 @@ views:
         type: loom.session.FrontierId
       - name: vendor_session_id
         type: Optional<String>
+      - name: agent
+        type: Optional<loom.agent.AgentId>
       - name: action
         type: String
       - name: files

@@ -19,7 +19,7 @@ fn the_operator_example_decodes() {
         .session
         .as_ref()
         .expect("the example declares a session");
-    assert_eq!(session.tools.decisions, DecisionMode::Frame);
+    assert_eq!(session.tools.decisions, DecisionMode::Ask);
     assert_eq!(session.tools.egress.len(), 1);
     assert_eq!(spec.states.len(), 3);
     assert!(matches!(spec.bindings[0], Binding::Connectors(_)));

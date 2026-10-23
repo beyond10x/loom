@@ -716,7 +716,15 @@ resolved graph `cargo metadata` reports.
 `AgentExecutor` over one metaharness session per call (Atlas ADR 0098): Harness, Claude Code or
 Codex, in a scratch copy of the workspace's named files. It proposes and never performs: the
 change returns as a `ProposedAction` whose arguments are `{files}` only, read against the bytes
-the copy was made from, and an effect applies it after Commission revalidates it. A file the
+the copy was made from, and an effect applies it after Commission revalidates it.
+`SessionExecutor::from_spec` builds it from a `loom.agent/1` spec (kind, brief, `agent` role
+model, `ToolPolicy`), launches Claude Code offering only `allow` less `deny`, hands the policy's
+decision mode to metaharness, denies an offered tool it cannot check, and records the spec's
+`agent.id` on each session; it applies no budget, stop policy or egress
+(`crates/loom-session-executor/tests/from_spec.rs`). It accepts Claude Code and Codex only under
+`decisions: ask` and b10x-harness only under `observe` with no `allow` or `deny`, and refuses
+any other spec, or a tool name holding a comma or whitespace, with a `SpecError` before any
+session. A file the
 session changed that the workspace no longer holds as copied when the session ends makes the step
 suspend with `ExternalAvailability` instead; a write after that is the effect's guard to catch.
 A path with a `.git` part, or one reached through a link in the workspace, is neither copied nor
