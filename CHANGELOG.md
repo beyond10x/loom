@@ -12,6 +12,21 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `SessionExecutor::from_spec` builds the session executor from a `loom.agent/1` spec's kind, brief, model and tools (story:session-executor-from-spec)
+- `ToolPolicy::claude_default()` and `ToolPolicy::codex_default()` (`ToolPolicyDefaults`): today's session tools, `ask` (story:session-executor-from-spec)
+- `SessionExecutor::tools` and `agent`; `loom.session.AgentSession.agent` names the spec a session ran under (story:session-executor-from-spec)
+
+### Changed
+
+- Every Claude Code session is launched with `--tools` naming only its offered tools, a supplied runner's included (story:session-executor-from-spec)
+- **Breaking:** `loom.session.ProposeSessionChange` and `AgentSessions` gain the field `agent`; struct literals must set it (story:session-executor-from-spec)
+
+### Deprecated
+
+- `TOOLS` and `CODEX_TOOLS`: use `ToolPolicy::claude_default().allow` and `codex_default().allow`; removed after 0.36.0 (story:session-executor-from-spec)
+
 ## [0.35.0] - 2026-10-22
 
 No breaking changes.

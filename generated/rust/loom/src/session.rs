@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 2d02417e02d41c8a605df5cd621ff3bf479b64cb9313cccdcbd95cf6d6b830b1
-// contract digest 122f165fd0059427cf9da89b83fb96384d053f4adf5cf219801d691146d3fc8d
+// model digest f2a57c28b9dedf89d885e21d88505e82f9e0d450ad71865a98d3f44a0d0f47fa
+// contract digest ef8b0a20ee908e334d511ea5d69e5daaed756883259da3794ac06f16bdd89107
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Session — `loom.session`.
@@ -110,6 +110,8 @@ pub struct AgentSessionData {
     pub frontier_id: FrontierId,
     /// `vendor_session_id` — `Optional<String>`.
     pub vendor_session_id: Option<String>,
+    /// `agent` — `Optional<loom.agent.AgentId>`.
+    pub agent: Option<crate::agent::AgentId>,
     /// `action` — `String`.
     pub action: String,
     /// `files` — `List<loom.session.ChangedFile>`.
@@ -247,6 +249,8 @@ pub struct ProposeSessionChange {
     pub frontier_id: FrontierId,
     /// `vendor_session_id` — `Optional<String>`.
     pub vendor_session_id: Option<String>,
+    /// `agent` — `Optional<loom.agent.AgentId>`.
+    pub agent: Option<crate::agent::AgentId>,
     /// `action` — `String`.
     pub action: String,
     /// `files` — `List<loom.session.ChangedFile>`.
@@ -299,6 +303,8 @@ pub struct AgentSessions {
     pub frontier_id: FrontierId,
     /// `vendor_session_id` — `Optional<String>`.
     pub vendor_session_id: Option<String>,
+    /// `agent` — `Optional<loom.agent.AgentId>`.
+    pub agent: Option<crate::agent::AgentId>,
     /// `action` — `String`.
     pub action: String,
     /// `files` — `List<loom.session.ChangedFile>`.
