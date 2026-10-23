@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest f2a57c28b9dedf89d885e21d88505e82f9e0d450ad71865a98d3f44a0d0f47fa
-// contract digest ef8b0a20ee908e334d511ea5d69e5daaed756883259da3794ac06f16bdd89107
+// model digest b774beb53c36941f484cfdcfb927b46287a34f934f9b43c3d7e49306ebe94f34
+// contract digest 7b9385bd4805d85156d0039e947a53ea05aeda4435f2bebd60af8072091657ce
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -378,10 +378,11 @@ where
             frontier_id: input.frontier_id.clone(),
             vendor_session_id: input.vendor_session_id.clone(),
             agent: input.agent.clone(),
+            continues: input.continues.clone(),
             action: input.action.clone(),
             files: input.files.clone(),
         };
-        let answer = crate::session::ProposeSessionChangeOutcome::Proposed { session_change_proposed: crate::session::SessionChangeProposed { session_id: identity.clone(), commission_id: input.commission_id.clone(), frontier_id: input.frontier_id.clone(), action: input.action.clone(), files: input.files.clone() } };
+        let answer = crate::session::ProposeSessionChangeOutcome::Proposed { session_change_proposed: crate::session::SessionChangeProposed { session_id: identity.clone(), commission_id: input.commission_id.clone(), frontier_id: input.frontier_id.clone(), continues: input.continues.clone(), action: input.action.clone(), files: input.files.clone() } };
         AgentSessionStorage::put(&mut self.ports, crate::session::AnyAgentSession::Ended(crate::session::AgentSession::new(data)).snapshot());
         return Ok(answer);
     }
@@ -468,6 +469,7 @@ where
                 frontier_id: held.data.frontier_id,
                 vendor_session_id: held.data.vendor_session_id,
                 agent: held.data.agent,
+                continues: held.data.continues,
                 action: held.data.action,
                 files: held.data.files,
                 state: held.state,
