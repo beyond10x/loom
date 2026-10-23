@@ -267,7 +267,7 @@ impl ConfinedChild {
         self.ended = is_terminal(observed.resource.state);
         let launched = settle(
             &self.input,
-            self.open.egress.aperture.as_ref(),
+            &self.open.egress.apertures,
             self.digest.clone(),
             Ending::from(observed),
         )?;

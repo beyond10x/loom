@@ -12,6 +12,19 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `ChildCommand::with_egress` takes up to `MAX_EGRESS_APERTURES` (4) apertures; the child reaches each host by name (story:several-egress-apertures)
+
+### Changed
+
+- **Breaking:** `AppliedConfinement.network` is an `Option<Vec<AppliedAperture>>` listing every aperture, absent for an unconfined run, no longer a `String` (story:several-egress-apertures)
+- **Breaking:** `ChildCommand::egress` returns `&[EgressAperture]`, no longer `Option<&EgressAperture>` (story:several-egress-apertures)
+
+### Security
+
+- `run_child` refuses an aperture host `inet_aton` reads as an address (`0x0a000001`, `0177.0.0.1`) unless it is `127.0.0.1` (story:several-egress-apertures)
+
 ## [0.36.0] - 2026-10-23
 
 ### Added

@@ -1,6 +1,6 @@
 // generated from intake v1
-// model digest 4ed9220e25a096d3ee91fdabe8d0f6b9cdd3b59b5a826a2dfa07924bac771607
-// contract digest 0d10146dd4b2743e959d71f4eeb3cfb293bf2dba47c285732ceb93672da1b95c
+// model digest f836d6f3248bbf56362084e46b16df9b4352fcdfa0941299cd8dda192f1dc47c
+// contract digest 0890560a4a02cf92eeee366965dd042fd7116dfad2f879b638eb8d98795f55c5
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! confinement — `intake.confinement`.
@@ -8,6 +8,17 @@
 //! Requested and observed confinement of local test commands. No automatic fallback. A command bound to a protocol's action runs outside Substrate, so a run that would start one is refused CommandUnconfined unless the operator opts out of confinement for those commands explicitly.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
+
+/// AppliedAperture — `intake.confinement.AppliedAperture`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppliedAperture {
+    /// `name` — `String`.
+    pub name: String,
+    /// `destination` — `String`.
+    pub destination: String,
+    /// `listen` — `Optional<String>`.
+    pub listen: Option<String>,
+}
 
 /// AppliedConfinement — `intake.confinement.AppliedConfinement`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,8 +33,8 @@ pub struct AppliedConfinement {
     pub cgroup: String,
     /// `filesystem` — `String`.
     pub filesystem: String,
-    /// `network` — `String`.
-    pub network: String,
+    /// `network` — `Optional<List<intake.confinement.AppliedAperture>>`.
+    pub network: Option<Vec<AppliedAperture>>,
     /// `profile` — `String`.
     pub profile: String,
     /// `writable_scopes` — `List<String>`.

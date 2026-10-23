@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -15,8 +15,8 @@ use std::time::Duration;
 
 use crate::executor::TestCommand;
 pub use intake_model::confinement::{
-    AppliedConfinement, Backend, ChildExit, ChildOutput, ChildStream, ConfinementProfile,
-    ConfinementRefusal, EnvironmentEntry, ReadOnlyFile, ToolchainRoot,
+    AppliedAperture, AppliedConfinement, Backend, ChildExit, ChildOutput, ChildStream,
+    ConfinementProfile, ConfinementRefusal, EnvironmentEntry, ReadOnlyFile, ToolchainRoot,
 };
 use sha2::{Digest as _, Sha256};
 /// Substrate's own declaration of the egress aperture a [`ChildCommand`] may reach: its name, the
@@ -24,6 +24,9 @@ use sha2::{Digest as _, Sha256};
 /// ceiling.
 pub use substrate_host::EgressAperture;
 use substrate_host::{DispatchOutcome, Driver as _, ExecObservation, HostConfig, HostDriver};
+/// The most egress apertures one child reaches ([`ChildCommand::with_egress`]), Substrate's own
+/// limit.
+pub use substrate_wire::MAX_EGRESS_APERTURES;
 use substrate_wire::{
     APERTURE_CA_BUNDLE_PATH, APERTURE_HOSTS_PATH, APERTURE_LOOPBACK_ADDRESS, ApertureMechanism,
     ApertureMode, AppliedNetwork, CapabilityFacts, CaptureMode, ConfinementRequest,
@@ -40,6 +43,8 @@ pub use substrate_wire::{BaselineEnvironment, ExecEnvironment, NetworkMode, Sand
 mod child;
 #[cfg(test)]
 mod security_w20261023w1_u3;
+#[cfg(test)]
+mod several_apertures;
 pub use child::{ChildError, ChildFrame, ChildResult, ChildSignal, ConfinedChild};
 
 static NEXT_EXEC: AtomicU64 = AtomicU64::new(0);
@@ -94,13 +99,13 @@ fn scope_error(detail: impl fmt::Display) -> ConfinementError {
 /// ([`SubstrateRunner::run_child`]) run through it confined.
 ///
 /// A runner and its clones share one Substrate driver per directory that holds their workspaces,
-/// egress aperture and certificate bundle they name (Substrate fixes a driver's apertures and
+/// egress apertures and certificate bundle they name (Substrate fixes a driver's apertures and
 /// bundle when it opens), opened at the first launch that needs it, so their launches in
 /// workspaces of one directory run side by side; each launch releases its execution from the
 /// driver once it ended. Opening a driver ends every confined run under its cgroup root (Substrate
 /// reconciles them as orphans), so no driver is opened on a root, however its path is spelled,
 /// while a launch of this process runs under it: a launch that needs a driver for another
-/// directory, egress aperture or certificate bundle then is refused with
+/// directory, set of egress apertures or certificate bundle then is refused with
 /// [`ConfinementRefusal::CapabilityUnserved`] instead.
 #[derive(Debug, Clone, Default)]
 pub struct SubstrateRunner {
@@ -123,9 +128,10 @@ impl fmt::Debug for Drivers {
 /// fixes when the driver opens. A launch shares a driver only with launches in workspaces of the
 /// same directory whose `DriverEgress` is equal, every field compared:
 ///
-/// - `aperture`: the egress aperture the driver declares (`HostConfig::egress_apertures`), the
-///   whole declaration, or none;
-/// - `ca_bundle`: the certificate bundle a run with that aperture trusts, as the launch read it
+/// - `apertures`: the egress apertures the driver declares (`HostConfig::egress_apertures`), each
+///   whole declaration, in the order the child named them, or none; a set in another order is
+///   another key, since the order decides each aperture's address in the sandbox;
+/// - `ca_bundle`: the certificate bundle a run with those apertures trusts, as the launch read it
 ///   ([`CaBundle`]), compared as the path the host named and the bytes read from it, or none.
 ///   The driver hands Substrate a private copy of those bytes (`HostConfig::ca_bundle`).
 ///
@@ -134,14 +140,14 @@ impl fmt::Debug for Drivers {
 /// they share. A test, and a child naming neither, use [`DriverEgress::NONE`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DriverEgress {
-    aperture: Option<EgressAperture>,
+    apertures: Vec<EgressAperture>,
     ca_bundle: Option<CaBundle>,
 }
 
 impl DriverEgress {
     /// No egress aperture and no certificate bundle.
     const NONE: Self = Self {
-        aperture: None,
+        apertures: Vec::new(),
         ca_bundle: None,
     };
 }
@@ -197,7 +203,7 @@ impl CaBundle {
 }
 
 /// The configuration of a driver for the workspaces in `parent`, opened for `egress`, before its
-/// cgroup root is chosen: its capsules in `state`, its private state directory, the aperture it
+/// cgroup root is chosen: its capsules in `state`, its private state directory, the apertures it
 /// declares, and for a certificate bundle the private copy written to `state`, never the path the
 /// host named.
 fn driver_config(
@@ -207,7 +213,7 @@ fn driver_config(
 ) -> Result<HostConfig, ConfinementError> {
     let mut config = HostConfig::minimum(parent);
     config.capsule_root = state.join("capsules");
-    config.egress_apertures = egress.aperture.iter().cloned().collect();
+    config.egress_apertures = egress.apertures.clone();
     config.ca_bundle = egress
         .ca_bundle
         .as_ref()
@@ -388,7 +394,7 @@ impl SubstrateRunner {
         }
         // Substrate publishes the declared apertures only once its mechanism worked in a
         // throwaway sandbox; a declared one it does not publish is never served.
-        if let Some(aperture) = &egress.aperture {
+        for aperture in &egress.apertures {
             let Some(served) = facts.exec_egress_apertures.as_ref() else {
                 return Err(refuse(
                     ConfinementRefusal::CapabilityUnserved,
@@ -424,9 +430,10 @@ impl SubstrateRunner {
     /// has. A guarantee Substrate does not serve is a [`ConfinementError`] and nothing runs, never
     /// an unconfined fall-back. The child's environment is exactly [`ChildCommand::environment`],
     /// it writes only under `target` and the workspace paths the host named
-    /// ([`ChildCommand::with_writable`]), and its network is none or exactly the egress aperture
-    /// it names ([`ChildCommand::with_egress`]), where it trusts the certificate bundle the host
-    /// names ([`ChildCommand::with_ca_bundle`]); an aperture naming no host, a bundle the child
+    /// ([`ChildCommand::with_writable`]), and its network is none or exactly the egress apertures
+    /// it names, at most [`MAX_EGRESS_APERTURES`] ([`ChildCommand::with_egress`]), where it trusts
+    /// the certificate bundle the host names ([`ChildCommand::with_ca_bundle`]); an aperture
+    /// declaration Substrate never makes or the child could not reach by name, a bundle the child
     /// cannot be given as named, or a writable path that names no directory of the workspace by
     /// itself, is refused before anything starts.
     /// Once the child has run, its result is refused as a [`ConfinementError`] when the
@@ -444,7 +451,7 @@ impl SubstrateRunner {
     pub fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
         check_program(&child.program)?;
         check_stdin(child.stdin.as_deref())?;
-        check_network(child.network, child.egress.as_ref())?;
+        check_network(child.network, &child.egress)?;
         // Read once, here: the child trusts these bytes, whatever the path holds later.
         let ca_bundle = check_ca_bundle(child)?;
         let writable = check_writable(&child.writable)?;
@@ -452,7 +459,7 @@ impl SubstrateRunner {
         let child = child.as_ref();
         let root = validate_workspace(&child.directory, &writable)?;
         let egress = DriverEgress {
-            aperture: child.egress.clone(),
+            apertures: child.egress.clone(),
             ca_bundle,
         };
         let open = self.driver(&root, &egress)?;
@@ -496,14 +503,14 @@ impl SubstrateRunner {
                 "a live child is given standard input through ConfinedChild::write_stdin, never ChildCommand::with_stdin",
             ));
         }
-        check_network(child.network, child.egress.as_ref())?;
+        check_network(child.network, &child.egress)?;
         let ca_bundle = check_ca_bundle(child)?;
         let writable = check_writable(&child.writable)?;
         let child = check_mounts(child, ca_bundle.as_ref())?;
         let child = child.as_ref();
         let root = validate_workspace(&child.directory, &writable)?;
         let egress = DriverEgress {
-            aperture: child.egress.clone(),
+            apertures: child.egress.clone(),
             ca_bundle,
         };
         let open = self.driver(&root, &egress)?;
@@ -542,7 +549,7 @@ impl SubstrateRunner {
             .map_err(observation_error)?;
         settle(
             input,
-            open.egress.aperture.as_ref(),
+            &open.egress.apertures,
             prepared.digest,
             Ending::from(observed),
         )
@@ -642,7 +649,7 @@ impl SubstrateRunner {
         })?;
         settle(
             input,
-            open.egress.aperture.as_ref(),
+            &open.egress.apertures,
             prepared.digest,
             Ending::from(observed),
         )
@@ -699,7 +706,7 @@ impl Prepared {
         if let Some(program) = input.argv.first() {
             check_program(program)?;
         }
-        let egress = open.egress.aperture.as_ref();
+        let egress = open.egress.apertures.as_slice();
         let running = Running::enter(&open.cgroup_root);
         let profile = requested_profile(input, egress);
         let digest = profile_digest(
@@ -777,13 +784,13 @@ impl From<ExecObservation> for Ending {
 }
 
 /// Accept `ending`, an execution of `input`, only when the confinement Substrate applied is the
-/// one `input` required, with the egress aperture the driver declares when `input` asks for one,
+/// one `input` required, with the egress apertures the driver declares when `input` asks for them,
 /// and project it: the applied confinement (with `digest`, the requested profile's), how it
 /// ended, and its output, the tail of each stream as text and both whole. Every launch, a child
 /// run to its end and a live child alike, is checked here once it ended.
 fn settle(
     input: &ExecStartInput,
-    egress: Option<&EgressAperture>,
+    egress: &[EgressAperture],
     digest: String,
     ending: Ending,
 ) -> Result<Launched, ConfinementError> {
@@ -811,7 +818,7 @@ fn settle(
         capability_snapshot: record.capability_snapshot.clone(),
         cgroup: record.cgroup.clone(),
         filesystem: enum_name(&record.filesystem),
-        network: applied_network_name(&record.network),
+        network: Some(applied_apertures(&record.network)),
         profile: enum_name(&record.profile),
         writable_scopes: record
             .workspace_access
@@ -872,12 +879,23 @@ struct Launched {
     exit: ChildExit,
 }
 
-/// The refusal Substrate ends a run with once its egress aperture's declared byte ceiling is
+/// Whether an aperture of `network` declares a byte ceiling.
+fn declares_a_ceiling(network: &AppliedNetwork) -> bool {
+    match network {
+        AppliedNetwork::None => false,
+        AppliedNetwork::Aperture(aperture) => aperture.max_bytes.is_some(),
+        AppliedNetwork::Apertures(apertures) => apertures
+            .iter()
+            .any(|aperture| aperture.max_bytes.is_some()),
+    }
+}
+
+/// The refusal Substrate ends a run with once an egress aperture's declared byte ceiling is
 /// reached, as it ends one at its deadline with `exec.timeout`.
 const BYTE_LIMIT: &str = "exec.aperture-byte-limit";
 
 /// A child's result: refused when Substrate reports no exit status, unless the child's deadline or
-/// the byte ceiling of the egress aperture it ran with ended it, since such a child was ended by
+/// the byte ceiling of an egress aperture it ran with ended it, since such a child was ended by
 /// something other than itself or a bound the host declared. A child its byte ceiling ended has
 /// no exit status and is not timed out; its output names [`BYTE_LIMIT`] and its driver record
 /// counts the bytes that crossed.
@@ -885,9 +903,10 @@ fn child_result(launched: Launched) -> Result<TestExecution, ConfinementError> {
     let execution = launched.execution;
     // Only a ceiling the record shows applied: the record already equals the declaration.
     let ceiling_ended = launched.refusal.as_deref() == Some(BYTE_LIMIT)
-        && execution.driver_record.as_ref().is_some_and(|record| {
-            matches!(&record.network, AppliedNetwork::Aperture(aperture) if aperture.max_bytes.is_some())
-        });
+        && execution
+            .driver_record
+            .as_ref()
+            .is_some_and(|record| declares_a_ceiling(&record.network));
     if execution.exit_code.is_none() && !execution.timed_out && !ceiling_ended {
         return Err(refuse(
             ConfinementRefusal::CapabilityUnserved,
@@ -963,10 +982,11 @@ impl TestRunner for SubstrateRunner {
 /// Substrate for [`SandboxProfile::Workspace`] with [`NetworkMode::None`] unless the host names
 /// another, and Substrate is always required: a guarantee it does not serve refuses the launch.
 ///
-/// A child that must reach one host, such as a harness and its vendor's API, names it as the
-/// Substrate [`EgressAperture`] it may reach ([`ChildCommand::with_egress`]): its network is then
-/// that aperture alone, every other guarantee kept. Substrate gives one run at most one aperture.
-/// A child reaching that host over TLS also names the certificate bundle it trusts there
+/// A child that must reach a host, such as a harness and its vendor's API, names it as a
+/// Substrate [`EgressAperture`] it may reach ([`ChildCommand::with_egress`], once per host, at
+/// most [`MAX_EGRESS_APERTURES`]): its network is then those apertures alone, every other
+/// guarantee kept. A child reaching such a host over TLS also names the certificate bundle it
+/// trusts there
 /// ([`ChildCommand::with_ca_bundle`]); without one it cannot verify the host's certificate.
 ///
 /// Beside `/usr`, `/bin`, `/lib`, `/lib64`, `/proc`, `/dev`, a private `/tmp` and its workspace,
@@ -985,7 +1005,7 @@ pub struct ChildCommand {
     environment: ExecEnvironment,
     profile: SandboxProfile,
     network: NetworkMode,
-    egress: Option<EgressAperture>,
+    egress: Vec<EgressAperture>,
     ca_bundle: Option<PathBuf>,
     timeout: Duration,
     stdin: Option<Vec<u8>>,
@@ -1030,7 +1050,7 @@ impl ChildCommand {
             },
             profile: SandboxProfile::Workspace,
             network: NetworkMode::None,
-            egress: None,
+            egress: Vec::new(),
             ca_bundle: None,
             timeout: Self::DEFAULT_TIMEOUT,
             stdin: None,
@@ -1163,23 +1183,30 @@ impl ChildCommand {
         Self { network, ..self }
     }
 
-    /// The same child reaching `aperture` and nothing else: [`NetworkMode::Aperture`], with the
-    /// host, port and pinned address `aperture` declares. The child reaches it by the host's name,
-    /// which Substrate maps to its forwarder on `127.0.0.1` inside the sandbox, at the named port.
-    /// A declaration Substrate's daemon never makes, or one the child could not reach by, is
-    /// refused before anything starts: a name it refuses, no port, a byte ceiling of zero, a host
-    /// that is no host name or IPv4 literal, an IPv4 literal host other than `127.0.0.1` (named in
-    /// the refusal; name such a host by its name), an IPv4 literal other than the pinned address,
-    /// and a pinned address that is no IPv4 one or not at the named port. A child its byte ceiling
-    /// ends is a result with no exit status, not timed out, whose output names
-    /// `exec.aperture-byte-limit`. It gets no certificate bundle unless the host names one
-    /// ([`ChildCommand::with_ca_bundle`]): without one, a child that verifies TLS certificates
-    /// cannot verify the host's.
+    /// The same child also reaching `aperture`, and nothing but the apertures named:
+    /// [`NetworkMode::Aperture`], with the host, port and pinned address `aperture` declares. Each
+    /// call adds one aperture, in order; a child reaches at most [`MAX_EGRESS_APERTURES`]. The child
+    /// reaches each by its host's name, which Substrate maps to that aperture's forwarder inside
+    /// the sandbox, at the named port: the first on `127.0.0.1`, the n-th on `127.0.0.n`. A
+    /// declaration Substrate's daemon never makes, or one the child could not reach by, is refused
+    /// before anything starts: a name it refuses, no port, a byte ceiling of zero, a host that is
+    /// no host name or IPv4 literal, an IPv4 literal host other than `127.0.0.1` (named in the
+    /// refusal; name such a host by its name), an IPv4 literal other than the pinned address, and
+    /// a pinned address that is no IPv4 one or not at the named port. Beside those, a set is
+    /// refused when it holds more than [`MAX_EGRESS_APERTURES`] apertures (naming the count), one
+    /// name twice, a second or later aperture whose host is an IPv4 literal or `localhost`, which
+    /// only the first one's forwarder answers (naming the host), or two apertures naming one host,
+    /// compared without ASCII case and a trailing `.` (naming it). A child a byte ceiling ends is a
+    /// result with no exit status, not timed out, whose output names `exec.aperture-byte-limit`. It
+    /// gets no certificate bundle unless the host names one ([`ChildCommand::with_ca_bundle`]):
+    /// without one, a child that verifies TLS certificates cannot verify the hosts'.
     #[must_use]
     pub fn with_egress(self, aperture: EgressAperture) -> Self {
+        let mut egress = self.egress;
+        egress.push(aperture);
         Self {
             network: NetworkMode::Aperture,
-            egress: Some(aperture),
+            egress,
             ..self
         }
     }
@@ -1287,9 +1314,9 @@ impl ChildCommand {
         self.network
     }
 
-    /// The egress aperture the child may reach, if it names one.
-    pub fn egress(&self) -> Option<&EgressAperture> {
-        self.egress.as_ref()
+    /// The egress apertures the child may reach, in the order named; empty when it names none.
+    pub fn egress(&self) -> &[EgressAperture] {
+        &self.egress
     }
 
     /// The certificate bundle the child trusts at its egress aperture, as named, if it names one.
@@ -1412,9 +1439,19 @@ impl ChildCommand {
             sandbox: ConfinementRequest {
                 capability_snapshot: snapshot,
                 network: self.network,
-                // A name only: the destination is the driver's declaration, never the request's.
-                aperture: self.egress.as_ref().map(|aperture| aperture.name.clone()),
-                apertures: Vec::new(),
+                // Names only: the destination is the driver's declaration, never the request's.
+                // One aperture is asked for as one, as before; several as a list, in order.
+                aperture: match self.egress.as_slice() {
+                    [only] => Some(only.name.clone()),
+                    _ => None,
+                },
+                apertures: match self.egress.as_slice() {
+                    [] | [_] => Vec::new(),
+                    several => several
+                        .iter()
+                        .map(|aperture| aperture.name.clone())
+                        .collect(),
+                },
                 profile: self.profile,
                 required: true,
             },
@@ -1670,19 +1707,74 @@ fn workspace_name(root: &Path) -> Result<&str, ConfinementError> {
 /// port other than the named port is refused too, and so is an IPv4 literal host other than
 /// `127.0.0.1`, which the child could not reach the host by. The embedded driver checks only a request's
 /// shape, and writes the host verbatim into the child's `/etc/hosts`, so the declaration's rules
-/// are held here.
-fn check_network(
-    network: NetworkMode,
-    egress: Option<&EgressAperture>,
-) -> Result<(), ConfinementError> {
-    let Some(aperture) = egress else {
+/// are held here, for each aperture of a set.
+///
+/// A set of apertures is refused, too, when it holds more than [`MAX_EGRESS_APERTURES`] (naming
+/// the count), one name twice, a second or later aperture whose host is an IPv4 literal or
+/// `localhost` (naming the host: only the first aperture's forwarder listens on `127.0.0.1`, so
+/// a later one is reached by its host name alone), or two apertures naming one host, compared
+/// without ASCII case and a trailing `.` (naming it): Substrate maps each host name to one
+/// forwarder in the child's `/etc/hosts`.
+fn check_network(network: NetworkMode, egress: &[EgressAperture]) -> Result<(), ConfinementError> {
+    if egress.is_empty() {
         return match network {
             NetworkMode::None => Ok(()),
             NetworkMode::Aperture => Err(scope_error(
                 "network aperture names no host: name the egress aperture with ChildCommand::with_egress",
             )),
         };
-    };
+    }
+    let most = usize::try_from(MAX_EGRESS_APERTURES).unwrap_or(usize::MAX);
+    if egress.len() > most {
+        let named = egress
+            .iter()
+            .map(|aperture| format!("`{}` ({})", aperture.name, aperture.host))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(scope_error(format!(
+            "{} egress apertures are named, {named}; a child reaches at most {MAX_EGRESS_APERTURES}",
+            egress.len()
+        )));
+    }
+    for (index, aperture) in egress.iter().enumerate() {
+        if let Some(earlier) = egress[..index]
+            .iter()
+            .find(|earlier| earlier.name == aperture.name)
+        {
+            return Err(scope_error(format!(
+                "egress aperture `{}` is named twice, for the hosts {} and {}: Substrate declares each aperture name once",
+                aperture.name, earlier.host, aperture.host
+            )));
+        }
+        check_aperture(network, aperture, index)?;
+        let host = host_key(&aperture.host);
+        if let Some(earlier) = egress[..index]
+            .iter()
+            .find(|earlier| host_key(&earlier.host) == host)
+        {
+            return Err(scope_error(format!(
+                "egress apertures `{}` and `{}` both name the host {host}: Substrate maps a host name to one aperture",
+                earlier.name, aperture.name
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// A host as Substrate compares the hosts of a set of apertures: ASCII lowercase, with no trailing
+/// `.`.
+fn host_key(host: &str) -> String {
+    host.strip_suffix('.').unwrap_or(host).to_ascii_lowercase()
+}
+
+/// Refuse the aperture at `index` of a set unless Substrate's daemon declares it so and the child
+/// can reach it: the rules of [`check_network`] for one aperture, and for a second or later one a
+/// host that is no IPv4 literal and not `localhost`.
+fn check_aperture(
+    network: NetworkMode,
+    aperture: &EgressAperture,
+    index: usize,
+) -> Result<(), ConfinementError> {
     let name = &aperture.name;
     if aperture.host.trim().is_empty() {
         return Err(scope_error(format!(
@@ -1713,29 +1805,61 @@ fn check_network(
             aperture.port
         )));
     }
+    if index > 0 {
+        let host = aperture.host.strip_suffix('.').unwrap_or(&aperture.host);
+        if numeric_host(host) || host.eq_ignore_ascii_case("localhost") {
+            return Err(scope_error(format!(
+                "egress aperture `{name}` names the host {}: only the first aperture listens on {APERTURE_LOOPBACK_ADDRESS}, so a later one is reached by its host name alone; name the host by its name",
+                aperture.host
+            )));
+        }
+    }
     check_host(name, &aperture.host, *pinned.ip())
+}
+
+/// Whether the C resolver reads `host` as an IPv4 address rather than a name: one to four
+/// dot-separated labels (a trailing `.` ignored), each a number as `inet_aton` reads one, decimal,
+/// `0x` or `0X` hexadecimal, or octal with a leading `0`. glibc's `getaddrinfo` parses such a host
+/// numerically before it reads `/etc/hosts`, so `0x7f000001` or `0177.0.0.1` reaches `127.0.0.1`
+/// whatever Substrate maps the name to there. A label holding digits an octal or decimal number
+/// cannot hold counts as numeric too: such a host is refused either way.
+fn numeric_host(host: &str) -> bool {
+    let host = host.strip_suffix('.').unwrap_or(host);
+    let labels = host.split('.').count();
+    (1..=4).contains(&labels)
+        && host.split('.').all(|label| {
+            match label
+                .strip_prefix("0x")
+                .or_else(|| label.strip_prefix("0X"))
+            {
+                Some(hex) => hex.bytes().all(|byte| byte.is_ascii_hexdigit()),
+                None => !label.is_empty() && label.bytes().all(|byte| byte.is_ascii_digit()),
+            }
+        })
 }
 
 /// Refuse an aperture's host unless it is a declaration Substrate's daemon makes for an address
 /// pinned at `pinned` and one the child can reach by: a host name, dot-separated labels of ASCII
 /// letters, digits and inner hyphens, at most 63 bytes each and 253 in all, the last not all
-/// digits, or the IPv4 literal `127.0.0.1` pinned there. Anything else (whitespace, a second line,
-/// a port, a URL, an IPv6 literal) never resolves to an IPv4 address there. Another IPv4 literal is
-/// refused too: Substrate maps only a host name to the forwarder it starts on
-/// [`APERTURE_LOOPBACK_ADDRESS`] inside the sandbox, so a child dialling any other literal would
-/// never reach the host; a literal also resolves to itself, so it must be `pinned`.
+/// digits and not every one a number ([`numeric_host`]), or exactly the IPv4 literal `127.0.0.1`
+/// pinned there. Anything else (whitespace, a second line, a port, a URL, an IPv6 literal) never
+/// resolves to an IPv4 address there. Any other numeric host, in whatever spelling `inet_aton`
+/// reads (`10.0.0.1`, `0x0a000001`, `0177.0.0.1`), is refused too: Substrate maps only a host name
+/// to the forwarder it starts on [`APERTURE_LOOPBACK_ADDRESS`] inside the sandbox, so a child
+/// dialling any other address would never reach the host; a literal also resolves to itself, so it
+/// must be `pinned`.
 fn check_host(name: &str, host: &str, pinned: Ipv4Addr) -> Result<(), ConfinementError> {
-    if let Ok(literal) = host.parse::<Ipv4Addr>() {
+    if numeric_host(host) {
         let forwarder: Ipv4Addr = APERTURE_LOOPBACK_ADDRESS
             .parse()
             .expect("Substrate's forwarder address is an IPv4 literal");
-        return if literal != forwarder {
+        return if host != APERTURE_LOOPBACK_ADDRESS {
             Err(scope_error(format!(
-                "egress aperture `{name}` names the host {literal}: a child reaches an aperture by its host name, or at {forwarder}, where Substrate's forwarder listens in the sandbox; name the host by its name"
+                "egress aperture `{name}` names the host {host}: the resolver reads it as an IPv4 address, and a child reaches an aperture by its host name, or at {forwarder} spelled so, where Substrate's forwarder listens in the sandbox; name the host by its name"
             )))
-        } else if literal != pinned {
+        } else if forwarder != pinned {
             Err(scope_error(format!(
-                "egress aperture `{name}` names the address {literal} but is pinned to {pinned}"
+                "egress aperture `{name}` names the address {forwarder} but is pinned to {pinned}"
             )))
         } else {
             Ok(())
@@ -1866,7 +1990,7 @@ fn check_ca_bundle(child: &ChildCommand) -> Result<Option<CaBundle>, Confinement
         .to_str()
         .map_or_else(|| format!("{path:?}"), |text| format!("`{text}`"));
     let refused = |why: &str| scope_error(format!("the CA bundle {named} {why}"));
-    if child.egress.is_none() {
+    if child.egress.is_empty() {
         return Err(refused(
             "is named for a child with no egress aperture, which reaches no host to verify; name the aperture with ChildCommand::with_egress",
         ));
@@ -2364,14 +2488,15 @@ fn check_driver_mounts(
 /// Accept Substrate's record of what it applied only when it is the confinement `input` required:
 /// its workspace access (exactly the writable paths requested, so a record reporting a wider or
 /// another writable set is refused), profile, read-only roots, read-only files and capability
-/// snapshot, no secret slot, a cgroup, and exactly the requested network ([`network_applied`]); no
-/// working directory, writable root, list of apertures or execution capsule, which Loom never
-/// requests, and so the filesystem Substrate applies without a capsule. A test's launch and a
-/// child's are held to the same record. The record is taken apart without `..`, so a member a
-/// later Substrate adds does not compile until it is judged here.
+/// snapshot, no secret slot, a cgroup, and exactly the requested network ([`network_applied`]),
+/// the apertures `input` asked for by name being exactly `egress`, in order; no working
+/// directory, writable root or execution capsule, which Loom never requests, and so the
+/// filesystem Substrate applies without a capsule. A test's launch and a child's are held to the
+/// same record. The record is taken apart without `..`, so a member a later Substrate adds does
+/// not compile until it is judged here.
 fn check_record(
     input: &ExecStartInput,
-    egress: Option<&EgressAperture>,
+    egress: &[EgressAperture],
     record: &substrate_wire::AppliedConfinement,
 ) -> Result<(), ConfinementError> {
     let substrate_wire::AppliedConfinement {
@@ -2390,14 +2515,13 @@ fn check_record(
     } = record;
     if *workspace_access != input.workspace_access
         || !network_applied(input.sandbox.network, egress, network)
-        || input.sandbox.aperture.as_deref() != egress.map(|aperture| aperture.name.as_str())
+        || !apertures_requested(&input.sandbox, egress)
         || *profile != input.sandbox.profile
         || *read_only_roots != input.read_only_roots
         || *read_only_files != input.read_only_files
         || *workdir != input.workdir
         || !input.writable_roots.is_empty()
         || !writable_roots.is_empty()
-        || !input.sandbox.apertures.is_empty()
         || input.capsule.is_some()
         || capsule.is_some()
         || *filesystem != substrate_wire::AppliedFilesystem::WorkspaceReadWriteSystemReadOnly
@@ -2413,61 +2537,124 @@ fn check_record(
     Ok(())
 }
 
+/// Whether the apertures `sandbox` asks Substrate for by name are exactly `egress`, in order: one
+/// aperture by `aperture` alone, several by `apertures` alone, none by neither.
+fn apertures_requested(sandbox: &ConfinementRequest, egress: &[EgressAperture]) -> bool {
+    match egress {
+        [] => sandbox.aperture.is_none() && sandbox.apertures.is_empty(),
+        [only] => {
+            sandbox.aperture.as_deref() == Some(only.name.as_str()) && sandbox.apertures.is_empty()
+        }
+        several => {
+            sandbox.aperture.is_none()
+                && sandbox.apertures.len() == several.len()
+                && sandbox
+                    .apertures
+                    .iter()
+                    .zip(several)
+                    .all(|(requested, declared)| *requested == declared.name)
+        }
+    }
+}
+
 /// Whether the network Substrate applied is the one requested: no network for
-/// [`NetworkMode::None`], and for [`NetworkMode::Aperture`] exactly the declared aperture, by its
-/// name, pinned destination, mechanism and byte ceiling, with no listen address, which Substrate
-/// sets only on the elements of a list of apertures. Any other network, wider or narrower, is
-/// not the one requested. The aperture is taken apart without `..`, as [`check_record`] takes the
-/// record; its byte counts are what crossed and judge nothing.
+/// [`NetworkMode::None`], and for [`NetworkMode::Aperture`] exactly the declared apertures. One
+/// aperture is applied as one, with no listen address; several as a list of as many, in the order
+/// declared, each listening where Substrate puts the aperture at its place
+/// ([`aperture_listen`]). Each is judged by its name, pinned destination, mechanism and byte
+/// ceiling. Any other network, wider or narrower, in another order or of another form, is not the
+/// one requested. An aperture is taken apart without `..`, as [`check_record`] takes the record;
+/// its byte counts are what crossed and judge nothing.
 fn network_applied(
     requested: NetworkMode,
-    egress: Option<&EgressAperture>,
+    egress: &[EgressAperture],
     applied: &AppliedNetwork,
 ) -> bool {
     match (requested, egress, applied) {
-        (NetworkMode::None, None, AppliedNetwork::None) => true,
-        (NetworkMode::Aperture, Some(declared), AppliedNetwork::Aperture(applied)) => {
-            let substrate_wire::AppliedAperture {
-                mode,
-                name,
-                destination,
-                mechanism,
-                bytes: _,
-                max_bytes,
-                listen,
-            } = applied;
-            *mode == ApertureMode::Aperture
-                && *name == declared.name
-                && *destination == declared.pinned.to_string()
-                && *mechanism == ApertureMechanism::LoopbackForwarder
-                && *max_bytes == declared.max_bytes
-                && listen.is_none()
+        (NetworkMode::None, [], AppliedNetwork::None) => true,
+        (NetworkMode::Aperture, [declared], AppliedNetwork::Aperture(applied)) => {
+            aperture_applied(declared, applied, None)
+        }
+        (NetworkMode::Aperture, declared, AppliedNetwork::Apertures(applied))
+            if declared.len() >= 2 =>
+        {
+            declared.len() == applied.len()
+                && declared
+                    .iter()
+                    .zip(applied)
+                    .enumerate()
+                    .all(
+                        |(index, (declared, applied))| match aperture_listen(index, declared) {
+                            Some(listen) => aperture_applied(declared, applied, Some(listen)),
+                            None => false,
+                        },
+                    )
         }
         _ => false,
     }
 }
 
-/// A network as the confinement projection names it: `none`, or `aperture:<name>@<destination>`.
-fn network_name(aperture: Option<(&str, &str)>) -> String {
-    aperture.map_or_else(
-        || "none".to_owned(),
-        |(name, destination)| format!("aperture:{name}@{destination}"),
-    )
+/// Whether `applied` is `declared` as Substrate applies it, listening at `listen`.
+fn aperture_applied(
+    declared: &EgressAperture,
+    applied: &substrate_wire::AppliedAperture,
+    listen: Option<SocketAddrV4>,
+) -> bool {
+    let substrate_wire::AppliedAperture {
+        mode,
+        name,
+        destination,
+        mechanism,
+        bytes: _,
+        max_bytes,
+        listen: applied_listen,
+    } = applied;
+    *mode == ApertureMode::Aperture
+        && *name == declared.name
+        && *destination == declared.pinned.to_string()
+        && *mechanism == ApertureMechanism::LoopbackForwarder
+        && *max_bytes == declared.max_bytes
+        && *applied_listen == listen.map(|listen| listen.to_string())
 }
 
-/// The network Substrate applied, named as [`network_name`] names it; several apertures, which
-/// [`check_record`] never accepts, are each named so and joined with `,`.
-fn applied_network_name(network: &AppliedNetwork) -> String {
+/// Where the aperture at `index` of a list listens inside the sandbox: the n-th (from 1) on
+/// `127.0.0.n` ([`APERTURE_LOOPBACK_ADDRESS`] for the first), at the port it names; none at or past
+/// [`MAX_EGRESS_APERTURES`].
+fn aperture_listen(index: usize, aperture: &EgressAperture) -> Option<SocketAddrV4> {
+    if index >= usize::try_from(MAX_EGRESS_APERTURES).ok()? {
+        return None;
+    }
+    let first: Ipv4Addr = APERTURE_LOOPBACK_ADDRESS.parse().ok()?;
+    let [a, b, c, d] = first.octets();
+    let d = d.checked_add(u8::try_from(index).ok()?)?;
+    Some(SocketAddrV4::new(Ipv4Addr::new(a, b, c, d), aperture.port))
+}
+
+/// A network as the requested profile names it: `none`, or `aperture:<name>@<destination>` for
+/// each aperture, joined with `,`.
+fn network_name(apertures: &[EgressAperture]) -> String {
+    if apertures.is_empty() {
+        return "none".to_owned();
+    }
+    apertures
+        .iter()
+        .map(|aperture| format!("aperture:{}@{}", aperture.name, aperture.pinned))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// The apertures Substrate applied, as the confinement projection lists them: none, the one
+/// aperture with no listen address, or each of a list with the address it listens on.
+fn applied_apertures(network: &AppliedNetwork) -> Vec<AppliedAperture> {
+    let project = |applied: &substrate_wire::AppliedAperture| AppliedAperture {
+        name: applied.name.clone(),
+        destination: applied.destination.clone(),
+        listen: applied.listen.clone(),
+    };
     match network {
-        AppliedNetwork::None => network_name(None),
-        AppliedNetwork::Aperture(applied) => {
-            network_name(Some((&applied.name, &applied.destination)))
-        }
-        AppliedNetwork::Apertures(applied) => applied
-            .iter()
-            .map(|applied| network_name(Some((&applied.name, &applied.destination))))
-            .collect::<Vec<_>>()
-            .join(","),
+        AppliedNetwork::None => Vec::new(),
+        AppliedNetwork::Aperture(applied) => vec![project(applied)],
+        AppliedNetwork::Apertures(applied) => applied.iter().map(project).collect(),
     }
 }
 
@@ -2851,16 +3038,11 @@ fn files_projection(files: &[substrate_wire::ReadOnlyFile]) -> Vec<ReadOnlyFile>
         })
         .collect()
 }
-fn requested_profile(
-    input: &ExecStartInput,
-    egress: Option<&EgressAperture>,
-) -> ConfinementProfile {
+fn requested_profile(input: &ExecStartInput, egress: &[EgressAperture]) -> ConfinementProfile {
     ConfinementProfile {
         backend: Backend::Substrate,
         network: match (input.sandbox.network, egress) {
-            (NetworkMode::Aperture, Some(aperture)) => {
-                network_name(Some((&aperture.name, &aperture.pinned.to_string())))
-            }
+            (NetworkMode::Aperture, [_, ..]) => network_name(egress),
             (network, _) => enum_name(&network),
         },
         writable_scopes: input
@@ -2887,7 +3069,7 @@ fn requested_profile(
 fn profile_digest(
     profile: &ConfinementProfile,
     inherited: &[BaselineEnvironment],
-    egress: Option<&EgressAperture>,
+    egress: &[EgressAperture],
     ca_bundle: Option<&CaBundle>,
     read_only_files: &[substrate_wire::ReadOnlyFile],
 ) -> String {
@@ -2901,10 +3083,16 @@ fn profile_digest(
     if !inherited.is_empty() {
         json["inherited"] = inherited.iter().map(|name| name.as_str()).collect();
     }
-    // The whole egress declaration, absent without one for the same reason.
-    if let Some(aperture) = egress {
-        json["egress"] = serde_json::json!({ "name":aperture.name, "host":aperture.host, "port":aperture.port,
-            "pinned":aperture.pinned.to_string(), "max_bytes":aperture.max_bytes });
+    // The whole egress declaration, absent without one for the same reason: one aperture as the
+    // object it has always been, so its digest is unchanged, and several as a list of them.
+    let declaration = |aperture: &EgressAperture| {
+        serde_json::json!({ "name":aperture.name, "host":aperture.host, "port":aperture.port,
+            "pinned":aperture.pinned.to_string(), "max_bytes":aperture.max_bytes })
+    };
+    match egress {
+        [] => {}
+        [only] => json["egress"] = declaration(only),
+        several => json["egress"] = several.iter().map(declaration).collect(),
     }
     // The certificate bundle: its path as the host named it (UTF-8, `check_ca_bundle`) and the
     // digest of the bytes the child trusts, absent without one for the same reason.
@@ -3106,13 +3294,13 @@ mod tests {
             input.workspace_access.writable_subtrees(),
             Some(expected.map(str::to_owned).as_slice())
         );
-        let profile = requested_profile(&input, None);
+        let profile = requested_profile(&input, &[]);
         assert_eq!(profile.writable_scopes, expected);
         let bare = ChildCommand::new("true", [] as [&str; 0], "/work/space");
-        let plain = requested_profile(&bare.input("space", "snapshot".to_owned()), None);
+        let plain = requested_profile(&bare.input("space", "snapshot".to_owned()), &[]);
         assert_ne!(
-            profile_digest(&profile, &[], None, None, &[]),
-            profile_digest(&plain, &[], None, None, &[])
+            profile_digest(&profile, &[], &[], None, &[]),
+            profile_digest(&plain, &[], &[], None, &[])
         );
         let named = 63;
         let most = (0..named).fold(bare.clone(), |child, n| {
@@ -3223,7 +3411,7 @@ mod tests {
             .with_writable("scratch")
             .input("space", "snapshot".to_owned());
         let exact = record_for(&input, AppliedNetwork::None);
-        check_record(&input, None, &exact).unwrap();
+        check_record(&input, &[], &exact).unwrap();
         let scoped = |paths: &[&str]| WorkspaceAccess::Scoped {
             writable_subtrees: paths.iter().map(|path| (*path).to_owned()).collect(),
         };
@@ -3239,7 +3427,7 @@ mod tests {
                 workspace_access: access.clone(),
                 ..exact.clone()
             };
-            let error = check_record(&input, None, &record).unwrap_err();
+            let error = check_record(&input, &[], &record).unwrap_err();
             assert_eq!(
                 error.reason,
                 ConfinementRefusal::CapabilityUnserved,
@@ -3262,7 +3450,7 @@ mod tests {
             assert!(input.sandbox.apertures.is_empty());
             let single = applied_aperture("model", PINNED, None);
             let exact = record_for(input, single.clone());
-            check_record(input, Some(&model()), &exact).unwrap();
+            check_record(input, &[model()], &exact).unwrap();
             let AppliedNetwork::Aperture(applied) = single else {
                 unreachable!("an applied aperture");
             };
@@ -3308,7 +3496,7 @@ mod tests {
                 },
             ];
             for record in others {
-                let error = check_record(input, Some(&model()), &record).unwrap_err();
+                let error = check_record(input, &[model()], &record).unwrap_err();
                 assert_eq!(
                     error.reason,
                     ConfinementRefusal::CapabilityUnserved,
@@ -3409,14 +3597,14 @@ mod tests {
     }
 
     /// An applied-confinement projection; the child-result rule does not read it.
-    fn projection(network: &str) -> AppliedConfinement {
+    fn projection(network: Vec<AppliedAperture>) -> AppliedConfinement {
         AppliedConfinement {
             backend: Backend::Substrate,
             profile_digest: String::new(),
             capability_snapshot: String::new(),
             cgroup: "substrate-ex_loom_1_0".to_owned(),
             filesystem: "workspace-rw-system-ro".to_owned(),
-            network: network.to_owned(),
+            network: Some(network),
             profile: "workspace".to_owned(),
             writable_scopes: vec!["target".to_owned()],
             read_only_roots: Vec::new(),
@@ -3441,7 +3629,7 @@ mod tests {
                 exit_code,
                 timed_out,
                 output: String::new(),
-                applied: projection("none"),
+                applied: projection(Vec::new()),
                 driver_record: None,
                 child_output: no_output(),
             },
@@ -3479,7 +3667,11 @@ mod tests {
                 output: format!(
                     "\n{BYTE_LIMIT}: The declared egress aperture byte ceiling was reached.\n"
                 ),
-                applied: projection("aperture:model@10.0.0.1:443"),
+                applied: projection(vec![AppliedAperture {
+                    name: "model".to_owned(),
+                    destination: "10.0.0.1:443".to_owned(),
+                    listen: None,
+                }]),
                 driver_record: Some(record_for(&input, network)),
                 child_output: no_output(),
             },
@@ -3601,28 +3793,28 @@ mod tests {
         let aperture = applied_aperture("model", PINNED, None);
         assert!(network_applied(
             NetworkMode::None,
-            None,
+            &[],
             &AppliedNetwork::None
         ));
-        assert!(!network_applied(NetworkMode::None, None, &aperture));
+        assert!(!network_applied(NetworkMode::None, &[], &aperture));
         assert!(network_applied(
             NetworkMode::Aperture,
-            Some(&model()),
+            &[model()],
             &aperture
         ));
         assert!(!network_applied(
             NetworkMode::Aperture,
-            Some(&model()),
+            &[model()],
             &AppliedNetwork::None
         ));
-        assert!(!network_applied(NetworkMode::Aperture, None, &aperture));
+        assert!(!network_applied(NetworkMode::Aperture, &[], &aperture));
         for other in [
             applied_aperture("other", PINNED, None),
             applied_aperture("model", "10.0.0.2:443", None),
             applied_aperture("model", PINNED, Some(1024)),
         ] {
             assert!(
-                !network_applied(NetworkMode::Aperture, Some(&model()), &other),
+                !network_applied(NetworkMode::Aperture, &[model()], &other),
                 "{other:?}"
             );
         }
@@ -3631,7 +3823,11 @@ mod tests {
             ..model()
         };
         assert!(
-            !network_applied(NetworkMode::Aperture, Some(&bounded), &aperture),
+            !network_applied(
+                NetworkMode::Aperture,
+                std::slice::from_ref(&bounded),
+                &aperture
+            ),
             "a declared ceiling applied without it is a wider network"
         );
     }
@@ -3641,9 +3837,9 @@ mod tests {
         let child = ChildCommand::new("true", [] as [&str; 0], "/work/space");
         // A test's request and a plain child's ask for no network alike.
         let none = child.input("space", "snapshot".to_owned());
-        check_record(&none, None, &record_for(&none, AppliedNetwork::None)).unwrap();
+        check_record(&none, &[], &record_for(&none, AppliedNetwork::None)).unwrap();
         let wider = record_for(&none, applied_aperture("model", PINNED, None));
-        let error = check_record(&none, None, &wider).unwrap_err();
+        let error = check_record(&none, &[], &wider).unwrap_err();
         assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
         assert_eq!(
             error.detail,
@@ -3654,15 +3850,15 @@ mod tests {
             .with_egress(model())
             .input("space", "snapshot".to_owned());
         let exact = record_for(&input, applied_aperture("model", PINNED, None));
-        check_record(&input, Some(&model()), &exact).unwrap();
+        check_record(&input, &[model()], &exact).unwrap();
         for other in [
             AppliedNetwork::None,
             applied_aperture("model", "10.0.0.2:443", None),
             applied_aperture("other", PINNED, None),
             applied_aperture("model", PINNED, Some(1024)),
         ] {
-            let error = check_record(&input, Some(&model()), &record_for(&input, other.clone()))
-                .unwrap_err();
+            let error =
+                check_record(&input, &[model()], &record_for(&input, other.clone())).unwrap_err();
             assert_eq!(
                 error.reason,
                 ConfinementRefusal::CapabilityUnserved,
@@ -3675,7 +3871,7 @@ mod tests {
             ..model()
         };
         let record = record_for(&input, applied_aperture("other", PINNED, None));
-        assert!(check_record(&input, Some(&other), &record).is_err());
+        assert!(check_record(&input, std::slice::from_ref(&other), &record).is_err());
     }
 
     /// How Substrate observed a live child of `input` end: its record names `network`, it ended
@@ -3728,7 +3924,7 @@ mod tests {
         let ending = |network| live_ending(input, network, ExecState::Exited, EXITED, None);
         let settled = settle(
             input,
-            None,
+            &[],
             "digest".to_owned(),
             ending(AppliedNetwork::None),
         )
@@ -3744,7 +3940,7 @@ mod tests {
         );
         assert_eq!(result.output.stdout, b"out");
         assert_eq!(result.output.stderr, b"err");
-        assert_eq!(result.applied.network, "none");
+        assert_eq!(result.applied.network, Some(Vec::new()));
         assert_eq!(result.applied.profile_digest, "digest");
         assert_eq!(
             result.driver_record,
@@ -3753,7 +3949,7 @@ mod tests {
 
         let error = settle(
             input,
-            None,
+            &[],
             "digest".to_owned(),
             ending(applied_aperture("model", PINNED, None)),
         )
@@ -3766,7 +3962,7 @@ mod tests {
         );
         let mut unrecorded = ending(AppliedNetwork::None);
         unrecorded.record = None;
-        let error = settle(input, None, "digest".to_owned(), unrecorded)
+        let error = settle(input, &[], "digest".to_owned(), unrecorded)
             .err()
             .expect("an end with no record is refused");
         assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
@@ -3778,7 +3974,7 @@ mod tests {
         let ending = |network| live_ending(input, network, ExecState::Exited, EXITED, None);
         settle(
             input,
-            Some(&model()),
+            &[model()],
             "digest".to_owned(),
             ending(applied_aperture("model", PINNED, None)),
         )
@@ -3790,7 +3986,7 @@ mod tests {
         ] {
             let error = settle(
                 input,
-                Some(&model()),
+                &[model()],
                 "digest".to_owned(),
                 ending(other.clone()),
             )
@@ -3812,7 +4008,7 @@ mod tests {
         let ended = |state, exit, refusal| {
             settle(
                 &input,
-                None,
+                &[],
                 "digest".to_owned(),
                 live_ending(&input, AppliedNetwork::None, state, exit, refusal),
             )
@@ -3964,12 +4160,12 @@ mod tests {
         let child = ChildCommand::new("true", [] as [&str; 0], "/work/space");
         let input = child.input("space", "snapshot".to_owned());
         let mut record = record_for(&input, AppliedNetwork::None);
-        check_record(&input, None, &record).unwrap();
+        check_record(&input, &[], &record).unwrap();
         record.read_only_files.push(substrate_wire::ReadOnlyFile {
             host_path: "/etc/hostname".to_owned(),
             mount: "/etc/hostname".to_owned(),
         });
-        let error = check_record(&input, None, &record).unwrap_err();
+        let error = check_record(&input, &[], &record).unwrap_err();
         assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
         assert_eq!(
             error.detail,
@@ -4003,7 +4199,7 @@ mod tests {
                 [file("/srv/policy.toml", "/etc/loom/policy.toml")]
             );
             let exact = record_for(input, AppliedNetwork::None);
-            check_record(input, None, &exact).unwrap();
+            check_record(input, &[], &exact).unwrap();
             let others = [
                 (Vec::new(), exact.read_only_files.clone()),
                 (
@@ -4037,11 +4233,11 @@ mod tests {
                     read_only_files,
                     ..exact.clone()
                 };
-                let error = check_record(input, None, &record).unwrap_err();
+                let error = check_record(input, &[], &record).unwrap_err();
                 assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
             }
             let ending = live_ending(input, AppliedNetwork::None, ExecState::Exited, EXITED, None);
-            let settled = settle(input, None, "digest".to_owned(), ending).unwrap();
+            let settled = settle(input, &[], "digest".to_owned(), ending).unwrap();
             let result = live_result(settled, false).unwrap();
             assert_eq!(
                 result.applied.read_only_roots,
@@ -4062,8 +4258,8 @@ mod tests {
 
     #[test]
     fn an_egress_aperture_naming_no_host_or_one_substrate_cannot_serve_is_refused() {
-        check_network(NetworkMode::None, None).unwrap();
-        check_network(NetworkMode::Aperture, Some(&model())).unwrap();
+        check_network(NetworkMode::None, &[]).unwrap();
+        check_network(NetworkMode::Aperture, &[model()]).unwrap();
         let refused = [
             (NetworkMode::Aperture, None, "names no host"),
             (
@@ -4122,7 +4318,7 @@ mod tests {
             ),
         ];
         for (network, egress, named) in refused {
-            let error = check_network(network, egress.as_ref()).unwrap_err();
+            let error = check_network(network, egress.as_slice()).unwrap_err();
             assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
             assert!(error.detail.contains(named), "{named}: {error}");
         }
@@ -4143,8 +4339,11 @@ mod tests {
             "a-b.c1.example",
             longest_label.as_str(),
         ] {
-            check_network(NetworkMode::Aperture, Some(&with_host(host)))
-                .unwrap_or_else(|error| panic!("{host:?}: {error}"));
+            check_network(
+                NetworkMode::Aperture,
+                std::slice::from_ref(&with_host(host)),
+            )
+            .unwrap_or_else(|error| panic!("{host:?}: {error}"));
         }
         // 127.0.0.1, where Substrate's forwarder listens in the sandbox, is the one literal a
         // child reaches the host by, and only pinned there.
@@ -4153,22 +4352,28 @@ mod tests {
             pinned: "127.0.0.1:443".parse().unwrap(),
             ..model()
         };
-        check_network(NetworkMode::Aperture, Some(&at_forwarder)).unwrap();
-        let error =
-            check_network(NetworkMode::Aperture, Some(&with_host("127.0.0.1"))).unwrap_err();
+        check_network(NetworkMode::Aperture, std::slice::from_ref(&at_forwarder)).unwrap();
+        let error = check_network(
+            NetworkMode::Aperture,
+            std::slice::from_ref(&with_host("127.0.0.1")),
+        )
+        .unwrap_err();
         assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid);
         assert!(error.detail.contains("pinned to 10.0.0.1"), "{error}");
         for (host, pinned) in [
             ("10.0.0.1", "10.0.0.1:443"),
             ("10.0.0.2", "10.0.0.1:443"),
             ("127.0.0.2", "127.0.0.2:443"),
+            ("10.0.1", "10.0.0.1:443"),
+            ("1", "10.0.0.1:443"),
         ] {
             let aperture = EgressAperture {
                 host: host.to_owned(),
                 pinned: pinned.parse().unwrap(),
                 ..model()
             };
-            let error = check_network(NetworkMode::Aperture, Some(&aperture)).unwrap_err();
+            let error =
+                check_network(NetworkMode::Aperture, std::slice::from_ref(&aperture)).unwrap_err();
             assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{host}");
             assert!(
                 error.detail.contains(&format!("names the host {host}:")),
@@ -4188,15 +4393,17 @@ mod tests {
             "api-.example.test",
             "api_model.example.test",
             "api.example.tést",
-            "10.0.1",
-            "1",
             "::1",
             "[::1]",
             "#api.example.test",
             label_too_long.as_str(),
             name_too_long.as_str(),
         ] {
-            let error = check_network(NetworkMode::Aperture, Some(&with_host(host))).unwrap_err();
+            let error = check_network(
+                NetworkMode::Aperture,
+                std::slice::from_ref(&with_host(host)),
+            )
+            .unwrap_err();
             assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{host:?}");
             assert!(
                 error.detail.contains("no host name or IPv4 literal"),
@@ -4208,7 +4415,8 @@ mod tests {
                 pinned: pinned.parse().unwrap(),
                 ..model()
             };
-            let error = check_network(NetworkMode::Aperture, Some(&aperture)).unwrap_err();
+            let error =
+                check_network(NetworkMode::Aperture, std::slice::from_ref(&aperture)).unwrap_err();
             assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{pinned}");
             assert!(error.detail.contains("not the port it names"), "{error}");
         }
@@ -4218,7 +4426,7 @@ mod tests {
     fn a_child_with_egress_asks_for_its_aperture_by_name_and_its_profile_names_the_destination() {
         let child = ChildCommand::new("true", [] as [&str; 0], "/work/space").with_egress(model());
         assert_eq!(child.network(), NetworkMode::Aperture);
-        assert_eq!(child.egress(), Some(&model()));
+        assert_eq!(child.egress(), [model()]);
         let input = child.input("space", "snapshot".to_owned());
         assert_eq!(
             input.sandbox,
@@ -4231,15 +4439,19 @@ mod tests {
                 required: true,
             }
         );
-        let profile = requested_profile(&input, Some(&model()));
+        let profile = requested_profile(&input, &[model()]);
         assert_eq!(profile.network, "aperture:model@10.0.0.1:443");
         assert_eq!(
-            applied_network_name(&applied_aperture("model", PINNED, None)),
-            profile.network
+            applied_apertures(&applied_aperture("model", PINNED, None)),
+            [AppliedAperture {
+                name: "model".to_owned(),
+                destination: PINNED.to_owned(),
+                listen: None,
+            }]
         );
-        assert_eq!(applied_network_name(&AppliedNetwork::None), "none");
-        let digest = profile_digest(&profile, &[], Some(&model()), None, &[]);
-        assert_ne!(digest, profile_digest(&profile, &[], None, None, &[]));
+        assert!(applied_apertures(&AppliedNetwork::None).is_empty());
+        let digest = profile_digest(&profile, &[], &[model()], None, &[]);
+        assert_ne!(digest, profile_digest(&profile, &[], &[], None, &[]));
         for other in [
             EgressAperture {
                 host: "other.example.test".to_owned(),
@@ -4252,7 +4464,7 @@ mod tests {
         ] {
             assert_ne!(
                 digest,
-                profile_digest(&profile, &[], Some(&other), None, &[])
+                profile_digest(&profile, &[], std::slice::from_ref(&other), None, &[])
             );
         }
     }
@@ -4261,19 +4473,19 @@ mod tests {
     fn inherited_baseline_names_change_the_digest_and_their_absence_does_not() {
         let child = ChildCommand::new("true", [] as [&str; 0], "/work/space");
         let input = child.input("space", "snapshot".to_owned());
-        let profile = requested_profile(&input, None);
+        let profile = requested_profile(&input, &[]);
         assert_eq!(profile.network, "none");
         assert_eq!(profile.writable_scopes, ["target"]);
         assert_ne!(
-            profile_digest(&profile, &[], None, None, &[]),
-            profile_digest(&profile, &[BaselineEnvironment::Path], None, None, &[])
+            profile_digest(&profile, &[], &[], None, &[]),
+            profile_digest(&profile, &[BaselineEnvironment::Path], &[], None, &[])
         );
         // With no inherited name the digest is the one a test's profile always had.
         let before = serde_json::json!({ "backend":"substrate", "network":"none", "writable_scopes":["target"],
             "read_only_roots":[], "environment":[],
             "timeout_ms":300_000, "memory_bytes":8_589_934_592_i64, "processes":2048, "cpu_millis":3_600_000 });
         assert_eq!(
-            profile_digest(&profile, &[], None, None, &[]),
+            profile_digest(&profile, &[], &[], None, &[]),
             format!("{:x}", Sha256::digest(before.to_string().as_bytes()))
         );
     }
@@ -4283,9 +4495,9 @@ mod tests {
         let child = ChildCommand::new("true", [] as [&str; 0], "/work/space")
             .with_read_only_file("/srv/policy.toml", "/etc/loom/policy.toml");
         let input = child.input("space", "snapshot".to_owned());
-        let profile = requested_profile(&input, None);
-        let digest = profile_digest(&profile, &[], None, None, &input.read_only_files);
-        assert_ne!(digest, profile_digest(&profile, &[], None, None, &[]));
+        let profile = requested_profile(&input, &[]);
+        let digest = profile_digest(&profile, &[], &[], None, &input.read_only_files);
+        assert_ne!(digest, profile_digest(&profile, &[], &[], None, &[]));
         for other in [
             ("/srv/other.toml", "/etc/loom/policy.toml"),
             ("/srv/policy.toml", "/etc/loom/other.toml"),
@@ -4294,15 +4506,15 @@ mod tests {
                 host_path: other.0.to_owned(),
                 mount: other.1.to_owned(),
             }];
-            assert_ne!(digest, profile_digest(&profile, &[], None, None, &other));
+            assert_ne!(digest, profile_digest(&profile, &[], &[], None, &other));
         }
         // Roots are in the profile itself, so a root changes the digest with no file named.
         let rooted = ChildCommand::new("true", [] as [&str; 0], "/work/space")
             .with_read_only_root("/srv/tools", "/opt/tools")
             .input("space", "snapshot".to_owned());
         assert_ne!(
-            profile_digest(&requested_profile(&rooted, None), &[], None, None, &[]),
-            profile_digest(&profile, &[], None, None, &[])
+            profile_digest(&requested_profile(&rooted, &[]), &[], &[], None, &[]),
+            profile_digest(&profile, &[], &[], None, &[])
         );
     }
 
@@ -4317,7 +4529,7 @@ mod tests {
     #[test]
     fn drivers_differ_by_the_bundle_path_and_the_bytes_read_from_it() {
         let key = |ca_bundle| DriverEgress {
-            aperture: Some(model()),
+            apertures: vec![model()],
             ca_bundle,
         };
         let first = key(read_as("/anchors/first.pem", b"one"));
@@ -4360,7 +4572,7 @@ mod tests {
 
         let state = tempfile::tempdir().unwrap();
         let egress = DriverEgress {
-            aperture: Some(model()),
+            apertures: vec![model()],
             ca_bundle: bundle,
         };
         let config = driver_config(fixture.path(), state.path(), &egress).unwrap();
@@ -4395,9 +4607,9 @@ mod tests {
         let input = ChildCommand::new("true", [] as [&str; 0], "/work/space")
             .with_egress(model())
             .input("space", "snapshot".to_owned());
-        let profile = requested_profile(&input, Some(&model()));
+        let profile = requested_profile(&input, &[model()]);
         let digest = |bundle: Option<CaBundle>| {
-            profile_digest(&profile, &[], Some(&model()), bundle.as_ref(), &[])
+            profile_digest(&profile, &[], &[model()], bundle.as_ref(), &[])
         };
         let bare = digest(None);
         let first = digest(read_as("/anchors/first.pem", b"one"));
