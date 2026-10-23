@@ -129,9 +129,16 @@ fn security_a_spec_cannot_override_its_bundle_through_the_environment() {
             .confined(&spec)
             .unwrap();
         let error = launch_refusal(&base, &command);
-        assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{name}: {error}");
+        assert_eq!(
+            error.reason,
+            ConfinementRefusal::ScopeInvalid,
+            "{name}: {error}"
+        );
         assert!(error.detail.contains(named), "{name}: {error}");
-        assert!(!workspace.join("target").exists(), "{name}: refused before start");
+        assert!(
+            !workspace.join("target").exists(),
+            "{name}: refused before start"
+        );
     }
 }
 
@@ -157,7 +164,11 @@ fn security_a_spec_cannot_smuggle_a_numeric_or_localhost_later_aperture() {
             .confined(&spec)
             .unwrap();
         let error = launch_refusal(&base, &command);
-        assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{host}: {error}");
+        assert_eq!(
+            error.reason,
+            ConfinementRefusal::ScopeInvalid,
+            "{host}: {error}"
+        );
         assert!(error.detail.contains(host), "{host}: {error}");
     }
 }
@@ -189,7 +200,11 @@ fn security_program_and_writable_root_refusals_hold_through_the_spec() {
             .confined(&empty())
             .unwrap();
         let error = launch_refusal(&base, &command);
-        assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{program}: {error}");
+        assert_eq!(
+            error.reason,
+            ConfinementRefusal::ScopeInvalid,
+            "{program}: {error}"
+        );
     }
     let spec = ConfinementSpec {
         writable_roots: vec![WritableRoot {
@@ -202,6 +217,10 @@ fn security_program_and_writable_root_refusals_hold_through_the_spec() {
     let error = ChildCommand::new("true", Vec::<String>::new(), &workspace)
         .confined(&spec)
         .unwrap_err();
-    assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved, "{error}");
+    assert_eq!(
+        error.reason,
+        ConfinementRefusal::CapabilityUnserved,
+        "{error}"
+    );
     assert!(error.detail.contains("`writable_roots`"), "{error}");
 }

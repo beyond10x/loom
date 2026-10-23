@@ -17,10 +17,11 @@ impl ChildCommand {
     /// same meaning, in this order: [`ChildCommand::with_read_only_root`] per read-only root,
     /// [`ChildCommand::with_read_only_file`] per file, [`ChildCommand::at_host_path`] per host
     /// path, [`ChildCommand::with_writable`] per writable workspace directory,
-    /// [`ChildCommand::with_environment`], [`ChildCommand::with_profile`],
-    /// [`ChildCommand::with_network`], [`ChildCommand::with_egress`] per aperture (so an aperture
-    /// makes the network [`NetworkMode::Aperture`] whatever `network` says), then, each only when
-    /// the spec names it, [`ChildCommand::with_ca_bundle`], [`ChildCommand::with_timeout`],
+    /// [`ChildCommand::with_environment`] when the environment names a variable,
+    /// [`ChildCommand::with_profile`], [`ChildCommand::with_network`] when `network` is not
+    /// `None`, [`ChildCommand::with_egress`] per aperture (so an aperture makes the network
+    /// [`NetworkMode::Aperture`] whatever `network` says), then, each only when the spec names
+    /// it, [`ChildCommand::with_ca_bundle`], [`ChildCommand::with_timeout`],
     /// [`ChildCommand::with_stdin`] and [`ChildCommand::with_workdir`]. A spec naming nothing
     /// leaves the command as it was. Every check those builders' launch makes runs at the launch
     /// of the command returned, and no other: the limits (4 read-only roots, 16 files, 16 MiB of
@@ -73,10 +74,13 @@ impl ChildCommand {
         for path in &spec.writable {
             child = child.with_writable(path);
         }
-        child = child
-            .with_environment(environment)
-            .with_profile(profile(spec.profile))
-            .with_network(network(spec.network));
+        if !environment.allow.is_empty() || !environment.set.is_empty() {
+            child = child.with_environment(environment);
+        }
+        child = child.with_profile(profile(spec.profile));
+        if spec.network != ChildNetwork::None {
+            child = child.with_network(network(spec.network));
+        }
         for aperture in egress {
             child = child.with_egress(aperture);
         }

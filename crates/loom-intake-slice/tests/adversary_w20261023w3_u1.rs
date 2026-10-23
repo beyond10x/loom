@@ -153,7 +153,11 @@ fn adversary_values_the_builders_carry_are_judged_by_the_launch_alike() {
     assert_eq!(spec_command, built);
     let from_spec = runner.run_child(&spec_command).unwrap_err();
     let from_builders = runner.run_child(&built).unwrap_err();
-    assert_eq!(from_spec.reason, ConfinementRefusal::ScopeInvalid, "{from_spec}");
+    assert_eq!(
+        from_spec.reason,
+        ConfinementRefusal::ScopeInvalid,
+        "{from_spec}"
+    );
     assert_eq!(from_spec.detail, from_builders.detail);
 
     let bare_aperture = ConfinementSpec {
