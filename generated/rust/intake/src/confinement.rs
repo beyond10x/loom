@@ -1,6 +1,6 @@
 // generated from intake v1
-// model digest c5457c9e4735af8938031585724e656e9eaa6bc6ff00f6761d8287a591db7f8c
-// contract digest f815c76fa97e91e076dd53cce6f3557b05973d54a2494e2d06a54f7355fd9c76
+// model digest b73c7b0c0fe67cd4954a2c476b82dcd2c06a3c8c05c68909779d45d9fe022c22
+// contract digest 3721cb55e566bb360e83554215936dbbf09b60969c7d8df9b1a04c19ff05b22b
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! confinement — `intake.confinement`.
@@ -56,6 +56,45 @@ pub enum Backend {
     None,
 }
 
+/// BaselineVariable — `intake.confinement.BaselineVariable`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BaselineVariable {
+    /// `Lang`.
+    Lang,
+    /// `LcAll`.
+    LcAll,
+    /// `Path`.
+    Path,
+    /// `Term`.
+    Term,
+    /// `Tz`.
+    Tz,
+}
+
+/// ChildAperture — `intake.confinement.ChildAperture`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChildAperture {
+    /// `name` — `String`.
+    pub name: String,
+    /// `host` — `String`.
+    pub host: String,
+    /// `port` — `Integer`.
+    pub port: i64,
+    /// `pinned` — `String`.
+    pub pinned: String,
+    /// `max_bytes` — `Optional<Integer>`.
+    pub max_bytes: Option<i64>,
+}
+
+/// ChildEnvironment — `intake.confinement.ChildEnvironment`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChildEnvironment {
+    /// `allow` — `List<intake.confinement.BaselineVariable>`.
+    pub allow: Vec<BaselineVariable>,
+    /// `set` — `List<intake.confinement.EnvironmentEntry>`.
+    pub set: Vec<EnvironmentEntry>,
+}
+
 /// ChildExit — `intake.confinement.ChildExit`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChildExit {
@@ -65,6 +104,15 @@ pub struct ChildExit {
     pub signal: Option<i64>,
     /// `timed_out` — `Boolean`.
     pub timed_out: bool,
+}
+
+/// ChildNetwork — `intake.confinement.ChildNetwork`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChildNetwork {
+    /// `None`.
+    None,
+    /// `Aperture`.
+    Aperture,
 }
 
 /// ChildOutput — `intake.confinement.ChildOutput`.
@@ -78,6 +126,13 @@ pub struct ChildOutput {
     pub stdout_truncated: bool,
     /// `stderr_truncated` — `Boolean`.
     pub stderr_truncated: bool,
+}
+
+/// ChildProfile — `intake.confinement.ChildProfile`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChildProfile {
+    /// `Workspace`.
+    Workspace,
 }
 
 /// ChildStream — `intake.confinement.ChildStream`: one of a closed set of names.
@@ -129,6 +184,37 @@ pub enum ConfinementRefusal {
     CommandUnconfined,
 }
 
+/// ConfinementSpec — `intake.confinement.ConfinementSpec`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfinementSpec {
+    /// `read_only_roots` — `List<intake.confinement.ToolchainRoot>`.
+    pub read_only_roots: Vec<ToolchainRoot>,
+    /// `read_only_files` — `List<intake.confinement.ReadOnlyFile>`.
+    pub read_only_files: Vec<ReadOnlyFile>,
+    /// `host_paths` — `List<String>`.
+    pub host_paths: Vec<String>,
+    /// `writable` — `List<String>`.
+    pub writable: Vec<String>,
+    /// `writable_roots` — `List<intake.confinement.WritableRoot>`.
+    pub writable_roots: Vec<WritableRoot>,
+    /// `workdir` — `Optional<String>`.
+    pub workdir: Option<String>,
+    /// `environment` — `intake.confinement.ChildEnvironment`.
+    pub environment: ChildEnvironment,
+    /// `profile` — `intake.confinement.ChildProfile`.
+    pub profile: ChildProfile,
+    /// `network` — `intake.confinement.ChildNetwork`.
+    pub network: ChildNetwork,
+    /// `egress` — `List<intake.confinement.ChildAperture>`.
+    pub egress: Vec<ChildAperture>,
+    /// `ca_bundle` — `Optional<String>`.
+    pub ca_bundle: Option<String>,
+    /// `timeout_ms` — `Optional<Integer>`.
+    pub timeout_ms: Option<i64>,
+    /// `stdin` — `Optional<Bytes>`.
+    pub stdin: Option<Vec<u8>>,
+}
+
 /// EnvironmentEntry — `intake.confinement.EnvironmentEntry`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnvironmentEntry {
@@ -150,6 +236,15 @@ pub struct ReadOnlyFile {
 /// ToolchainRoot — `intake.confinement.ToolchainRoot`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolchainRoot {
+    /// `host_path` — `String`.
+    pub host_path: String,
+    /// `mount` — `String`.
+    pub mount: String,
+}
+
+/// WritableRoot — `intake.confinement.WritableRoot`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WritableRoot {
     /// `host_path` — `String`.
     pub host_path: String,
     /// `mount` — `String`.

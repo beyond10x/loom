@@ -1,14 +1,14 @@
 <!--
   generated from intake v1
-  model digest c5457c9e4735af8938031585724e656e9eaa6bc6ff00f6761d8287a591db7f8c
-  contract digest f815c76fa97e91e076dd53cce6f3557b05973d54a2494e2d06a54f7355fd9c76
+  model digest b73c7b0c0fe67cd4954a2c476b82dcd2c06a3c8c05c68909779d45d9fe022c22
+  contract digest 3721cb55e566bb360e83554215936dbbf09b60969c7d8df9b1a04c19ff05b22b
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — intake v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-97 capabilities: **94 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+104 capabilities: **101 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -20,14 +20,21 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `intake.confinement.AppliedAperture` |
 | domain type | `intake.confinement.AppliedConfinement` |
 | domain type | `intake.confinement.Backend` |
+| domain type | `intake.confinement.BaselineVariable` |
+| domain type | `intake.confinement.ChildAperture` |
+| domain type | `intake.confinement.ChildEnvironment` |
 | domain type | `intake.confinement.ChildExit` |
+| domain type | `intake.confinement.ChildNetwork` |
 | domain type | `intake.confinement.ChildOutput` |
+| domain type | `intake.confinement.ChildProfile` |
 | domain type | `intake.confinement.ChildStream` |
 | domain type | `intake.confinement.ConfinementProfile` |
 | domain type | `intake.confinement.ConfinementRefusal` |
+| domain type | `intake.confinement.ConfinementSpec` |
 | domain type | `intake.confinement.EnvironmentEntry` |
 | domain type | `intake.confinement.ReadOnlyFile` |
 | domain type | `intake.confinement.ToolchainRoot` |
+| domain type | `intake.confinement.WritableRoot` |
 | domain type | `intake.context.ContextPolicy` |
 | domain type | `intake.context.ContextReport` |
 | domain type | `intake.context.ContextRequestMetric` |

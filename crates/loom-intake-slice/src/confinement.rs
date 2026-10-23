@@ -18,6 +18,12 @@ pub use intake_model::confinement::{
     AppliedAperture, AppliedConfinement, Backend, ChildExit, ChildOutput, ChildStream,
     ConfinementProfile, ConfinementRefusal, EnvironmentEntry, ReadOnlyFile, ToolchainRoot,
 };
+/// A child's confinement as one value, applied by [`ChildCommand::confined`], and the types its
+/// fields name: each maps one to one onto the Substrate type the builder of the same meaning takes.
+pub use intake_model::confinement::{
+    BaselineVariable, ChildAperture, ChildEnvironment, ChildNetwork, ChildProfile, ConfinementSpec,
+    WritableRoot,
+};
 use sha2::{Digest as _, Sha256};
 /// Substrate's own declaration of the egress aperture a [`ChildCommand`] may reach: its name, the
 /// host and port the host names, the address that host was resolved to and an optional byte
@@ -48,6 +54,7 @@ mod child;
 mod security_w20261023w1_u3;
 #[cfg(test)]
 mod several_apertures;
+mod spec;
 #[cfg(test)]
 mod workdir;
 pub use child::{ChildError, ChildFrame, ChildResult, ChildSignal, ConfinedChild};
