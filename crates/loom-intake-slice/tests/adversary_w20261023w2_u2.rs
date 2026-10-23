@@ -57,7 +57,8 @@ fn adversary_a_workdir_the_child_cannot_enter_is_refused_before_launch() {
     for (workdir, child) in [
         (
             "/workspace/locked",
-            ChildCommand::new("true", [] as [&str; 0], &workspace).with_workdir("/workspace/locked"),
+            ChildCommand::new("true", [] as [&str; 0], &workspace)
+                .with_workdir("/workspace/locked"),
         ),
         (
             "/opt/tools/locked",
@@ -75,7 +76,11 @@ fn adversary_a_workdir_the_child_cannot_enter_is_refused_before_launch() {
                 past_every_check(),
                 "{workdir}: a directory the child cannot enter passed every check before launch: {error}"
             );
-            assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{workdir}: {error}");
+            assert_eq!(
+                error.reason,
+                ConfinementRefusal::ScopeInvalid,
+                "{workdir}: {error}"
+            );
             assert!(error.detail.contains(workdir), "{workdir}: {error}");
         }
     }
@@ -165,15 +170,18 @@ fn adversary_a_child_starts_in_the_target_the_launch_creates() {
             let fresh = workspace.parent().unwrap().join("fresh");
             std::fs::create_dir(&fresh).unwrap();
             assert!(!fresh.join("target").exists());
-            let child = ChildCommand::new("sh", ["-c", "pwd"], &fresh)
-                .with_workdir("/workspace/target");
+            let child =
+                ChildCommand::new("sh", ["-c", "pwd"], &fresh).with_workdir("/workspace/target");
             let Some(result) = workdir_result(runner.run_child(&child)) else {
                 return;
             };
             let execution = result.expect("the child starts in the created target");
             assert_eq!(execution.exit_code, Some(0), "{}", execution.output);
             assert_eq!(execution.output, "/workspace/target\n");
-            assert_eq!(execution.applied.workdir.as_deref(), Some("/workspace/target"));
+            assert_eq!(
+                execution.applied.workdir.as_deref(),
+                Some("/workspace/target")
+            );
         },
     );
 }

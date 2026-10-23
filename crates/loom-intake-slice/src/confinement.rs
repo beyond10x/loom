@@ -811,6 +811,7 @@ fn settle(
         )
     })?;
     check_record(input, egress, &record)?;
+    check_entered_workdir(input, &ending.output)?;
     let timed_out = ending
         .refusal
         .as_ref()
@@ -1375,14 +1376,18 @@ impl ChildCommand {
     /// naming the directory:
     ///
     /// - a path that is not UTF-8, longer than [`MAX_WORKDIR_BYTES`] (4096), not absolute, or not
-    ///   lexically normal (a `.`, `..` or empty component, a trailing `/`, a NUL);
+    ///   lexically normal (a `.`, `..` or empty component, a trailing `/`), or holding a control
+    ///   character, which the refusal escapes;
     /// - one at or beneath a read-only file's mount;
     /// - one not at or beneath `/workspace` or a read-only root's mount, `/`, `/scratch`,
     ///   `/runtime` and `/tmp` included: Loom asks Substrate for no scratch directory, execution
     ///   capsule or writable root;
     /// - one the host's disk does not hold as a directory reached through no symbolic link,
     ///   below the workspace directory or the root's host path, read before the launch;
-    ///   `/workspace/target` alone may be absent, since the launch creates it.
+    ///   `/workspace/target` alone may be absent, since the launch creates it;
+    /// - one this process cannot search, or below a directory it cannot search: bubblewrap could
+    ///   not enter it, and a run whose output carries bubblewrap's `Can't chdir to` diagnostic for
+    ///   it is refused the same way once it ended, so a program that never ran reports no exit.
     ///
     /// Refused [`ConfinementRefusal::CapabilityUnserved`] on a driver that does not publish
     /// `exec.workdir`. Substrate checks the directory again when it starts the child, beneath the
@@ -2546,18 +2551,22 @@ fn check_driver_mounts(
 /// returned, each host path given at its own path resolved to a root or a file. A child naming
 /// none passes, the disk untouched. In order:
 ///
-/// 1. the text: UTF-8, at most [`MAX_WORKDIR_BYTES`], absolute, no NUL, no `.`, `..` or empty
-///    component, as Substrate's `validate_workdir` requires;
+/// 1. the text: UTF-8, no control character (the refusal escapes it), at most
+///    [`MAX_WORKDIR_BYTES`], absolute, no `.`, `..` or empty component, as Substrate's
+///    `validate_workdir` requires;
 /// 2. not at or beneath a read-only file's mount, which is no directory;
 /// 3. at or beneath `/workspace` or a read-only root's mount, the only mounts Loom places that
 ///    hold directories: Loom asks for no scratch, capsule or writable root, so `/scratch`,
 ///    `/runtime` and every other path are refused here rather than by Substrate;
 /// 4. on disk, below the workspace directory or the root's host path, every component read
 ///    without following it: a directory, through no symbolic link. `/workspace/target` alone may
-///    be absent, since the launch creates it.
+///    be absent, since the launch creates it; and searchable by this process, with every
+///    directory on the way to it ([`may_search`]), since bubblewrap cannot enter one that is not.
 ///
 /// Substrate checks step 4 again when the child starts, beneath the descriptor it binds
 /// (`exec.workdir-missing`), so a directory removed or swapped after this check is refused there.
+/// A directory bubblewrap still cannot enter is refused once the run ended
+/// ([`check_entered_workdir`]).
 fn check_workdir(child: &ChildCommand) -> Result<(), ConfinementError> {
     let Some(named) = child.workdir.as_deref() else {
         return Ok(());
@@ -2568,6 +2577,11 @@ fn check_workdir(child: &ChildCommand) -> Result<(), ConfinementError> {
             "the working directory {named:?} is not UTF-8; Substrate names a working directory as text"
         )));
     };
+    if text.chars().any(char::is_control) {
+        return Err(scope_error(format!(
+            "the working directory {text:?} holds a control character"
+        )));
+    }
     if text.len() > MAX_WORKDIR_BYTES {
         let mut end = 64;
         while !text.is_char_boundary(end) {
@@ -2582,11 +2596,6 @@ fn check_workdir(child: &ChildCommand) -> Result<(), ConfinementError> {
     if !text.starts_with('/') {
         return Err(scope_error(format!(
             "the working directory `{text}` is not absolute; name it as the child sees it, such as `/workspace/{text}`"
-        )));
-    }
-    if text.contains('\0') {
-        return Err(scope_error(format!(
-            "the working directory `{text}` holds a NUL"
         )));
     }
     if text != "/"
@@ -2634,6 +2643,17 @@ fn check_workdir(child: &ChildCommand) -> Result<(), ConfinementError> {
     };
     // 4. The disk.
     let in_workspace = at_or_beneath(SANDBOX_WORKSPACE).is_some();
+    let searchable = |path: &Path| -> Result<(), ConfinementError> {
+        if may_search(path) {
+            Ok(())
+        } else {
+            Err(scope_error(format!(
+                "the working directory `{text}` cannot be entered: `{}` or a directory on the way to it is not searchable",
+                path.display()
+            )))
+        }
+    };
+    searchable(&base)?;
     let mut current = base;
     for component in rest.split('/').filter(|component| !component.is_empty()) {
         current.push(component);
@@ -2660,6 +2680,12 @@ fn check_workdir(child: &ChildCommand) -> Result<(), ConfinementError> {
                     current.display()
                 )));
             }
+            Err(e)
+                if e.kind() == std::io::ErrorKind::PermissionDenied
+                    && current.parent().is_some_and(|parent| !may_search(parent)) =>
+            {
+                return searchable(current.parent().unwrap_or(&current));
+            }
             Err(e) => {
                 return Err(scope_error(format!(
                     "the working directory `{text}` cannot be read at `{}`: {e}",
@@ -2667,6 +2693,43 @@ fn check_workdir(child: &ChildCommand) -> Result<(), ConfinementError> {
                 )));
             }
         }
+    }
+    searchable(&current)
+}
+
+/// Whether this process may search `path`, a directory, and every directory on the way to it: a
+/// child cannot start in a directory it cannot enter, and bubblewrap's `--chdir` fails there with
+/// `Permission denied`. The probe is a `stat` of `<path>/.`, which resolves through `path` and so
+/// needs search permission on it and on each directory above it, as `chdir` does.
+fn may_search(path: &Path) -> bool {
+    let mut probe = path.as_os_str().to_owned();
+    probe.push("/.");
+    std::fs::metadata(probe).is_ok()
+}
+
+/// Refuse the result of a run that named a working directory when its output carries
+/// bubblewrap's diagnostic for that directory (`bwrap: Can't chdir to <workdir>: …`): bubblewrap
+/// could not enter it, so the program never ran and the exit status is bubblewrap's, not the
+/// child's. Substrate reads that failure as no refusal of its own, so the result is refused here
+/// as an invalid scope, the refusal [`check_workdir`] gives before launch for the same directory.
+fn check_entered_workdir(
+    input: &ExecStartInput,
+    output: &ChildOutput,
+) -> Result<(), ConfinementError> {
+    let Some(workdir) = input.workdir.as_deref() else {
+        return Ok(());
+    };
+    let diagnostic = format!("bwrap: Can't chdir to {workdir}: ");
+    let carries = [&output.stderr, &output.stdout].into_iter().any(|stream| {
+        String::from_utf8_lossy(stream)
+            .lines()
+            .any(|line| line.starts_with(&diagnostic))
+    });
+    if carries {
+        return Err(scope_error(format!(
+            "the child could not enter its working directory {workdir:?}, so its program never ran: {}",
+            String::from_utf8_lossy(tail(&output.stderr)).trim_end()
+        )));
     }
     Ok(())
 }

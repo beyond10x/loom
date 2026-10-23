@@ -37,7 +37,162 @@ fn a_workdir_that_is_not_absolute_and_normal_is_refused_naming_it() {
     ] {
         assert_refused(workdir, "`.`, `..` or empty component");
     }
-    assert_refused("/workspace/a\0b", "NUL");
+}
+
+/// A working directory holding a control character (C0, DEL or C1, a newline and a NUL
+/// included) is refused before the disk is asked, the refusal naming it escaped, so the refusal
+/// is one line holding no control character.
+#[test]
+fn a_workdir_holding_a_control_character_is_refused_escaped() {
+    for workdir in [
+        "/workspace/a\nb",
+        "/workspace/a\rb",
+        "/workspace/a\0b",
+        "/workspace/\u{1b}[2J",
+        "/workspace/a\u{7f}",
+        "/workspace/a\u{85}b",
+        "/workspace/a\tb",
+        "relative\n",
+    ] {
+        let error = lexical_refusal(workdir);
+        assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
+        assert!(error.detail.contains("control character"), "{error}");
+        assert!(
+            error.detail.contains(&format!("{workdir:?}")),
+            "{workdir:?}: {error}"
+        );
+        assert!(
+            !error.detail.chars().any(char::is_control),
+            "{workdir:?}: {error}"
+        );
+    }
+}
+
+/// A directory this process cannot search, or one below such a directory, is refused before
+/// launch, naming the working directory, in the workspace and under a read-only root alike; a
+/// directory with search permission alone is entered.
+#[test]
+fn a_workdir_the_process_cannot_search_is_refused_naming_it() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let held = tempfile::tempdir().unwrap();
+    let base = held.path().canonicalize().unwrap();
+    let workspace = base.join("workspace");
+    let tools = base.join("tools");
+    for directory in [
+        workspace.join("locked"),
+        workspace.join("outer/inner"),
+        workspace.join("search-only"),
+        tools.join("locked"),
+    ] {
+        std::fs::create_dir_all(directory).unwrap();
+    }
+    let mode = |path: &Path, mode: u32| {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+    mode(&workspace.join("locked"), 0o600);
+    mode(&workspace.join("outer"), 0o600);
+    mode(&workspace.join("search-only"), 0o100);
+    mode(&tools.join("locked"), 0o600);
+    let child = |workdir: &str| {
+        ChildCommand::new("true", [] as [&str; 0], &workspace)
+            .with_read_only_root(&tools, "/opt/tools")
+            .with_workdir(workdir)
+    };
+    let searchable = may_search(&workspace.join("locked"));
+    for workdir in [
+        "/workspace/locked",
+        "/workspace/outer",
+        "/workspace/outer/inner",
+        "/opt/tools/locked",
+    ] {
+        let outcome = check_workdir(&child(workdir));
+        if searchable {
+            // A process that may search any directory (`CAP_DAC_OVERRIDE`) enters these too.
+            outcome.unwrap();
+            continue;
+        }
+        let error = outcome.expect_err("refused");
+        assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
+        assert!(error.detail.contains(workdir), "{workdir}: {error}");
+        assert!(
+            error.detail.contains("not searchable"),
+            "{workdir}: {error}"
+        );
+    }
+    check_workdir(&child("/workspace/search-only")).unwrap();
+    check_workdir(&child("/opt/tools")).unwrap();
+    mode(&workspace.join("outer"), 0o700);
+}
+
+/// An ended run, of `input`, that wrote `stdout` and `stderr` and exited 1.
+fn ended(input: &ExecStartInput, stdout: &str, stderr: &str) -> Ending {
+    Ending {
+        record: Some(record(input, input.workdir.as_deref())),
+        state: ExecState::Exited,
+        exit: Some(ExecExit {
+            code: Some(1),
+            signal: None,
+        }),
+        refusal: None,
+        output: ChildOutput {
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+            stdout_truncated: false,
+            stderr_truncated: false,
+        },
+        output_complete: true,
+    }
+}
+
+/// A run naming a working directory whose output carries bubblewrap's `Can't chdir to` diagnostic
+/// for it is refused once it ended, `run_child` and a live child's `wait` alike (both settle the
+/// run here), so a program that never ran reports no exit status; the same text from a run
+/// naming no working directory, or naming another directory, is the child's own output.
+#[test]
+fn a_run_bubblewrap_could_not_enter_its_workdir_is_refused() {
+    let named = ChildCommand::new("true", [] as [&str; 0], "/work/space")
+        .with_workdir("/workspace/locked")
+        .input("space", "snapshot".to_owned());
+    let diagnostic = "bwrap: Can't chdir to /workspace/locked: Permission denied\n";
+    for (stdout, stderr) in [
+        ("", diagnostic),
+        (diagnostic, ""),
+        ("", &*format!("noise\n{diagnostic}")),
+    ] {
+        let error = settle(
+            &named,
+            &[],
+            "digest".to_owned(),
+            ended(&named, stdout, stderr),
+        )
+        .err()
+        .expect("refused");
+        assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
+        assert!(error.detail.contains("/workspace/locked"), "{error}");
+        assert!(error.detail.contains("never ran"), "{error}");
+    }
+    let launched = settle(
+        &named,
+        &[],
+        "digest".to_owned(),
+        ended(
+            &named,
+            "",
+            "bwrap: Can't chdir to /workspace/locked2: Permission denied\n",
+        ),
+    )
+    .expect("another directory's diagnostic is the child's output");
+    assert_eq!(launched.execution.exit_code, Some(1));
+    let plain = ChildCommand::new("true", [] as [&str; 0], "/work/space")
+        .input("space", "snapshot".to_owned());
+    let launched = settle(
+        &plain,
+        &[],
+        "digest".to_owned(),
+        ended(&plain, "", diagnostic),
+    )
+    .expect("a run naming no working directory is not judged by it");
+    assert_eq!(launched.execution.exit_code, Some(1));
 }
 
 #[test]
