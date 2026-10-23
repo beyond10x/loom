@@ -361,6 +361,193 @@ fn release_check_passes_on_the_first_tag() {
     let _ = fs::remove_dir_all(&root);
 }
 
+/// The SDK stability page of the fixture repositories, listing `loom_sdk::Port` and
+/// `loom_sdk::Other`.
+const STABILITY_PAGE: &str = "# SDK stability\n\n| Port | Path |\n|---|---|\n\
+                              | `Port` | `loom_sdk::Port` |\n| `Other` | `loom_sdk::Other` |\n";
+
+/// A git repository tagged `0.1.0` with `first` as its entry and the SDK stability page at
+/// `website/docs/reference/sdk-stability.md`, then a second commit at the workspace version
+/// `second_version` with `second` as its entry, tagged when `tag_second`.
+fn release_pair(
+    name: &str,
+    first: &str,
+    second_version: &str,
+    second: &str,
+    tag_second: bool,
+) -> PathBuf {
+    let root = fixture(name, "0.1.0", &changelog_with(&[("0.1.0", first)]));
+    let page = root.join("website/docs/reference/sdk-stability.md");
+    fs::create_dir_all(page.parent().unwrap_or(&root))
+        .unwrap_or_else(|e| panic!("create {}: {e}", page.display()));
+    write(&page, STABILITY_PAGE);
+    git(&root, &["init", "-q"]);
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "first"]);
+    git(&root, &["tag", "-a", "0.1.0", "-m", "Loom 0.1.0"]);
+
+    write(
+        &root.join("Cargo.toml"),
+        &format!(
+            "[workspace]\nmembers = [\"crates/*\"]\n\n[workspace.package]\nversion = \
+             \"{second_version}\"\nedition = \"2024\"\n"
+        ),
+    );
+    write(
+        &root.join("CHANGELOG.md"),
+        &changelog_with(&[("0.1.0", first), (second_version, second)]),
+    );
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "second"]);
+    if tag_second {
+        git(
+            &root,
+            &[
+                "tag",
+                "-a",
+                second_version,
+                "-m",
+                &format!("Loom {second_version}"),
+            ],
+        );
+    }
+    root
+}
+
+#[test]
+fn a_removal_without_a_deprecated_release_is_refused() {
+    // `loom_sdk::Port` is listed on 0.1.0's stability page and no earlier entry deprecated it, so
+    // removing it in 0.2.0 is refused, under `### Removed` and as a `**Breaking:**` removal
+    // elsewhere, tagged or not yet tagged.
+    for (n, (second, tag_second)) in [
+        (
+            "### Removed\n\n- **Breaking:** `loom_sdk::Port` is removed (story:drop-port)",
+            true,
+        ),
+        (
+            "### Removed\n\n- **Breaking:** `loom_sdk::Port` is removed (story:drop-port)",
+            false,
+        ),
+        (
+            "### Changed\n\n- **Breaking:** `loom_sdk::Port` is removed; use `loom_sdk::Other`",
+            true,
+        ),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let root = release_pair(&format!("removal-{n}"), FIRST, "0.2.0", second, *tag_second);
+        let out = release_check(&root, "0.2.0");
+        let err = stderr(&out);
+        assert!(
+            !out.status.success()
+                && err.contains("CHANGELOG.md entry [0.2.0] removes `loom_sdk::Port`")
+                && err.contains("### Deprecated"),
+            "release-check did not refuse removing `loom_sdk::Port` without a deprecated \
+             release ({second:?}): {err}"
+        );
+        assert!(
+            !err.contains("`loom_sdk::Other`"),
+            "release-check named an item the entry does not remove: {err}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // Deprecated in an earlier release, the removal passes.
+    let first = "### Added\n\n- **Breaking:** everything is new.\n\n### Deprecated\n\n\
+                 - `loom_sdk::Port` is deprecated; use `loom_sdk::Other`";
+    let root = release_pair(
+        "removal-deprecated",
+        first,
+        "0.2.0",
+        "### Removed\n\n- **Breaking:** `loom_sdk::Port` is removed",
+        true,
+    );
+    let out = release_check(&root, "0.2.0");
+    assert!(
+        out.status.success(),
+        "release-check refused removing `loom_sdk::Port`, deprecated in 0.1.0: {}",
+        stderr(&out)
+    );
+    let _ = fs::remove_dir_all(&root);
+
+    // Deprecated only in the entry that removes it is no release under `### Deprecated`.
+    let root = release_pair(
+        "removal-same-entry",
+        FIRST,
+        "0.2.0",
+        "### Deprecated\n\n- `loom_sdk::Port` is deprecated\n\n### Removed\n\n\
+         - **Breaking:** `loom_sdk::Port` is removed",
+        true,
+    );
+    let out = release_check(&root, "0.2.0");
+    assert!(
+        !out.status.success()
+            && stderr(&out).contains("CHANGELOG.md entry [0.2.0] removes `loom_sdk::Port`"),
+        "release-check accepted a deprecation in the entry that removes the item: {}",
+        stderr(&out)
+    );
+    let _ = fs::remove_dir_all(&root);
+
+    // An item the previous release's stability page does not list is outside the window.
+    let root = release_pair(
+        "removal-unlisted",
+        FIRST,
+        "0.2.0",
+        "### Removed\n\n- **Breaking:** `Loom::run_loop` is removed",
+        true,
+    );
+    let out = release_check(&root, "0.2.0");
+    assert!(
+        out.status.success(),
+        "release-check refused removing an item the stability page does not list: {}",
+        stderr(&out)
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_breaking_entry_on_a_patch_tag_is_refused() {
+    let breaking = "### Changed\n\n- **Breaking:** `Port::call` takes a context (story:port-context)";
+    for tag_second in [true, false] {
+        let root = release_pair(
+            &format!("patch-{tag_second}"),
+            FIRST,
+            "0.1.1",
+            breaking,
+            tag_second,
+        );
+        let out = release_check(&root, "0.1.1");
+        let err = stderr(&out);
+        assert!(
+            !out.status.success()
+                && err.contains("tag 0.1.1 moves only the patch version from 0.1.0")
+                && err.contains("**Breaking:**"),
+            "release-check passed a `**Breaking:**` entry on the patch tag 0.1.1: {err}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // A patch tag that breaks nothing passes, and so does a break on a minor tag.
+    let root = release_pair("patch-none", FIRST, "0.1.1", NO_BREAKS, true);
+    let out = release_check(&root, "0.1.1");
+    assert!(
+        out.status.success(),
+        "release-check refused a patch tag with `No breaking changes.`: {}",
+        stderr(&out)
+    );
+    let _ = fs::remove_dir_all(&root);
+
+    let root = release_pair("minor-break", FIRST, "0.2.0", breaking, true);
+    let out = release_check(&root, "0.2.0");
+    assert!(
+        out.status.success(),
+        "release-check refused a `**Breaking:**` entry on the minor tag 0.2.0: {}",
+        stderr(&out)
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
 #[test]
 fn release_check_passes_when_tag_version_and_changelog_agree() {
     let root = fixture("agree", "0.1.0", CHANGELOG);
