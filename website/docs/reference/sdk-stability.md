@@ -86,7 +86,7 @@ implements it through.
 |---|---|
 | `loom_sdk::run_until_blocked` | Drives a commission until it is blocked |
 | `loom_sdk::LoopEnd` | What `run_until_blocked` returns |
-| `loom_sdk::Runtime` | A run's governor, executor, authority provider and effect port, held by reference, and its run store and loop context, owned (`new`, `runs`, `context`, `into_parts`); `run`, `run_suspending` and `resume` call `run_until_blocked`, `run_with_suspension` and `resume_after_grant` with them and return what those return, which stay public and unchanged |
+| `loom_sdk::Runtime` | A run's governor, executor, authority provider and effect port, held by reference, and its run store and loop context, owned (`new`, `runs`, `runs_mut`, `context`, `context_mut`, `into_parts`); `run`, `run_suspending` and `resume` call `run_until_blocked`, `run_with_suspension` and `resume_after_grant` with them and return what those return, which stay public and unchanged |
 | `loom_sdk::EventSink`, `loom_sdk::NoEvents` | The event port at the top, and the sink that receives nothing, `LoopContext::events`' default |
 | `loom_sdk::Loom` | The executor: proposes one action per frontier |
 | `loom_sdk::CanonGovernor` | The governor over a case store |
