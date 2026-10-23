@@ -42,10 +42,20 @@ control-plane path, and fails when either table here and the code disagree.
 
 `loom-xtask release-check` holds both rules on every release tag
 ([`crates/loom-xtask/tests/release_check.rs`](https://github.com/beyond10x/loom/blob/main/crates/loom-xtask/tests/release_check.rs)):
-it refuses an entry that removes a path the previous tag's version of this page lists, as a
-bullet under `### Removed` or a `**Breaking:**` bullet saying `removed`, when no earlier release
-listed it under `### Deprecated`; and it refuses a `**Breaking:**` bullet on a tag with the same
+it refuses an entry that removes a path the previous tag's version of this page lists, when no
+earlier release deprecated it; and it refuses a `**Breaking:**` bullet on a tag with the same
 major and minor version as the previous tag. There is no 1.0 promise.
+
+- A listed path is a backticked `loom_sdk::` path in a table row of this page, outside a code
+  fence, in a row not marked *generated*. Environment variables and other spans are not paths.
+- A removal is any bullet under `### Removed`, and any `**Breaking:**` bullet that says
+  `removed`, `deleted`, `renamed` or `moves to`. It removes every backticked item before its
+  first `;`, wherever the verb stands. A rename or move removes only the old name, the first item
+  before the verb.
+- A deprecation is a bullet under `### Deprecated`. It deprecates every `loom_sdk::` path before
+  its first `;`.
+- An item covers the path it names and every path in its module: removing or deprecating
+  `loom_sdk::ports` covers `loom_sdk::ports::Gate`.
 
 ## The Canon release a Loom release links
 

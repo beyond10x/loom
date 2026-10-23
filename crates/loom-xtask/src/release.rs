@@ -16,13 +16,18 @@
 //! It also holds the SDK stability page's two rules (`story:stability-version-rule`). The tag
 //! rule: an entry with a `**Breaking:**` bullet on a tag that moves only the patch version from
 //! the previous tag (the same major and minor) fails, naming both tags. The deprecation window: an
-//! entry fails for each item it removes that the previous tag's [`STABILITY_PAGE`] lists (as a
-//! backticked span outside a code fence) and that no entry of a release below the tag lists under
-//! `### Deprecated`, naming the item. An entry removes the subjects of each bullet under
-//! `### Removed` and of each `**Breaking:**` bullet elsewhere that says `removed`; a bullet's
-//! subjects are its backticked spans before its first `;` and before the word (`removed`,
-//! `deprecated`), so `` `a` is removed; use `b` `` removes `a` alone. An item the page does not
-//! list is outside the window.
+//! entry fails for each path the previous tag's [`STABILITY_PAGE`] lists that it removes and that
+//! no entry of a release below the tag deprecates, naming the path. The page lists each backticked
+//! `loom_sdk::` path in a table row outside a code fence that is not marked generated; anything
+//! else (a variable, a generated row, prose) is outside the window. A removal is any bullet under
+//! `### Removed`, and any `**Breaking:**` bullet in another section that says `removed`,
+//! `deleted`, `renamed` or `moves to`. It removes every backticked span before its first `;`,
+//! wherever the verb stands (`` Removed `a` ``, `` `a` is removed, and so is `b` ``); when it says
+//! `renamed` or `moves to`, only the first span before that verb (the first after it when none
+//! precedes it), the rest naming the new place. A bullet under `### Deprecated` deprecates every
+//! `loom_sdk::` span before its first `;`. A removed or deprecated item covers a path it equals or
+//! is a module of, compared by `::` component, so removing `loom_sdk::ports` removes the listed
+//! `loom_sdk::ports::Gate`, and deprecating it deprecates that path.
 //!
 //! The previous tag is the highest bare-version tag of `<root>`'s git repository below the tag;
 //! with none, only the statement is required. The tag's side of the diff is the tag when it exists
@@ -343,41 +348,118 @@ fn spans(text: &str) -> Vec<&str> {
     text.split('`').skip(1).step_by(2).collect()
 }
 
-/// Whether `word` is a whole word of `text`, ignoring ASCII case.
-fn has_word(text: &str, word: &str) -> bool {
-    text.split(|c: char| !(c.is_alphanumeric() || c == '_'))
-        .any(|w| w.eq_ignore_ascii_case(word))
-}
-
-/// The backticked spans a bullet names as the subject of `verb` (`removed`, `deprecated`): the
-/// spans before its first `;`, and before the first whole word `verb` in that clause, so
-/// `` `a` is removed; use `b` `` names `a` alone.
-fn subjects<'a>(text: &'a str, verb: &str) -> Vec<&'a str> {
-    let clause = text.split(';').next().unwrap_or_default();
-    let mut end = clause.len();
-    let mut at = 0;
-    for word in clause.split_inclusive(|c: char| !(c.is_alphanumeric() || c == '_')) {
-        let bare = word.trim_end_matches(|c: char| !(c.is_alphanumeric() || c == '_'));
-        if bare.eq_ignore_ascii_case(verb) && clause[..at].matches('`').count().is_multiple_of(2) {
-            end = at;
-            break;
+/// The text before the first `;` outside a backticked span.
+fn clause(text: &str) -> &str {
+    let mut in_span = false;
+    for (at, c) in text.char_indices() {
+        match c {
+            '`' => in_span = !in_span,
+            ';' if !in_span => return &text[..at],
+            _ => {}
         }
-        at += word.len();
     }
-    spans(&clause[..end])
+    text
 }
 
-/// The items an entry removes: the subjects of each bullet under `### Removed`, and of each
-/// `**Breaking:**` bullet elsewhere that says `removed`.
+/// A word of a bullet's prose or one of its backticked spans.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Token<'a> {
+    Word(&'a str),
+    Span(&'a str),
+}
+
+/// The words outside backticked spans and the spans themselves, in order.
+fn tokens(text: &str) -> Vec<Token<'_>> {
+    let mut found = Vec::new();
+    for (n, part) in text.split('`').enumerate() {
+        if n % 2 == 1 {
+            found.push(Token::Span(part));
+        } else {
+            found.extend(
+                part.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                    .filter(|w| !w.is_empty())
+                    .map(Token::Word),
+            );
+        }
+    }
+    found
+}
+
+/// Whether the token is the prose word `word`, ignoring ASCII case.
+fn is_word(token: Option<&Token<'_>>, word: &str) -> bool {
+    matches!(token, Some(Token::Word(w)) if w.eq_ignore_ascii_case(word))
+}
+
+/// Where the prose says `renamed` or `moves to`, as a token index.
+fn rename_at(tokens: &[Token<'_>]) -> Option<usize> {
+    (0..tokens.len()).find(|&at| {
+        is_word(tokens.get(at), "renamed")
+            || (is_word(tokens.get(at), "moves") && is_word(tokens.get(at + 1), "to"))
+    })
+}
+
+/// Whether the prose of a bullet says it takes something away: `removed`, `deleted`, `renamed`
+/// or `moves to`.
+fn says_removal(text: &str) -> bool {
+    let found = tokens(text);
+    rename_at(&found).is_some()
+        || found
+            .iter()
+            .any(|t| is_word(Some(t), "removed") || is_word(Some(t), "deleted"))
+}
+
+/// The items a removal bullet names: every span before its first `;`, or, when that clause says
+/// `renamed` or `moves to`, only the first span before the verb (the first after it when none
+/// precedes it); the other spans name the new place.
+fn removal_items(text: &str) -> Vec<&str> {
+    let found = tokens(clause(text));
+    match rename_at(&found) {
+        Some(at) => {
+            let before = token_spans(&found[..at]);
+            let after = token_spans(&found[at..]);
+            before
+                .first()
+                .or(after.first())
+                .copied()
+                .into_iter()
+                .collect()
+        }
+        None => token_spans(&found),
+    }
+}
+
+/// The spans among the tokens, in order.
+fn token_spans<'a>(part: &[Token<'a>]) -> Vec<&'a str> {
+    part.iter()
+        .filter_map(|t| match t {
+            Token::Span(s) => Some(*s),
+            Token::Word(_) => None,
+        })
+        .collect()
+}
+
+/// Whether `item` is `path` or a module of it, compared by `::` component.
+fn covers(item: &str, path: &str) -> bool {
+    path == item
+        || path
+            .strip_prefix(item)
+            .is_some_and(|rest| rest.starts_with("::"))
+}
+
+/// The prefix of a path the stability page's window covers.
+const SDK_PATH: &str = "loom_sdk::";
+
+/// The items an entry removes: those of each bullet under `### Removed`, and of each
+/// `**Breaking:**` bullet elsewhere that says `removed`, `deleted`, `renamed` or `moves to`.
 fn removed_items(entry: &str) -> Vec<String> {
     let mut items = Vec::new();
     for (section, text) in bullets_by_section(entry) {
-        let breaking_removal = text.starts_with(BREAKING) && has_word(&text, "removed");
+        let breaking_removal = text.starts_with(BREAKING) && says_removal(&text);
         if section != "Removed" && !breaking_removal {
             continue;
         }
         let text = text.strip_prefix(BREAKING).unwrap_or(&text);
-        for item in subjects(text, "removed") {
+        for item in removal_items(text) {
             if !item.is_empty() && !items.iter().any(|i| i == item) {
                 items.push(item.to_owned());
             }
@@ -386,8 +468,8 @@ fn removed_items(entry: &str) -> Vec<String> {
     items
 }
 
-/// The items listed under `### Deprecated` in the entries of releases below the tag: each such
-/// bullet's subjects.
+/// The items deprecated in the entries of releases below the tag: every `loom_sdk::` span before
+/// the first `;` of each bullet under `### Deprecated`.
 fn deprecated_before(changelog: &str, tag: &str) -> Vec<String> {
     let Some(key) = version_key(tag) else {
         return Vec::new();
@@ -414,15 +496,20 @@ fn deprecated_before(changelog: &str, tag: &str) -> Vec<String> {
         }
         for (section, text) in bullets_by_section(&body.join("\n")) {
             if section == "Deprecated" {
-                items.extend(subjects(&text, "deprecated").into_iter().map(str::to_owned));
+                items.extend(
+                    spans(clause(&text))
+                        .into_iter()
+                        .filter(|s| s.starts_with(SDK_PATH))
+                        .map(str::to_owned),
+                );
             }
         }
     }
     items
 }
 
-/// One failure per item the entry removes that the previous tag's SDK stability page lists and no
-/// release below the tag listed under `### Deprecated`.
+/// One failure per path the previous tag's SDK stability page lists that an item the entry
+/// removes covers and that no deprecation of a release below the tag covers.
 fn undeprecated_removals(
     root: &Path,
     changelog: &str,
@@ -435,20 +522,40 @@ fn undeprecated_removals(
         Err(failure) => return vec![failure],
     };
     let deprecated = deprecated_before(changelog, tag);
-    removed
-        .iter()
-        .filter(|item| listed.contains(item) && !deprecated.contains(item))
-        .map(|item| {
-            format!(
-                "CHANGELOG.md entry [{tag}] removes `{item}`, which the SDK stability page of \
+    let mut failures = Vec::new();
+    let mut named: Vec<&str> = Vec::new();
+    for item in removed {
+        for path in listed.iter().filter(|path| covers(item, path)) {
+            if named.contains(&path.as_str()) || deprecated.iter().any(|d| covers(d, path)) {
+                continue;
+            }
+            named.push(path);
+            let what = if item == path {
+                format!("`{item}`")
+            } else {
+                format!("`{item}`, and with it `{path}`")
+            };
+            failures.push(format!(
+                "CHANGELOG.md entry [{tag}] removes {what}, which the SDK stability page of \
                  {previous} lists ({STABILITY_PAGE}), but no earlier release lists it under \
                  `### Deprecated`; deprecate it for at least one release before removing it"
-            )
-        })
-        .collect()
+            ));
+        }
+    }
+    failures
 }
 
-/// The backticked spans of the SDK stability page at `refs/tags/<previous>`, empty when the page
+/// Whether a table row is marked generated: one of its cells reads `generated` or `*generated*`.
+fn marked_generated(row: &str) -> bool {
+    row.split('|').any(|cell| {
+        cell.trim()
+            .trim_matches('*')
+            .eq_ignore_ascii_case("generated")
+    })
+}
+
+/// The `loom_sdk::` paths the SDK stability page at `refs/tags/<previous>` lists: the backticked
+/// ones in its table rows outside code fences, rows marked generated left out; empty when the page
 /// is not in that tag.
 fn listed_at(root: &Path, previous: &str) -> Result<Vec<String>, String> {
     let tree = format!("refs/tags/{previous}");
@@ -462,16 +569,26 @@ fn listed_at(root: &Path, previous: &str) -> Result<Vec<String>, String> {
         return Ok(Vec::new());
     }
     let page = git(root, &["show", &format!("{tree}:{STABILITY_PAGE}")])?;
+    Ok(listed_paths(&page))
+}
+
+/// The paths a stability page lists, as [`listed_at`] reads them.
+fn listed_paths(page: &str) -> Vec<String> {
     let mut fenced = false;
     let mut listed = Vec::new();
     for line in page.lines() {
-        if line.trim_start().starts_with("```") {
+        let row = line.trim_start();
+        if row.starts_with("```") {
             fenced = !fenced;
-        } else if !fenced {
-            listed.extend(spans(line).into_iter().map(str::to_owned));
+        } else if !fenced && row.starts_with('|') && !marked_generated(row) {
+            for span in spans(row) {
+                if span.starts_with(SDK_PATH) && !listed.iter().any(|l| l == span) {
+                    listed.push(span.to_owned());
+                }
+            }
         }
     }
-    Ok(listed)
+    listed
 }
 
 /// The previous tag and the stable-surface files that differ between it and the tag (or `HEAD`
@@ -552,41 +669,78 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Breaks, breaks, deprecated_before, entry, is_bare_version, is_entry_heading,
-        moves_only_patch, removed_items, subjects, version_key,
+        Breaks, breaks, covers, deprecated_before, entry, is_bare_version, is_entry_heading,
+        listed_paths, moves_only_patch, removal_items, removed_items, version_key,
     };
 
     #[test]
-    fn a_bullet_names_its_subjects_before_the_verb_and_the_first_semicolon() {
+    fn a_removal_names_every_span_before_the_first_semicolon() {
         assert_eq!(
-            subjects("`a` and `b` are removed; use `c`", "removed"),
+            removal_items("`a` and `b` are removed; use `c`"),
             ["a", "b"]
         );
         assert_eq!(
-            subjects("the harness `R`, `p::R`, is removed, see `x`", "removed"),
-            ["R", "p::R"]
+            removal_items("the harness `R`, `p::R`, is removed, see `x`"),
+            ["R", "p::R", "x"]
         );
-        assert_eq!(subjects("`removed` is removed", "removed"), ["removed"]);
-        assert_eq!(subjects("`a` drops `b`", "removed"), ["a", "b"]);
+        assert_eq!(removal_items("Removed `a` (story:s)"), ["a"]);
+        assert_eq!(removal_items("`a` is removed, and so is `b`"), ["a", "b"]);
+        assert_eq!(removal_items("`a;b` is removed; use `c`"), ["a;b"]);
+    }
+
+    #[test]
+    fn a_rename_removes_only_its_old_name() {
+        assert_eq!(
+            removal_items("`A` is renamed `B`, an llm `M` only; `C` is removed"),
+            ["A"]
+        );
+        assert_eq!(removal_items("`A` moves to `p::A`"), ["A"]);
+        assert_eq!(removal_items("Renamed `A` to `B`"), ["A"]);
+        assert_eq!(removal_items("`renamed` is renamed `x`"), ["renamed"]);
     }
 
     #[test]
     fn removals_are_removed_bullets_and_breaking_removals() {
         let entry = "### Changed\n\n- **Breaking:** `a` is removed\n- `b` is removed\n\
                      - **Breaking:** `c` takes a context\n\n### Removed\n\n- `d` is gone\n\
-                     - **Breaking:**\n  `e` is removed";
-        assert_eq!(removed_items(entry), ["a", "d", "e"]);
+                     - **Breaking:**\n  `e` is removed\n\n### Changed\n\n\
+                     - **Breaking:** `f` is deleted\n- **Breaking:** `g` is renamed `h`\n\
+                     - **Breaking:** `i` moves to `j`\n- **Breaking:** `removed` takes `k`";
+        assert_eq!(removed_items(entry), ["a", "d", "e", "f", "g", "i"]);
     }
 
     #[test]
     fn deprecations_count_only_below_the_tag() {
-        let changelog = "## [Unreleased]\n\n### Deprecated\n\n- `u` is deprecated\n\n\
-                         ## [0.3.0] - 2026-10-07\n\n### Deprecated\n\n- `c` is deprecated\n\n\
+        let changelog = "## [Unreleased]\n\n### Deprecated\n\n- `loom_sdk::u` is deprecated\n\n\
+                         ## [0.3.0] - 2026-10-07\n\n### Deprecated\n\n\
+                         - `loom_sdk::c` is deprecated\n\n\
                          ## [0.2.0] - 2026-10-06\n\n### Deprecated\n\n\
-                         - `b` is deprecated; use `x`\n\n## [0.1.0]\n\n### Added\n\n- `a`\n";
-        assert_eq!(deprecated_before(changelog, "0.3.0"), ["b"]);
+                         - `loom_sdk::b` is deprecated; use `loom_sdk::x`\n\
+                         - Deprecated `loom_sdk::d` and `NOT_A_PATH`\n\n\
+                         ## [0.1.0]\n\n### Added\n\n- `loom_sdk::a`\n";
+        assert_eq!(
+            deprecated_before(changelog, "0.3.0"),
+            ["loom_sdk::b", "loom_sdk::d"]
+        );
         assert!(moves_only_patch("0.3.1", "0.3.0") && !moves_only_patch("0.4.0", "0.3.9"));
         assert!(!moves_only_patch("1.0.0", "0.9.9"));
+    }
+
+    #[test]
+    fn an_item_covers_itself_and_the_paths_of_its_module() {
+        assert!(covers("loom_sdk::ports", "loom_sdk::ports"));
+        assert!(covers("loom_sdk::ports", "loom_sdk::ports::Gate"));
+        assert!(!covers("loom_sdk::ports", "loom_sdk::portsx::Gate"));
+        assert!(!covers("loom_sdk::ports::Gate", "loom_sdk::ports"));
+    }
+
+    #[test]
+    fn the_page_lists_sdk_paths_of_table_rows_not_marked_generated() {
+        let page = "Prose names `loom_sdk::Prose`.\n\n| A | B |\n|---|---|\n\
+                    | `loom_sdk::A` | names `CURL_HOME` and `loom_sdk::B` |\n\
+                    | `loom_sdk::G` | generated |\n| `loom_sdk::H` | *generated* |\n\n\
+                    ```text\n| `loom_sdk::Fenced` | type |\n```\n";
+        assert_eq!(listed_paths(page), ["loom_sdk::A", "loom_sdk::B"]);
     }
 
     #[test]
