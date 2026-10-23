@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.39.1] - 2026-10-24
+
+No breaking changes.
+
 ### Added
 
 - `SessionExecutor::api_key_secret` names a b10x-harness endpoint's API key in the secret store; the loop gets `--api-key-secret` (story:endpoint-api-key-secret)
@@ -1031,7 +1035,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.39.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.39.1...HEAD
+[0.39.1]: https://github.com/beyond10x/loom/releases/tag/0.39.1
 [0.39.0]: https://github.com/beyond10x/loom/releases/tag/0.39.0
 [0.38.0]: https://github.com/beyond10x/loom/releases/tag/0.38.0
 [0.37.0]: https://github.com/beyond10x/loom/releases/tag/0.37.0
