@@ -2,12 +2,15 @@
 format: aep.planning-md/3
 id: story:loop-context-split
 kind: story
-status: draft
+status: active
 title: LoopContext splits into Clock, Ids, Limits and HostControl with a blanket impl
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
-revision: 1
+revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-23T08:15:52Z", actor: "human:timo", revision: 2, correlation: "wave-2026-10-23-w3"}
+- {from: "proposed", to: "active", at: "2026-10-23T08:15:52Z", actor: "human:timo", revision: 3, correlation: "wave-2026-10-23-w3"}
 ---
 ## Outcome
 
