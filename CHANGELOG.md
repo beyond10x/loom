@@ -15,9 +15,9 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ## [0.39.0] - 2026-10-23
 
 ### Changed
+
 - **Breaking:** `loom_sdk::session::metaharness` is metaharness `0.15.0` (was `0.13.0`): `RunSpec`, `FloorInputs`, `Credential` and `AuditReport` change
 - `SessionExecutor` runs Claude Code 2.1.309 and Codex 0.160.0, which metaharness `0.15.0` adds to its pins
-- `SessionExecutor` runs sessions on Claude Code 2.1.309 and Codex 0.160.0, which metaharness `0.15.0` pins beside 2.1.304, 2.1.305 and 0.153.4
 
 ## [0.38.0] - 2026-10-23
 
