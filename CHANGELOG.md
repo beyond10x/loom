@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `SessionExecutor::api_key_secret` names a b10x-harness endpoint's API key in the secret store; the loop gets `--api-key-secret` (story:endpoint-api-key-secret)
+
 ## [0.39.0] - 2026-10-23
 
 ### Changed

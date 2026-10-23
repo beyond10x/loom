@@ -255,7 +255,9 @@ impl std::fmt::Display for SpecError {
 impl std::error::Error for SpecError {}
 
 /// The model endpoint a `Kind::B10x` session's loop is pointed at, and the subscription token
-/// it reads there: the loop reads the file itself, and metaharness copies nothing.
+/// it reads there: the loop reads the file itself, and metaharness copies nothing. On the
+/// secret route ([`SessionExecutor::api_key_secret`]) it names no token: `token_file` empty,
+/// `token_pointer` none.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Endpoint {
     /// The endpoint origin plus its API prefix.
@@ -455,6 +457,13 @@ pub struct SessionExecutor {
     /// The agent whose spec the executor was built from ([`Self::from_spec`]), recorded on each
     /// session as `loom.session.AgentSession.agent`; none for an executor built without one.
     pub agent: Option<AgentId>,
+    /// For `Kind::B10x`, the name of [`Self::endpoint`]'s API key in the operator's secret store,
+    /// as `<namespace>/<name>`: the loop is launched with `--credentials api-key` and
+    /// `--api-key-secret <name>`, and opens the store itself, so the key never enters this
+    /// process, metaharness or the child's environment. The endpoint then names no subscription
+    /// token (`token_file` empty, `token_pointer` none). A call with a name on another kind,
+    /// beside a token, or not of that shape fails before the copy is made.
+    pub api_key_secret: Option<String>,
     runner: RefCell<Option<Box<dyn ProcessRunner>>>,
     last: RefCell<Option<SessionReport>>,
     ids: RefCell<Box<dyn FnMut() -> SessionId>>,
@@ -505,6 +514,7 @@ impl SessionExecutor {
             endpoint: None,
             tools: None,
             agent: None,
+            api_key_secret: None,
             runner: RefCell::new(None),
             last: RefCell::new(None),
             ids: RefCell::new(Box::new(fresh_session_id)),
@@ -772,8 +782,9 @@ impl SessionExecutor {
     /// by default every Claude Code and Codex call decided here, every b10x-harness call
     /// observed), and by kind: Claude Code `Strict`; Codex `On` (its strict floor fails on four rows its
     /// opening record does not carry, H1a, H1b, H4 and H5, which metaharness cannot decide for
-    /// it yet); b10x-harness `On`, pointed at [`Self::endpoint`] with its subscription
-    /// token, confined by substrate in the loop's own process so its write tools reach the copy
+    /// it yet); b10x-harness `On`, pointed at [`Self::endpoint`] with its subscription token, or
+    /// with [`Self::api_key_secret`] under `ApiKey` when one is named, confined by substrate in the
+    /// loop's own process so its write tools reach the copy
     /// and nothing else. Each with the copy as its declared scratch working directory.
     fn spec(&self, copy: &Path) -> Result<RunSpec, String> {
         let mut spec = RunSpec::new(self.kind);
@@ -802,17 +813,51 @@ impl SessionExecutor {
                 )?;
                 spec.hermetic = HermeticMode::On;
                 spec.max_turns = self.max_turns;
-                spec.credentials = CredentialSource::None;
                 spec.model_endpoint = Some(endpoint.base_url.clone());
                 spec.model_wire = Some(endpoint.wire.clone());
                 spec.model = Some(self.model.clone().unwrap_or(endpoint.model.clone()));
-                spec.subscription_token_file = Some(endpoint.token_file.display().to_string());
-                spec.subscription_token_pointer
-                    .clone_from(&endpoint.token_pointer);
+                if let Some(name) = &self.api_key_secret {
+                    // The loop opens the secret store by this name; metaharness holds the name
+                    // and never the key.
+                    spec.credentials = CredentialSource::ApiKey;
+                    spec.api_key_secret = Some(name.clone());
+                } else {
+                    spec.credentials = CredentialSource::None;
+                    spec.subscription_token_file = Some(endpoint.token_file.display().to_string());
+                    spec.subscription_token_pointer
+                        .clone_from(&endpoint.token_pointer);
+                }
                 spec.substrate_embedded = true;
             }
         }
         Ok(spec)
+    }
+
+    /// [`Self::api_key_secret`], when named, is for a b10x-harness session, is the endpoint's only
+    /// credential, and has the shape `<namespace>/<name>` (metaharness's check, so the two cannot
+    /// disagree); the value is quoted escaped.
+    fn check_api_key_secret(&self) -> Result<(), String> {
+        let Some(name) = &self.api_key_secret else {
+            return Ok(());
+        };
+        let quoted = name.escape_debug();
+        if self.kind != Kind::B10x {
+            return Err(format!(
+                "the API key secret `{quoted}` is for a b10x-harness session; a {:?} session has \
+                 no secret route",
+                self.kind
+            ));
+        }
+        if let Some(endpoint) = &self.endpoint
+            && (!endpoint.token_file.as_os_str().is_empty() || endpoint.token_pointer.is_some())
+        {
+            return Err(format!(
+                "the API key secret `{quoted}` and the endpoint's subscription token are two \
+                 credentials for one request; leave the endpoint's token_file empty and its \
+                 token_pointer unset"
+            ));
+        }
+        metaharness_b10x::validate_api_key_secret(name)
     }
 
     /// One session: the copy made, the session run in it to its end, the proposal read.
@@ -830,6 +875,7 @@ impl SessionExecutor {
                 "the named files {unplain:?} are not plain paths relative to the workspace"
             ));
         }
+        self.check_api_key_secret()?;
         let offered = self.offered();
         let copy = ScratchCopy::make(&self.scratch, &self.workspace, &self.files)?;
         report.cwd = Some(copy.dir.clone());

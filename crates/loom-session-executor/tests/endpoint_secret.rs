@@ -131,7 +131,7 @@ fn b10x_lines(_cwd: &Path) -> Vec<ScriptStep> {
     let action = serde_json::json!({"action": EDIT, "summary": "fixed a"}).to_string();
     [
         serde_json::json!({"kind": "started", "model": "synthetic", "published_tools": [],
-                           "credential_source": "secret"}),
+                           "credential_source": "api-key:secrets"}),
         serde_json::json!({"kind": "text-delta", "text": action}),
         serde_json::json!({"kind": "usage", "model": "synthetic", "input_tokens": 100,
                            "output_tokens": 20, "cached_input_tokens": 0}),
@@ -271,7 +271,11 @@ fn a_secret_beside_a_subscription_token_is_refused() {
 
     let (session, seen) = Session::new();
     let mut executor = scratch.executor(Kind::B10x, session, SECRET);
-    executor.endpoint.as_mut().expect("an endpoint").token_pointer = Some("/token".to_owned());
+    executor
+        .endpoint
+        .as_mut()
+        .expect("an endpoint")
+        .token_pointer = Some("/token".to_owned());
     refused_before_any_session(&executor, &seen, &[SECRET, "token"]);
 }
 
