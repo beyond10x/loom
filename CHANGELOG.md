@@ -15,11 +15,13 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Added
 
 - `ChildCommand::with_egress` takes up to `MAX_EGRESS_APERTURES` (4) apertures; the child reaches each host by name (story:several-egress-apertures)
+- `ChildCommand::with_workdir` starts a child in a directory under `/workspace` or a read-only root; others refused (story:child-workdir)
 
 ### Changed
 
 - **Breaking:** `AppliedConfinement.network` is an `Option<Vec<AppliedAperture>>` listing every aperture, absent for an unconfined run, no longer a `String` (story:several-egress-apertures)
 - **Breaking:** `ChildCommand::egress` returns `&[EgressAperture]`, no longer `Option<&EgressAperture>` (story:several-egress-apertures)
+- **Breaking:** `AppliedConfinement` gains `workdir: Option<String>`, so a struct literal must name it (story:child-workdir)
 
 ### Security
 
