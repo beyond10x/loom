@@ -12,11 +12,12 @@ use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
-    ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, BreachStep, CaseId,
-    Commission, CommissionData, CommissionId, EffectOutcome, EffectOutcomePerformed,
-    ExecutorOutcome, ExecutorOutcomeProposedAction, Frontier, FrontierAction, HostStop,
-    ObservationId, PrincipalId, ProposedActionArguments, RunBudget, RunId, RunOutcome,
-    RuntimeEvent, StopPolicy, SuspensionReason, commission_state, frontier_state,
+    ActionRequestId, ActionStatus, AgentRevisionId, AuthorityContext, BreachStep, BudgetLimit,
+    CaseId, Commission, CommissionData, CommissionId, EffectOutcome, EffectOutcomePerformed,
+    EffectOutcomeRefused, ExecutorOutcome, ExecutorOutcomeProposedAction, Frontier, FrontierAction,
+    HostStop, ObservationId, PrincipalId, ProposedActionArguments, RunBudget, RunId, RunOutcome,
+    RunOutcomeIdleBound, RuntimeEvent, StopPolicy, SuspensionReason, commission_state,
+    frontier_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -63,10 +64,11 @@ fn governor(case: &CaseId) -> FakeGovernor {
     governor
 }
 
-/// Each call proposes `evaluate` with arguments of its own, so each is progress.
-#[derive(Default)]
+/// Each call proposes `evaluate` with arguments of its own, so each is progress, or, repeating,
+/// the same request every time, so a refused one is no new admission.
 struct Session {
     calls: AtomicUsize,
+    repeating: bool,
 }
 
 impl AgentExecutor for Session {
@@ -76,15 +78,18 @@ impl AgentExecutor for Session {
         _frontier: &Frontier<frontier_state::Issued>,
     ) -> ExecutorOutcome {
         let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        let argument = if self.repeating { 1 } else { call };
         ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
             action: EVALUATE.to_owned(),
-            arguments: ProposedActionArguments(Value::Number(call.to_string())),
+            arguments: ProposedActionArguments(Value::Number(argument.to_string())),
         })
     }
 }
 
-/// Performs every request.
-struct Effects;
+/// Performs every request, or refuses every one with an ordinary refusal (an idle iteration).
+struct Effects {
+    refusing: bool,
+}
 
 impl EffectPort for Effects {
     fn performs(&self, _action: &str) -> bool {
@@ -96,19 +101,28 @@ impl EffectPort for Effects {
         _commission: &Commission<commission_state::Assigned>,
         _request: &AdmittedRequest,
     ) -> Result<EffectOutcome, EffectError> {
-        Ok(EffectOutcome::Performed(EffectOutcomePerformed {
-            report: Value::Text("evaluated".to_owned()),
-            attempt: None,
-            audit: None,
-            usage: None,
-        }))
+        Ok(if self.refusing {
+            EffectOutcome::Refused(EffectOutcomeRefused {
+                reason: "nothing changed".to_owned(),
+                ends_run: false,
+            })
+        } else {
+            EffectOutcome::Performed(EffectOutcomePerformed {
+                report: Value::Text("evaluated".to_owned()),
+                attempt: None,
+                audit: None,
+                usage: None,
+            })
+        })
     }
 }
 
-/// What a scenario sets: the limits, the trusted time and the host's answers to `host_stop`.
+/// What a scenario sets: the limits, the trusted time, the host's answers to `host_stop` and
+/// whether the effect port refuses the one request the session repeats.
 #[derive(Clone)]
 struct Scenario {
     name: &'static str,
+    refusing: bool,
     step_budget: Option<usize>,
     run_budget: Option<RunBudget>,
     stop_policy: StopPolicy,
@@ -150,9 +164,10 @@ fn disk_low() -> HostStop {
 fn host_stopped() -> Scenario {
     Scenario {
         name: "host-stop",
+        refusing: false,
         step_budget: None,
         run_budget: Some(RunBudget {
-            deadline: Some("2026-10-23T12:00:00Z".to_owned()),
+            deadline: Some(Timestamp("2026-10-23T12:00:00Z".to_owned())),
             ..unlimited()
         }),
         stop_policy: policy(),
@@ -165,9 +180,10 @@ fn host_stopped() -> Scenario {
 fn deadline_stopped() -> Scenario {
     Scenario {
         name: "deadline",
+        refusing: false,
         step_budget: Some(5),
         run_budget: Some(RunBudget {
-            deadline: Some("2026-10-23T08:00:00Z".to_owned()),
+            deadline: Some(Timestamp("2026-10-23T08:00:00Z".to_owned())),
             ..unlimited()
         }),
         stop_policy: policy(),
@@ -180,7 +196,22 @@ fn deadline_stopped() -> Scenario {
 fn step_budget_stopped() -> Scenario {
     Scenario {
         name: "step-budget",
+        refusing: false,
         step_budget: Some(2),
+        run_budget: None,
+        stop_policy: policy(),
+        clock: "2026-10-23T09:00:00Z",
+        answers: vec![None],
+    }
+}
+
+/// The run its stop policy's idle bound of three ends, the one request refused each time: under the default
+/// policy two idle iterations would end it.
+fn idle_bound_stopped() -> Scenario {
+    Scenario {
+        name: "idle-bound",
+        refusing: true,
+        step_budget: None,
         run_budget: None,
         stop_policy: policy(),
         clock: "2026-10-23T09:00:00Z",
@@ -384,14 +415,17 @@ impl HostControl for Assembled<'_> {
 }
 
 /// `run_until_blocked` of a fresh session under `context`, on a fresh governor and run store.
-fn run<C: LoopContext>(name: &str, context: &mut C) -> LoopEnd {
+fn run<C: LoopContext>(name: &str, refusing: bool, context: &mut C) -> LoopEnd {
     let case = CaseId(format!("case-split-{name}"));
     let mut runs = Generated::new(RunStore::new(|| RunId(uuid(0x101))));
     run_until_blocked(
         &governor(&case),
-        &Session::default(),
+        &Session {
+            calls: AtomicUsize::new(0),
+            repeating: refusing,
+        },
         &StaticAuthorityProvider::new(),
-        &Effects,
+        &Effects { refusing },
         &commission(&case),
         &mut runs,
         context,
@@ -399,21 +433,19 @@ fn run<C: LoopContext>(name: &str, context: &mut C) -> LoopEnd {
     .unwrap_or_else(|error| panic!("the loop failed: {error}"))
 }
 
+/// What one run left: its end, the events its sink received and how often the host was asked.
+type Observed = (LoopEnd, Vec<RuntimeEvent>, usize);
+
 /// The scenario run once under a single `LoopContext` and once under one assembled from four
 /// parts: the two ends, events and host asks.
-fn both(
-    scenario: &Scenario,
-) -> (
-    (LoopEnd, Vec<RuntimeEvent>, usize),
-    (LoopEnd, Vec<RuntimeEvent>, usize),
-) {
+fn both(scenario: &Scenario) -> (Observed, Observed) {
     let mut whole = Whole {
         ids: Counters::new(),
         clock: scenario.clock,
         scenario: scenario.clone(),
         host: Host::new(&scenario.answers),
     };
-    let single = run(scenario.name, &mut whole);
+    let single = run(scenario.name, scenario.refusing, &mut whole);
 
     let limits = AgentLimits {
         step_budget: scenario.step_budget,
@@ -427,7 +459,7 @@ fn both(
         limits: &limits,
         host: &mut host,
     };
-    let parts = run(scenario.name, &mut assembled);
+    let parts = run(scenario.name, scenario.refusing, &mut assembled);
 
     (
         (single, whole.host.events, whole.host.asked),
@@ -437,19 +469,40 @@ fn both(
 
 #[test]
 fn a_context_from_four_parts_runs_as_one() {
-    for scenario in [host_stopped(), deadline_stopped(), step_budget_stopped()] {
+    for scenario in [
+        host_stopped(),
+        deadline_stopped(),
+        step_budget_stopped(),
+        idle_bound_stopped(),
+    ] {
         let ((single, single_events, single_asked), (parts, parts_events, parts_asked)) =
             both(&scenario);
 
-        let reason = match &single.outcome {
-            RunOutcome::Suspended(suspended) => &suspended.reason,
-            other => panic!("{}: the run ends suspended, not {other:?}", scenario.name),
-        };
-        match (scenario.name, reason) {
-            ("host-stop", SuspensionReason::HostStop(stop)) => assert_eq!(stop, &disk_low()),
-            ("deadline", SuspensionReason::RunBudget(_))
-            | ("step-budget", SuspensionReason::Budget(_)) => {}
-            (name, reason) => panic!("{name}: the run stops for its scenario, not {reason:?}"),
+        match (scenario.name, &single.outcome) {
+            ("host-stop", RunOutcome::Suspended(suspended)) => assert_eq!(
+                suspended.reason,
+                SuspensionReason::HostStop(disk_low()),
+                "host-stop: the run stops for the host's stop"
+            ),
+            ("deadline", RunOutcome::Suspended(suspended)) => assert!(
+                matches!(
+                    &suspended.reason,
+                    SuspensionReason::RunBudget(breach) if breach.limit == BudgetLimit::Deadline
+                ),
+                "deadline: the run stops for its deadline, not {:?}",
+                suspended.reason
+            ),
+            ("step-budget", RunOutcome::Suspended(suspended)) => assert!(
+                matches!(suspended.reason, SuspensionReason::Budget(_)),
+                "step-budget: the run stops for its step budget, not {:?}",
+                suspended.reason
+            ),
+            ("idle-bound", outcome) => assert_eq!(
+                outcome,
+                &RunOutcome::IdleBound(RunOutcomeIdleBound { idle_iterations: 3 }),
+                "idle-bound: the run ends at the idle bound its stop policy sets"
+            ),
+            (name, outcome) => panic!("{name}: the run stops for its scenario, not {outcome:?}"),
         }
         assert!(
             !single_events.is_empty(),

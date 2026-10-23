@@ -64,6 +64,10 @@ host_ports! {
     loom_sdk::loom::workflow::WorkflowRunStore => hosts::RunRecords;
     loom_sdk::loom::arguments::ArgumentGenerator => hosts::Arguments;
     loom_sdk::commission::runtime::LoopContext => hosts::Context;
+    loom_sdk::commission::runtime::Ids => hosts::Parts;
+    loom_sdk::commission::runtime::Clock => hosts::Parts;
+    loom_sdk::commission::runtime::Limits => hosts::Parts;
+    loom_sdk::commission::runtime::HostControl => hosts::Parts;
     loom_sdk::commission::ports::events::EventSink => hosts::Events;
 }
 
@@ -91,7 +95,7 @@ mod hosts {
     use loom_sdk::commission::ports::executor::AgentExecutor;
     use loom_sdk::commission::ports::governor::Governor;
     use loom_sdk::commission::ports::suspension::{SuspensionPort, SuspensionStoreError};
-    use loom_sdk::commission::runtime::LoopContext;
+    use loom_sdk::commission::runtime::{Clock, HostControl, Ids, Limits, LoopContext};
     use loom_sdk::connectors::{CredentialError, CredentialResolver};
     use loom_sdk::governor::{CaseState, CaseStore, EvaluationTime, FallibleCaseStore};
     use loom_sdk::intake::slice::confinement::{
@@ -399,6 +403,42 @@ mod hosts {
         }
     }
 
+    /// A context from its four parts, each implemented on its own; the four make it a
+    /// `LoopContext` with no `impl LoopContext` of its own. It leaves `Limits::run_budget`,
+    /// `Limits::stop_policy` and both `HostControl` methods at their defaults.
+    pub struct Parts;
+
+    impl Ids for Parts {
+        fn action_request_id(&mut self) -> ActionRequestId {
+            unreachable!("{NEVER_CALLED}")
+        }
+
+        fn observation_id(&mut self) -> ObservationId {
+            unreachable!("{NEVER_CALLED}")
+        }
+    }
+
+    impl Clock for Parts {
+        fn now(&mut self) -> Timestamp {
+            unreachable!("{NEVER_CALLED}")
+        }
+    }
+
+    impl Limits for Parts {
+        fn step_budget(&self) -> Option<usize> {
+            unreachable!("{NEVER_CALLED}")
+        }
+    }
+
+    impl HostControl for Parts {}
+
+    /// The four parts are a `LoopContext`: the bound is the witness.
+    #[allow(dead_code)]
+    fn parts_are_a_loop_context() {
+        fn holds<T: LoopContext>(_: T) {}
+        holds(Parts);
+    }
+
     /// `Context` leaves `LoopContext::events` at its default, `NoEvents`; a host that wants the
     /// events implements this sink and returns it there.
     pub struct Events;
@@ -627,6 +667,10 @@ fn a_host_implements_every_port_through_loom_sdk_alone() {
         "WorkflowRunStore",
         "ArgumentGenerator",
         "LoopContext",
+        "Ids",
+        "Clock",
+        "Limits",
+        "HostControl",
         "EventSink",
     ]
     .into_iter()
