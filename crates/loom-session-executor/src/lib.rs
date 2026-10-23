@@ -166,9 +166,21 @@ pub enum SpecError {
         /// The spec's `agent.id`.
         agent: String,
     },
-    /// The spec denies tools its session kind cannot withhold: Codex and b10x-harness are
-    /// offered their whole toolset whatever the policy says, so a denied tool is held back only
-    /// when every call is decided here (`ask`).
+    /// The spec names a decision mode its session kind does not run under a policy Loom
+    /// enforces: Claude Code and Codex only under `ask`, where this executor decides every call
+    /// (under `frame` Loom supplies no frame, so every call is abstained on; under `observe`
+    /// none is decided), and b10x-harness only under `observe`, the one mode metaharness runs it
+    /// in.
+    DecisionModeUnenforced {
+        /// The spec's `agent.id`.
+        agent: String,
+        /// The session kind, as the spec names it.
+        kind: SessionKind,
+        /// The decision mode the spec names.
+        mode: PolicyDecisions,
+    },
+    /// The spec denies tools its session kind cannot withhold: a b10x-harness session's calls
+    /// are observed and never decided, so no tool can be denied it.
     DenyUnenforced {
         /// The spec's `agent.id`.
         agent: String,
@@ -176,6 +188,24 @@ pub enum SpecError {
         kind: SessionKind,
         /// The tools denied.
         deny: Vec<String>,
+    },
+    /// The spec allows tools other than its session kind's default, which the kind cannot be
+    /// narrowed or widened to: a b10x-harness session runs its loop's own toolset, observed.
+    AllowUnenforced {
+        /// The spec's `agent.id`.
+        agent: String,
+        /// The session kind, as the spec names it.
+        kind: SessionKind,
+        /// The tools allowed.
+        allow: Vec<String>,
+    },
+    /// An `allow` or `deny` entry holds a comma or whitespace, so it is no one tool name: the
+    /// offered tools are handed to the session joined by commas.
+    ToolNameInvalid {
+        /// The spec's `agent.id`.
+        agent: String,
+        /// The entry, as the spec writes it.
+        tool: String,
     },
 }
 
@@ -185,10 +215,32 @@ impl std::fmt::Display for SpecError {
             Self::NoSession { agent } => {
                 write!(f, "the agent spec {agent} names no session to run")
             }
+            Self::DecisionModeUnenforced { agent, kind, mode } => {
+                let runs = match kind {
+                    SessionKind::Harness => "Observe",
+                    SessionKind::ClaudeCode | SessionKind::Codex => "Ask",
+                };
+                write!(
+                    f,
+                    "the agent spec {agent} runs a {kind:?} session under `decisions: {mode:?}`, \
+                     which Loom does not enforce; a {kind:?} session runs only under \
+                     `decisions: {runs}`"
+                )
+            }
             Self::DenyUnenforced { agent, kind, deny } => write!(
                 f,
-                "the agent spec {agent} denies {deny:?}, which a {kind:?} session is offered \
-                 anyway; deny them under `decisions: ask` or leave them out of `deny`"
+                "the agent spec {agent} denies {deny:?}, which a {kind:?} session cannot \
+                 withhold: its calls are observed and never decided; leave them out of `deny`"
+            ),
+            Self::AllowUnenforced { agent, kind, allow } => write!(
+                f,
+                "the agent spec {agent} allows {allow:?}, but a {kind:?} session runs its own \
+                 toolset and cannot be narrowed to a list; leave `allow` empty"
+            ),
+            Self::ToolNameInvalid { agent, tool } => write!(
+                f,
+                "the agent spec {agent} names the tool {tool:?}, which holds a comma or \
+                 whitespace and so is no one tool name"
             ),
         }
     }
@@ -455,9 +507,13 @@ impl SessionExecutor {
     ///
     /// # Errors
     ///
-    /// [`SpecError::NoSession`] for a spec that runs no session, and
-    /// [`SpecError::DenyUnenforced`] for a Codex or b10x-harness session denying tools when its
-    /// calls are not decided here, since neither can be launched without them.
+    /// It builds an executor only for a policy Loom enforces itself, and refuses any other spec
+    /// before any session: [`SpecError::NoSession`] for a spec that runs no session;
+    /// [`SpecError::ToolNameInvalid`] for an `allow` or `deny` entry holding a comma or
+    /// whitespace; [`SpecError::DecisionModeUnenforced`] for Claude Code or Codex under any mode
+    /// but `ask`, and b10x-harness under any but `observe`; and for b10x-harness,
+    /// [`SpecError::AllowUnenforced`] for an `allow` other than its default (none) and
+    /// [`SpecError::DenyUnenforced`] for any `deny`.
     pub fn from_spec(
         spec: &AgentSpec,
         workspace: impl Into<PathBuf>,
@@ -467,20 +523,45 @@ impl SessionExecutor {
         let Some(session) = &spec.session else {
             return Err(SpecError::NoSession { agent: agent.0 });
         };
-        let kind = match session.kind {
-            SessionKind::ClaudeCode => Kind::Claude,
-            SessionKind::Codex => Kind::Codex,
-            SessionKind::Harness => Kind::B10x,
-        };
-        if kind != Kind::Claude
-            && !session.tools.deny.is_empty()
-            && session.tools.decisions != PolicyDecisions::Ask
+        let tools = &session.tools;
+        if let Some(tool) = tools
+            .allow
+            .iter()
+            .chain(&tools.deny)
+            .find(|tool| tool.contains(|c: char| c == ',' || c.is_whitespace()))
         {
-            return Err(SpecError::DenyUnenforced {
+            return Err(SpecError::ToolNameInvalid {
+                agent: agent.0,
+                tool: tool.clone(),
+            });
+        }
+        let (kind, enforced) = match session.kind {
+            SessionKind::ClaudeCode => (Kind::Claude, PolicyDecisions::Ask),
+            SessionKind::Codex => (Kind::Codex, PolicyDecisions::Ask),
+            SessionKind::Harness => (Kind::B10x, PolicyDecisions::Observe),
+        };
+        if tools.decisions != enforced {
+            return Err(SpecError::DecisionModeUnenforced {
                 agent: agent.0,
                 kind: session.kind,
-                deny: session.tools.deny.clone(),
+                mode: tools.decisions,
             });
+        }
+        if kind == Kind::B10x {
+            if !tools.allow.is_empty() {
+                return Err(SpecError::AllowUnenforced {
+                    agent: agent.0,
+                    kind: session.kind,
+                    allow: tools.allow.clone(),
+                });
+            }
+            if !tools.deny.is_empty() {
+                return Err(SpecError::DenyUnenforced {
+                    agent: agent.0,
+                    kind: session.kind,
+                    deny: tools.deny.clone(),
+                });
+            }
         }
         let mut executor = Self::new(workspace, files, spec.agent.brief.clone()).of_kind(kind);
         executor.model = spec

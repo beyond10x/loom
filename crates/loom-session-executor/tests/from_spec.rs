@@ -27,7 +27,7 @@ use b10x_loom_session_executor::model::agent::{
 use b10x_loom_session_executor::model::models::{ModelRole, ModelsConfig, RoleModel};
 use b10x_loom_session_executor::model::session::SessionKind;
 use b10x_loom_session_executor::{
-    CredentialSource, ProcessRunner, Proposal, SessionExecutor, ToolPolicyDefaults as _,
+    CredentialSource, ProcessRunner, Proposal, SessionExecutor, SpecError, ToolPolicyDefaults as _,
 };
 
 const EDIT: &str = "implementation.edit";
@@ -362,4 +362,119 @@ fn the_default_policies_carry_the_tools_and_ask() {
     assert_eq!(codex.allow, ["Bash", "apply_patch"]);
     assert_eq!(codex.decisions, DecisionMode::Ask);
     assert!(codex.deny.is_empty() && codex.egress.is_empty());
+}
+
+/// [`spec`] with its session of `kind` under `tools`.
+fn spec_of(kind: SessionKind, tools: ToolPolicy) -> AgentSpec {
+    let mut spec = spec(tools);
+    if let Some(session) = spec.session.as_mut() {
+        session.kind = kind;
+    }
+    spec
+}
+
+fn refusal(kind: SessionKind, tools: ToolPolicy) -> SpecError {
+    SessionExecutor::from_spec(&spec_of(kind, tools), "/nowhere", Fixture::files())
+        .expect_err("the spec is refused")
+}
+
+fn harness_default() -> ToolPolicy {
+    ToolPolicy {
+        allow: Vec::new(),
+        deny: Vec::new(),
+        egress: Vec::new(),
+        decisions: DecisionMode::Observe,
+    }
+}
+
+#[test]
+fn claude_code_and_codex_are_built_only_under_ask() {
+    for (kind, default) in [
+        (SessionKind::ClaudeCode, ToolPolicy::claude_default()),
+        (SessionKind::Codex, ToolPolicy::codex_default()),
+    ] {
+        let mut asked = default.clone();
+        asked.deny = vec![asked.allow[0].clone()];
+        assert!(
+            SessionExecutor::from_spec(&spec_of(kind, asked), "/nowhere", Fixture::files()).is_ok(),
+            "{kind:?} under ask builds, a deny included"
+        );
+        for mode in [DecisionMode::Frame, DecisionMode::Observe] {
+            let mut tools = default.clone();
+            tools.decisions = mode;
+            let refused = refusal(kind, tools);
+            assert!(
+                matches!(
+                    refused,
+                    SpecError::DecisionModeUnenforced { kind: k, mode: m, .. } if k == kind && m == mode
+                ),
+                "{kind:?} under {mode:?}: {refused:?}"
+            );
+            assert!(refused.to_string().contains("decisions: Ask"), "{refused}");
+        }
+    }
+}
+
+#[test]
+fn b10x_harness_is_built_only_under_observe_with_its_default_policy() {
+    assert!(
+        SessionExecutor::from_spec(
+            &spec_of(SessionKind::Harness, harness_default()),
+            "/nowhere",
+            Fixture::files()
+        )
+        .is_ok()
+    );
+    for mode in [DecisionMode::Ask, DecisionMode::Frame] {
+        let mut tools = harness_default();
+        tools.decisions = mode;
+        let refused = refusal(SessionKind::Harness, tools);
+        assert!(
+            matches!(refused, SpecError::DecisionModeUnenforced { mode: m, .. } if m == mode),
+            "{refused:?}"
+        );
+        assert!(
+            refused.to_string().contains("decisions: Observe"),
+            "{refused}"
+        );
+    }
+    let mut allowing = harness_default();
+    allowing.allow = vec!["shell".to_owned()];
+    assert!(matches!(
+        refusal(SessionKind::Harness, allowing),
+        SpecError::AllowUnenforced { .. }
+    ));
+    let mut denying = harness_default();
+    denying.deny = vec!["shell".to_owned()];
+    let refused = refusal(SessionKind::Harness, denying);
+    assert!(
+        matches!(refused, SpecError::DenyUnenforced { .. }),
+        "{refused:?}"
+    );
+    let message = refused.to_string();
+    assert!(
+        !message.contains("ask") && !message.contains("frame"),
+        "the refusal advises no mode the kind cannot run: {message}"
+    );
+}
+
+#[test]
+fn a_tool_name_holding_a_comma_or_whitespace_is_refused() {
+    for (allow, deny) in [
+        (vec!["Read,Bash"], vec![]),
+        (vec!["Read Bash"], vec![]),
+        (vec!["Read"], vec!["Bash\t"]),
+    ] {
+        let tools = ToolPolicy {
+            allow: allow.iter().map(|tool| (*tool).to_owned()).collect(),
+            deny: deny.iter().map(|tool| (*tool).to_owned()).collect(),
+            egress: Vec::new(),
+            decisions: DecisionMode::Ask,
+        };
+        let refused = refusal(SessionKind::ClaudeCode, tools);
+        assert!(
+            matches!(refused, SpecError::ToolNameInvalid { .. }),
+            "{allow:?} {deny:?}: {refused:?}"
+        );
+    }
 }

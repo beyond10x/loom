@@ -719,7 +719,10 @@ the copy was made from, and an effect applies it after Commission revalidates it
 model, `ToolPolicy`), launches Claude Code offering only `allow` less `deny`, hands the policy's
 decision mode to metaharness, denies an offered tool it cannot check, and records the spec's
 `agent.id` on each session; it applies no budget, stop policy or egress
-(`crates/loom-session-executor/tests/from_spec.rs`). A file the
+(`crates/loom-session-executor/tests/from_spec.rs`). It accepts Claude Code and Codex only under
+`decisions: ask` and b10x-harness only under `observe` with no `allow` or `deny`, and refuses
+any other spec, or a tool name holding a comma or whitespace, with a `SpecError` before any
+session. A file the
 session changed that the workspace no longer holds as copied when the session ends makes the step
 suspend with `ExternalAvailability` instead; a write after that is the effect's guard to catch.
 A path with a `.git` part, or one reached through a link in the workspace, is neither copied nor

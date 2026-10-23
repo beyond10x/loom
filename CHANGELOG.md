@@ -14,7 +14,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Added
 
-- `SessionExecutor::from_spec` builds the session executor from a `loom.agent/1` spec's kind, brief, model and tools (story:session-executor-from-spec)
+- `SessionExecutor::from_spec` builds the session executor from a `loom.agent/1` spec; `SpecError` refuses a policy Loom does not enforce (story:session-executor-from-spec)
 - `ToolPolicy::claude_default()` and `ToolPolicy::codex_default()` (`ToolPolicyDefaults`): today's session tools, `ask` (story:session-executor-from-spec)
 - `SessionExecutor::tools` and `agent`; `loom.session.AgentSession.agent` names the spec a session ran under (story:session-executor-from-spec)
 

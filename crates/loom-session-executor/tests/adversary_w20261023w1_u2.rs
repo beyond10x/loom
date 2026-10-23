@@ -306,7 +306,8 @@ impl ProcessRunner for ClaudeSession {
 /// `story:session-executor-from-spec` acceptance: a tool in `deny` is absent from the session
 /// request. A policy entry holding a comma (which `loom_sdk::agent::parse` accepts: it refuses
 /// only empty or blank text) is joined unescaped into `--tools`, which Claude Code splits at
-/// commas, so `Bash` is offered although the policy denies it.
+/// commas, so `Bash` is offered although the policy denies it. A spec `from_spec` refuses
+/// offers nothing.
 #[test]
 fn adversary_a_denied_tool_is_not_offered_through_a_comma_in_an_allowed_entry() {
     let fixture = Fixture::new("comma");
@@ -317,15 +318,14 @@ fn adversary_a_denied_tool_is_not_offered_through_a_comma_in_an_allowed_entry() 
         decisions: DecisionMode::Frame,
     };
     let script = ClaudeSession::default();
-    let executor = fixture.prepare(
-        SessionExecutor::from_spec(
-            &spec(SessionKind::ClaudeCode, tools),
-            fixture.workspace(),
-            files(),
-        )
-        .expect("a Claude Code spec builds"),
-        Box::new(script.clone()),
-    );
+    let Ok(executor) = SessionExecutor::from_spec(
+        &spec(SessionKind::ClaudeCode, tools),
+        fixture.workspace(),
+        files(),
+    ) else {
+        return;
+    };
+    let executor = fixture.prepare(executor, Box::new(script.clone()));
     let step = step_of(&executor);
     let args = script.args.borrow().first().cloned().unwrap_or_else(|| {
         panic!(
