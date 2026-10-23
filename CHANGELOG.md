@@ -12,12 +12,18 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-10-23
+
 ### Added
 
 - `ConfinementSpec` declares a child's confinement as one value; `ChildCommand::confined` applies it through the builders (story:confinement-spec)
 - `SessionExecutor::continuing` records the earlier session of the same commission a session continues as `loom.session.AgentSession.continues`; a session id the executor already recorded is refused before the session (story:session-lineage)
 - `LoopContext` splits into `Ids`, `Clock`, `Limits` and `HostControl`; a type implementing all four is a `LoopContext` (story:loop-context-split)
 - `cargo run -p b10x-loom-sdk --example governed_loop`: an agent loops on a failing check until the frontier offers the merge; shows a refused selection, an approval stop and a step budget
+
+### Changed
+
+- **Breaking:** `AgentSessionData`, `ProposeSessionChange`, `SessionChangeProposed` and `AgentSessions` (`session::model::session`) gain `continues: Option<SessionId>`, so a struct literal must name it (story:session-lineage)
 
 ## [0.37.0] - 2026-10-23
 
@@ -1014,7 +1020,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.37.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.38.0...HEAD
+[0.38.0]: https://github.com/beyond10x/loom/releases/tag/0.38.0
 [0.37.0]: https://github.com/beyond10x/loom/releases/tag/0.37.0
 [0.36.0]: https://github.com/beyond10x/loom/releases/tag/0.36.0
 [0.35.0]: https://github.com/beyond10x/loom/releases/tag/0.35.0
