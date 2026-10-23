@@ -63,6 +63,7 @@ types:
       - {name: writable_scopes, type: "List<String>"}
       - {name: read_only_roots, type: "List<intake.confinement.ToolchainRoot>"}
       - {name: read_only_files, type: "List<intake.confinement.ReadOnlyFile>"}
+      - {name: workdir, type: "Optional<String>"}
   - name: intake.confinement.ChildStream
     kind: enum
     variants: [Stdout, Stderr]
