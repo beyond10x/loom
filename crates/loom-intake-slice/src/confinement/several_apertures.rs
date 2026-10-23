@@ -366,7 +366,7 @@ fn the_profile_names_every_aperture_in_order() {
         profile.network,
         "aperture:model@10.0.0.1:443,aperture:search@10.0.0.2:443"
     );
-    let digest = |egress: &[EgressAperture]| profile_digest(&profile, &[], egress, None, &[]);
+    let digest = |egress: &[EgressAperture]| profile_digest(&profile, &[], egress, None, &[], None);
     assert_ne!(digest(&[model(), search()]), digest(&[search(), model()]));
     assert_ne!(digest(&[model(), search()]), digest(&[model()]));
     let single = ChildCommand::new("true", [] as [&str; 0], "/work/space").with_egress(model());
