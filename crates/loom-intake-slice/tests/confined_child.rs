@@ -2137,3 +2137,212 @@ fn wait_for<T: std::fmt::Debug>(marker: &Path, handle: &std::thread::JoinHandle<
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }
+
+/// The working directory a launch reports through `run_child`, or `None` once the case skipped
+/// because Substrate does not serve a working directory on this machine (`exec.workdir`).
+fn workdir_result(result: Result<TestExecution, ConfinementError>) -> Option<TestExecution> {
+    match result {
+        Err(error)
+            if error.reason == ConfinementRefusal::CapabilityUnserved
+                && error.detail.contains("exec.workdir") =>
+        {
+            skip(&format!("Substrate working directory ({error})"));
+            None
+        }
+        result => Some(result.expect("the child starts in its working directory")),
+    }
+}
+
+/// The story's case: a child named with a working directory under the workspace starts there,
+/// `pwd` printing it, through `run_child` and a live child alike; the applied confinement and the
+/// driver's record name it, and a child naming none still starts in `/workspace`, its record
+/// naming no working directory.
+#[test]
+fn a_child_starts_in_its_named_workdir() {
+    delegated(
+        "a_child_starts_in_its_named_workdir",
+        |runner, workspace| {
+            std::fs::create_dir_all(workspace.join("sub/dir")).unwrap();
+            let child = ChildCommand::new("sh", ["-c", "pwd"], workspace)
+                .with_workdir("/workspace/sub/dir");
+            assert_eq!(child.workdir(), Some(Path::new("/workspace/sub/dir")));
+            assert_eq!(
+                child.sandbox_path(&workspace.canonicalize().unwrap().join("sub/dir")),
+                Some(PathBuf::from("/workspace/sub/dir"))
+            );
+            let Some(result) = workdir_result(runner.run_child(&child)) else {
+                return;
+            };
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            assert_eq!(result.output, "/workspace/sub/dir\n");
+            assert_eq!(
+                result.applied.workdir.as_deref(),
+                Some("/workspace/sub/dir")
+            );
+            let record = result.driver_record.as_ref().expect("the driver's record");
+            assert_eq!(record.workdir.as_deref(), Some("/workspace/sub/dir"));
+
+            let mut live = runner
+                .spawn_child(
+                    &ChildCommand::new("pwd", [] as [&str; 0], workspace)
+                        .with_workdir("/workspace/sub"),
+                )
+                .expect("a live child starts in its working directory");
+            assert_eq!(
+                read_to_end(&mut live),
+                (b"/workspace/sub\n".to_vec(), Vec::new())
+            );
+            let ended = live.wait().expect("the live child's result");
+            assert_eq!(ended.exit.exit_code, Some(0));
+            assert_eq!(ended.applied.workdir.as_deref(), Some("/workspace/sub"));
+            assert_eq!(
+                ended.driver_record.workdir.as_deref(),
+                Some("/workspace/sub")
+            );
+
+            let plain = runner
+                .run_child(&ChildCommand::new("sh", ["-c", "pwd"], workspace))
+                .expect("a child naming no working directory runs");
+            assert_eq!(plain.output, "/workspace\n");
+            assert_eq!(plain.applied.workdir, None);
+            assert_eq!(
+                plain.driver_record.as_ref().expect("the record").workdir,
+                None
+            );
+            assert_ne!(plain.applied.profile_digest, result.applied.profile_digest);
+        },
+    );
+}
+
+/// A child starts in a directory of a read-only root it reads, at the root's mount and at its
+/// own host path alike, and reads what is there.
+#[test]
+fn a_child_starts_in_a_workdir_under_its_read_only_root() {
+    delegated(
+        "a_child_starts_in_a_workdir_under_its_read_only_root",
+        |runner, workspace| {
+            let (_held, root) = host_directory();
+            std::fs::create_dir(root.join("bin")).unwrap();
+            std::fs::write(root.join("bin/tool"), "a tool\n").unwrap();
+            let child = ChildCommand::new("sh", ["-c", "pwd; cat tool"], workspace)
+                .with_read_only_root(&root, "/opt/tools")
+                .with_workdir("/opt/tools/bin");
+            let Some(result) = workdir_result(runner.run_child(&child)) else {
+                return;
+            };
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            assert_eq!(result.output, "/opt/tools/bin\na tool\n");
+            assert_eq!(result.applied.workdir.as_deref(), Some("/opt/tools/bin"));
+
+            let own = text(&root.join("bin"));
+            let child = ChildCommand::new("sh", ["-c", "pwd; cat tool"], workspace)
+                .at_host_path(&root)
+                .with_workdir(&own);
+            let result = runner
+                .run_child(&child)
+                .expect("the child starts at the host path");
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            assert_eq!(result.output, format!("{own}\na tool\n"));
+            assert_eq!(result.applied.workdir.as_deref(), Some(own.as_str()));
+        },
+    );
+}
+
+/// A working directory the child cannot start in is refused `ScopeInvalid` before anything
+/// starts, naming it, through `run_child` and `spawn_child`: outside the workspace and every
+/// read-only root (`/scratch`, `/runtime` and the root `/` included), relative or with a `.`,
+/// `..` or empty component, not UTF-8, longer than Substrate's 4096 bytes, at or beneath a
+/// read-only file, or a path that is absent, no directory or reached through a symbolic link.
+/// One at or beneath the workspace or a root that is there gets past every check, as does
+/// `/workspace/target` before the launch creates it.
+#[test]
+fn a_workdir_outside_the_childs_mounts_is_refused_before_launch() {
+    use std::os::unix::ffi::OsStrExt as _;
+    let (_held, base) = host_directory();
+    let workspace = base.join("workspace");
+    let tools = base.join("tools");
+    let own = base.join("own");
+    let file = base.join("policy.toml");
+    std::fs::create_dir_all(workspace.join("sub")).unwrap();
+    std::fs::write(workspace.join("notes.txt"), "a file").unwrap();
+    std::os::unix::fs::symlink("sub", workspace.join("link")).unwrap();
+    std::fs::create_dir_all(tools.join("bin")).unwrap();
+    std::os::unix::fs::symlink("bin", tools.join("link")).unwrap();
+    std::fs::create_dir(&own).unwrap();
+    std::fs::write(&file, "allow = true\n").unwrap();
+    let runner = SubstrateRunner::new(Some(base.clone()));
+    let child = |workdir: &std::ffi::OsStr| {
+        ChildCommand::new("true", [] as [&str; 0], &workspace)
+            .with_read_only_root(&tools, "/opt/tools")
+            .with_read_only_file(&file, "/etc/loom/policy.toml")
+            .at_host_path(&own)
+            .with_workdir(workdir)
+    };
+    let outside = "not at or beneath /workspace or a read-only root";
+    let long = format!("/workspace/{}", "a".repeat(4096));
+    let own_text = text(&own);
+    let refused: Vec<(String, &str)> = vec![
+        ("/scratch".into(), outside),
+        ("/scratch/x".into(), outside),
+        ("/runtime".into(), outside),
+        ("/runtime/x".into(), outside),
+        ("/".into(), outside),
+        ("/tmp".into(), outside),
+        ("/workspacex".into(), outside),
+        ("/opt".into(), outside),
+        ("/opt/toolsx".into(), outside),
+        (text(&tools), outside),
+        (format!("{own_text}x"), outside),
+        ("sub".into(), "not absolute"),
+        ("/workspace/../etc".into(), "`.`, `..` or empty component"),
+        ("/workspace/./sub".into(), "`.`, `..` or empty component"),
+        ("/workspace//sub".into(), "`.`, `..` or empty component"),
+        ("/workspace/sub/".into(), "`.`, `..` or empty component"),
+        ("/etc/loom/policy.toml".into(), "read-only file"),
+        ("/etc/loom/policy.toml/x".into(), "read-only file"),
+        ("/workspace/absent".into(), "does not exist"),
+        ("/workspace/target/absent".into(), "does not exist"),
+        ("/workspace/notes.txt".into(), "is no directory"),
+        ("/workspace/link".into(), "symbolic link"),
+        ("/workspace/link/x".into(), "symbolic link"),
+        ("/opt/tools/absent".into(), "does not exist"),
+        ("/opt/tools/link".into(), "symbolic link"),
+        (format!("{own_text}/absent"), "does not exist"),
+    ];
+    for (workdir, why) in &refused {
+        assert_refused(
+            &runner,
+            &workspace,
+            &child(std::ffi::OsStr::new(workdir)),
+            workdir,
+            why,
+        );
+    }
+    assert_refused(
+        &runner,
+        &workspace,
+        &child(std::ffi::OsStr::new(&long)),
+        "/workspace/aaaa",
+        "4096",
+    );
+    assert_refused(
+        &runner,
+        &workspace,
+        &child(std::ffi::OsStr::from_bytes(b"/workspace/\xff")),
+        "/workspace/",
+        "not UTF-8",
+    );
+    for placed in [
+        "/workspace/target",
+        "/workspace",
+        "/workspace/sub",
+        "/opt/tools",
+        "/opt/tools/bin",
+        own_text.as_str(),
+    ] {
+        let error = runner
+            .run_child(&child(std::ffi::OsStr::new(placed)))
+            .unwrap_err();
+        assert_eq!(error.reason, past_every_check(), "{placed}: {error}");
+    }
+}

@@ -27,6 +27,9 @@ use substrate_host::{DispatchOutcome, Driver as _, ExecObservation, HostConfig, 
 /// The most egress apertures one child reaches ([`ChildCommand::with_egress`]), Substrate's own
 /// limit.
 pub use substrate_wire::MAX_EGRESS_APERTURES;
+/// The longest working directory a child is started in ([`ChildCommand::with_workdir`]), in bytes:
+/// Substrate's own limit.
+pub use substrate_wire::MAX_WORKDIR_BYTES;
 use substrate_wire::{
     APERTURE_CA_BUNDLE_PATH, APERTURE_HOSTS_PATH, APERTURE_LOOPBACK_ADDRESS, ApertureMechanism,
     ApertureMode, AppliedNetwork, CapabilityFacts, CaptureMode, ConfinementRequest,
@@ -45,6 +48,8 @@ mod child;
 mod security_w20261023w1_u3;
 #[cfg(test)]
 mod several_apertures;
+#[cfg(test)]
+mod workdir;
 pub use child::{ChildError, ChildFrame, ChildResult, ChildSignal, ConfinedChild};
 
 static NEXT_EXEC: AtomicU64 = AtomicU64::new(0);
@@ -457,6 +462,7 @@ impl SubstrateRunner {
         let writable = check_writable(&child.writable)?;
         let child = check_mounts(child, ca_bundle.as_ref())?;
         let child = child.as_ref();
+        check_workdir(child)?;
         let root = validate_workspace(&child.directory, &writable)?;
         let egress = DriverEgress {
             apertures: child.egress.clone(),
@@ -466,6 +472,7 @@ impl SubstrateRunner {
         let workspace = workspace_name(&root)?;
         let machine = open.driver.machine();
         check_driver_mounts(&open, child, &machine.facts)?;
+        check_workdir_served(child, &machine.facts)?;
         let launched = match child.stdin.as_deref() {
             None => Self::launch(&open, workspace, &child.input(workspace, machine.snapshot))?,
             Some(stdin) => {
@@ -508,6 +515,7 @@ impl SubstrateRunner {
         let writable = check_writable(&child.writable)?;
         let child = check_mounts(child, ca_bundle.as_ref())?;
         let child = child.as_ref();
+        check_workdir(child)?;
         let root = validate_workspace(&child.directory, &writable)?;
         let egress = DriverEgress {
             apertures: child.egress.clone(),
@@ -516,6 +524,7 @@ impl SubstrateRunner {
         let open = self.driver(&root, &egress)?;
         let machine = open.driver.machine();
         check_driver_mounts(&open, child, &machine.facts)?;
+        check_workdir_served(child, &machine.facts)?;
         check_pipe_sessions(&machine.facts)?;
         let workspace = workspace_name(&root)?;
         let session = child.session_input(workspace, machine.snapshot);
@@ -715,6 +724,7 @@ impl Prepared {
             egress,
             open.egress.ca_bundle.as_ref(),
             &input.read_only_files,
+            input.workdir.as_deref(),
         );
         let root_identity = open
             .driver
@@ -827,6 +837,7 @@ fn settle(
             .to_vec(),
         read_only_roots: roots_projection(&record.read_only_roots),
         read_only_files: files_projection(&record.read_only_files),
+        workdir: record.workdir.clone(),
     };
     let described = format!(
         "state {}, refusal {}, output complete {}",
@@ -993,8 +1004,9 @@ impl TestRunner for SubstrateRunner {
 /// a child sees only the host directories and files the host names, read-only, each at the mount
 /// the host names ([`ChildCommand::with_read_only_root`], [`ChildCommand::with_read_only_file`])
 /// or at its own host path ([`ChildCommand::at_host_path`]). [`ChildCommand::sandbox_path`] says
-/// where a host path is inside. The child always starts in `/workspace`, and Loom requests no
-/// writable path outside the workspace, though Substrate 0.10.0 offers writable roots: a directory
+/// where a host path is inside. The child starts in `/workspace` unless the host names another
+/// directory of the workspace or of a read-only root ([`ChildCommand::with_workdir`]). Loom requests
+/// no writable path outside the workspace, though Substrate 0.10.0 offers writable roots: a directory
 /// outside it, such as a linked worktree's common git directory, can be given read-only only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChildCommand {
@@ -1012,6 +1024,7 @@ pub struct ChildCommand {
     read_only_roots: Vec<ReadOnlyMount>,
     read_only_files: Vec<ReadOnlyMount>,
     host_paths: Vec<PathBuf>,
+    workdir: Option<PathBuf>,
 }
 
 /// A host directory or file a [`ChildCommand`] reads, and where the child sees it: its host path
@@ -1057,6 +1070,7 @@ impl ChildCommand {
             read_only_roots: Vec::new(),
             read_only_files: Vec::new(),
             host_paths: Vec::new(),
+            workdir: None,
         }
     }
 
@@ -1350,8 +1364,45 @@ impl ChildCommand {
         &self.host_paths
     }
 
+    /// The same child, started in `workdir` instead of `/workspace`: a directory as the child sees
+    /// it, at or beneath `/workspace` or the mount of a read-only root it reads
+    /// ([`ChildCommand::with_read_only_root`], or a directory given by
+    /// [`ChildCommand::at_host_path`], whose mount is its host path). A host holding a host path
+    /// names it through [`ChildCommand::sandbox_path`]. Substrate's wire and its record carry the
+    /// sandbox path, so the child is named by it too. Naming it again replaces the first.
+    ///
+    /// Refused [`ConfinementRefusal::ScopeInvalid`] before anything starts or `target` is created,
+    /// naming the directory:
+    ///
+    /// - a path that is not UTF-8, longer than [`MAX_WORKDIR_BYTES`] (4096), not absolute, or not
+    ///   lexically normal (a `.`, `..` or empty component, a trailing `/`, a NUL);
+    /// - one at or beneath a read-only file's mount;
+    /// - one not at or beneath `/workspace` or a read-only root's mount, `/`, `/scratch`,
+    ///   `/runtime` and `/tmp` included: Loom asks Substrate for no scratch directory, execution
+    ///   capsule or writable root;
+    /// - one the host's disk does not hold as a directory reached through no symbolic link,
+    ///   below the workspace directory or the root's host path, read before the launch;
+    ///   `/workspace/target` alone may be absent, since the launch creates it.
+    ///
+    /// Refused [`ConfinementRefusal::CapabilityUnserved`] on a driver that does not publish
+    /// `exec.workdir`. Substrate checks the directory again when it starts the child, beneath the
+    /// mount it binds, so one removed or swapped for a link after this check is refused there.
+    /// The applied confinement names the working directory Substrate recorded
+    /// ([`AppliedConfinement::workdir`]), and a record naming another one, or none, is refused.
+    #[must_use]
+    pub fn with_workdir(mut self, workdir: impl Into<PathBuf>) -> Self {
+        self.workdir = Some(workdir.into());
+        self
+    }
+
+    /// The working directory the child starts in, as named ([`ChildCommand::with_workdir`]);
+    /// `None` is `/workspace`.
+    pub fn workdir(&self) -> Option<&Path> {
+        self.workdir.as_deref()
+    }
+
     /// Where the child sees the host path `path`: a path inside the workspace directory at
-    /// `/workspace/<relative>` (the child starts in `/workspace`), one inside a read-only root at
+    /// `/workspace/<relative>`, one inside a read-only root at
     /// the same place under its mount, a read-only file at its mount, and a path given at its
     /// own host path, or inside such a directory, at itself. Anything else is `None`: a relative
     /// path, one with a `..` component, one that leads through a symbolic link, a path beneath a
@@ -1483,7 +1534,12 @@ impl ChildCommand {
             secret_slots: Vec::new(),
             capsule: None,
             lease_ttl_ms: None,
-            workdir: None,
+            // `check_workdir` refused a working directory that is not UTF-8 before a launch builds
+            // this.
+            workdir: self
+                .workdir
+                .as_deref()
+                .map(|workdir| workdir.to_string_lossy().into_owned()),
             writable_roots: Vec::new(),
         }
     }
@@ -2485,13 +2541,162 @@ fn check_driver_mounts(
     Ok(())
 }
 
+/// Refuse, before anything starts or `target` is created, a working directory the child cannot
+/// start in ([`ChildCommand::with_workdir`]), naming it; `child` is the one [`check_mounts`]
+/// returned, each host path given at its own path resolved to a root or a file. A child naming
+/// none passes, the disk untouched. In order:
+///
+/// 1. the text: UTF-8, at most [`MAX_WORKDIR_BYTES`], absolute, no NUL, no `.`, `..` or empty
+///    component, as Substrate's `validate_workdir` requires;
+/// 2. not at or beneath a read-only file's mount, which is no directory;
+/// 3. at or beneath `/workspace` or a read-only root's mount, the only mounts Loom places that
+///    hold directories: Loom asks for no scratch, capsule or writable root, so `/scratch`,
+///    `/runtime` and every other path are refused here rather than by Substrate;
+/// 4. on disk, below the workspace directory or the root's host path, every component read
+///    without following it: a directory, through no symbolic link. `/workspace/target` alone may
+///    be absent, since the launch creates it.
+///
+/// Substrate checks step 4 again when the child starts, beneath the descriptor it binds
+/// (`exec.workdir-missing`), so a directory removed or swapped after this check is refused there.
+fn check_workdir(child: &ChildCommand) -> Result<(), ConfinementError> {
+    let Some(named) = child.workdir.as_deref() else {
+        return Ok(());
+    };
+    // 1. Text.
+    let Some(text) = named.to_str() else {
+        return Err(scope_error(format!(
+            "the working directory {named:?} is not UTF-8; Substrate names a working directory as text"
+        )));
+    };
+    if text.len() > MAX_WORKDIR_BYTES {
+        let mut end = 64;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        return Err(scope_error(format!(
+            "the working directory `{}…` is {} bytes, longer than the {MAX_WORKDIR_BYTES} bytes Substrate admits",
+            &text[..end],
+            text.len()
+        )));
+    }
+    if !text.starts_with('/') {
+        return Err(scope_error(format!(
+            "the working directory `{text}` is not absolute; name it as the child sees it, such as `/workspace/{text}`"
+        )));
+    }
+    if text.contains('\0') {
+        return Err(scope_error(format!(
+            "the working directory `{text}` holds a NUL"
+        )));
+    }
+    if text != "/"
+        && text[1..]
+            .split('/')
+            .any(|component| matches!(component, "" | "." | ".."))
+    {
+        return Err(scope_error(format!(
+            "the working directory `{text}` is not lexically normal: it has a `.`, `..` or empty component or a trailing `/`; name it without them"
+        )));
+    }
+    let at_or_beneath = |mount: &str| -> Option<String> {
+        if text == mount {
+            Some(String::new())
+        } else {
+            text.strip_prefix(mount)
+                .and_then(|rest| rest.strip_prefix('/'))
+                .map(str::to_owned)
+        }
+    };
+    // 2. A read-only file.
+    if let Some(file) = child
+        .read_only_files
+        .iter()
+        .find(|file| at_or_beneath(&file.mount.to_string_lossy()).is_some())
+    {
+        return Err(scope_error(format!(
+            "the working directory `{text}` lies at or beneath the read-only file mounted at `{}`; a child starts in a directory",
+            file.mount.display()
+        )));
+    }
+    // 3. The mounts that hold directories.
+    let (base, rest) = if let Some(rest) = at_or_beneath(SANDBOX_WORKSPACE) {
+        (canonical_workspace(&child.directory)?, rest)
+    } else if let Some((root, rest)) = child
+        .read_only_roots
+        .iter()
+        .find_map(|root| at_or_beneath(&root.mount.to_string_lossy()).map(|rest| (root, rest)))
+    {
+        (root.host_path.clone(), rest)
+    } else {
+        return Err(scope_error(format!(
+            "the working directory `{text}` is not at or beneath /workspace or a read-only root the child reads; Loom places no other directory, such as /scratch or /runtime"
+        )));
+    };
+    // 4. The disk.
+    let in_workspace = at_or_beneath(SANDBOX_WORKSPACE).is_some();
+    let mut current = base;
+    for component in rest.split('/').filter(|component| !component.is_empty()) {
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(scope_error(format!(
+                    "the working directory `{text}` passes through the symbolic link `{}`; name the directory it leads to",
+                    current.display()
+                )));
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(scope_error(format!(
+                    "the working directory `{text}` is no directory: `{}` is not one",
+                    current.display()
+                )));
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if in_workspace && rest == "target" {
+                    return Ok(());
+                }
+                return Err(scope_error(format!(
+                    "the working directory `{text}` does not exist: `{}` is absent",
+                    current.display()
+                )));
+            }
+            Err(e) => {
+                return Err(scope_error(format!(
+                    "the working directory `{text}` cannot be read at `{}`: {e}",
+                    current.display()
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Refuse a working directory on a driver that does not publish `exec.workdir`
+/// ([`ConfinementRefusal::CapabilityUnserved`]), before anything starts: Substrate proves the
+/// mechanism when its driver opens, and a driver without it would refuse the start itself.
+fn check_workdir_served(
+    child: &ChildCommand,
+    facts: &CapabilityFacts,
+) -> Result<(), ConfinementError> {
+    match child.workdir.as_deref() {
+        Some(workdir) if facts.exec_workdir != Some(true) => Err(refuse(
+            ConfinementRefusal::CapabilityUnserved,
+            format!(
+                "Substrate does not serve a working directory on this machine (`exec.workdir`), so the child cannot start in `{}`; start it in /workspace",
+                workdir.display()
+            ),
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// Accept Substrate's record of what it applied only when it is the confinement `input` required:
 /// its workspace access (exactly the writable paths requested, so a record reporting a wider or
 /// another writable set is refused), profile, read-only roots, read-only files and capability
 /// snapshot, no secret slot, a cgroup, and exactly the requested network ([`network_applied`]),
-/// the apertures `input` asked for by name being exactly `egress`, in order; no working
-/// directory, writable root or execution capsule, which Loom never requests, and so the
-/// filesystem Substrate applies without a capsule. A test's launch and a child's are held to the
+/// the apertures `input` asked for by name being exactly `egress`, in order; exactly the working
+/// directory requested, or none when none was ([`ChildCommand::with_workdir`]); no writable root
+/// or execution capsule, which Loom never requests, and so the filesystem Substrate applies without a capsule. A test's launch and a child's are held to the
 /// same record. The record is taken apart without `..`, so a member a later Substrate adds does
 /// not compile until it is judged here.
 fn check_record(
@@ -3072,6 +3277,7 @@ fn profile_digest(
     egress: &[EgressAperture],
     ca_bundle: Option<&CaBundle>,
     read_only_files: &[substrate_wire::ReadOnlyFile],
+    workdir: Option<&str>,
 ) -> String {
     // Generated ESS model types deliberately have no serialization dependency.
     let mut json = serde_json::json!({ "backend":"substrate", "network":profile.network, "writable_scopes":profile.writable_scopes,
@@ -3107,6 +3313,10 @@ fn profile_digest(
             .iter()
             .map(|f| serde_json::json!({"host_path":f.host_path,"mount":f.mount}))
             .collect();
+    }
+    // The working directory the child starts in, absent without one for the same reason.
+    if let Some(workdir) = workdir {
+        json["workdir"] = workdir.into();
     }
     format!("{:x}", Sha256::digest(json.to_string().as_bytes()))
 }
@@ -3299,8 +3509,8 @@ mod tests {
         let bare = ChildCommand::new("true", [] as [&str; 0], "/work/space");
         let plain = requested_profile(&bare.input("space", "snapshot".to_owned()), &[]);
         assert_ne!(
-            profile_digest(&profile, &[], &[], None, &[]),
-            profile_digest(&plain, &[], &[], None, &[])
+            profile_digest(&profile, &[], &[], None, &[], None),
+            profile_digest(&plain, &[], &[], None, &[], None)
         );
         let named = 63;
         let most = (0..named).fold(bare.clone(), |child, n| {
@@ -3609,6 +3819,7 @@ mod tests {
             writable_scopes: vec!["target".to_owned()],
             read_only_roots: Vec::new(),
             read_only_files: Vec::new(),
+            workdir: None,
         }
     }
 
@@ -4450,8 +4661,8 @@ mod tests {
             }]
         );
         assert!(applied_apertures(&AppliedNetwork::None).is_empty());
-        let digest = profile_digest(&profile, &[], &[model()], None, &[]);
-        assert_ne!(digest, profile_digest(&profile, &[], &[], None, &[]));
+        let digest = profile_digest(&profile, &[], &[model()], None, &[], None);
+        assert_ne!(digest, profile_digest(&profile, &[], &[], None, &[], None));
         for other in [
             EgressAperture {
                 host: "other.example.test".to_owned(),
@@ -4464,7 +4675,7 @@ mod tests {
         ] {
             assert_ne!(
                 digest,
-                profile_digest(&profile, &[], std::slice::from_ref(&other), None, &[])
+                profile_digest(&profile, &[], std::slice::from_ref(&other), None, &[], None)
             );
         }
     }
@@ -4477,15 +4688,15 @@ mod tests {
         assert_eq!(profile.network, "none");
         assert_eq!(profile.writable_scopes, ["target"]);
         assert_ne!(
-            profile_digest(&profile, &[], &[], None, &[]),
-            profile_digest(&profile, &[BaselineEnvironment::Path], &[], None, &[])
+            profile_digest(&profile, &[], &[], None, &[], None),
+            profile_digest(&profile, &[BaselineEnvironment::Path], &[], None, &[], None)
         );
         // With no inherited name the digest is the one a test's profile always had.
         let before = serde_json::json!({ "backend":"substrate", "network":"none", "writable_scopes":["target"],
             "read_only_roots":[], "environment":[],
             "timeout_ms":300_000, "memory_bytes":8_589_934_592_i64, "processes":2048, "cpu_millis":3_600_000 });
         assert_eq!(
-            profile_digest(&profile, &[], &[], None, &[]),
+            profile_digest(&profile, &[], &[], None, &[], None),
             format!("{:x}", Sha256::digest(before.to_string().as_bytes()))
         );
     }
@@ -4496,8 +4707,8 @@ mod tests {
             .with_read_only_file("/srv/policy.toml", "/etc/loom/policy.toml");
         let input = child.input("space", "snapshot".to_owned());
         let profile = requested_profile(&input, &[]);
-        let digest = profile_digest(&profile, &[], &[], None, &input.read_only_files);
-        assert_ne!(digest, profile_digest(&profile, &[], &[], None, &[]));
+        let digest = profile_digest(&profile, &[], &[], None, &input.read_only_files, None);
+        assert_ne!(digest, profile_digest(&profile, &[], &[], None, &[], None));
         for other in [
             ("/srv/other.toml", "/etc/loom/policy.toml"),
             ("/srv/policy.toml", "/etc/loom/other.toml"),
@@ -4506,15 +4717,18 @@ mod tests {
                 host_path: other.0.to_owned(),
                 mount: other.1.to_owned(),
             }];
-            assert_ne!(digest, profile_digest(&profile, &[], &[], None, &other));
+            assert_ne!(
+                digest,
+                profile_digest(&profile, &[], &[], None, &other, None)
+            );
         }
         // Roots are in the profile itself, so a root changes the digest with no file named.
         let rooted = ChildCommand::new("true", [] as [&str; 0], "/work/space")
             .with_read_only_root("/srv/tools", "/opt/tools")
             .input("space", "snapshot".to_owned());
         assert_ne!(
-            profile_digest(&requested_profile(&rooted, &[]), &[], &[], None, &[]),
-            profile_digest(&profile, &[], &[], None, &[])
+            profile_digest(&requested_profile(&rooted, &[]), &[], &[], None, &[], None),
+            profile_digest(&profile, &[], &[], None, &[], None)
         );
     }
 
@@ -4609,7 +4823,7 @@ mod tests {
             .input("space", "snapshot".to_owned());
         let profile = requested_profile(&input, &[model()]);
         let digest = |bundle: Option<CaBundle>| {
-            profile_digest(&profile, &[], &[model()], bundle.as_ref(), &[])
+            profile_digest(&profile, &[], &[model()], bundle.as_ref(), &[], None)
         };
         let bare = digest(None);
         let first = digest(read_as("/anchors/first.pem", b"one"));
