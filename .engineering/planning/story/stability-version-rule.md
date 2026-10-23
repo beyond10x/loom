@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:stability-version-rule
 kind: story
-status: active
+status: implemented
 title: The SDK stability page states a deprecation window and a tag rule, and release-check holds them
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-23T01:01:34Z", actor: "human:timo", revision: 2, correlation: "wave-2026-10-23-w1"}
 - {from: "proposed", to: "active", at: "2026-10-23T01:01:35Z", actor: "human:timo", revision: 3, correlation: "wave-2026-10-23-w1"}
+- {from: "active", to: "implemented", at: "2026-10-23T02:11:11Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 

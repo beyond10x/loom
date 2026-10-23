@@ -11,7 +11,7 @@ relations:
 - decides: story:session-executor-from-spec
 - decides: story:substrate-0-8-pin
 - decides: story:stability-version-rule
-revision: 1
+revision: 2
 ---
 # Wave 2026-10-23-w1 proposal, accepted with no operator turn
 
@@ -42,3 +42,20 @@ writable-host-root stays on Timo's Q2. Approved under the grant in ~/beyond10x/C
   - D3: each unit's build cache is discarded when it merges; one full gate runs on the wave head.
   - D4: release 0.36.0 moves the `ess` pin in `.github/workflows/check.yml` to the newest ESS
     release, as AGENTS.md § Releases requires.
+
+- Decisions taken while the wave ran:
+  - D5: `stability-version-rule`'s adversary findings were fixed under one rule: a listed item is
+    a `loom_sdk::` path in a table row not marked generated; a removal names every listed span
+    before the bullet's first `;`, module prefixes match component-wise, and a `**Breaking:**`
+    bullet saying removed, deleted, renamed or moves to counts as a removal.
+  - D6: `substrate-0-8-pin`'s two security findings (a single aperture's `listen`, the record's
+    capsule and filesystem) were fixed in the unit, and `check_record` destructures every field.
+  - D7: `session-executor-from-spec` fails toward less authority: `from_spec` builds Claude Code
+    and Codex only under `ask`, b10x-harness only under `observe` with its default policy, and
+    refuses a tool name holding `,` or whitespace. One adversary case was changed to accept a
+    refused spec, as the other three do; `crates/loom-sdk/tests/agent_spec.rs` follows the
+    example's switch to `ask`.
+  - D8: ESS 0.68.0 is pinned in its own commit (`626ff2d2`) before the full gate, with a
+    `**Breaking:**` bullet as the 0.67.0 move in 0.35.0 had.
+  - D9: at the orchestrator's disk request the gate script stopped after clippy; the running
+    `cargo test --workspace` finished and the remaining steps ran afterwards on the same head.

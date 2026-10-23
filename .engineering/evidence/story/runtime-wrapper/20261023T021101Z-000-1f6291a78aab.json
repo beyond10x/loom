@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-23T02:11:01Z",
+  "actor": "human:timo",
+  "artifact": "story:runtime-wrapper",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check",
+    "reference": "wave/2026-10-23-w1@626ff2d2: the task check steps exit 0 (cargo test 1954 passed, 0 failed, 10 ignored), task website exit 0, task plan exit 0, release-check --tag 0.35.0 exit 0"
+  }
+}
