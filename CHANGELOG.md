@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Fixed
+
+- `SessionExecutor` reads a b10x-harness action line streamed in several `text-delta` events as one line (story:b10x-text-deltas)
+
 ## [0.39.1] - 2026-10-24
 
 No breaking changes.

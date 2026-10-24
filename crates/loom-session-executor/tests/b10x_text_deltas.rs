@@ -178,7 +178,8 @@ fn step_of(executor: &SessionExecutor) -> ExecutorStep {
     executor.run_with_usage(&commission(&case), &frontier(&case))
 }
 
-/// The proposal the step returned, its action and summary, or a panic naming why there is none.
+/// The action the step proposed and the summary it carries, or a panic naming why there is no
+/// proposal.
 fn proposed(executor: &SessionExecutor) -> (String, String) {
     let step = step_of(executor);
     let proposal = match Proposal::from_outcome(&step.outcome) {
@@ -189,7 +190,7 @@ fn proposed(executor: &SessionExecutor) -> (String, String) {
             executor.last_report().map(|report| report.error)
         ),
     };
-    (proposal.action, proposal.summary)
+    (proposal.action, step.summary.unwrap_or_default())
 }
 
 #[test]

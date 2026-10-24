@@ -1003,6 +1003,14 @@ impl SessionExecutor {
                         })
                     });
                 }
+                // b10x-harness streams a turn's text in fragments (`text-delta`): they join with
+                // no separator, keeping the line breaks they carry, and each turn starts a text of
+                // its own. Claude Code's and Codex's text events are whole messages.
+                Event::TurnStarted { .. } if self.kind == Kind::B10x => said.push(String::new()),
+                Event::Text { text, .. } if self.kind == Kind::B10x => match said.last_mut() {
+                    Some(turn) => turn.push_str(text),
+                    None => said.push(text.clone()),
+                },
                 Event::Text { text, .. } => said.push(text.clone()),
                 // b10x-harness states each call's tokens only here. Codex's `usage` events are
                 // running totals and Claude Code's are per message beside a total, so neither
