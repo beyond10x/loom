@@ -1007,6 +1007,16 @@ impl SessionExecutor {
                 // no separator, keeping the line breaks they carry, and each turn starts a text of
                 // its own. Claude Code's and Codex's text events are whole messages.
                 Event::TurnStarted { .. } if self.kind == Kind::B10x => said.push(String::new()),
+                // A retried turn discards what its failed attempt streamed; metaharness passes the
+                // loop's `turn-retried` on as an opaque event.
+                Event::Opaque { vendor_subtype, .. }
+                    if self.kind == Kind::B10x
+                        && vendor_subtype.as_deref() == Some("turn-retried") =>
+                {
+                    if let Some(turn) = said.last_mut() {
+                        turn.clear();
+                    }
+                }
                 Event::Text { text, .. } if self.kind == Kind::B10x => match said.last_mut() {
                     Some(turn) => turn.push_str(text),
                     None => said.push(text.clone()),
