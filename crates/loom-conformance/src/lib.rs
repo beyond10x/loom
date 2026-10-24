@@ -98,6 +98,7 @@ const CATALOGUE_EXISTS: &str = "loom.run.CatalogueExists";
 const CATALOGUE_NOT_FOUND: &str = "loom.run.CatalogueNotFound";
 const ACTION_NOT_IN_CATALOGUE: &str = "loom.run.ActionNotInCatalogue";
 const CATALOGUE_REVISION_MISMATCH: &str = "loom.run.CatalogueRevisionMismatch";
+const SELECTION_EXISTS: &str = "loom.run.SelectionExists";
 const SELECTION_NOT_FOUND: &str = "loom.run.SelectionNotFound";
 const SELECTION_NOT_SELECTED: &str = "loom.run.SelectionNotSelected";
 const SELECTION_STATE_CONFLICT: &str = "loom.run.SelectionStateConflict";
@@ -463,6 +464,13 @@ fn select(
     };
     Some(
         match select_action(&live.catalogues, &mut live.requests, command) {
+            SelectActionOutcome::SelectionExists { error } => refused(
+                SELECT_ACTION,
+                "selection-exists",
+                SELECTION_EXISTS,
+                "selection_id",
+                codec::id(&error.selection_id.0),
+            ),
             SelectActionOutcome::CatalogueUnknown { error } => refused(
                 SELECT_ACTION,
                 "catalogue-unknown",

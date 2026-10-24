@@ -14,8 +14,9 @@ use std::fmt;
 /// How deep a document from a caller may nest before it is refused.
 ///
 /// A caller can send anything, and a recursive reader with no limit turns a hostile document
-/// into a stack overflow — which is a crash the process cannot catch and cannot report. Sixty-four is far past any model this emitter can produce: the specification's own
-/// type references are refused past thirty-two.
+/// into a stack overflow — which is a crash the process cannot catch and cannot report. A `Json`
+/// field may carry a value this deep, so the answer that carries it back is read with
+/// [`parse_written`], which keeps its own stack and has no limit.
 const DEPTH: usize = 64;
 
 /// A JSON value, as it arrived.
@@ -81,7 +82,7 @@ impl fmt::Display for ParseError {
     }
 }
 
-/// Reads one JSON document.
+/// Reads one JSON document from a caller, refusing one nested deeper than [`DEPTH`].
 ///
 /// # Errors
 ///
@@ -100,6 +101,188 @@ pub fn parse(text: &str) -> Result<Value, ParseError> {
         });
     }
     Ok(value)
+}
+
+/// An array or object [`parse_written`] has opened and not yet closed.
+enum Open {
+    /// The items read so far.
+    Array(Vec<Value>),
+    /// The members read so far, and the name of the one being read.
+    Object(Vec<(String, Value)>, String),
+}
+
+/// Reads one JSON document this system wrote itself, however deep it nests.
+///
+/// An answer places a caller's value deeper than it arrived — a `Json` field inside an event
+/// payload inside the outcome's envelope, inside whatever the model nests around it — so any
+/// limit short of the writer's would refuse an answer the system has already written. This
+/// reader keeps the arrays and objects it has opened in a list of its own rather than recursing,
+/// so a document the writer could produce is one it can read.
+///
+/// # Errors
+///
+/// [`ParseError`] for anything that is not exactly one well-formed value followed by whitespace:
+/// an answer holding a `Json` value the realization built with a number JSON does not spell.
+pub fn parse_written(document: &str) -> Result<Value, ParseError> {
+    let bytes = document.as_bytes();
+    let mut at = 0;
+    let mut open: Vec<Open> = Vec::new();
+    skip(bytes, &mut at);
+    loop {
+        let mut value = match bytes.get(at) {
+            Some(b'[') => {
+                at += 1;
+                skip(bytes, &mut at);
+                if bytes.get(at) != Some(&b']') {
+                    open.push(Open::Array(Vec::new()));
+                    continue;
+                }
+                at += 1;
+                Value::Array(Vec::new())
+            }
+            Some(b'{') => {
+                at += 1;
+                skip(bytes, &mut at);
+                if bytes.get(at) != Some(&b'}') {
+                    let name = member_name(bytes, &mut at)?;
+                    open.push(Open::Object(Vec::new(), name));
+                    continue;
+                }
+                at += 1;
+                Value::Object(Vec::new())
+            }
+            Some(b'"') => text(bytes, &mut at).map(Value::Text)?,
+            Some(b't') => literal(bytes, &mut at, b"true", Value::Bool(true))?,
+            Some(b'f') => literal(bytes, &mut at, b"false", Value::Bool(false))?,
+            Some(b'n') => literal(bytes, &mut at, b"null", Value::Null)?,
+            Some(byte) if *byte == b'-' || byte.is_ascii_digit() => number(bytes, &mut at)?,
+            _ => {
+                return Err(ParseError {
+                    at,
+                    expected: "a value".to_owned(),
+                })
+            }
+        };
+        loop {
+            skip(bytes, &mut at);
+            match open.last_mut() {
+                None => {
+                    end(bytes, &mut at)?;
+                    return Ok(value);
+                }
+                Some(Open::Array(items)) => {
+                    items.push(value);
+                    match bytes.get(at) {
+                        Some(b',') => {
+                            at += 1;
+                            skip(bytes, &mut at);
+                            break;
+                        }
+                        Some(b']') => {
+                            at += 1;
+                            value = Value::Array(std::mem::take(items));
+                            open.pop();
+                        }
+                        _ => {
+                            return Err(ParseError {
+                                at,
+                                expected: "`,` or `]`".to_owned(),
+                            })
+                        }
+                    }
+                }
+                Some(Open::Object(members, name)) => {
+                    members.push((std::mem::take(name), value));
+                    match bytes.get(at) {
+                        Some(b',') => {
+                            at += 1;
+                            skip(bytes, &mut at);
+                            *name = member_name(bytes, &mut at)?;
+                            break;
+                        }
+                        Some(b'}') => {
+                            at += 1;
+                            value = Value::Object(std::mem::take(members));
+                            open.pop();
+                        }
+                        _ => {
+                            return Err(ParseError {
+                                at,
+                                expected: "`,` or `}`".to_owned(),
+                            })
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Reads a member's name and the `:` after it, leaving `at` at its value.
+fn member_name(bytes: &[u8], at: &mut usize) -> Result<String, ParseError> {
+    if bytes.get(*at) != Some(&b'"') {
+        return Err(ParseError {
+            at: *at,
+            expected: "a member name".to_owned(),
+        });
+    }
+    let name = text(bytes, at)?;
+    skip(bytes, at);
+    if bytes.get(*at) != Some(&b':') {
+        return Err(ParseError {
+            at: *at,
+            expected: "`:`".to_owned(),
+        });
+    }
+    *at += 1;
+    skip(bytes, at);
+    Ok(name)
+}
+
+/// Refuses anything but whitespace after the document.
+fn end(bytes: &[u8], at: &mut usize) -> Result<(), ParseError> {
+    skip(bytes, at);
+    if *at != bytes.len() {
+        return Err(ParseError {
+            at: *at,
+            expected: "the end of the document".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+/// Whether a value a caller built is one [`parse`] would have read: nested no deeper than
+/// [`DEPTH`], and every number spelled the way JSON spells one.
+///
+/// A caller that sends a document gets this from [`parse`]. One that builds the value itself, as
+/// a caller of `handle` does, gets it here, so the same value is refused on both paths. The walk
+/// keeps its own list rather than recursing, so a value too deep for the reader is no deeper for
+/// this.
+///
+/// # Errors
+///
+/// What [`parse`] would have expected instead of the first value it would have refused.
+pub fn admitted(value: &Value) -> Result<(), String> {
+    let mut pending = vec![(value, 0)];
+    while let Some((value, depth)) = pending.pop() {
+        if depth > DEPTH {
+            return Err(format!("a document nested less than {DEPTH} deep"));
+        }
+        match value {
+            Value::Number(spelling) => {
+                let mut at = 0;
+                if number(spelling.as_bytes(), &mut at).is_err() || at != spelling.len() {
+                    return Err(format!("a number, found `{spelling}`"));
+                }
+            }
+            Value::Array(items) => pending.extend(items.iter().map(|item| (item, depth + 1))),
+            Value::Object(members) => {
+                pending.extend(members.iter().map(|(_, item)| (item, depth + 1)));
+            }
+            Value::Null | Value::Bool(_) | Value::Text(_) => {}
+        }
+    }
+    Ok(())
 }
 
 /// Advances past whitespace.

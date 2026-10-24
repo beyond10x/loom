@@ -12,9 +12,15 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Changed
+
+- Loom requires ESS 0.69.0; the conformance crates take `ess-conformance` and `ess-primitives` at tag `0.69.0`, and the generated `json` modules gain `parse_written` and `admitted`
+- **Breaking:** `model::run::SelectActionOutcome` gains `SelectionExists` (`loom.run.SelectAction` `selection-exists`); exhaustive matches handle it (story:refused-selection-stays-refused)
+
 ### Fixed
 
 - `SessionExecutor` reads a b10x-harness action line streamed in several `text-delta` events as one line (story:b10x-text-deltas)
+- `selection::select_action` and the run pipeline refuse a selection id already held, so a refused selection is never selected or admitted again (story:refused-selection-stays-refused)
 
 ## [0.39.1] - 2026-10-24
 

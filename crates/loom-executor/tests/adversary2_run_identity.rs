@@ -3,11 +3,10 @@
 //!
 //! `ProjectCatalogue` and `RevalidateSelection` are the generated behaviour
 //! (`b10x_loom_executor::model::behaviour::Generated`). `SelectAction` is an obligation; `SpecPorts`
-//! implements it as its contract in `generated/rust/loom/PLAN.md` states it: `catalogue-unknown`,
-//! `not-in-catalogue`, `revision-mismatch`, then `selected` "otherwise, creates
-//! `loom.run.Selection`". The specification declares no `existing_instance:` branch on any of its
-//! creating commands, so neither the generated behaviour nor a conforming implementation of the
-//! contract can refuse an identity that is already stored: each replaces it.
+//! implements it as its contract in `generated/rust/loom/PLAN.md` states it: `selection-exists`
+//! "for an identity a record already carries", `catalogue-unknown`, `not-in-catalogue`,
+//! `revision-mismatch`, then `selected` "otherwise, creates `loom.run.Selection`"
+//! (`story:refused-selection-stays-refused`), so a stored selection id is refused, never replaced.
 //!
 //! The expectations are the specification's own words: `ess/domains/run.yaml` says a selection's
 //! `case_revision` is "held equal to that catalogue's by SelectAction", that a selection names "one
@@ -26,8 +25,8 @@ use b10x_loom_executor::model::run::{
     ActionCatalogueSnapshot, ActionNotInCatalogue, ActionSelected, AnySelection, CatalogueEntry,
     CatalogueEntryStatus, CatalogueId, CatalogueNotFound, CatalogueRevisionMismatch,
     ProjectCatalogue, RevalidateSelection, RevalidateSelectionOutcome, SelectAction,
-    SelectActionOutcome, Selection, SelectionData, SelectionId, SelectionSnapshot, SelectionState,
-    SelectionStrategy, TurnId,
+    SelectActionOutcome, Selection, SelectionData, SelectionExists, SelectionId, SelectionSnapshot,
+    SelectionState, SelectionStrategy, TurnId,
 };
 
 /// In-memory storage, `false` for every `external:` branch, and `SelectAction` as its contract
@@ -96,6 +95,13 @@ impl SelectActionBehavior for SpecPorts {
         &mut self,
         input: SelectAction,
     ) -> Result<SelectActionOutcome, UnmetObligation> {
+        if SelectionStorage::get(self, &input.selection_id).is_some() {
+            return Ok(SelectActionOutcome::SelectionExists {
+                error: SelectionExists {
+                    selection_id: input.selection_id,
+                },
+            });
+        }
         let Some(catalogue) = ActionCatalogueStorage::get(self, &input.catalogue_id) else {
             return Ok(SelectActionOutcome::CatalogueUnknown {
                 error: CatalogueNotFound {
@@ -285,7 +291,6 @@ fn projecting_a_stored_catalogue_id_again_keeps_its_selections_true() {
 /// is refused as stale; `SelectAction` sent again for selection id 10 must not bring it back to
 /// `Selected`, and a later revalidation must not admit it.
 #[test]
-#[ignore = "story:interruption-recovery; ESS-SYNTH-004"]
 fn a_refused_selection_is_never_selected_or_admitted_again() {
     let mut model = Generated::new(SpecPorts::default());
     let entries = || {

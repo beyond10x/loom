@@ -7,9 +7,11 @@
 //! refusal moves the selection to `Refused`, an admission to `Admitted`, and every outcome is
 //! recorded.
 //!
-//! `not-in-frontier` is an `external:` outcome: ess 0.68.0 does not synthesize it as a membership
-//! guard over `frontier_actions`. The context here answers it from the command input it is handed
-//! and the selection the record holds, and refuses to answer any other external branch.
+//! `not-in-frontier` is an `external:` outcome: the specification does not declare it as a
+//! membership guard over `frontier_actions` (ess 0.69.0 would synthesize one written as
+//! `not: {exists: {in: input.frontier_actions, ...}}`; no story has adopted it). The context here
+//! answers it from the command input it is handed and the selection the record holds, and refuses
+//! to answer any other external branch.
 //!
 //! The revision and the action ids are the caller's to read from the governor, never from the
 //! model: [`crate::Loom::with_governor`].
