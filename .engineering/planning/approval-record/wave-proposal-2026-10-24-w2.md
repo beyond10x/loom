@@ -8,7 +8,8 @@ tags:
 - non-interactive
 relations:
 - decides: story:b10x-text-deltas
-revision: 1
+- decides: story:refused-selection-stays-refused
+revision: 4
 ---
 # Wave 2026-10-24-w2 proposal, accepted with no operator turn
 
@@ -33,3 +34,37 @@ through your process".
   segment, and segments are joined with `"\n"`, so a turn's text never runs into the next turn's.
   Claude Code and Codex text events are whole messages and keep `"\n"`.
 - D3: no ESS change, and no public type changes, so 0.39.2 is a patch with `No breaking changes.`
+
+## Change of order (2026-10-24)
+
+Session `b10x-chef-orchestrator` first approved, under the same grant, "ess 0.69.0 is tagged
+[...] 1. Release 0.39.2 (the text-delta join fix) first [...] 2. Then item 3, loom 0.40.0: move
+the ess pin to 0.69.0, re-test the selection-guard story with host-stop option B as you recorded,
+and release", and then replaced it: "Change of order, from noto for Timo. This replaces my last two
+messages: there is no 0.39.2. Make one release, loom 0.40.0, containing: (a) the ess 0.69.0 pin
+move; (b) the selection-guard story with host-stop option B; (c) the text-delta join fix and its
+split-action test. [...] Build against tag 0.69.0 (e1cf58c11), and tag 0.40.0 only after I confirm
+ess 0.69.0 is verified. If the 0.69.0 move is blocked for more than 2 hours, tell me at once: the
+fallback is 0.39.2 with only the fix."
+
+- The wave now carries three units and releases 0.40.0, not 0.39.2: u1 `story:b10x-text-deltas`
+  (c), u2 the ess 0.69.0 pin (a), u3 `story:refused-selection-stays-refused` (b).
+- The 0.40.0 tag waits for the orchestrator's confirmation that ESS 0.69.0 is verified.
+- D3 changes with it: the release is 0.40.0; whether it breaks anything is decided by what u2 and
+  u3 change.
+
+## Decisions taken while the wave ran
+
+- D4: (b) is read as `story:refused-selection-stays-refused`, the selection guard ESS 0.69.0 was
+  awaited for. `story:needs-authority-before-host-stop` (option B) depends on
+  `story:frontier-names-movers`, whose new `FrontierObligation.moved_by` and
+  `FrontierClaim.decided_by` break every consumer's struct literal of them, which the grant does not
+  cover. It stays `draft`, as `approval-record:needs-authority-before-host-stop-option-b` records;
+  the orchestrator was asked (2026-10-24) whether 0.40.0 should carry it with Timo's word on the
+  break.
+
+- D4 answered (2026-10-24): session `b10x-chef-orchestrator` wrote "D: A. loom 0.40.0 carries the
+  ess 0.69.0 pin, story:refused-selection-stays-refused and the text-delta join fix with its
+  split-action test. Host-stop option B stays draft. It breaks consumers' FrontierObligation and
+  FrontierClaim literals, which is on the never-list, and the goal does not need it." and "Build
+  and gate against the tag now, and tag 0.40.0 only after I confirm."
