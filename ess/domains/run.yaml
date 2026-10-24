@@ -265,6 +265,12 @@ errors:
       - name: selection_id
         type: loom.run.SelectionId
 
+  # A selection is made once: an id the run already holds, in any state, is never selected again.
+  - name: loom.run.SelectionExists
+    fields:
+      - name: selection_id
+        type: loom.run.SelectionId
+
   # A selection's telemetry is recorded once: its id is never recorded again.
   - name: loom.run.SelectionRecordExists
     fields:
@@ -309,7 +315,8 @@ commands:
             case_revision: input.case_revision
 
   # A selector picks only from the catalogue it was handed; an action id the catalogue does not
-  # list is refused whatever the confidence (ADR 0073).
+  # list is refused whatever the confidence (ADR 0073). A selection id the run already holds is
+  # refused first, whatever its state, so a refused or admitted selection is never selected again.
   - name: loom.run.SelectAction
     input:
       - name: selection_id
@@ -326,6 +333,12 @@ commands:
       - name: case_revision
         type: Integer
     outcomes:
+      - name: selection-exists
+        existing_instance: true
+        error: loom.run.SelectionExists
+        payload:
+          loom.run.SelectionExists:
+            selection_id: input.selection_id
       - name: catalogue-unknown
         when_related: {via: input.catalogue_id, exists: false}
         error: loom.run.CatalogueNotFound
