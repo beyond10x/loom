@@ -9,7 +9,7 @@ tags:
 relations:
 - decides: story:b10x-text-deltas
 - decides: story:refused-selection-stays-refused
-revision: 5
+revision: 6
 ---
 # Wave 2026-10-24-w2 proposal, accepted with no operator turn
 
@@ -76,3 +76,13 @@ fallback is 0.39.2 with only the fix."
   order set.
 - D6: `upstream-blocker:ess-0-69-existing-selection-guard` is cleared: on ESS 0.69.0 the `ess/`
   copy with `selection-exists` synthesizes `30 scenario(s) (0 authored), 0 refusal(s)`.
+
+## Confirmation to tag (2026-10-24)
+
+Session `b10x-chef-orchestrator` confirmed, under the grant in `~/beyond10x/CLAUDE.md`: "Go: ess
+0.69.0 is released and verified, and my re-run of verify-release.sh ess 0.69.0 exits 0. Move the CI
+pins in check.yml and pages.yml using the 0.69.0 SHA256SUMS. Then push, open the PR, merge through
+the bot route, tag 0.40.0 and run verify-release."
+
+- The CI pins moved in 062af08d (ESS_SHA256 `55e2f115…abc9a` from the 0.69.0 SHA256SUMS); the
+  0.40.0 tag goes on the head of `main` that carries them.
