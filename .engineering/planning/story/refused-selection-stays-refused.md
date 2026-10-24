@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:refused-selection-stays-refused
 kind: story
-status: active
+status: implemented
 title: A refused selection stays refused under a reused selection id
 relations:
 - serves: vision:governed-autonomy
@@ -15,10 +15,11 @@ scope:
   path: ess/domains/run.yaml
 - confidence: inferred
   path: generated/rust/loom
-revision: 5
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-21T13:40:11Z", actor: "human:timo", revision: 4}
 - {from: "proposed", to: "active", at: "2026-10-21T13:40:11Z", actor: "human:timo", revision: 5}
+- {from: "active", to: "implemented", at: "2026-10-24T02:59:14Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 

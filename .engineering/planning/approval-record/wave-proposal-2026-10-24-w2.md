@@ -9,7 +9,7 @@ tags:
 relations:
 - decides: story:b10x-text-deltas
 - decides: story:refused-selection-stays-refused
-revision: 4
+revision: 5
 ---
 # Wave 2026-10-24-w2 proposal, accepted with no operator turn
 
@@ -68,3 +68,11 @@ fallback is 0.39.2 with only the fix."
   split-action test. Host-stop option B stays draft. It breaks consumers' FrontierObligation and
   FrontierClaim literals, which is on the never-list, and the goal does not need it." and "Build
   and gate against the tag now, and tag 0.40.0 only after I confirm."
+
+- D5: `model::run::SelectActionOutcome` gains `SelectionExists`, which breaks a consumer's
+  exhaustive match. It is a generated model type, which `website/docs/reference/sdk-stability.md`
+  places outside its promise, so it breaks no documented contract; the CHANGELOG names it in a
+  `**Breaking:**` bullet and the release moves the minor version (0.40.0), as the orchestrator's
+  order set.
+- D6: `upstream-blocker:ess-0-69-existing-selection-guard` is cleared: on ESS 0.69.0 the `ess/`
+  copy with `selection-exists` synthesizes `30 scenario(s) (0 authored), 0 refusal(s)`.

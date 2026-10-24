@@ -2,11 +2,13 @@
 format: aep.planning-md/3
 id: upstream-blocker:ess-0-69-existing-selection-guard
 kind: upstream-blocker
-status: open
+status: cleared
 title: ESS 0.69.0 synthesis reaches a guard on an existing selection id
 relations:
 - blocks: story:refused-selection-stays-refused
-revision: 1
+revision: 3
+transitions:
+- {from: "open", to: "cleared", at: "2026-10-24T02:59:14Z", actor: "human:timo", revision: 3}
 ---
 ## Waiting on
 
@@ -19,3 +21,9 @@ ESS-SYNTH-004 (`decision-blocker:ess-existing-selection-guard`, § What was obse
 
 On ESS 0.69.0, a copy of `ess/` with the `selection-exists` outcome synthesizes with 0 refusals and
 `task ess-gate` exits 0, so `story:refused-selection-stays-refused` can make its `ess/` commit.
+
+## Cleared
+
+On ESS 0.69.0 (tag 0.69.0, commit e1cf58c1), `ess/` with the `selection-exists` outcome of
+`loom.run.SelectAction` and both catalogue guards kept synthesizes `30 scenario(s) (0 authored),
+0 refusal(s)`, and `task ess-gate` exits 0 (2026-10-24, wave 2026-10-24-w2, commit 233c9b83).
