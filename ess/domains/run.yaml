@@ -489,8 +489,10 @@ commands:
 
   # Before a selection is proposed it is revalidated against the case revision and the action ids
   # of the frontier current at revalidation, which come from the governor, never from the model.
-  # not-in-frontier stays `external:`, answered by the executor from the input's frontier_actions:
-  # ess 0.68.0 has no predicate for membership in them: it refuses one as unparsable (ESS-SPEC-012).
+  # not-in-frontier stays `external:`, answered by the executor from the input's frontier_actions.
+  # ess 0.69.0 refuses `action not in input.frontier_actions` as unparsable (ESS-SPEC-012); it
+  # validates and synthesizes the form `not: {exists: {in: input.frontier_actions, ...}}`, which no
+  # story has adopted yet.
   - name: loom.run.RevalidateSelection
     input:
       - name: selection_id

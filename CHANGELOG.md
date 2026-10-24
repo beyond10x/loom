@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Changed
+
+- Loom requires ESS 0.69.0; the conformance crates take `ess-conformance` and `ess-primitives` at tag `0.69.0`, and the generated `json` modules gain `parse_written` and `admitted`
+
 ## [0.39.1] - 2026-10-24
 
 No breaking changes.
