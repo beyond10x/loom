@@ -12,6 +12,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-10-24
+
 ### Changed
 
 - Loom requires ESS 0.69.0; the conformance crates take `ess-conformance` and `ess-primitives` at tag `0.69.0`, and the generated `json` modules gain `parse_written` and `admitted`
@@ -1045,7 +1047,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.39.1...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.40.0...HEAD
+[0.40.0]: https://github.com/beyond10x/loom/releases/tag/0.40.0
 [0.39.1]: https://github.com/beyond10x/loom/releases/tag/0.39.1
 [0.39.0]: https://github.com/beyond10x/loom/releases/tag/0.39.0
 [0.38.0]: https://github.com/beyond10x/loom/releases/tag/0.38.0
