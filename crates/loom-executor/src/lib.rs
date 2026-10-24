@@ -515,6 +515,17 @@ impl<S: ActionSelector, G: ArgumentGenerator, V> Loom<S, G, V> {
             // telemetry, then the overrule: only the replacement goes on to arguments and
             // revalidation.
             let mut record = self.record();
+            // A selection id the record already holds, in any state, is never selected again
+            // (`loom.run.SelectAction`, `selection-exists`): nothing is written for this run.
+            let reused = |id: &SelectionId| record.get(id).is_some();
+            if reused(&selection_id)
+                || resolved
+                    .overruled
+                    .as_ref()
+                    .is_some_and(|overruled| reused(&overruled.data().selection_id))
+            {
+                return Err(no_useful_action());
+            }
             let overruled =
                 resolved
                     .overruled
@@ -838,6 +849,71 @@ mod tests {
         ] {
             assert_ne!(other.0, id);
         }
+    }
+
+    /// `story:refused-selection-stays-refused`: the run pipeline refuses a selection id its record
+    /// already holds, as `loom.run.SelectAction` declares (`selection-exists`), without the
+    /// generated behaviour: a selection revalidation refused is not stored `Selected` again under
+    /// its id, is given no arguments, and stays `Refused`.
+    #[test]
+    fn the_pipeline_refuses_a_selection_id_its_record_already_holds() {
+        let loom = Loom::new(
+            Scripted(Ok("metrics.inspect")),
+            EmptyObjectArguments,
+            "inspect",
+        );
+        let frontier = frontier_for(
+            "CASE-1",
+            vec![listed("metrics.inspect", ActionStatus::Admissible, None)],
+        );
+        let identity = || model::primitives::Uuid(frontier.data().frontier_id.0.0.clone());
+        let catalogue = projection::project(&frontier, CatalogueId(identity()), TurnId(identity()));
+        let reused = SelectionId(loom_id(&loom.instance, "selection", "reused", 0));
+        let argument_request = |n| ArgumentRequestId(loom_id(&loom.instance, "request", "r", n));
+
+        assert!(
+            loom.prepare(
+                (&frontier, &catalogue),
+                (reused.clone(), argument_request(0))
+            )
+            .is_ok(),
+            "the first selection under the id is prepared"
+        );
+        let stale = loom.record().revalidate_selection(RevalidateSelection {
+            selection_id: reused.clone(),
+            case_revision: 2,
+            frontier_actions: vec!["metrics.inspect".to_owned()],
+        });
+        assert!(
+            matches!(stale, Ok(RevalidateSelectionOutcome::StaleRevision { .. })),
+            "{stale:?}"
+        );
+
+        let again = loom.prepare(
+            (&frontier, &catalogue),
+            (reused.clone(), argument_request(1)),
+        );
+        assert!(
+            matches!(again, Err(ExecutorOutcome::NoUsefulAction(_))),
+            "a reused selection id was prepared again"
+        );
+        let held: Vec<_> = loom
+            .selections()
+            .into_iter()
+            .filter(|snapshot| snapshot.data.selection_id == reused)
+            .map(|snapshot| snapshot.state)
+            .collect();
+        assert_eq!(held, [model::run::SelectionState::Refused]);
+        assert_eq!(
+            loom.argument_requests().len(),
+            1,
+            "no second argument request"
+        );
+
+        // `Loom::select` records nothing: a pick under the reused id leaves the record as it was.
+        let before = loom.selections();
+        assert!(loom.select(&catalogue, reused.clone()).is_ok());
+        assert_eq!(loom.selections(), before, "Loom::select wrote the record");
     }
 
     /// Each Loom gets a namespace no other Loom has, unless one is fixed for it.

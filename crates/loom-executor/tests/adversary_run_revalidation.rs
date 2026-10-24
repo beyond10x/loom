@@ -3,8 +3,9 @@
 //!
 //! `ProjectCatalogue` and `RevalidateSelection` are generated behaviour ("the specification fully
 //! determines it"). `SelectAction` is an obligation; `SpecPorts` implements it exactly as
-//! `ess/domains/run.yaml` declares it: `catalogue-unknown`, `not-in-catalogue`, then `selected`
-//! setting every field from the input, `case_revision` included. A fix that adds a `SelectAction`
+//! `ess/domains/run.yaml` declares it: `selection-exists`, `catalogue-unknown`,
+//! `not-in-catalogue`, `revision-mismatch`, then `selected` setting every field from the input,
+//! `case_revision` included. A fix that adds a `SelectAction`
 //! refusal changes that declaration, and `SpecPorts::select_action` follows it.
 //!
 //! The expectations come from `story:selection-revalidation` § Acceptance items 1 and 2, which
@@ -30,7 +31,7 @@ use b10x_loom_executor::model::run::{
     ActionCatalogueSnapshot, ActionNotInCatalogue, ActionSelected, AnySelection, CatalogueEntry,
     CatalogueEntryStatus, CatalogueId, CatalogueNotFound, CatalogueRevisionMismatch,
     ProjectCatalogue, ProjectCatalogueOutcome, RevalidateSelection, RevalidateSelectionOutcome,
-    SelectAction, SelectActionOutcome, Selection, SelectionData, SelectionId,
+    SelectAction, SelectActionOutcome, Selection, SelectionData, SelectionExists, SelectionId,
     SelectionNotInFrontier, SelectionSnapshot, SelectionStale, SelectionStrategy, TurnId,
 };
 
@@ -109,6 +110,13 @@ impl SelectActionBehavior for SpecPorts {
         &mut self,
         input: SelectAction,
     ) -> Result<SelectActionOutcome, UnmetObligation> {
+        if SelectionStorage::get(self, &input.selection_id).is_some() {
+            return Ok(SelectActionOutcome::SelectionExists {
+                error: SelectionExists {
+                    selection_id: input.selection_id,
+                },
+            });
+        }
         let Some(catalogue) = ActionCatalogueStorage::get(self, &input.catalogue_id) else {
             return Ok(SelectActionOutcome::CatalogueUnknown {
                 error: CatalogueNotFound {

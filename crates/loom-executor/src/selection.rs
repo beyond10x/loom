@@ -28,8 +28,8 @@ use crate::model::primitives::Decimal;
 use crate::model::run::{
     ActionCatalogue, ActionNotInCatalogue, ActionSelected, AnyActionCatalogue, AnySelection,
     CatalogueEntry, CatalogueEntryStatus, CatalogueNotFound, CatalogueRevisionMismatch,
-    SelectAction, SelectActionOutcome, Selection, SelectionData, SelectionId, SelectionStrategy,
-    action_catalogue_state, selection_state,
+    SelectAction, SelectActionOutcome, Selection, SelectionData, SelectionExists, SelectionId,
+    SelectionStrategy, action_catalogue_state, selection_state,
 };
 
 /// What a selector is told besides the candidates.
@@ -422,17 +422,25 @@ fn chosen(
 /// `loom.run.SelectAction`: the action `input` names, selected from the catalogue `catalogues`
 /// holds under `input.catalogue_id`, and stored in `selections`.
 ///
-/// The outcomes, in the order `ess/domains/run.yaml` declares them: `catalogue-unknown` for a
-/// catalogue `catalogues` does not hold; `not-in-catalogue`, by the rule [`select`] applies to
-/// every selector, for an action the catalogue does not list, whatever the confidence;
-/// `revision-mismatch` when the case revision `input` claims is not the catalogue's; otherwise
-/// `selected`, and the selection is stored `Selected`, replacing one held under its identity.
-/// Nothing is stored on a refusal.
+/// The outcomes, in the order `ess/domains/run.yaml` declares them: `selection-exists` for a
+/// selection id `selections` already holds, in any state, so a refused or admitted selection is
+/// never selected again; `catalogue-unknown` for a catalogue `catalogues` does not hold;
+/// `not-in-catalogue`, by the rule [`select`] applies to every selector, for an action the
+/// catalogue does not list, whatever the confidence; `revision-mismatch` when the case revision
+/// `input` claims is not the catalogue's; otherwise `selected`, and the selection is stored
+/// `Selected`. Nothing is stored on a refusal.
 pub fn select_action(
     catalogues: &impl ActionCatalogueStorage,
     selections: &mut impl SelectionStorage,
     input: SelectAction,
 ) -> SelectActionOutcome {
+    if selections.get(&input.selection_id).is_some() {
+        return SelectActionOutcome::SelectionExists {
+            error: SelectionExists {
+                selection_id: input.selection_id,
+            },
+        };
+    }
     let Some(held) = catalogues.get(&input.catalogue_id) else {
         return SelectActionOutcome::CatalogueUnknown {
             error: CatalogueNotFound {
