@@ -8,7 +8,7 @@ tags:
 - non-interactive
 relations:
 - decides: story:agent-check
-revision: 1
+revision: 2
 ---
 # Wave 2026-10-25-w1 proposal, accepted with no operator turn
 
@@ -80,3 +80,26 @@ Pre-flight: `df -h /` 169G free; one unit, one build directory inside the unit t
   `PATH`, and the pin does not move in this unit (no release here).
 - D6: `malformed` carries `member: document` and the decoder's message as `detail`;
   `loom_sdk::agent::AgentSpecError` exposes the message only.
+
+## Decisions taken while routing adversary pass 1
+
+Source: `review-result:adversary-agent-check-pass-1` (4 red cases, 9 findings: 8 introduced, 1
+pre-existing). The coordinator's routing, under the same grant:
+
+- D7: a credential is refused as `SecretLiteral` before the decoder is allowed to describe a value.
+  D4 ("never repeats the value") wins over D6 ("the decoder's message verbatim") where they collide
+  (finding 2, `lib.rs:82`: a token in an enum member reached `agent check`'s standard error inside
+  the decoder's message). The check walks the YAML value tree before decoding: not YAML at all is
+  `Malformed` with the parser's message; a credential anywhere in the tree is `SecretLiteral`; then
+  the decode-level `Malformed`; then the rest in declaration order. `ess/` is not touched: the
+  specification's comment "the first refusal found, in declaration order" is read with this
+  precedence, and a later unit that changes `ess/domains/agent.yaml` states it there.
+- D8: `b10x_loom_agent::check_text` strips one leading U+FEFF before anything else (finding 3,
+  pre-existing in `crates/loom-sdk/src/models.rs:350`, which is not changed in this unit).
+- Finding 1 (`lib.rs:166`, a password holding `#`): back to the implementor; userinfo is any `@`
+  in the authority up to the first `/`, with `#` and `?` not ending it.
+- Findings 4-9 (mutants the unit's suite missed): the adversary's own `adv_*` cases
+  (`crates/loom-agent/tests/adv_check.rs`, `crates/loom-cli/tests/adv_agent_check.rs`) join the
+  suite unchanged.
+- Found by the implementor, not fixed, out of scope: the sdk decoder repeats an enum or format
+  value in its message (`crates/loom-sdk`); after D7 no credential reaches it through `agent check`.

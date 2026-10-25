@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-25T16:48:10Z",
+  "actor": "human:timo",
+  "artifact": "story:agent-check",
+  "kind": "story",
+  "revision": 24,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check on wave/2026-10-25-w1 at de91c818 (ess 0.69.0): exit 0, 2135 passed, 0 failed, 9 ignored over 399 suites; task plan exit 0; task website exit 0",
+    "reference": "wave/2026-10-25-w1@de91c818, wave-check.log in the session's scratch"
+  }
+}
