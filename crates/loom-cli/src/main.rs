@@ -170,8 +170,14 @@ fn agent_resume_command(arguments: &AgentResumeArgs) -> ExitCode {
         Ok(plugin) => plugin,
         Err(error) => return failed(&error.to_string()),
     };
+    // The state directory is held as a serving host holds it, so the two never resume one grant
+    // at once; a host that holds it refuses this command.
+    let held = match b10x_loom_plugin::state::StateDir::open(&arguments.state, plugin.config()) {
+        Ok(held) => held,
+        Err(error) => return failed(&error.to_string()),
+    };
     let host = b10x_loom_plugin::Host::new(plugin.config());
-    match plugin.resume(&host, &arguments.commission) {
+    let exit = match plugin.resume(&host, &arguments.commission) {
         Ok(resumed) => {
             println!("{}", printable(&resumed.to_string()));
             ExitCode::SUCCESS
@@ -180,7 +186,9 @@ fn agent_resume_command(arguments: &AgentResumeArgs) -> ExitCode {
             eprintln!("b10x-loom: {}", printable(&failure.to_string()));
             ExitCode::from(agent::resume_exit_status(&failure))
         }
-    }
+    };
+    drop(held);
+    exit
 }
 
 /// The state directory `approve` and `resume` read: one `run --state` made. Neither creates it.

@@ -26,7 +26,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Changed
 
-- A plugin turn that ends `NeedsAuthority` or `AwaitingApproval` with a proposal under a suspension port is recorded `proposed`, naming the commission that awaits approval (story:agent-serve)
+- A plugin turn that ends `NeedsAuthority` or `AwaitingApproval` with a proposal under a suspension port is recorded `proposed`, naming the commission that awaits approval; a turn given a commission mints ids seeded with it, so two turns on two items never share a request id or an idempotency key (story:agent-serve)
 - `ProtocolCatalog::plugins()` holds `operator-reply@1` beside `inbound-answer@1`; `bundled()` holds neither (story:agent-check)
 - The conformance suite and the ESS gate synthesize with `--scenarios`, so authored scenarios join the synthesized ones (story:agent-check)
 

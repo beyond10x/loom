@@ -19,6 +19,14 @@ and recorded model answers, and passes in the unit's gate:
 | SIGTERM ends the host after the item | `crates/loom-cli/tests/agent_serve.rs`, `sigterm_ends_the_host_after_the_item` |
 | `SpecAuthority` grants exactly `policy.capabilities` | `crates/loom-agent/tests/serve.rs`, `the_spec_authority_grants_exactly_the_policy_capabilities` |
 
+## Not verified here
+
+- The conformance suite drives `loom.agent.AdmitSend` on its declared inputs alone; that a served
+  host feeds it the item's channel, the recorded proposal, the grant and the counter is held by
+  the tests above, not by conformance.
+- No real Connectors run: every write in the tests goes to the fake `connectors`, so what a real
+  `operations invoke` answers for a channel's post operation is unverified until the manual run.
+
 ## Manual run
 
 No manual run against a live channel was made: the implementation session had no channel, no

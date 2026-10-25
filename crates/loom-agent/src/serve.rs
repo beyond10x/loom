@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use b10x_loom_plugin::effects::SENDS_FILE;
+use b10x_loom_plugin::effects::{SENDS_FILE, detail};
 use b10x_loom_plugin::project::SEND;
 use b10x_loom_plugin::turn::stopped;
 use b10x_loom_plugin::{
@@ -45,7 +45,7 @@ use b10x_loom_plugin_slack::{SlackConfig, SlackHandler, TurnModels};
 use chrono::{SecondsFormat, Utc};
 use llm_core::Model;
 use loom::datasource::{DataSource, WriteOperation};
-use loom_sdk::agent::{AgentSpec, Binding, ConnectorsBinding, WriteMode};
+use loom_sdk::agent::{AdmitSendOutcome, AgentSpec, Binding, ConnectorsBinding, WriteMode};
 use loom_sdk::commission::model::json::Value;
 use loom_sdk::commission::model::primitives::{Timestamp, Uuid};
 use loom_sdk::commission::model::responsibility::{
@@ -210,7 +210,12 @@ impl SpecPlugin {
             spec,
             config,
             slack,
-            state: state.to_path_buf(),
+            state: std::path::absolute(state).map_err(|error| {
+                PluginError::State(format!(
+                    "{} cannot be made absolute: {error}",
+                    state.display()
+                ))
+            })?,
             authority,
             send,
             classifier: None,
@@ -401,6 +406,24 @@ impl SpecPlugin {
         let policy = self
             .policy(true, Some(held.proposal.clone()), &proof)
             .ok_or_else(|| failed("the channel binding declares no write".to_owned()))?;
+        // Decided before any process: a refusal here performs nothing and keeps the send held,
+        // with its Suspension and the person's grant, for a later resume.
+        let channel = detail(&held.item, "channel").unwrap_or_default();
+        let refused = match policy.admission(&channel, true).map_err(failed)? {
+            AdmitSendOutcome::Admitted => None,
+            AdmitSendOutcome::Held => Some("Held".to_owned()),
+            AdmitSendOutcome::WritesNone { error }
+            | AdmitSendOutcome::OutsideAllowList { error }
+            | AdmitSendOutcome::NoProposal { error }
+            | AdmitSendOutcome::RateLimited { error } => {
+                Some(send_refusal_spelling(error.reason).to_owned())
+            }
+        };
+        if let Some(reason) = refused {
+            return Err(ResumeFailure::Refused(format!(
+                "{reason}: nothing was sent; the send stays held"
+            )));
+        }
         let projection = Projection {
             actions: vec![SEND.to_owned()],
             sources: Vec::new(),
@@ -441,11 +464,13 @@ impl SpecPlugin {
         );
         match end {
             Ok(_) => {}
+            // Nothing was performed; the send stays held for a later resume.
             Err(ResumeError::Refused(refusal)) => {
                 return Err(ResumeFailure::Refused(format!("{refusal:?}")));
             }
             Err(error) => return Err(failed(error.to_string())),
         }
+        // The request was performed or definitively refused under the process: nothing is held.
         let _ = std::fs::remove_file(&path);
         match effects.sent() {
             Some(sent) => Ok(Resumed {

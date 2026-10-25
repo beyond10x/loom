@@ -239,6 +239,61 @@ fn sigterm_ends_the_host_after_the_item() {
     assert_eq!(scratch.held().len(), 1, "the send stays held");
 }
 
+/// `agent resume` holds the state directory as a serving host does, so the two never perform
+/// one grant twice: while another process holds it, the resume exits 1 naming the directory and
+/// performs nothing; once it is released, the resume performs the send.
+#[test]
+fn a_resume_while_the_state_is_held_is_refused() {
+    let scratch = Scratch::new("held-state", 0);
+    let (base_url, server) = serve(recorded(&scratch.ts));
+    let output = scratch.serve_once(&base_url);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    server.join().expect("the server finished");
+    let held = scratch.held();
+    assert_eq!(held.len(), 1, "{held:?}");
+    let commission = &held[0];
+    let approved = scratch
+        .command()
+        .args(["approve", commission, "reply.send", "--state"])
+        .arg(scratch.state())
+        .output()
+        .unwrap();
+    assert_eq!(approved.status.code(), Some(0));
+    let record = fs::OpenOptions::new()
+        .append(true)
+        .open(scratch.state().join("record.jsonl"))
+        .unwrap();
+    record
+        .try_lock()
+        .expect("this test holds the state directory");
+
+    let refused = scratch.resume(commission);
+
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert_eq!(refused.status.code(), Some(1), "{stderr}");
+    assert!(
+        stderr.contains("held by another host"),
+        "the refusal names the hold: {stderr}"
+    );
+    assert!(scratch.invoked(WRITE).is_empty(), "nothing was sent");
+    assert_eq!(scratch.held(), held, "the send stays held");
+    record.unlock().unwrap();
+
+    let resumed = scratch.resume(commission);
+    assert_eq!(
+        resumed.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&resumed.stderr)
+    );
+    assert_eq!(scratch.invoked(WRITE).len(), 1);
+}
+
 /// A spec `agent check` refuses is not served: exit 3, the refusal on standard error, and no
 /// read, no state directory.
 #[test]
@@ -262,6 +317,84 @@ fn agent_serve_refuses_what_check_refuses() {
     );
     assert!(scratch.argv().is_empty(), "nothing was read");
     assert!(!scratch.state().exists(), "no state directory was made");
+}
+
+/// `--state <DIR>` is a path like any other flag's: a relative one, given from the directory
+/// that holds it, serves, approves and resumes the same way as an absolute one. The help text
+/// names no restriction. The proof the write carries is derived from `--state` as given
+/// (`crates/loom-agent/src/serve.rs:302-309`) and Connectors refuses a relative proof before
+/// any process (`approval-not-absolute`), so the approved send must still be performed.
+#[test]
+fn a_relative_state_directory_performs_the_granted_send() {
+    let scratch = Scratch::new("relative-state", 0);
+    let (base_url, server) = serve(recorded(&scratch.ts));
+    let catalog = scratch.catalog(&base_url);
+    let relative = |command: &mut Command| {
+        command.current_dir(&scratch.root);
+    };
+    let mut command = scratch.command();
+    command
+        .args(["agent", "serve", "--spec"])
+        .arg(scratch.spec())
+        .args(["--state", "agent-state", "--catalog"])
+        .arg(&catalog)
+        .args([
+            "--classifier-model",
+            "lab-classifier",
+            "--model",
+            "lab-agent",
+            "--once",
+        ]);
+    relative(&mut command);
+    let output = command.output().expect("run b10x-loom");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(server.join().expect("the server finished").len(), 7);
+    let held = scratch.held();
+    assert_eq!(held.len(), 1, "one send is held: {held:?}");
+    let commission = &held[0];
+    let mut approve = scratch.command();
+    approve.args([
+        "approve",
+        commission,
+        "reply.send",
+        "--state",
+        "agent-state",
+    ]);
+    relative(&mut approve);
+    let approved = approve.output().unwrap();
+    assert_eq!(
+        approved.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&approved.stderr)
+    );
+
+    let mut resume = scratch.command();
+    resume
+        .args(["agent", "resume", commission, "--spec"])
+        .arg(scratch.spec())
+        .args(["--state", "agent-state"]);
+    relative(&mut resume);
+    let resumed = resume.output().unwrap();
+
+    let stdout = String::from_utf8_lossy(&resumed.stdout);
+    let stderr = String::from_utf8_lossy(&resumed.stderr);
+    assert_eq!(
+        resumed.status.code(),
+        Some(0),
+        "the granted send is performed from a relative --state:\n{stdout}\n{stderr}"
+    );
+    assert_eq!(
+        scratch.invoked(WRITE).len(),
+        1,
+        "one write: {:?}",
+        scratch.argv()
+    );
 }
 
 // ---------------------------------------------------------------------------------------------

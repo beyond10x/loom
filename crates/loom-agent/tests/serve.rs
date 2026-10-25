@@ -622,12 +622,16 @@ fn a_send_is_held_until_approved() {
     );
     assert_eq!(plugin.held().unwrap(), std::slice::from_ref(&commission));
     let suspensions = FileSuspensionStore::open(&state).unwrap();
+    let stored = suspensions
+        .get(&CommissionId(Uuid(commission.clone())))
+        .unwrap()
+        .expect("the Suspension holds the send");
+    // The request the turn suspended: its id carries the commission, so two turns taking the
+    // same steps on two items never share one.
+    let suspended_request = stored.data.action_request_id.0.0.clone();
     assert!(
-        suspensions
-            .get(&CommissionId(Uuid(commission.clone())))
-            .unwrap()
-            .is_some(),
-        "the Suspension holds the send"
+        !suspended_request.starts_with("00000000-0000-"),
+        "the request id is seeded with the commission: {suspended_request}"
     );
     assert_eq!(
         plugin.resume(&host, &commission),
@@ -660,8 +664,10 @@ fn a_send_is_held_until_approved() {
     assert_eq!(resumed.classification, "applied");
     assert_eq!(
         resumed.idempotency_key,
-        format!("loom-action-request-{}", granted.action_request_id.0.0)
+        format!("loom-action-request-{suspended_request}"),
+        "the key names the request the turn suspended"
     );
+    assert_eq!(granted.action_request_id.0.0, suspended_request);
     let writes = invokes_of(&fixture, WRITE);
     assert_eq!(writes.len(), 1, "exactly one write: {:?}", fixture.argv());
     assert_eq!(
@@ -902,4 +908,148 @@ fn the_commission_of_an_item_revision_is_stable() {
     assert_eq!(one.0.len(), 36);
     assert_eq!(&one.0[14..15], "4");
     let _: PathBuf = fixture.plugin_state();
+}
+
+// ---- adversary: two items, two grants ------------------------------------------------------------
+
+/// The script of one item's turn: a read, the proposal, the send to its thread.
+fn held_script(ts: &str) -> Vec<(&'static str, serde_json::Value)> {
+    vec![
+        (
+            "source_read",
+            json!({"source": "docs", "kind": "search", "input": {"query": "deploy"}}),
+        ),
+        ("reply_propose", json!({"text": REPLY})),
+        (
+            "reply_send",
+            json!({"channel": CHANNEL, "thread_ts": ts, "text": REPLY}),
+        ),
+    ]
+}
+
+/// Approves `commission`'s held send as `b10x-loom approve <COMMISSION> reply.send` does.
+fn approve_send(state: &Path, commission: &str) {
+    let suspensions = FileSuspensionStore::open(state).unwrap();
+    let head_of = |_: &CaseId| Err("no merge here".to_owned());
+    approve(
+        &suspensions,
+        &GrantStore::open(state).unwrap(),
+        &MergeHandoffStore::open(state).unwrap(),
+        &head_of,
+        commission,
+        "reply.send",
+        now(),
+        None,
+    )
+    .unwrap_or_else(|error| panic!("the grant for {commission} is written: {error:?}"));
+}
+
+/// Two questions in the allowed channel, each answered in its own turn and held; a person
+/// approves both. The two sends are two writes of two admitted requests, so Connectors must see
+/// two idempotency keys: `--idempotency-key` is "loom-action-request-<admitted request id>"
+/// (`crates/loom-connectors/src/cli/write.rs:71`) and Connectors reuses a key to observe the
+/// first invocation, never to apply a second one. The turn's ids restart at one for every turn
+/// (`crates/loom-plugin/src/turn.rs:948-961`), so two items whose turns take the same steps
+/// suspend requests of the same id, and the second approved reply carries the first one's key.
+#[test]
+fn two_approved_sends_on_two_items_carry_two_idempotency_keys() {
+    let fixture = fixture("serve-two-items-two-keys");
+    write_fixtures(&fixture, "slack");
+    let newer = ts_ago(60);
+    let older = ts_ago(90);
+    channels(&fixture, json!([member(CHANNEL, 5)]));
+    support::history(
+        &fixture,
+        vec![
+            support::message("U0ALICE", &older, "Is the deploy finished?"),
+            support::message("U0CAROL", &newer, "Did the migration run?"),
+        ],
+    );
+    let state = fixture.plugin_state();
+    let plugin = plugin(
+        &fixture,
+        spec(&fixture, "approval", &[CHANNEL], 5),
+        vec![held_script(&older), held_script(&newer)],
+    );
+    let host = Host::new(plugin.config()).with_environment(fixture.environment());
+
+    let lines = b10x_loom_plugin::run_plugin_on(&plugin, &host, &state, &AtomicBool::new(true))
+        .expect("the host runs once");
+
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    let held = plugin.held().unwrap();
+    assert_eq!(held.len(), 2, "both sends are held: {held:?} {lines:?}");
+    for commission in &held {
+        approve_send(&state, commission);
+    }
+
+    let mut keys = Vec::new();
+    for commission in &held {
+        let resumed = plugin
+            .resume(&host, commission)
+            .unwrap_or_else(|failure| panic!("{commission} is performed: {failure}"));
+        keys.push(resumed.idempotency_key);
+    }
+
+    let writes = invokes_of(&fixture, WRITE);
+    assert_eq!(writes.len(), 2, "{:?}", fixture.argv());
+    let flags: Vec<&str> = writes
+        .iter()
+        .map(|argv| flag(argv, "--idempotency-key").expect("the write carries its key"))
+        .collect();
+    assert_ne!(
+        flags[0], flags[1],
+        "two admitted requests of two items carry two keys, else Connectors answers the second \
+         send with the first's observation and the second reply is never posted: {keys:?}"
+    );
+}
+
+/// A refusal before any process at the resume (here: five sends in the window already) performs
+/// nothing, so the person's grant stands and the send must stay held for a later resume: the
+/// help text promises "nothing was sent" for exit 5, not "and the approved reply is dropped".
+#[test]
+fn a_resume_refused_before_any_process_keeps_the_send_held() {
+    let fixture = fixture("serve-refused-resume-keeps-held");
+    write_fixtures(&fixture, "slack");
+    let ts = ts_ago(60);
+    channels(&fixture, json!([member(CHANNEL, 5)]));
+    support::history(
+        &fixture,
+        vec![support::message("U0ALICE", &ts, "Is the deploy finished?")],
+    );
+    let state = fixture.plugin_state();
+    let plugin = plugin(
+        &fixture,
+        spec(&fixture, "approval", &[CHANNEL], 5),
+        vec![held_script(&ts)],
+    );
+    let host = Host::new(plugin.config()).with_environment(fixture.environment());
+    b10x_loom_plugin::run_plugin_on(&plugin, &host, &state, &AtomicBool::new(true))
+        .expect("the host runs once");
+    let commission = plugin.held().unwrap().remove(0);
+    approve_send(&state, &commission);
+    seed_sends(&fixture, 5, 10);
+
+    let refused = plugin.resume(&host, &commission);
+
+    match &refused {
+        Err(b10x_loom_agent::ResumeFailure::Refused(why)) => {
+            assert!(why.contains("RateLimited"), "{why}");
+        }
+        other => panic!("the sixth send is refused: {other:?}"),
+    }
+    assert!(invokes_of(&fixture, WRITE).is_empty(), "nothing ran");
+    assert_eq!(
+        plugin.held().unwrap(),
+        std::slice::from_ref(&commission),
+        "a send refused before any process stays held for the next resume"
+    );
+    let suspensions = FileSuspensionStore::open(&state).unwrap();
+    assert!(
+        suspensions
+            .get(&CommissionId(Uuid(commission.clone())))
+            .unwrap()
+            .is_some(),
+        "the Suspension still holds the request"
+    );
 }

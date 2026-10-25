@@ -660,7 +660,18 @@ state directory and `approvals/<commission>.json` naming the item; the record li
 revision)`, a stable UUID of the three. `b10x-loom approve <COMMISSION> reply.send --state <DIR>`
 writes the grant as it does for a run; `SpecPlugin::resume` performs the send once through
 `resume_after_grant` under `GrantAuthority`, with the grant file as the write's proof, and a serving
-host does so for every granted commission at its next poll (`b10x-loom agent resume` does it now).
+host does so for every granted commission at its next poll (`b10x-loom agent resume` does it now,
+holding the state directory's record lock as a host does, so the two never perform one grant at
+once: while a host holds it the command exits 1 naming the hold,
+`a_resume_while_the_state_is_held_is_refused`). A resume decides `admit_send` before any process:
+a refusal there (the window is full, the channel left the allow list) performs nothing and keeps
+the held file, the Suspension and the grant for a later resume; only a send performed or refused
+under the process removes the held file (`a_resume_refused_before_any_process_keeps_the_send_held`).
+The state directory is made absolute in `SpecPlugin::new`, because the grant file is the write's
+proof and Connectors refuses a relative proof (`a_relative_state_directory_performs_the_granted_send`).
+A turn's ids are seeded with its commission (the first two groups of each id), so two turns taking
+the same steps on two items suspend two request ids and their sends carry two idempotency keys
+(`two_approved_sends_on_two_items_carry_two_idempotency_keys`).
 Sends are counted in `sends.jsonl` in the state directory. `agent serve` settles the models before
 any read: the spec's `model` section (`loom_sdk::models::from_routes` on `model.routes`, relative to
 the spec, for the `agent` and `classifier` roles) or `--catalog` with `--model` and

@@ -103,6 +103,25 @@ pub struct SendPolicy {
     pub proposal: Option<Proposal>,
 }
 
+impl SendPolicy {
+    /// Decides `loom.agent.AdmitSend` for a send to `channel` now, from this policy, whether a
+    /// reply is `proposed`, and the sends the counter holds within the window.
+    ///
+    /// # Errors
+    /// The counter file cannot be read or holds a line that is not one.
+    pub fn admission(&self, channel: &str, proposed: bool) -> Result<AdmitSendOutcome, String> {
+        let sent_in_window = sent_in_window(&self.counter, Utc::now())?;
+        Ok(admit_send(&AdmitSend {
+            mode: self.mode,
+            channel_allowed: self.allow.iter().any(|allowed| allowed == channel),
+            proposed,
+            granted: self.granted,
+            sent_in_window,
+            max_per_hour: self.max_per_hour,
+        }))
+    }
+}
+
 /// Decides `loom.agent.AdmitSend` (`ess/domains/agent.yaml`): the first refusal in declaration
 /// order, `held` in approval mode before the grant, else `admitted`.
 pub fn admit_send(input: &AdmitSend) -> AdmitSendOutcome {
@@ -453,16 +472,9 @@ impl<'a, S: FallibleCaseStore> DataSourceEffects<'a, S> {
         let channel = detail(self.item, "channel").unwrap_or_default();
         let proposal = self.proposal();
         let now = Utc::now();
-        let sent_in_window = sent_in_window(&policy.counter, now)
+        let decision = policy
+            .admission(&channel, proposal.is_some())
             .map_err(|why| EffectError::new(format!("the send counter: {why}")))?;
-        let decision = admit_send(&AdmitSend {
-            mode: policy.mode,
-            channel_allowed: policy.allow.contains(&channel),
-            proposed: proposal.is_some(),
-            granted: policy.granted,
-            sent_in_window,
-            max_per_hour: policy.max_per_hour,
-        });
         let refusal = match decision {
             AdmitSendOutcome::WritesNone { error }
             | AdmitSendOutcome::OutsideAllowList { error }
@@ -481,7 +493,7 @@ impl<'a, S: FallibleCaseStore> DataSourceEffects<'a, S> {
                 }
                 SendRefusalReason::NoProposal => "no reply is proposed for the item".to_owned(),
                 SendRefusalReason::RateLimited => format!(
-                    "{sent_in_window} sends in the last hour reached max_per_hour {}",
+                    "the sends in the last hour reached max_per_hour {}",
                     policy.max_per_hour
                 ),
             };

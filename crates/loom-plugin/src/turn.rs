@@ -329,7 +329,10 @@ pub fn turn_with<S: FallibleCaseStore>(
     let governor = CanonGovernor::new(options.store)
         .with_catalog(&catalog)
         .map_err(|error| PluginError::Turn(error.to_string()))?;
-    let ids = Ids::default();
+    let ids = options
+        .commission
+        .as_ref()
+        .map_or_else(Ids::default, Ids::seeded);
     let commission_id = options.commission.unwrap_or_else(|| ids.next('c'));
     let turned = |result: TurnResult, awaiting_approval: bool| Turned {
         result,
@@ -943,21 +946,53 @@ impl Model for Lent<'_> {
     }
 }
 
-/// Ids for one turn, unique within it.
+/// Ids for one turn, unique within it; seeded with the turn's commission, unique across turns
+/// too: the first two groups carry the commission, so two turns taking the same steps on two
+/// items mint two request ids, and the idempotency key derived from an admitted request names
+/// one send. Unseeded (no commission), the groups are zero, as a plain plugin turn's are.
 #[derive(Default)]
 struct Ids {
+    prefix: u64,
     next: AtomicU64,
 }
 
 impl Ids {
+    /// Ids whose first two groups are derived from `commission`.
+    fn seeded(commission: &Uuid) -> Self {
+        Self {
+            prefix: fnv1a(commission.0.as_bytes()),
+            next: AtomicU64::default(),
+        }
+    }
+
     fn next(&self, kind: char) -> Uuid {
-        uuid(kind, self.next.fetch_add(1, Ordering::SeqCst) + 1)
+        uuid_in(
+            self.prefix,
+            kind,
+            self.next.fetch_add(1, Ordering::SeqCst) + 1,
+        )
     }
 }
 
-/// A version-4-shaped id of `kind` (a hex digit) and `n`.
+/// A version-4-shaped id of `kind` (a hex digit) and `n`, with zero first groups.
 fn uuid(kind: char, n: u64) -> Uuid {
-    Uuid(format!("00000000-0000-4000-8{kind}00-{n:012x}"))
+    uuid_in(0, kind, n)
+}
+
+/// A version-4-shaped id whose first two groups are the high 48 bits of `prefix`.
+fn uuid_in(prefix: u64, kind: char, n: u64) -> Uuid {
+    Uuid(format!(
+        "{:08x}-{:04x}-4000-8{kind}00-{n:012x}",
+        prefix >> 32,
+        (prefix >> 16) & 0xffff
+    ))
+}
+
+/// FNV-1a over `bytes`, 64 bits.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
 }
 
 /// What the loop needs that no model may supply: ids, the host's clock and the steps the turn has
