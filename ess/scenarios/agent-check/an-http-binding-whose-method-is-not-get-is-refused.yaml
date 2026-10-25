@@ -1,0 +1,15 @@
+# story agent-check: an `http` binding whose method is not GET is refused, naming the member and
+# the method. The fixture is the operator example with the `metrics` binding set to POST.
+type: ess-scenario/4
+domain: loom.agent
+scenario: an-http-binding-whose-method-is-not-get-is-refused
+summary: An http binding with method POST is refused, naming the member.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.CheckAgentSpec
+    input: {path: ess/scenarios/agent-check/specs/http-method.yaml}
+    outcome: http-method
+    error:
+      name: loom.agent.SpecRefused
+      fields: {reason: HttpMethod, member: "bindings[2].method", detail: POST}
