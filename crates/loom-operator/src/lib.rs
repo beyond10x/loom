@@ -9,9 +9,10 @@
 //! NetworkPolicy and, with `expose.a2a`, a Service, each owned by the resource. Before any child
 //! is rendered the spec is checked in-process (`b10x_loom_agent::check_text`, the library behind
 //! `b10x-loom agent check`), `spec.routes` is walked for a credential and read by llm's strict
-//! routes parser, and `spec.connectorsConfig` is decoded as TOML and walked; a refusal is the
-//! resource's status and no child exists for it. The lifecycle is the generated behaviour of
-//! `loom.resource` over `b10x_loom_resource::LoomAgentRecord`; its row is the resource's status.
+//! routes parser, and `spec.connectorsConfig` is decoded as TOML and walked, word by word and
+//! over its raw text too; a refusal is the resource's status and no child exists for it. The
+//! lifecycle is the generated behaviour of `loom.resource` over
+//! `b10x_loom_resource::LoomAgentRecord`; its row is the resource's status.
 //!
 //! * [`cli`]: the command line, `run`, `render` and `crd`.
 //! * [`config`]: the controller's `config.yaml`.

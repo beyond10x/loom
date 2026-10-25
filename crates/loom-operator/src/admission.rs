@@ -10,24 +10,31 @@
 //!    parser (`llm_models::routes::Routes::parse`, the reader of the pod's `routes.yaml`)
 //!    refuses: an unknown field, an `auth.secret` that is a value and not an `env:`, `file:` or
 //!    `keychain:` reference, a route to an undeclared endpoint and the like.
-//! 3. `spec.connectorsConfig` decoded as TOML (`Malformed` when it is not TOML) and every key and
-//!    string of the decoded table walked for a credential (`SecretLiteral`), so an escape such as
-//!    `x` hides nothing.
+//! 3. `spec.connectorsConfig`, which the ConfigMap receives verbatim, walked for a credential
+//!    (`SecretLiteral`) three ways, so neither an escape, a comment nor a leading word hides one:
+//!    decoded as TOML (`Malformed` when it is not TOML) with every key and string of the decoded
+//!    table walked whole; every word of each decoded key and string; and every word of the raw
+//!    text, comments included, named by its line. A word is what whitespace and `=`, `"`, `'`,
+//!    `,`, `[`, `]`, `{`, `}` separate, its leading `#` dropped; a word that is a token prefix
+//!    ending in a space (`Bearer`) is walked with the word after it.
 //! 4. An empty `spec.routes` while the controller configures no model route (`NoModelRoute`).
 //! 5. A `spec.secretRef` outside the configuration's `allowedSecretNames` (`SecretNotAllowed`).
 //! 6. A `deploy.kubernetes.namespace` other than the resource's (`NamespaceMismatch`).
-//! 7. A `deploy.kubernetes.egress` host outside `allowedEgressHosts` (`EgressHostNotAllowed`).
+//! 7. A `deploy.kubernetes.egress` entry naming neither a host nor a namespace, whose rule would
+//!    admit every destination on its port, or naming a host outside `allowedEgressHosts`
+//!    (`EgressHostNotAllowed`).
 //!
 //! The walk of steps 2 and 3 reads a text that is not a `loom.agent/1` document only within the
 //! agent decoder's bounds, [`MAX_WALKED_OPENERS`] `[` or `{` bytes and [`MAX_WALKED_BYTES`]; a
-//! text beyond either is refused `TooLarge` rather than admitted unread.
+//! document beyond either is refused `TooLarge` rather than admitted unread. Words are walked in
+//! sequences that each stay within both bounds.
 //!
 //! A refusal reads `refused: <reason> at <member>: <detail>`, as `b10x-loom agent check` prints
 //! it, the member spelt from the resource (`spec.agent.bindings[1].base_url`); its detail never
 //! repeats a value of the resource. An admitted spec reads as the check's line, `checked <agent>:
 //! <n> states, <m> bindings, protocol <protocol>`.
 
-use b10x_loom_agent::{Checked, RefusalReason, check_text, spelling};
+use b10x_loom_agent::{Checked, RefusalReason, TOKEN_PREFIXES, check_text, spelling};
 use llm_models::routes::Routes;
 use loom_sdk::agent::{AgentSpec, parse};
 use serde_yaml_ng::{Mapping, Value};
@@ -122,14 +129,18 @@ fn within(at: &str, member: &str) -> String {
     }
 }
 
-/// The first credential `text`, a YAML document standing at `at` in the resource, holds, as a
-/// refusal; `TooLarge` when the text is beyond what the walk reads.
-fn credential(text: &str, at: &str) -> Result<(), Refusal> {
-    let openers = text
-        .bytes()
+/// How many `[` and `{` bytes `text` holds.
+fn openers(text: &str) -> usize {
+    text.bytes()
         .filter(|byte| matches!(byte, b'[' | b'{'))
-        .count();
-    if openers > MAX_WALKED_OPENERS {
+        .count()
+}
+
+/// The member, within `text`, and the shape of the first credential `text`, a YAML document
+/// standing at `at` in the resource, holds; `TooLarge` when the text is beyond what the walk
+/// reads.
+fn first_credential(text: &str, at: &str) -> Result<Option<(String, String)>, Refusal> {
+    if openers(text) > MAX_WALKED_OPENERS {
         return Err(Refusal::new(
             "TooLarge",
             at,
@@ -149,19 +160,182 @@ fn credential(text: &str, at: &str) -> Result<(), Refusal> {
             ),
         ));
     }
-    match check_text(text, &|_| None) {
-        Err(refused) if refused.reason == RefusalReason::SecretLiteral => Err(Refusal::new(
-            spelling(refused.reason),
-            within(at, &refused.member),
-            refused.detail,
+    Ok(match check_text(text, &|_| None) {
+        Err(refused) if refused.reason == RefusalReason::SecretLiteral => {
+            Some((refused.member, refused.detail))
+        }
+        _ => None,
+    })
+}
+
+/// The first credential `text`, a YAML document standing at `at` in the resource, holds, as a
+/// refusal; `TooLarge` when the text is beyond what the walk reads.
+fn credential(text: &str, at: &str) -> Result<(), Refusal> {
+    match first_credential(text, at)? {
+        Some((member, detail)) => Err(Refusal::new(
+            spelling(RefusalReason::SecretLiteral),
+            within(at, &member),
+            detail,
         )),
-        _ => Ok(()),
+        None => Ok(()),
     }
 }
 
-/// `text`, the `spec.connectorsConfig` TOML, decoded and written as YAML for the walk.
-fn connectors_yaml(text: &str) -> Result<String, Refusal> {
-    let table: toml::Table = toml::from_str(text).map_err(|error| {
+/// One word walked for a credential: its text, the member it stands in and, for a word of the
+/// raw text, its line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Word {
+    text: String,
+    member: String,
+    line: Option<usize>,
+}
+
+/// What a word may cost in a walked sequence, at most: YAML writes a byte as up to four, and an
+/// item adds its `- `, its quotes and its newline.
+fn cost(word: &str) -> usize {
+    word.len().saturating_mul(4).saturating_add(8)
+}
+
+/// The words of `text`, as the module documentation separates them; a token prefix ending in a
+/// space (`Bearer `) is joined with the word after it.
+fn words(text: &str) -> Vec<String> {
+    let parts: Vec<&str> = text
+        .split(|c: char| c.is_whitespace() || "=\"',[]{}".contains(c))
+        .map(|part| part.trim_start_matches('#'))
+        .filter(|part| !part.is_empty())
+        .collect();
+    let spaced = |part: &str| {
+        TOKEN_PREFIXES
+            .iter()
+            .any(|prefix| prefix.strip_suffix(' ') == Some(part))
+    };
+    parts
+        .iter()
+        .enumerate()
+        .map(|(index, part)| match parts.get(index + 1) {
+            Some(next) if spaced(part) => format!("{part} {next}"),
+            _ => (*part).to_owned(),
+        })
+        .collect()
+}
+
+/// The words of each key and string of `table`, the table at `member`, in document order: a
+/// key's words before what it holds, standing in the table that holds the key, so a member
+/// never spells a key found to be a credential.
+fn decoded_words(table: &toml::Table, member: &str, out: &mut Vec<Word>) {
+    for (key, value) in table {
+        out.extend(words(key).into_iter().map(|text| Word {
+            text,
+            member: member.to_owned(),
+            line: None,
+        }));
+        value_words(value, &format!("{member}.{key}"), out);
+    }
+}
+
+/// The words of each key and string of `value`, the value at `member`.
+fn value_words(value: &toml::Value, member: &str, out: &mut Vec<Word>) {
+    match value {
+        toml::Value::String(text) => out.extend(words(text).into_iter().map(|text| Word {
+            text,
+            member: member.to_owned(),
+            line: None,
+        })),
+        toml::Value::Table(table) => decoded_words(table, member, out),
+        toml::Value::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                value_words(item, &format!("{member}[{index}]"), out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The words of `text`, the raw `spec.connectorsConfig`, each with its line.
+fn raw_words(text: &str) -> Vec<Word> {
+    text.lines()
+        .enumerate()
+        .flat_map(|(index, line)| {
+            words(line).into_iter().map(move |text| Word {
+                text,
+                member: "spec.connectorsConfig".to_owned(),
+                line: Some(index + 1),
+            })
+        })
+        .collect()
+}
+
+/// The first credential among `words` as a refusal at the word's member, its line added to the
+/// detail. The words are walked as YAML sequences, each within the walk's bounds.
+fn word_credential(words: &[Word]) -> Result<(), Refusal> {
+    let mut start = 0;
+    while start < words.len() {
+        let (mut end, mut bytes, mut opened) = (start, 0_usize, 0_usize);
+        while let Some(word) = words.get(end) {
+            let (more_bytes, more_opened) = (cost(&word.text), openers(&word.text));
+            if end > start
+                && (bytes + more_bytes > MAX_WALKED_BYTES
+                    || opened + more_opened > MAX_WALKED_OPENERS)
+            {
+                break;
+            }
+            bytes += more_bytes;
+            opened += more_opened;
+            end += 1;
+        }
+        let chunk = &words[start..end];
+        let texts: Vec<&str> = chunk.iter().map(|word| word.text.as_str()).collect();
+        let text = serde_yaml_ng::to_string(&texts).map_err(|_| {
+            Refusal::new(
+                spelling(RefusalReason::Malformed),
+                "spec.connectorsConfig",
+                "cannot be written as YAML",
+            )
+        })?;
+        if let Some((member, detail)) = first_credential(&text, &chunk[0].member)? {
+            let found = member
+                .strip_prefix('[')
+                .and_then(|rest| rest.strip_suffix(']'))
+                .and_then(|index| index.parse::<usize>().ok())
+                .and_then(|index| chunk.get(index));
+            return Err(match found {
+                Some(word) => Refusal::new(
+                    spelling(RefusalReason::SecretLiteral),
+                    word.member.clone(),
+                    match word.line {
+                        Some(line) => format!("{detail} (line {line})"),
+                        None => detail,
+                    },
+                ),
+                None => Refusal::new(
+                    spelling(RefusalReason::SecretLiteral),
+                    "spec.connectorsConfig",
+                    detail,
+                ),
+            });
+        }
+        start = end;
+    }
+    Ok(())
+}
+
+/// Walks `text`, the `spec.connectorsConfig` TOML, for a credential: the decoded table whole,
+/// the words of each decoded key and string, then the words of the raw text.
+fn connectors_credential(text: &str) -> Result<(), Refusal> {
+    let table = connectors_table(text)?;
+    credential(
+        &yaml(&table, "spec.connectorsConfig")?,
+        "spec.connectorsConfig",
+    )?;
+    let mut decoded = Vec::new();
+    decoded_words(&table, "spec.connectorsConfig", &mut decoded);
+    word_credential(&decoded)?;
+    word_credential(&raw_words(text))
+}
+
+/// `text`, the `spec.connectorsConfig` TOML, decoded.
+fn connectors_table(text: &str) -> Result<toml::Table, Refusal> {
+    toml::from_str(text).map_err(|error| {
         let detail = error.span().map_or_else(
             || "it is not a TOML document".to_owned(),
             |span| {
@@ -180,8 +354,7 @@ fn connectors_yaml(text: &str) -> Result<String, Refusal> {
             "spec.connectorsConfig",
             detail,
         )
-    })?;
-    yaml(&table, "spec.connectorsConfig")
+    })
 }
 
 /// `value`, a member of the resource at `at`, as YAML.
@@ -287,7 +460,7 @@ pub fn admit(
     }
 
     let connectors = spec.connectors_config.clone().unwrap_or_default();
-    credential(&connectors_yaml(&connectors)?, "spec.connectorsConfig")?;
+    connectors_credential(&connectors)?;
 
     let (routes, default_routes) = match (given, &config.model_route) {
         (Some(text), _) => (text, false),
@@ -324,6 +497,14 @@ pub fn admit(
             ));
         }
         for (index, egress) in kubernetes.egress.iter().enumerate() {
+            if egress.host.is_none() && egress.namespace.is_none() {
+                return Err(Refusal::new(
+                    "EgressHostNotAllowed",
+                    format!("spec.agent.deploy.kubernetes.egress[{index}]"),
+                    "it names neither a host nor a namespace, so its rule would admit every \
+                     destination on its port",
+                ));
+            }
             if let Some(host) = &egress.host
                 && !config.allowed_egress_hosts.contains(host)
             {
@@ -439,6 +620,114 @@ mod tests {
             refusal.message(),
             "refused: Malformed at spec.connectorsConfig: it is not a TOML document (line 2)"
         );
+    }
+
+    /// The ConfigMap receives the raw text: a token in a comment, after another word of a
+    /// string, after `Bearer `, or spelt with an escape after another word, is found all the
+    /// same, named by its member or its line.
+    #[test]
+    fn a_token_in_a_comment_or_after_a_word_of_the_connectors_toml_is_refused_without_repeating_it()
+    {
+        let ops = "[connections.ops]\nadapter = \"chat\"\n";
+        for (toml, message) in [
+            (
+                format!("{ops}# token = \"xoxb-000-fake\"\ntoken = \"env:CHAT_TOKEN\"\n"),
+                "refused: SecretLiteral at spec.connectorsConfig: a value with the prefix \
+                 `xoxb-` (line 3)",
+            ),
+            (
+                format!("{ops}token = \"env:CHAT_TOKEN\" #xoxb-000-fake\n"),
+                "refused: SecretLiteral at spec.connectorsConfig: a value with the prefix \
+                 `xoxb-` (line 3)",
+            ),
+            (
+                format!("{ops}# authorization = \"Bearer 000fake\"\n"),
+                "refused: SecretLiteral at spec.connectorsConfig: a value with the prefix \
+                 `Bearer ` (line 3)",
+            ),
+            (
+                format!("{ops}headers = {{ authorization = \"token ghp_000fake\" }}\n"),
+                "refused: SecretLiteral at spec.connectorsConfig.connections.ops.headers.\
+                 authorization: a value with the prefix `ghp_`",
+            ),
+            (
+                format!("{ops}headers = {{ authorization = \"token \\u0067hp_000fake\" }}\n"),
+                "refused: SecretLiteral at spec.connectorsConfig.connections.ops.headers.\
+                 authorization: a value with the prefix `ghp_`",
+            ),
+            (
+                format!("{ops}notes = [\"first\", \"then\\tBearer 000fake\"]\n"),
+                "refused: SecretLiteral at spec.connectorsConfig.connections.ops.notes[1]: a \
+                 value with the prefix `Bearer `",
+            ),
+            (
+                "[connections]\n\"token ghp_000fake\" = 1\n".to_owned(),
+                "refused: SecretLiteral at spec.connectorsConfig.connections: a value with the \
+                 prefix `ghp_`",
+            ),
+        ] {
+            let refusal = admitted(&spec(Some(&toml))).expect_err(&toml);
+            assert_eq!(refusal.message(), message, "{toml}");
+            assert!(!refusal.message().contains("000fake"), "{toml}");
+        }
+        let annotated = format!(
+            "# the chat connection, its token from the environment\n{ops}token = \
+             \"env:CHAT_TOKEN\" # rotated monthly\nheaders = {{ accept = \"application/json\" }}\n"
+        );
+        admitted(&spec(Some(&annotated))).expect("comments and words without a token");
+    }
+
+    /// The words are walked in sequences within the walk's bounds, so a long text of short
+    /// words is walked to its end and not refused `TooLarge`.
+    #[test]
+    fn the_words_of_a_long_connectors_toml_are_walked_to_the_last() {
+        let lines = MAX_WALKED_BYTES / 4 / 12;
+        let mut toml = String::from("[connections.ops]\n");
+        for _ in 0..lines {
+            toml.push_str("# a b c d e\n");
+        }
+        assert!(toml.len() < MAX_WALKED_BYTES);
+        assert!(lines * 5 * cost("a") > MAX_WALKED_BYTES);
+        admitted(&spec(Some(&toml))).expect("no token");
+        toml.push_str("# xoxb-000-fake\n");
+        let refusal = admitted(&spec(Some(&toml))).expect_err("refused");
+        assert_eq!(
+            refusal.message(),
+            format!(
+                "refused: SecretLiteral at spec.connectorsConfig: a value with the prefix \
+                 `xoxb-` (line {})",
+                lines + 2
+            )
+        );
+    }
+
+    #[test]
+    fn an_egress_entry_naming_neither_host_nor_namespace_is_refused_naming_it() {
+        let deployed = |egress: serde_json::Value| {
+            let mut deployed = spec(None);
+            deployed.agent["deploy"] = serde_json::json!({"kubernetes": {
+                "namespace": "agents", "service_account": "a",
+                "image_repository": "registry.example/a",
+                "resources": {"cpu": "100m", "memory": "128Mi"},
+                "egress": egress,
+            }});
+            admitted(&deployed)
+        };
+        let logs = serde_json::json!({"name": "logs", "namespace": "monitoring", "port": 3100});
+        deployed(serde_json::json!([logs])).expect("a namespace entry is admitted");
+        for anywhere in [
+            serde_json::json!({"name": "anywhere", "port": 6443}),
+            serde_json::json!({"name": "anywhere", "selector": [{"name": "app", "value": "x"}],
+                               "port": 6443}),
+        ] {
+            let refusal = deployed(serde_json::json!([logs, anywhere])).expect_err("refused");
+            assert_eq!(
+                refusal.message(),
+                "refused: EgressHostNotAllowed at spec.agent.deploy.kubernetes.egress[1]: it \
+                 names neither a host nor a namespace, so its rule would admit every \
+                 destination on its port"
+            );
+        }
     }
 
     #[test]

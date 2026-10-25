@@ -737,22 +737,31 @@ Admission, first refusal wins: `b10x_loom_agent::check_text` over `spec.agent` (
 `spec.agent.`); the same over `spec.routes`, taking only `SecretLiteral` from it, then `Malformed`
 when the routes are not a mapping or llm's strict parser (`llm_models::routes::Routes::parse`,
 which refuses an `auth.secret` that is a value and not an `env:`, `file:` or `keychain:` reference)
-refuses them; `spec.connectorsConfig` decoded as TOML (`Malformed` otherwise) and each decoded key
-and string walked; a routes or connectors text beyond the walk's bound (4096 `[` or `{` bytes,
-2 MiB) is `TooLarge`, never admitted unwalked; empty routes without `modelRoute`
-(`NoModelRoute`); a `secretRef` not allowed (`SecretNotAllowed`); a `deploy.kubernetes.namespace`
-other than the resource's (`NamespaceMismatch`); an egress host not allowed
-(`EgressHostNotAllowed`); then each child it would render is read, and one that exists without this
-resource as controller is `ChildNotOwned`, naming its kind and name. A child whose controller is a
+refuses them; `spec.connectorsConfig`, which the ConfigMap receives verbatim, decoded as TOML
+(`Malformed` otherwise) with each decoded key and string walked whole, then each word of them, then
+each word of the raw text, comments included (named by line); a routes or connectors document
+beyond the walk's bound (4096 `[` or `{` bytes, 2 MiB) is `TooLarge`, never admitted unwalked, and
+words are walked in sequences within it; empty routes without `modelRoute` (`NoModelRoute`); a
+`secretRef` not allowed (`SecretNotAllowed`); a `deploy.kubernetes.namespace` other than the
+resource's (`NamespaceMismatch`); an egress entry naming neither a host nor a namespace (its rule
+would admit every destination on its port), or a host not allowed (`EgressHostNotAllowed`); then
+each child it would render is read, and one that exists without this resource as controller is
+`ChildNotOwned`, naming its kind and name. That refusal is the cluster's, not the spec's: each later
+reconcile at that generation reads the children again, and once none is someone else's the record
+is forgotten and the generation applied and checked as created. A child whose controller is a
 `LoomAgent` of the same name with another uid (a predecessor not yet garbage-collected) is deleted
-instead, and the children are applied on the next reconcile. A Refused resource has no child: on
-every reconcile each child it controls is deleted (GET, owner check, delete with a uid
-precondition), so a failed delete is retried. A Running or Degraded resource has its children read
-again, then applied by server-side apply (field manager `b10x-loom-operator`, forced); a child
-someone else controls by then fails the reconcile and is not taken over. Then `ObserveDeployment`
-with what the applied Deployment reports, once its `observedGeneration` caught up. The status goes
-out by server-side apply on `/status`, only when it
-changed; conditions follow `src/status.rs` (a table per state in its module doc). Requeue after
+instead, and the children are applied on the next reconcile. The children a resource controls are
+found by its uid, not by the names its spec renders now: each kind listed by
+`app.kubernetes.io/instance=<name>`, plus each child the controller applied for that uid read by
+name, either counted only with a controller owner reference to the uid (a list answered 404 counts
+as empty). A Refused resource has no child: on every reconcile each child it controls is deleted
+with a uid precondition, so a failed delete is retried. A Running or Degraded resource has its
+children read again, then applied by server-side apply (field manager `b10x-loom-operator`,
+forced); a child someone else controls by then fails the reconcile and is not taken over. Then
+`ObserveDeployment` with what the applied Deployment reports, once its `observedGeneration` caught
+up, and each child it controls that this generation does not render (an account an earlier
+generation named, a Service once `expose.a2a` is gone) is deleted. The status goes out by
+server-side apply on `/status`, only when it changed; conditions follow `src/status.rs` (a table per state in its module doc). Requeue after
 300 s, retry after 30 s; `.owns(Deployment)` wakes it on a Deployment change. Deletion is the
 garbage collector's (owner references with `controller` and `blockOwnerDeletion`); the controller
 forgets the record. Each value serialized to YAML goes through JSON text (`admission::yaml`):
@@ -767,8 +776,8 @@ and `connectors.toml`; a Deployment (one replica, `Recreate`, init container
 user 10001, read-only root, no capability, seccomp `RuntimeDefault`, requests equal to limits,
 annotation `loom.beyond10x.dev/generation`, probes only with `expose.a2a`); a NetworkPolicy (deny by
 default; egress to DNS in `kube-system`, to each egress entry, and to the model route's port only
-with the default routes; ingress from each ingress entry); and with `expose.a2a` a Service (a stale
-one is deleted). `deploy.kubernetes.image_repository` is not read. The golden file
+with the default routes; ingress from each ingress entry); and with `expose.a2a` a Service.
+`deploy.kubernetes.image_repository` is not read. The golden file
 `tests/golden/platform-operator.yaml` is rewritten by
 `LOOM_OPERATOR_BLESS=1 cargo test -p b10x-loom-operator --test render`; review its diff.
 

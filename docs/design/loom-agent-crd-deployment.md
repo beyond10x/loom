@@ -182,11 +182,13 @@ when it publishes the status (`crates/loom-operator/src/status.rs`).
 
 Validation layers, in order: the CRD schema (structural, from the ESS domain); the controller's
 admission, before any child exists, which runs `b10x_loom_agent::check_text` (the library behind
-`b10x-loom agent check`) over `spec.agent`, refuses a credential in `spec.routes` or in the decoded
-`spec.connectorsConfig` TOML, reads `spec.routes` with llm's strict `llm.routes/1` parser (so an
-`auth.secret` that is a value and not a reference is refused), holds `secretRef`,
-`deploy.kubernetes.namespace` and the egress hosts to the controller's configuration, and refuses
-a child name that an object it does not control already holds, its answer landing in
+`b10x-loom agent check`) over `spec.agent`, refuses a credential in `spec.routes` or in
+`spec.connectorsConfig` (its decoded TOML, the words of each decoded string, and the words of the
+raw text the ConfigMap receives, comments included), reads `spec.routes` with llm's strict
+`llm.routes/1` parser (so an `auth.secret` that is a value and not a reference is refused), holds
+`secretRef`, `deploy.kubernetes.namespace` and the egress hosts to the controller's configuration
+(an egress entry naming neither a host nor a namespace is refused), and refuses a child name that
+an object it does not control already holds, its answer landing in
 `status.check`; then `b10x-loom agent check` again in the pod's init container, whose exit code is
 not read back.
 
@@ -225,12 +227,22 @@ Where the implementation (`story:loom-operator`) differs from this table and § 
 - "Server-side apply with the resource as owner" applies only over a child the resource already
   controls or that does not exist. Before applying, the controller reads each child: one held by
   any other controller, or by none (the controller's own ServiceAccount, `default`), refuses the
-  resource `ChildNotOwned` instead of being taken over and later garbage-collected with it. A
-  child of a deleted `LoomAgent` of the same name is deleted first, and the children are applied
-  on the next reconcile.
+  resource `ChildNotOwned` instead of being taken over and later garbage-collected with it. That
+  refusal depends on the cluster, not the spec, so the children are read again on each later
+  reconcile at that generation, and once none is someone else's the generation is applied and
+  checked as new. A child of a deleted `LoomAgent` of the same name is deleted first, and the
+  children are applied on the next reconcile.
 - The record is keyed by name, so the controller also holds each name's uid: a resource deleted
   and created again under its name is applied as new, not `unchanged` or `stale`. A Refused
   resource's children are deleted on every reconcile, so a failed delete is retried.
+- "Each child it controls" is found by the resource's uid, not by the names the current spec
+  renders: each child kind is listed by `app.kubernetes.io/instance`, and each child the
+  controller applied for that uid is read by name, either counting only with a controller owner
+  reference to the uid. A Refused resource loses every such child; a Running one loses each such
+  child this generation does not render (the ServiceAccount an earlier generation named, a Service
+  once `expose.a2a` is gone) after its children are applied.
+- An egress entry naming neither `host` nor `namespace` is refused `EgressHostNotAllowed`: its
+  rule would have no peer and admit every destination on its port.
 
 ## 6. Deployment through the platform's deployment repository
 

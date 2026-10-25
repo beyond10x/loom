@@ -1,8 +1,9 @@
 //! Acceptance for `story:loom-operator`: the reconcile loop against a fake API server, kube's mock
 //! client over `tower-test`, in-process. The fake answers server-side applies with the object
 //! applied and a uid naming its path (a Deployment with the availability the test sets), a read
-//! with the last object applied at that path or 404, and a delete with a `Status`. Nothing
-//! reaches a cluster.
+//! with the last object applied at that path or 404, a list by label selector with the objects
+//! of that collection whose labels match, and a delete with a `Status`. Nothing reaches a
+//! cluster.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -50,6 +51,15 @@ const CHILDREN: [&str; 5] = [
     "/api/v1/namespaces/agents/services/platform-operator",
 ];
 
+/// The collection of each child kind, in the order the controller lists them.
+const COLLECTIONS: [&str; 5] = [
+    "/api/v1/namespaces/agents/serviceaccounts",
+    "/api/v1/namespaces/agents/configmaps",
+    "/apis/apps/v1/namespaces/agents/deployments",
+    "/apis/networking.k8s.io/v1/namespaces/agents/networkpolicies",
+    "/api/v1/namespaces/agents/services",
+];
+
 /// One request the fake server answered.
 #[derive(Debug, Clone)]
 struct Seen {
@@ -57,6 +67,49 @@ struct Seen {
     path: String,
     query: String,
     body: Value,
+}
+
+impl Seen {
+    /// The label selector of a list, decoded: `None` for any other request.
+    fn selector(&self) -> Option<String> {
+        self.query
+            .split('&')
+            .find_map(|pair| pair.strip_prefix("labelSelector="))
+            .map(decoded)
+    }
+
+    /// A read of one object by name.
+    fn read(&self) -> bool {
+        self.method == Method::GET && self.selector().is_none()
+    }
+}
+
+/// `text`, percent-encoded as a query parameter, decoded.
+fn decoded(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        let hex = bytes
+            .get(at + 1..at + 3)
+            .and_then(|hex| std::str::from_utf8(hex).ok())
+            .and_then(|hex| u8::from_str_radix(hex, 16).ok());
+        match (bytes[at], hex) {
+            (b'%', Some(byte)) => {
+                out.push(byte);
+                at += 3;
+            }
+            (b'+', _) => {
+                out.push(b' ');
+                at += 1;
+            }
+            (byte, _) => {
+                out.push(byte);
+                at += 1;
+            }
+        }
+    }
+    String::from_utf8(out).expect("UTF-8")
 }
 
 /// The fake API server's state: what it saw, the last object applied at each path, and the
@@ -69,7 +122,43 @@ struct Server {
 }
 
 impl Server {
-    fn answer(&mut self, method: &Method, path: &str, body: &Value) -> (StatusCode, Value) {
+    fn answer(
+        &mut self,
+        method: &Method,
+        path: &str,
+        query: &str,
+        body: &Value,
+    ) -> (StatusCode, Value) {
+        let selector = query
+            .split('&')
+            .find_map(|pair| pair.strip_prefix("labelSelector="))
+            .map(decoded);
+        if let (&Method::GET, Some(selector)) = (method, selector) {
+            let wanted: Vec<(&str, &str)> = selector
+                .split(',')
+                .filter_map(|pair| pair.split_once('='))
+                .collect();
+            let collection = format!("{path}/");
+            let items: Vec<Value> = self
+                .objects
+                .iter()
+                .filter(|(at, _)| {
+                    at.strip_prefix(&collection)
+                        .is_some_and(|name| !name.contains('/'))
+                })
+                .filter(|(_, object)| {
+                    wanted
+                        .iter()
+                        .all(|(key, value)| object["metadata"]["labels"][*key] == *value)
+                })
+                .map(|(_, object)| object.clone())
+                .collect();
+            return (
+                StatusCode::OK,
+                json!({"apiVersion": "v1", "kind": "List", "metadata": {"resourceVersion": "1"},
+                       "items": items}),
+            );
+        }
         match *method {
             Method::PATCH if path.ends_with("/status") => (
                 StatusCode::OK,
@@ -153,6 +242,16 @@ impl Fake {
             .objects
             .contains_key(path)
     }
+
+    /// Removes the object at `path`, as if someone else had deleted it.
+    fn remove(&self, path: &str) {
+        self.server.lock().expect("the fake").objects.remove(path);
+    }
+
+    /// Every object the fake holds, by path.
+    fn objects(&self) -> BTreeMap<String, Value> {
+        self.server.lock().expect("the fake").objects.clone()
+    }
 }
 
 /// An object at `path` named `name` whose controller is `controller` (kind, name, uid), or none.
@@ -186,7 +285,7 @@ fn fake() -> (Client, Fake) {
             let query = parts.uri.query().unwrap_or_default().to_owned();
             let (status, answer) = {
                 let mut server = shared.lock().expect("the fake");
-                let answer = server.answer(&parts.method, &path, &body);
+                let answer = server.answer(&parts.method, &path, &query, &body);
                 server.seen.push(Seen {
                     method: parts.method,
                     path,
@@ -212,6 +311,34 @@ fn root() -> PathBuf {
 
 fn example() -> String {
     fs::read_to_string(root().join("examples/agents/operator.yaml")).expect("the example spec")
+}
+
+/// The example with its ServiceAccount named `account`.
+fn named(account: &str) -> String {
+    let spec = example().replace(
+        "service_account: platform-operator",
+        &format!("service_account: {account}"),
+    );
+    assert!(spec.contains(&format!("service_account: {account}")));
+    spec
+}
+
+/// `spec` with a password in a binding's URL: refused `SecretLiteral`.
+fn with_secret_literal(spec: &str) -> String {
+    let refused = spec.replace(
+        "http://logs.monitoring.svc:3100",
+        "http://ops:not-a-real-password@logs.monitoring.svc:3100",
+    );
+    assert_ne!(refused, spec);
+    refused
+}
+
+/// The paths of the requests in `seen` with `method`, in order.
+fn paths<'a>(seen: &'a [Seen], method: &Method) -> Vec<&'a str> {
+    seen.iter()
+        .filter(|seen| seen.method == *method)
+        .map(|seen| seen.path.as_str())
+        .collect()
 }
 
 /// `spec_agent` wrapped as the `LoomAgent` `platform-operator` at `generation`, with `rest`
@@ -305,7 +432,7 @@ async fn a_created_resource_is_checked_its_children_applied_and_its_status_runni
     }
     let reads: Vec<&str> = seen
         .iter()
-        .filter(|seen| seen.method == Method::GET)
+        .filter(|seen| seen.read())
         .map(|seen| seen.path.as_str())
         .collect();
     assert_eq!(
@@ -313,10 +440,30 @@ async fn a_created_resource_is_checked_its_children_applied_and_its_status_runni
         "each child is read once, to take over none"
     );
     assert!(
-        seen[..CHILDREN.len()]
-            .iter()
-            .all(|seen| seen.method == Method::GET),
+        seen[..CHILDREN.len()].iter().all(Seen::read),
         "every read comes before the first apply: {seen:?}"
+    );
+    let first_apply = CHILDREN.len();
+    let last_apply = first_apply + CHILDREN.len();
+    assert_eq!(applies(&seen[first_apply..last_apply]), CHILDREN);
+    let lists: Vec<(&str, String)> = seen
+        .iter()
+        .filter_map(|seen| Some((seen.path.as_str(), seen.selector()?)))
+        .collect();
+    assert_eq!(
+        lists,
+        COLLECTIONS.map(|path| (
+            path,
+            "app.kubernetes.io/instance=platform-operator".to_owned()
+        )),
+        "each child kind is listed by the instance label, to delete what this generation does \
+         not render"
+    );
+    assert!(
+        seen[last_apply..last_apply + COLLECTIONS.len()]
+            .iter()
+            .all(|seen| seen.selector().is_some()),
+        "the lists follow the last apply: {seen:?}"
     );
     assert!(
         seen.iter()
@@ -761,4 +908,167 @@ async fn children_a_predecessor_left_are_deleted_and_applied_on_the_next_reconci
     {
         assert_eq!(apply.body["metadata"]["ownerReferences"][0]["uid"], UID);
     }
+}
+
+#[tokio::test]
+async fn a_service_account_a_new_generation_no_longer_names_is_deleted_after_the_apply() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    let old = "/api/v1/namespaces/agents/serviceaccounts/operator-account";
+    let new = "/api/v1/namespaces/agents/serviceaccounts/another-account";
+    reconciled(agent(1, &named("operator-account"), DEFAULT_ROUTES), &ctx).await;
+    assert!(fake.holds(old));
+    fake.take();
+
+    reconciled(agent(2, &named("another-account"), DEFAULT_ROUTES), &ctx).await;
+    let seen = fake.take();
+    assert!(applies(&seen).contains(&new), "{seen:?}");
+    assert_eq!(paths(&seen, &Method::DELETE), [old]);
+    let delete = seen
+        .iter()
+        .position(|seen| seen.method == Method::DELETE)
+        .expect("a delete");
+    assert_eq!(
+        seen[delete].body["preconditions"]["uid"],
+        format!("uid-of-{old}")
+    );
+    let last_apply = seen
+        .iter()
+        .rposition(|seen| seen.method == Method::PATCH && !seen.path.ends_with("/status"))
+        .expect("an apply");
+    assert!(
+        last_apply < delete,
+        "the old account goes once the new children are applied: {seen:?}"
+    );
+    assert!(!fake.holds(old));
+    assert!(fake.holds(new));
+    assert_eq!(published(&seen)["state"], "Running");
+}
+
+/// After a restart the controller has applied nothing: the children an earlier generation had
+/// are found by the instance label, and only those this resource controls are deleted.
+#[tokio::test]
+async fn after_a_restart_a_refused_generation_deletes_the_children_it_finds_by_label() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(agent(1, &named("operator-account"), DEFAULT_ROUTES), &ctx).await;
+    fake.take();
+
+    let (fresh_client, fresh) = self::fake();
+    for (path, object) in fake.objects() {
+        fresh.put(&path, object);
+    }
+    let theirs = "/api/v1/namespaces/agents/configmaps/platform-operator-notes";
+    let mut labelled = object("platform-operator-notes", theirs, None);
+    labelled["metadata"]["labels"] = json!({"app.kubernetes.io/instance": NAME});
+    fresh.put(theirs, labelled);
+    let restarted = context(fresh_client);
+    reconciled(
+        agent(
+            2,
+            &with_secret_literal(&named("another-account")),
+            DEFAULT_ROUTES,
+        ),
+        &restarted,
+    )
+    .await;
+    let seen = fresh.take();
+    assert_eq!(published(&seen)["state"], "Refused");
+    assert!(
+        seen.iter().all(|seen| !seen.read()),
+        "nothing is read by name: {seen:?}"
+    );
+    assert_eq!(
+        paths(&seen, &Method::DELETE),
+        [
+            "/api/v1/namespaces/agents/serviceaccounts/operator-account",
+            CHILDREN[1],
+            CHILDREN[2],
+            CHILDREN[3],
+            CHILDREN[4],
+        ]
+    );
+    assert_eq!(
+        fresh.objects().into_keys().collect::<Vec<_>>(),
+        [theirs],
+        "only the labelled ConfigMap no one controls is left"
+    );
+}
+
+#[tokio::test]
+async fn a_child_not_owned_refusal_is_read_again_and_clears_once_the_child_is_gone() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    let config_map = CHILDREN[1];
+    fake.put(
+        config_map,
+        object("platform-operator-spec", config_map, None),
+    );
+    reconciled(agent(1, &example(), DEFAULT_ROUTES), &ctx).await;
+    let status = published(&fake.take());
+    assert_eq!(status["state"], "Refused");
+    let mut current = agent(1, &example(), DEFAULT_ROUTES);
+    current.status = Some(serde_json::from_value(status).expect("the published status"));
+    let events = ctx.events().len();
+
+    reconciled(current.clone(), &ctx).await;
+    let seen = fake.take();
+    assert_eq!(
+        seen.iter()
+            .filter(|seen| seen.read())
+            .map(|seen| seen.path.as_str())
+            .collect::<Vec<_>>(),
+        CHILDREN,
+        "the children are read again"
+    );
+    assert!(applies(&seen).is_empty(), "no apply call: {seen:?}");
+    assert!(
+        seen.iter().all(|seen| seen.path != STATUS),
+        "the refusal stands: {seen:?}"
+    );
+    assert_eq!(ctx.events().len(), events, "the record is not touched");
+
+    fake.remove(config_map);
+    reconciled(current, &ctx).await;
+    let seen = fake.take();
+    assert_eq!(applies(&seen), CHILDREN);
+    let status = published(&seen);
+    assert_eq!(status["state"], "Running");
+    assert_eq!(status["observedGeneration"], 1);
+    assert_eq!(status["check"]["exitCode"], 0);
+    assert_eq!(
+        ctx.events()[events..],
+        [
+            ResourceEvent::Deleted(LoomAgentDeleted { name: name() }),
+            ResourceEvent::Applied(LoomAgentApplied {
+                name: name(),
+                generation: 1
+            }),
+            ResourceEvent::Running(LoomAgentRunning {
+                name: name(),
+                generation: 1
+            }),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_refusal_of_the_spec_reads_no_child_again() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    let refused = with_secret_literal(&example());
+    reconciled(agent(1, &refused, DEFAULT_ROUTES), &ctx).await;
+    let status = published(&fake.take());
+    let mut current = agent(1, &refused, DEFAULT_ROUTES);
+    current.status = Some(serde_json::from_value(status).expect("the published status"));
+    let events = ctx.events().len();
+
+    reconciled(current, &ctx).await;
+    let seen = fake.take();
+    assert!(
+        seen.iter()
+            .all(|seen| !seen.read() && seen.method == Method::GET),
+        "only the lists of what it controls: {seen:?}"
+    );
+    assert_eq!(ctx.events().len(), events);
 }

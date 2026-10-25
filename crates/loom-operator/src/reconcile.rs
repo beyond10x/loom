@@ -15,25 +15,35 @@
 //!    read, and one that exists without this resource as its controller is refused
 //!    (`ChildNotOwned`, naming its kind and name), unless its controller is a `LoomAgent` of the
 //!    same name with another uid (a predecessor). The answer is recorded with `RecordCheck`: exit
-//!    code 0 and the check's line, or 3 and the refusal.
-//! 4. A `Refused` resource has no children: on every reconcile each child it owns as controller
-//!    is deleted, preconditioned on the uid read, so a delete that failed is tried again.
+//!    code 0 and the check's line, or 3 and the refusal. A `ChildNotOwned` refusal is about the
+//!    cluster, not the spec: on each later reconcile at the same generation the children are read
+//!    again, and once none is someone else's the record is forgotten and the generation applied
+//!    and checked as created, in the same reconcile.
+//! 4. A `Refused` resource has no children: on every reconcile each child it controls is deleted,
+//!    preconditioned on the uid read, so a delete that failed is tried again.
 //! 5. A `Running` or `Degraded` resource has its children read again: a child a predecessor
 //!    controls is deleted and the children are applied on the next reconcile, after [`RETRY`]; a
 //!    child someone else controls fails the reconcile ([`Error::NotOwned`]) and is never taken
 //!    over. Otherwise the children are applied by server-side apply, field manager
 //!    `b10x-loom-operator`, forced; the Deployment's `Available` condition in the apply's answer,
-//!    when its status has observed the applied generation, is `ObserveDeployment`. A Service an
-//!    earlier generation had is deleted once `expose.a2a` is gone.
+//!    when its status has observed the applied generation, is `ObserveDeployment`. Then each
+//!    child it controls that this generation does not render (a Service once `expose.a2a` is
+//!    gone, the ServiceAccount an earlier generation named) is deleted.
 //! 6. The record's row is published as the status by server-side apply on the status
 //!    subresource, unless the status already reads so.
+//!
+//! The children a resource controls are found by its uid, not by the names its current spec
+//! renders: each child kind is listed by the label `app.kubernetes.io/instance: <resource>`, and
+//! each child the controller applied for that uid is read by name as well; either one counts
+//! only when its controlling owner reference names the resource's uid. A kind the API server
+//! does not serve (a list answered 404) holds none.
 //!
 //! The next reconcile comes after [`REQUEUE`], on any change to the resource or to a Deployment
 //! it owns, and after [`RETRY`] when one fails. After a restart the record is empty: every
 //! resource is created again at its cluster generation, checked again, and its status rewritten.
 //! The controller reads and writes no Secret and reads no Pod.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -50,12 +60,12 @@ use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::core::v1::{ConfigMap, Service, ServiceAccount};
 use k8s_openapi::api::networking::v1::NetworkPolicy;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
-use kube::api::{Api, DeleteParams, Patch, PatchParams, Preconditions};
+use kube::api::{Api, DeleteParams, ListParams, Patch, PatchParams, Preconditions};
 use kube::runtime::controller::{self, Action, Controller};
 use kube::runtime::watcher;
 use kube::{Client, Resource, ResourceExt};
 use loom_protocols::ProtocolCatalog;
-use loom_sdk::agent::{AgentSpec, parse};
+use loom_sdk::agent::AgentSpec;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -117,6 +127,15 @@ impl From<UnmetObligation> for Error {
     }
 }
 
+/// What the controller holds of a resource beside its record: its uid, and each child (kind and
+/// name) it applied for that uid and has not seen deleted, so a child a later generation no
+/// longer renders is found by name as well as by its label.
+#[derive(Debug)]
+struct Held {
+    uid: String,
+    applied: BTreeSet<(Kind, String)>,
+}
+
 /// What every reconcile shares: the client, the configuration, the plugin catalog the check
 /// reads, and the record.
 pub struct Context {
@@ -124,7 +143,7 @@ pub struct Context {
     config: Config,
     catalog: ProtocolCatalog,
     record: Mutex<LoomAgentRecord>,
-    uids: Mutex<HashMap<String, String>>,
+    held: Mutex<HashMap<String, Held>>,
 }
 
 impl Context {
@@ -138,7 +157,7 @@ impl Context {
             config,
             catalog: ProtocolCatalog::plugins()?,
             record: Mutex::new(LoomAgentRecord::new()),
-            uids: Mutex::new(HashMap::new()),
+            held: Mutex::new(HashMap::new()),
         })
     }
 
@@ -146,22 +165,57 @@ impl Context {
         self.record.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn uids(&self) -> MutexGuard<'_, HashMap<String, String>> {
-        self.uids.lock().unwrap_or_else(PoisonError::into_inner)
+    fn held(&self) -> MutexGuard<'_, HashMap<String, Held>> {
+        self.held.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Holds `uid` as the uid of the resource `name`. When another uid was held, the record's
     /// entry belongs to a resource since deleted and created again under the name: it is
-    /// forgotten, so the new resource is applied as created.
+    /// forgotten, with the children applied for it, so the new resource is applied as created.
     fn hold(&self, name: &str, uid: &str) {
         if uid.is_empty() {
             return;
         }
-        let previous = self.uids().insert(name.to_owned(), uid.to_owned());
-        if previous.is_some_and(|previous| previous != uid) {
+        let fresh = || Held {
+            uid: uid.to_owned(),
+            applied: BTreeSet::new(),
+        };
+        let replaced = {
+            let mut held = self.held();
+            let entry = held.entry(name.to_owned()).or_insert_with(fresh);
+            if entry.uid == uid {
+                false
+            } else {
+                *entry = fresh();
+                true
+            }
+        };
+        if replaced {
             let _ = self.record().delete_loom_agent(DeleteLoomAgent {
                 name: ResourceName(name.to_owned()),
             });
+        }
+    }
+
+    /// Each child applied for the resource `name` and not seen deleted.
+    fn applied(&self, name: &str) -> Vec<(Kind, String)> {
+        self.held()
+            .get(name)
+            .map(|held| held.applied.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Notes that the child `kind` `child` is applied for the resource `name`.
+    fn remember(&self, name: &str, kind: Kind, child: &str) {
+        if let Some(held) = self.held().get_mut(name) {
+            held.applied.insert((kind, child.to_owned()));
+        }
+    }
+
+    /// Notes that the child `kind` `child` of the resource `name` is gone or not its own.
+    fn unremember(&self, name: &str, kind: Kind, child: &str) {
+        if let Some(held) = self.held().get_mut(name) {
+            held.applied.remove(&(kind, child.to_owned()));
         }
     }
 
@@ -180,7 +234,7 @@ impl Context {
     /// Forgets the resource `name`: `DeleteLoomAgent`. A name the record does not hold is
     /// answered `unknown` and changes nothing.
     pub fn forget(&self, name: &str) {
-        self.uids().remove(name);
+        self.held().remove(name);
         let _ = self.record().delete_loom_agent(DeleteLoomAgent {
             name: ResourceName(name.to_owned()),
         });
@@ -214,8 +268,8 @@ where
         .await
 }
 
-/// The kinds of child a resource renders.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The kinds of child a resource renders, in the order they are applied and deleted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Kind {
     ServiceAccount,
     ConfigMap,
@@ -225,6 +279,14 @@ enum Kind {
 }
 
 impl Kind {
+    const ALL: [Self; 5] = [
+        Self::ServiceAccount,
+        Self::ConfigMap,
+        Self::Deployment,
+        Self::NetworkPolicy,
+        Self::Service,
+    ];
+
     fn as_str(self) -> &'static str {
         match self {
             Self::ServiceAccount => "ServiceAccount",
@@ -361,19 +423,135 @@ async fn delete_kind(
     }
 }
 
-/// Deletes the child of `kind` named `name` when the resource whose uid is `owner` controls it;
-/// a child that is gone, or someone else's, is left alone.
-async fn delete_owned(
+/// The label selector of every child of the resource `resource`.
+fn instance(resource: &str) -> String {
+    format!("app.kubernetes.io/instance={resource}")
+}
+
+/// The name and uid of each `K` labelled as a child of the resource `resource` that the
+/// resource, whose uid is `owner`, controls. A kind the API server does not serve (404) holds
+/// none.
+async fn listed<K>(
+    client: &Client,
+    namespace: &str,
+    resource: &str,
+    owner: &str,
+) -> Result<Vec<(String, String)>, kube::Error>
+where
+    K: Resource<Scope = NamespaceResourceScope, DynamicType = ()>
+        + Clone
+        + Debug
+        + DeserializeOwned,
+{
+    let api: Api<K> = Api::namespaced(client.clone(), namespace);
+    let list = match api
+        .list(&ListParams::default().labels(&instance(resource)))
+        .await
+    {
+        Ok(list) => list,
+        Err(kube::Error::Api(status)) if status.code == 404 => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    Ok(list
+        .items
+        .iter()
+        .filter_map(|child| match holding(child.meta(), resource, owner) {
+            Holding::Ours(uid) => Some((child.name_any(), uid)),
+            _ => None,
+        })
+        .collect())
+}
+
+/// [`listed`] for the child kind `kind`.
+async fn listed_kind(
     kind: Kind,
     client: &Client,
     namespace: &str,
-    name: &str,
+    resource: &str,
     owner: &str,
-) -> Result<(), kube::Error> {
-    match held_kind(kind, client, namespace, name, "", owner).await? {
-        Holding::Ours(uid) => delete_kind(kind, client, namespace, name, &uid).await,
-        _ => Ok(()),
+) -> Result<Vec<(String, String)>, kube::Error> {
+    match kind {
+        Kind::ServiceAccount => listed::<ServiceAccount>(client, namespace, resource, owner).await,
+        Kind::ConfigMap => listed::<ConfigMap>(client, namespace, resource, owner).await,
+        Kind::Deployment => listed::<Deployment>(client, namespace, resource, owner).await,
+        Kind::NetworkPolicy => listed::<NetworkPolicy>(client, namespace, resource, owner).await,
+        Kind::Service => listed::<Service>(client, namespace, resource, owner).await,
     }
+}
+
+/// A child the resource controls: its kind, name and uid.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct Owned {
+    kind: Kind,
+    name: String,
+    uid: String,
+}
+
+/// Every child the resource `resource`, whose uid is `owner`, controls, except those in `keep`,
+/// in the order [`Kind`] gives: each kind listed by the instance label, then each child applied
+/// for the uid read by name, so one whose label was changed is found all the same. A child read
+/// by name that is gone or not the resource's is no longer remembered.
+async fn owned(
+    ctx: &Context,
+    namespace: &str,
+    resource: &str,
+    owner: &str,
+    keep: &BTreeSet<(Kind, String)>,
+) -> Result<Vec<Owned>, kube::Error> {
+    let mut found = BTreeSet::new();
+    for kind in Kind::ALL {
+        for (name, uid) in listed_kind(kind, &ctx.client, namespace, resource, owner).await? {
+            if !keep.contains(&(kind, name.clone())) {
+                found.insert(Owned { kind, name, uid });
+            }
+        }
+    }
+    for (kind, name) in ctx.applied(resource) {
+        if keep.contains(&(kind, name.clone()))
+            || found
+                .iter()
+                .any(|child| child.kind == kind && child.name == name)
+        {
+            continue;
+        }
+        match held_kind(kind, &ctx.client, namespace, &name, resource, owner).await? {
+            Holding::Ours(uid) => {
+                found.insert(Owned { kind, name, uid });
+            }
+            _ => ctx.unremember(resource, kind, &name),
+        }
+    }
+    Ok(found.into_iter().collect())
+}
+
+/// Deletes every child the resource `resource`, whose uid is `owner`, controls, except those in
+/// `keep`, each preconditioned on the uid read.
+async fn delete_owned(
+    ctx: &Context,
+    namespace: &str,
+    resource: &str,
+    owner: &str,
+    keep: &BTreeSet<(Kind, String)>,
+) -> Result<(), kube::Error> {
+    for child in owned(ctx, namespace, resource, owner, keep).await? {
+        delete_kind(child.kind, &ctx.client, namespace, &child.name, &child.uid).await?;
+        ctx.unremember(resource, child.kind, &child.name);
+    }
+    Ok(())
+}
+
+/// The kind and name of each of `children`, in the order they are applied.
+fn wanted(children: &Children) -> Vec<(Kind, String)> {
+    let mut wanted = vec![
+        (Kind::ServiceAccount, children.service_account.name_any()),
+        (Kind::ConfigMap, children.config_map.name_any()),
+        (Kind::Deployment, children.deployment.name_any()),
+        (Kind::NetworkPolicy, children.network_policy.name_any()),
+    ];
+    if let Some(service) = &children.service {
+        wanted.push((Kind::Service, service.name_any()));
+    }
+    wanted
 }
 
 /// One child a resource renders, and who controls it now.
@@ -392,15 +570,7 @@ async fn survey(
     owner: &str,
     children: &Children,
 ) -> Result<Vec<Surveyed>, kube::Error> {
-    let mut wanted = vec![
-        (Kind::ServiceAccount, children.service_account.name_any()),
-        (Kind::ConfigMap, children.config_map.name_any()),
-        (Kind::Deployment, children.deployment.name_any()),
-        (Kind::NetworkPolicy, children.network_policy.name_any()),
-    ];
-    if let Some(service) = &children.service {
-        wanted.push((Kind::Service, service.name_any()));
-    }
+    let wanted = wanted(children);
     let mut found = Vec::with_capacity(wanted.len());
     for (kind, name) in wanted {
         let holding = held_kind(kind, client, namespace, &name, resource, owner).await?;
@@ -411,6 +581,17 @@ async fn survey(
         });
     }
     Ok(found)
+}
+
+/// The reason of a refusal the children's survey gave, not the spec.
+pub const CHILD_NOT_OWNED: &str = "ChildNotOwned";
+
+/// Whether `message`, a recorded check, is a refusal the children's survey gave.
+fn survey_refusal(message: &str) -> bool {
+    message
+        .strip_prefix("refused: ")
+        .and_then(|rest| rest.strip_prefix(CHILD_NOT_OWNED))
+        .is_some_and(|rest| rest.starts_with(" at "))
 }
 
 /// The refusal of a resource one of whose children someone else controls: the first such child.
@@ -425,7 +606,7 @@ fn not_owned(found: &[Surveyed], spec: &AgentSpec) -> Option<admission::Refusal>
             .and_then(|deploy| deploy.kubernetes.as_ref())
             .is_some();
     Some(admission::Refusal {
-        reason: "ChildNotOwned".to_owned(),
+        reason: CHILD_NOT_OWNED.to_owned(),
         member: if named_by_spec {
             "spec.agent.deploy.kubernetes.service_account"
         } else {
@@ -477,27 +658,6 @@ async fn apply_children(
     Ok(availability(&deployment))
 }
 
-/// Deletes every child the resource `name`, whose uid is `owner`, may own.
-async fn delete_children(
-    client: &Client,
-    namespace: &str,
-    name: &str,
-    owner: &str,
-    service_account: &str,
-) -> Result<(), kube::Error> {
-    let config_map = render::config_map_name(name);
-    for (kind, child) in [
-        (Kind::ServiceAccount, service_account),
-        (Kind::ConfigMap, config_map.as_str()),
-        (Kind::Deployment, name),
-        (Kind::NetworkPolicy, name),
-        (Kind::Service, name),
-    ] {
-        delete_owned(kind, client, namespace, child, owner).await?;
-    }
-    Ok(())
-}
-
 /// Publishes `row` as the status of the resource `name`, unless `current` already reads so.
 async fn publish(
     ctx: &Context,
@@ -547,14 +707,6 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
     let owner = agent.metadata.uid.clone().unwrap_or_default();
     ctx.hold(&name, &owner);
 
-    let applied = ctx.record().apply_loom_agent(ApplyLoomAgent {
-        name: key.clone(),
-        generation,
-    })?;
-    if matches!(applied, ApplyLoomAgentOutcome::Stale { .. }) {
-        return Ok(Action::requeue(RETRY));
-    }
-
     let admitted = ctx.admit(&agent, &namespace);
     let rendered = admitted.as_ref().map(|admitted| {
         (
@@ -563,11 +715,40 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
         )
     });
     let mut surveyed = None;
+    let recorded = ctx.record().agent(&key);
+    if let (Ok((_, children)), Some(recorded)) = (&rendered, &recorded)
+        && recorded.state == LoomAgentState::Refused
+        && recorded.data.observed_generation == generation
+        && recorded
+            .data
+            .check
+            .as_ref()
+            .is_some_and(|check| survey_refusal(&check.message))
+    {
+        let found = survey(&ctx.client, &namespace, &name, &owner, children).await?;
+        if found.iter().all(|child| child.holding != Holding::Foreign) {
+            ctx.record()
+                .delete_loom_agent(DeleteLoomAgent { name: key.clone() })?;
+            surveyed = Some(found);
+        }
+    }
+
+    let applied = ctx.record().apply_loom_agent(ApplyLoomAgent {
+        name: key.clone(),
+        generation,
+    })?;
+    if matches!(applied, ApplyLoomAgentOutcome::Stale { .. }) {
+        return Ok(Action::requeue(RETRY));
+    }
+
     let state = ctx.record().agent(&key).map(|held| held.state);
     if state == Some(LoomAgentState::Pending) {
         let checked = match &rendered {
             Ok((admitted, children)) => {
-                let found = survey(&ctx.client, &namespace, &name, &owner, children).await?;
+                let found = match surveyed.take() {
+                    Some(found) => found,
+                    None => survey(&ctx.client, &namespace, &name, &owner, children).await?,
+                };
                 let refusal = not_owned(&found, &admitted.spec);
                 surveyed = Some(found);
                 refusal.map_or_else(|| Ok(admitted.message()), Err)
@@ -589,11 +770,7 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
     let state = ctx.record().agent(&key).map(|held| held.state);
     match (state, &rendered) {
         (Some(LoomAgentState::Refused), _) if !owner.is_empty() => {
-            let spec = admission::yaml(&agent.spec.agent, "spec.agent")
-                .ok()
-                .and_then(|text| parse(&text).ok());
-            let account = render::service_account_name(&name, spec.as_ref());
-            delete_children(&ctx.client, &namespace, &name, &owner, &account).await?;
+            delete_owned(&ctx, &namespace, &name, &owner, &BTreeSet::new()).await?;
         }
         (Some(LoomAgentState::Running | LoomAgentState::Degraded), Ok((_, children))) => {
             let found = match surveyed {
@@ -611,15 +788,19 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                 .filter(|child| matches!(child.holding, Holding::Predecessor(_)))
                 .collect();
             if predecessors.is_empty() {
-                let available = apply_children(&ctx.client, &namespace, children).await?;
-                if children.service.is_none() && !owner.is_empty() {
-                    delete_owned(Kind::Service, &ctx.client, &namespace, &name, &owner).await?;
+                let current: BTreeSet<(Kind, String)> = wanted(children).into_iter().collect();
+                for (kind, child) in &current {
+                    ctx.remember(&name, *kind, child);
                 }
+                let available = apply_children(&ctx.client, &namespace, children).await?;
                 if let Some(availability) = available {
                     ctx.record().observe_deployment(ObserveDeployment {
                         name: key.clone(),
                         availability,
                     })?;
+                }
+                if !owner.is_empty() {
+                    delete_owned(&ctx, &namespace, &name, &owner, &current).await?;
                 }
             } else {
                 for child in predecessors {
