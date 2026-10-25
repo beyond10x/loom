@@ -50,6 +50,7 @@
 //! observation of one scenario can satisfy another. Consistency tokens come from a counter, so two
 //! runs of one suite report the same thing.
 
+mod a2a;
 mod agent;
 pub mod codec;
 mod session;
@@ -210,6 +211,8 @@ impl ConformanceTarget for LoomTarget {
             agent::ADMIT_SEND => agent::admit_send_command(input),
             agent::ADMIT_HTTP_READ => agent::admit_http_read_command(input),
             agent::BOUND_HTTP_ANSWER => agent::bound_http_answer_command(input),
+            a2a::ADMIT_A2A_REQUEST => a2a::admit_a2a_request_command(input),
+            a2a::ADMIT_SERVE => a2a::admit_serve_command(input),
             other => {
                 return Err(TargetError::unavailable(
                     format!("invoking `{other}`"),

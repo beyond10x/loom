@@ -497,6 +497,20 @@ types:
     kind: enum
     variants: [MethodNotGet, PathNotAllowed, BearerMissing, Redirected, FailedStatus]
 
+  # Why the A2A listener of a served agent refuses a request (story agent-a2a), one reason per
+  # refusal of `AdmitA2aRequest`: the request carries no `Authorization: Bearer` header
+  # (`MissingBearer`); it carries one whose token is not the agent's (`WrongBearer`).
+  - name: loom.agent.A2aRefusalReason
+    kind: enum
+    variants: [MissingBearer, WrongBearer]
+
+  # Why `b10x-loom agent serve` does not serve a spec `CheckAgentSpec` accepts (story agent-a2a),
+  # one reason per refusal of `AdmitServe`: the spec declares neither a `channel` to poll nor
+  # `expose.a2a` to answer on, so the host would run nothing (`NothingToServe`).
+  - name: loom.agent.ServeRefusalReason
+    kind: enum
+    variants: [NothingToServe]
+
 errors:
   # The refusal of `AdmitSend`: why, and whether it is final. A final refusal ends the turn's run
   # (Commission's `EffectOutcomeRefused.ends_run`): the item is handled and its reply never sent. A
@@ -526,6 +540,19 @@ errors:
         type: String
       - name: detail
         type: String
+
+  # The refusal of `AdmitA2aRequest`: why. The listener answers it `401` before it reads the
+  # request's body, so a refused request runs no turn and reads nothing.
+  - name: loom.agent.A2aRefused
+    fields:
+      - name: reason
+        type: loom.agent.A2aRefusalReason
+
+  # The refusal of `AdmitServe`: why. The host exits before it reads, calls a model or records.
+  - name: loom.agent.ServeRefused
+    fields:
+      - name: reason
+        type: loom.agent.ServeRefusalReason
 
 commands:
   # Whether the `loom.agent/1` document at `path` can be served: `b10x-loom agent check --spec`.
@@ -706,4 +733,77 @@ commands:
         when: bytes > max_bytes
         accepts: nothing
       - name: whole
+        accepts: nothing
+
+  # Whether the A2A listener of a served agent (`expose.a2a`, story agent-a2a) answers a request:
+  # decided on the request line and its headers, before the body is read. `probe` is whether the
+  # request is `GET /ready` or `GET /live`, which the pod's probes send without a bearer;
+  # `bearer_presented` whether it carries an `Authorization: Bearer` header; `bearer_matches`
+  # whether that token is the one the agent's Secret gives it. A probe is answered whatever it
+  # carries; every other request (the agent card, `message/send`, the task status, any other path)
+  # needs the bearer. The first refusal in declaration order is the answer, so a request with no
+  # header is `missing-bearer` whatever `bearer_matches` says. Nothing is held between two
+  # decisions.
+  - name: loom.agent.AdmitA2aRequest
+    input:
+      - name: probe
+        type: Boolean
+      - name: bearer_presented
+        type: Boolean
+      - name: bearer_matches
+        type: Boolean
+    outcomes:
+      - name: missing-bearer
+        when:
+          all:
+            - probe == false
+            - bearer_presented == false
+        error: loom.agent.A2aRefused
+        payload:
+          loom.agent.A2aRefused: {reason: MissingBearer}
+      - name: wrong-bearer
+        when:
+          all:
+            - probe == false
+            - bearer_matches == false
+        error: loom.agent.A2aRefused
+        payload:
+          loom.agent.A2aRefused: {reason: WrongBearer}
+      - name: probe
+        when: probe == true
+        accepts: nothing
+      - name: admitted
+        accepts: nothing
+
+  # Whether `b10x-loom agent serve` serves a spec `CheckAgentSpec` accepts, and what its host runs
+  # (story agent-a2a): `channel` is whether the spec declares a `channel`, `a2a` whether it
+  # declares `expose.a2a`. A spec with neither is refused: the host would run nothing. With a
+  # channel the host polls it, and with `expose.a2a` as well it answers A2A beside the poll; with
+  # `expose.a2a` alone it polls nothing and its main loop is the A2A listener, which SIGTERM ends
+  # as it ends the poll. Decided before anything is read, a model called or a record written.
+  - name: loom.agent.AdmitServe
+    input:
+      - name: channel
+        type: Boolean
+      - name: a2a
+        type: Boolean
+    outcomes:
+      - name: nothing-to-serve
+        when:
+          all:
+            - channel == false
+            - a2a == false
+        error: loom.agent.ServeRefused
+        payload:
+          loom.agent.ServeRefused: {reason: NothingToServe}
+      - name: polls-and-answers
+        when:
+          all:
+            - channel == true
+            - a2a == true
+        accepts: nothing
+      - name: polls
+        when: channel == true
+        accepts: nothing
+      - name: answers
         accepts: nothing

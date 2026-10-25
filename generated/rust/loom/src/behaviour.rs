@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 09af172219b0fefa59e5b1327d8ad0c0d091a965ea1b67545155c88d6e8aeb27
-// contract digest 61002ca6f629015a9d3d582787f5c77dc4c33faaa158cf586504ae6079c93399
+// model digest 4a99756f85a24fac97752e928c318c5c1b6ffbd3343706808e92c1fbf83dada5
+// contract digest d1418824cb56c636461a5a81d92386592eac2357fd0ef3ac5cffc66165578878
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -168,6 +168,28 @@ impl<P> Generated<P> {
     }
 }
 
+/// `loom.agent.AdmitA2aRequest`, generated: every outcome is one the specification fully determines.
+impl<P> crate::agent::obligations::AdmitA2aRequestBehavior for Generated<P>
+{
+    fn admit_a2a_request(&mut self, input: crate::agent::AdmitA2aRequest) -> Result<crate::agent::AdmitA2aRequestOutcome, UnmetObligation> {
+        let _ = &input;
+        // `missing-bearer`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(all(&[equal(Some(&input.probe).map(|value| *value), Some(false)), equal(Some(&input.bearer_presented).map(|value| *value), Some(false))]), "loom.agent.AdmitA2aRequest")? {
+            return Ok(crate::agent::AdmitA2aRequestOutcome::MissingBearer { error: crate::agent::A2aRefused { reason: crate::agent::A2aRefusalReason::MissingBearer } });
+        }
+        // `wrong-bearer`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(all(&[equal(Some(&input.probe).map(|value| *value), Some(false)), equal(Some(&input.bearer_matches).map(|value| *value), Some(false))]), "loom.agent.AdmitA2aRequest")? {
+            return Ok(crate::agent::AdmitA2aRequestOutcome::WrongBearer { error: crate::agent::A2aRefused { reason: crate::agent::A2aRefusalReason::WrongBearer } });
+        }
+        // `probe`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.probe).map(|value| *value), Some(true)), "loom.agent.AdmitA2aRequest")? {
+            return Ok(crate::agent::AdmitA2aRequestOutcome::Probe);
+        }
+        // `admitted`: the default.
+        return Ok(crate::agent::AdmitA2aRequestOutcome::Admitted);
+    }
+}
+
 /// `loom.agent.AdmitHttpRead`, generated: every outcome is one the specification fully determines.
 impl<P> crate::agent::obligations::AdmitHttpReadBehavior for Generated<P>
 {
@@ -217,6 +239,28 @@ impl<P> crate::agent::obligations::AdmitSendBehavior for Generated<P>
         }
         // `admitted`: the default.
         return Ok(crate::agent::AdmitSendOutcome::Admitted);
+    }
+}
+
+/// `loom.agent.AdmitServe`, generated: every outcome is one the specification fully determines.
+impl<P> crate::agent::obligations::AdmitServeBehavior for Generated<P>
+{
+    fn admit_serve(&mut self, input: crate::agent::AdmitServe) -> Result<crate::agent::AdmitServeOutcome, UnmetObligation> {
+        let _ = &input;
+        // `nothing-to-serve`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(all(&[equal(Some(&input.channel).map(|value| *value), Some(false)), equal(Some(&input.a2a).map(|value| *value), Some(false))]), "loom.agent.AdmitServe")? {
+            return Ok(crate::agent::AdmitServeOutcome::NothingToServe { error: crate::agent::ServeRefused { reason: crate::agent::ServeRefusalReason::NothingToServe } });
+        }
+        // `polls-and-answers`: an accepting branch, in declaration order.
+        if decided(all(&[equal(Some(&input.channel).map(|value| *value), Some(true)), equal(Some(&input.a2a).map(|value| *value), Some(true))]), "loom.agent.AdmitServe")? {
+            return Ok(crate::agent::AdmitServeOutcome::PollsAndAnswers);
+        }
+        // `polls`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.channel).map(|value| *value), Some(true)), "loom.agent.AdmitServe")? {
+            return Ok(crate::agent::AdmitServeOutcome::Polls);
+        }
+        // `answers`: the default.
+        return Ok(crate::agent::AdmitServeOutcome::Answers);
     }
 }
 

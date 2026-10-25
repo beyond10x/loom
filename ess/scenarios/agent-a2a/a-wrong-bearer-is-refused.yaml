@@ -1,0 +1,12 @@
+# story agent-a2a: a bearer that is not the agent's is refused as a missing one is, before the
+# body is read.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-wrong-bearer-is-refused
+summary: A request whose bearer is not the agent's is refused `WrongBearer`.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.AdmitA2aRequest
+    input: {probe: false, bearer_presented: true, bearer_matches: false}
+    outcome: wrong-bearer

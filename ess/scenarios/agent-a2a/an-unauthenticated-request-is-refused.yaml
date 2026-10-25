@@ -1,0 +1,12 @@
+# story agent-a2a: a request to the A2A listener without the bearer the agent's Secret gives it is
+# refused before its body is read, so no turn runs.
+type: ess-scenario/4
+domain: loom.agent
+scenario: an-unauthenticated-request-is-refused
+summary: A request without an `Authorization` bearer is refused `MissingBearer`.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.AdmitA2aRequest
+    input: {probe: false, bearer_presented: false, bearer_matches: false}
+    outcome: missing-bearer

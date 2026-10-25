@@ -38,3 +38,10 @@ scenarios:
   - scenarios/agent-http-binding/a-failing-status-answers-nothing.yaml
   - scenarios/agent-http-binding/a-response-over-max-bytes-is-cut.yaml
   - scenarios/agent-http-binding/a-response-within-max-bytes-is-read-whole.yaml
+  - scenarios/agent-a2a/a-probe-needs-no-bearer.yaml
+  - scenarios/agent-a2a/an-unauthenticated-request-is-refused.yaml
+  - scenarios/agent-a2a/a-wrong-bearer-is-refused.yaml
+  - scenarios/agent-a2a/a-request-with-the-bearer-is-admitted.yaml
+  - scenarios/agent-a2a/a-spec-exposing-a2a-without-a-channel-is-served.yaml
+  - scenarios/agent-a2a/a-spec-with-nothing-to-serve-is-refused.yaml
+  - scenarios/agent-a2a/a-spec-with-a-channel-is-polled.yaml

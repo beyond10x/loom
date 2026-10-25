@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "09af172219b0fefa59e5b1327d8ad0c0d091a965ea1b67545155c88d6e8aeb27",
-    "contract_digest": "61002ca6f629015a9d3d582787f5c77dc4c33faaa158cf586504ae6079c93399"
+    "source_digest": "4a99756f85a24fac97752e928c318c5c1b6ffbd3343706808e92c1fbf83dada5",
+    "contract_digest": "d1418824cb56c636461a5a81d92386592eac2357fd0ef3ac5cffc66165578878"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -20,6 +20,13 @@
     {
       "kind": "domain_type",
       "source": "loom.agent.A2aExposure",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.agent.A2aRefusalReason",
       "disposition": {
         "disposition": "generated"
       }
@@ -237,6 +244,13 @@
     {
       "kind": "domain_type",
       "source": "loom.agent.SendRefusalReason",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.agent.ServeRefusalReason",
       "disposition": {
         "disposition": "generated"
       }
@@ -1076,6 +1090,20 @@
     },
     {
       "kind": "command_contract",
+      "source": "loom.agent.AdmitA2aRequest",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.agent.AdmitA2aRequest",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
       "source": "loom.agent.AdmitHttpRead",
       "disposition": {
         "disposition": "generated"
@@ -1098,6 +1126,20 @@
     {
       "kind": "command_behavior",
       "source": "loom.agent.AdmitSend",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.agent.AdmitServe",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.agent.AdmitServe",
       "disposition": {
         "disposition": "generated"
       }
@@ -1303,6 +1345,13 @@
     },
     {
       "kind": "error_type",
+      "source": "loom.agent.A2aRefused",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
       "source": "loom.agent.HttpReadRefused",
       "disposition": {
         "disposition": "generated"
@@ -1311,6 +1360,13 @@
     {
       "kind": "error_type",
       "source": "loom.agent.SendRefused",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.agent.ServeRefused",
       "disposition": {
         "disposition": "generated"
       }

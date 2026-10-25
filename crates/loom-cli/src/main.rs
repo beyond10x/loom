@@ -6,7 +6,6 @@ use std::process::{Command as Process, ExitCode};
 use std::sync::Arc;
 
 use b10x_llm_tool_call::codex_model;
-use b10x_loom_cli::agent;
 use b10x_loom_cli::evaluate::{decision_json, refusal_json, refused_input, request_from_json};
 use b10x_loom_cli::events::{EventStream, FAILED};
 use b10x_loom_cli::mandate::{self, Mandate};
@@ -18,6 +17,7 @@ use b10x_loom_cli::{
     Confinement, DEFAULT_MODEL, EvaluateArgs, Output, PluginCommand, PluginName, ProtocolCommand,
     ResumeArgs, RunArgs, approve_exit_status, resume_exit_status, run_exit_status,
 };
+use b10x_loom_cli::{a2a, agent};
 use b10x_loom_intake_slice::bindings::ActionBindings;
 use b10x_loom_intake_slice::case;
 use b10x_loom_intake_slice::clock::HostClock;
@@ -141,16 +141,62 @@ fn agent_serve(arguments: &AgentServeArgs, spec: loom_sdk::agent::AgentSpec) -> 
             arguments.classifier_model.as_deref(),
         )?,
     };
+    let classifier: Arc<dyn Model> = Arc::from(classifier);
+    let a2a_spec = spec.clone();
     let plugin = b10x_loom_agent::SpecPlugin::new(spec, &arguments.state)
         .map_err(|e| e.to_string())?
-        .with_classifier(classifier)
-        .with_turn_models(turn_models(model));
+        .with_classifier(Box::new(a2a::SharedModel(Arc::clone(&classifier))))
+        .with_turn_models(turn_models(Arc::clone(&model)));
+    let answers_only = a2a::answers_only(&a2a_spec);
+    if answers_only && arguments.once {
+        return Err(a2a::ONCE_WITHOUT_A_CHANNEL.to_owned());
+    }
+    let bearer = std::env::var(a2a::BEARER_ENV).ok();
+    let listening = a2a::prepare(&a2a_spec, arguments.a2a_address, bearer.as_deref())?;
     let stop = Arc::new(AtomicBool::new(arguments.once));
     if !arguments.once {
         stop_on_signals(Arc::clone(&stop))?;
     }
-    let lines = b10x_loom_plugin::run_plugin(&plugin, plugin.config(), &arguments.state, &stop)
-        .map_err(|e| e.to_string())?;
+    if answers_only {
+        // Nothing to poll: the host's main loop is the A2A listener, holding the state directory
+        // as the polling host does, until SIGTERM or SIGINT.
+        let (server, socket) =
+            listening.ok_or_else(|| "`expose.a2a` declares no listener".to_owned())?;
+        let held = b10x_loom_plugin::state::StateDir::open(&arguments.state, plugin.config())
+            .map_err(|e| e.to_string())?;
+        let agent = a2a::Agent {
+            spec: a2a_spec,
+            state: &arguments.state,
+            classifier,
+            model,
+        };
+        let served = a2a::serve(&server, socket, agent, &stop, &stop);
+        drop(held);
+        return served;
+    }
+    let a2a_stop = AtomicBool::new(false);
+    let (ran, served) = std::thread::scope(|scope| {
+        let serving = listening.map(|(server, socket)| {
+            let agent = a2a::Agent {
+                spec: a2a_spec,
+                state: &arguments.state,
+                classifier,
+                model,
+            };
+            let (a2a_stop, stop) = (&a2a_stop, &stop);
+            scope.spawn(move || a2a::serve(&server, socket, agent, a2a_stop, stop))
+        });
+        let ran = b10x_loom_plugin::run_plugin(&plugin, plugin.config(), &arguments.state, &stop);
+        a2a_stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        let served = serving.map_or(Ok(()), |serving| {
+            serving
+                .join()
+                .unwrap_or_else(|_| Err("the A2A listener panicked".to_owned()))
+        });
+        (ran, served)
+    });
+    let lines = ran.map_err(|e| e.to_string())?;
+    served?;
     for note in plugin.take_notes() {
         eprintln!("b10x-loom: {}", printable(&note));
     }

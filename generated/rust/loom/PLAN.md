@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest 09af172219b0fefa59e5b1327d8ad0c0d091a965ea1b67545155c88d6e8aeb27
-  contract digest 61002ca6f629015a9d3d582787f5c77dc4c33faaa158cf586504ae6079c93399
+  model digest 4a99756f85a24fac97752e928c318c5c1b6ffbd3343706808e92c1fbf83dada5
+  contract digest d1418824cb56c636461a5a81d92386592eac2357fd0ef3ac5cffc66165578878
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-203 capabilities: **201 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+211 capabilities: **209 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -16,6 +16,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | --- | --- |
 | domain type | `loom.agent.A2aCard` |
 | domain type | `loom.agent.A2aExposure` |
+| domain type | `loom.agent.A2aRefusalReason` |
 | domain type | `loom.agent.ActionBudget` |
 | domain type | `loom.agent.AgentId` |
 | domain type | `loom.agent.AgentIdentity` |
@@ -47,6 +48,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.agent.RunBudget` |
 | domain type | `loom.agent.RuntimeSpec` |
 | domain type | `loom.agent.SendRefusalReason` |
+| domain type | `loom.agent.ServeRefusalReason` |
 | domain type | `loom.agent.SessionSpec` |
 | domain type | `loom.agent.StateWhen` |
 | domain type | `loom.agent.StopPolicy` |
@@ -166,10 +168,14 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | entity lifecycle | `loom.run.Selection` |
 | entity lifecycle | `loom.run.SelectionRecord` |
 | entity lifecycle | `loom.session.AgentSession` |
+| command contract | `loom.agent.AdmitA2aRequest` |
+| command behaviour | `loom.agent.AdmitA2aRequest` |
 | command contract | `loom.agent.AdmitHttpRead` |
 | command behaviour | `loom.agent.AdmitHttpRead` |
 | command contract | `loom.agent.AdmitSend` |
 | command behaviour | `loom.agent.AdmitSend` |
+| command contract | `loom.agent.AdmitServe` |
+| command behaviour | `loom.agent.AdmitServe` |
 | command contract | `loom.agent.BoundHttpAnswer` |
 | command behaviour | `loom.agent.BoundHttpAnswer` |
 | command contract | `loom.agent.CheckAgentSpec` |
@@ -195,8 +201,10 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | event type | `loom.run.SelectionRecorded` |
 | event type | `loom.run.SelectionStale` |
 | event type | `loom.session.SessionChangeProposed` |
+| error type | `loom.agent.A2aRefused` |
 | error type | `loom.agent.HttpReadRefused` |
 | error type | `loom.agent.SendRefused` |
+| error type | `loom.agent.ServeRefused` |
 | error type | `loom.agent.SpecRefused` |
 | error type | `loom.run.ActionNotInCatalogue` |
 | error type | `loom.run.CatalogueExists` |
