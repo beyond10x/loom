@@ -643,17 +643,32 @@ keeping the events each outcome published; `task conform` holds it to the domain
 (`crates/loom-conformance/src/resource.rs`). Its `crd::manifest` projects the CRD
 (`deploy/crd/loomagents.loom.beyond10x.dev.yaml`, § Generated files) from the two JSON Schemas
 `ess generate --kind schema` writes, and refuses a result that is not a Kubernetes structural
-schema. It inlines every `$ref`, writes `const` as `enum`, flattens the `bindings` union so the tag
-`kind` sits beside the fields of every variant (a `oneOf` per variant names that variant's
-required fields), keeps `routes` as `x-kubernetes-preserve-unknown-fields`, types a `Decimal` as
-`number` and never requires a list. The last two follow `loom_sdk::agent::parse`, which reads a
-decimal from a number or a string and an absent list as empty; a structural schema has no
-number-or-string type. `examples/agents/operator.yaml` validates against the projected schema
-(`crates/loom-resource/tests/crd.rs`).
+schema. Every keyword is carried, rewritten, dropped as an ESS annotation or refused by name
+(`crd.rs` module doc lists each). It inlines every `$ref`, writes `const` as `enum`, keeps a map's
+value schema (`additionalProperties`) and drops only `additionalProperties: false`, keeps `routes`
+as `x-kubernetes-preserve-unknown-fields`, and types a `Decimal` as `number`, since
+`loom_sdk::agent::parse` reads a number or a string there and a structural schema has no
+number-or-string type. It flattens the `bindings` union so the tag `kind` sits beside the fields of
+every variant; each variant's `oneOf` entry names that variant's required fields and refuses, by
+`not: {anyOf: [{required: [<f>]}, …]}`, every field only another variant declares.
 
-The controller, `crates/loom-operator` with `kube` and `k8s-openapi`, is step 6 of the CRD
-deployment design (`docs/design/loom-agent-crd-deployment.md` § 9) and is not yet written. Nothing
-in Loom talks to a cluster.
+The CRD requires every member the specification declares required, except a `List<…>` the
+`loom.agent` document declares, which its decoder reads as empty when absent; a list another
+document declares, such as `model.roles`, stays required (`ABSENT_LIST_IS_EMPTY` in `crd.rs`,
+`every_object_requires_exactly_what_the_specification_declares_required`).
+`examples/agents/operator.yaml` validates against the projected schema as written
+(`crates/loom-resource/tests/crd.rs`). The API server prunes a member the schema does not declare
+rather than refusing it (a client sends `fieldValidation=Strict` to have it refused); it refuses a
+declared member of the wrong type or of another binding variant. What reaches the pod is a document
+the schema admitted, which `b10x-loom agent check` reads again. The decoder's own checks that the
+specification does not declare (the `format` value, ports, non-blank text, variable names, RFC 3339
+instants) are not in the CRD.
+
+The status is `observedGeneration`, `state` and `check`. `status.state` is the lifecycle state the
+design calls `phase`; the design's `status.deployment` and `status.conditions` belong to the
+controller and are added with it. The controller, `crates/loom-operator` with `kube` and
+`k8s-openapi`, is step 6 of the CRD deployment design (`docs/design/loom-agent-crd-deployment.md`
+§ 9) and is not yet written. Nothing in Loom talks to a cluster.
 
 ## Plugin host
 

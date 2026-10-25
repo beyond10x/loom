@@ -8,33 +8,51 @@
 //! the spec type and `status` from the entity's fields other than its identity [`IDENTITY`].
 //! `loom-xtask crd-generate` writes it to [`FILE`] and `loom-xtask crd-drift` compares it.
 //!
-//! The projection makes the schema structural, as the Kubernetes API server requires:
+//! The projection makes the schema structural, as the Kubernetes API server requires. Every keyword
+//! of a schema node is carried, rewritten to an equivalent, dropped as an annotation or refused by
+//! name; none is passed over unexamined:
 //!
+//! * carried as written: the keywords of `CARRIED` (`type`, `enum`, `required`, `format`,
+//!   `pattern`, `description` and the numeric, length and item bounds); every member the
+//!   specification declares required is required, except a list the `loom.agent` document
+//!   declares, which its decoder reads as empty when absent (`ABSENT_LIST_IS_EMPTY`);
+//! * dropped, annotations only ESS reads: `$defs`, `$schema`, `$id`, `title`, `x-ess-name`,
+//!   `x-ess-field`, `x-ess-provenance`, an `x-ess-kind` of `struct`, `newtype`, `enum` or
+//!   `entity`, and an `x-ess-map-key` of `String` (a JSON object's keys are text);
 //! * every `$ref` into `$defs` is inlined, recursively; a reference reached again while it is being
 //!   inlined is refused as [`CrdError::Cycle`], naming the type;
-//! * `$defs`, `$schema`, `$id`, `title`, `additionalProperties` and every `x-ess-*` key are
-//!   dropped: the API server refuses `additionalProperties: false` and prunes unknown fields
-//!   instead (`b10x-loom agent check` in the pod refuses an undeclared member of the agent document);
 //! * `const: x` becomes `enum: [x]`;
+//! * `additionalProperties: false` is removed, the one form the API server refuses (it prunes an
+//!   undeclared member instead); `additionalProperties: true` becomes
+//!   `x-kubernetes-preserve-unknown-fields: true`; an `additionalProperties` schema (ESS `Map`) is
+//!   projected and kept, so a map keeps its entries, and refused beside `properties`;
 //! * an empty schema (ESS `Json`, here `spec.routes`) becomes an object that preserves unknown
 //!   fields;
 //! * a `Decimal` (`type: string`, `format: decimal`) becomes `type: number`: the agent document's
 //!   decoder (`loom_sdk::agent::parse`) reads a decimal written as a number
 //!   (`classify_threshold: 0.5`), and Kubernetes has no number-or-string type, so a decimal
 //!   written as a quoted string, which the decoder also reads, is refused by the API server;
-//! * a list is never required: the decoder reads an absent list as an empty one, and the
-//!   operator example (`examples/agents/operator.yaml`) omits three (`selector`, `per_action`,
-//!   `breach_by_limit`);
 //! * a tagged union (`x-ess-kind: union`, projected by ESS as a `oneOf` of `{<tag>: {const},
 //!   value: {$ref}}`) is flattened to the wire form Loom's decoder reads, the tag beside the
 //!   variant's fields: `properties` holds the tag, with an `enum` of every variant, and the union
 //!   of every variant's fields; `required` holds the tag and the fields every variant requires;
-//!   `oneOf` holds one entry per variant with nothing but the tag's one-value `enum` and that
-//!   variant's `required`. Two variants declaring one field with different schemas are refused as
-//!   [`CrdError::UnionConflict`], naming the field.
+//!   `oneOf` holds one entry per variant: the tag's one-value `enum`, that variant's `required`,
+//!   and `not: {anyOf: [{required: [<f>]}, …]}` over every field another variant declares and it
+//!   does not, so the flattened union admits exactly what one of its variants admits. Two variants
+//!   declaring one field with different schemas are refused as [`CrdError::UnionConflict`],
+//!   naming the field;
+//! * anything else, an `x-ess-*` key not listed above included, is refused as
+//!   [`CrdError::Keyword`], naming it.
 //!
-//! Any other keyword is refused as [`CrdError::Keyword`] rather than carried over unexamined, and
-//! the finished document is checked by [`violations`] before it is written. The YAML has sorted
+//! What the schema then holds of the agent document: a member it does not declare is pruned by the
+//! API server, not refused (a client sends `fieldValidation=Strict` to have it refused); a declared
+//! member of the wrong type, or of another variant of a union, is refused by the schema; what
+//! reaches the pod is a document the schema admitted, which `b10x-loom agent check` reads again.
+//! A member the schema lets a document omit is one the decoder lets it omit too; the decoder's
+//! checks the specification does not declare (the `format` value, port ranges, non-blank text,
+//! variable names, RFC 3339 instants) are the decoder's alone.
+//!
+//! The finished document is checked by [`violations`] before it is written. The YAML has sorted
 //! keys, starts with [`HEADER`] and ends with one newline, so one specification gives one file.
 
 use serde_json::{Map, Value, json};
@@ -67,8 +85,24 @@ pub const IDENTITY: &str = "name";
 /// Where a `$ref` into the document's own definitions starts.
 const DEFINITIONS: &str = "#/$defs/";
 
-/// Keys dropped wherever they stand as a keyword.
-const DROPPED: [&str; 5] = ["$defs", "$schema", "$id", "title", "additionalProperties"];
+/// Annotations only ESS reads, dropped wherever they stand as a keyword.
+const ANNOTATIONS: [&str; 7] = [
+    "$defs",
+    "$schema",
+    "$id",
+    "title",
+    "x-ess-name",
+    "x-ess-field",
+    "x-ess-provenance",
+];
+
+/// The `x-ess-kind`s that only annotate a node the other keywords already describe; `union` is
+/// flattened, and any other kind is refused.
+const ANNOTATED_KINDS: [&str; 4] = ["struct", "newtype", "enum", "entity"];
+
+/// The one `x-ess-map-key` a structural schema states without a keyword: a JSON object's keys are
+/// text.
+const TEXT_KEY: &str = "String";
 
 /// Keywords carried over as they are.
 const CARRIED: [&str; 12] = [
@@ -86,16 +120,59 @@ const CARRIED: [&str; 12] = [
     "maxItems",
 ];
 
-/// Keys no projected document holds as a keyword.
-const FORBIDDEN: [&str; 7] = [
-    "$ref",
-    "$defs",
-    "$schema",
-    "$id",
-    "const",
+/// Keys no projected document holds as a keyword; nor does it hold an `x-ess-*` key or an
+/// `additionalProperties` that is not a schema.
+const FORBIDDEN: [&str; 6] = ["$ref", "$defs", "$schema", "$id", "const", "title"];
+
+/// What a structural schema does not set inside `allOf`, `anyOf`, `oneOf` or `not`.
+const NOT_IN_A_JUNCTOR: [&str; 5] = [
+    "type",
+    "description",
+    "default",
     "additionalProperties",
-    "title",
+    "nullable",
 ];
+
+/// The junctors of a structural schema.
+const JUNCTORS: [&str; 4] = ["oneOf", "anyOf", "allOf", "not"];
+
+/// The specification documents, by domain, whose decoder reads an absent list as empty: a
+/// `List<…>` member such a document declares required is not required in the CRD. The leniency
+/// is the agent document's decoder's (`crates/loom-sdk/src/agent.rs`, `Members::list`); a list
+/// another document declares stays required, as its decoder requires it (`model.roles`, from the
+/// models document). story:agent-spec-constraints-in-ess makes it a declaration in ESS, which
+/// replaces this table.
+const ABSENT_LIST_IS_EMPTY: [&str; 1] = ["loom.agent"];
+
+/// Whether the definition `name` (`<domain>.<Type>`) is one of an `ABSENT_LIST_IS_EMPTY`
+/// document.
+fn absent_list_is_empty(name: &str) -> bool {
+    name.rsplit_once('.')
+        .is_some_and(|(domain, _)| ABSENT_LIST_IS_EMPTY.contains(&domain))
+}
+
+/// Takes out of the object `projected`'s `required` every member whose projected schema is a list.
+fn require_no_list(projected: &mut Map<String, Value>) {
+    let lists: Vec<String> = projected
+        .get("properties")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter(|(_, schema)| schema.get("type").and_then(Value::as_str) == Some("array"))
+        .map(|(name, _)| name.clone())
+        .collect();
+    let Some(Value::Array(required)) = projected.get_mut("required") else {
+        return;
+    };
+    required.retain(|member| {
+        !member
+            .as_str()
+            .is_some_and(|name| lists.iter().any(|l| l == name))
+    });
+    if required.is_empty() {
+        projected.remove("required");
+    }
+}
 
 /// Why a projection was refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -371,10 +448,31 @@ impl<'d> Projector<'d> {
     ) -> Result<Map<String, Value>, CrdError> {
         let mut projected = Map::new();
         for (key, value) in map {
-            if DROPPED.contains(&key.as_str()) || key.starts_with("x-ess-") {
-                continue;
-            }
             match key.as_str() {
+                annotation if ANNOTATIONS.contains(&annotation) => {}
+                "x-ess-kind"
+                    if value
+                        .as_str()
+                        .is_some_and(|kind| ANNOTATED_KINDS.contains(&kind)) => {}
+                "x-ess-map-key" if value.as_str() == Some(TEXT_KEY) => {}
+                "additionalProperties" => match value {
+                    Value::Bool(false) => {}
+                    Value::Bool(true) => {
+                        projected.insert(
+                            "x-kubernetes-preserve-unknown-fields".to_owned(),
+                            Value::Bool(true),
+                        );
+                    }
+                    Value::Object(_) => {
+                        projected.insert(key.clone(), self.schema(value, &format!("{at}.*"))?);
+                    }
+                    _ => {
+                        return Err(shape(
+                            at,
+                            "`additionalProperties` is neither a boolean nor a schema",
+                        ));
+                    }
+                },
                 "const" => {
                     if map.contains_key("enum") {
                         return Err(shape(at, "both `const` and `enum`"));
@@ -408,23 +506,19 @@ impl<'d> Projector<'d> {
                 }
             }
         }
-        let lists: Vec<String> = projected
-            .get("properties")
-            .and_then(Value::as_object)
-            .into_iter()
-            .flatten()
-            .filter(|(_, property)| property.get("type") == Some(&Value::from("array")))
-            .map(|(name, _)| name.clone())
-            .collect();
-        if let Some(required) = projected.get_mut("required").and_then(Value::as_array_mut) {
-            required.retain(|name| {
-                !name
-                    .as_str()
-                    .is_some_and(|name| lists.iter().any(|list| list == name))
-            });
-            if required.is_empty() {
-                projected.remove("required");
-            }
+        if self
+            .inlining
+            .last()
+            .is_some_and(|definition| absent_list_is_empty(definition))
+        {
+            require_no_list(&mut projected);
+        }
+        if projected.contains_key("properties") && projected.contains_key("additionalProperties") {
+            return Err(shape(
+                at,
+                "`properties` beside an `additionalProperties` schema, which a structural schema \
+                 does not allow",
+            ));
         }
         Ok(projected)
     }
@@ -446,11 +540,28 @@ impl<'d> Projector<'d> {
         let Some(variants) = map.get("oneOf").and_then(Value::as_array) else {
             return Err(refuse("no `oneOf` of variants".to_owned()));
         };
+        if let Some(other) = map.keys().find(|key| {
+            !ANNOTATIONS.contains(&key.as_str())
+                && !["x-ess-kind", "x-ess-union-tag", "oneOf"].contains(&key.as_str())
+        }) {
+            return Err(CrdError::Keyword {
+                at: at.to_owned(),
+                keyword: other.clone(),
+            });
+        }
         let mut fields = Map::new();
-        let mut tags: Vec<String> = Vec::new();
-        let mut entries = Vec::new();
-        let mut required_by_all: Option<Vec<String>> = None;
+        // Each variant's tag, the fields it declares and those it requires, in declaration order.
+        let mut declared: Vec<(String, Vec<String>, Vec<String>)> = Vec::new();
         for (index, variant) in variants.iter().enumerate() {
+            if let Some(other) = variant.as_object().and_then(|variant| {
+                variant.keys().find(|key| {
+                    !ANNOTATIONS.contains(&key.as_str())
+                        && !["type", "properties", "required", "additionalProperties"]
+                            .contains(&key.as_str())
+                })
+            }) {
+                return Err(refuse(format!("variant {index} holds `{other}`")));
+            }
             let Some(members) = variant.get("properties").and_then(Value::as_object) else {
                 return Err(refuse(format!("variant {index} declares no properties")));
             };
@@ -461,7 +572,7 @@ impl<'d> Projector<'d> {
             else {
                 return Err(refuse(format!("variant {index} has no `{tag}` const")));
             };
-            if tags.iter().any(|seen| seen == name) {
+            if declared.iter().any(|(seen, _, _)| seen == name) {
                 return Err(refuse(format!("variant `{name}` is declared twice")));
             }
             if let Some(other) = members.keys().find(|key| *key != tag && *key != "value") {
@@ -495,6 +606,7 @@ impl<'d> Projector<'d> {
                     (own, required)
                 }
             };
+            let names: Vec<String> = own.keys().cloned().collect();
             for (field, schema) in own {
                 let conflict = field == tag
                     || fields
@@ -508,6 +620,14 @@ impl<'d> Projector<'d> {
                 }
                 fields.insert(field, schema);
             }
+            declared.push((name.to_owned(), names, required));
+        }
+        if declared.is_empty() {
+            return Err(refuse("no variant".to_owned()));
+        }
+        let mut entries = Vec::new();
+        let mut required_by_all: Option<Vec<String>> = None;
+        for (name, own, required) in &declared {
             let mut tagged = Map::new();
             tagged.insert(tag.to_owned(), json!({"enum": [name]}));
             let mut entry = Map::new();
@@ -515,19 +635,25 @@ impl<'d> Projector<'d> {
             if !required.is_empty() {
                 entry.insert("required".to_owned(), json!(required));
             }
+            let mut foreign: Vec<&String> = fields.keys().filter(|f| !own.contains(f)).collect();
+            foreign.sort();
+            if !foreign.is_empty() {
+                let each: Vec<Value> = foreign
+                    .into_iter()
+                    .map(|field| json!({"required": [field]}))
+                    .collect();
+                entry.insert("not".to_owned(), json!({"anyOf": each}));
+            }
             entries.push(Value::Object(entry));
             required_by_all = Some(match required_by_all {
-                None => required,
+                None => required.clone(),
                 Some(all) => all
                     .into_iter()
                     .filter(|field| required.contains(field))
                     .collect(),
             });
-            tags.push(name.to_owned());
         }
-        if tags.is_empty() {
-            return Err(refuse("no variant".to_owned()));
-        }
+        let tags: Vec<&String> = declared.iter().map(|(name, _, _)| name).collect();
         let mut properties = Map::new();
         properties.insert(tag.to_owned(), json!({"type": "string", "enum": tags}));
         properties.extend(fields);
@@ -543,10 +669,11 @@ impl<'d> Projector<'d> {
 }
 
 /// Every rule of a structural schema `document` breaks, with where: a forbidden key anywhere in
-/// the document ([`FORBIDDEN`] and `x-ess-*`, a property's name not counting as a key), a schema
-/// node of its `openAPIV3Schema` without a `type` that does not preserve unknown fields, and a
-/// `oneOf` entry holding anything but its tag's `enum` and `required`, or naming a property the
-/// enclosing schema does not declare. Empty means none.
+/// the document ([`FORBIDDEN`], `x-ess-*` and an `additionalProperties` that is not a schema, a
+/// property's name not counting as a key); in its `openAPIV3Schema`, a schema node without a
+/// `type` that does not preserve unknown fields, `properties` beside an `additionalProperties`
+/// schema, and inside a junctor, at any depth, a key of [`NOT_IN_A_JUNCTOR`] or a member the
+/// schema outside the junctor does not declare. Empty means none.
 #[must_use]
 pub fn violations(document: &Value) -> Vec<String> {
     let mut found = Vec::new();
@@ -577,7 +704,12 @@ fn forbidden(value: &Value, at: &str, names: bool, found: &mut Vec<String>) {
         Value::Object(map) => {
             for (key, member) in map {
                 let path = format!("{at}/{key}");
-                if !names && (FORBIDDEN.contains(&key.as_str()) || key.starts_with("x-ess-")) {
+                let not_a_schema = key == "additionalProperties" && !member.is_object();
+                if !names
+                    && (FORBIDDEN.contains(&key.as_str())
+                        || key.starts_with("x-ess-")
+                        || not_a_schema)
+                {
                     found.push(format!("{path}: a key no structural schema holds"));
                 }
                 forbidden(member, &path, !names && key == "properties", found);
@@ -601,67 +733,116 @@ fn structural(schema: &Value, at: &str, found: &mut Vec<String>) {
     if !node.contains_key("type") && !preserves {
         found.push(format!("{at}: no type"));
     }
-    let declared = node.get("properties").and_then(Value::as_object);
-    for (name, property) in declared.into_iter().flatten() {
+    for (name, property) in node
+        .get("properties")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+    {
         structural(property, &format!("{at}/properties/{name}"), found);
+    }
+    if let Some(values) = node
+        .get("additionalProperties")
+        .filter(|values| values.is_object())
+    {
+        if node.contains_key("properties") {
+            found.push(format!("{at}: `properties` beside `additionalProperties`"));
+        }
+        structural(values, &format!("{at}/additionalProperties"), found);
     }
     if let Some(items) = node.get("items") {
         structural(items, &format!("{at}/items"), found);
     }
-    for junctor in ["oneOf", "anyOf", "allOf", "not"] {
-        let Some(entries) = node.get(junctor) else {
-            continue;
+    junctors(node, node, at, found);
+}
+
+/// The junctors of `node`, each entry checked against `outside`, the schema they constrain.
+fn junctors(
+    node: &Map<String, Value>,
+    outside: &Map<String, Value>,
+    at: &str,
+    found: &mut Vec<String>,
+) {
+    for junctor in JUNCTORS {
+        let entries = match node.get(junctor) {
+            None => continue,
+            Some(Value::Array(entries)) => entries.iter().collect::<Vec<_>>(),
+            Some(single) => vec![single],
         };
-        let entries = match entries {
-            Value::Array(entries) => entries.clone(),
-            single => vec![single.clone()],
-        };
-        for (index, entry) in entries.iter().enumerate() {
-            let here = format!("{at}/{junctor}/{index}");
-            let Some(entry) = entry.as_object() else {
-                found.push(format!("{here}: not a schema"));
-                continue;
+        for (index, entry) in entries.into_iter().enumerate() {
+            let here = if junctor == "not" {
+                format!("{at}/not")
+            } else {
+                format!("{at}/{junctor}/{index}")
             };
-            for key in entry
-                .keys()
-                .filter(|key| *key != "properties" && *key != "required")
-            {
-                found.push(format!("{here}/{key}: not allowed inside a junctor"));
-            }
-            let mut named: Vec<&str> = Vec::new();
-            for (name, property) in entry
-                .get("properties")
-                .and_then(Value::as_object)
-                .into_iter()
-                .flatten()
-            {
-                named.push(name);
-                let only_enum = property
-                    .as_object()
-                    .is_some_and(|property| property.keys().all(|key| key == "enum"));
-                if !only_enum {
-                    found.push(format!(
-                        "{here}/properties/{name}: only `enum` is allowed inside a junctor"
-                    ));
-                }
-            }
-            named.extend(
-                entry
-                    .get("required")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Value::as_str),
-            );
-            for name in named {
-                if !declared.is_some_and(|properties| properties.contains_key(name)) {
-                    found.push(format!(
-                        "{here}: `{name}` is not declared outside the junctor"
-                    ));
-                }
+            inside_junctor(entry, outside, &here, found);
+        }
+    }
+}
+
+/// One schema inside a junctor: none of [`NOT_IN_A_JUNCTOR`], and every member it names declared
+/// by `outside`, the schema it constrains.
+fn inside_junctor(
+    entry: &Value,
+    outside: &Map<String, Value>,
+    here: &str,
+    found: &mut Vec<String>,
+) {
+    let Some(entry) = entry.as_object() else {
+        found.push(format!("{here}: not a schema"));
+        return;
+    };
+    for key in entry.keys() {
+        if NOT_IN_A_JUNCTOR.contains(&key.as_str()) {
+            found.push(format!("{here}/{key}: not allowed inside a junctor"));
+        }
+    }
+    let declared = outside.get("properties").and_then(Value::as_object);
+    for name in entry
+        .get("required")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+    {
+        if !declared.is_some_and(|properties| properties.contains_key(name)) {
+            found.push(format!(
+                "{here}: `{name}` is not declared outside the junctor"
+            ));
+        }
+    }
+    for (name, property) in entry
+        .get("properties")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+    {
+        match declared
+            .and_then(|properties| properties.get(name))
+            .and_then(Value::as_object)
+        {
+            None => found.push(format!(
+                "{here}: `{name}` is not declared outside the junctor"
+            )),
+            Some(beside) => {
+                inside_junctor(
+                    property,
+                    beside,
+                    &format!("{here}/properties/{name}"),
+                    found,
+                );
             }
         }
     }
+    if let Some(items) = entry.get("items") {
+        match outside.get("items").and_then(Value::as_object) {
+            None => found.push(format!(
+                "{here}: `items` is not declared outside the junctor"
+            )),
+            Some(beside) => inside_junctor(items, beside, &format!("{here}/items"), found),
+        }
+    }
+    junctors(entry, outside, here, found);
 }
 
 /// `value` as YAML, every map's keys in sorted order.
@@ -727,29 +908,152 @@ mod tests {
                 "oneOf": [
                     {"properties": {"kind": {"enum": ["a"], "type": "string"}}, "required": ["port"]},
                     {"type": "object"},
+                    {"properties": {"kind": {"enum": ["b"]}}, "not": {"anyOf": [{"required": ["kind"]}, {"required": ["ghost"], "nullable": true}]}},
                 ],
             }}}]},
         });
         assert_eq!(
             violations(&document),
             [
-                "/spec/versions/0/schema/openAPIV3Schema/oneOf/0/properties/kind: only `enum` is allowed inside a junctor",
                 "/spec/versions/0/schema/openAPIV3Schema/oneOf/0: `port` is not declared outside the junctor",
+                "/spec/versions/0/schema/openAPIV3Schema/oneOf/0/properties/kind/type: not allowed inside a junctor",
                 "/spec/versions/0/schema/openAPIV3Schema/oneOf/1/type: not allowed inside a junctor",
+                "/spec/versions/0/schema/openAPIV3Schema/oneOf/2/not/anyOf/1/nullable: not allowed inside a junctor",
+                "/spec/versions/0/schema/openAPIV3Schema/oneOf/2/not/anyOf/1: `ghost` is not declared outside the junctor",
             ]
         );
     }
 
     #[test]
     fn an_unknown_keyword_is_refused_naming_it() {
-        let spec = json!({"type": "object", "properties": {"a": {"type": "string", "anyOf": []}}});
         let entity = json!({"type": "object", "properties": {"name": {"type": "string"}}});
+        for (keyword, value) in [
+            ("anyOf", json!([])),
+            ("oneOf", json!([])),
+            ("x-ess-union-tag", json!("kind")),
+            ("x-ess-mystery", json!(true)),
+            ("x-ess-map-key", json!("Integer")),
+            ("x-ess-kind", json!("mystery")),
+            ("uniqueItems", json!(true)),
+        ] {
+            let mut a = json!({"type": "string"});
+            a[keyword] = value;
+            let spec = json!({"type": "object", "properties": {"a": a}});
+            assert_eq!(
+                open_api_schema(&spec, &entity),
+                Err(CrdError::Keyword {
+                    at: "spec.a".to_owned(),
+                    keyword: keyword.to_owned()
+                }),
+                "`{keyword}`"
+            );
+        }
+    }
+
+    #[test]
+    fn every_keyword_is_carried_rewritten_or_dropped_as_its_row_says() {
+        let entity = json!({"type": "object", "properties": {"name": {"type": "string"}}});
+        let mut node = json!({"title": "A", "$id": "a", "$schema": "s", "x-ess-name": "t.A",
+            "x-ess-field": "a", "x-ess-provenance": {}, "x-ess-kind": "newtype",
+            "x-ess-map-key": "String", "additionalProperties": false});
+        for keyword in CARRIED {
+            node[keyword] = json!(keyword);
+        }
+        node["type"] = json!("string");
+        let spec = json!({"type": "object", "properties": {"a": node}});
+        let projected = open_api_schema(&spec, &entity).expect("projects");
+        let mut kept: Vec<&str> = projected["properties"]["spec"]["properties"]["a"]
+            .as_object()
+            .expect("a")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        kept.sort_unstable();
+        let mut carried = CARRIED.to_vec();
+        carried.sort_unstable();
+        assert_eq!(kept, carried, "carried survive, annotations are dropped");
+
+        let open = json!({"type": "object", "properties": {"a": {"type": "object", "additionalProperties": true}}});
         assert_eq!(
-            open_api_schema(&spec, &entity),
-            Err(CrdError::Keyword {
-                at: "spec.a".to_owned(),
-                keyword: "anyOf".to_owned()
-            })
+            open_api_schema(&open, &entity).expect("projects")["properties"]["spec"]["properties"]
+                ["a"],
+            json!({"type": "object", "x-kubernetes-preserve-unknown-fields": true})
         );
+        let constant =
+            json!({"type": "object", "properties": {"a": {"type": "string", "const": "x"}}});
+        assert_eq!(
+            open_api_schema(&constant, &entity).expect("projects")["properties"]["spec"]["properties"]
+                ["a"],
+            json!({"type": "string", "enum": ["x"]})
+        );
+    }
+
+    /// A union of three variants: a member two of them declare is refused only in the third's
+    /// entry, and one all three declare in none.
+    #[test]
+    fn a_variant_entry_refuses_exactly_the_members_it_does_not_declare() {
+        let spec = json!({
+            "$ref": "#/$defs/t.U",
+            "$defs": {
+                "t.U": {"x-ess-kind": "union", "x-ess-union-tag": "kind", "oneOf": [
+                    {"properties": {"kind": {"const": "a"}, "value": {"$ref": "#/$defs/t.A"}}},
+                    {"properties": {"kind": {"const": "b"}, "value": {"$ref": "#/$defs/t.B"}}},
+                    {"properties": {"kind": {"const": "c"}, "value": {"$ref": "#/$defs/t.C"}}},
+                ]},
+                "t.A": {"type": "object", "properties": {"name": {"type": "string"}, "port": {"type": "integer"}}, "required": ["name"]},
+                "t.B": {"type": "object", "properties": {"name": {"type": "string"}, "port": {"type": "integer"}, "path": {"type": "string"}}, "required": ["name", "path"]},
+                "t.C": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
+            },
+        });
+        let entity = json!({"type": "object", "properties": {"name": {"type": "string"}}});
+        let projected = open_api_schema(&spec, &entity).expect("projects");
+        assert_eq!(
+            projected["properties"]["spec"]["oneOf"],
+            json!([
+                {"properties": {"kind": {"enum": ["a"]}}, "required": ["name"], "not": {"anyOf": [{"required": ["path"]}]}},
+                {"properties": {"kind": {"enum": ["b"]}}, "required": ["name", "path"]},
+                {"properties": {"kind": {"enum": ["c"]}}, "required": ["name"], "not": {"anyOf": [{"required": ["path"]}, {"required": ["port"]}]}},
+            ])
+        );
+        assert_eq!(
+            projected["properties"]["spec"]["required"],
+            json!(["kind", "name"])
+        );
+    }
+
+    /// A list a `loom.agent` definition requires, inline or not, is not required; a member of it
+    /// that is not a list is; a list another document requires stays required, inlined into a
+    /// `loom.agent` definition or not.
+    #[test]
+    fn only_a_list_of_the_agent_document_may_be_absent() {
+        let list = json!({"type": "array", "items": {"type": "string"}});
+        let spec = json!({
+            "$ref": "#/$defs/loom.agent.A",
+            "$defs": {
+                "loom.agent.A": {"type": "object", "properties": {
+                    "states": list,
+                    "format": {"type": "string"},
+                    "model": {"$ref": "#/$defs/loom.models.M"},
+                    "inline": {"type": "object", "properties": {"allow": list}, "required": ["allow"]},
+                }, "required": ["states", "format", "model", "inline"]},
+                "loom.models.M": {"type": "object", "properties": {"roles": list}, "required": ["roles"]},
+            },
+        });
+        let entity = json!({"type": "object", "properties": {"name": {"type": "string"}}});
+        let projected = open_api_schema(&spec, &entity).expect("projects");
+        let agent = &projected["properties"]["spec"];
+        assert_eq!(agent["required"], json!(["format", "model", "inline"]));
+        assert_eq!(agent["properties"]["inline"].get("required"), None);
+        assert_eq!(agent["properties"]["model"]["required"], json!(["roles"]));
+
+        let elsewhere =
+            json!({"type": "object", "properties": {"roles": list}, "required": ["roles"]});
+        assert_eq!(
+            open_api_schema(&elsewhere, &entity).expect("projects")["properties"]["spec"]["required"],
+            json!(["roles"])
+        );
+        assert!(absent_list_is_empty("loom.agent.AgentSpec"));
+        assert!(!absent_list_is_empty("loom.agents.AgentSpec"));
+        assert!(!absent_list_is_empty("loom.models.ModelsConfig"));
     }
 }

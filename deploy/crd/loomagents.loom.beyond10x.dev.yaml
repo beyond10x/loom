@@ -46,7 +46,19 @@ spec:
                   bindings:
                     items:
                       oneOf:
-                      - properties:
+                      - not:
+                          anyOf:
+                          - required:
+                            - allow_paths
+                          - required:
+                            - base_url
+                          - required:
+                            - bearer_env
+                          - required:
+                            - max_bytes
+                          - required:
+                            - method
+                        properties:
                           kind:
                             enum:
                             - connectors
@@ -54,7 +66,21 @@ spec:
                         - name
                         - adapter
                         - connection
-                      - properties:
+                      - not:
+                          anyOf:
+                          - required:
+                            - adapter
+                          - required:
+                            - connection
+                          - required:
+                            - get
+                          - required:
+                            - list
+                          - required:
+                            - search
+                          - required:
+                            - write
+                        properties:
                           kind:
                             enum:
                             - http
@@ -272,6 +298,7 @@ spec:
                         type: string
                     required:
                     - routes
+                    - roles
                     type: object
                   policy:
                     properties:
