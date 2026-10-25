@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:loom-operator
 kind: story
-status: active
+status: implemented
 title: 'The Loom operator: crates/loom-operator reconciles LoomAgent into a pod, and charts/loom-agents installs it'
 relations:
 - decomposes: epic:loom-sdk-for-products
@@ -33,6 +33,8 @@ scope:
 - confidence: cited
   path: crates/loom-operator
 - confidence: cited
+  path: crates/loom-resource
+- confidence: cited
   path: deploy/crd
 - confidence: cited
   path: docs/design/loom-agent-crd-deployment.md
@@ -46,10 +48,11 @@ scope:
   path: website/data/status.json
 - confidence: cited
   path: website/docs/reference
-revision: 22
+revision: 24
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-25T18:23:57Z", actor: "human:timo", revision: 21}
 - {from: "proposed", to: "active", at: "2026-10-25T18:23:57Z", actor: "human:timo", revision: 22}
+- {from: "active", to: "implemented", at: "2026-10-25T20:44:00Z", actor: "human:timo", revision: 24, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}}
 ---
 ## Outcome
 

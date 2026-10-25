@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-25T20:43:57Z",
+  "actor": "human:timo",
+  "artifact": "story:loom-operator",
+  "kind": "story",
+  "revision": 23,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check",
+    "reference": "task check exit 0 on f02dcd44 with ESS 0.69.0 (CI's pin, run from a private copy): 416 test-result lines, 2250 passed, 0 failed, 9 ignored; task plan exit 0; unit gate task check exit 0 on 4e56e2d5"
+  }
+}

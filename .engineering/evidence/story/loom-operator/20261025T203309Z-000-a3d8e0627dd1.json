@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-25T20:33:09Z",
+  "actor": "human:timo",
+  "artifact": "story:loom-operator",
+  "kind": "story",
+  "revision": 22,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "correction commit 4e56e2d5 on impl/loom-operator (F1-F4 fixed; F5, F6 cases kept in the suite)",
+    "review": "review-result:adversary-w20261025-operator-pass-2",
+    "outcome": "fixed"
+  }
+}

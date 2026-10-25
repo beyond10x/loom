@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-25T20:43:57Z",
+  "actor": "human:timo",
+  "artifact": "story:loom-operator",
+  "kind": "story",
+  "revision": 23,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "task conform",
+    "reference": "baseline origin/main 62f2e664: 74 scenarios executed, 0 skipped; treatment f02dcd44: 76 executed (loom.resource 26 to 28), 0 refused, 0 skipped, conformance_status passed; crate b10x-loom-operator 78 tests green, 18 of them adversary cases over two passes"
+  }
+}
