@@ -380,6 +380,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "b10x-loom-agent"
+version = "0.40.0"
+dependencies = [
+ "b10x-loom-protocols",
+ "b10x-loom-sdk",
+ "serde",
+ "serde_yaml_ng",
+]
+
+[[package]]
 name = "b10x-loom-cli"
 version = "0.40.0"
 dependencies = [
@@ -389,6 +399,7 @@ dependencies = [
  "b10x-llm-models",
  "b10x-llm-routing",
  "b10x-llm-tool-call",
+ "b10x-loom-agent",
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
  "b10x-loom-governor",
@@ -442,8 +453,10 @@ dependencies = [
 name = "b10x-loom-conformance"
 version = "0.40.0"
 dependencies = [
+ "b10x-loom-agent",
  "b10x-loom-commission",
  "b10x-loom-executor",
+ "b10x-loom-protocols",
  "b10x-loom-session-executor",
  "ess-conformance",
  "ess-primitives",

@@ -218,12 +218,21 @@ fn mutant_marker_mid_line_in_run_yaml_is_killed() {
 
 // Item 2/3: confidence typed Binary64 is refused by synthesize and is not the decimal primitive.
 // Every confidence is retyped: `SelectAction` copies its input into `Selection.confidence`, and
-// retyping one side alone fails validation instead.
+// retyping one side alone fails validation instead. The replica lists no authored scenarios
+// (`scenarios: []`): validate checks the codecs the authored scenarios need and would refuse
+// `Binary64` for them (`ESS-AUTHOR-036`) before synthesize names `UnsupportedPrimitive`.
 #[test]
 fn mutant_confidence_binary64_is_killed() {
     mutant_is_killed(
         "confidence_binary64",
         |tree| {
+            let inputs = tree.join("ess/ess-inputs.yaml");
+            let listed = fs::read_to_string(&inputs).expect("read ess-inputs.yaml to mutate");
+            let at = listed
+                .find("\nscenarios:")
+                .expect("ess-inputs.yaml has a top-level `scenarios:` list");
+            fs::write(&inputs, format!("{}\nscenarios: []\n", &listed[..at]))
+                .expect("write mutant");
             let run = tree.join("ess/domains/run.yaml");
             let text = fs::read_to_string(&run).expect("read file to mutate");
             assert!(

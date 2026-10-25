@@ -238,6 +238,10 @@ An agent as data: one `loom.agent/1` document naming the agent and its brief, it
 
 - `capabilities` — `List<String>`
 
+### `RefusalReason`
+
+`loom.agent.RefusalReason` is one of `Malformed`, `SecretLiteral`, `UnknownProtocol`, `UnknownAction`, `UnboundSource`, `HttpMethod`, `SendWithoutWrites` and `EmptyChannelAllow`.
+
 ### `RunBudget`
 
 `loom.agent.RunBudget` is a record of eight fields:
@@ -306,7 +310,49 @@ An agent as data: one `loom.agent/1` document naming the agent and its brief, it
 
 One of the types above is reached by nothing else in this system: `loom.agent.AgentSpec`. No entity, view, command, event, error or crossing names it, so it is either vocabulary something outside this specification uses or a leftover — and only a person can tell which.
 
+## Commands
+
+### `CheckAgentSpec`
+
+`loom.agent.CheckAgentSpec`.
+
+It takes:
+
+- `path` — `String`
+
+It has nine outcomes.
+
+**`malformed`** — Decided outside the input: the document at the path does not decode as a loom.agent/1 document. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.agent.SpecRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`secret-literal`** — Decided outside the input: a string of the document holds a credential. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.agent.SpecRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`unknown-protocol`** — Decided outside the input: the inner loop names a protocol the plugin catalog does not hold, or states are declared with no inner loop. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.agent.SpecRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`unknown-action`** — Decided outside the input: a state names an action the inner loop's protocol does not declare. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.agent.SpecRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`unbound-source`** — Decided outside the input: a state, the outer loop or the channel names a source no binding declares. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.agent.SpecRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`http-method`** — Decided outside the input: an http binding's method is not GET. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.agent.SpecRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`send-without-writes`** — Decided outside the input: reply.send is a capability while writes are none or undeclared. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.agent.SpecRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`empty-channel-allow`** — Decided outside the input: the channel's allow list is empty. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.agent.SpecRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`serveable`** — The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+## Errors
+
+### `SpecRefused`
+
+It carries:
+
+- `reason` — `loom.agent.RefusalReason`
+- `member` — `String`
+- `detail` — `String`
+
+Reported by `loom.agent.CheckAgentSpec` on its `malformed`, `secret-literal`, `unknown-protocol`, `unknown-action`, `unbound-source`, `http-method`, `send-without-writes` and `empty-channel-allow` outcomes.
+
 
 ---
 
-Generated from loom v1 · model digest `f3a7ce1d84af0aa210bcdcb654d0345049da29dfb769d229bf126c3235f9073d` · contract digest `slice-sha256/2:9e532af70289dccf0904699ae171009306b4b5f4e1ba3c19a4cdc33c0a06792f`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · model digest `36d9f391b47bf4ff392161dfbb07aa4606f2481a4cc3a3d4ac33a45bc10d5732` · contract digest `slice-sha256/2:9e4f9aac1a99c444bb25be0761b19692234e50c84321052be9ceb50d78c680a2`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

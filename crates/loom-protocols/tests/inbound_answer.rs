@@ -170,6 +170,13 @@ fn bundled_catalog_excludes_inbound_answer() {
             "{label} lists inbound.answer under another registration"
         );
     }
+    let plugins = ProtocolCatalog::plugins().expect("the plugin catalog");
+    let held: Vec<&str> = plugins.iter().map(|entry| entry.name()).collect();
+    assert_eq!(
+        held,
+        vec![NAME, "operator-reply@1"],
+        "the plugin catalog holds exactly the two plugin protocols"
+    );
 }
 
 #[test]

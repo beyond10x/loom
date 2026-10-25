@@ -10,7 +10,8 @@
 # session's run budget and stop policy are declared here field for field as Commission declares
 # them (`RunBudget`, `ActionBudget`, `StopPolicy`, `LimitBreachStep`, `BreachStep`,
 # `BudgetLimit`), and convert one to one. A spec is a document a host reads: it has no lifecycle,
-# so the domain declares types only.
+# so the domain declares types, and one stateless command, `CheckAgentSpec` (story agent-check):
+# whether the document at a path can be served, answered before anything runs.
 domain: loom.agent
 
 summary: >-
@@ -458,3 +459,85 @@ types:
         type: Optional<loom.agent.RuntimeSpec>
       - name: deploy
         type: Optional<loom.agent.DeploySpec>
+
+  # Why a spec cannot be served (story agent-check), one reason per refusal of `CheckAgentSpec`:
+  # the document does not decode as a `loom.agent/1` document (`Malformed`); a string of the
+  # document holds a credential, where only a reference belongs (`SecretLiteral`); the inner
+  # loop's protocol is not in the plugin catalog, or states are declared with no inner loop to
+  # check them against (`UnknownProtocol`); a state names an action its protocol lacks
+  # (`UnknownAction`); a state, the outer loop or the channel names a source no binding declares
+  # (`UnboundSource`); an `http` binding's method is not `GET` (`HttpMethod`); `reply.send` is
+  # among the capabilities while writes are `none` or undeclared (`SendWithoutWrites`); the
+  # channel's allow list is empty (`EmptyChannelAllow`).
+  - name: loom.agent.RefusalReason
+    kind: enum
+    variants:
+      [Malformed, SecretLiteral, UnknownProtocol, UnknownAction, UnboundSource, HttpMethod,
+       SendWithoutWrites, EmptyChannelAllow]
+
+errors:
+  # The one refusal of `CheckAgentSpec`: why, which member of the document (a path such as
+  # `states[0].actions[2]` or `bindings[1].method`; `document` when none), and the detail a person
+  # reads (the action, source or protocol named, or what the decoder refused).
+  - name: loom.agent.SpecRefused
+    fields:
+      - name: reason
+        type: loom.agent.RefusalReason
+      - name: member
+        type: String
+      - name: detail
+        type: String
+
+commands:
+  # Whether the `loom.agent/1` document at `path` can be served: `b10x-loom agent check --spec`.
+  # The document and the plugin catalog it is checked against are outside the input, so every
+  # refusal is external; the first refusal found, in declaration order, is the answer, and a
+  # document none of them claims is serveable. Nothing runs, nothing is read but the document,
+  # and nothing is held between two checks.
+  - name: loom.agent.CheckAgentSpec
+    input:
+      - name: path
+        type: String
+    outcomes:
+      - name: malformed
+        external: the document at the path does not decode as a loom.agent/1 document
+        error: loom.agent.SpecRefused
+        payload:
+          loom.agent.SpecRefused: {reason: Malformed}
+      - name: secret-literal
+        external: a string of the document holds a credential
+        error: loom.agent.SpecRefused
+        payload:
+          loom.agent.SpecRefused: {reason: SecretLiteral}
+      - name: unknown-protocol
+        external: the inner loop names a protocol the plugin catalog does not hold, or states are declared with no inner loop
+        error: loom.agent.SpecRefused
+        payload:
+          loom.agent.SpecRefused: {reason: UnknownProtocol}
+      - name: unknown-action
+        external: a state names an action the inner loop's protocol does not declare
+        error: loom.agent.SpecRefused
+        payload:
+          loom.agent.SpecRefused: {reason: UnknownAction}
+      - name: unbound-source
+        external: a state, the outer loop or the channel names a source no binding declares
+        error: loom.agent.SpecRefused
+        payload:
+          loom.agent.SpecRefused: {reason: UnboundSource}
+      - name: http-method
+        external: an http binding's method is not GET
+        error: loom.agent.SpecRefused
+        payload:
+          loom.agent.SpecRefused: {reason: HttpMethod}
+      - name: send-without-writes
+        external: reply.send is a capability while writes are none or undeclared
+        error: loom.agent.SpecRefused
+        payload:
+          loom.agent.SpecRefused: {reason: SendWithoutWrites}
+      - name: empty-channel-allow
+        external: the channel's allow list is empty
+        error: loom.agent.SpecRefused
+        payload:
+          loom.agent.SpecRefused: {reason: EmptyChannelAllow}
+      - name: serveable
+        accepts: nothing

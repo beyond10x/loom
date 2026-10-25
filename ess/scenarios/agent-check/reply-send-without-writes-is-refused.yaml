@@ -1,0 +1,15 @@
+# story agent-check: `reply.send` among the capabilities with `writes.mode: none` is refused,
+# naming the capability's member. The fixture is the operator example with writes set to `none`.
+type: ess-scenario/4
+domain: loom.agent
+scenario: reply-send-without-writes-is-refused
+summary: reply.send in policy.capabilities beside writes.mode none is refused, naming the member.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.CheckAgentSpec
+    input: {path: ess/scenarios/agent-check/specs/send-without-writes.yaml}
+    outcome: send-without-writes
+    error:
+      name: loom.agent.SpecRefused
+      fields: {reason: SendWithoutWrites, member: "policy.capabilities[2]", detail: reply.send}

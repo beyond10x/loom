@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "f3a7ce1d84af0aa210bcdcb654d0345049da29dfb769d229bf126c3235f9073d",
-    "contract_digest": "ea012624508e2cf3c3cdf5522ef160b4f74727db5a6edd27a5fd102ecf4ea2d4"
+    "source_digest": "36d9f391b47bf4ff392161dfbb07aa4606f2481a4cc3a3d4ac33a45bc10d5732",
+    "contract_digest": "00b46a8d1edd40edd961dc9dcf2afe82e3d81210aec3a4882dbcfa4b17960ae1"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -202,6 +202,13 @@
     {
       "kind": "domain_type",
       "source": "loom.agent.PolicySpec",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.agent.RefusalReason",
       "disposition": {
         "disposition": "generated"
       }
@@ -1055,6 +1062,25 @@
     },
     {
       "kind": "command_contract",
+      "source": "loom.agent.CheckAgentSpec",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.agent.CheckAgentSpec",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "the fields of error `loom.agent.SpecRefused`, which the specification gives no source, in `malformed`"
+        },
+        "contract": "given `loom.agent.CheckAgentSpec` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `malformed` externally decided (the document at the path does not decode as a loom.agent/1 document), error `loom.agent.SpecRefused`; `secret-literal` externally decided (a string of the document holds a credential), error `loom.agent.SpecRefused`; `unknown-protocol` externally decided (the inner loop names a protocol the plugin catalog does not hold, or states are declared with no inner loop), error `loom.agent.SpecRefused`; `unknown-action` externally decided (a state names an action the inner loop's protocol does not declare), error `loom.agent.SpecRefused`; `unbound-source` externally decided (a state, the outer loop or the channel names a source no binding declares), error `loom.agent.SpecRefused`; `http-method` externally decided (an http binding's method is not GET), error `loom.agent.SpecRefused`; `send-without-writes` externally decided (reply.send is a capability while writes are none or undeclared), error `loom.agent.SpecRefused`; `empty-channel-allow` externally decided (the channel's allow list is empty), error `loom.agent.SpecRefused`; `serveable` otherwise"
+      }
+    },
+    {
+      "kind": "command_contract",
       "source": "loom.run.OverruleSelection",
       "disposition": {
         "disposition": "generated"
@@ -1215,6 +1241,13 @@
     {
       "kind": "event_type",
       "source": "loom.session.SessionChangeProposed",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.agent.SpecRefused",
       "disposition": {
         "disposition": "generated"
       }

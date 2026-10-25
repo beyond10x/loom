@@ -6,6 +6,7 @@ use std::process::{Command as Process, ExitCode};
 use std::sync::Arc;
 
 use b10x_llm_tool_call::codex_model;
+use b10x_loom_cli::agent;
 use b10x_loom_cli::evaluate::{decision_json, refusal_json, refused_input, request_from_json};
 use b10x_loom_cli::events::{EventStream, FAILED};
 use b10x_loom_cli::mandate::{self, Mandate};
@@ -13,9 +14,9 @@ use b10x_loom_cli::model_catalog::ModelCatalog;
 use b10x_loom_cli::plugin::{is_proposal, recorded, report_line, turn_models};
 use b10x_loom_cli::regular_file;
 use b10x_loom_cli::{
-    ApproveArgs, Cli, Command, Confinement, DEFAULT_MODEL, EvaluateArgs, Output, PluginCommand,
-    PluginName, ProtocolCommand, ResumeArgs, RunArgs, approve_exit_status, resume_exit_status,
-    run_exit_status,
+    AgentCheckArgs, AgentCommand, ApproveArgs, Cli, Command, Confinement, DEFAULT_MODEL,
+    EvaluateArgs, Output, PluginCommand, PluginName, ProtocolCommand, ResumeArgs, RunArgs,
+    approve_exit_status, resume_exit_status, run_exit_status,
 };
 use b10x_loom_intake_slice::bindings::ActionBindings;
 use b10x_loom_intake_slice::case;
@@ -68,8 +69,27 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => failed(&error),
         },
+        Command::Agent(arguments) => match arguments.command {
+            AgentCommand::Check(arguments) => agent_check_command(&arguments),
+        },
         Command::Approve(arguments) => approve_command(&arguments),
         Command::Resume(arguments) => resume_command(&arguments),
+    }
+}
+
+/// Runs `agent check`, as `AGENT_CHECK_HELP` states: one line on standard output for a
+/// serveable spec, the refusal on standard error for one that is not.
+fn agent_check_command(arguments: &AgentCheckArgs) -> ExitCode {
+    match agent::check_spec(&arguments.spec) {
+        Ok(checked) => {
+            println!("{}", agent::checked_line(&checked));
+            ExitCode::SUCCESS
+        }
+        Err(agent::CheckFailure::Refused(refusal)) => {
+            eprintln!("b10x-loom: {}", agent::refused_line(&refusal));
+            ExitCode::from(agent::REFUSED)
+        }
+        Err(agent::CheckFailure::Unreadable(why)) => failed(&why),
     }
 }
 

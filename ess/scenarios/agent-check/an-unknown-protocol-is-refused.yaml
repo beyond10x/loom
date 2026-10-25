@@ -1,0 +1,15 @@
+# story agent-check: an inner loop naming a protocol the plugin catalog does not hold is refused,
+# naming the member and the protocol. The fixture is the operator example on `operator-escalate@1`.
+type: ess-scenario/4
+domain: loom.agent
+scenario: an-unknown-protocol-is-refused
+summary: An inner loop on a protocol the plugin catalog does not hold is refused, naming it.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.CheckAgentSpec
+    input: {path: ess/scenarios/agent-check/specs/unknown-protocol.yaml}
+    outcome: unknown-protocol
+    error:
+      name: loom.agent.SpecRefused
+      fields: {reason: UnknownProtocol, member: loops.inner.protocol, detail: operator-escalate@1}

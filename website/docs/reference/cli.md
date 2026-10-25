@@ -28,6 +28,8 @@ Generated from the clap definition of the `b10x-loom` command line in [`crates/l
 | [`b10x-loom plugin`](#b10x-loom-plugin) | Host a plugin, or print what it proposed. A plugin reads and proposes; it never sends |
 | [`b10x-loom plugin run`](#b10x-loom-plugin-run) | Host a plugin: poll, classify and answer each new item in a governed read-only turn, and record one line per handled item. Nothing is sent |
 | [`b10x-loom plugin report`](#b10x-loom-plugin-report) | Print one line per proposal a plugin recorded in its state directory: a proposed reply or a proposed case |
+| [`b10x-loom agent`](#b10x-loom-agent) | Check an agent defined as data, a loom.agent/1 spec, before anything runs |
+| [`b10x-loom agent check`](#b10x-loom-agent-check) | Say whether a loom.agent/1 spec can be served: refuse, naming the member and the reason, a spec that cannot. It runs nothing |
 | [`b10x-loom approve`](#b10x-loom-approve) | Approve the request a commission's Suspension holds: write a grant into the state directory. Approval performs nothing; `resume` does |
 | [`b10x-loom resume`](#b10x-loom-resume) | Continue a commission's suspended run after its approval: perform the suspended request once, release the Suspension, and run on until the run stops |
 
@@ -212,6 +214,45 @@ Usage: b10x-loom plugin report --state <DIR> <PLUGIN>
 |---|---|---|---|
 | `<PLUGIN>` | yes | none | The plugin whose record is read |
 | `--state <DIR>` | yes | none | The plugin's state directory |
+
+## `b10x-loom agent`
+
+Check an agent defined as data, a loom.agent/1 spec, before anything runs
+
+```text
+Usage: b10x-loom agent <COMMAND>
+```
+
+## `b10x-loom agent check`
+
+Say whether a loom.agent/1 spec can be served: refuse, naming the member and the reason, a spec that cannot. It runs nothing
+
+```text
+Usage: b10x-loom agent check --spec <FILE>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--spec <FILE>` | yes | none | The loom.agent/1 document, YAML or JSON, in a regular file; a named pipe, a device or a directory is refused |
+
+```text
+The spec is checked against the plugin catalog, which holds inbound-answer@1 and operator-reply@1.
+The first refusal is the answer, in this order: the document does not decode (Malformed); a string of
+it holds a credential, a URL with a user name or a query, or a token prefix such as xoxb- or sk-
+(SecretLiteral; the value is never repeated); the inner loop's protocol is not in the catalog, or
+states are declared with no inner loop (UnknownProtocol); a state names an action its protocol lacks
+(UnknownAction); a state, the outer loop or the channel names a source no binding declares
+(UnboundSource); an http binding's method is not GET (HttpMethod); reply.send is a capability while
+writes are none or undeclared (SendWithoutWrites); the channel allows no channel id
+(EmptyChannelAllow). Nothing runs and nothing but the spec is read.
+
+Exit status:
+  0  serveable: standard output carries "checked <agent>: <n> states, <m> bindings, protocol <protocol>"
+     (protocol none without loops)
+  3  refused: standard error carries "refused: <reason> at <member>: <detail>"
+  1  the file cannot be read
+  2  the command line is not valid
+```
 
 ## `b10x-loom approve`
 

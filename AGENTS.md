@@ -133,6 +133,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | A consequential action leaves Loom only as a proposal, and the executor links no Connectors crate | `crates/loom-executor/tests/connector_boundary.rs` (`consequential_actions_leave_loom_only_as_a_proposal`) |
 | A Connector invocation is made once, and only Connectors' own "nothing changed" is a refusal | `crates/loom-connectors/tests/connectors_invoker.rs` |
 | A write through the Connectors command line runs only for an admitted request and is bound to its admitted action and arguments, with an absolute approval proof path passed and never read, and an idempotency key derived from the request id; another action, input other than the admitted arguments, an operation not described as a write, or a missing, relative or control-character proof path, invokes nothing; an `unknown` or lost write is returned unknown and never invoked again; reads still refuse a write; only an applied write of the admitted request becomes the protocol's evidence, naming its step and, for a route, its target (the `queue` or `owner` the admitted arguments name, which the governor removes before Canon reads the record); a route whose target cannot be read, or whose answer names another one, records nothing and says why | `crates/loom-connectors/tests/connectors_cli_write.rs` (`an_admitted_write_passes_the_proof_path_and_the_derived_key`, `a_write_without_an_absolute_proof_path_starts_nothing`, `an_operation_not_described_as_a_write_is_refused_before_the_invoke`, `the_same_admitted_request_yields_the_same_idempotency_key`, `an_unknown_write_is_returned_unknown_and_never_invoked_again`, `a_write_whose_answer_is_lost_is_unknown`, `invoke_read_still_refuses_a_mutation_operation`), `crates/loom-connectors/tests/support_triage_route.rs` (`an_applied_route_records_a_routing_record_naming_the_step`, `the_route_is_not_admitted_before_the_review_approved`, `a_route_not_applied_records_no_evidence`), `crates/loom-connectors/tests/adversary_w172_governed_write.rs` (`input_the_runtime_did_not_admit_is_never_written`, `a_request_admitted_for_another_action_writes_nothing`, `a_control_character_proof_path_starts_no_process`, `the_adapter_refuses_the_write_of_another_admitted_request`, `the_record_names_the_target_the_admitted_arguments_name`, `a_route_whose_target_cannot_be_read_records_nothing_and_says_why`, `an_answer_naming_another_target_records_nothing`), `crates/loom-governor/tests/adversary2_governor.rs` (`a_target_in_the_facts_leaves_the_record_as_canon_evaluates_it`) |
+| A spec that cannot be served is refused before anything runs, naming the member and the reason, in declaration order of `loom.agent.CheckAgentSpec`; a credential in the document is refused without repeating it; `operator-reply@1` is in the plugin catalog, not the bundled one, and its `reply.send` is blocked until a reply is proposed | `crates/loom-agent/tests/check.rs` (`a_valid_spec_checks`, `a_state_naming_an_unknown_action_is_refused`, `a_source_without_a_binding_is_refused`, `a_secret_literal_is_refused`, `every_credential_shape_is_refused_without_repeating_it`, `a_credential_in_an_enum_member_is_refused_before_the_decoder`, `the_first_refusal_in_declaration_order_is_the_answer`), `crates/loom-cli/tests/agent_check.rs` (`a_secret_literal_is_refused_without_repeating_it`), `crates/loom-protocols/tests/operator_reply.rs` (`operator_reply_send_needs_a_proposal`, `plugin_catalog_lists_operator_reply`, `bundled_catalog_excludes_operator_reply`), `crates/loom-protocols/tests/inbound_answer.rs` (`bundled_catalog_excludes_inbound_answer`), `task conform` (`loom.agent.CheckAgentSpec`) |
 | A plugin turn reads only the sources and kinds of its projection, and a proposal is recorded, never sent | `crates/loom-plugin/tests/effects.rs` (`effects_refuse_an_undeclared_read`, `propose_writes_the_record_only`) |
 | A slack-handler run describes and invokes only the three configured Slack reads and the turns' data-source reads, and records one line per item it proposes for; nothing is sent | `crates/loom-plugin-slack/tests/run.rs` (`fixture_run_invokes_no_write`, `fixture_run_records_three_proposals`) |
 | A read through Connectors is performed naming its audit record; a write without a recorded attempt is an error | `crates/loom-connectors/tests/connectors_invoker.rs` (`an_admitted_read_is_performed_with_its_result_and_names_its_audit_record`, `a_write_without_a_recorded_attempt_is_still_an_error`), `crates/loom-commission-testkit/tests/effect_invocation.rs` (`a_performed_that_names_another_record_than_its_binding_requires_is_not_answered`) |
@@ -605,8 +606,31 @@ and a Kubernetes selector is a list of `Label`s, ESS having no map. ESS generate
 `loom_sdk::agent::parse` (`crates/loom-sdk/src/agent.rs`) decodes YAML or JSON into the generated
 types, refusing an undeclared member, a missing required one, a wrong type, an undeclared enum
 spelling and a `format` other than `loom.agent/1`, each naming the member; the models section goes
-through the models configuration's own decoder. It checks the shape only: whether a spec can be
-served is `story:agent-check`'s. `examples/agents/operator.yaml` decodes
+through the models configuration's own decoder. It checks the shape only. Whether a spec can be
+served is `b10x-loom-agent` (`crates/loom-agent`, `check` and `check_text`, run by `b10x-loom agent
+check --spec`): the ESS command `loom.agent.CheckAgentSpec` with its error `SpecRefused` (`reason`,
+`member`, `detail`) and the enum `RefusalReason`. Against a closure answering a plugin-catalog
+protocol's actions, the first refusal is the answer. `check_text` drops one leading byte order
+mark, then: `Malformed` (`document`, the decoder's message) when the text is not one YAML document
+the decoder reads (a scan error, an empty document, several documents, past its byte, flow or
+alias bound); `SecretLiteral` (a URL with user information or a query, or a token prefix of
+`TOKEN_PREFIXES`; the value is never repeated), found by `credentials.rs` walking the YAML the
+parser reads, every scalar, key and tag in document order, before the document is decoded, so it
+covers every member by construction and precedes the decode-level `Malformed`: a decoder message
+(an undeclared enum spelling, an unknown key) never carries a credential; a key holding one is
+named by the mapping that holds it. Then `Malformed` (the decoder refuses the document), and
+`check`'s own checks in the declaration order of the command's outcomes: `UnknownProtocol`,
+`UnknownAction`, `UnboundSource` (states, then the outer loop, then the channel), `HttpMethod`,
+`SendWithoutWrites` and `EmptyChannelAllow`. `check` takes a decoded spec and so starts at
+`UnknownProtocol`; a credential is the text's to refuse. The walk reads no more than the decoder:
+on a document the decoder refuses it runs under the decoder's own byte, flow and alias bounds
+(`the_credential_walk_keeps_the_decoders_bounds`). The conformance target plays
+the file system for the command's `path`: a file under the repository root is read as it is, a
+synthesized path reads the fixture of the forced branch (`ess/scenarios/agent-check/specs/`) or,
+forced nothing, the operator example. The scenarios are authored `ess-scenario/4` documents under
+`ess/scenarios/agent-check/`, listed in `ess-inputs.yaml`, their names hyphenated
+(`a-valid-spec-checks`, `a-state-naming-an-unknown-action-is-refused`), since ESS admits nothing
+else (`ESS-AUTHOR-001`). `examples/agents/operator.yaml` decodes
 (`crates/loom-sdk/tests/agent_spec.rs`, `the_operator_example_decodes`; the unknown-member unit test
 is `agent::tests::a_spec_with_an_unknown_member_is_refused_in_yaml_and_json`). It also refuses
 empty or blank text, a YAML tag on any value, a `bearer_env` that is no environment variable name
@@ -623,8 +647,11 @@ holds (`Decimal`, `Timestamp`, `SessionKind`, `Intent`, the datasource ids and
 build time implementing `Plugin` (`poll`, `classify`, `project`, `turn`, `result`, `objectives`),
 run by `run_plugin(plugin, config, state, stop)`. Its nouns are the `loom.plugin` domain
 (`ess/domains/plugin.yaml`); a plugin's own configuration extends `PluginConfig`. The plugin hooks
-sit outside a run and grant nothing. A turn is a thin caller of `run_until_blocked` through
-`loom_sdk`, on `inbound-answer@1` from `ProtocolCatalog::plugins()`, with Loom's chooser path (a
+sit outside a run and grant nothing. `ProtocolCatalog::plugins()` holds `inbound-answer@1` and
+`operator-reply@1` (`inbound-answer@1` plus `reply.send`, a write under the `reply.send`
+capability once a reply is proposed); `bundled()` holds neither. A turn is a thin caller of
+`run_until_blocked` through `loom_sdk`, on `inbound-answer@1` from `ProtocolCatalog::plugins()`,
+with Loom's chooser path (a
 `Loom` over `b10x_loom_executor::model_selector`'s `ModelSelector` and `ModelArguments`, on the
 turn's llm `Model`, revalidating against the governor), `PluginAuthority` (grants `datasource.read`
 and `reply.propose`, denies every other capability) and `DataSourceEffects`, which reads through

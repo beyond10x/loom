@@ -1,0 +1,16 @@
+# story agent-check: a state naming an action its protocol lacks is refused, naming the state's
+# member and the action. The fixture is the operator example with `reply.escalate` in the first
+# state, which `operator-reply@1` does not declare.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-state-naming-an-unknown-action-is-refused
+summary: A state naming an action operator-reply@1 does not declare is refused, naming it.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.CheckAgentSpec
+    input: {path: ess/scenarios/agent-check/specs/unknown-action.yaml}
+    outcome: unknown-action
+    error:
+      name: loom.agent.SpecRefused
+      fields: {reason: UnknownAction, member: "states[0].actions[2]", detail: reply.escalate}
