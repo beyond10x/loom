@@ -728,19 +728,30 @@ from `ess/`; the crate's unit tests hold its group, version, kind, plural and se
 admits none). One instance watches one namespace with one replica; there is no leader election.
 
 The record (`LoomAgentRecord`) lives in the controller's memory; after a restart every resource is
-applied again at its cluster generation and checked again. A reconcile (`src/reconcile.rs`) runs
-`ApplyLoomAgent`; a Pending resource is admitted (`src/admission.rs`) and the answer recorded by
-`RecordCheck` (exit 0, or 3 with `refused: <reason> at <member>: <detail>`). Admission, first
-refusal wins: `b10x_loom_agent::check_text` over `spec.agent` (members prefixed `spec.agent.`); the
-same over `spec.routes`, taking only `SecretLiteral` from it, then `Malformed` when the routes are
-not a mapping; `spec.connectorsConfig` split into words and walked for a credential; empty routes
-without `modelRoute` (`NoModelRoute`); a `secretRef` not allowed (`SecretNotAllowed`); a
-`deploy.kubernetes.namespace` other than the resource's (`NamespaceMismatch`); an egress host not
-allowed (`EgressHostNotAllowed`). A refused resource gets no child, and the children of an earlier
-generation are deleted (GET, owner check, delete with a uid precondition). A Running or Degraded
-resource has its children applied by server-side apply (field manager `b10x-loom-operator`,
-forced), then `ObserveDeployment` with what the applied Deployment reports, once its
-`observedGeneration` caught up. The status goes out by server-side apply on `/status`, only when it
+applied again at its cluster generation and checked again. The record is keyed by name, so the
+controller holds each name's uid beside it: a resource whose uid differs (deleted and created again
+under its name) is forgotten with `DeleteLoomAgent` first and applied as created. A reconcile
+(`src/reconcile.rs`) runs `ApplyLoomAgent`; a Pending resource is admitted (`src/admission.rs`) and
+the answer recorded by `RecordCheck` (exit 0, or 3 with `refused: <reason> at <member>: <detail>`).
+Admission, first refusal wins: `b10x_loom_agent::check_text` over `spec.agent` (members prefixed
+`spec.agent.`); the same over `spec.routes`, taking only `SecretLiteral` from it, then `Malformed`
+when the routes are not a mapping or llm's strict parser (`llm_models::routes::Routes::parse`,
+which refuses an `auth.secret` that is a value and not an `env:`, `file:` or `keychain:` reference)
+refuses them; `spec.connectorsConfig` decoded as TOML (`Malformed` otherwise) and each decoded key
+and string walked; a routes or connectors text beyond the walk's bound (4096 `[` or `{` bytes,
+2 MiB) is `TooLarge`, never admitted unwalked; empty routes without `modelRoute`
+(`NoModelRoute`); a `secretRef` not allowed (`SecretNotAllowed`); a `deploy.kubernetes.namespace`
+other than the resource's (`NamespaceMismatch`); an egress host not allowed
+(`EgressHostNotAllowed`); then each child it would render is read, and one that exists without this
+resource as controller is `ChildNotOwned`, naming its kind and name. A child whose controller is a
+`LoomAgent` of the same name with another uid (a predecessor not yet garbage-collected) is deleted
+instead, and the children are applied on the next reconcile. A Refused resource has no child: on
+every reconcile each child it controls is deleted (GET, owner check, delete with a uid
+precondition), so a failed delete is retried. A Running or Degraded resource has its children read
+again, then applied by server-side apply (field manager `b10x-loom-operator`, forced); a child
+someone else controls by then fails the reconcile and is not taken over. Then `ObserveDeployment`
+with what the applied Deployment reports, once its `observedGeneration` caught up. The status goes
+out by server-side apply on `/status`, only when it
 changed; conditions follow `src/status.rs` (a table per state in its module doc). Requeue after
 300 s, retry after 30 s; `.owns(Deployment)` wakes it on a Deployment change. Deletion is the
 garbage collector's (owner references with `controller` and `blockOwnerDeletion`); the controller

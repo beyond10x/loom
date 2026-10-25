@@ -642,6 +642,7 @@ dependencies = [
 name = "b10x-loom-operator"
 version = "0.40.0"
 dependencies = [
+ "b10x-llm-models",
  "b10x-loom-agent",
  "b10x-loom-protocols",
  "b10x-loom-resource",
@@ -656,6 +657,7 @@ dependencies = [
  "serde_json",
  "serde_yaml_ng",
  "tokio",
+ "toml 1.1.6+spec-1.1.0",
  "tower-test",
 ]
 

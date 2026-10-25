@@ -136,6 +136,36 @@ impl Fake {
     fn take(&self) -> Vec<Seen> {
         std::mem::take(&mut self.server.lock().expect("the fake").seen)
     }
+
+    /// Stores `object` at `path`, as if someone else had created it.
+    fn put(&self, path: &str, object: Value) {
+        self.server
+            .lock()
+            .expect("the fake")
+            .objects
+            .insert(path.to_owned(), object);
+    }
+
+    fn holds(&self, path: &str) -> bool {
+        self.server
+            .lock()
+            .expect("the fake")
+            .objects
+            .contains_key(path)
+    }
+}
+
+/// An object at `path` named `name` whose controller is `controller` (kind, name, uid), or none.
+fn object(name: &str, path: &str, controller: Option<(&str, &str, &str)>) -> Value {
+    let mut metadata =
+        json!({"name": name, "namespace": "agents", "uid": format!("uid-of-{path}")});
+    if let Some((kind, owner, uid)) = controller {
+        metadata["ownerReferences"] = json!([{
+            "apiVersion": if kind == "LoomAgent" { "loom.beyond10x.dev/v1alpha1" } else { "apps/v1" },
+            "kind": kind, "name": owner, "uid": uid, "controller": true,
+        }]);
+    }
+    json!({"metadata": metadata})
 }
 
 fn fake() -> (Client, Fake) {
@@ -273,7 +303,26 @@ async fn a_created_resource_is_checked_its_children_applied_and_its_status_runni
             assert_eq!(apply.body["metadata"]["ownerReferences"][0]["uid"], UID);
         }
     }
-    assert!(seen.iter().all(|seen| seen.method == Method::PATCH));
+    let reads: Vec<&str> = seen
+        .iter()
+        .filter(|seen| seen.method == Method::GET)
+        .map(|seen| seen.path.as_str())
+        .collect();
+    assert_eq!(
+        reads, CHILDREN,
+        "each child is read once, to take over none"
+    );
+    assert!(
+        seen[..CHILDREN.len()]
+            .iter()
+            .all(|seen| seen.method == Method::GET),
+        "every read comes before the first apply: {seen:?}"
+    );
+    assert!(
+        seen.iter()
+            .all(|seen| seen.method == Method::PATCH || seen.method == Method::GET),
+        "nothing is deleted: {seen:?}"
+    );
 
     let status = published(&seen);
     assert_eq!(status["observedGeneration"], 1);
@@ -574,4 +623,142 @@ async fn a_deleted_resource_is_forgotten_and_nothing_is_called() {
         "gone from the store, gone from the record"
     );
     assert!(fake.take().is_empty());
+}
+
+#[tokio::test]
+async fn a_child_someone_else_controls_refuses_the_resource_naming_it_and_stays() {
+    let config_map = CHILDREN[1];
+    for (controller, account, member, kind_and_name) in [
+        (
+            Some(("Deployment", "other", "uid-of-someone-else")),
+            None,
+            "metadata.name",
+            "ConfigMap platform-operator-spec",
+        ),
+        (
+            None,
+            Some("loom-agents-operator"),
+            "spec.agent.deploy.kubernetes.service_account",
+            "ServiceAccount loom-agents-operator",
+        ),
+        (
+            Some(("LoomAgent", "another-agent", "uid-of-another-agent")),
+            Some("another-agent"),
+            "spec.agent.deploy.kubernetes.service_account",
+            "ServiceAccount another-agent",
+        ),
+    ] {
+        let (client, fake) = fake();
+        let ctx = context(client);
+        let mut spec = example();
+        let path = match account {
+            Some(account) => {
+                spec = spec.replace(
+                    "service_account: platform-operator",
+                    &format!("service_account: {account}"),
+                );
+                format!("/api/v1/namespaces/agents/serviceaccounts/{account}")
+            }
+            None => config_map.to_owned(),
+        };
+        let name = path.rsplit('/').next().expect("a name").to_owned();
+        fake.put(&path, object(&name, &path, controller));
+
+        reconciled(agent(1, &spec, DEFAULT_ROUTES), &ctx).await;
+        let seen = fake.take();
+        assert!(applies(&seen).is_empty(), "no apply call: {seen:?}");
+        assert!(
+            seen.iter().all(|seen| seen.method != Method::DELETE),
+            "nothing is deleted: {seen:?}"
+        );
+        assert!(fake.holds(&path));
+        let status = published(&seen);
+        assert_eq!(status["state"], "Refused");
+        assert_eq!(status["check"]["exitCode"], 3);
+        assert_eq!(
+            status["check"]["message"],
+            format!(
+                "refused: ChildNotOwned at {member}: the {kind_and_name} exists and this resource \
+                 does not control it"
+            )
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_child_someone_else_creates_under_a_running_resource_is_not_taken_over() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(agent(1, &example(), DEFAULT_ROUTES), &ctx).await;
+    fake.take();
+
+    let service = CHILDREN[4];
+    fake.put(service, object(NAME, service, None));
+    let error = reconcile(
+        Arc::new(agent(1, &example(), DEFAULT_ROUTES)),
+        Arc::clone(&ctx),
+    )
+    .await
+    .expect_err("the reconcile fails");
+    assert_eq!(
+        error.to_string(),
+        "the Service platform-operator exists and this resource does not control it"
+    );
+    let seen = fake.take();
+    assert!(applies(&seen).is_empty(), "no apply call: {seen:?}");
+    assert_eq!(
+        fake.server.lock().expect("the fake").objects[service],
+        object(NAME, service, None),
+        "the Service is left as its owner wrote it"
+    );
+}
+
+#[tokio::test]
+async fn children_a_predecessor_left_are_deleted_and_applied_on_the_next_reconcile() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    for path in CHILDREN {
+        let name = path.rsplit('/').next().expect("a name");
+        fake.put(
+            path,
+            object(
+                name,
+                path,
+                Some(("LoomAgent", NAME, "uid-of-the-predecessor")),
+            ),
+        );
+    }
+
+    let action = reconciled(agent(1, &example(), DEFAULT_ROUTES), &ctx).await;
+    assert_eq!(action, Action::requeue(Duration::from_secs(30)));
+    let seen = fake.take();
+    assert!(applies(&seen).is_empty(), "no apply call: {seen:?}");
+    let deletes: Vec<&Seen> = seen
+        .iter()
+        .filter(|seen| seen.method == Method::DELETE)
+        .collect();
+    assert_eq!(
+        deletes
+            .iter()
+            .map(|seen| seen.path.as_str())
+            .collect::<Vec<_>>(),
+        CHILDREN
+    );
+    for delete in deletes {
+        assert_eq!(
+            delete.body["preconditions"]["uid"],
+            format!("uid-of-{}", delete.path)
+        );
+    }
+    assert_eq!(published(&seen)["state"], "Running");
+
+    reconciled(agent(1, &example(), DEFAULT_ROUTES), &ctx).await;
+    let seen = fake.take();
+    assert_eq!(applies(&seen), CHILDREN);
+    for apply in seen
+        .iter()
+        .filter(|seen| seen.method == Method::PATCH && !seen.path.ends_with("/status"))
+    {
+        assert_eq!(apply.body["metadata"]["ownerReferences"][0]["uid"], UID);
+    }
 }

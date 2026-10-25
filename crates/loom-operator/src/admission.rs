@@ -6,13 +6,21 @@
 //!    `UnknownProtocol`, `UnknownAction`, `UnboundSource`, `HttpMethod`, `SendWithoutWrites`,
 //!    `EmptyChannelAllow`).
 //! 2. `spec.routes` walked for a credential by the same library (`SecretLiteral`); a routes
-//!    document that is not a mapping is `Malformed`.
-//! 3. `spec.connectorsConfig` walked for a credential, each word of the TOML as one value
-//!    (`SecretLiteral`).
+//!    document that is not a mapping is `Malformed`, and so is one llm's strict `llm.routes/1`
+//!    parser (`llm_models::routes::Routes::parse`, the reader of the pod's `routes.yaml`)
+//!    refuses: an unknown field, an `auth.secret` that is a value and not an `env:`, `file:` or
+//!    `keychain:` reference, a route to an undeclared endpoint and the like.
+//! 3. `spec.connectorsConfig` decoded as TOML (`Malformed` when it is not TOML) and every key and
+//!    string of the decoded table walked for a credential (`SecretLiteral`), so an escape such as
+//!    `x` hides nothing.
 //! 4. An empty `spec.routes` while the controller configures no model route (`NoModelRoute`).
 //! 5. A `spec.secretRef` outside the configuration's `allowedSecretNames` (`SecretNotAllowed`).
 //! 6. A `deploy.kubernetes.namespace` other than the resource's (`NamespaceMismatch`).
 //! 7. A `deploy.kubernetes.egress` host outside `allowedEgressHosts` (`EgressHostNotAllowed`).
+//!
+//! The walk of steps 2 and 3 reads a text that is not a `loom.agent/1` document only within the
+//! agent decoder's bounds, [`MAX_WALKED_OPENERS`] `[` or `{` bytes and [`MAX_WALKED_BYTES`]; a
+//! text beyond either is refused `TooLarge` rather than admitted unread.
 //!
 //! A refusal reads `refused: <reason> at <member>: <detail>`, as `b10x-loom agent check` prints
 //! it, the member spelt from the resource (`spec.agent.bindings[1].base_url`); its detail never
@@ -20,6 +28,7 @@
 //! <n> states, <m> bindings, protocol <protocol>`.
 
 use b10x_loom_agent::{Checked, RefusalReason, check_text, spelling};
+use llm_models::routes::Routes;
 use loom_sdk::agent::{AgentSpec, parse};
 use serde_yaml_ng::{Mapping, Value};
 
@@ -28,6 +37,14 @@ use crate::resource::LoomAgentSpec;
 
 /// The exit code a refusal is recorded with, as `b10x-loom agent check` exits on one.
 pub const REFUSED: i64 = 3;
+
+/// The most `[` and `{` bytes a walked routes or connectors text may hold: the agent decoder's
+/// bound, beyond which `check_text` does not walk a text that is not a `loom.agent/1` document.
+pub const MAX_WALKED_OPENERS: usize = loom_sdk::agent::MAX_FLOW_OPENERS;
+
+/// The longest walked routes or connectors text, in bytes: the agent decoder's byte bound, beyond
+/// which `check_text` does not walk a text that is not a `loom.agent/1` document.
+pub const MAX_WALKED_BYTES: usize = 2 * 1024 * 1024;
 
 /// The name of the endpoint the default routes document declares.
 pub const MODEL_ROUTE_ENDPOINT: &str = "model-route";
@@ -105,16 +122,66 @@ fn within(at: &str, member: &str) -> String {
     }
 }
 
-/// The first credential `text`, a YAML document, holds, as a refusal at `at`.
-fn credential(text: &str, at: &str) -> Option<Refusal> {
+/// The first credential `text`, a YAML document standing at `at` in the resource, holds, as a
+/// refusal; `TooLarge` when the text is beyond what the walk reads.
+fn credential(text: &str, at: &str) -> Result<(), Refusal> {
+    let openers = text
+        .bytes()
+        .filter(|byte| matches!(byte, b'[' | b'{'))
+        .count();
+    if openers > MAX_WALKED_OPENERS {
+        return Err(Refusal::new(
+            "TooLarge",
+            at,
+            format!(
+                "it holds more than {MAX_WALKED_OPENERS} `[` or `{{` bytes, more than the \
+                 credential walk reads"
+            ),
+        ));
+    }
+    if text.len() > MAX_WALKED_BYTES {
+        return Err(Refusal::new(
+            "TooLarge",
+            at,
+            format!(
+                "it is longer than {MAX_WALKED_BYTES} bytes as YAML, more than the credential \
+                 walk reads"
+            ),
+        ));
+    }
     match check_text(text, &|_| None) {
-        Err(refused) if refused.reason == RefusalReason::SecretLiteral => Some(Refusal::new(
+        Err(refused) if refused.reason == RefusalReason::SecretLiteral => Err(Refusal::new(
             spelling(refused.reason),
             within(at, &refused.member),
             refused.detail,
         )),
-        _ => None,
+        _ => Ok(()),
     }
+}
+
+/// `text`, the `spec.connectorsConfig` TOML, decoded and written as YAML for the walk.
+fn connectors_yaml(text: &str) -> Result<String, Refusal> {
+    let table: toml::Table = toml::from_str(text).map_err(|error| {
+        let detail = error.span().map_or_else(
+            || "it is not a TOML document".to_owned(),
+            |span| {
+                let line = text
+                    .as_bytes()
+                    .iter()
+                    .take(span.start)
+                    .filter(|byte| **byte == b'\n')
+                    .count()
+                    + 1;
+                format!("it is not a TOML document (line {line})")
+            },
+        );
+        Refusal::new(
+            spelling(RefusalReason::Malformed),
+            "spec.connectorsConfig",
+            detail,
+        )
+    })?;
+    yaml(&table, "spec.connectorsConfig")
 }
 
 /// `value`, a member of the resource at `at`, as YAML.
@@ -202,9 +269,7 @@ pub fn admit(
         .then(|| yaml(&spec.routes, "spec.routes"))
         .transpose()?;
     if let Some(text) = &given {
-        if let Some(refusal) = credential(text, "spec.routes") {
-            return Err(refusal);
-        }
+        credential(text, "spec.routes")?;
         if !spec.routes.is_object() {
             return Err(Refusal::new(
                 spelling(RefusalReason::Malformed),
@@ -212,20 +277,17 @@ pub fn admit(
                 "an llm.routes/1 document is a mapping",
             ));
         }
+        Routes::parse(text).map_err(|error| {
+            Refusal::new(
+                spelling(RefusalReason::Malformed),
+                "spec.routes",
+                error.message,
+            )
+        })?;
     }
 
     let connectors = spec.connectors_config.clone().unwrap_or_default();
-    let words: Vec<&str> = connectors
-        .split(|c: char| c.is_whitespace() || "=\"',[]{}".contains(c))
-        .filter(|word| !word.is_empty())
-        .collect();
-    if let Some(refusal) = credential(&yaml(&words, "spec.connectorsConfig")?, "document") {
-        return Err(Refusal::new(
-            &refusal.reason,
-            "spec.connectorsConfig",
-            refusal.detail,
-        ));
-    }
+    credential(&connectors_yaml(&connectors)?, "spec.connectorsConfig")?;
 
     let (routes, default_routes) = match (given, &config.model_route) {
         (Some(text), _) => (text, false),
@@ -335,12 +397,122 @@ mod tests {
         )))
         .expect_err("refused");
         assert_eq!(refusal.reason, "SecretLiteral");
-        assert_eq!(refusal.member, "spec.connectorsConfig");
+        assert_eq!(
+            refusal.member,
+            "spec.connectorsConfig.connections.ops.token"
+        );
         assert!(!refusal.message().contains("xoxb-000-fake"));
         admitted(&spec(Some(
             "[connections.ops]\nadapter = \"chat\"\ntoken = \"env:CHAT_TOKEN\"\n",
         )))
         .expect("a reference is admitted");
+    }
+
+    #[test]
+    fn a_token_spelt_with_toml_escapes_or_as_a_key_is_refused_as_decoded() {
+        for (toml, member) in [
+            (
+                "[connections.ops]\ntoken = \"\\u0078oxb-000-fake\"\n",
+                "spec.connectorsConfig.connections.ops.token",
+            ),
+            (
+                "[connections.ops]\ntoken = \"\"\"\n\\U00000078oxb-000-fake\"\"\"\n",
+                "spec.connectorsConfig.connections.ops.token",
+            ),
+            (
+                "[connections]\n\"\\u0078oxb-000-fake\" = 1\n",
+                "spec.connectorsConfig.connections",
+            ),
+        ] {
+            let refusal = admitted(&spec(Some(toml))).expect_err(toml);
+            assert_eq!(refusal.reason, "SecretLiteral", "{toml}");
+            assert_eq!(refusal.member, member, "{toml}");
+            assert!(!refusal.message().contains("oxb-000-fake"), "{toml}");
+        }
+    }
+
+    #[test]
+    fn a_connectors_config_that_is_not_toml_is_malformed_without_repeating_it() {
+        let refusal = admitted(&spec(Some("[connections.ops]\ntoken = xoxb-000-fake\n")))
+            .expect_err("refused");
+        assert_eq!(
+            refusal.message(),
+            "refused: Malformed at spec.connectorsConfig: it is not a TOML document (line 2)"
+        );
+    }
+
+    #[test]
+    fn a_routes_secret_that_is_a_value_is_refused_by_llms_parser_without_repeating_it() {
+        let mut literal = spec(None);
+        literal.routes["endpoints"]["lab"]["auth"] =
+            serde_json::json!({"kind": "bearer", "secret": "not-a-reference-000-fake"});
+        let refusal = admitted(&literal).expect_err("refused");
+        assert_eq!(refusal.reason, "Malformed");
+        assert_eq!(refusal.member, "spec.routes");
+        assert!(
+            refusal.detail.contains("must be a reference"),
+            "{refusal:?}"
+        );
+        assert!(!refusal.message().contains("not-a-reference-000-fake"));
+
+        let mut reference = spec(None);
+        reference.routes["endpoints"]["lab"]["auth"] =
+            serde_json::json!({"kind": "bearer", "secret": "env:LAB_KEY"});
+        admitted(&reference).expect("a reference is admitted");
+
+        let mut unknown = spec(None);
+        unknown.routes["note"] = serde_json::json!("anything");
+        assert_eq!(admitted(&unknown).expect_err("refused").reason, "Malformed");
+    }
+
+    /// The walk's bound, held at its edge: a token beside exactly [`MAX_WALKED_OPENERS`] braces
+    /// is still found, and one more brace refuses the text unwalked.
+    #[test]
+    fn a_routes_text_beyond_the_walks_bound_is_too_large_and_one_within_it_is_walked() {
+        let at = |braces: usize| {
+            let mut routes = spec(None);
+            routes.routes["note"] = serde_json::json!("{".repeat(braces));
+            routes.routes["endpoints"]["lab"]["auth"] =
+                serde_json::json!({"kind": "bearer", "secret": "xoxb-000-fake"});
+            admitted(&routes).expect_err("refused")
+        };
+        let within = at(MAX_WALKED_OPENERS);
+        assert_eq!(within.reason, "SecretLiteral");
+        assert_eq!(within.member, "spec.routes.endpoints.lab.auth.secret");
+        let beyond = at(MAX_WALKED_OPENERS + 1);
+        assert_eq!(
+            beyond.message(),
+            "refused: TooLarge at spec.routes: it holds more than 4096 `[` or `{` bytes, more \
+             than the credential walk reads"
+        );
+
+        let long = |bytes: usize| {
+            let mut connectors = String::from("token = \"xoxb-000-fake\"\npad = \"");
+            let pad = bytes.saturating_sub(connectors.len() + 2);
+            connectors.push_str(&"a".repeat(pad));
+            connectors.push_str("\"\n");
+            admitted(&spec(Some(&connectors))).expect_err("refused")
+        };
+        assert_eq!(long(MAX_WALKED_BYTES - 64).reason, "SecretLiteral");
+        let beyond = long(MAX_WALKED_BYTES + 64);
+        assert_eq!(beyond.reason, "TooLarge");
+        assert_eq!(beyond.member, "spec.connectorsConfig");
+        assert!(!beyond.message().contains("xoxb-000-fake"));
+    }
+
+    #[test]
+    fn the_default_routes_read_as_llm_routes() {
+        let route = ModelRoute {
+            url: "http://model-route.agents.svc:8080/v1".to_owned(),
+            protocol: "messages".to_owned(),
+            model: "small-model".to_owned(),
+        };
+        let decoded = parse(
+            "format: loom.agent/1\nagent: {id: a, name: A, brief: b}\nmodel: {routes: routes.yaml, \
+             roles: [{role: agent, model: small}]}\n",
+        )
+        .expect("a spec");
+        Routes::parse(&default_routes(&route, &decoded)).expect("llm reads the default routes");
     }
 
     #[test]

@@ -182,10 +182,13 @@ when it publishes the status (`crates/loom-operator/src/status.rs`).
 
 Validation layers, in order: the CRD schema (structural, from the ESS domain); the controller's
 admission, before any child exists, which runs `b10x_loom_agent::check_text` (the library behind
-`b10x-loom agent check`) over `spec.agent`, refuses a credential in `spec.routes` or
-`spec.connectorsConfig`, and holds `secretRef`, `deploy.kubernetes.namespace` and the egress hosts
-to the controller's configuration, its answer landing in `status.check`; then
-`b10x-loom agent check` again in the pod's init container, whose exit code is not read back.
+`b10x-loom agent check`) over `spec.agent`, refuses a credential in `spec.routes` or in the decoded
+`spec.connectorsConfig` TOML, reads `spec.routes` with llm's strict `llm.routes/1` parser (so an
+`auth.secret` that is a value and not a reference is refused), holds `secretRef`,
+`deploy.kubernetes.namespace` and the egress hosts to the controller's configuration, and refuses
+a child name that an object it does not control already holds, its answer landing in
+`status.check`; then `b10x-loom agent check` again in the pod's init container, whose exit code is
+not read back.
 
 ### 5.2 `loom-operator`
 
@@ -219,6 +222,15 @@ Where the implementation (`story:loom-operator`) differs from this table and § 
 - The chart `charts/loom-agents` lives in this repository, versioned with the Loom tag (§ 10
   row 3 B): it installs the CRD, the controller's Deployment, ServiceAccount, Role, RoleBinding and
   ConfigMap, and `task chart-check` lints and renders it.
+- "Server-side apply with the resource as owner" applies only over a child the resource already
+  controls or that does not exist. Before applying, the controller reads each child: one held by
+  any other controller, or by none (the controller's own ServiceAccount, `default`), refuses the
+  resource `ChildNotOwned` instead of being taken over and later garbage-collected with it. A
+  child of a deleted `LoomAgent` of the same name is deleted first, and the children are applied
+  on the next reconcile.
+- The record is keyed by name, so the controller also holds each name's uid: a resource deleted
+  and created again under its name is applied as new, not `unchanged` or `stale`. A Refused
+  resource's children are deleted on every reconcile, so a failed delete is retried.
 
 ## 6. Deployment through the platform's deployment repository
 

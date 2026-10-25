@@ -15,6 +15,7 @@ name = "b10x-loom-operator"
 path = "src/main.rs"
 
 [dependencies]
+b10x-llm-models = { git = "https://github.com/beyond10x/llm", tag = "0.8.1" }
 b10x-loom-agent = { path = "../loom-agent" }
 b10x-loom-protocols = { path = "../loom-protocols" }
 b10x-loom-resource = { path = "../loom-resource" }
@@ -28,6 +29,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml_ng = "0.10"
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "sync", "time"] }
+toml = { version = "1", default-features = false, features = ["parse", "serde"] }
 
 [dev-dependencies]
 http-body-util = "0.1"
