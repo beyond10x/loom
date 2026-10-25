@@ -404,7 +404,7 @@ fn gate_over_a_copy_synthesize_refuses_with_exit_0_fails_at_synthesize() {
 #[test]
 fn gate_over_a_copy_requiring_an_older_ess_fails_at_validate() {
     let copy = copy_with_edit("gate_requires_older", "ess-inputs.yaml", |text| {
-        text.replacen("requires: ess 0.69.0", "requires: ess 0.51.0", 1)
+        text.replacen("requires: ess 0.69.2", "requires: ess 0.51.0", 1)
     });
     let suite = copy.parent().expect("scratch").join("loom-suite.json");
     let Err(failure) = run_gate(&copy, &suite) else {
