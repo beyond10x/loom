@@ -304,6 +304,12 @@ refusing a member the domain does not declare. `examples/agents/operator.yaml` i
 grants exactly `policy.capabilities`, and `admit_send` decides each `reply.send` as
 `loom.agent.AdmitSend` declares.
 
+To deploy such an agent to Kubernetes, the `LoomAgent` custom resource carries the document as its
+`spec.agent`. Its CustomResourceDefinition, `deploy/crd/loomagents.loom.beyond10x.dev.yaml`, is
+generated: its schema is projected from the specification (`ess/domains/resource.yaml` and the
+`loom.agent` domain) and `task crd-drift` fails when it falls behind. The controller that
+reconciles the resource is not written yet.
+
 Since `0.2.0`, `CanonGovernor::with_protocol` admits host-reviewed Canon protocols;
 `with_evaluation_time` supplies trusted freshness time. Durable hosts implement
 `governor::FallibleCaseStore`, while existing `CaseStore` users remain compatible. Protocol
@@ -402,6 +408,7 @@ surface kept stable within a release line, every port a host implements among it
 | `b10x-loom-connectors` | Commission's `ConnectorInvoker` over a Connectors service (Connectors `v0.35.0`) |
 | `b10x-loom-plugin` | The plugin host: polls a plugin, classifies each item and answers it in a governed turn over Connectors data sources, one record line per item; a turn given a `SendPolicy` may send the reply it proposed, once admitted |
 | `b10x-loom-plugin-slack` | The slack-handler plugin: walks the Slack channels the bot is a member of, read only, and proposes answers to the messages nobody answered; `b10x-loom plugin run slack-handler` hosts it |
+| `b10x-loom-resource` | The `LoomAgent` Kubernetes resource: its lifecycle record over the generated `loom.resource` behaviour, and the CRD projected from the specification; talks to no cluster |
 | `b10x-loom-governor` | Evaluates a case's protocol with Canon and issues the frontier; executes nothing |
 | `b10x-loom-mandate` | Opt-in: Commission's authority port answered by Mandate's `check` (Mandate `v0.9.0`), with the host's Mandate ports; a Mandate failure grants nothing. `b10x-loom approve` and `resume` use it behind `--mandate`; the SDK does not link it |
 | `b10x-loom-selector-laya` | Experimental: a fast typed action selector over a local or hosted Laya endpoint (`POST /v1/systemone`); no product crate links it |

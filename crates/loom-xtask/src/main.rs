@@ -21,6 +21,13 @@
 //! covered before it is generated, together with every type the generated crate declares
 //! (`SessionData`, `AnySession`, `SessionSnapshot`, …), as Commission's check reserves.
 //!
+//! `crd-generate` writes `deploy/crd/loomagents.loom.beyond10x.dev.yaml`, the `LoomAgent`
+//! `CustomResourceDefinition`: it runs `ess generate --path ess --kind schema` into scratch through
+//! the `--ess` binary, reads the documents of `loom.resource.LoomAgentSpec` and of the entity
+//! `loom.resource.LoomAgent`, and projects them with `b10x_loom_resource::crd::manifest`.
+//! `crd-drift` projects the same way and fails, naming the file, when the committed file is
+//! missing or differs from the projection by one byte.
+//!
 //! `release-check --tag <tag>` fails unless the tag is the workspace version and `CHANGELOG.md`
 //! has its entry with a `**Breaking:**` bullet or the line `No breaking changes.`, which it may
 //! say only when no stable surface changed since the previous tag, never with a break on a tag
@@ -28,6 +35,7 @@
 //! that no earlier release deprecated;
 //! `.github/workflows/release.yml` runs it on every pushed tag (see `release`).
 
+use b10x_loom_resource::crd;
 use clap::{Parser, Subcommand};
 use std::collections::BTreeSet;
 use std::fs;
@@ -93,6 +101,19 @@ enum Command {
         /// The committed tree to compare. Defaults to `<root>/generated/rust/loom`.
         #[arg(long)]
         generated: Option<PathBuf>,
+    },
+    /// Write `deploy/crd/loomagents.loom.beyond10x.dev.yaml`, the `LoomAgent`
+    /// `CustomResourceDefinition` projected from `ess generate --kind schema` of `ess/` by
+    /// `b10x_loom_resource::crd::manifest`.
+    CrdGenerate {
+        #[command(flatten)]
+        scratch: Scratch,
+    },
+    /// Fail when `deploy/crd/loomagents.loom.beyond10x.dev.yaml` is missing or differs from a fresh
+    /// projection of `ess/`, naming the file.
+    CrdDrift {
+        #[command(flatten)]
+        scratch: Scratch,
     },
     /// Fail when a source file of `b10x-loom-executor` defines, or renames something to, a type `ess/`
     /// declares (its name with the domain prefix removed) or a type the generated crate declares.
@@ -171,6 +192,8 @@ fn run(cli: Cli) -> Result<(), String> {
             &generated.unwrap_or_else(|| root.join(GENERATED)),
             SPECIFICATION,
         ),
+        Command::CrdGenerate { scratch } => crd_generate(&root, &cli.ess, &scratch),
+        Command::CrdDrift { scratch } => crd_drift(&root, &cli.ess, &scratch),
         Command::NoHandModel { src, generated } => no_hand_model(
             &root,
             &cli.ess,
@@ -316,6 +339,41 @@ impl Regeneration {
         scratch: &Scratch,
         specification: &str,
     ) -> Result<Self, String> {
+        Self::run(
+            root,
+            ess,
+            scratch,
+            "regen",
+            &["generate", "synthesize"],
+            specification,
+            &["--target", "rust", "--layout", "crate"],
+        )
+    }
+
+    /// The JSON Schema documents `ess generate --kind schema` writes for `ess/`.
+    fn schemas(root: &Path, ess: &Path, scratch: &Scratch) -> Result<Self, String> {
+        Self::run(
+            root,
+            ess,
+            scratch,
+            "schema",
+            &["generate"],
+            SPECIFICATION,
+            &["--kind", "schema"],
+        )
+    }
+
+    /// Runs `ess <verb> --path <root>/<specification> <options> --out <dir>` into a fresh
+    /// directory under the scratch root.
+    fn run(
+        root: &Path,
+        ess: &Path,
+        scratch: &Scratch,
+        prefix: &str,
+        verb: &[&str],
+        specification: &str,
+        options: &[&str],
+    ) -> Result<Self, String> {
         let scratch = match &scratch.scratch {
             Some(dir) => dir.clone(),
             None => default_scratch(root),
@@ -327,25 +385,75 @@ impl Regeneration {
             .map(|d| d.as_nanos())
             .unwrap_or_default();
         let regeneration = Self {
-            dir: scratch.join(format!("regen-{}-{nanos}", std::process::id())),
+            dir: scratch.join(format!("{prefix}-{}-{nanos}", std::process::id())),
         };
         let output = Process::new(ess)
-            .args(["generate", "synthesize", "--path"])
+            .args(verb)
+            .arg("--path")
             .arg(root.join(specification))
-            .args(["--target", "rust", "--layout", "crate", "--out"])
+            .args(options)
+            .arg("--out")
             .arg(&regeneration.dir)
             .output()
             .map_err(|e| format!("run {}: {e}", ess.display()))?;
         if !output.status.success() {
             return Err(format!(
-                "`{} generate synthesize` failed ({}):\n{}{}",
+                "`{} {}` failed ({}):\n{}{}",
                 ess.display(),
+                verb.join(" "),
                 output.status,
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
             ));
         }
         Ok(regeneration)
+    }
+}
+
+/// The `LoomAgent` `CustomResourceDefinition` projected from a fresh schema export of `ess/`.
+fn crd_projection(root: &Path, ess: &Path, scratch: &Scratch) -> Result<String, String> {
+    let schemas = Regeneration::schemas(root, ess, scratch)?;
+    let document = |relative: &str| -> Result<serde_json::Value, String> {
+        let path = schemas.dir.join(relative);
+        let text =
+            fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+        serde_json::from_str(&text).map_err(|e| format!("{} is not JSON: {e}", path.display()))
+    };
+    let spec = document(crd::SPEC_SCHEMA)?;
+    let entity = document(crd::ENTITY_SCHEMA)?;
+    crd::manifest(&spec, &entity)
+        .map_err(|e| format!("project the LoomAgent CRD from {SPECIFICATION}/: {e}"))
+}
+
+fn crd_generate(root: &Path, ess: &Path, scratch: &Scratch) -> Result<(), String> {
+    let manifest = crd_projection(root, ess, scratch)?;
+    let file = root.join(crd::FILE);
+    if let Some(dir) = file.parent() {
+        fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+    }
+    fs::write(&file, manifest).map_err(|e| format!("write {}: {e}", file.display()))?;
+    println!("{}: projected from {SPECIFICATION}/", crd::FILE);
+    Ok(())
+}
+
+fn crd_drift(root: &Path, ess: &Path, scratch: &Scratch) -> Result<(), String> {
+    let manifest = crd_projection(root, ess, scratch)?;
+    let file = root.join(crd::FILE);
+    match fs::read(&file) {
+        Ok(committed) if committed == manifest.as_bytes() => {
+            println!("{}: no drift from {SPECIFICATION}/", crd::FILE);
+            Ok(())
+        }
+        Ok(_) => Err(format!(
+            "{}: differs from a fresh projection of {SPECIFICATION}/ (regenerate it with `task \
+             crd-generate`)",
+            crd::FILE
+        )),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Err(format!(
+            "{}: missing (write it with `task crd-generate`)",
+            crd::FILE
+        )),
+        Err(error) => Err(format!("read {}: {error}", file.display())),
     }
 }
 

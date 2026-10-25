@@ -485,6 +485,7 @@ dependencies = [
  "b10x-loom-commission",
  "b10x-loom-executor",
  "b10x-loom-protocols",
+ "b10x-loom-resource",
  "b10x-loom-session-executor",
  "ess-conformance",
  "ess-primitives",
@@ -649,6 +650,16 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "url",
+]
+
+[[package]]
+name = "b10x-loom-resource"
+version = "0.40.0"
+dependencies = [
+ "jsonschema 0.52.1",
+ "loom",
+ "serde_json",
+ "serde_yaml_ng",
 ]
 
 [[package]]
@@ -3192,6 +3203,7 @@ dependencies = [
 name = "loom-xtask"
 version = "0.40.0"
 dependencies = [
+ "b10x-loom-resource",
  "clap",
  "proc-macro2",
  "serde_json",

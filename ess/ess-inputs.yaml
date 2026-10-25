@@ -14,6 +14,7 @@ specification:
   - domains/models.yaml
   - domains/session.yaml
   - domains/agent.yaml
+  - domains/resource.yaml
 scenarios:
   - scenarios/agent-check/a-valid-spec-checks.yaml
   - scenarios/agent-check/a-malformed-document-is-refused.yaml

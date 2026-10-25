@@ -23,6 +23,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `b10x-loom-plugin`: `turn_with` with `TurnOptions` and `Turned`; `DataSourceEffects::with_send` with `SendPolicy` performs `reply.send` once `admit_send` admits it (story:agent-serve)
 - `b10x-loom-plugin-slack`: `SlackHandler::with_channel_allow` and `poll`'s allow list (story:agent-serve)
 - `loom.agent.AdmitSend` with its error `SendRefused` and the enum `SendRefusalReason`, generated from `ess/domains/agent.yaml` and re-exported from `loom_sdk::agent`; five authored scenarios under `ess/scenarios/agent-serve/` (story:agent-serve)
+- The `loom.resource` domain and the `LoomAgent` CRD projected from it, held by `task crd-drift` (story:loom-agent-resource-domain)
+- `b10x-loom-resource`: `LoomAgentRecord`, the resource's lifecycle record, and `crd::manifest` (story:loom-agent-resource-domain)
 - `b10x-loom agent check --spec <FILE>` says whether a `loom.agent/1` spec can be served: exit 0 with one `checked` line, 3 with the first refusal naming its reason and member, 1 when the file cannot be read (story:agent-check)
 - `b10x-loom-agent`: `check` and `check_text` check a spec against the plugin catalog's protocols in the declaration order of `loom.agent.CheckAgentSpec`; `check_text` refuses a credential anywhere in the document before decoding it, without repeating it (story:agent-check)
 - `operator-reply@1` in `ProtocolCatalog::plugins()`: `inbound-answer@1`'s read and proposal plus `reply.send`, a write under the `reply.send` capability once a reply is proposed, and `reply.decline` (story:agent-check)

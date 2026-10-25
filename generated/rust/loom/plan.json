@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "4a99756f85a24fac97752e928c318c5c1b6ffbd3343706808e92c1fbf83dada5",
-    "contract_digest": "d1418824cb56c636461a5a81d92386592eac2357fd0ef3ac5cffc66165578878"
+    "source_digest": "57efaae179a33626d37c8c198c74946595a31ed6f2ea28fcc78619f3cd766242",
+    "contract_digest": "2ae84016be0474df15e9872f7fcbe97c0bc899337811922b75b31e7cda8dc5fb"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -768,6 +768,55 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.resource.CheckResult",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.resource.DeploymentAvailability",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.resource.ImageRef",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.resource.LoomAgent.State",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.resource.LoomAgentSpec",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.resource.ResourceName",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.resource.SecretRef",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.run.ActionCatalogue.State",
       "disposition": {
         "disposition": "generated"
@@ -1055,6 +1104,13 @@
     },
     {
       "kind": "entity_lifecycle",
+      "source": "loom.resource.LoomAgent",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "entity_lifecycle",
       "source": "loom.run.ActionCatalogue",
       "disposition": {
         "disposition": "generated"
@@ -1179,6 +1235,62 @@
     },
     {
       "kind": "command_contract",
+      "source": "loom.resource.ApplyLoomAgent",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.resource.ApplyLoomAgent",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.resource.DeleteLoomAgent",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.resource.DeleteLoomAgent",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.resource.ObserveDeployment",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.resource.ObserveDeployment",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.resource.RecordCheck",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.resource.RecordCheck",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
       "source": "loom.run.OverruleSelection",
       "disposition": {
         "disposition": "generated"
@@ -1276,6 +1388,48 @@
     {
       "kind": "command_behavior",
       "source": "loom.session.ProposeSessionChange",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.resource.LoomAgentApplied",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.resource.LoomAgentDegraded",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.resource.LoomAgentDeleted",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.resource.LoomAgentRecovered",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.resource.LoomAgentRefused",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.resource.LoomAgentRunning",
       "disposition": {
         "disposition": "generated"
       }
@@ -1380,6 +1534,27 @@
     },
     {
       "kind": "error_type",
+      "source": "loom.resource.LoomAgentNotFound",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.resource.LoomAgentStateConflict",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.resource.StaleGeneration",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
       "source": "loom.run.ActionNotInCatalogue",
       "disposition": {
         "disposition": "generated"
@@ -1437,6 +1612,20 @@
     {
       "kind": "error_type",
       "source": "loom.run.SelectionStateConflict",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_type",
+      "source": "loom.resource.LoomAgents",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_query",
+      "source": "loom.resource.LoomAgents",
       "disposition": {
         "disposition": "generated"
       }

@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-25T17:11:45Z",
+  "actor": "human:timo",
+  "artifact": "story:loom-agent-resource-domain",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "commit 600694ee on impl/loom-agent-resource-domain (F1, F2, F3, J1, J2); pre-existing J3 and J5 filed as story:agent-spec-constraints-in-ess",
+    "review": "review-result:adversary-w20261025-resource-pass-1",
+    "outcome": "fixed"
+  }
+}

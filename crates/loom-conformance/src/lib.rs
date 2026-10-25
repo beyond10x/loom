@@ -23,6 +23,13 @@
 //! through it, and the view `AgentSessions` reads the sessions it recorded (the `session` module
 //! says how).
 //!
+//! The `loom.resource` domain's `ApplyLoomAgent`, `RecordCheck`, `ObserveDeployment` and
+//! `DeleteLoomAgent`, and its view `LoomAgents`, are answered by `b10x-loom-resource`'s
+//! `LoomAgentRecord`, which runs the generated behaviour of `loom.resource` over itself (the
+//! `resource` module).
+//!
+//! This crate translates values and records what was published. It decides no outcome: each
+//! answer is the outcome the executor returned, and each event is the one it returned.
 //! The `loom.agent` domain's `CheckAgentSpec` is answered by `b10x_loom_agent::check_text` over
 //! the plugin catalog (`loom_protocols::ProtocolCatalog::plugins`): `serveable`, or the branch of
 //! the refusal's reason with `SpecRefused` carrying its reason, member and detail. The target plays
@@ -53,6 +60,7 @@
 mod a2a;
 mod agent;
 pub mod codec;
+mod resource;
 mod session;
 
 use std::cell::RefCell;
@@ -71,6 +79,7 @@ use b10x_loom_executor::model::run::{
 };
 use b10x_loom_executor::projection::CatalogueRecord;
 use b10x_loom_executor::selection::select_action;
+use b10x_loom_resource::LoomAgentRecord;
 use b10x_loom_session_executor::model::session::AgentSessions;
 use ess_conformance::scenario::{CommandRef, ErrorRef, EventRef, OutcomeRef};
 use ess_conformance::target::{
@@ -140,6 +149,8 @@ struct Live {
     sequence: u64,
     /// The sessions the session executor recorded, one `AgentSessions` row each.
     sessions: Vec<AgentSessions>,
+    /// `LoomAgent` resources, behind the generated behaviour of `loom.resource`.
+    resources: LoomAgentRecord,
 }
 
 impl Live {
@@ -206,6 +217,14 @@ impl ConformanceTarget for LoomTarget {
             RECORD_SELECTION => record_selection(&mut live, input, correlation),
             session::PROPOSE_SESSION_CHANGE => {
                 session::propose_session_change(&mut live, input, correlation)?
+            }
+            resource::APPLY_LOOM_AGENT => resource::apply_loom_agent(&mut live, input, correlation),
+            resource::RECORD_CHECK => resource::record_check(&mut live, input, correlation),
+            resource::OBSERVE_DEPLOYMENT => {
+                resource::observe_deployment(&mut live, input, correlation)
+            }
+            resource::DELETE_LOOM_AGENT => {
+                resource::delete_loom_agent(&mut live, input, correlation)
             }
             agent::CHECK_AGENT_SPEC => agent::check_agent_spec(&mut live, input)?,
             agent::ADMIT_SEND => agent::admit_send_command(input),
@@ -332,6 +351,12 @@ impl ConformanceTarget for LoomTarget {
                 })
                 .collect(),
             session::AGENT_SESSIONS => live.sessions.iter().map(session::row).collect(),
+            resource::LOOM_AGENTS => resource::rows(&live.resources).ok_or_else(|| {
+                TargetError::unavailable(
+                    format!("reading `{view}`"),
+                    "the generated query refused a row its declared type cannot hold",
+                )
+            })?,
             _ => {
                 return Err(TargetError::unavailable(
                     format!("reading `{view}`"),

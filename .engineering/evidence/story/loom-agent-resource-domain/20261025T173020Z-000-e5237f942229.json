@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-25T17:30:20Z",
+  "actor": "human:timo",
+  "artifact": "story:loom-agent-resource-domain",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "commit 73a18ab5 on impl/loom-agent-resource-domain (P2-1, P2-2, N1)",
+    "review": "review-result:adversary-w20261025-resource-pass-2",
+    "outcome": "fixed"
+  }
+}
