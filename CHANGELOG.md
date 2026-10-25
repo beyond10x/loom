@@ -12,6 +12,18 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `b10x-loom agent check --spec <FILE>` says whether a `loom.agent/1` spec can be served: exit 0 with one `checked` line, 3 with the first refusal naming its reason and member, 1 when the file cannot be read (story:agent-check)
+- `b10x-loom-agent`: `check` and `check_text` check a spec against the plugin catalog's protocols in the declaration order of `loom.agent.CheckAgentSpec`; `check_text` refuses a credential anywhere in the document before decoding it, without repeating it (story:agent-check)
+- `operator-reply@1` in `ProtocolCatalog::plugins()`: `inbound-answer@1`'s read and proposal plus `reply.send`, a write under the `reply.send` capability once a reply is proposed, and `reply.decline` (story:agent-check)
+- `loom.agent.CheckAgentSpec` with its error `SpecRefused` and the enum `RefusalReason`, generated from `ess/domains/agent.yaml` and re-exported from `loom_sdk::agent`; nine authored scenarios under `ess/scenarios/agent-check/` (story:agent-check)
+
+### Changed
+
+- `ProtocolCatalog::plugins()` holds `operator-reply@1` beside `inbound-answer@1`; `bundled()` holds neither (story:agent-check)
+- The conformance suite and the ESS gate synthesize with `--scenarios`, so authored scenarios join the synthesized ones (story:agent-check)
+
 ## [0.40.0] - 2026-10-24
 
 ### Changed

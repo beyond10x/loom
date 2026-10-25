@@ -1,0 +1,15 @@
+# story agent-check: a state naming a source no binding declares is refused, naming the member and
+# the source. The fixture is the operator example with `tickets` among the first state's sources.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-source-without-a-binding-is-refused
+summary: A state naming a source no binding declares is refused, naming the source.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.CheckAgentSpec
+    input: {path: ess/scenarios/agent-check/specs/unbound-source.yaml}
+    outcome: unbound-source
+    error:
+      name: loom.agent.SpecRefused
+      fields: {reason: UnboundSource, member: "states[0].sources[2]", detail: tickets}

@@ -98,6 +98,12 @@ fn adversary2_w2_named_unsupported_scenarios_fail_task_conform_on_conformance_st
         .join(format!("adversary2-status-{}-{nanos}", std::process::id()));
     fs::create_dir_all(fake.join("crates/loom-conformance")).expect("create the copy's crate dir");
     copy_tree(&root().join("ess"), &fake.join("ess"));
+    // The target reads `loom.agent.CheckAgentSpec`'s documents from the repository root it is
+    // given, the operator example among them, so the copy holds it too.
+    copy_tree(
+        &root().join("examples/agents"),
+        &fake.join("examples/agents"),
+    );
 
     let run_yaml = fake.join("ess/domains/run.yaml");
     let spec = fs::read_to_string(&run_yaml).expect("read the copy's run.yaml");

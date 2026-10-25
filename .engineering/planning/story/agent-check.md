@@ -2,13 +2,60 @@
 format: aep.planning-md/3
 id: story:agent-check
 kind: story
-status: draft
+status: implemented
 title: b10x-loom agent check refuses a loom.agent/1 spec that cannot be served, and operator-reply@1 is in the plugin catalog
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
 - depends_on: story:agent-domain
-revision: 1
+scope:
+- confidence: cited
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: inferred
+  path: Cargo.lock
+- confidence: inferred
+  path: Cargo.toml
+- confidence: cited
+  path: README.md
+- confidence: cited
+  path: crates/loom-agent
+- confidence: cited
+  path: crates/loom-cli/src/agent.rs
+- confidence: cited
+  path: crates/loom-cli/src/lib.rs
+- confidence: inferred
+  path: crates/loom-cli/src/main.rs
+- confidence: inferred
+  path: crates/loom-conformance/src
+- confidence: inferred
+  path: crates/loom-conformance/tests/conform.rs
+- confidence: cited
+  path: crates/loom-protocols/src/lib.rs
+- confidence: inferred
+  path: crates/loom-protocols/tests/operator_reply.rs
+- confidence: cited
+  path: ess/domains/agent.yaml
+- confidence: inferred
+  path: ess/ess-inputs.yaml
+- confidence: inferred
+  path: ess/scenarios/agent-check
+- confidence: inferred
+  path: generated/rust/loom
+- confidence: cited
+  path: protocols/operator-reply/1.yaml
+- confidence: inferred
+  path: website/data/status.json
+- confidence: cited
+  path: website/docs/reference/cli.md
+- confidence: inferred
+  path: website/docs/reference/ess
+revision: 26
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-25T15:14:05Z", actor: "human:timo", revision: 23}
+- {from: "proposed", to: "active", at: "2026-10-25T15:14:06Z", actor: "human:timo", revision: 24}
+- {from: "active", to: "implemented", at: "2026-10-25T16:48:20Z", actor: "human:timo", revision: 26, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}}
 ---
 ## Outcome
 
@@ -54,10 +101,22 @@ Serving the spec (`story:agent-serve`); `http` bindings at run time (`story:agen
 
 ## Scope
 
-`ess/domains/agent.yaml` (refusals, scenarios), `protocols/operator-reply/1.yaml`,
-`crates/loom-protocols/src/lib.rs`, a new crate `crates/loom-agent` (the check), `crates/loom-cli/src/lib.rs`
-(`Command::Agent`), `crates/loom-cli/src/agent.rs`, `website/docs/reference/cli.md` (generated),
-README.md, AGENTS.md, CHANGELOG.md.
+Confirmed on the wave head (the merge of `impl/agent-check`, `git diff --stat e77a247c..de91c818`):
+
+| path | |
+|---|---|
+| `crates/loom-agent/` (`b10x-loom-agent`: `lib.rs`, `credentials.rs`, `tests/check.rs`, `tests/adv_check.rs`) | added |
+| `protocols/operator-reply/1.yaml`, `crates/loom-protocols/src/lib.rs`, `crates/loom-protocols/tests/{operator_reply,inbound_answer}.rs` | confirmed |
+| `crates/loom-cli/src/{lib,main,agent}.rs`, `crates/loom-cli/tests/{agent_check,adv_agent_check}.rs`, `crates/loom-cli/Cargo.toml` | confirmed |
+| `crates/loom-conformance/src/{lib,agent}.rs`, `tests/conform.rs`, `tests/adversary2_w2_conformance_status.rs`, `Cargo.toml` | confirmed |
+| `ess/domains/agent.yaml`, `ess/ess-inputs.yaml`, `ess/scenarios/agent-check/` (nine scenarios, eight fixtures) | confirmed |
+| `generated/rust/loom/` (regenerated), `crates/loom-sdk/src/agent.rs` (re-exports) | confirmed |
+| `crates/loom-executor/tests/{crate_names,ess_gate,adversary_ess_gate}.rs` | confirmed |
+| `website/docs/reference/{cli,crates}.md`, `website/docs/reference/ess/` (regenerated), `website/data/status.json` | confirmed |
+| `README.md`, `AGENTS.md`, `CHANGELOG.md`, `Cargo.toml` (workspace member), `Cargo.lock` | confirmed |
+| `website/docs/reference/sdk-stability.md`, `examples/agents/operator.yaml` | not touched |
+
+Not declared, per D3: "a binding naming a program other than `runtime.connectors.program`" (no binding of `loom.agent` names a program).
 
 ## Ready
 

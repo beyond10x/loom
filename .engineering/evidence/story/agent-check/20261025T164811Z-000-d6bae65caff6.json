@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-25T16:48:11Z",
+  "actor": "human:timo",
+  "artifact": "story:agent-check",
+  "kind": "story",
+  "revision": 24,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "b10x-loom agent check --spec on de91c818: examples/agents/operator.yaml exit 0 'checked platform-operator: 3 states, 3 bindings, protocol operator-reply@1'; specs/unknown-action.yaml exit 3 'refused: UnknownAction at states[0].actions[2]: reply.escalate'; specs/secret-literal.yaml exit 3 'refused: SecretLiteral at bindings[1].base_url: a URL carrying a user name and password', the value absent from the output: VERIFIED",
+    "reference": "wave/2026-10-25-w1@de91c818"
+  }
+}

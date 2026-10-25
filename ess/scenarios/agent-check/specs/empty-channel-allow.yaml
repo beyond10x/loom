@@ -1,0 +1,56 @@
+format: loom.agent/1
+agent:
+  id: platform-operator
+  name: Platform operator
+  brief: >-
+    You watch one chat channel for questions about the platform. Read logs and metrics before you
+    answer; say what you read. Never claim a fix you did not observe.
+model:
+  routes: routes.yaml
+  roles:
+    - {role: agent, model: small}
+    - {role: classifier, model: small}
+session:
+  kind: ClaudeCode
+  budget: {max_steps: 20, max_tokens: 400000}
+  stop: {approval_gate: true, idle_bound: 2, on_breach: DiscardStep}
+  confinement: none
+  tools:
+    allow: [Read, Grep]
+    deny: [Bash]
+    egress:
+      - {name: logs, host: logs.example, port: 3100, max_bytes: 262144}
+    decisions: ask
+loops:
+  outer: {poll_interval_seconds: 60, sources: [chat], min_age_minutes: 0, lookback_minutes: 120}
+  inner: {protocol: operator-reply@1, step_budget: 8, model_budget: 16, classify_threshold: 0.5}
+states:
+  - {name: answer, when: {intent: Ask}, actions: [source.read, reply.propose, reply.send, reply.decline], sources: [logs, metrics, chat]}
+  - {name: look-up, when: {intent: Find}, actions: [source.read, reply.propose, reply.send, reply.decline], sources: [logs, metrics]}
+  - {name: hand-off, when: {intent: Task}, actions: [reply.decline], sources: []}
+bindings:
+  - {name: chat, kind: connectors, adapter: chat, connection: ops, list: conversations.list, get: conversations.history, search: conversations.replies, write: chat.postMessage}
+  - {name: logs, kind: http, base_url: http://logs.monitoring.svc:3100, allow_paths: [/api/v1/query_range, /api/v1/labels], method: GET, max_bytes: 262144}
+  - {name: metrics, kind: http, base_url: http://metrics.monitoring.svc:9090, allow_paths: [/api/v1/query, /api/v1/alerts], method: GET, max_bytes: 262144}
+channel: {binding: chat, allow: [], bot_user_id: U0000000001}
+writes: {mode: auto, max_per_hour: 30}
+policy: {capabilities: [datasource.read, reply.propose, reply.send]}
+expose:
+  a2a: {port: 8080, path: /a2a, card: {name: platform-operator, description: Answers about platform logs and metrics, skills: [logs, metrics]}}
+runtime:
+  state_dir: /var/lib/agent
+  connectors: {program: /usr/local/bin/connectors, config: /etc/agent/connectors.toml, state_dir: /var/lib/agent/connectors, timeout_seconds: 30}
+  confinement: none
+deploy:
+  kubernetes:
+    namespace: agents
+    service_account: platform-operator
+    image_repository: registry.example/agents/platform-operator
+    resources: {cpu: 250m, memory: 256Mi}
+    egress:
+      - {name: chat-api, host: chat.example, port: 443}
+      - {name: model-api, host: models.example, port: 443}
+      - {name: logs, namespace: monitoring, selector: [{name: app, value: logs}], port: 3100}
+      - {name: metrics, namespace: monitoring, selector: [{name: app, value: metrics}], port: 9090}
+    ingress:
+      - {name: a2a, from_namespace: operator-clients, port: 8080}

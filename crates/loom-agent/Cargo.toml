@@ -1,0 +1,19 @@
+[package]
+name = "b10x-loom-agent"
+description = "Checks a loom.agent/1 document before anything runs: whether it can be served against the plugin catalog, naming the member and the reason of the first refusal."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "b10x_loom_agent"
+
+[dependencies]
+b10x-loom-sdk = { path = "../loom-sdk" }
+serde = "1"
+serde_yaml_ng = "0.10"
+
+[dev-dependencies]
+b10x-loom-protocols = { path = "../loom-protocols" }

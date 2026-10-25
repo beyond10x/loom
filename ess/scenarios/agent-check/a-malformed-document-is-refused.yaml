@@ -1,0 +1,16 @@
+# story agent-check: a document the decoder refuses is refused as malformed, with the decoder's
+# message as the detail. The fixture is the operator example with a member `agent.team` the domain
+# does not declare.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-malformed-document-is-refused
+summary: A document with a member the domain does not declare is refused as malformed, naming it.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.CheckAgentSpec
+    input: {path: ess/scenarios/agent-check/specs/malformed.yaml}
+    outcome: malformed
+    error:
+      name: loom.agent.SpecRefused
+      fields: {reason: Malformed, member: document}
