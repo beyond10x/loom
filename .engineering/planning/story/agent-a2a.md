@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:agent-a2a
 kind: story
-status: active
+status: implemented
 title: 'A served agent answers A2A: its card, one turn per message, and a refusal without the bearer'
 relations:
 - decomposes: epic:loom-sdk-for-products
@@ -32,10 +32,11 @@ scope:
   path: ess/domains/agent.yaml
 - confidence: inferred
   path: website/docs/reference/crates.md
-revision: 15
+revision: 16
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-25T15:17:34Z", actor: "human:timo", revision: 14}
 - {from: "proposed", to: "active", at: "2026-10-25T15:17:34Z", actor: "human:timo", revision: 15}
+- {from: "active", to: "implemented", at: "2026-10-25T20:36:28Z", actor: "human:timo", revision: 16, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:agent-serve
 kind: story
-status: active
+status: implemented
 title: b10x-loom agent serve hosts the agent a spec declares, reading only allow-listed channels and sending a reply only once approved
 relations:
 - decomposes: epic:loom-sdk-for-products
@@ -39,10 +39,11 @@ scope:
   path: ess/domains/agent.yaml
 - confidence: inferred
   path: website/docs/reference/cli.md
-revision: 20
+revision: 21
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-25T15:17:33Z", actor: "human:timo", revision: 19}
 - {from: "proposed", to: "active", at: "2026-10-25T15:17:33Z", actor: "human:timo", revision: 20}
+- {from: "active", to: "implemented", at: "2026-10-25T20:36:27Z", actor: "human:timo", revision: 21, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 

@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-25T20:36:28Z",
+  "actor": "human:timo",
+  "artifact": "story:agent-a2a",
+  "kind": "story",
+  "revision": 15,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check on wave/2026-10-25-agents at 7f75a48d (tree loom-agents-w2, 2026-10-25): 2248 passed, 0 failed, 9 ignored over 401 result lines; task plan valid; six drift checks no drift"
+  }
+}

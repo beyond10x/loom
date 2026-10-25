@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:agent-http-binding
 kind: story
-status: active
+status: implemented
 title: An agent spec's http binding reads an allow-listed path by GET, bounded, and its answer reaches the model as data
 relations:
 - decomposes: epic:loom-sdk-for-products
@@ -25,10 +25,11 @@ scope:
   path: crates/loom-sdk/src/agent.rs
 - confidence: cited
   path: ess/domains/agent.yaml
-revision: 12
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-25T15:17:33Z", actor: "human:timo", revision: 11}
 - {from: "proposed", to: "active", at: "2026-10-25T15:17:34Z", actor: "human:timo", revision: 12}
+- {from: "active", to: "implemented", at: "2026-10-25T20:36:27Z", actor: "human:timo", revision: 13, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 
