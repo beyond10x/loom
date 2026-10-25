@@ -16,6 +16,14 @@
         {
           "name": "check",
           "type": "Optional<CheckResult>"
+        },
+        {
+          "name": "deployment",
+          "type": "Optional<DeploymentStatus>"
+        },
+        {
+          "name": "conditions",
+          "type": "Optional<List<Condition>>"
         }
       ],
       "id": "loom.resource.LoomAgent",
@@ -59,6 +67,20 @@
             ],
             "name": "recover",
             "to": "Running"
+          },
+          {
+            "from": [
+              "Running"
+            ],
+            "name": "observe-running",
+            "to": "Running"
+          },
+          {
+            "from": [
+              "Degraded"
+            ],
+            "name": "observe-degraded",
+            "to": "Degraded"
           },
           {
             "from": [

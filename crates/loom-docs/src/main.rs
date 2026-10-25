@@ -3,9 +3,11 @@
 //! `website/docs/reference/`, checks it for drift, and binds a built site to its source commit.
 //! The site build itself is Docusaurus.
 //!
-//! It generates three references:
+//! It generates four references:
 //!
 //! - the CLI reference (`reference/cli.md`), walked from the clap definition of `b10x-loom`;
+//! - the operator CLI reference (`reference/operator-cli.md`), walked from the clap definition of
+//!   `b10x-loom-operator`;
 //! - the crate list (`reference/crates.md`), from `cargo metadata --no-deps`;
 //! - the ESS domain reference (`reference/ess/`) of the `loom` (`ess/`) and `intake`
 //!   (`ess/intake/`) systems: Markdown pages from `ess generate --kind docs`, and one
@@ -525,6 +527,7 @@ fn run_events_contract(root: &Path, ess: &Path, check: bool) -> Result<()> {
 fn single_pages(root: &Path) -> Result<Pages> {
     Ok(Pages::from([
         (cli::PAGE.to_owned(), cli::page()),
+        (cli::OPERATOR_PAGE.to_owned(), cli::operator_page()),
         (crates::PAGE.to_owned(), crates::page(root)?),
     ]))
 }

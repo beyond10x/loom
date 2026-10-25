@@ -261,6 +261,76 @@ $ b10x-loom agent check --spec ess/scenarios/agent-check/specs/unknown-action.ya
 b10x-loom: refused: UnknownAction at states[0].actions[2]: reply.escalate
 ```
 
+## Deploy agents to Kubernetes
+
+A `LoomAgent` resource carries a `loom.agent/1` document as its `spec.agent`, and the controller
+`b10x-loom-operator` (`crates/loom-operator`) runs each resource as one pod. The Helm chart
+`charts/loom-agents`, versioned with Loom, installs the CustomResourceDefinition, the controller,
+its ServiceAccount and a Role limited to its namespace, which grants nothing on Secrets. The values
+name the controller image (`image`), the agent image a resource gets when it names none
+(`agentImage`), the model route, an in-cluster proxy given by `modelRoute.url`, `.protocol` and
+`.model` that holds no credential, and the Secret names and egress hosts a resource may use
+(`allowedSecretNames`, `allowedEgressHosts`; an empty list allows none). `helm install` takes the
+release name, chart, namespace and `--set` values shown here; `--include-crds` is only for
+`helm template`, since `helm install` installs `crds/` itself:
+
+```console
+$ helm template loom-agents charts/loom-agents --namespace agents --include-crds \
+    --set modelRoute.url=http://model-route.agents.svc:8080/v1 \
+    --set modelRoute.protocol=messages --set modelRoute.model=small-model | grep '^kind:'
+kind: CustomResourceDefinition
+kind: ServiceAccount
+kind: ConfigMap
+kind: Role
+kind: RoleBinding
+kind: Deployment
+```
+
+Helm installs the chart's `crds/` once and never upgrades it; `b10x-loom-operator crd` prints the
+CRD of the installed version. For each resource the controller first runs the check of
+`b10x-loom agent check` over `spec.agent`, looks for a credential in `spec.routes` and
+`spec.connectorsConfig`, and holds the Secret, the namespace and the egress hosts to its
+configuration. A refusal is the resource's status (`state: Refused`, `check` naming the member)
+and no child is created. Otherwise it applies a ServiceAccount, a ConfigMap, a Deployment that
+checks the spec again in an init container and runs `b10x-loom agent serve`, a NetworkPolicy and,
+with `expose.a2a`, a Service, all owned by the resource, and publishes `state`
+(Pending, Running, Degraded or Refused), `check`, `deployment` and the conditions `Checked` and
+`Available`.
+
+`b10x-loom-operator render` prints what the controller would apply for one resource and talks to no
+cluster. Install it with `cargo install --locked --path crates/loom-operator`. Here the example
+spec is wrapped as a resource that asks for the default routes (`routes: {}`), which needs a model
+route, so the built-in configuration refuses it (exit 3) and `operator.yaml`, written in the
+chart's `config.yaml` format, admits it:
+
+```console
+$ (printf 'apiVersion: loom.beyond10x.dev/v1alpha1\nkind: LoomAgent\nmetadata: {name: platform-operator, namespace: agents}\nspec:\n  routes: {}\n  agent:\n'; sed 's/^/    /' examples/agents/operator.yaml) > platform-operator.yaml
+$ b10x-loom-operator render --resource platform-operator.yaml
+b10x-loom-operator: refused: NoModelRoute at spec.routes: it is empty and the controller configures no model route
+$ cat operator.yaml
+namespace: agents
+defaultImage: {repository: registry.example/loom-agent, tag: '0.40.0'}
+defaultResources: {cpu: 250m, memory: 256Mi}
+modelRoute: {url: 'http://model-route.agents.svc:8080/v1', protocol: messages, model: small-model}
+allowedSecretNames: []
+allowedEgressHosts: [chat.example, models.example]
+$ b10x-loom-operator render --resource platform-operator.yaml --config operator.yaml | grep -E '^kind:|^  name:'
+kind: ServiceAccount
+  name: platform-operator
+kind: ConfigMap
+  name: platform-operator-spec
+kind: Deployment
+  name: platform-operator
+kind: NetworkPolicy
+  name: platform-operator
+kind: Service
+  name: platform-operator
+```
+
+The [operator CLI reference](https://beyond10x.github.io/loom/docs/reference/operator-cli) lists
+every flag and exit status, and
+[the deployment design](docs/design/loom-agent-crd-deployment.md) draws the pod.
+
 ## Embed the runtime
 
 An application depends on one crate, `b10x-loom-sdk` (library `loom_sdk`). It re-exports
@@ -287,7 +357,7 @@ To deploy such an agent to Kubernetes, the `LoomAgent` custom resource carries t
 `spec.agent`. Its CustomResourceDefinition, `deploy/crd/loomagents.loom.beyond10x.dev.yaml`, is
 generated: its schema is projected from the specification (`ess/domains/resource.yaml` and the
 `loom.agent` domain) and `task crd-drift` fails when it falls behind. The controller that
-reconciles the resource is not written yet.
+reconciles the resource is `b10x-loom-operator` (§ Deploy agents to Kubernetes).
 
 Since `0.2.0`, `CanonGovernor::with_protocol` admits host-reviewed Canon protocols;
 `with_evaluation_time` supplies trusted freshness time. Durable hosts implement
@@ -387,6 +457,7 @@ surface kept stable within a release line, every port a host implements among it
 | `b10x-loom-plugin` | The plugin host: polls a plugin, classifies each item and answers it in a governed read-only turn over Connectors data sources, one record line per item |
 | `b10x-loom-plugin-slack` | The slack-handler plugin: walks the Slack channels the bot is a member of, read only, and proposes answers to the messages nobody answered; `b10x-loom plugin run slack-handler` hosts it |
 | `b10x-loom-resource` | The `LoomAgent` Kubernetes resource: its lifecycle record over the generated `loom.resource` behaviour, and the CRD projected from the specification; talks to no cluster |
+| `b10x-loom-operator` | The `b10x-loom-operator` controller: reconciles a `LoomAgent` into a pod and its children, and renders them; installed by `charts/loom-agents` |
 | `b10x-loom-governor` | Evaluates a case's protocol with Canon and issues the frontier; executes nothing |
 | `b10x-loom-mandate` | Opt-in: Commission's authority port answered by Mandate's `check` (Mandate `v0.9.0`), with the host's Mandate ports; a Mandate failure grants nothing. `b10x-loom approve` and `resume` use it behind `--mandate`; the SDK does not link it |
 | `b10x-loom-selector-laya` | Experimental: a fast typed action selector over a local or hosted Laya endpoint (`POST /v1/systemone`); no product crate links it |

@@ -5,17 +5,19 @@
 //! itself, and the view `LoomAgents` by its generated query. This module decodes the suite's input
 //! into the generated types, publishes the event each outcome carries and encodes each answer back;
 //! it decides no outcome. The suite names members by their declared names (`observed_generation`,
-//! `exit_code`), not by their wire names.
+//! `exit_code`), not by their wire names. The view's `conditions` is encoded as the record holds
+//! it; no command sets it (ESS 0.69.0 admits no list under `sets:`), so every row reads it absent.
 
 use std::collections::BTreeMap;
 
 use b10x_loom_resource::LoomAgentRecord;
 use b10x_loom_resource::model::{
-    ApplyLoomAgent, ApplyLoomAgentOutcome, CheckResult, DeleteLoomAgent, DeleteLoomAgentOutcome,
-    DeploymentAvailability, LoomAgentState, LoomAgents, ObserveDeployment,
-    ObserveDeploymentOutcome, RecordCheck, RecordCheckOutcome, ResourceName, StaleGeneration,
+    ApplyLoomAgent, ApplyLoomAgentOutcome, CheckResult, Condition, ConditionStatus, ConditionType,
+    DeleteLoomAgent, DeleteLoomAgentOutcome, DeploymentAvailability, DeploymentStatus,
+    LoomAgentObserved, LoomAgentState, LoomAgents, ObserveDeployment, ObserveDeploymentOutcome,
+    RecordCheck, RecordCheckOutcome, ResourceName, StaleGeneration,
 };
-use ess_conformance::target::{SemanticCommandResult, ViewRow};
+use ess_conformance::target::{ObservedEvent, SemanticCommandResult, ViewRow};
 use ess_primitives::ids::CorrelationId;
 use ess_primitives::node::Node;
 
@@ -33,6 +35,7 @@ const LOOM_AGENT_RUNNING: &str = "loom.resource.LoomAgentRunning";
 const LOOM_AGENT_REFUSED: &str = "loom.resource.LoomAgentRefused";
 const LOOM_AGENT_DEGRADED: &str = "loom.resource.LoomAgentDegraded";
 const LOOM_AGENT_RECOVERED: &str = "loom.resource.LoomAgentRecovered";
+const LOOM_AGENT_OBSERVED: &str = "loom.resource.LoomAgentObserved";
 const LOOM_AGENT_DELETED: &str = "loom.resource.LoomAgentDeleted";
 
 const STALE_GENERATION: &str = "loom.resource.StaleGeneration";
@@ -158,6 +161,28 @@ fn availability(input: &Input, name: &str) -> Option<DeploymentAvailability> {
     })
 }
 
+/// The declared name of a `loom.resource.DeploymentAvailability`.
+fn availability_node(availability: DeploymentAvailability) -> Node {
+    codec::text_node(match availability {
+        DeploymentAvailability::Available => "Available",
+        DeploymentAvailability::Unavailable => "Unavailable",
+    })
+}
+
+/// Publishes `LoomAgentObserved`, the event of `still-running` and `still-degraded`.
+fn observed(
+    live: &mut Live,
+    observed: &LoomAgentObserved,
+    correlation: &CorrelationId,
+) -> ObservedEvent {
+    live.publish(
+        event(LOOM_AGENT_OBSERVED)
+            .with("name", name_node(&observed.name))
+            .with("availability", availability_node(observed.availability)),
+        correlation,
+    )
+}
+
 /// `ObserveDeployment`, by the record's generated behaviour.
 pub(crate) fn observe_deployment(
     live: &mut Live,
@@ -184,7 +209,12 @@ pub(crate) fn observe_deployment(
             );
             took(OBSERVE_DEPLOYMENT, "degraded").emitting(published)
         }
-        ObserveDeploymentOutcome::StillRunning => took(OBSERVE_DEPLOYMENT, "still-running"),
+        ObserveDeploymentOutcome::StillRunning {
+            loom_agent_observed,
+        } => {
+            let published = observed(live, &loom_agent_observed, correlation);
+            took(OBSERVE_DEPLOYMENT, "still-running").emitting(published)
+        }
         ObserveDeploymentOutcome::Recovered {
             loom_agent_recovered,
         } => {
@@ -194,7 +224,12 @@ pub(crate) fn observe_deployment(
             );
             took(OBSERVE_DEPLOYMENT, "recovered").emitting(published)
         }
-        ObserveDeploymentOutcome::StillDegraded => took(OBSERVE_DEPLOYMENT, "still-degraded"),
+        ObserveDeploymentOutcome::StillDegraded {
+            loom_agent_observed,
+        } => {
+            let published = observed(live, &loom_agent_observed, correlation);
+            took(OBSERVE_DEPLOYMENT, "still-degraded").emitting(published)
+        }
         ObserveDeploymentOutcome::NoDeployment { error } => refused(
             OBSERVE_DEPLOYMENT,
             "no-deployment",
@@ -244,6 +279,16 @@ fn row(held: &LoomAgents) -> ViewRow {
             "check".to_owned(),
             held.check.as_ref().map_or(Node::Null, check),
         ),
+        (
+            "deployment".to_owned(),
+            held.deployment.as_ref().map_or(Node::Null, deployment),
+        ),
+        (
+            "conditions".to_owned(),
+            held.conditions.as_deref().map_or(Node::Null, |held| {
+                Node::Seq(held.iter().map(condition).collect())
+            }),
+        ),
         ("state".to_owned(), state(held.state)),
     ])
 }
@@ -253,6 +298,37 @@ fn check(check: &CheckResult) -> Node {
     Node::Map(BTreeMap::from([
         ("exit_code".to_owned(), codec::number(check.exit_code)),
         ("message".to_owned(), codec::text_node(&check.message)),
+    ]))
+}
+
+/// A `loom.resource.DeploymentStatus` as a suite value.
+fn deployment(deployment: &DeploymentStatus) -> Node {
+    Node::Map(BTreeMap::from([(
+        "availability".to_owned(),
+        availability_node(deployment.availability),
+    )]))
+}
+
+/// A `loom.resource.Condition` as a suite value, its enums by their declared names.
+fn condition(condition: &Condition) -> Node {
+    Node::Map(BTreeMap::from([
+        (
+            "type".to_owned(),
+            codec::text_node(match condition.r#type {
+                ConditionType::Checked => "Checked",
+                ConditionType::Available => "Available",
+            }),
+        ),
+        (
+            "status".to_owned(),
+            codec::text_node(match condition.status {
+                ConditionStatus::True => "True",
+                ConditionStatus::False => "False",
+                ConditionStatus::Unknown => "Unknown",
+            }),
+        ),
+        ("reason".to_owned(), codec::text_node(&condition.reason)),
+        ("message".to_owned(), codec::text_node(&condition.message)),
     ]))
 }
 

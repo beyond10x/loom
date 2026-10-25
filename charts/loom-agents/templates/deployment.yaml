@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "loom-agents.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "loom-agents.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "loom-agents.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "loom-agents.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "loom-agents.name" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: loom-operator
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: [b10x-loom-operator]
+          args: [run, --config, /etc/loom-operator/config.yaml]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+          volumeMounts:
+            - name: config
+              mountPath: /etc/loom-operator
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "loom-agents.name" . }}

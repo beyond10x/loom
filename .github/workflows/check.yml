@@ -69,6 +69,19 @@ jobs:
           tar -xzf "$asset"
           echo "$RUNNER_TEMP/ess-$ESS_VERSION-x86_64-unknown-linux-gnu" >> "$GITHUB_PATH"
 
+      - name: Install helm
+        env:
+          HELM_VERSION: "3.19.0"
+          HELM_SHA256: a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/helm.tar.gz" \
+            "https://get.helm.sh/helm-v$HELM_VERSION-linux-amd64.tar.gz"
+          echo "$HELM_SHA256  $RUNNER_TEMP/helm.tar.gz" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/helm-bin"
+          tar -xzf "$RUNNER_TEMP/helm.tar.gz" -C "$RUNNER_TEMP/helm-bin" --strip-components=1 linux-amd64/helm
+          echo "$RUNNER_TEMP/helm-bin" >> "$GITHUB_PATH"
+
       - name: Fetch locked dependencies for offline checks
         run: cargo fetch --locked
 

@@ -14,8 +14,11 @@
 //!   `deploy/crd/loomagents.loom.beyond10x.dev.yaml`.
 //! * [`model`] is the generated `loom.resource` module, so a caller names one path for the types.
 //!
-//! The record holds the generation the controller applied and the spec check's result, never the
-//! spec: the spec stays in the cluster and the controller re-reads it on every reconcile.
+//! The record holds the generation the controller applied, the spec check's result and what it
+//! last read of the child Deployment, never the spec: the spec stays in the cluster and the
+//! controller re-reads it on every reconcile. No command sets the row's `conditions` (ESS 0.69.0
+//! admits no list under `sets:`); `b10x-loom-operator` computes them from the row when it
+//! publishes the status.
 
 pub mod crd;
 
@@ -29,9 +32,9 @@ use loom::resource::obligations::{
 };
 use model::{
     ApplyLoomAgent, ApplyLoomAgentOutcome, DeleteLoomAgent, DeleteLoomAgentOutcome,
-    LoomAgentApplied, LoomAgentDegraded, LoomAgentDeleted, LoomAgentRecovered, LoomAgentRefused,
-    LoomAgentRunning, LoomAgentSnapshot, LoomAgents, ObserveDeployment, ObserveDeploymentOutcome,
-    RecordCheck, RecordCheckOutcome, ResourceName,
+    LoomAgentApplied, LoomAgentDegraded, LoomAgentDeleted, LoomAgentObserved, LoomAgentRecovered,
+    LoomAgentRefused, LoomAgentRunning, LoomAgentSnapshot, LoomAgents, ObserveDeployment,
+    ObserveDeploymentOutcome, RecordCheck, RecordCheckOutcome, ResourceName,
 };
 
 /// An event a `loom.resource` outcome published, as the record keeps it.
@@ -47,6 +50,9 @@ pub enum ResourceEvent {
     Degraded(LoomAgentDegraded),
     /// `loom.resource.LoomAgentRecovered`, by `ObserveDeployment`'s `recovered`.
     Recovered(LoomAgentRecovered),
+    /// `loom.resource.LoomAgentObserved`, by `ObserveDeployment`'s `still-running` or
+    /// `still-degraded`.
+    Observed(LoomAgentObserved),
     /// `loom.resource.LoomAgentDeleted`, by `DeleteLoomAgent`'s `deleted`.
     Deleted(LoomAgentDeleted),
 }
@@ -167,9 +173,15 @@ impl LoomAgentRecord {
             } => self
                 .events
                 .push(ResourceEvent::Recovered(loom_agent_recovered.clone())),
+            ObserveDeploymentOutcome::StillRunning {
+                loom_agent_observed,
+            }
+            | ObserveDeploymentOutcome::StillDegraded {
+                loom_agent_observed,
+            } => self
+                .events
+                .push(ResourceEvent::Observed(loom_agent_observed.clone())),
             ObserveDeploymentOutcome::Unknown { .. }
-            | ObserveDeploymentOutcome::StillRunning
-            | ObserveDeploymentOutcome::StillDegraded
             | ObserveDeploymentOutcome::NoDeployment { .. } => {}
         }
         Ok(outcome)

@@ -20,11 +20,16 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `b10x-loom-agent`: `check` and `check_text` check a spec against the plugin catalog's protocols in the declaration order of `loom.agent.CheckAgentSpec`; `check_text` refuses a credential anywhere in the document before decoding it, without repeating it (story:agent-check)
 - `operator-reply@1` in `ProtocolCatalog::plugins()`: `inbound-answer@1`'s read and proposal plus `reply.send`, a write under the `reply.send` capability once a reply is proposed, and `reply.decline` (story:agent-check)
 - `loom.agent.CheckAgentSpec` with its error `SpecRefused` and the enum `RefusalReason`, generated from `ess/domains/agent.yaml` and re-exported from `loom_sdk::agent`; nine authored scenarios under `ess/scenarios/agent-check/` (story:agent-check)
+- `b10x-loom-operator`, the `LoomAgent` controller: `run --config`, `render --resource` and `crd`; it checks the spec before any child exists (story:loom-operator)
+- `charts/loom-agents`, the Helm chart that installs the CRD and the controller with a namespaced Role, versioned with Loom (story:loom-operator)
+- `loom.resource`: `status.deployment`, `status.conditions` (`Checked`, `Available`) and the event `LoomAgentObserved` (story:loom-operator)
 
 ### Changed
 
 - `ProtocolCatalog::plugins()` holds `operator-reply@1` beside `inbound-answer@1`; `bundled()` holds neither (story:agent-check)
 - The conformance suite and the ESS gate synthesize with `--scenarios`, so authored scenarios join the synthesized ones (story:agent-check)
+- `ObserveDeployment` records every observation: `still-running` and `still-degraded` set `deployment`; `respecified` clears it (story:loom-operator)
+- `task check` runs `task chart-check`, which needs Helm 3; CI installs Helm 3.19.0 by checksum (story:loom-operator)
 
 ## [0.40.0] - 2026-10-24
 

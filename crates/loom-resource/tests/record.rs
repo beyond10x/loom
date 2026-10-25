@@ -5,10 +5,10 @@
 
 use b10x_loom_resource::model::{
     ApplyLoomAgent, ApplyLoomAgentOutcome, CheckResult, DeleteLoomAgent, DeleteLoomAgentOutcome,
-    DeploymentAvailability, LoomAgentApplied, LoomAgentDegraded, LoomAgentDeleted,
-    LoomAgentNotFound, LoomAgentRecovered, LoomAgentRefused, LoomAgentRunning, LoomAgentState,
-    LoomAgentStateConflict, LoomAgents, ObserveDeployment, ObserveDeploymentOutcome, RecordCheck,
-    RecordCheckOutcome, ResourceName, StaleGeneration,
+    DeploymentAvailability, DeploymentStatus, LoomAgentApplied, LoomAgentDegraded,
+    LoomAgentDeleted, LoomAgentNotFound, LoomAgentObserved, LoomAgentRecovered, LoomAgentRefused,
+    LoomAgentRunning, LoomAgentState, LoomAgentStateConflict, LoomAgents, ObserveDeployment,
+    ObserveDeploymentOutcome, RecordCheck, RecordCheckOutcome, ResourceName, StaleGeneration,
 };
 use b10x_loom_resource::{LoomAgentRecord, ResourceEvent};
 
@@ -68,7 +68,19 @@ fn row(record: &LoomAgentRecord) -> Option<LoomAgents> {
     rows.pop()
 }
 
+/// The row of a resource no Deployment observation has reached since its generation was applied.
 fn held(generation: i64, check: Option<(i64, &str)>, state: LoomAgentState) -> Option<LoomAgents> {
+    observed(generation, check, None, state)
+}
+
+/// The row of a resource whose last Deployment observation read `availability`. No command sets
+/// `conditions`: the controller computes them when it publishes the status.
+fn observed(
+    generation: i64,
+    check: Option<(i64, &str)>,
+    availability: Option<DeploymentAvailability>,
+    state: LoomAgentState,
+) -> Option<LoomAgents> {
     Some(LoomAgents {
         name: name(),
         observed_generation: generation,
@@ -76,6 +88,8 @@ fn held(generation: i64, check: Option<(i64, &str)>, state: LoomAgentState) -> O
             exit_code,
             message: message.to_owned(),
         }),
+        deployment: availability.map(|availability| DeploymentStatus { availability }),
+        conditions: None,
         state,
     })
 }
@@ -115,7 +129,22 @@ fn the_record_walks_the_lifecycle_from_apply_to_delete() {
 
     assert_eq!(
         observe(&mut record, DeploymentAvailability::Available),
-        ObserveDeploymentOutcome::StillRunning
+        ObserveDeploymentOutcome::StillRunning {
+            loom_agent_observed: LoomAgentObserved {
+                name: name(),
+                availability: DeploymentAvailability::Available
+            }
+        }
+    );
+    assert_eq!(
+        row(&record),
+        observed(
+            1,
+            Some((0, "")),
+            Some(DeploymentAvailability::Available),
+            LoomAgentState::Running
+        ),
+        "a Running resource whose Deployment is available shows it"
     );
     assert_eq!(
         observe(&mut record, DeploymentAvailability::Unavailable),
@@ -125,11 +154,21 @@ fn the_record_walks_the_lifecycle_from_apply_to_delete() {
     );
     assert_eq!(
         row(&record),
-        held(1, Some((0, "")), LoomAgentState::Degraded)
+        observed(
+            1,
+            Some((0, "")),
+            Some(DeploymentAvailability::Unavailable),
+            LoomAgentState::Degraded
+        )
     );
     assert_eq!(
         observe(&mut record, DeploymentAvailability::Unavailable),
-        ObserveDeploymentOutcome::StillDegraded
+        ObserveDeploymentOutcome::StillDegraded {
+            loom_agent_observed: LoomAgentObserved {
+                name: name(),
+                availability: DeploymentAvailability::Unavailable
+            }
+        }
     );
     assert_eq!(
         observe(&mut record, DeploymentAvailability::Available),
@@ -139,7 +178,12 @@ fn the_record_walks_the_lifecycle_from_apply_to_delete() {
     );
     assert_eq!(
         row(&record),
-        held(1, Some((0, "")), LoomAgentState::Running)
+        observed(
+            1,
+            Some((0, "")),
+            Some(DeploymentAvailability::Available),
+            LoomAgentState::Running
+        )
     );
 
     assert_eq!(
@@ -151,7 +195,11 @@ fn the_record_walks_the_lifecycle_from_apply_to_delete() {
             }
         }
     );
-    assert_eq!(row(&record), held(2, None, LoomAgentState::Pending));
+    assert_eq!(
+        row(&record),
+        held(2, None, LoomAgentState::Pending),
+        "a new generation clears the check and the Deployment observation"
+    );
 
     assert_eq!(
         check(&mut record, 2, 3, "bindings[1].base_url is not a URL"),
@@ -227,7 +275,15 @@ fn the_record_walks_the_lifecycle_from_apply_to_delete() {
                 name: name(),
                 generation: 1
             }),
+            ResourceEvent::Observed(LoomAgentObserved {
+                name: name(),
+                availability: DeploymentAvailability::Available
+            }),
             ResourceEvent::Degraded(LoomAgentDegraded { name: name() }),
+            ResourceEvent::Observed(LoomAgentObserved {
+                name: name(),
+                availability: DeploymentAvailability::Unavailable
+            }),
             ResourceEvent::Recovered(LoomAgentRecovered { name: name() }),
             ResourceEvent::Applied(LoomAgentApplied {
                 name: name(),
@@ -265,7 +321,12 @@ fn a_newer_generation_returns_every_state_to_pending_with_the_check_cleared() {
     observe(&mut record, DeploymentAvailability::Unavailable);
     assert_eq!(
         row(&record),
-        held(2, Some((0, "")), LoomAgentState::Degraded)
+        observed(
+            2,
+            Some((0, "")),
+            Some(DeploymentAvailability::Unavailable),
+            LoomAgentState::Degraded
+        )
     );
     apply(&mut record, 5);
     assert_eq!(row(&record), held(5, None, LoomAgentState::Pending));
@@ -369,12 +430,16 @@ fn two_resources_are_held_apart() {
                     exit_code: 0,
                     message: String::new()
                 }),
+                deployment: None,
+                conditions: None,
                 state: LoomAgentState::Running,
             },
             LoomAgents {
                 name: ResourceName("triage".to_owned()),
                 observed_generation: 1,
                 check: None,
+                deployment: None,
+                conditions: None,
                 state: LoomAgentState::Pending,
             },
         ]

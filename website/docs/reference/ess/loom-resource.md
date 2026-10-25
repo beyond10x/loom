@@ -23,9 +23,32 @@ The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`)
 - `exit_code` — `Integer`, called `exitCode` on the wire
 - `message` — `String`
 
+### `Condition`
+
+`loom.resource.Condition` is a record of four fields:
+
+- `type` — `loom.resource.ConditionType`
+- `status` — `loom.resource.ConditionStatus`
+- `reason` — `String`
+- `message` — `String`
+
+### `ConditionStatus`
+
+`loom.resource.ConditionStatus` is one of `True`, `False` and `Unknown`.
+
+### `ConditionType`
+
+`loom.resource.ConditionType` is one of `Checked` and `Available`.
+
 ### `DeploymentAvailability`
 
 `loom.resource.DeploymentAvailability` is one of `Available` and `Unavailable`.
+
+### `DeploymentStatus`
+
+`loom.resource.DeploymentStatus` is a record of one field:
+
+- `availability` — `loom.resource.DeploymentAvailability`
 
 ### `ImageRef`
 
@@ -70,6 +93,8 @@ It holds:
 
 - `observed_generation` — `Integer`, called `observedGeneration` on the wire
 - `check` — `Optional<loom.resource.CheckResult>`, which may be absent
+- `deployment` — `Optional<loom.resource.DeploymentStatus>`, which may be absent
+- `conditions` — `Optional<List<loom.resource.Condition>>`, which may be absent
 
 It declares no relation to another entity, and no other entity names it.
 
@@ -86,6 +111,8 @@ stateDiagram-v2
     Pending --> Refused: refuse (RecordCheck)
     Running --> Degraded: degrade (ObserveDeployment)
     Degraded --> Running: recover (ObserveDeployment)
+    Running --> Running: observe-running (ObserveDeployment)
+    Degraded --> Degraded: observe-degraded (ObserveDeployment)
     Degraded --> Pending: respecify (ApplyLoomAgent)
     Pending --> Pending: respecify (ApplyLoomAgent)
     Refused --> Pending: respecify (ApplyLoomAgent)
@@ -98,6 +125,8 @@ Each move is taken by a declared command outcome, and a move nothing takes is re
 - `refuse` — taken by `loom.resource.RecordCheck` on its `refused` outcome
 - `degrade` — taken by `loom.resource.ObserveDeployment` on its `degraded` outcome
 - `recover` — taken by `loom.resource.ObserveDeployment` on its `recovered` outcome
+- `observe-running` — taken by `loom.resource.ObserveDeployment` on its `still-running` outcome
+- `observe-degraded` — taken by `loom.resource.ObserveDeployment` on its `still-degraded` outcome
 - `respecify` — taken by `loom.resource.ApplyLoomAgent` on its `respecified` outcome
 
 An instance is brought into existence by `loom.resource.ApplyLoomAgent` on its `created` outcome.
@@ -129,6 +158,8 @@ It exposes:
 - `name` — `loom.resource.ResourceName`
 - `observed_generation` — `Integer`
 - `check` — `Optional<loom.resource.CheckResult>`, which may be absent
+- `deployment` — `Optional<loom.resource.DeploymentStatus>`, which may be absent
+- `conditions` — `Optional<List<loom.resource.Condition>>`, which may be absent
 - `state` — `loom.resource.LoomAgent.State`
 
 It declares no order, so the rows come back in whatever order the implementation has, and two reads may disagree.
@@ -156,7 +187,7 @@ It has four outcomes.
 
 **`unchanged`** — Taken when the existing subject's stored fields satisfy `observed_generation == input.generation`. It preserves the existing subject, without an error or event. The instance is the one named by the input field `name`. It emits nothing. A test establishes and independently observes the subject enum fact before selecting this branch.
 
-**`respecified`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.resource.LoomAgent` from `Degraded`, `Pending`, `Refused` and `Running` to `Pending`, along the declared move `respecify`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentApplied`. It sets `observed_generation` from `input.generation` and `check` cleared. A test reaches it by constructing an input that satisfies no other outcome's condition.
+**`respecified`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.resource.LoomAgent` from `Degraded`, `Pending`, `Refused` and `Running` to `Pending`, along the declared move `respecify`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentApplied`. It sets `observed_generation` from `input.generation`, `check` cleared and `deployment` cleared. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
 ### `DeleteLoomAgent`
 
@@ -185,13 +216,13 @@ It has six outcomes.
 
 **`unknown`** — Taken when the identity the command names is one no record carries, before any other answer for it. No entity in this specification changes. It reports `loom.resource.LoomAgentNotFound`, carrying `name`. It emits nothing. A test reaches it by sending an identity no record carries, arranging nothing.
 
-**`degraded`** — Taken when the existing subject is in Running and `availability == Unavailable` holds of the input. It moves a `loom.resource.LoomAgent` from `Running` to `Degraded`, along the declared move `degrade`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentDegraded`. A test establishes the declared subject state and constructs input selecting this branch in that state.
+**`degraded`** — Taken when the existing subject is in Running and `availability == Unavailable` holds of the input. It moves a `loom.resource.LoomAgent` from `Running` to `Degraded`, along the declared move `degrade`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentDegraded`. It sets `deployment` from `{availability: input.availability}`. A test establishes the declared subject state and constructs input selecting this branch in that state.
 
-**`still-running`** — Taken when the existing subject is in Running and `availability == Available` holds of the input. It preserves the existing subject, without an error or event. The instance is the one named by the input field `name`. It emits nothing. A test establishes the declared subject state and constructs input selecting this branch in that state.
+**`still-running`** — Taken when the existing subject is in Running and `availability == Available` holds of the input. It moves a `loom.resource.LoomAgent` from `Running` to `Running`, along the declared move `observe-running`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentObserved`. It sets `deployment` from `{availability: input.availability}`. A test establishes the declared subject state and constructs input selecting this branch in that state.
 
-**`recovered`** — Taken when the existing subject is in Degraded and `availability == Available` holds of the input. It moves a `loom.resource.LoomAgent` from `Degraded` to `Running`, along the declared move `recover`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentRecovered`. A test establishes the declared subject state and constructs input selecting this branch in that state.
+**`recovered`** — Taken when the existing subject is in Degraded and `availability == Available` holds of the input. It moves a `loom.resource.LoomAgent` from `Degraded` to `Running`, along the declared move `recover`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentRecovered`. It sets `deployment` from `{availability: input.availability}`. A test establishes the declared subject state and constructs input selecting this branch in that state.
 
-**`still-degraded`** — Taken when the existing subject is in Degraded and `availability == Unavailable` holds of the input. It preserves the existing subject, without an error or event. The instance is the one named by the input field `name`. It emits nothing. A test establishes the declared subject state and constructs input selecting this branch in that state.
+**`still-degraded`** — Taken when the existing subject is in Degraded and `availability == Unavailable` holds of the input. It moves a `loom.resource.LoomAgent` from `Degraded` to `Degraded`, along the declared move `observe-degraded`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentObserved`. It sets `deployment` from `{availability: input.availability}`. A test establishes the declared subject state and constructs input selecting this branch in that state.
 
 **`no-deployment`** — The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It reports `loom.resource.LoomAgentStateConflict`, carrying `name`. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
@@ -254,6 +285,19 @@ It carries:
 - `name` — `loom.resource.ResourceName`
 
 Emitted by `loom.resource.DeleteLoomAgent` on its `deleted` outcome.
+
+Nothing in this system reacts to it.
+
+### `LoomAgentObserved`
+
+`loom.resource.LoomAgentObserved`.
+
+It carries:
+
+- `name` — `loom.resource.ResourceName`
+- `availability` — `loom.resource.DeploymentAvailability`
+
+Emitted by `loom.resource.ObserveDeployment` on its `still-running` and `still-degraded` outcomes.
 
 Nothing in this system reacts to it.
 
@@ -335,4 +379,4 @@ Reported by `loom.resource.RecordCheck` on its `stale` outcome.
 
 ---
 
-Generated from loom v1 · model digest `b45d71347c921a18e8cc80e0d679a2120f09cda4251d04af27cfc43bc9c8b295` · contract digest `slice-sha256/2:8e8ca704222cd115efb5f6d1a635f765d0ac0e279cdd0e664781ed50ac02883a`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · model digest `bdde76ecdfe74de23e60baede8074d4e9737e8f2f0216d333a526b9ab77440f8` · contract digest `slice-sha256/2:cf861e82e162125b6df7cae6714ecccbd0da96321ddc8e7deed2e6dd09d5e67f`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

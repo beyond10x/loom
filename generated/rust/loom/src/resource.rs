@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest b45d71347c921a18e8cc80e0d679a2120f09cda4251d04af27cfc43bc9c8b295
-// contract digest e6cd03abb8d70a142f0445dce48f74758629d1f06380c00a5edfc6784fe535ec
+// model digest bdde76ecdfe74de23e60baede8074d4e9737e8f2f0216d333a526b9ab77440f8
+// contract digest 03245bddbe418d5c4aa42a0de1fee9b18c8f7793cca6608e8faafc316ee7de2d
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Resource — `loom.resource`.
@@ -18,6 +18,39 @@ pub struct CheckResult {
     pub message: String,
 }
 
+/// Condition — `loom.resource.Condition`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Condition {
+    /// `type` — `loom.resource.ConditionType`.
+    pub r#type: ConditionType,
+    /// `status` — `loom.resource.ConditionStatus`.
+    pub status: ConditionStatus,
+    /// `reason` — `String`.
+    pub reason: String,
+    /// `message` — `String`.
+    pub message: String,
+}
+
+/// ConditionStatus — `loom.resource.ConditionStatus`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConditionStatus {
+    /// `True`.
+    True,
+    /// `False`.
+    False,
+    /// `Unknown`.
+    Unknown,
+}
+
+/// ConditionType — `loom.resource.ConditionType`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConditionType {
+    /// `Checked`.
+    Checked,
+    /// `Available`.
+    Available,
+}
+
 /// DeploymentAvailability — `loom.resource.DeploymentAvailability`: one of a closed set of names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeploymentAvailability {
@@ -25,6 +58,13 @@ pub enum DeploymentAvailability {
     Available,
     /// `Unavailable`.
     Unavailable,
+}
+
+/// DeploymentStatus — `loom.resource.DeploymentStatus`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeploymentStatus {
+    /// `availability` — `loom.resource.DeploymentAvailability`.
+    pub availability: DeploymentAvailability,
 }
 
 /// ImageRef — `loom.resource.ImageRef`.
@@ -90,6 +130,10 @@ pub struct LoomAgentData {
     pub observed_generation: i64,
     /// `check` — `Optional<loom.resource.CheckResult>`.
     pub check: Option<CheckResult>,
+    /// `deployment` — `Optional<loom.resource.DeploymentStatus>`.
+    pub deployment: Option<DeploymentStatus>,
+    /// `conditions` — `Optional<List<loom.resource.Condition>>`.
+    pub conditions: Option<Vec<Condition>>,
 }
 
 /// The states of `loom.resource.LoomAgent`, at the type level.
@@ -189,6 +233,14 @@ impl LoomAgent<loom_agent_state::Degraded> {
         }
     }
 
+    /// `observe-degraded` — `Degraded` → `Degraded`. Taken by the `still-degraded` outcome of `loom.resource.ObserveDeployment`.
+    pub fn observe_degraded(self) -> LoomAgent<loom_agent_state::Degraded> {
+        LoomAgent {
+            data: self.data,
+            state: core::marker::PhantomData,
+        }
+    }
+
     /// `respecify` — `Degraded` → `Pending`. Taken by the `respecified` outcome of `loom.resource.ApplyLoomAgent`.
     pub fn respecify(self) -> LoomAgent<loom_agent_state::Pending> {
         LoomAgent {
@@ -237,6 +289,14 @@ impl LoomAgent<loom_agent_state::Refused> {
 impl LoomAgent<loom_agent_state::Running> {
     /// `degrade` — `Running` → `Degraded`. Taken by the `degraded` outcome of `loom.resource.ObserveDeployment`.
     pub fn degrade(self) -> LoomAgent<loom_agent_state::Degraded> {
+        LoomAgent {
+            data: self.data,
+            state: core::marker::PhantomData,
+        }
+    }
+
+    /// `observe-running` — `Running` → `Running`. Taken by the `still-running` outcome of `loom.resource.ObserveDeployment`.
+    pub fn observe_running(self) -> LoomAgent<loom_agent_state::Running> {
         LoomAgent {
             data: self.data,
             state: core::marker::PhantomData,
@@ -431,14 +491,20 @@ pub enum ObserveDeploymentOutcome {
         loom_agent_degraded: LoomAgentDegraded,
     },
     /// `still-running` — when the existing subject is in Running and `availability == Available`.
-    StillRunning,
+    StillRunning {
+        /// The `loom.resource.LoomAgentObserved` this outcome publishes.
+        loom_agent_observed: LoomAgentObserved,
+    },
     /// `recovered` — when the existing subject is in Degraded and `availability == Available`.
     Recovered {
         /// The `loom.resource.LoomAgentRecovered` this outcome publishes.
         loom_agent_recovered: LoomAgentRecovered,
     },
     /// `still-degraded` — when the existing subject is in Degraded and `availability == Unavailable`.
-    StillDegraded,
+    StillDegraded {
+        /// The `loom.resource.LoomAgentObserved` this outcome publishes.
+        loom_agent_observed: LoomAgentObserved,
+    },
     /// `no-deployment` — otherwise.
     NoDeployment {
         /// Why it was refused: `loom.resource.LoomAgentStateConflict`.
@@ -518,6 +584,15 @@ pub struct LoomAgentDeleted {
     pub name: ResourceName,
 }
 
+/// LoomAgentObserved — the event `loom.resource.LoomAgentObserved`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoomAgentObserved {
+    /// `name` — `loom.resource.ResourceName`.
+    pub name: ResourceName,
+    /// `availability` — `loom.resource.DeploymentAvailability`.
+    pub availability: DeploymentAvailability,
+}
+
 /// LoomAgentRecovered — the event `loom.resource.LoomAgentRecovered`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoomAgentRecovered {
@@ -583,6 +658,10 @@ pub struct LoomAgents {
     pub observed_generation: i64,
     /// `check` — `Optional<loom.resource.CheckResult>`.
     pub check: Option<CheckResult>,
+    /// `deployment` — `Optional<loom.resource.DeploymentStatus>`.
+    pub deployment: Option<DeploymentStatus>,
+    /// `conditions` — `Optional<List<loom.resource.Condition>>`.
+    pub conditions: Option<Vec<Condition>>,
     /// `state` — `loom.resource.LoomAgent.State`.
     pub state: LoomAgentState,
 }

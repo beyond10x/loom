@@ -216,13 +216,15 @@ newer ESS ships.
 
 ## Gate
 
-Needs Rust, Task, `ess` and bubblewrap (`/usr/bin/bwrap`). CI installs the backend before
+Needs Rust, Task, `ess`, Helm 3 (`task chart-check`) and bubblewrap (`/usr/bin/bwrap`).
+CI installs the backend before
 running the delegation-refusal tests. Run `cargo fetch --locked` before the gate, as CI does:
 the offline dependency guard inspects the full graph, including platform-specific crates.
 Before a change is reported done, in this order:
 
-1. `task check`: the three specification validations, both ESS gates, all four drift checks, both
-   no-hand-model checks, Loom's, Commission's and intake's conformance suites, the dependency guard,
+1. `task check`: the three specification validations, both ESS gates, all four drift checks,
+   `task chart-check` (Helm lint and render of `charts/loom-agents`), both no-hand-model checks,
+   Loom's, Commission's and intake's conformance suites, the dependency guard,
    `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
    `cargo test --workspace --locked`, `task consumer-check`, then `task docs-check` and
    `task commission:docs-drift`. CI runs exactly this (`check.yml`, job `loom / task check`).
@@ -269,7 +271,9 @@ cache; never delete a `target/` by hand.
 | `generated/rust/commission/` | the same over `ess/commission/`, via `loom-commission-xtask` | `task commission:generate` | `task commission:drift` |
 | `generated/rust/intake/` | synthesis over `ess/intake/`, via `loom-xtask` | `task intake-generate` | `task intake-drift` |
 | `deploy/crd/loomagents.loom.beyond10x.dev.yaml` | `loom-xtask crd-generate`, projecting the JSON Schemas `ess generate --kind schema` writes for `ess/` through `b10x_loom_resource::crd` | `task crd-generate` | `task crd-drift` |
+| `charts/loom-agents/crds/loomagents.loom.beyond10x.dev.yaml` | a byte copy of `deploy/crd/loomagents.loom.beyond10x.dev.yaml` | `task crd-generate` | `task chart-check`, `crates/loom-operator/tests/chart.rs` |
 | `website/docs/reference/cli.md` | `loom-docs`, from `b10x_loom_cli::Cli` (`crates/loom-cli/src/lib.rs`) | `task docs-generate` | `task docs-check` |
+| `website/docs/reference/operator-cli.md` | `loom-docs`, from `b10x_loom_operator::cli::Cli` (`crates/loom-operator/src/cli.rs`) | `task docs-generate` | `task docs-check` |
 | `website/docs/reference/crates.md` | `loom-docs`, from `cargo metadata` | `task docs-generate` | `task docs-check` |
 | `website/docs/reference/ess/`, `website/data/ess/` | `loom-docs`, from `ess/` and `ess/intake/` | `task docs-generate` | `task docs-check` |
 | `docs/contracts/run-events-v1.json` | `loom-docs`, the V1 contract of `run --output jsonl` from `ess/intake/` and `b10x_loom_cli::events` | `task docs-generate` | `task docs-check`, failing only on a break |
@@ -673,7 +677,8 @@ value schema (`additionalProperties`) and drops only `additionalProperties: fals
 `Decimal` as `number`, since `loom_sdk::agent::parse` reads a number or a string there and a
 structural schema has no number-or-string type. An ESS `Json` (here `routes`), wherever it stands,
 becomes an untyped node with `x-kubernetes-preserve-unknown-fields`, so it admits any JSON value as
-the specification does; the pod's `b10x-loom agent check` is what reads the routes document. A
+the specification does; the controller walks it for a credential before any child exists
+(§ Operator) and the pod's `b10x-loom agent check` reads it. A
 `format` the API server reads otherwise than ESS writes it is refused by name: `duration` (ESS's
 ISO 8601, the API server's Go duration). It flattens the `bindings` union so the tag `kind` sits
 beside the fields of every variant; each variant's `oneOf` entry names that variant's required
@@ -693,11 +698,81 @@ the schema admitted, which `b10x-loom agent check` reads again. The decoder's ow
 specification does not declare (the `format` value, ports, non-blank text, variable names, RFC 3339
 instants) are not in the CRD.
 
-The status is `observedGeneration`, `state` and `check`. `status.state` is the lifecycle state the
-design calls `phase`; the design's `status.deployment` and `status.conditions` belong to the
-controller and are added with it. The controller, `crates/loom-operator` with `kube` and
-`k8s-openapi`, is step 6 of the CRD deployment design (`docs/design/loom-agent-crd-deployment.md`
-§ 9) and is not yet written. Nothing in Loom talks to a cluster.
+The status is `observedGeneration`, `state`, `check`, `deployment` and `conditions`.
+`status.state` is the lifecycle state the design calls `phase`. `deployment` (`availability`
+Available or Unavailable) is what the controller last read of the child Deployment: every
+`ObserveDeployment` outcome that reads one sets it, and `respecified` clears it. `still-running` and
+`still-degraded` are moves over the self-transitions `observe-running` and `observe-degraded`,
+emitting `LoomAgentObserved`, because on ESS 0.69.0 an `updates:` outcome beside `moves:` under one
+subject predicate makes the whole command a hand-written obligation. `conditions` (`Checked`,
+`Available`) is declared for the CRD's schema and the view, but no command sets it: a `sets:` value
+on ESS 0.69.0 admits no list (marked in `resource.yaml`), so the controller computes the list when
+it publishes (§ Operator). `b10x-loom-resource` talks to no cluster; `crates/loom-operator` is the
+only crate that does.
+
+## Operator
+
+`b10x-loom-operator` (`crates/loom-operator`, `story:loom-operator`, design
+`docs/design/loom-agent-crd-deployment.md` § 4, § 5) is the controller of `LoomAgent`, on `kube`
+4.2 (`runtime`, `derive`, `client`, `rustls-tls`) and `k8s-openapi` 0.28 (`v1_34`). Its kube type
+`resource::LoomAgent` is declared with `schema = "disabled"`, since the schema is the one projected
+from `ess/`; the crate's unit tests hold its group, version, kind, plural and serialized members to
+`b10x_loom_resource::crd` and the CRD. The command line (`src/cli.rs`, clap derive) is
+`run --config <file>`, `render --resource <file> [--config <file>]` (exit 0; 3 refused; 2 not a
+`LoomAgent`; 1 unreadable) and `crd` (the CRD's bytes). `render` without `--config` uses
+`Config::builtin()`: namespace `default`, no model route, no Secret name or egress host allowed.
+
+`config.yaml` (`src/config.rs`, unknown members refused): `namespace`,
+`defaultImage {repository, tag}`, `defaultResources {cpu, memory}`, optional
+`modelRoute {url, protocol, model}`, `allowedSecretNames`, `allowedEgressHosts` (an empty list
+admits none). One instance watches one namespace with one replica; there is no leader election.
+
+The record (`LoomAgentRecord`) lives in the controller's memory; after a restart every resource is
+applied again at its cluster generation and checked again. A reconcile (`src/reconcile.rs`) runs
+`ApplyLoomAgent`; a Pending resource is admitted (`src/admission.rs`) and the answer recorded by
+`RecordCheck` (exit 0, or 3 with `refused: <reason> at <member>: <detail>`). Admission, first
+refusal wins: `b10x_loom_agent::check_text` over `spec.agent` (members prefixed `spec.agent.`); the
+same over `spec.routes`, taking only `SecretLiteral` from it, then `Malformed` when the routes are
+not a mapping; `spec.connectorsConfig` split into words and walked for a credential; empty routes
+without `modelRoute` (`NoModelRoute`); a `secretRef` not allowed (`SecretNotAllowed`); a
+`deploy.kubernetes.namespace` other than the resource's (`NamespaceMismatch`); an egress host not
+allowed (`EgressHostNotAllowed`). A refused resource gets no child, and the children of an earlier
+generation are deleted (GET, owner check, delete with a uid precondition). A Running or Degraded
+resource has its children applied by server-side apply (field manager `b10x-loom-operator`,
+forced), then `ObserveDeployment` with what the applied Deployment reports, once its
+`observedGeneration` caught up. The status goes out by server-side apply on `/status`, only when it
+changed; conditions follow `src/status.rs` (a table per state in its module doc). Requeue after
+300 s, retry after 30 s; `.owns(Deployment)` wakes it on a Deployment change. Deletion is the
+garbage collector's (owner references with `controller` and `blockOwnerDeletion`); the controller
+forgets the record. Each value serialized to YAML goes through JSON text (`admission::yaml`):
+serde_json's `arbitrary_precision`, on in this workspace, breaks a `Value` number written to YAML
+directly.
+
+The children (`src/render.rs`): a ServiceAccount (`deploy.kubernetes.service_account`, else the
+resource name); a ConfigMap `<name>-spec` with `agent.yaml`, `routes.yaml` (a non-empty
+`spec.routes` as given, else one anonymous endpoint at the model route, a route per declared role)
+and `connectors.toml`; a Deployment (one replica, `Recreate`, init container
+`b10x-loom agent check`, container `b10x-loom agent serve`, image `spec.image` else `defaultImage`,
+user 10001, read-only root, no capability, seccomp `RuntimeDefault`, requests equal to limits,
+annotation `loom.beyond10x.dev/generation`, probes only with `expose.a2a`); a NetworkPolicy (deny by
+default; egress to DNS in `kube-system`, to each egress entry, and to the model route's port only
+with the default routes; ingress from each ingress entry); and with `expose.a2a` a Service (a stale
+one is deleted). `deploy.kubernetes.image_repository` is not read. The golden file
+`tests/golden/platform-operator.yaml` is rewritten by
+`LOOM_OPERATOR_BLESS=1 cargo test -p b10x-loom-operator --test render`; review its diff.
+
+The chart `charts/loom-agents` (Helm 3) installs `crds/` (§ Generated files), the controller
+Deployment (`command: [b10x-loom-operator]`, `args: [run, --config, /etc/loom-operator/config.yaml]`),
+its ServiceAccount, a namespaced Role and RoleBinding, and the ConfigMap holding `config.yaml` from
+the values. The Role grants `get`, `list`, `watch`, `update`, `patch` on `loomagents` and
+`loomagents/status`, `update` on `loomagents/finalizers` (which `blockOwnerDeletion` needs), and
+`create`, `update`, `patch`, `get`, `list`, `watch`, `delete` on the five child kinds; nothing on
+Secrets, Pods or Events. `values.yaml` carries no comments. `Chart.yaml` `version` and `appVersion`
+and the values' `image.tag` and `agentImage.tag` are the workspace version, so a release bumps all
+four (`tests/chart.rs` fails otherwise). `task chart-check` compares the CRD copy, then runs
+`helm lint` and `helm template` with the defaults and with the overrides `tests/chart.rs` asserts.
+CI installs Helm 3.19.0 by checksum (`check.yml`). No Event is recorded, and a ServiceAccount a
+later generation renames stays until the resource is deleted.
 
 ## Plugin host
 
@@ -1329,7 +1404,9 @@ moves the minor version before 1.0, never only the patch version. A release is:
    under an empty `## [Unreleased]`, carrying its `**Breaking:**` bullets or, when nothing breaks,
    the line `No breaking changes.` under the heading; the link references at the bottom move with
    it (`[Unreleased]` compares from the new tag, and a `[<version>]` line links its tag). README,
-   AGENTS.md and the site pages that name the version or a dependency line move with it. A
+   AGENTS.md and the site pages that name the version or a dependency line move with it, and so
+   do `charts/loom-agents/Chart.yaml` (`version`, `appVersion`) and the two image tags in its
+   `values.yaml` (`crates/loom-operator/tests/chart.rs` holds them to the workspace version). A
    release moves the `ess` pin (§ ESS) to the newest ESS release in that same release.
    `cargo run -q --locked -p loom-xtask -- release-check --tag <version>` passes on it.
 2. `check` and `Shared source gates` green on that commit.

@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest b45d71347c921a18e8cc80e0d679a2120f09cda4251d04af27cfc43bc9c8b295
-// contract digest e6cd03abb8d70a142f0445dce48f74758629d1f06380c00a5edfc6784fe535ec
+// model digest bdde76ecdfe74de23e60baede8074d4e9737e8f2f0216d333a526b9ab77440f8
+// contract digest 03245bddbe418d5c4aa42a0de1fee9b18c8f7793cca6608e8faafc316ee7de2d
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -206,6 +206,8 @@ where
                 name: identity.clone(),
                 observed_generation: input.generation.clone(),
                 check: None,
+                deployment: None,
+                conditions: None,
             };
             let answer = crate::resource::ApplyLoomAgentOutcome::Created { loom_agent_applied: crate::resource::LoomAgentApplied { name: identity.clone(), generation: input.generation.clone() } };
             LoomAgentStorage::put(&mut self.ports, crate::resource::AnyLoomAgent::Pending(crate::resource::LoomAgent::new(data)).snapshot());
@@ -224,6 +226,8 @@ where
                     name: identity.clone(),
                     observed_generation: input.generation.clone(),
                     check: None,
+                    deployment: None,
+                    conditions: None,
                 };
                 let answer = crate::resource::ApplyLoomAgentOutcome::Created { loom_agent_applied: crate::resource::LoomAgentApplied { name: identity.clone(), generation: input.generation.clone() } };
                 LoomAgentStorage::put(&mut self.ports, crate::resource::AnyLoomAgent::Pending(crate::resource::LoomAgent::new(data)).snapshot());
@@ -240,6 +244,8 @@ where
                 name: identity.clone(),
                 observed_generation: input.generation.clone(),
                 check: None,
+                deployment: None,
+                conditions: None,
             };
             let answer = crate::resource::ApplyLoomAgentOutcome::Created { loom_agent_applied: crate::resource::LoomAgentApplied { name: identity.clone(), generation: input.generation.clone() } };
             LoomAgentStorage::put(&mut self.ports, crate::resource::AnyLoomAgent::Pending(crate::resource::LoomAgent::new(data)).snapshot());
@@ -255,6 +261,7 @@ where
         let mut next = moved.snapshot();
         next.data.observed_generation = input.generation.clone();
         next.data.check = None;
+        next.data.deployment = None;
         let answer = crate::resource::ApplyLoomAgentOutcome::Respecified { loom_agent_applied: crate::resource::LoomAgentApplied { name: input.name.clone(), generation: input.generation.clone() } };
         LoomAgentStorage::put(&mut self.ports, next);
         return Ok(answer);
@@ -301,7 +308,8 @@ where
                 crate::resource::AnyLoomAgent::Running(instance) => crate::resource::AnyLoomAgent::Degraded(instance.degrade()),
                 _ => return Err(undeclared("loom.resource.ObserveDeployment")),
             };
-            let next = moved.snapshot();
+            let mut next = moved.snapshot();
+            next.data.deployment = Some(crate::resource::DeploymentStatus { availability: input.availability.clone() });
             let answer = crate::resource::ObserveDeploymentOutcome::Degraded { loom_agent_degraded: crate::resource::LoomAgentDegraded { name: input.name.clone() } };
             LoomAgentStorage::put(&mut self.ports, next);
             return Ok(answer);
@@ -312,7 +320,14 @@ where
                 return Ok(crate::resource::ObserveDeploymentOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
             };
             let _ = &held;
-            let answer = crate::resource::ObserveDeploymentOutcome::StillRunning;
+            let moved = match held.refine() {
+                crate::resource::AnyLoomAgent::Running(instance) => crate::resource::AnyLoomAgent::Running(instance.observe_running()),
+                _ => return Err(undeclared("loom.resource.ObserveDeployment")),
+            };
+            let mut next = moved.snapshot();
+            next.data.deployment = Some(crate::resource::DeploymentStatus { availability: input.availability.clone() });
+            let answer = crate::resource::ObserveDeploymentOutcome::StillRunning { loom_agent_observed: crate::resource::LoomAgentObserved { name: input.name.clone(), availability: input.availability.clone() } };
+            LoomAgentStorage::put(&mut self.ports, next);
             return Ok(answer);
         }
         // `recovered`: selected by the addressed row.
@@ -325,7 +340,8 @@ where
                 crate::resource::AnyLoomAgent::Degraded(instance) => crate::resource::AnyLoomAgent::Running(instance.recover()),
                 _ => return Err(undeclared("loom.resource.ObserveDeployment")),
             };
-            let next = moved.snapshot();
+            let mut next = moved.snapshot();
+            next.data.deployment = Some(crate::resource::DeploymentStatus { availability: input.availability.clone() });
             let answer = crate::resource::ObserveDeploymentOutcome::Recovered { loom_agent_recovered: crate::resource::LoomAgentRecovered { name: input.name.clone() } };
             LoomAgentStorage::put(&mut self.ports, next);
             return Ok(answer);
@@ -336,7 +352,14 @@ where
                 return Ok(crate::resource::ObserveDeploymentOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
             };
             let _ = &held;
-            let answer = crate::resource::ObserveDeploymentOutcome::StillDegraded;
+            let moved = match held.refine() {
+                crate::resource::AnyLoomAgent::Degraded(instance) => crate::resource::AnyLoomAgent::Degraded(instance.observe_degraded()),
+                _ => return Err(undeclared("loom.resource.ObserveDeployment")),
+            };
+            let mut next = moved.snapshot();
+            next.data.deployment = Some(crate::resource::DeploymentStatus { availability: input.availability.clone() });
+            let answer = crate::resource::ObserveDeploymentOutcome::StillDegraded { loom_agent_observed: crate::resource::LoomAgentObserved { name: input.name.clone(), availability: input.availability.clone() } };
+            LoomAgentStorage::put(&mut self.ports, next);
             return Ok(answer);
         }
         // `no-deployment`: the default.
@@ -626,6 +649,8 @@ where
                 name: held.data.name,
                 observed_generation: held.data.observed_generation,
                 check: held.data.check,
+                deployment: held.data.deployment,
+                conditions: held.data.conditions,
                 state: held.state,
             })
             .collect())

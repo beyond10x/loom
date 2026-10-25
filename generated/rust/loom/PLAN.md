@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest b45d71347c921a18e8cc80e0d679a2120f09cda4251d04af27cfc43bc9c8b295
-  contract digest e6cd03abb8d70a142f0445dce48f74758629d1f06380c00a5edfc6784fe535ec
+  model digest bdde76ecdfe74de23e60baede8074d4e9737e8f2f0216d333a526b9ab77440f8
+  contract digest 03245bddbe418d5c4aa42a0de1fee9b18c8f7793cca6608e8faafc316ee7de2d
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-220 capabilities: **218 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+225 capabilities: **223 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -119,7 +119,11 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.plugin.SourceRead` |
 | domain type | `loom.plugin.TurnResult` |
 | domain type | `loom.resource.CheckResult` |
+| domain type | `loom.resource.Condition` |
+| domain type | `loom.resource.ConditionStatus` |
+| domain type | `loom.resource.ConditionType` |
 | domain type | `loom.resource.DeploymentAvailability` |
+| domain type | `loom.resource.DeploymentStatus` |
 | domain type | `loom.resource.ImageRef` |
 | domain type | `loom.resource.LoomAgent.State` |
 | domain type | `loom.resource.LoomAgentSpec` |
@@ -197,6 +201,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | event type | `loom.resource.LoomAgentApplied` |
 | event type | `loom.resource.LoomAgentDegraded` |
 | event type | `loom.resource.LoomAgentDeleted` |
+| event type | `loom.resource.LoomAgentObserved` |
 | event type | `loom.resource.LoomAgentRecovered` |
 | event type | `loom.resource.LoomAgentRefused` |
 | event type | `loom.resource.LoomAgentRunning` |
