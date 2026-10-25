@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-25T17:40:31Z",
+  "actor": "human:timo",
+  "artifact": "story:loom-agent-resource-domain",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "task conform",
+    "reference": "baseline origin/main 15499135: 30 scenarios executed, 0 refused; treatment f4b12bd2: 56 scenarios executed (26 loom.resource), 0 refused, 0 skipped; crd-drift red without the generated CRD (drift-red.txt EXIT=1), green at f4b12bd2"
+  }
+}

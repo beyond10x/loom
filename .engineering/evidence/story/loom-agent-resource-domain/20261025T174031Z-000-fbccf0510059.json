@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-25T17:40:31Z",
+  "actor": "human:timo",
+  "artifact": "story:loom-agent-resource-domain",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check",
+    "reference": "task check exit 0 on f4b12bd2 with ESS 0.69.0: 400 test-result lines, 2119 passed, 0 failed, 9 ignored; task spec, ess-gate, drift, crd-drift, no-hand-model, conform and plan exit 0"
+  }
+}

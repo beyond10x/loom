@@ -8,7 +8,7 @@ tags:
 - non-interactive
 relations:
 - decides: story:loom-agent-resource-domain
-revision: 3
+revision: 5
 ---
 # Filing and approving story:loom-agent-resource-domain, wave 2026-10-25-resource
 
@@ -53,3 +53,13 @@ request on green. No tag, no release.
   needs; the ESS pin (0.69.0) does not move, this being no release.
 - D5: no `loom_sdk` re-export and no SDK stability entry: the resource types are the controller's,
   which lives in this repository.
+- D6 (after adversary pass 1, F1): the CRD follows the decoder's leniency for lists the
+  `loom.agent` document declares (`ABSENT_LIST_IS_EMPTY` in `crd.rs`, one rule, one place) instead
+  of requiring them; the alternative, making `loom_sdk::agent::parse` require every list, changes a
+  contract shipped since 0.34.0 and the fixtures of wave 2026-10-25-agents, which is outside this
+  unit and outside the grant. The leniency becomes an ESS declaration in
+  `story:agent-spec-constraints-in-ess`, together with the pre-existing findings J3 and J5.
+- D7 (after adversary pass 1, J1): the status field is `state`, the entity's lifecycle state, where
+  the design wrote `phase`; `status.deployment` and `status.conditions` are the controller's (step
+  6). Recorded in design § 5.1 and § 8 (this wave) and AGENTS.md § Resource.
+- D8 (after adversary pass 2): an ESS `Json` projects to `{x-kubernetes-preserve-unknown-fields: true}` with no `type`, everywhere, `spec.routes` included, because ESS `Json` admits any value and a structural schema allows an untyped node that preserves unknown fields; a union variant that is not a struct and a `format` the API server reads differently from ESS (`duration`) are refused by name rather than projected lossily.

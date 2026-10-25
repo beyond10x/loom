@@ -164,11 +164,12 @@ spec:
   image: {repository: <registry>/loom-agent, tag: "0.40.0"}   # optional override of the controller default
 status:
   observedGeneration: 3
-  phase: Running        # Pending | Refused | Running | Degraded
+  state: Running        # Pending | Running | Refused | Degraded, the entity's lifecycle state
   check: {exitCode: 0, message: ""}        # from `b10x-loom agent check`, run as an init container
-  deployment: platform-operator
-  conditions: [...]
 ```
+
+`status.deployment` and `status.conditions` are the controller's (§ 9 step 6) and are added when it
+is written; `status.state` is the `loom.resource` lifecycle state this design first called `phase`.
 
 Validation layers, in order: the CRD schema (structural, from the ESS domain), an admission step
 that refuses a secret-looking literal anywhere in `spec.agent` or `spec.routes` (the same rule
@@ -238,7 +239,7 @@ separate story with its own SRE change; this design neither depends on it nor bl
 | Controller | golden-manifest render tests per example spec; reconcile loop against a fake API server; "a secret literal is refused before any child is created" | this repository, `crates/loom-operator/tests` |
 | Image | `docker run <image> b10x-loom agent check --spec examples/operator.yaml` exits 0 in the deployment repository's CI | deployment repository CI |
 | Manifests | `helm template` + `kubeconform` + `kubectl apply --dry-run=server` on every change | deployment repository CI |
-| End to end | one YAML scenario in the platform's e2e-tests repository: apply the resource, wait for `status.phase: Running`, ask over A2A through a port-forward, expect a sourced answer, delete, expect 0 pods | the platform's e2e-tests repository |
+| End to end | one YAML scenario in the platform's e2e-tests repository: apply the resource, wait for `status.state: Running`, ask over A2A through a port-forward, expect a sourced answer, delete, expect 0 pods | the platform's e2e-tests repository |
 | Smoke | the platform's smoke suite unchanged; a sixth check `operator` added only when the agent is part of the release contract | the platform |
 
 ## 9. The steps, enumerated (minimal vertical slice, slice A: http reads + A2A answer)

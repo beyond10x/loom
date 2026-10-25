@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:loom-agent-resource-domain
 kind: story
-status: active
+status: implemented
 title: 'The LoomAgent resource: ESS domain loom.resource and the CRD schema projected from it and loom.agent'
 relations:
 - decomposes: epic:loom-sdk-for-products
@@ -42,10 +42,11 @@ scope:
   path: website/docs/reference/crates.md
 - confidence: cited
   path: website/docs/reference/ess
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-25T15:15:30Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-25T15:15:30Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-25T17:40:31Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1},"asserted":{"test_result":1,"review_outcome":2,"verification":1}}}
 ---
 ## Outcome
 
