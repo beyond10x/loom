@@ -54,6 +54,6 @@ One opening store commit on `wave/2026-10-25-agents` (this record, the Scope sec
 
 | unit | branch | head | worktree | build dir | scratch | stage |
 |---|---|---|---|---|---|---|
-| agent-serve | | | | | ~/.cache/scratch/fbf1604f-db7b-423e-bed5-b9a4dc96d66a/w2/agent-serve | waits for agent-check on main |
-| agent-http-binding | | | | | ~/.cache/scratch/fbf1604f-db7b-423e-bed5-b9a4dc96d66a/w2/agent-http-binding | waits for unit 1 |
+| agent-serve | impl/agent-serve from b40e1bb9 | 91fc7bc8 unit, db82a2f1 adversary round 1 | loom-w2-agent-serve (finished after merge) | its target/ | ~/.cache/scratch/fbf1604f-db7b-423e-bed5-b9a4dc96d66a/w2/agent-serve | merged into the integration branch at bc063973; review-result:adversary-agent-serve-pass-1 (6 findings, all fixed) |
+| agent-http-binding | impl/agent-http-binding from bc063973 | | loom-w2-agent-http-binding | its target/ | ~/.cache/scratch/fbf1604f-db7b-423e-bed5-b9a4dc96d66a/w2/agent-http-binding | implementor dispatched |
 | agent-a2a | | | | | ~/.cache/scratch/fbf1604f-db7b-423e-bed5-b9a4dc96d66a/w2/agent-a2a | waits for unit 1 |
