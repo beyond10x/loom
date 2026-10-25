@@ -260,6 +260,10 @@ separate story with its own SRE change; this design neither depends on it nor bl
 Steps 5-8 can start now against the spec and a stub image (`b10x-loom --version` entrypoint);
 step 10 waits on 1-4 and 9. Days: I don't know; the Loom stories carry no estimates.
 
+## 9a. A takt delivery as a second agent kind (later slice)
+
+takt (story delivery: branches, pull requests, releases, trials) is an agent of the same stack. It is not part of slice A or B. A later slice C runs a takt delivery as a second `LoomAgent` variant: `spec.image` names a takt image (built in the deployment repository from the takt tag beside `loom-agent`), the pod runs takt's own entrypoint instead of `b10x-loom agent serve`, and `spec.agent` carries takt's run configuration as its `loom.agent/1` document. The controller renders the same children (§ 5.2); what differs is the image, the command and the egress list (a forge over the bot route, a harness session under Substrate). Blocked until takt's `dependency-blocker:loom-child-confinement` clears; until then takt is out of scope here (decision 7).
+
 ## 10. Decisions for Timo
 
 | # | Question | Options | Default on silence |
@@ -270,6 +274,7 @@ step 10 waits on 1-4 and 9. Days: I don't know; the Loom stories carry no estima
 | 4 | New dependencies `kube` + `k8s-openapi` in the platform workspace | resolved 2026-10-25 (Timo: 0 dependencies on the platform): the controller is `beyond10x/loom` `crates/loom-operator` with its own gate; the platform workspace gains nothing. | B, taken |
 | 5 | Model route for the first run | A. the in-cluster Bedrock signing proxy. B. Anthropic key Secret. C. OpenRouter key. | A, fall back to B |
 | 6 | First slice | A. http reads + A2A answer, no credentials (D6). B. Slack read + write first, blocked on Connectors custody. | A |
+| 7 | takt deliveries on this path | A. later slice C: a second `LoomAgent` variant with a takt image and command, after `loom-child-confinement` clears (§ 9a). B. out of scope: takt keeps its own deployment; the reason is that its confinement needs Substrate, which this design leaves out (§ 11). | A |
 
 ## 11. Not in this design
 
@@ -278,3 +283,4 @@ step 10 waits on 1-4 and 9. Days: I don't know; the Loom stories carry no estima
   cluster-operator-owned resource, not a customer-owned agent.
 - MCP read proxy (`loom-kubernetes.md` M6), Agency registration (M7), Substrate confinement (Q6).
 - Multi-tenancy of `LoomAgent` resources across namespaces: one namespace per controller instance.
+- takt deliveries: slice C at the earliest (§ 9a, decision 7); nothing in slices A or B runs takt.
