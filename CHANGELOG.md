@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-10-25
+
+No breaking changes.
+
 ### Added
 
 - An agent spec's `http` binding is read by a served turn: `source.read {source, kind: get, input: {path, query?}}` is one GET of a path exactly in `allow_paths` (no `\`, no `.` or `..` segment, no encoded separator, even when listed; `agent check` refuses such an entry as `Malformed`) under `base_url`, with the bearer the variable `bearer_env` names (unset, empty or blank is `BearerMissing`), no redirect followed (the refusal carries at most 256 bytes of the location), the body cut at `max_bytes` in bytes on a character boundary and marked, never longer than `max_bytes` (a byte that is not UTF-8 is dropped); a refusal (the method, the path, the bearer, a redirect, a failing status) is a refused step the model reads as data (story:agent-http-binding)
@@ -1084,7 +1088,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.40.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.41.0...HEAD
+[0.41.0]: https://github.com/beyond10x/loom/releases/tag/0.41.0
 [0.40.0]: https://github.com/beyond10x/loom/releases/tag/0.40.0
 [0.39.1]: https://github.com/beyond10x/loom/releases/tag/0.39.1
 [0.39.0]: https://github.com/beyond10x/loom/releases/tag/0.39.0
