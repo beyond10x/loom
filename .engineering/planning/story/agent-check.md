@@ -2,13 +2,59 @@
 format: aep.planning-md/3
 id: story:agent-check
 kind: story
-status: draft
+status: active
 title: b10x-loom agent check refuses a loom.agent/1 spec that cannot be served, and operator-reply@1 is in the plugin catalog
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
 - depends_on: story:agent-domain
-revision: 1
+scope:
+- confidence: cited
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: inferred
+  path: Cargo.lock
+- confidence: inferred
+  path: Cargo.toml
+- confidence: cited
+  path: README.md
+- confidence: cited
+  path: crates/loom-agent
+- confidence: cited
+  path: crates/loom-cli/src/agent.rs
+- confidence: cited
+  path: crates/loom-cli/src/lib.rs
+- confidence: inferred
+  path: crates/loom-cli/src/main.rs
+- confidence: inferred
+  path: crates/loom-conformance/src
+- confidence: inferred
+  path: crates/loom-conformance/tests/conform.rs
+- confidence: cited
+  path: crates/loom-protocols/src/lib.rs
+- confidence: inferred
+  path: crates/loom-protocols/tests/operator_reply.rs
+- confidence: cited
+  path: ess/domains/agent.yaml
+- confidence: inferred
+  path: ess/ess-inputs.yaml
+- confidence: inferred
+  path: ess/scenarios/agent-check
+- confidence: inferred
+  path: generated/rust/loom
+- confidence: cited
+  path: protocols/operator-reply/1.yaml
+- confidence: inferred
+  path: website/data/status.json
+- confidence: cited
+  path: website/docs/reference/cli.md
+- confidence: inferred
+  path: website/docs/reference/ess
+revision: 24
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-25T15:14:05Z", actor: "human:timo", revision: 23}
+- {from: "proposed", to: "active", at: "2026-10-25T15:14:06Z", actor: "human:timo", revision: 24}
 ---
 ## Outcome
 
