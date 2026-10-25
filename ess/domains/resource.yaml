@@ -1,6 +1,7 @@
-# The `LoomAgent` Kubernetes custom resource and its lifecycle (story loom-agent-resource-domain).
-# Sources read: the CRD deployment design (`docs/design/loom-agent-crd-deployment.md`, D1, D2, D8,
-# § 5.1, § 8) and `loom.agent.AgentSpec` (`ess/domains/agent.yaml`), which `spec.agent` holds
+# The `LoomAgent` Kubernetes custom resource and its lifecycle (story loom-agent-resource-domain;
+# the status's `deployment` and `conditions`, story loom-operator). Sources read: the CRD
+# deployment design (`docs/design/loom-agent-crd-deployment.md`, D1, D2, D8, § 5.1, § 5.2, § 8)
+# and `loom.agent.AgentSpec` (`ess/domains/agent.yaml`), which `spec.agent` holds
 # verbatim, so there is no second agent schema (D1). The resource is namespaced and one controller
 # instance watches one namespace (design § 11), so its name alone identifies it. The lifecycle is
 # the controller's view of the resource: what it records as it reconciles, never what the model
@@ -53,8 +54,10 @@ types:
     kind: enum
     variants: [Available, Unavailable]
 
-  # What `b10x-loom agent check` said of the spec, as the pod's init container ran it: its exit
-  # code (0, the spec is served) and its message (empty on 0).
+  # What the spec check said of the spec: its exit code (0, the spec is served) and its message
+  # (empty on 0). The controller runs the check in-process before any child exists, with the
+  # library behind `b10x-loom agent check`, and records its own refusals of the resource (a Secret
+  # or an egress host it does not allow, a namespace other than the resource's) the same way.
   - name: loom.resource.CheckResult
     kind: struct
     fields:
@@ -63,6 +66,38 @@ types:
         naming: {wire: exitCode}
       - name: message
         type: String
+
+  # The Kubernetes condition types the controller publishes: `Checked`, whether the spec check
+  # passed for the observed generation, and `Available`, whether the child Deployment is.
+  - name: loom.resource.ConditionType
+    kind: enum
+    variants: [Checked, Available]
+
+  # A condition's status as Kubernetes spells it, quoted so YAML reads text and not a boolean.
+  - name: loom.resource.ConditionStatus
+    kind: enum
+    variants: ['True', 'False', Unknown]
+
+  # One condition: its type and status, a CamelCase reason and a message for a person.
+  - name: loom.resource.Condition
+    kind: struct
+    fields:
+      - name: type
+        type: loom.resource.ConditionType
+      - name: status
+        type: loom.resource.ConditionStatus
+      - name: reason
+        type: String
+      - name: message
+        type: String
+
+  # What the controller last read of the child Deployment (design § 5.2: the status comes from the
+  # Deployment's conditions).
+  - name: loom.resource.DeploymentStatus
+    kind: struct
+    fields:
+      - name: availability
+        type: loom.resource.DeploymentAvailability
 
   # The resource's `spec`: the `loom.agent/1` document verbatim; the llm `routes.yaml` inline, a
   # document of llm's own format that Loom passes through, so it is untyped here and holds secrets
@@ -93,6 +128,12 @@ entities:
   # passed; Refused when it failed, until a new generation is applied; Degraded while the child
   # Deployment is unavailable, Running again when it is. A new generation returns every state to
   # Pending with the check cleared. Nothing is terminal: a resource leaves by deletion.
+  # `deployment` is what the controller last read of the child Deployment, absent until it read
+  # one and cleared by a new generation, whose Deployment is not yet read. An observation that
+  # leaves Running or Degraded as it is moves over a self-transition (`observe-running`,
+  # `observe-degraded`) so it can record what it read: on ESS 0.69.0 an `updates:` outcome beside
+  # `moves:` outcomes under one subject predicate makes the whole command a hand-written
+  # obligation, and a `preserves:` outcome sets nothing.
   - name: loom.resource.LoomAgent
     identity:
       name: name
@@ -103,6 +144,15 @@ entities:
         naming: {wire: observedGeneration}
       - name: check
         type: Optional<loom.resource.CheckResult>
+      - name: deployment
+        type: Optional<loom.resource.DeploymentStatus>
+      # The controller's projection of `state`, `check` and `deployment` as Kubernetes conditions,
+      # computed when it publishes the status. No command sets it, because a `sets:` value on ESS
+      # 0.69.0 admits no list (a list is read only as the `via:` of a related read, and `[]` needs
+      # `ess/31`); the declaration gives the CRD its schema. ESS 0.69.0 workaround, reported as an
+      # ESS gap.
+      - name: conditions
+        type: Optional<List<loom.resource.Condition>>
     lifecycle:
       initial: Pending
       states: [Pending, Running, Refused, Degraded]
@@ -120,6 +170,12 @@ entities:
         - name: recover
           from: [Degraded]
           to: Running
+        - name: observe-running
+          from: [Running]
+          to: Running
+        - name: observe-degraded
+          from: [Degraded]
+          to: Degraded
         - name: respecify
           from: [Pending, Running, Refused, Degraded]
           to: Pending
@@ -187,12 +243,20 @@ events:
       - name: name
         type: loom.resource.ResourceName
 
+  # An observation of the child Deployment that left the state as it was, with what was read.
+  - name: loom.resource.LoomAgentObserved
+    fields:
+      - name: name
+        type: loom.resource.ResourceName
+      - name: availability
+        type: loom.resource.DeploymentAvailability
+
 commands:
   # The controller saw the resource at a generation: created, or changed. A generation the
   # controller already holds is a reconcile of what it has and changes nothing; an older one is
-  # stale and refused; a newer one returns the resource to Pending, its check cleared, from
-  # whatever state it held, Pending included (design § 5.1: the check runs again for every
-  # generation).
+  # stale and refused; a newer one returns the resource to Pending, its check and its Deployment
+  # observation cleared, from whatever state it held, Pending included (design § 5.1: the check
+  # runs again for every generation).
   - name: loom.resource.ApplyLoomAgent
     input:
       - name: name
@@ -231,15 +295,16 @@ commands:
         sets:
           observed_generation: input.generation
           check: {cleared: true}
+          deployment: {cleared: true}
         emits: [loom.resource.LoomAgentApplied]
         payload:
           loom.resource.LoomAgentApplied:
             name: input.name
             generation: input.generation
 
-  # The spec check ran in the pod's init container for a generation: exit code 0 runs the agent,
-  # any other refuses it. A result for a generation the controller has moved past is stale; a
-  # result for a resource that is not Pending is out of order and changes nothing.
+  # The spec check ran for a generation: exit code 0 runs the agent, any other refuses it. A
+  # result for a generation the controller has moved past is stale; a result for a resource that
+  # is not Pending is out of order and changes nothing.
   - name: loom.resource.RecordCheck
     input:
       - name: name
@@ -297,8 +362,10 @@ commands:
 
   # The controller read the child Deployment's availability: a Running resource whose Deployment
   # is unavailable is Degraded, a Degraded one whose Deployment is available is Running again,
-  # and one already in the state the observation says is left as it is. A resource without a
-  # Deployment to observe (Pending, Refused) answers a state conflict.
+  # and one already in the state the observation says stays in it. Every outcome that reads a
+  # Deployment records the availability as `deployment`, so a Running resource whose Deployment is
+  # available shows it. A resource without a Deployment to observe (Pending, Refused) answers a
+  # state conflict.
   - name: loom.resource.ObserveDeployment
     input:
       - name: name
@@ -317,6 +384,8 @@ commands:
         when: availability == Unavailable
         moves: loom.resource.LoomAgent.degrade
         instance: name
+        sets:
+          deployment: {availability: input.availability}
         emits: [loom.resource.LoomAgentDegraded]
         payload:
           loom.resource.LoomAgentDegraded:
@@ -324,13 +393,22 @@ commands:
       - name: still-running
         when_subject_state: Running
         when: availability == Available
-        preserves: loom.resource.LoomAgent
+        moves: loom.resource.LoomAgent.observe-running
         instance: name
+        sets:
+          deployment: {availability: input.availability}
+        emits: [loom.resource.LoomAgentObserved]
+        payload:
+          loom.resource.LoomAgentObserved:
+            name: input.name
+            availability: input.availability
       - name: recovered
         when_subject_state: Degraded
         when: availability == Available
         moves: loom.resource.LoomAgent.recover
         instance: name
+        sets:
+          deployment: {availability: input.availability}
         emits: [loom.resource.LoomAgentRecovered]
         payload:
           loom.resource.LoomAgentRecovered:
@@ -338,8 +416,15 @@ commands:
       - name: still-degraded
         when_subject_state: Degraded
         when: availability == Unavailable
-        preserves: loom.resource.LoomAgent
+        moves: loom.resource.LoomAgent.observe-degraded
         instance: name
+        sets:
+          deployment: {availability: input.availability}
+        emits: [loom.resource.LoomAgentObserved]
+        payload:
+          loom.resource.LoomAgentObserved:
+            name: input.name
+            availability: input.availability
       - name: no-deployment
         error: loom.resource.LoomAgentStateConflict
         payload:
@@ -368,7 +453,9 @@ commands:
             name: input.name
 
 views:
-  # Every resource the controller holds, one row each, with the fields its status publishes.
+  # Every resource the controller holds, one row each, with the fields its status publishes. It
+  # carries `deployment` and `conditions` too, so a scenario of a preserving outcome of
+  # `ApplyLoomAgent` reads every field it leaves as it was.
   - name: loom.resource.LoomAgents
     source: loom.resource.LoomAgent
     consistency: read_your_writes
@@ -379,5 +466,9 @@ views:
         type: Integer
       - name: check
         type: Optional<loom.resource.CheckResult>
+      - name: deployment
+        type: Optional<loom.resource.DeploymentStatus>
+      - name: conditions
+        type: Optional<List<loom.resource.Condition>>
       - name: state
         type: loom.resource.LoomAgent.State

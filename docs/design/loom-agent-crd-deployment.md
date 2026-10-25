@@ -165,29 +165,84 @@ spec:
 status:
   observedGeneration: 3
   state: Running        # Pending | Running | Refused | Degraded, the entity's lifecycle state
-  check: {exitCode: 0, message: ""}        # from `b10x-loom agent check`, run as an init container
+  check: {exitCode: 0, message: "checked platform-operator: 3 states, 3 bindings, protocol operator-reply@1"}
+  deployment: {availability: Available}   # Available | Unavailable, last read of the child Deployment
+  conditions:                             # Checked and Available, computed from state, check, deployment
+    - {type: Checked, status: "True", reason: SpecServeable, message: "checked platform-operator: …"}
+    - {type: Available, status: "True", reason: DeploymentAvailable, message: the Deployment reports Available}
 ```
 
-`status.deployment` and `status.conditions` are the controller's (§ 9 step 6) and are added when it
-is written; `status.state` is the `loom.resource` lifecycle state this design first called `phase`.
+`status.state` is the `loom.resource` lifecycle state this design first called `phase`.
+`status.check` comes from the controller's own check (§ 5.2), not from the pod. `status.deployment`
+and `status.conditions` were added with the controller (`story:loom-operator`): `deployment` is set
+by every `ObserveDeployment` outcome that reads the Deployment and cleared when the spec changes;
+`conditions` is declared in `ess/domains/resource.yaml` for the CRD's schema, but ESS 0.69.0 admits
+no list as a `sets:` value, so the controller computes it from `state`, `check` and `deployment`
+when it publishes the status (`crates/loom-operator/src/status.rs`).
 
-Validation layers, in order: the CRD schema (structural, from the ESS domain), an admission step
-that refuses a secret-looking literal anywhere in `spec.agent` or `spec.routes` (the same rule
-`agent check` applies, `loom-kubernetes.md` § 3), then `b10x-loom agent check` in the pod's init
-container, whose exit code lands in `status.check`.
+Validation layers, in order: the CRD schema (structural, from the ESS domain); the controller's
+admission, before any child exists, which runs `b10x_loom_agent::check_text` (the library behind
+`b10x-loom agent check`) over `spec.agent`, refuses a credential in `spec.routes` or in
+`spec.connectorsConfig` (its decoded TOML, the words of each decoded string, and the words of the
+raw text the ConfigMap receives, comments included), reads `spec.routes` with llm's strict
+`llm.routes/1` parser (so an `auth.secret` that is a value and not a reference is refused), holds
+`secretRef`, `deploy.kubernetes.namespace` and the egress hosts to the controller's configuration
+(an egress entry naming neither a host nor a namespace is refused), and refuses a child name that
+an object it does not control already holds, its answer landing in
+`status.check`; then `b10x-loom agent check` again in the pod's init container, whose exit code is
+not read back.
 
 ### 5.2 `loom-operator`
 
 | Aspect | Design |
 |---|---|
-| Code | `crates/loom-operator` (binary `loom-operator`) in this repository; `kube` (runtime + derive) and `k8s-openapi` as its dependencies (D9) |
+| Code | `crates/loom-operator` (package and binary `b10x-loom-operator`) in this repository; `kube` 4.2 (runtime, derive, client, rustls-tls) and `k8s-openapi` 0.28 (`v1_34`) as its dependencies (D9) |
 | Image | its own image `<registry>/loom-operator:<loom tag>`, built in the deployment repository from the Loom tag beside the agent image (§ 6); the platform's backend image is untouched |
-| Config | `/etc/loom-operator/config.yaml` from a ConfigMap: `namespace`, `defaultImage`, `defaultResources`, `allowedSecretNames`, `allowedEgressHosts` |
-| Loop | watch `LoomAgent` in one namespace; reconcile = render the children (ConfigMap, ServiceAccount, Deployment, NetworkPolicy, Service) as server-side apply with the resource as owner; status from the child Deployment's conditions and the init container's result; delete = garbage collection through owner references |
-| RBAC | namespaced Role: `loomagents` + `loomagents/status` (get, list, watch, update, patch), `configmaps`, `serviceaccounts`, `deployments`, `services`, `networkpolicies`, `events` (create, update, patch, get, list, watch, delete). No ClusterRole; the CRD itself is applied by ArgoCD, not by the controller |
+| Config | `/etc/loom-operator/config.yaml` from a ConfigMap: `namespace`, `defaultImage`, `defaultResources`, `modelRoute` (`url`, `protocol`, `model`; § 10 row 5 A), `allowedSecretNames`, `allowedEgressHosts` |
+| Loop | watch `LoomAgent` in one namespace; reconcile = check the spec in-process, then render the children (ConfigMap, ServiceAccount, Deployment, NetworkPolicy, Service) as server-side apply with the resource as owner; status from the controller's check and the child Deployment's `Available` condition; delete = garbage collection through owner references |
+| RBAC | namespaced Role: `loomagents` + `loomagents/status` (get, list, watch, update, patch), `loomagents/finalizers` (update), `configmaps`, `serviceaccounts`, `deployments`, `services`, `networkpolicies` (create, update, patch, get, list, watch, delete). No ClusterRole; the CRD itself is installed from the chart's `crds/` (§ 10 row 3 B), not by the controller |
 | Replicas | 1, `Recreate`; no leader election |
 | Platform coupling | none: no platform code, crate or image; the controller never calls the platform's management API and the platform never reads `LoomAgent`. The two meet only in the dev cluster namespace and in the deployment repository |
 | Tests | render tests against golden manifests per spec example; a kube-apiserver fake (`kube`'s mock client) for the reconcile loop; `clippy -D warnings`; an ESS conformance suite for the resource lifecycle domain (D8) |
+
+Where the implementation (`story:loom-operator`) differs from this table and § 4, and why:
+
+- The spec check runs in the controller, through `b10x_loom_agent::check_text`, before any child
+  is rendered, and its answer is `status.check`. Reading the init container's exit code would need
+  a read permission on Pods and would answer only after a Deployment exists, which § 8's "refused
+  before any child is created" excludes. The init container stays, so the pod refuses a spec on
+  its own too.
+- `events` is not in the Role and the controller records no Event. `loomagents/finalizers`
+  (update) is in it, because an owner reference with `blockOwnerDeletion` needs it.
+- Without `expose.a2a` the Deployment has no probe; § 4's exec probe running `agent check` is not
+  rendered, since the check holds for the spec's whole life and adds nothing as a liveness signal.
+- `deploy.kubernetes.image_repository` is not read: the image is `spec.image` or the configured
+  `defaultImage`.
+- The NetworkPolicy admits egress to DNS in `kube-system`, to each egress entry (a host entry by
+  port only, since a NetworkPolicy names no host) and to the model route's port only when the
+  controller wrote the default routes, and ingress from each ingress entry.
+- The chart `charts/loom-agents` lives in this repository, versioned with the Loom tag (§ 10
+  row 3 B): it installs the CRD, the controller's Deployment, ServiceAccount, Role, RoleBinding and
+  ConfigMap, and `task chart-check` lints and renders it.
+- "Server-side apply with the resource as owner" applies only over a child the resource already
+  controls or that does not exist. Before applying, the controller reads each child: one held by
+  any other controller, or by none (the controller's own ServiceAccount, `default`), refuses the
+  resource `ChildNotOwned` instead of being taken over and later garbage-collected with it. That
+  refusal depends on the cluster, not the spec, so the children are read again on each later
+  reconcile at that generation, and once none is someone else's the generation is applied and
+  checked as new. A child of a deleted `LoomAgent` of the same name is deleted first, and the
+  children are applied on the next reconcile.
+- The record is keyed by name, so the controller also holds each name's uid: a resource deleted
+  and created again under its name is applied as new, not `unchanged` or `stale`. A Refused
+  resource's children are deleted on every reconcile, so a failed delete is retried.
+- "Each child it controls" is found by the resource's uid, not by the names the current spec
+  renders: each child kind is listed by `app.kubernetes.io/instance`, and each child the
+  controller applied for that uid is read by name, either counting only with a controller owner
+  reference to the uid. A Refused resource loses every such child; a Running one loses each such
+  child this generation does not render (the ServiceAccount an earlier generation named, a Service
+  once `expose.a2a` is gone) after its children are applied.
+- An egress entry naming neither `host` nor `namespace` is refused `EgressHostNotAllowed`: its
+  rule would have no peer and admit every destination on its port.
 
 ## 6. Deployment through the platform's deployment repository
 
@@ -236,7 +291,8 @@ separate story with its own SRE change; this design neither depends on it nor bl
 | Layer | Test | Where |
 |---|---|---|
 | Spec | ESS conformance scenarios for the `LoomAgent` lifecycle domain (create → Pending → Running; refused spec → Refused; delete → children gone) | this repository, `ess/` |
-| Controller | golden-manifest render tests per example spec; reconcile loop against a fake API server; "a secret literal is refused before any child is created" | this repository, `crates/loom-operator/tests` |
+| Controller | golden-manifest render tests per example spec; reconcile loop against a fake API server; "a secret literal is refused before any child is created" | this repository, `crates/loom-operator/tests` (`render.rs`, `reconcile.rs`, `cli.rs`) |
+| Chart | `helm lint` and `helm template` with the default values and with overrides (`task chart-check`); the rendered Role, image and `config.yaml` and the CRD copy held by `crates/loom-operator/tests/chart.rs`. `kubeconform` is not run here: it fetches its schemas from the network | this repository, `task check` |
 | Image | `docker run <image> b10x-loom agent check --spec examples/operator.yaml` exits 0 in the deployment repository's CI | deployment repository CI |
 | Manifests | `helm template` + `kubeconform` + `kubectl apply --dry-run=server` on every change | deployment repository CI |
 | End to end | one YAML scenario in the platform's e2e-tests repository: apply the resource, wait for `status.state: Running`, ask over A2A through a port-forward, expect a sourced answer, delete, expect 0 pods | the platform's e2e-tests repository |

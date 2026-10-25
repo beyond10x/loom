@@ -550,6 +550,41 @@ spec:
                 - exitCode
                 - message
                 type: object
+              conditions:
+                items:
+                  properties:
+                    message:
+                      type: string
+                    reason:
+                      type: string
+                    status:
+                      enum:
+                      - 'True'
+                      - 'False'
+                      - Unknown
+                      type: string
+                    type:
+                      enum:
+                      - Checked
+                      - Available
+                      type: string
+                  required:
+                  - type
+                  - status
+                  - reason
+                  - message
+                  type: object
+                type: array
+              deployment:
+                properties:
+                  availability:
+                    enum:
+                    - Available
+                    - Unavailable
+                    type: string
+                required:
+                - availability
+                type: object
               observedGeneration:
                 type: integer
               state:

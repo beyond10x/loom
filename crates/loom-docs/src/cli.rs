@@ -1,11 +1,15 @@
-//! The CLI reference page, walked from the clap definition of `b10x-loom` (`b10x_loom_cli::Cli`).
+//! The CLI reference pages, each walked from the clap definition of one command line: `b10x-loom`
+//! (`b10x_loom_cli::Cli`) and `b10x-loom-operator` (`b10x_loom_operator::cli::Cli`).
 
 use clap::CommandFactory;
 
 use crate::{SOURCE, cell, front_matter_with};
 
-/// Where the CLI reference lands, relative to the repository root.
+/// Where the `b10x-loom` CLI reference lands, relative to the repository root.
 pub const PAGE: &str = "website/docs/reference/cli.md";
+
+/// Where the `b10x-loom-operator` CLI reference lands, relative to the repository root.
+pub const OPERATOR_PAGE: &str = "website/docs/reference/operator-cli.md";
 
 /// Every subcommand below `command`, depth first, without clap's `help`.
 fn commands(command: &clap::Command, out: &mut Vec<clap::Command>) {
@@ -65,8 +69,9 @@ fn arguments(command: &clap::Command) -> Vec<[String; 4]> {
         .collect()
 }
 
-/// The CLI reference page for the command line `root`.
-pub fn page_for(mut root: clap::Command) -> String {
+/// The CLI reference page for the command line `root`, defined in `source` (a path relative to
+/// the repository root), at `position` in the reference sidebar.
+pub fn page_for(mut root: clap::Command, source: &str, position: u32) -> String {
     root.build();
     let name = root.get_name().to_owned();
     let mut all = Vec::new();
@@ -78,11 +83,11 @@ pub fn page_for(mut root: clap::Command) -> String {
         &format!(
             "Every command and option of the {name} command line, generated from its definition."
         ),
-        Some(1),
+        Some(position),
     );
     out.push_str(&format!(
         "# `{name}`\n\nGenerated from the clap definition of the `{name}` command line in \
-         [`crates/loom-cli/src/lib.rs`]({SOURCE}/crates/loom-cli/src/lib.rs) by `loom-docs`. It \
+         [`{source}`]({SOURCE}/{source}) by `loom-docs`. It \
          lists only commands that exist.\n\n> {}\n\n`{name} --version` prints its version, \
          and `--help` after any command prints the text below.\n\n## Commands\n\n\
          | Command | What it does |\n|---|---|\n",
@@ -123,7 +128,20 @@ pub fn page_for(mut root: clap::Command) -> String {
 
 /// The CLI reference page for `b10x-loom`.
 pub fn page() -> String {
-    page_for(b10x_loom_cli::Cli::command())
+    page_for(
+        b10x_loom_cli::Cli::command(),
+        "crates/loom-cli/src/lib.rs",
+        1,
+    )
+}
+
+/// The CLI reference page for `b10x-loom-operator`.
+pub fn operator_page() -> String {
+    page_for(
+        b10x_loom_operator::cli::Cli::command(),
+        "crates/loom-operator/src/cli.rs",
+        5,
+    )
 }
 
 #[cfg(test)]
@@ -146,5 +164,29 @@ mod tests {
         assert!(page.contains("| `--replace` | no | `false` |"));
         assert!(!page.contains("--replace <REPLACE>"));
         assert!(!page.contains("b10x-loom help"));
+        assert!(page.contains(
+            "[`crates/loom-cli/src/lib.rs`](https://github.com/beyond10x/loom/blob/main/crates/loom-cli/src/lib.rs)"
+        ));
+    }
+
+    #[test]
+    fn the_operator_page_names_its_own_source_and_every_command() {
+        let page = operator_page();
+        assert!(page.contains("title: \"b10x-loom-operator CLI reference\""));
+        assert!(page.contains("sidebar_position: 5"));
+        assert!(page.contains(
+            "[`crates/loom-operator/src/cli.rs`](https://github.com/beyond10x/loom/blob/main/crates/loom-operator/src/cli.rs)"
+        ));
+        assert!(!page.contains("crates/loom-cli/src/lib.rs"));
+        for command in ["run", "render", "crd"] {
+            assert!(
+                page.contains(&format!("## `b10x-loom-operator {command}`")),
+                "{command}"
+            );
+        }
+        assert!(page.contains("| `--config <FILE>` | yes | none |"));
+        assert!(page.contains("| `--resource <FILE>` | yes | none |"));
+        assert!(page.contains("3  refused: standard error carries"));
+        assert!(!page.contains("b10x-loom-operator help"));
     }
 }

@@ -1015,9 +1015,43 @@ fn status_is_the_entity_without_its_name_and_its_state_enumerates_the_lifecycle(
     assert_eq!(status["type"], "object");
     assert_eq!(
         keys(&status["properties"]),
-        ["check", "observedGeneration", "state"]
+        [
+            "check",
+            "conditions",
+            "deployment",
+            "observedGeneration",
+            "state"
+        ]
     );
     assert_eq!(names(&status["required"]), ["observedGeneration", "state"]);
+    assert_eq!(
+        status["properties"]["deployment"],
+        json!({
+            "type": "object",
+            "properties": {
+                "availability": {"type": "string", "enum": ["Available", "Unavailable"]},
+            },
+            "required": ["availability"],
+        }),
+        "what the controller last read of the child Deployment"
+    );
+    assert_eq!(
+        status["properties"]["conditions"],
+        json!({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string", "enum": ["Checked", "Available"]},
+                    "status": {"type": "string", "enum": ["True", "False", "Unknown"]},
+                    "reason": {"type": "string"},
+                    "message": {"type": "string"},
+                },
+                "required": ["type", "status", "reason", "message"],
+            },
+        }),
+        "the Kubernetes conditions, their status text and not a boolean"
+    );
     let mut states = names(&status["properties"]["state"]["enum"]);
     states.sort();
     assert_eq!(states, lifecycle);
@@ -1066,6 +1100,12 @@ fn the_operator_example_validates_as_a_loom_agent_and_refusals_do_not() {
     routed["spec"]["image"] = json!({"repository": "registry.example/loom-agent", "tag": "0.40.0"});
     routed["spec"]["secretRef"] = json!({"name": "platform-operator-secrets"});
     routed["status"] = json!({"observedGeneration": 2, "state": "Running", "check": {"exitCode": 0, "message": ""}});
+    assert_eq!(errors(&validator, &routed), Vec::<String>::new());
+    routed["status"]["deployment"] = json!({"availability": "Available"});
+    routed["status"]["conditions"] = json!([
+        {"type": "Checked", "status": "True", "reason": "SpecChecked", "message": ""},
+        {"type": "Available", "status": "True", "reason": "DeploymentAvailable", "message": ""},
+    ]);
     assert_eq!(errors(&validator, &routed), Vec::<String>::new());
 
     // A list of the agent document left out is one its decoder reads as empty.
@@ -1164,6 +1204,20 @@ fn the_operator_example_validates_as_a_loom_agent_and_refusals_do_not() {
     refused(
         &|r| r["status"] = json!({"observedGeneration": 1, "state": "Crashed"}),
         "a state the lifecycle does not declare",
+    );
+    refused(
+        &|r| {
+            r["status"] = json!({"observedGeneration": 1, "state": "Running",
+                "conditions": [{"type": "Checked", "status": true, "reason": "SpecChecked", "message": ""}]})
+        },
+        "a condition status written as a boolean rather than the text `True`",
+    );
+    refused(
+        &|r| {
+            r["status"] = json!({"observedGeneration": 1, "state": "Running",
+                "deployment": {"availability": "Progressing"}})
+        },
+        "a Deployment availability the domain does not declare",
     );
 }
 

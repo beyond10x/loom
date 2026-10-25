@@ -22,6 +22,7 @@ tasks:
       - task: commission:ess-gate
       - task: drift
       - task: crd-drift
+      - task: chart-check
       - task: commission:drift
       - task: intake-drift
       - task: no-hand-model
@@ -82,14 +83,32 @@ tasks:
       - cargo run -q --locked -p loom-xtask -- drift
 
   crd-generate:
-    desc: Write deploy/crd/loomagents.loom.beyond10x.dev.yaml, the LoomAgent CRD projected from ess/.
+    desc: Write deploy/crd/loomagents.loom.beyond10x.dev.yaml, the LoomAgent CRD projected from ess/, and its copy in charts/loom-agents/crds/.
     cmds:
       - cargo run -q --locked -p loom-xtask -- crd-generate
+      - cp deploy/crd/loomagents.loom.beyond10x.dev.yaml charts/loom-agents/crds/loomagents.loom.beyond10x.dev.yaml
 
   crd-drift:
     desc: Fail when deploy/crd/loomagents.loom.beyond10x.dev.yaml differs from a fresh projection of ess/, naming the file.
     cmds:
       - cargo run -q --locked -p loom-xtask -- crd-drift
+
+  chart-check:
+    desc: Fail when charts/loom-agents/crds/ differs from deploy/crd/, or when Helm cannot lint the chart or render it with its default values and with overrides.
+    cmds:
+      - cmp deploy/crd/loomagents.loom.beyond10x.dev.yaml charts/loom-agents/crds/loomagents.loom.beyond10x.dev.yaml
+      - helm lint charts/loom-agents
+      - helm template loom-agents charts/loom-agents --namespace agents > /dev/null
+      - >-
+        helm template loom-agents charts/loom-agents --namespace agents
+        --set 'image.tag=0.0.1-test'
+        --set 'agentImage.repository=registry.example/other-agent'
+        --set 'modelRoute.url=http://model-route.agents.svc:8080/v1'
+        --set 'modelRoute.protocol=messages'
+        --set 'modelRoute.model=small-model'
+        --set 'allowedSecretNames={platform-operator-secrets}'
+        --set 'allowedEgressHosts={chat.example,models.example}'
+        > /dev/null
 
   no-hand-model:
     desc: Fail when crates/loom-executor/src defines, or renames something to, a type ess/ declares.

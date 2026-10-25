@@ -1,0 +1,23 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "loom-agents.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "loom-agents.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [loom.beyond10x.dev]
+    resources: [loomagents, loomagents/status]
+    verbs: [get, list, watch, update, patch]
+  - apiGroups: [loom.beyond10x.dev]
+    resources: [loomagents/finalizers]
+    verbs: [update]
+  - apiGroups: [""]
+    resources: [configmaps, serviceaccounts, services]
+    verbs: [create, update, patch, get, list, watch, delete]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [create, update, patch, get, list, watch, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [create, update, patch, get, list, watch, delete]
