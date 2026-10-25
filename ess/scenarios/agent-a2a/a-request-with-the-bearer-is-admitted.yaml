@@ -1,0 +1,12 @@
+# story agent-a2a: the agent card, `message/send` and the task status are answered for a request
+# carrying the agent's bearer.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-request-with-the-bearer-is-admitted
+summary: A request carrying the agent's bearer is admitted.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.AdmitA2aRequest
+    input: {probe: false, bearer_presented: true, bearer_matches: true}
+    outcome: admitted

@@ -23,6 +23,11 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `b10x-loom-agent`: `check` and `check_text` check a spec against the plugin catalog's protocols in the declaration order of `loom.agent.CheckAgentSpec`; `check_text` refuses a credential anywhere in the document before decoding it, without repeating it (story:agent-check)
 - `operator-reply@1` in `ProtocolCatalog::plugins()`: `inbound-answer@1`'s read and proposal plus `reply.send`, a write under the `reply.send` capability once a reply is proposed, and `reply.decline` (story:agent-check)
 - `loom.agent.CheckAgentSpec` with its error `SpecRefused` and the enum `RefusalReason`, generated from `ess/domains/agent.yaml` and re-exported from `loom_sdk::agent`; nine authored scenarios under `ess/scenarios/agent-check/` (story:agent-check)
+- `b10x-loom agent serve` answers A2A when the spec declares `expose.a2a`, on `--a2a-address` (default `0.0.0.0`) and `expose.a2a.port`: the agent card at `/.well-known/agent-card.json`, `SendMessage` (one turn on `inbound-answer@1`, answered with its record; nothing is sent through A2A) and `GetTask` at `expose.a2a.path`, and `/ready` and `/live`; every other request needs `Authorization: Bearer` with the token `LOOM_A2A_BEARER` holds, and the host refuses to start without it (story:agent-a2a)
+- `b10x-loom-a2a`: `A2aServer`, `Answerer`, `Bearer` and `admit_a2a_request`, over the `a2a` crate of `beyond10x/a2a` at tag `0.3.0` (story:agent-a2a)
+- `b10x-loom-agent`: `serve::a2a` with `Answering`, `BEARER_ENV`, `bearer` and `listener` (story:agent-a2a)
+- `b10x-loom-plugin`: `TurnOptions::events` hands each `RuntimeEvent` of a turn's run to a sink (story:agent-a2a)
+- `loom.agent.AdmitA2aRequest` with its error `A2aRefused` and the enum `A2aRefusalReason`, generated from `ess/domains/agent.yaml`; four authored scenarios under `ess/scenarios/agent-a2a/` (story:agent-a2a)
 
 ### Changed
 

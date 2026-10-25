@@ -11,6 +11,7 @@ publish = false
 name = "b10x_loom_agent"
 
 [dependencies]
+b10x-loom-a2a = { path = "../loom-a2a" }
 b10x-loom-plugin = { path = "../loom-plugin" }
 b10x-loom-plugin-slack = { path = "../loom-plugin-slack" }
 b10x-loom-sdk = { path = "../loom-sdk" }

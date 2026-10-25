@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 8745d4eaaf221f3a1bb550570e3c053abb7a0be0d3ecc2ae5c5c74c9c641f0cd
-// contract digest ee901859b361adccaddf46e3c87dad5bc8dd71ec3a5f0fb52c94b6a87e0042d4
+// model digest 8ae58731f7f79f17db497c148f863a2a09f9d0b11cdd8a084f42d50b131fa4a2
+// contract digest 42772f0e3c9ac74486da92cac0a54283b8c90a6bd6e2ad7ea9bc7a6a54f0f463
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Agent — `loom.agent`.
@@ -29,6 +29,15 @@ pub struct A2aExposure {
     pub path: String,
     /// `card` — `loom.agent.A2aCard`.
     pub card: A2aCard,
+}
+
+/// A2aRefusalReason — `loom.agent.A2aRefusalReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum A2aRefusalReason {
+    /// `MissingBearer`.
+    MissingBearer,
+    /// `WrongBearer`.
+    WrongBearer,
 }
 
 /// ActionBudget — `loom.agent.ActionBudget`.
@@ -484,6 +493,42 @@ pub struct WritesSpec {
     pub max_per_hour: i64,
 }
 
+/// AdmitA2aRequest — the input of `loom.agent.AdmitA2aRequest`.
+///
+/// Everything it can result in is [`AdmitA2aRequestOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmitA2aRequest {
+    /// `probe` — `Boolean`.
+    pub probe: bool,
+    /// `bearer_presented` — `Boolean`.
+    pub bearer_presented: bool,
+    /// `bearer_matches` — `Boolean`.
+    pub bearer_matches: bool,
+}
+
+/// Everything `loom.agent.AdmitA2aRequest` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdmitA2aRequestOutcome {
+    /// `missing-bearer` — when `(probe == false and bearer_presented == false)`.
+    MissingBearer {
+        /// Why it was refused: `loom.agent.A2aRefused`.
+        error: A2aRefused,
+    },
+    /// `wrong-bearer` — when `(probe == false and bearer_matches == false)`.
+    WrongBearer {
+        /// Why it was refused: `loom.agent.A2aRefused`.
+        error: A2aRefused,
+    },
+    /// `probe` — when `probe == true`.
+    Probe,
+    /// `admitted` — otherwise.
+    Admitted,
+}
+
 /// AdmitSend — the input of `loom.agent.AdmitSend`.
 ///
 /// Everything it can result in is [`AdmitSendOutcome`].
@@ -596,6 +641,13 @@ pub enum CheckAgentSpecOutcome {
     Serveable,
 }
 
+/// The declared error `loom.agent.A2aRefused`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct A2aRefused {
+    /// `reason` — `loom.agent.A2aRefusalReason`.
+    pub reason: A2aRefusalReason,
+}
+
 /// The declared error `loom.agent.SendRefused`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SendRefused {
@@ -622,6 +674,17 @@ pub struct SpecRefused {
 /// per generated behaviour, which [`Generated`](crate::behaviour::Generated) implements.
 /// [`Unimplemented`](obligations::Unimplemented) satisfies every owed trait by refusing in the type system.
 pub mod obligations {
+    /// The behaviour `loom.agent.AdmitA2aRequest` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait AdmitA2aRequestBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.agent.AdmitA2aRequest`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn admit_a2a_request(&mut self, input: super::AdmitA2aRequest) -> Result<super::AdmitA2aRequestOutcome, crate::obligation::UnmetObligation>;
+    }
+
     /// The behaviour `loom.agent.AdmitSend` — generated.
     ///
     /// The specification fully determines it: [`crate::behaviour::Generated`] implements it

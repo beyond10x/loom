@@ -82,6 +82,7 @@ use loom_sdk::loom::model_selector::{
 use loom_sdk::{
     CanonGovernor, Loom, LoopContext, MemoryCaseStore, ProtocolCatalog, run_until_blocked,
 };
+use loom_sdk::{EventSink, NoEvents};
 
 use crate::codec::{intent_name, kind_name};
 use crate::effects::{DataSourceEffects, ITEM, SendPolicy};
@@ -165,6 +166,8 @@ pub struct TurnOptions<'o, S> {
     pub step_budget: usize,
     /// The most model requests of the turn.
     pub model_budget: u64,
+    /// Where each `RuntimeEvent` of the turn's run goes as it happens; none receives nothing.
+    pub events: Option<&'o mut dyn EventSink>,
 }
 
 impl TurnOptions<'static, MemoryCaseStore> {
@@ -180,6 +183,7 @@ impl TurnOptions<'static, MemoryCaseStore> {
             commission: None,
             step_budget: TURN_STEP_BUDGET,
             model_budget: TURN_MODEL_BUDGET,
+            events: None,
         }
     }
 }
@@ -409,6 +413,8 @@ pub fn turn_with<S: FallibleCaseStore>(
     let mut clock = Clock {
         ids: &ids,
         budget: options.step_budget,
+        events: options.events,
+        none: NoEvents,
     };
     let end = match options.suspensions {
         Some(suspensions) => run_with_suspension(
@@ -997,12 +1003,14 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 
 /// What the loop needs that no model may supply: ids, the host's clock and the steps the turn has
 /// left.
-struct Clock<'a> {
+struct Clock<'a, 'e> {
     ids: &'a Ids,
     budget: usize,
+    events: Option<&'e mut dyn EventSink>,
+    none: NoEvents,
 }
 
-impl LoopContext for Clock<'_> {
+impl LoopContext for Clock<'_, '_> {
     fn action_request_id(&mut self) -> ActionRequestId {
         ActionRequestId(self.ids.next('b'))
     }
@@ -1017,5 +1025,12 @@ impl LoopContext for Clock<'_> {
 
     fn step_budget(&self) -> Option<usize> {
         Some(self.budget)
+    }
+
+    fn events(&mut self) -> &mut dyn EventSink {
+        match &mut self.events {
+            Some(events) => &mut **events,
+            None => &mut self.none,
+        }
     }
 }

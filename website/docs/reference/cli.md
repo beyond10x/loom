@@ -272,6 +272,7 @@ Usage: b10x-loom agent serve [OPTIONS] --spec <FILE> --state <DIR>
 | `--catalog <PATH>` | no | none | An llm catalog (`llm.catalog/1` TOML) in a regular file, instead of the spec's models: `--model` and `--classifier-model` then each name a route alias of it |
 | `--model <ID>` | no | none | The model each turn runs on: a name the spec's routes document serves, or with `--catalog` a route alias. By default the spec's `agent` role |
 | `--classifier-model <ID>` | no | none | The model that classifies each item: a name the spec's routes document serves, or with `--catalog` a route alias. By default the spec's `classifier` role |
+| `--a2a-address <IP>` | no | `0.0.0.0` | The address the A2A listener binds when the spec declares `expose.a2a`, on its port |
 
 ```text
 The spec is checked as `agent check` does before anything runs. The host is the plugin host over
@@ -289,6 +290,12 @@ The models are the spec's `model` section (its routes document, relative to the 
 `agent` and `classifier` roles), or with --catalog the route aliases --model and --classifier-model
 name. With --once it runs one cycle and prints one line per proposal it recorded; without it, it
 polls every poll_interval_seconds until SIGTERM or SIGINT (a second one exits 130 at once).
+
+With expose.a2a the agent also answers A2A on --a2a-address and expose.a2a.port, beside the poll:
+the agent card at /.well-known/agent-card.json, and at expose.a2a.path JSON-RPC SendMessage, one
+turn on inbound-answer@1 answered with its record (nothing is sent through A2A), and GetTask. Every
+request but GET /ready and GET /live needs `Authorization: Bearer` with the token LOOM_A2A_BEARER
+holds; the host refuses to start without it. The listener stops when the host does.
 
 Exit status:
   0  the cycles ran

@@ -181,6 +181,7 @@ pub fn run_exit_status(run: &SliceRun) -> u8 {
     }
 }
 
+pub mod a2a;
 pub mod agent;
 pub mod evaluate;
 pub mod events;
@@ -409,6 +410,12 @@ The models are the spec's `model` section (its routes document, relative to the 
 name. With --once it runs one cycle and prints one line per proposal it recorded; without it, it
 polls every poll_interval_seconds until SIGTERM or SIGINT (a second one exits 130 at once).
 
+With expose.a2a the agent also answers A2A on --a2a-address and expose.a2a.port, beside the poll:
+the agent card at /.well-known/agent-card.json, and at expose.a2a.path JSON-RPC SendMessage, one
+turn on inbound-answer@1 answered with its record (nothing is sent through A2A), and GetTask. Every
+request but GET /ready and GET /live needs `Authorization: Bearer` with the token LOOM_A2A_BEARER
+holds; the host refuses to start without it. The listener stops when the host does.
+
 Exit status:
   0  the cycles ran
   1  the spec, the models or the state directory cannot be used, or the last cycle's poll failed
@@ -471,6 +478,9 @@ pub struct AgentServeArgs {
     /// `--catalog` a route alias. By default the spec's `classifier` role.
     #[arg(long, value_name = "ID")]
     pub classifier_model: Option<String>,
+    /// The address the A2A listener binds when the spec declares `expose.a2a`, on its port.
+    #[arg(long, value_name = "IP", default_value = a2a::DEFAULT_ADDRESS)]
+    pub a2a_address: std::net::IpAddr,
 }
 
 /// The arguments of `b10x-loom agent resume`.

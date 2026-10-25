@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 8745d4eaaf221f3a1bb550570e3c053abb7a0be0d3ecc2ae5c5c74c9c641f0cd
-// contract digest ee901859b361adccaddf46e3c87dad5bc8dd71ec3a5f0fb52c94b6a87e0042d4
+// model digest 8ae58731f7f79f17db497c148f863a2a09f9d0b11cdd8a084f42d50b131fa4a2
+// contract digest 42772f0e3c9ac74486da92cac0a54283b8c90a6bd6e2ad7ea9bc7a6a54f0f463
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -165,6 +165,28 @@ impl<P> Generated<P> {
     /// The generated behaviours, over `ports`.
     pub fn new(ports: P) -> Self {
         Self { ports }
+    }
+}
+
+/// `loom.agent.AdmitA2aRequest`, generated: every outcome is one the specification fully determines.
+impl<P> crate::agent::obligations::AdmitA2aRequestBehavior for Generated<P>
+{
+    fn admit_a2a_request(&mut self, input: crate::agent::AdmitA2aRequest) -> Result<crate::agent::AdmitA2aRequestOutcome, UnmetObligation> {
+        let _ = &input;
+        // `missing-bearer`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(all(&[equal(Some(&input.probe).map(|value| *value), Some(false)), equal(Some(&input.bearer_presented).map(|value| *value), Some(false))]), "loom.agent.AdmitA2aRequest")? {
+            return Ok(crate::agent::AdmitA2aRequestOutcome::MissingBearer { error: crate::agent::A2aRefused { reason: crate::agent::A2aRefusalReason::MissingBearer } });
+        }
+        // `wrong-bearer`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(all(&[equal(Some(&input.probe).map(|value| *value), Some(false)), equal(Some(&input.bearer_matches).map(|value| *value), Some(false))]), "loom.agent.AdmitA2aRequest")? {
+            return Ok(crate::agent::AdmitA2aRequestOutcome::WrongBearer { error: crate::agent::A2aRefused { reason: crate::agent::A2aRefusalReason::WrongBearer } });
+        }
+        // `probe`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.probe).map(|value| *value), Some(true)), "loom.agent.AdmitA2aRequest")? {
+            return Ok(crate::agent::AdmitA2aRequestOutcome::Probe);
+        }
+        // `admitted`: the default.
+        return Ok(crate::agent::AdmitA2aRequestOutcome::Admitted);
     }
 }
 

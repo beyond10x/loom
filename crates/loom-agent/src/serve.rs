@@ -66,6 +66,8 @@ use loom_sdk::{CanonGovernor, LoopContext, ProtocolCatalog};
 pub use b10x_loom_plugin::admit_send;
 pub use b10x_loom_plugin::effects::send_refusal_spelling;
 
+pub mod a2a;
+
 /// The directory in the state directory holding one file per send awaiting approval.
 pub const APPROVALS_DIR: &str = "approvals";
 
@@ -580,6 +582,7 @@ impl Plugin for SpecPlugin {
                 commission: Some(commission.clone()),
                 step_budget,
                 model_budget,
+                events: None,
             },
         )?;
         if turned.awaiting_approval

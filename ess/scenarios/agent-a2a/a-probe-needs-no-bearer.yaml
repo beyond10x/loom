@@ -1,0 +1,11 @@
+# story agent-a2a: the pod's readiness and liveness probes carry no bearer and are answered.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-probe-needs-no-bearer
+summary: A probe, `GET /ready` or `GET /live`, is answered without a bearer.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.AdmitA2aRequest
+    input: {probe: true, bearer_presented: false, bearer_matches: false}
+    outcome: probe

@@ -483,6 +483,13 @@ types:
     kind: enum
     variants: [WritesNone, OutsideAllowList, NoProposal, RateLimited]
 
+  # Why the A2A listener of a served agent refuses a request (story agent-a2a), one reason per
+  # refusal of `AdmitA2aRequest`: the request carries no `Authorization: Bearer` header
+  # (`MissingBearer`); it carries one whose token is not the agent's (`WrongBearer`).
+  - name: loom.agent.A2aRefusalReason
+    kind: enum
+    variants: [MissingBearer, WrongBearer]
+
 errors:
   # The refusal of `AdmitSend`: why, and whether it is final. A final refusal ends the turn's run
   # (Commission's `EffectOutcomeRefused.ends_run`): the item is handled and its reply never sent. A
@@ -505,6 +512,13 @@ errors:
         type: String
       - name: detail
         type: String
+
+  # The refusal of `AdmitA2aRequest`: why. The listener answers it `401` before it reads the
+  # request's body, so a refused request runs no turn and reads nothing.
+  - name: loom.agent.A2aRefused
+    fields:
+      - name: reason
+        type: loom.agent.A2aRefusalReason
 
 commands:
   # Whether the `loom.agent/1` document at `path` can be served: `b10x-loom agent check --spec`.
@@ -608,6 +622,46 @@ commands:
           all:
             - mode == approval
             - granted == false
+        accepts: nothing
+      - name: admitted
+        accepts: nothing
+
+  # Whether the A2A listener of a served agent (`expose.a2a`, story agent-a2a) answers a request:
+  # decided on the request line and its headers, before the body is read. `probe` is whether the
+  # request is `GET /ready` or `GET /live`, which the pod's probes send without a bearer;
+  # `bearer_presented` whether it carries an `Authorization: Bearer` header; `bearer_matches`
+  # whether that token is the one the agent's Secret gives it. A probe is answered whatever it
+  # carries; every other request (the agent card, `message/send`, the task status, any other path)
+  # needs the bearer. The first refusal in declaration order is the answer, so a request with no
+  # header is `missing-bearer` whatever `bearer_matches` says. Nothing is held between two
+  # decisions.
+  - name: loom.agent.AdmitA2aRequest
+    input:
+      - name: probe
+        type: Boolean
+      - name: bearer_presented
+        type: Boolean
+      - name: bearer_matches
+        type: Boolean
+    outcomes:
+      - name: missing-bearer
+        when:
+          all:
+            - probe == false
+            - bearer_presented == false
+        error: loom.agent.A2aRefused
+        payload:
+          loom.agent.A2aRefused: {reason: MissingBearer}
+      - name: wrong-bearer
+        when:
+          all:
+            - probe == false
+            - bearer_matches == false
+        error: loom.agent.A2aRefused
+        payload:
+          loom.agent.A2aRefused: {reason: WrongBearer}
+      - name: probe
+        when: probe == true
         accepts: nothing
       - name: admitted
         accepts: nothing

@@ -718,3 +718,221 @@ fn install_program(source: &Path, target: &Path) {
         .unwrap();
     assert!(status.success(), "install {}: {status}", target.display());
 }
+
+// ---- story:agent-a2a ------------------------------------------------------------------------------
+
+/// The bearer of the A2A cases: a throwaway value set only in the child's environment.
+const A2A_TOKEN: &str = "a2a-cli-test-bearer-c51e";
+
+impl Scratch {
+    /// Declares `expose.a2a` on `port` in the spec.
+    fn expose_a2a(&self, port: u16) {
+        let mut spec = fs::read_to_string(self.spec()).unwrap();
+        spec.push_str(&format!(
+            "expose:\n  a2a: {{port: {port}, path: /a2a, card: {{name: test-operator, description: Answers about the deploy, skills: [logs, metrics]}}}}\n"
+        ));
+        fs::write(self.spec(), spec).unwrap();
+    }
+
+    /// The channel's history holds no message, so the poll finds no item.
+    fn quiet_channel(&self) {
+        let document = json!({"ok": true, "result": {"adapter": "slack",
+            "operation": "conversations.history", "revision": "rev-1",
+            "result": {"ok": true, "messages": [], "has_more": false}}});
+        fs::write(
+            self.root
+                .join("connectors-state/invoke.conversations.history.json"),
+            document.to_string(),
+        )
+        .unwrap();
+    }
+}
+
+/// A loopback port nothing listens on at the time of asking.
+fn free_port() -> u16 {
+    TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+/// One HTTP/1.1 request to `127.0.0.1:port`: the status and the body, or `None` when nothing
+/// listens yet.
+fn a2a_request(
+    port: u16,
+    method: &str,
+    path: &str,
+    bearer: Option<&str>,
+    body: Option<&Value>,
+) -> Option<(u16, String)> {
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).ok()?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let body = body.map(Value::to_string).unwrap_or_default();
+    let mut head = format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n");
+    if let Some(token) = bearer {
+        head.push_str(&format!("Authorization: Bearer {token}\r\n"));
+    }
+    head.push_str(&format!(
+        "Content-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    ));
+    stream.write_all(head.as_bytes()).ok()?;
+    stream.write_all(body.as_bytes()).ok()?;
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).ok()?;
+    let (head, body) = raw.split_once("\r\n\r\n")?;
+    let status = head.split(' ').nth(1)?.parse().ok()?;
+    Some((status, body.to_owned()))
+}
+
+/// A spec declaring `expose.a2a` is not served without its bearer: the host exits 1 naming the
+/// variable before any read, model call or record.
+#[test]
+fn agent_serve_refuses_to_start_without_the_a2a_bearer() {
+    let scratch = Scratch::new("a2a-no-bearer", 3600);
+    scratch.expose_a2a(free_port());
+    let catalog = scratch.catalog("http://127.0.0.1:1/v1");
+
+    for bearer in [None, Some("")] {
+        let mut command = scratch.serve_command(&catalog);
+        command.args(["--once", "--a2a-address", "127.0.0.1"]);
+        match bearer {
+            Some(value) => command.env("LOOM_A2A_BEARER", value),
+            None => command.env_remove("LOOM_A2A_BEARER"),
+        };
+        let output = command.output().expect("run b10x-loom");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{stderr}");
+        assert!(stderr.contains("LOOM_A2A_BEARER"), "{stderr}");
+        assert!(scratch.argv().is_empty(), "nothing was read");
+        assert!(
+            !scratch.state().join("record.jsonl").exists(),
+            "nothing was recorded"
+        );
+    }
+}
+
+/// With `expose.a2a` and its bearer the served agent answers A2A beside the poll: the probes
+/// without a bearer, the card and every message only with it, and a message is one turn on
+/// `inbound-answer@1` answered with its record. Nothing is sent through A2A; SIGTERM ends both.
+#[test]
+fn agent_serve_answers_a2a_beside_the_poll() {
+    let scratch = Scratch::new("a2a-serve", 3600);
+    scratch.quiet_channel();
+    let port = free_port();
+    scratch.expose_a2a(port);
+    let select = |action: &str| sse(AGENT, "select_action", json!({ "action": action }));
+    let (base_url, models) = serve(vec![
+        sse(
+            CLASSIFIER,
+            "classify_item",
+            json!({"intent": "ask", "hints": ["docs"], "confidence": 0.9}),
+        ),
+        select("source.read"),
+        sse(
+            AGENT,
+            "action_arguments",
+            json!({"source": "docs", "kind": "search", "input": {"query": "deploy"}}),
+        ),
+        select("reply.propose"),
+        sse(AGENT, "action_arguments", json!({"text": REPLY})),
+    ]);
+    let catalog = scratch.catalog(&base_url);
+    let mut child = Reaped(
+        scratch
+            .serve_command(&catalog)
+            .args(["--a2a-address", "127.0.0.1"])
+            .env("LOOM_A2A_BEARER", A2A_TOKEN)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start b10x-loom"),
+    );
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        if let Some((200, _)) = a2a_request(port, "GET", "/ready", None, None) {
+            break;
+        }
+        assert!(
+            child.0.try_wait().unwrap().is_none(),
+            "the host ended before its listener answered"
+        );
+        assert!(Instant::now() < deadline, "no readiness in 60 s");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let card_path = "/.well-known/agent-card.json";
+    let (status, refused) = a2a_request(port, "GET", card_path, None, None).unwrap();
+    assert_eq!(status, 401, "{refused}");
+    assert!(refused.contains("MissingBearer"), "{refused}");
+    let (status, card) = a2a_request(port, "GET", card_path, Some(A2A_TOKEN), None).unwrap();
+    assert_eq!(status, 200, "{card}");
+    let card: Value = serde_json::from_str(&card).unwrap();
+    assert_eq!(card["skills"][0]["id"], "logs", "{card}");
+    assert_eq!(card["skills"][1]["id"], "metrics", "{card}");
+    let send = json!({"jsonrpc": "2.0", "id": "q-1", "method": "message/send",
+        "params": {"message": {"messageId": "m-1", "role": "ROLE_USER",
+            "parts": [{"text": "Is the deploy finished?"}]}}});
+    let (status, refused) =
+        a2a_request(port, "POST", "/a2a", Some("not-the-bearer"), Some(&send)).unwrap();
+    assert_eq!(status, 401, "{refused}");
+    assert!(refused.contains("WrongBearer"), "{refused}");
+    let (status, answer) = a2a_request(port, "POST", "/a2a", Some(A2A_TOKEN), Some(&send)).unwrap();
+    assert_eq!(status, 200, "{answer}");
+    let answer: Value = serde_json::from_str(&answer).unwrap();
+    let task = &answer["result"]["task"];
+    assert_eq!(task["status"]["state"], "TASK_STATE_COMPLETED", "{answer}");
+    let record = &task["artifacts"][0]["parts"][1]["data"];
+    assert_eq!(record["outcome"], "proposed", "{answer}");
+    assert_eq!(record["proposal"], REPLY, "{answer}");
+    assert_eq!(record["reads"][0]["source"], "docs", "{answer}");
+    let get = json!({"jsonrpc": "2.0", "id": 2, "method": "GetTask",
+        "params": {"id": task["id"]}});
+    let (_, got) = a2a_request(port, "POST", "/a2a", Some(A2A_TOKEN), Some(&get)).unwrap();
+    let got: Value = serde_json::from_str(&got).unwrap();
+    assert_eq!(
+        got["result"]["status"]["state"], "TASK_STATE_COMPLETED",
+        "{got}"
+    );
+
+    let killed = Command::new("kill")
+        .args(["-TERM", &child.0.id().to_string()])
+        .status()
+        .expect("kill");
+    assert!(killed.success());
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "SIGTERM did not stop the host in 30 s"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let mut stderr = String::new();
+    child
+        .0
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    assert_eq!(status.code(), Some(0), "{stderr}");
+    assert!(stderr.contains("A2A listening on 127.0.0.1:"), "{stderr}");
+    assert!(!stderr.contains(A2A_TOKEN), "the bearer is never printed");
+    assert_eq!(models.join().expect("the models answered").len(), 5);
+    assert!(
+        scratch.invoked(WRITE).is_empty(),
+        "nothing is sent through A2A"
+    );
+    assert!(scratch.held().is_empty(), "no send is held either");
+    assert!(
+        a2a_request(port, "GET", "/live", None, None).is_none(),
+        "the listener stopped with the host"
+    );
+}
