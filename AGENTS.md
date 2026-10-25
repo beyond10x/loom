@@ -645,12 +645,17 @@ keeping the events each outcome published; `task conform` holds it to the domain
 `ess generate --kind schema` writes, and refuses a result that is not a Kubernetes structural
 schema. Every keyword is carried, rewritten, dropped as an ESS annotation or refused by name
 (`crd.rs` module doc lists each). It inlines every `$ref`, writes `const` as `enum`, keeps a map's
-value schema (`additionalProperties`) and drops only `additionalProperties: false`, keeps `routes`
-as `x-kubernetes-preserve-unknown-fields`, and types a `Decimal` as `number`, since
-`loom_sdk::agent::parse` reads a number or a string there and a structural schema has no
-number-or-string type. It flattens the `bindings` union so the tag `kind` sits beside the fields of
-every variant; each variant's `oneOf` entry names that variant's required fields and refuses, by
-`not: {anyOf: [{required: [<f>]}, …]}`, every field only another variant declares.
+value schema (`additionalProperties`) and drops only `additionalProperties: false`, and types a
+`Decimal` as `number`, since `loom_sdk::agent::parse` reads a number or a string there and a
+structural schema has no number-or-string type. An ESS `Json` (here `routes`), wherever it stands,
+becomes an untyped node with `x-kubernetes-preserve-unknown-fields`, so it admits any JSON value as
+the specification does; the pod's `b10x-loom agent check` is what reads the routes document. A
+`format` the API server reads otherwise than ESS writes it is refused by name: `duration` (ESS's
+ISO 8601, the API server's Go duration). It flattens the `bindings` union so the tag `kind` sits
+beside the fields of every variant; each variant's `oneOf` entry names that variant's required
+fields and refuses, by `not: {anyOf: [{required: [<f>]}, …]}`, every field only another variant
+declares. A union variant whose value is not a struct (a map, a `Json`, a scalar) is refused,
+naming the union and the variant, since the flattened form carries only declared members.
 
 The CRD requires every member the specification declares required, except a `List<…>` the
 `loom.agent` document declares, which its decoder reads as empty when absent; a list another

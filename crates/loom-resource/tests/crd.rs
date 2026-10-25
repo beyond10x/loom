@@ -17,7 +17,8 @@
 //!   `model.roles`, stays required;
 //! * `spec.agent` is required; `spec.agent.bindings.items` carries `kind` with
 //!   `enum: [connectors, http]` and the fields of both variants beside it, and each variant's entry
-//!   refuses a member only another variant declares; `spec.routes` preserves unknown fields;
+//!   refuses a member only another variant declares; `spec.routes`, an ESS `Json`, is untyped and
+//!   preserves unknown fields;
 //!   `status.state` enumerates exactly the lifecycle's states, read from the compiled
 //!   specification; a decimal is a number;
 //! * a map (`additionalProperties` holding a schema) keeps its value schema, projected;
@@ -989,11 +990,12 @@ fn an_agent_list_may_be_absent_a_models_list_may_not_and_a_decimal_is_a_number()
 }
 
 #[test]
-fn spec_routes_preserve_unknown_fields() {
+fn spec_routes_is_untyped_and_preserves_unknown_fields() {
     let document = projected();
     assert_eq!(
         open_api(&document)["properties"]["spec"]["properties"]["routes"],
-        json!({"type": "object", "x-kubernetes-preserve-unknown-fields": true})
+        json!({"x-kubernetes-preserve-unknown-fields": true}),
+        "`routes` is an ESS `Json`, which admits any JSON value"
     );
 }
 
@@ -1078,6 +1080,12 @@ fn the_operator_example_validates_as_a_loom_agent_and_refusals_do_not() {
         .remove("allow_paths");
     assert_eq!(errors(&validator, &listless), Vec::<String>::new());
 
+    // `routes` is an ESS `Json`, so the schema admits any JSON value there; the pod's
+    // `b10x-loom agent check` is what reads the routes document.
+    let mut named_routes = resource.clone();
+    named_routes["spec"]["routes"] = json!("routes.yaml");
+    assert_eq!(errors(&validator, &named_routes), Vec::<String>::new());
+
     let refused = |change: &dyn Fn(&mut Value), why: &str| {
         let mut copy = resource.clone();
         change(&mut copy);
@@ -1097,10 +1105,6 @@ fn the_operator_example_validates_as_a_loom_agent_and_refusals_do_not() {
             r.as_object_mut().expect("resource").remove("spec");
         },
         "a resource without spec",
-    );
-    refused(
-        &|r| r["spec"]["routes"] = json!("routes.yaml"),
-        "routes that are not a document",
     );
     refused(
         &|r| {

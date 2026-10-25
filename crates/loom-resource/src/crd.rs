@@ -13,9 +13,10 @@
 //! name; none is passed over unexamined:
 //!
 //! * carried as written: the keywords of `CARRIED` (`type`, `enum`, `required`, `format`,
-//!   `pattern`, `description` and the numeric, length and item bounds); every member the
-//!   specification declares required is required, except a list the `loom.agent` document
-//!   declares, which its decoder reads as empty when absent (`ABSENT_LIST_IS_EMPTY`);
+//!   `pattern`, `description` and the numeric, length and item bounds), except a `format` of
+//!   `MISREAD_FORMATS`; every member the specification declares required is required, except a
+//!   list the `loom.agent` document declares, which its decoder reads as empty when absent
+//!   (`ABSENT_LIST_IS_EMPTY`);
 //! * dropped, annotations only ESS reads: `$defs`, `$schema`, `$id`, `title`, `x-ess-name`,
 //!   `x-ess-field`, `x-ess-provenance`, an `x-ess-kind` of `struct`, `newtype`, `enum` or
 //!   `entity`, and an `x-ess-map-key` of `String` (a JSON object's keys are text);
@@ -26,8 +27,10 @@
 //!   undeclared member instead); `additionalProperties: true` becomes
 //!   `x-kubernetes-preserve-unknown-fields: true`; an `additionalProperties` schema (ESS `Map`) is
 //!   projected and kept, so a map keeps its entries, and refused beside `properties`;
-//! * an empty schema (ESS `Json`, here `spec.routes`) becomes an object that preserves unknown
-//!   fields;
+//! * an ESS `Json` (an empty schema, or one holding only a `description`; here `spec.routes`)
+//!   becomes an untyped node that preserves unknown fields, wherever it stands, so it admits any
+//!   JSON value as the specification does (a structural schema allows a node without a `type`
+//!   when it preserves unknown fields);
 //! * a `Decimal` (`type: string`, `format: decimal`) becomes `type: number`: the agent document's
 //!   decoder (`loom_sdk::agent::parse`) reads a decimal written as a number
 //!   (`classify_threshold: 0.5`), and Kubernetes has no number-or-string type, so a decimal
@@ -40,7 +43,13 @@
 //!   and `not: {anyOf: [{required: [<f>]}, …]}` over every field another variant declares and it
 //!   does not, so the flattened union admits exactly what one of its variants admits. Two variants
 //!   declaring one field with different schemas are refused as [`CrdError::UnionConflict`],
-//!   naming the field;
+//!   naming the field. A variant whose value is not a struct (a map, a `Json`, a scalar newtype)
+//!   is refused as [`CrdError::Union`], naming the union and the variant, since the flattened
+//!   form carries only declared members;
+//! * a `format` the API server reads otherwise than ESS writes it is refused as
+//!   [`CrdError::Keyword`], naming the field and the format: `duration`, which ESS writes for an
+//!   ISO 8601 duration and the API server reads as a Go duration (`date-time` is RFC 3339 on both
+//!   sides, and carried);
 //! * anything else, an `x-ess-*` key not listed above included, is refused as
 //!   [`CrdError::Keyword`], naming it.
 //!
@@ -120,6 +129,14 @@ const CARRIED: [&str; 12] = [
     "maxItems",
 ];
 
+/// The `format`s the API server reads otherwise than ESS writes them, refused by name: ESS writes
+/// `duration` for an ISO 8601 duration, which the API server reads as a Go duration.
+const MISREAD_FORMATS: [&str; 1] = ["duration"];
+
+/// The extension that lets a structural schema node hold members it does not declare, or, on a
+/// node without a `type`, any JSON value.
+const PRESERVE_UNKNOWN: &str = "x-kubernetes-preserve-unknown-fields";
+
 /// Keys no projected document holds as a keyword; nor does it hold an `x-ess-*` key or an
 /// `additionalProperties` that is not a schema.
 const FORBIDDEN: [&str; 6] = ["$ref", "$defs", "$schema", "$id", "const", "title"];
@@ -149,6 +166,31 @@ const ABSENT_LIST_IS_EMPTY: [&str; 1] = ["loom.agent"];
 fn absent_list_is_empty(name: &str) -> bool {
     name.rsplit_once('.')
         .is_some_and(|(domain, _)| ABSENT_LIST_IS_EMPTY.contains(&domain))
+}
+
+/// Whether the projected node `node` preserves unknown fields.
+fn preserves_unknown(node: &Map<String, Value>) -> bool {
+    node.get(PRESERVE_UNKNOWN) == Some(&Value::Bool(true))
+}
+
+/// What the projected node `node` holds when it is not a struct, an object of declared members
+/// only; `None` for a struct.
+fn not_a_struct(node: &Map<String, Value>) -> Option<String> {
+    let kind = node.get("type").and_then(Value::as_str);
+    if preserves_unknown(node) {
+        return Some(match kind {
+            None => "any JSON value".to_owned(),
+            Some(_) => "an object of any members".to_owned(),
+        });
+    }
+    if node.contains_key("additionalProperties") {
+        return Some("a map".to_owned());
+    }
+    match kind {
+        Some("object") => None,
+        Some(other) => Some(format!("a `{other}`")),
+        None => Some("an untyped value".to_owned()),
+    }
 }
 
 /// Takes out of the object `projected`'s `required` every member whose projected schema is a list.
@@ -388,16 +430,21 @@ impl<'d> Projector<'d> {
             return self.union(map, at);
         }
         let mut projected = self.keywords(map, at)?;
-        if projected.is_empty() {
-            return Ok(json!({"type": "object", "x-kubernetes-preserve-unknown-fields": true}));
+        if projected.keys().all(|key| key == "description") {
+            // ESS `Json`: any JSON value.
+            projected.insert(PRESERVE_UNKNOWN.to_owned(), Value::Bool(true));
+            return Ok(Value::Object(projected));
         }
         if projected.get("format").and_then(Value::as_str) == Some("decimal") {
             projected.remove("format");
             projected.remove("pattern");
             projected.insert("type".to_owned(), Value::from("number"));
         }
-        if !projected.contains_key("type") {
-            return Err(shape(at, "a schema with neither a type nor a reference"));
+        if !projected.contains_key("type") && !preserves_unknown(&projected) {
+            return Err(shape(
+                at,
+                "a schema with neither a type, a reference nor unknown fields preserved",
+            ));
         }
         Ok(Value::Object(projected))
     }
@@ -458,10 +505,7 @@ impl<'d> Projector<'d> {
                 "additionalProperties" => match value {
                     Value::Bool(false) => {}
                     Value::Bool(true) => {
-                        projected.insert(
-                            "x-kubernetes-preserve-unknown-fields".to_owned(),
-                            Value::Bool(true),
-                        );
+                        projected.insert(PRESERVE_UNKNOWN.to_owned(), Value::Bool(true));
                     }
                     Value::Object(_) => {
                         projected.insert(key.clone(), self.schema(value, &format!("{at}.*"))?);
@@ -494,6 +538,16 @@ impl<'d> Projector<'d> {
                 }
                 "items" => {
                     projected.insert(key.clone(), self.schema(value, &format!("{at}[]"))?);
+                }
+                "format"
+                    if value
+                        .as_str()
+                        .is_some_and(|format| MISREAD_FORMATS.contains(&format)) =>
+                {
+                    return Err(CrdError::Keyword {
+                        at: at.to_owned(),
+                        keyword: format!("format: {}", value.as_str().unwrap_or_default()),
+                    });
                 }
                 carried if CARRIED.contains(&carried) => {
                     projected.insert(key.clone(), value.clone());
@@ -584,8 +638,14 @@ impl<'d> Projector<'d> {
                 None => (Map::new(), Vec::new()),
                 Some(value) => {
                     let projected = self.schema(value, &format!("{at}<{name}>"))?;
-                    if projected.get("type") != Some(&Value::from("object")) {
-                        return Err(refuse(format!("the value of `{name}` is not an object")));
+                    let what = projected
+                        .as_object()
+                        .map_or_else(|| Some("no schema".to_owned()), not_a_struct);
+                    if let Some(what) = what {
+                        return Err(refuse(format!(
+                            "variant `{name}` holds {what}, not a struct, and a flattened union \
+                             carries only struct variants"
+                        )));
                     }
                     let own = projected
                         .get("properties")
@@ -729,8 +789,7 @@ fn structural(schema: &Value, at: &str, found: &mut Vec<String>) {
         found.push(format!("{at}: not a schema"));
         return;
     };
-    let preserves = node.get("x-kubernetes-preserve-unknown-fields") == Some(&Value::Bool(true));
-    if !node.contains_key("type") && !preserves {
+    if !node.contains_key("type") && !preserves_unknown(node) {
         found.push(format!("{at}: no type"));
     }
     for (name, property) in node
@@ -1055,5 +1114,117 @@ mod tests {
         assert!(absent_list_is_empty("loom.agent.AgentSpec"));
         assert!(!absent_list_is_empty("loom.agents.AgentSpec"));
         assert!(!absent_list_is_empty("loom.models.ModelsConfig"));
+    }
+
+    /// A union of a struct variant `s` and the variant `other`, whose value is `value`.
+    fn union_with(value: &Value) -> Value {
+        json!({
+            "$ref": "#/$defs/t.U",
+            "$defs": {
+                "t.U": {"x-ess-name": "t.U", "x-ess-kind": "union", "x-ess-union-tag": "kind", "oneOf": [
+                    {"properties": {"kind": {"const": "s"}, "value": {"$ref": "#/$defs/t.S"}}},
+                    {"properties": {"kind": {"const": "other"}, "value": {"$ref": "#/$defs/t.V"}}},
+                ]},
+                "t.S": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
+                "t.V": value,
+            },
+        })
+    }
+
+    #[test]
+    fn a_union_variant_that_is_not_a_struct_is_refused_naming_it() {
+        let entity = json!({"type": "object", "properties": {"name": {"type": "string"}}});
+        for (value, what) in [
+            (
+                json!({"x-ess-kind": "newtype", "type": "object", "additionalProperties": {"type": "string"}, "x-ess-map-key": "String"}),
+                "a map",
+            ),
+            (json!({"x-ess-kind": "newtype"}), "any JSON value"),
+            (
+                json!({"x-ess-kind": "newtype", "type": "string"}),
+                "a `string`",
+            ),
+        ] {
+            assert_eq!(
+                open_api_schema(&union_with(&value), &entity),
+                Err(CrdError::Union {
+                    union: "t.U".to_owned(),
+                    detail: format!(
+                        "variant `other` holds {what}, not a struct, and a flattened union \
+                         carries only struct variants"
+                    ),
+                }),
+                "{value}"
+            );
+        }
+        let unit = json!({
+            "$ref": "#/$defs/t.U",
+            "$defs": {"t.U": {"x-ess-kind": "union", "x-ess-union-tag": "kind", "oneOf": [
+                {"properties": {"kind": {"const": "none"}}},
+            ]}},
+        });
+        assert!(
+            open_api_schema(&unit, &entity).is_ok(),
+            "a variant with no value"
+        );
+    }
+
+    /// ESS `Json` admits any JSON value, so its node is untyped and preserves unknown fields,
+    /// wherever it stands; an object that admits any member stays an object.
+    #[test]
+    fn json_is_untyped_and_preserves_unknown_fields_wherever_it_stands() {
+        let entity = json!({"type": "object", "properties": {"name": {"type": "string"}}});
+        let spec = json!({
+            "$ref": "#/$defs/t.A",
+            "$defs": {
+                "t.A": {"type": "object", "properties": {
+                    "raw": {},
+                    "noted": {"description": "any value"},
+                    "named": {"$ref": "#/$defs/t.Raw"},
+                    "values": {"type": "object", "additionalProperties": {}, "x-ess-map-key": "String"},
+                    "list": {"type": "array", "items": {}},
+                    "open": {"type": "object", "additionalProperties": true},
+                }},
+                "t.Raw": {"x-ess-kind": "newtype", "title": "Raw"},
+            },
+        });
+        let projected = open_api_schema(&spec, &entity).expect("projects");
+        let a = &projected["properties"]["spec"]["properties"];
+        let any = json!({"x-kubernetes-preserve-unknown-fields": true});
+        assert_eq!(a["raw"], any);
+        assert_eq!(
+            a["noted"],
+            json!({"description": "any value", "x-kubernetes-preserve-unknown-fields": true})
+        );
+        assert_eq!(a["named"], any);
+        assert_eq!(
+            a["values"],
+            json!({"type": "object", "additionalProperties": any})
+        );
+        assert_eq!(a["list"], json!({"type": "array", "items": any}));
+        assert_eq!(
+            a["open"],
+            json!({"type": "object", "x-kubernetes-preserve-unknown-fields": true})
+        );
+    }
+
+    /// A `format` the API server reads otherwise than ESS writes it is refused, naming the field
+    /// and the format; one both read alike is carried.
+    #[test]
+    fn a_format_the_api_server_reads_otherwise_is_refused_naming_it() {
+        let entity = json!({"type": "object", "properties": {"name": {"type": "string"}}});
+        let field = |format: &str| json!({"type": "object", "properties": {"timeout": {"type": "string", "format": format}}});
+        assert_eq!(
+            open_api_schema(&field("duration"), &entity),
+            Err(CrdError::Keyword {
+                at: "spec.timeout".to_owned(),
+                keyword: "format: duration".to_owned(),
+            })
+        );
+        assert_eq!(
+            open_api_schema(&field("date-time"), &entity).expect("projects")["properties"]["spec"]
+                ["properties"]["timeout"],
+            json!({"type": "string", "format": "date-time"})
+        );
     }
 }
