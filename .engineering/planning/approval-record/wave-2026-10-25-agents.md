@@ -55,5 +55,5 @@ One opening store commit on `wave/2026-10-25-agents` (this record, the Scope sec
 | unit | branch | head | worktree | build dir | scratch | stage |
 |---|---|---|---|---|---|---|
 | agent-serve | impl/agent-serve from b40e1bb9 | 91fc7bc8 unit, db82a2f1 adversary round 1 | loom-w2-agent-serve (finished after merge) | its target/ | ~/.cache/scratch/fbf1604f-db7b-423e-bed5-b9a4dc96d66a/w2/agent-serve | merged into the integration branch at bc063973; review-result:adversary-agent-serve-pass-1 (6 findings, all fixed) |
-| agent-http-binding | impl/agent-http-binding from bc063973 | | loom-w2-agent-http-binding | its target/ | ~/.cache/scratch/fbf1604f-db7b-423e-bed5-b9a4dc96d66a/w2/agent-http-binding | implementor dispatched |
-| agent-a2a | | | | | ~/.cache/scratch/fbf1604f-db7b-423e-bed5-b9a4dc96d66a/w2/agent-a2a | waits for unit 1 |
+| agent-http-binding | impl/agent-http-binding from 62ea2a89 | a96c9230 unit, fix round 1 | loom-w2-agent-http-binding (finished after merge) | its target/ | ~/.cache/scratch/fbf1604f-db7b-423e-bed5-b9a4dc96d66a/w2/agent-http-binding | merged into the integration branch at 611d4742; review-result:adversary-agent-http-binding-pass-1 (7 findings, all fixed) |
+| agent-a2a | impl/agent-a2a from 62ea2a89 | | loom-w2-agent-a2a | its target/ | ~/.cache/scratch/fbf1604f-db7b-423e-bed5-b9a4dc96d66a/w2/agent-a2a | implementor dispatched (opus), in parallel with unit 2 |
