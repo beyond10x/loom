@@ -1,9 +1,9 @@
-# story agent-http-binding: a binding naming a `bearer_env` the host has no value for starts no
-# request, rather than one without the bearer.
+# story agent-http-binding: a binding naming a `bearer_env` that is unset, empty or blank on the
+# host starts no request, rather than one without the bearer or with an empty one.
 type: ess-scenario/4
 domain: loom.agent
 scenario: a-missing-bearer-is-refused
-summary: A read whose bearer variable is unset is refused before any request.
+summary: A read whose bearer variable is unset, empty or blank is refused before any request.
 
 timeline:
   - at: 2026-10-25T00:00:00Z

@@ -275,8 +275,9 @@ aliases as `plugin run` takes them. SIGTERM ends the host after the item it is h
 `http` binding of the spec is read by `source.read` with `kind: get` and `input: {path, query?}`:
 one GET of a path exactly in its `allow_paths` under its `base_url`, carrying the bearer the
 variable `bearer_env` names, following no redirect, the body cut at `max_bytes` and marked; a path
-outside the list (or holding `..` or an encoded separator), a method other than GET, an unset
-bearer variable, a redirect or a failing status is a refused read the model reads as data.
+outside the list (or holding `\`, a `.` or `..` segment or an encoded separator, which
+`agent check` also refuses in the list), a method other than GET, a bearer variable unset, empty
+or blank, a redirect or a failing status is a refused read the model reads as data.
 
 ## Embed the runtime
 

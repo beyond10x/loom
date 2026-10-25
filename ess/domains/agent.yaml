@@ -255,7 +255,10 @@ types:
         type: Optional<loom.datasource.OperationId>
 
   # A binding read over HTTP: its base URL, the paths it may request, the method, the environment
-  # variable holding a bearer token (absent, none), and the most bytes an answer may hold.
+  # variable holding a bearer token (absent, none), and the most bytes an answer may hold. Each
+  # allowed path starts with `/` and holds no `\`, no `.` or `..` segment, no percent-encoded
+  # separator or dot, no `?` or `#` and no whitespace or control character; a document listing
+  # another is malformed.
   - name: loom.agent.HttpBinding
     kind: struct
     fields:
@@ -486,10 +489,10 @@ types:
   # Why a read of an `http` binding answers the model nothing (story agent-http-binding), one
   # reason per refusal of `AdmitHttpRead` and `BoundHttpAnswer`: the binding's method is not
   # `GET` (`MethodNotGet`); the read's path is not exactly one of the binding's `allow_paths`, or
-  # holds a `..` segment or an encoded separator (`PathNotAllowed`); the binding names a
-  # `bearer_env` the host has no value for (`BearerMissing`); the endpoint answered a redirect,
-  # which is never followed (`Redirected`); the endpoint answered a status outside 2xx
-  # (`FailedStatus`).
+  # holds a `\`, a `.` or `..` segment or an encoded separator (`PathNotAllowed`); the binding
+  # names a `bearer_env` that is unset, empty or blank on the host (`BearerMissing`); the endpoint
+  # answered a redirect, which is never followed (`Redirected`); the endpoint answered a status
+  # outside 2xx (`FailedStatus`).
   - name: loom.agent.HttpReadRefusalReason
     kind: enum
     variants: [MethodNotGet, PathNotAllowed, BearerMissing, Redirected, FailedStatus]
@@ -633,9 +636,10 @@ commands:
   # Whether a `source.read` of an `http` binding starts a request: `b10x-loom agent serve` decides
   # it before any request, over the binding and the read's path. `method` is the binding's
   # `method`; `path_allowed` whether the read's path is exactly one of the binding's
-  # `allow_paths`, holding no `..` segment and no encoded separator, which the host decides over
-  # the two texts; `bearer_missing` whether the binding names a `bearer_env` the host has no value
-  # for. The first refusal in declaration order is the answer; `admitted` is one GET of the path
+  # `allow_paths`, holding no `\`, no `.` or `..` segment and no encoded separator, which the host
+  # decides over the two texts even for a path the list names; `bearer_missing` whether the
+  # binding names a `bearer_env` that is unset, or set to empty or blank text, on the host: an
+  # empty token is no bearer, and no request goes out without one. The first refusal in declaration order is the answer; `admitted` is one GET of the path
   # under the binding's `base_url`. Nothing is held between two decisions.
   - name: loom.agent.AdmitHttpRead
     input:
@@ -666,9 +670,13 @@ commands:
 
   # What a turn reads of an `http` binding's answer: `status` is the response status, `bytes` how
   # many bytes of the body the host read (it reads at most one past the bound), `max_bytes` the
-  # binding's bound. A redirect is never followed (`redirected`); a status outside 2xx answers
-  # nothing (`failed-status`); an answer past the bound reaches the model cut at `max_bytes` and
-  # marked as cut (`cut`); any other reaches it whole (`whole`).
+  # binding's bound. A redirect is never followed (`redirected`), and the refusal names at most
+  # 256 bytes of its location and no more than `max_bytes`, cut on a character boundary and marked
+  # as cut; a status outside 2xx
+  # answers nothing (`failed-status`); an answer past the bound reaches the model cut at
+  # `max_bytes` and marked as cut (`cut`); any other reaches it whole (`whole`). The text the model
+  # reads is never longer than `max_bytes` bytes: the body is cut in bytes, backed off to a
+  # character boundary, and a byte that is not UTF-8 is dropped from it rather than replaced.
   - name: loom.agent.BoundHttpAnswer
     input:
       - name: status

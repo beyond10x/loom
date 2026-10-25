@@ -10,9 +10,9 @@
 //! not declare are refused the same way. An optional member may be absent or `null`; a list may
 //! be absent and is then empty. A decimal is a number or a string spelling one. `format` must be
 //! `loom.agent/1`. Text is never empty or blank, no value carries a YAML tag, a `bearer_env` is
-//! an environment variable name (never a token, and a refusal does not repeat it) and a port is
-//! 1 to 65535. A document holding more than [`MAX_FLOW_OPENERS`] `[` or `{` is refused before
-//! it is read.
+//! an environment variable name (never a token, and a refusal does not repeat it), an `http`
+//! binding's allowed path is a [`plain_http_path`] and a port is 1 to 65535. A document holding
+//! more than [`MAX_FLOW_OPENERS`] `[` or `{` is refused before it is read.
 //!
 //! Decoding checks the shape only. Whether a spec can be served (a state naming an action its
 //! protocol lacks, a source no binding declares) is a later check's.
@@ -246,6 +246,42 @@ fn variable_name(value: &Value, at: &str) -> Result<String, AgentSpecError> {
     } else {
         Err(AgentSpecError::new(format!(
             "`{at}` is not an environment variable name"
+        )))
+    }
+}
+
+/// The percent-encoded bytes a plain path may not hold: a separator either way, and a dot, each
+/// in both cases. Decoded by a server, they would name another path than the one written.
+const ENCODED: [&str; 6] = ["%2F", "%2f", "%5C", "%5c", "%2E", "%2e"];
+
+/// Whether `path` is one an `http` binding may allow and read: it starts with `/` and holds no
+/// `\` (an `http` URL reads it as `/`), no `.` or `..` segment, no percent-encoded separator or
+/// dot, no `?` or `#` (a query is given apart) and no whitespace or control character. The
+/// decoder refuses an `allow_paths` entry that is not one; the host refuses a read of one even
+/// when the list names it.
+#[must_use]
+pub fn plain_http_path(path: &str) -> bool {
+    path.starts_with('/')
+        && !path.contains(['\\', '?', '#'])
+        && !path
+            .split('/')
+            .any(|segment| segment == "." || segment == "..")
+        && !ENCODED.iter().any(|encoded| path.contains(encoded))
+        && !path
+            .chars()
+            .any(|character| character.is_whitespace() || character.is_control())
+}
+
+/// An entry of an `http` binding's `allow_paths`: text that is a [`plain_http_path`]. A refusal
+/// does not repeat the text.
+fn allow_path(value: &Value, at: &str) -> Result<String, AgentSpecError> {
+    let path = text(value, at)?;
+    if plain_http_path(&path) {
+        Ok(path)
+    } else {
+        Err(AgentSpecError::new(format!(
+            "`{at}` is not a plain path, one that starts with `/` and holds no `\\`, no `.` or \
+             `..` segment, no encoded separator or dot, no `?` or `#` and no whitespace"
         )))
     }
 }
@@ -631,7 +667,7 @@ fn binding(value: &Value, at: &str) -> Result<Binding, AgentSpecError> {
             Ok(Binding::Http(HttpBinding {
                 name: members.get("name", source)?,
                 base_url: members.get("base_url", text)?,
-                allow_paths: members.list("allow_paths", text)?,
+                allow_paths: members.list("allow_paths", allow_path)?,
                 method: members.get("method", text)?,
                 bearer_env: members.maybe("bearer_env", variable_name)?,
                 max_bytes: members.get("max_bytes", integer)?,

@@ -1,5 +1,5 @@
-# story agent-http-binding: a path that is not exactly one of `allow_paths`, or holds `..` or an
-# encoded separator, starts no request.
+# story agent-http-binding: a path that is not exactly one of `allow_paths`, or holds a `\`, a `.`
+# or `..` segment or an encoded separator even when the list names it, starts no request.
 type: ess-scenario/4
 domain: loom.agent
 scenario: a-path-outside-allow-paths-is-refused

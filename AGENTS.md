@@ -689,18 +689,22 @@ Connectors as before, and an `http` binding beside it changes no such read,
 supplies `HttpGet` (`crates/loom-agent/src/http.rs`) over its spec's `http` bindings, and
 `project` admits them as sources of a state. `HttpGet` decides `loom.agent.AdmitHttpRead`
 (`admit_http_read`) before any request: the binding's method is `GET` (`check` refuses another
-first; the host refuses it again), the path is allowed (`path_allowed`: starts with `/`, exactly
-one of `allow_paths`, no `..` segment, no percent-encoded separator or dot, no `?`, `#`,
-whitespace or control character, held even for an allow list naming such a path) and the variable
-`bearer_env` names, when one is named, is set. The one request is a GET of `base_url` + `path`
+first; the host refuses it again), the path is allowed (`path_allowed`: exactly one of
+`allow_paths` and a `loom_sdk::agent::plain_http_path`, which starts with `/` and holds no `\`,
+no `.` or `..` segment, no percent-encoded separator or dot, no `?`, `#`, whitespace or control
+character; held even for an allow list naming such a path, and the decoder refuses such an
+`allow_paths` entry, so `check` answers `Malformed`) and the variable `bearer_env` names, when one
+is named, holds text (unset, empty or blank is `BearerMissing`). The one request is a GET of `base_url` + `path`
 with the query as parameters, on reqwest with redirects off and no proxy (as llm's `b10x-llm-http`
 is built; that crate exposes no GET at 0.8.1, so the GET is composed here on the same client),
 bounded by `HTTP_TIMEOUT`; the bearer is sent as an `authorization` header marked sensitive and
 never repeated. It then decides `loom.agent.BoundHttpAnswer` (`bound_http_answer`) over the
 status and the bytes read (at most one past `max_bytes`; the body of a redirect or a failure is
-never read): a redirect is a refusal naming the location, a status outside 2xx a refusal naming
-it, a body past the bound is cut at it and the transcript entry is marked `[cut at max_bytes N:
-the answer is longer]`, any other is read whole. A refusal is a refused step naming the reason in
+never read): a redirect is a refusal naming at most 256 bytes of the location (`LOCATION_BYTES`)
+and no more than `max_bytes`, marked when cut, a status outside 2xx a refusal naming it, a body
+past the bound is cut at it and the transcript entry is marked `[cut at max_bytes N: the answer
+is longer]`, any other is read whole. The text never exceeds `max_bytes`: the bytes are cut
+first, backed off to a character boundary, and a byte that is not UTF-8 is dropped. A refusal is a refused step naming the reason in
 the enum's spelling; an endpoint out of reach is `PluginError::Unavailable`, as Connectors down
 is. The answer reaches the model only through the transcript's data block, as a Connectors read
 does (`a_log_line_is_data_not_instructions` in `crates/loom-plugin/tests/http_reads.rs`). The

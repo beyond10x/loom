@@ -94,8 +94,9 @@ pub const SEND_WINDOW_SECONDS: i64 = 60 * 60;
 pub const SENDS_FILE: &str = "sends.jsonl";
 
 /// What a read of an `http` binding answered, as the reader bounded it: the response status, the
-/// body read up to the binding's `max_bytes` (decoded as UTF-8, lossily), and whether it was cut
-/// there (`loom.agent.BoundHttpAnswer` `cut`).
+/// body read up to the binding's `max_bytes` (its UTF-8: a byte that is not, or a character the cut
+/// split, is dropped, so the text is never past the bound), and whether it was cut there
+/// (`loom.agent.BoundHttpAnswer` `cut`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpAnswer {
     /// The response status.

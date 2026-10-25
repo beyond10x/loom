@@ -1,5 +1,6 @@
 # story agent-http-binding: a redirect is never followed; the read is refused, and the host names
-# the location in the refusal the model reads.
+# at most 256 bytes of the location, and no more than `max_bytes`, in the refusal the model
+# reads, marked when cut.
 type: ess-scenario/4
 domain: loom.agent
 scenario: a-redirect-is-not-followed
