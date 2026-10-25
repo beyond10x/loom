@@ -14,9 +14,9 @@ use b10x_loom_cli::model_catalog::ModelCatalog;
 use b10x_loom_cli::plugin::{is_proposal, recorded, report_line, turn_models};
 use b10x_loom_cli::regular_file;
 use b10x_loom_cli::{
-    AgentCheckArgs, AgentCommand, ApproveArgs, Cli, Command, Confinement, DEFAULT_MODEL,
-    EvaluateArgs, Output, PluginCommand, PluginName, ProtocolCommand, ResumeArgs, RunArgs,
-    approve_exit_status, resume_exit_status, run_exit_status,
+    AgentCheckArgs, AgentCommand, AgentResumeArgs, AgentServeArgs, ApproveArgs, Cli, Command,
+    Confinement, DEFAULT_MODEL, EvaluateArgs, Output, PluginCommand, PluginName, ProtocolCommand,
+    ResumeArgs, RunArgs, approve_exit_status, resume_exit_status, run_exit_status,
 };
 use b10x_loom_intake_slice::bindings::ActionBindings;
 use b10x_loom_intake_slice::case;
@@ -71,6 +71,8 @@ fn main() -> ExitCode {
         },
         Command::Agent(arguments) => match arguments.command {
             AgentCommand::Check(arguments) => agent_check_command(&arguments),
+            AgentCommand::Serve(arguments) => agent_serve_command(&arguments),
+            AgentCommand::Resume(arguments) => agent_resume_command(&arguments),
         },
         Command::Approve(arguments) => approve_command(&arguments),
         Command::Resume(arguments) => resume_command(&arguments),
@@ -90,6 +92,94 @@ fn agent_check_command(arguments: &AgentCheckArgs) -> ExitCode {
             ExitCode::from(agent::REFUSED)
         }
         Err(agent::CheckFailure::Unreadable(why)) => failed(&why),
+    }
+}
+
+/// The spec of `agent serve` and `agent resume`, read and checked; a refused spec exits 3.
+fn served_spec(path: &Path) -> Result<loom_sdk::agent::AgentSpec, ExitCode> {
+    match agent::read_spec(path) {
+        Ok(spec) => Ok(spec),
+        Err(agent::CheckFailure::Refused(refusal)) => {
+            eprintln!("b10x-loom: {}", agent::refused_line(&refusal));
+            Err(ExitCode::from(agent::REFUSED))
+        }
+        Err(agent::CheckFailure::Unreadable(why)) => Err(failed(&why)),
+    }
+}
+
+/// Runs `agent serve`, as `AGENT_SERVE_HELP` states.
+fn agent_serve_command(arguments: &AgentServeArgs) -> ExitCode {
+    let spec = match served_spec(&arguments.spec) {
+        Ok(spec) => spec,
+        Err(exit) => return exit,
+    };
+    match agent_serve(arguments, spec) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => failed(&error),
+    }
+}
+
+fn agent_serve(arguments: &AgentServeArgs, spec: loom_sdk::agent::AgentSpec) -> Result<(), String> {
+    // Both models are settled here, before any model call or read.
+    let (classifier, model): (Box<dyn Model>, Arc<dyn Model>) = match &arguments.catalog {
+        Some(path) => {
+            let models = ModelCatalog::read(path)?;
+            fn alias<'a>(flag: &str, given: Option<&'a str>) -> Result<&'a str, String> {
+                given.ok_or_else(|| format!("{flag} names no route alias of --catalog"))
+            }
+            let classifier = alias("--classifier-model", arguments.classifier_model.as_deref())?;
+            let model = alias("--model", arguments.model.as_deref())?;
+            (
+                Box::new(models.model("--classifier-model", classifier)?),
+                Arc::new(models.model("--model", model)?),
+            )
+        }
+        None => agent::spec_models(
+            &spec,
+            &arguments.spec,
+            arguments.model.as_deref(),
+            arguments.classifier_model.as_deref(),
+        )?,
+    };
+    let plugin = b10x_loom_agent::SpecPlugin::new(spec, &arguments.state)
+        .map_err(|e| e.to_string())?
+        .with_classifier(classifier)
+        .with_turn_models(turn_models(model));
+    let stop = Arc::new(AtomicBool::new(arguments.once));
+    if !arguments.once {
+        stop_on_signals(Arc::clone(&stop))?;
+    }
+    let lines = b10x_loom_plugin::run_plugin(&plugin, plugin.config(), &arguments.state, &stop)
+        .map_err(|e| e.to_string())?;
+    for note in plugin.take_notes() {
+        eprintln!("b10x-loom: {}", printable(&note));
+    }
+    print_proposals(&lines)
+}
+
+/// Runs `agent resume`, as `AGENT_RESUME_HELP` states.
+fn agent_resume_command(arguments: &AgentResumeArgs) -> ExitCode {
+    let spec = match served_spec(&arguments.spec) {
+        Ok(spec) => spec,
+        Err(exit) => return exit,
+    };
+    if let Err(error) = existing_state(&arguments.state) {
+        return failed(&error);
+    }
+    let plugin = match b10x_loom_agent::SpecPlugin::new(spec, &arguments.state) {
+        Ok(plugin) => plugin,
+        Err(error) => return failed(&error.to_string()),
+    };
+    let host = b10x_loom_plugin::Host::new(plugin.config());
+    match plugin.resume(&host, &arguments.commission) {
+        Ok(resumed) => {
+            println!("{}", printable(&resumed.to_string()));
+            ExitCode::SUCCESS
+        }
+        Err(failure) => {
+            eprintln!("b10x-loom: {}", printable(&failure.to_string()));
+            ExitCode::from(agent::resume_exit_status(&failure))
+        }
     }
 }
 

@@ -45,6 +45,10 @@ pub use models_config::agent::{
 /// generated from `ess/domains/agent.yaml`; `b10x-loom-agent` checks a spec into them.
 pub use models_config::agent::{RefusalReason, SpecRefused};
 
+/// Whether a served agent sends a proposed reply: `loom.agent.AdmitSend`, its outcome, its error
+/// `SendRefused` and the reason; `b10x-loom-agent` decides it before every send.
+pub use models_config::agent::{AdmitSend, AdmitSendOutcome, SendRefusalReason, SendRefused};
+
 /// The one format a document declares.
 pub const FORMAT: &str = "loom.agent/1";
 

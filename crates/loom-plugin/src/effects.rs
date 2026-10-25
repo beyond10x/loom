@@ -14,15 +14,27 @@
 //! - `reply.propose {text}` appends the proposal to the turn's record and submits
 //!   `reply_proposed`. It runs no command and sends nothing.
 //! - `reply.decline {reason}` records the decline and submits `reply_declined`.
+//! - `reply.send {channel, thread_ts?, text}` (`operator-reply@1`), only when the port was given a
+//!   [`SendPolicy`] and the projection admits it, sends the recorded proposal to the item's channel
+//!   through [`ConnectorsCli::invoke_write`]: a governed write bound to the admitted arguments,
+//!   under the idempotency key derived from the admitted request. Before any process it decides
+//!   `loom.agent.AdmitSend` ([`admit_send`]) over what it knows: the write mode, whether the item's
+//!   channel is in the allow list, whether a reply is recorded, whether a person granted the
+//!   send, and the sends of the last hour (the policy's counter file, one line per send) against
+//!   `max_per_hour`. A final refusal ends the run (`ends_run: true`); a send before a proposal does
+//!   not. Arguments that are not the item's channel and the recorded proposal are refused. A
+//!   performed send is counted and submits one `reply_sent` evidence.
 //!
 //! Evidence comes from what this port did, never from what the model said: the record names the
 //! item and its revision, and an observation of the port's own step backs it.
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use chrono::{SecondsFormat, Utc};
-use loom::datasource::{DataSource, ReadKind};
+use chrono::{DateTime, SecondsFormat, Utc};
+use loom::agent::{AdmitSend, AdmitSendOutcome, SendRefusalReason, SendRefused, WriteMode};
+use loom::datasource::{DataSource, ReadKind, WriteApproval, WriteOperation, WriteResult};
 use loom::plugin::{InboundItem, Projection, Proposal, SourceRead};
 use loom_sdk::CanonGovernor;
 use loom_sdk::commission::model::json::{self as model, Value};
@@ -35,11 +47,11 @@ use loom_sdk::commission::model::responsibility::{
 use loom_sdk::commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use loom_sdk::commission::ports::evidence::{ObservationPort, submit_evidence};
 use loom_sdk::commission::ports::governor::Governor;
-use loom_sdk::connectors::cli::{CliError, ConnectorsCli};
+use loom_sdk::connectors::cli::{CliError, ConnectorsCli, WriteError};
 use loom_sdk::governor::FallibleCaseStore;
 
 use crate::codec::{kind_name, kind_named};
-use crate::project::{DECLINE, PROPOSE, READ};
+use crate::project::{DECLINE, PROPOSE, READ, SEND};
 
 /// The producer every evidence record of this port is attributed to.
 pub const PRODUCER: &str = "loom-plugin/datasource-effects";
@@ -61,6 +73,124 @@ pub const TIMED_OUT: &str = " timed out after ";
 /// The most bytes of one read's answer the turn's transcript keeps.
 pub const TRANSCRIPT_ENTRY_BYTES: usize = 16 * 1024;
 
+/// The window `writes.max_per_hour` counts sends in.
+pub const SEND_WINDOW_SECONDS: i64 = 60 * 60;
+
+/// The file in the state directory counting sends: one JSON line per performed send, its
+/// instant (`at`, RFC 3339) and idempotency key (`key`).
+pub const SENDS_FILE: &str = "sends.jsonl";
+
+/// How a turn may send its proposed reply: `reply.send` of `operator-reply@1`.
+#[derive(Debug, Clone)]
+pub struct SendPolicy {
+    /// The write: action `reply.send`, the channel binding's adapter, connection and write
+    /// operation.
+    pub operation: WriteOperation,
+    /// The channel ids a reply may be sent to (`channel.allow`).
+    pub allow: Vec<String>,
+    /// The spec's `writes.mode`.
+    pub mode: WriteMode,
+    /// The most sends in [`SEND_WINDOW_SECONDS`] (`writes.max_per_hour`).
+    pub max_per_hour: i64,
+    /// Whether a person granted this send (`b10x-loom approve`): true at a resume after the
+    /// grant, false in a turn.
+    pub granted: bool,
+    /// The counter file ([`SENDS_FILE`] in the state directory).
+    pub counter: PathBuf,
+    /// The proof the write names (`--approval-file`): an absolute path.
+    pub proof_file: String,
+    /// A proposal recorded before this port existed: the held one, at a resume after the grant.
+    pub proposal: Option<Proposal>,
+}
+
+/// Decides `loom.agent.AdmitSend` (`ess/domains/agent.yaml`): the first refusal in declaration
+/// order, `held` in approval mode before the grant, else `admitted`.
+pub fn admit_send(input: &AdmitSend) -> AdmitSendOutcome {
+    let refused = |reason: SendRefusalReason, r#final: bool| SendRefused { reason, r#final };
+    if input.mode == WriteMode::None {
+        return AdmitSendOutcome::WritesNone {
+            error: refused(SendRefusalReason::WritesNone, true),
+        };
+    }
+    if !input.channel_allowed {
+        return AdmitSendOutcome::OutsideAllowList {
+            error: refused(SendRefusalReason::OutsideAllowList, true),
+        };
+    }
+    if !input.proposed {
+        return AdmitSendOutcome::NoProposal {
+            error: refused(SendRefusalReason::NoProposal, false),
+        };
+    }
+    if input.sent_in_window >= input.max_per_hour {
+        return AdmitSendOutcome::RateLimited {
+            error: refused(SendRefusalReason::RateLimited, true),
+        };
+    }
+    if input.mode == WriteMode::Approval && !input.granted {
+        return AdmitSendOutcome::Held;
+    }
+    AdmitSendOutcome::Admitted
+}
+
+/// `reason` as the enum `loom.agent.SendRefusalReason` spells it.
+pub fn send_refusal_spelling(reason: SendRefusalReason) -> &'static str {
+    match reason {
+        SendRefusalReason::WritesNone => "WritesNone",
+        SendRefusalReason::OutsideAllowList => "OutsideAllowList",
+        SendRefusalReason::NoProposal => "NoProposal",
+        SendRefusalReason::RateLimited => "RateLimited",
+    }
+}
+
+/// How many sends `counter` records within the last [`SEND_WINDOW_SECONDS`] before `now`. A
+/// counter that does not exist counts none; a line that is not a counted send counts none.
+///
+/// # Errors
+/// The counter exists and cannot be read.
+pub fn sent_in_window(counter: &std::path::Path, now: DateTime<Utc>) -> Result<i64, String> {
+    let text = match std::fs::read_to_string(counter) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(format!("{}: {error}", counter.display())),
+    };
+    let mut counted = 0;
+    for line in text.lines() {
+        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let Some(at) = entry
+            .get("at")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|at| DateTime::parse_from_rfc3339(at).ok())
+        else {
+            continue;
+        };
+        let age = now
+            .signed_duration_since(at.with_timezone(&Utc))
+            .num_seconds();
+        if (0..SEND_WINDOW_SECONDS).contains(&age) {
+            counted += 1;
+        }
+    }
+    Ok(counted)
+}
+
+/// Appends one send to `counter`: `at` and `key`.
+fn count_send(counter: &std::path::Path, at: DateTime<Utc>, key: &str) -> Result<(), String> {
+    use std::io::Write as _;
+    let line = serde_json::json!({
+        "at": at.to_rfc3339_opts(SecondsFormat::Secs, true),
+        "key": key,
+    });
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(counter)
+        .map_err(|error| format!("{}: {error}", counter.display()))?;
+    writeln!(file, "{line}").map_err(|error| format!("{}: {error}", counter.display()))
+}
+
 /// What the turn did so far.
 #[derive(Debug, Default)]
 struct Log {
@@ -68,6 +198,7 @@ struct Log {
     transcript: Vec<String>,
     proposal: Option<Proposal>,
     declined: Option<String>,
+    sent: Option<WriteResult>,
     evidence: usize,
     unavailable: Option<String>,
 }
@@ -80,6 +211,7 @@ pub struct DataSourceEffects<'a, S> {
     connectors: ConnectorsCli,
     sources: Vec<DataSource>,
     actions: Vec<String>,
+    send: Option<SendPolicy>,
     log: Mutex<Log>,
     ids: AtomicU64,
 }
@@ -107,9 +239,26 @@ impl<'a, S: FallibleCaseStore> DataSourceEffects<'a, S> {
                 .cloned()
                 .collect(),
             actions: projection.actions.clone(),
+            send: None,
             log: Mutex::default(),
             ids: AtomicU64::new(1),
         }
+    }
+
+    /// The port performing `reply.send` under `policy`, when the projection admits it. A policy
+    /// carrying a proposal starts the port with it recorded.
+    #[must_use]
+    pub fn with_send(mut self, policy: SendPolicy) -> Self {
+        if let Some(proposal) = &policy.proposal {
+            self.log().proposal = Some(proposal.clone());
+        }
+        self.send = Some(policy);
+        self
+    }
+
+    /// What the one performed send came to, when the turn sent.
+    pub fn sent(&self) -> Option<WriteResult> {
+        self.log().sent.clone()
     }
 
     /// The reads performed, in order.
@@ -155,11 +304,12 @@ impl<'a, S: FallibleCaseStore> DataSourceEffects<'a, S> {
     }
 
     fn refused(&self, reason: String) -> EffectOutcome {
+        self.refused_ending(reason, false)
+    }
+
+    fn refused_ending(&self, reason: String, ends_run: bool) -> EffectOutcome {
         self.log().transcript.push(format!("refused: {reason}"));
-        EffectOutcome::Refused(EffectOutcomeRefused {
-            reason,
-            ends_run: false,
-        })
+        EffectOutcome::Refused(EffectOutcomeRefused { reason, ends_run })
     }
 
     /// `source.read`.
@@ -291,6 +441,140 @@ impl<'a, S: FallibleCaseStore> DataSourceEffects<'a, S> {
         }))
     }
 
+    /// `reply.send` (see the module documentation).
+    fn send(
+        &self,
+        request: &AdmittedRequest,
+        arguments: &Value,
+    ) -> Result<EffectOutcome, EffectError> {
+        let Some(policy) = &self.send else {
+            return Ok(self.refused_ending("this turn sends nothing".to_owned(), true));
+        };
+        let channel = detail(self.item, "channel").unwrap_or_default();
+        let proposal = self.proposal();
+        let now = Utc::now();
+        let sent_in_window = sent_in_window(&policy.counter, now)
+            .map_err(|why| EffectError::new(format!("the send counter: {why}")))?;
+        let decision = admit_send(&AdmitSend {
+            mode: policy.mode,
+            channel_allowed: policy.allow.contains(&channel),
+            proposed: proposal.is_some(),
+            granted: policy.granted,
+            sent_in_window,
+            max_per_hour: policy.max_per_hour,
+        });
+        let refusal = match decision {
+            AdmitSendOutcome::WritesNone { error }
+            | AdmitSendOutcome::OutsideAllowList { error }
+            | AdmitSendOutcome::NoProposal { error }
+            | AdmitSendOutcome::RateLimited { error } => Some(error),
+            AdmitSendOutcome::Held => {
+                return Ok(self.refused("reply.send is held until a person approves it".to_owned()));
+            }
+            AdmitSendOutcome::Admitted => None,
+        };
+        if let Some(error) = refusal {
+            let why = match error.reason {
+                SendRefusalReason::WritesNone => "the spec's writes are none".to_owned(),
+                SendRefusalReason::OutsideAllowList => {
+                    format!("the item's channel `{channel}` is not in the allow list")
+                }
+                SendRefusalReason::NoProposal => "no reply is proposed for the item".to_owned(),
+                SendRefusalReason::RateLimited => format!(
+                    "{sent_in_window} sends in the last hour reached max_per_hour {}",
+                    policy.max_per_hour
+                ),
+            };
+            return Ok(self.refused_ending(
+                format!(
+                    "reply.send refused ({}): {why}",
+                    send_refusal_spelling(error.reason)
+                ),
+                error.r#final,
+            ));
+        }
+        let Some(proposal) = proposal else {
+            return Ok(self.refused("no reply is proposed for the item".to_owned()));
+        };
+        if text(arguments, "channel") != Some(channel.as_str()) {
+            return Ok(self.refused(format!(
+                "reply.send names a channel other than the item's `{channel}`"
+            )));
+        }
+        if text(arguments, "text") != Some(proposal.text.as_str()) {
+            return Ok(self
+                .refused("reply.send carries a text other than the recorded proposal".to_owned()));
+        }
+        if let Some(thread) = text(arguments, "thread_ts")
+            && Some(thread.to_owned()) != detail(self.item, "ts")
+        {
+            return Ok(self.refused("reply.send names a thread other than the item's".to_owned()));
+        }
+        let input = loom::json::parse(&text_of(arguments))
+            .map_err(|error| EffectError::new(format!("the send's input: {error:?}")))?;
+        let approval = WriteApproval {
+            proof_file: policy.proof_file.clone(),
+        };
+        let result =
+            match self
+                .connectors
+                .invoke_write(request, &policy.operation, &input, &approval)
+            {
+                Ok(result) => result,
+                Err(WriteError::Refused(refusal)) => {
+                    return Ok(self.refused_ending(
+                        format!(
+                            "the send was refused ({}): {}",
+                            refusal.code, refusal.message
+                        ),
+                        true,
+                    ));
+                }
+                Err(WriteError::Failed(why)) => return Err(EffectError::new(why)),
+            };
+        count_send(&policy.counter, now, &result.idempotency_key)
+            .map_err(|why| EffectError::new(format!("the send counter: {why}")))?;
+        let classification = match result.classification {
+            loom::datasource::MutationClassification::NotAttempted => "not_attempted",
+            loom::datasource::MutationClassification::Refused => "refused",
+            loom::datasource::MutationClassification::Applied => "applied",
+            loom::datasource::MutationClassification::Unknown => "unknown",
+        };
+        let mut payload = vec![
+            ("action".to_owned(), Value::Text(SEND.to_owned())),
+            ("sent".to_owned(), Value::Bool(true)),
+            ("channel".to_owned(), Value::Text(channel.clone())),
+            (
+                "classification".to_owned(),
+                Value::Text(classification.to_owned()),
+            ),
+            (
+                "idempotency_key".to_owned(),
+                Value::Text(result.idempotency_key.clone()),
+            ),
+        ];
+        if let Some(id) = &result.request_id {
+            payload.push(("request_id".to_owned(), Value::Text(id.clone())));
+        }
+        if let Some(audit) = &result.audit_ref {
+            payload.push(("audit_ref".to_owned(), Value::Text(audit.clone())));
+        }
+        let report = Value::Object(payload);
+        self.evidence("reply_sent", report.clone())?;
+        let audit = result.audit_ref.clone().map(ConnectorAuditRef);
+        let mut log = self.log();
+        log.transcript.push(format!(
+            "reply.send: the proposed reply was sent to `{channel}` ({classification})"
+        ));
+        log.sent = Some(result);
+        Ok(EffectOutcome::Performed(EffectOutcomePerformed {
+            report,
+            attempt: None,
+            audit,
+            usage: None,
+        }))
+    }
+
     /// Observes this port's step and submits one `kind` evidence about the item, citing it.
     fn evidence(&self, kind: &str, payload: Value) -> Result<(), EffectError> {
         let failed = |why: String| EffectError::new(format!("the {kind} evidence: {why}"));
@@ -353,7 +637,9 @@ impl<'a, S: FallibleCaseStore> DataSourceEffects<'a, S> {
 
 impl<S: FallibleCaseStore> EffectPort for DataSourceEffects<'_, S> {
     fn performs(&self, action: &str) -> bool {
-        [READ, PROPOSE, DECLINE].contains(&action) && self.actions.iter().any(|held| held == action)
+        let known =
+            [READ, PROPOSE, DECLINE].contains(&action) || (action == SEND && self.send.is_some());
+        known && self.actions.iter().any(|held| held == action)
     }
 
     fn invoke(
@@ -378,6 +664,7 @@ impl<S: FallibleCaseStore> EffectPort for DataSourceEffects<'_, S> {
         match data.action.as_str() {
             READ => self.read(arguments),
             PROPOSE => self.propose(arguments),
+            SEND => self.send(request, arguments),
             _ => self.decline(arguments),
         }
     }
@@ -389,6 +676,14 @@ fn declared(source: &DataSource, kind: ReadKind) -> Option<&loom::datasource::Op
         ReadKind::List => source.list.as_ref(),
         ReadKind::Search => source.search.as_ref(),
         ReadKind::Get => source.get.as_ref(),
+    }
+}
+
+/// The text detail `name` of `item`.
+pub fn detail(item: &InboundItem, name: &str) -> Option<String> {
+    match item.details.member(name) {
+        Some(loom::json::Value::Text(text)) => Some(text.clone()),
+        _ => None,
     }
 }
 

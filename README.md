@@ -261,6 +261,18 @@ $ b10x-loom agent check --spec ess/scenarios/agent-check/specs/unknown-action.ya
 b10x-loom: refused: UnknownAction at states[0].actions[2]: reply.escalate
 ```
 
+`b10x-loom agent serve --spec <FILE> --state <DIR> [--once]` hosts the agent a checked spec
+declares: the plugin host over the spec, polling only the channels `channel.allow` lists through
+its `connectors` channel binding, classifying each item and answering it in a governed turn on the
+inner loop's protocol under the state whose `when` names the intent, with exactly
+`policy.capabilities` as its authority. `reply.send` is a governed write of the recorded proposal
+to the item's channel, at most `writes.max_per_hour` an hour. In `writes.mode: approval` a send is
+held: the turn ends proposed naming its commission, `b10x-loom approve <COMMISSION> reply.send
+--state <DIR>` grants it, and the host performs it at its next poll, or `b10x-loom agent resume
+<COMMISSION> --spec <FILE> --state <DIR>` performs it now, once. `writes.mode: none` sends nothing
+and `auto` is not served yet. The models are the spec's `model` section, or `--catalog` route
+aliases as `plugin run` takes them. SIGTERM ends the host after the item it is handling.
+
 ## Embed the runtime
 
 An application depends on one crate, `b10x-loom-sdk` (library `loom_sdk`). It re-exports
@@ -281,7 +293,10 @@ An agent can be written as data: a `loom.agent/1` document, YAML or JSON, which
 `loom_sdk::agent::parse` decodes into an `AgentSpec` (identity, models, session and tool policy,
 loops, states, bindings, channel, writes, capabilities, exposure, runtime and deployment),
 refusing a member the domain does not declare. `examples/agents/operator.yaml` is one.
-`b10x-loom agent check` (library `b10x-loom-agent`) says whether such a spec can be served.
+`b10x-loom agent check` (library `b10x-loom-agent`) says whether such a spec can be served, and
+`b10x_loom_agent::SpecPlugin` is the plugin `b10x-loom agent serve` hosts over it: `SpecAuthority`
+grants exactly `policy.capabilities`, and `admit_send` decides each `reply.send` as
+`loom.agent.AdmitSend` declares.
 
 Since `0.2.0`, `CanonGovernor::with_protocol` admits host-reviewed Canon protocols;
 `with_evaluation_time` supplies trusted freshness time. Durable hosts implement
@@ -372,13 +387,13 @@ surface kept stable within a release line, every port a host implements among it
 |---|---|
 | `b10x-loom-protocols` | The shared protocol catalog and verified offline installations |
 | `b10x-loom-cli` | The `b10x-loom` command line |
-| `b10x-loom-agent` | Checks a `loom.agent/1` spec before anything runs: the first reason it cannot be served, naming the member; `b10x-loom agent check` runs it |
+| `b10x-loom-agent` | Checks a `loom.agent/1` spec before anything runs: the first reason it cannot be served, naming the member; `b10x-loom agent check` runs it. `SpecPlugin` serves a checked spec on the plugin host, holding each `reply.send` for approval; `b10x-loom agent serve` hosts it |
 | `b10x-loom-sdk` | The one crate an embedding depends on |
 | `b10x-loom-executor` | The executor: catalogue, action selection and argument generation, each model request one turn of an llm `Model` |
 | `b10x-loom-session-executor` | An `AgentExecutor` over a harness, Claude Code or Codex session run through metaharness (`0.15.0`) in a scratch copy: it proposes the session's change, never applies it, and summarizes the session's record as `trace-ir-summary/1`, with each tool call's decision and who made it; `SessionExecutor::from_spec` builds it from a `loom.agent/1` spec, offering only the spec's allowed tools; a b10x-harness session can read its endpoint's API key from the secret store by name (`api_key_secret`) |
 | `b10x-loom-commission` | Commission's contracts and runtime loop, generated from its ESS specification |
 | `b10x-loom-connectors` | Commission's `ConnectorInvoker` over a Connectors service (Connectors `v0.35.0`) |
-| `b10x-loom-plugin` | The plugin host: polls a plugin, classifies each item and answers it in a governed read-only turn over Connectors data sources, one record line per item |
+| `b10x-loom-plugin` | The plugin host: polls a plugin, classifies each item and answers it in a governed turn over Connectors data sources, one record line per item; a turn given a `SendPolicy` may send the reply it proposed, once admitted |
 | `b10x-loom-plugin-slack` | The slack-handler plugin: walks the Slack channels the bot is a member of, read only, and proposes answers to the messages nobody answered; `b10x-loom plugin run slack-handler` hosts it |
 | `b10x-loom-governor` | Evaluates a case's protocol with Canon and issues the frontier; executes nothing |
 | `b10x-loom-mandate` | Opt-in: Commission's authority port answered by Mandate's `check` (Mandate `v0.9.0`), with the host's Mandate ports; a Mandate failure grants nothing. `b10x-loom approve` and `resume` use it behind `--mandate`; the SDK does not link it |

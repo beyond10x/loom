@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 36d9f391b47bf4ff392161dfbb07aa4606f2481a4cc3a3d4ac33a45bc10d5732
-// contract digest 00b46a8d1edd40edd961dc9dcf2afe82e3d81210aec3a4882dbcfa4b17960ae1
+// model digest 8745d4eaaf221f3a1bb550570e3c053abb7a0be0d3ecc2ae5c5c74c9c641f0cd
+// contract digest ee901859b361adccaddf46e3c87dad5bc8dd71ec3a5f0fb52c94b6a87e0042d4
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! The typed refusal of an unmet obligation, and the conversion seams owed between contexts.

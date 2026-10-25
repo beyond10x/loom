@@ -207,6 +207,7 @@ impl ConformanceTarget for LoomTarget {
                 session::propose_session_change(&mut live, input, correlation)?
             }
             agent::CHECK_AGENT_SPEC => agent::check_agent_spec(&mut live, input)?,
+            agent::ADMIT_SEND => agent::admit_send_command(input),
             other => {
                 return Err(TargetError::unavailable(
                     format!("invoking `{other}`"),

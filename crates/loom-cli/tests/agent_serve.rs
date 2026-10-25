@@ -1,0 +1,587 @@
+//! Acceptance for `story:agent-serve`, the command line: `b10x-loom agent serve --spec <FILE>
+//! --state <DIR>` hosts the agent the spec declares, polls only the channels `channel.allow`
+//! lists, answers an item in a governed turn on the spec's protocol, holds its `reply.send` for a
+//! person's approval in `writes.mode: approval`, and ends after the item it is handling on
+//! SIGTERM. `b10x-loom approve <COMMISSION> reply.send --state <DIR>` grants the held send and
+//! `agent resume` performs it, once.
+//!
+//! Every case runs the binary. The channel and `docs` reads and the write go to the fake
+//! `connectors` of `loom-connectors`, answering from `loom-plugin-slack`'s and `loom-connectors`'
+//! fixtures (one channel, one question an hour old). The models are the fixture catalog's
+//! anonymous Chat Completions routes (`fixtures/catalog-route/catalog.toml`) at a loopback socket
+//! this file opens, which replays recorded responses in order. No case reaches the network, a
+//! credential or a Codex login.
+
+use std::fs;
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Output, Stdio};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use serde_json::{Value, json};
+
+const CATALOG: &str = include_str!("fixtures/catalog-route/catalog.toml");
+const CLASSIFIER: &str = "example/Classifier-Model";
+const AGENT: &str = "example/Agent-Model";
+const CHANNEL: &str = "C0FIXTURE1";
+const WRITE: &str = "message.post";
+const REPLY: &str = "The deploy finished at 10:02; the logs show no error.";
+
+/// The responses of one item asked and answered: classified, one read, the proposal, and the
+/// send the host holds. Nothing is asked after the hold.
+fn recorded(ts: &str) -> Vec<Vec<u8>> {
+    let select = |action: &str| sse(AGENT, "select_action", json!({ "action": action }));
+    vec![
+        sse(
+            CLASSIFIER,
+            "classify_item",
+            json!({"intent": "ask", "hints": ["docs"], "confidence": 0.9}),
+        ),
+        select("source.read"),
+        sse(
+            AGENT,
+            "action_arguments",
+            json!({"source": "docs", "kind": "search", "input": {"query": "deploy"}}),
+        ),
+        select("reply.propose"),
+        sse(AGENT, "action_arguments", json!({"text": REPLY})),
+        select("reply.send"),
+        sse(
+            AGENT,
+            "action_arguments",
+            json!({"channel": CHANNEL, "thread_ts": ts, "text": REPLY}),
+        ),
+    ]
+}
+
+/// `--once` handles the question: the turn reads, proposes and ends held on `reply.send`, naming
+/// its commission; nothing is written before the grant. `approve` grants it and `agent resume`
+/// performs the write once, through the connectors command line with the grant as its proof;
+/// a second resume finds nothing held.
+#[test]
+fn agent_serve_once_holds_the_send_and_resume_performs_it() {
+    let scratch = Scratch::new("once", 0);
+    let (base_url, server) = serve(recorded(&scratch.ts));
+
+    let output = scratch.serve_once(&base_url);
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "{stdout}\n{stderr}");
+    let printed: Vec<&str> = stdout.lines().collect();
+    assert_eq!(printed.len(), 1, "one line for the proposal:\n{stdout}");
+    assert!(
+        printed[0].starts_with(&format!(
+            "{CHANNEL}:{} proposed ask reads=docs/search ",
+            scratch.ts
+        )),
+        "{stdout}"
+    );
+    assert_eq!(server.join().expect("the server finished").len(), 7);
+    assert!(
+        scratch.invoked(WRITE).is_empty(),
+        "nothing is sent before the grant"
+    );
+    let held = scratch.held();
+    assert_eq!(held.len(), 1, "one send is held: {held:?}");
+    let commission = &held[0];
+    let record = fs::read_to_string(scratch.state().join("record.jsonl")).unwrap();
+    assert!(
+        record.contains(&format!(
+            "reply.send awaits approval: commission {commission}"
+        )),
+        "{record}"
+    );
+
+    let early = scratch.resume(commission);
+    assert_eq!(
+        early.status.code(),
+        Some(4),
+        "{}",
+        String::from_utf8_lossy(&early.stderr)
+    );
+    assert!(
+        scratch.invoked(WRITE).is_empty(),
+        "a resume before the grant sends nothing"
+    );
+
+    let approved = scratch
+        .command()
+        .args(["approve", commission, "reply.send", "--state"])
+        .arg(scratch.state())
+        .output()
+        .unwrap();
+    assert_eq!(
+        approved.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&approved.stderr)
+    );
+
+    let resumed = scratch.resume(commission);
+    let stdout = String::from_utf8_lossy(&resumed.stdout);
+    let stderr = String::from_utf8_lossy(&resumed.stderr);
+    assert_eq!(resumed.status.code(), Some(0), "{stdout}\n{stderr}");
+    assert!(
+        stdout.starts_with(&format!("sent for commission {commission}: applied")),
+        "{stdout}"
+    );
+    let writes = scratch.invoked(WRITE);
+    assert_eq!(writes.len(), 1, "one write: {writes:?}");
+    let proof = writes[0]
+        .windows(2)
+        .find(|w| w[0] == "--approval-file")
+        .map(|w| PathBuf::from(&w[1]))
+        .expect("the write carries its proof");
+    assert!(
+        proof.starts_with(scratch.state()),
+        "the proof is the grant in the state directory: {}",
+        proof.display()
+    );
+    assert!(proof.is_file());
+    let stdin = fs::read_to_string(scratch.root.join("connectors-state/stdin.log")).unwrap();
+    assert!(
+        stdin.contains(REPLY),
+        "the proposal is what is sent: {stdin}"
+    );
+    assert!(scratch.held().is_empty(), "nothing stays held");
+
+    let again = scratch.resume(commission);
+    assert_eq!(
+        again.status.code(),
+        Some(3),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+    assert_eq!(
+        scratch.invoked(WRITE).len(),
+        1,
+        "a second resume sends nothing"
+    );
+}
+
+/// Without `--once` the host polls until SIGTERM, which ends it after the item it is handling:
+/// here after the first cycle, while it waits out a one-hour interval. It exits 0 and prints what
+/// it recorded.
+#[test]
+fn sigterm_ends_the_host_after_the_item() {
+    let scratch = Scratch::new("sigterm", 3600);
+    let (base_url, server) = serve(recorded(&scratch.ts));
+    let catalog = scratch.catalog(&base_url);
+    let mut child = Reaped(
+        scratch
+            .serve_command(&catalog)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start b10x-loom"),
+    );
+    let record = scratch.state().join("record.jsonl");
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while fs::read_to_string(&record).map_or(0, |text| text.matches('\n').count()) < 1 {
+        assert!(
+            child.0.try_wait().unwrap().is_none(),
+            "the host ended before its first cycle was recorded"
+        );
+        assert!(
+            Instant::now() < deadline,
+            "the first cycle was not recorded in 60 s"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let killed = Command::new("kill")
+        .args(["-TERM", &child.0.id().to_string()])
+        .status()
+        .expect("kill");
+    assert!(killed.success());
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "SIGTERM did not stop the host in 30 s"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    child
+        .0
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .unwrap();
+    child
+        .0
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    assert_eq!(status.code(), Some(0), "{stdout}\n{stderr}");
+    assert!(
+        stderr.contains("stopping after the current item"),
+        "{stderr}"
+    );
+    assert_eq!(
+        stdout.lines().count(),
+        1,
+        "it prints what it recorded:\n{stdout}"
+    );
+    assert_eq!(server.join().expect("the server finished").len(), 7);
+    assert_eq!(scratch.held().len(), 1, "the send stays held");
+}
+
+/// A spec `agent check` refuses is not served: exit 3, the refusal on standard error, and no
+/// read, no state directory.
+#[test]
+fn agent_serve_refuses_what_check_refuses() {
+    let scratch = Scratch::new("refused", 0);
+    let spec = fs::read_to_string(scratch.spec()).unwrap();
+    fs::write(
+        scratch.spec(),
+        spec.replace("allow: [C0FIXTURE1]", "allow: []"),
+    )
+    .unwrap();
+    let (base_url, _server) = serve(Vec::new());
+
+    let output = scratch.serve_once(&base_url);
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(
+        stderr.contains("EmptyChannelAllow at channel.allow"),
+        "{stderr}"
+    );
+    assert!(scratch.argv().is_empty(), "nothing was read");
+    assert!(!scratch.state().exists(), "no state directory was made");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Fixtures.
+
+/// A scratch directory under `CARGO_TARGET_TMPDIR`: the home, the fake `connectors` and its state
+/// directory, the spec, the catalog and the host's state directory; removed on drop.
+struct Scratch {
+    root: PathBuf,
+    /// The question's `ts`, an hour ago.
+    ts: String,
+}
+
+impl Scratch {
+    fn new(label: &str, poll_interval_seconds: u64) -> Self {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+        let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+            "agent-serve-{label}-{}-{}",
+            std::process::id(),
+            now.as_nanos()
+        ));
+        for directory in ["home", "connectors-state"] {
+            fs::create_dir_all(root.join(directory)).unwrap();
+        }
+        let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let fake = root.join("connectors");
+        install_program(
+            &crates.join("loom-connectors/tests/fixtures/connectors/fake-connectors"),
+            &fake,
+        );
+        let connectors_state = root.join("connectors-state");
+        let fixtures = crates.join("loom-plugin-slack/tests/fixtures");
+        for verb in ["describe", "invoke"] {
+            for operation in [
+                "conversations.list",
+                "conversations.history",
+                "conversations.replies",
+                "docs.search",
+            ] {
+                fs::copy(
+                    fixtures.join(format!("{verb}-{operation}.json")),
+                    connectors_state.join(format!("{verb}.{operation}.json")),
+                )
+                .unwrap();
+            }
+        }
+        let writes = crates.join("loom-connectors/tests/fixtures/connectors");
+        let describe = fs::read_to_string(writes.join("describe-write.json")).unwrap();
+        fs::write(
+            connectors_state.join(format!("describe.{WRITE}.json")),
+            describe.replace("\"adapter\":\"chat\"", "\"adapter\":\"slack\""),
+        )
+        .unwrap();
+        fs::copy(
+            writes.join("invoke-route-applied.json"),
+            connectors_state.join(format!("invoke.{WRITE}.json")),
+        )
+        .unwrap();
+        let ts = format!("{}.000100", now.as_secs() - 3600);
+        let answer = |operation: &str, result: Value| {
+            let document = json!({"ok": true, "result": {"adapter": "slack", "operation": operation,
+                                   "revision": "rev-1", "result": result}});
+            fs::write(
+                connectors_state.join(format!("invoke.{operation}.json")),
+                document.to_string(),
+            )
+            .unwrap();
+        };
+        answer(
+            "conversations.list",
+            json!({"ok": true, "channels": [{"id": CHANNEL, "name": "fixture", "is_channel": true,
+                   "is_member": true, "is_archived": false, "num_members": 5}],
+                   "response_metadata": {"next_cursor": ""}}),
+        );
+        answer(
+            "conversations.history",
+            json!({"ok": true, "messages": [{"type": "message", "user": "U0ALICE",
+                   "text": "Is the deploy finished?", "ts": ts}], "has_more": false}),
+        );
+        let scratch = Self { root, ts };
+        let spec = format!(
+            "format: loom.agent/1
+agent: {{id: test-operator, name: Test operator, brief: Answer questions about the deploy.}}
+model:
+  routes: routes.yaml
+  roles: [{{role: agent, model: small}}, {{role: classifier, model: small}}]
+loops:
+  outer: {{poll_interval_seconds: {poll_interval_seconds}, sources: [chat], min_age_minutes: 10, lookback_minutes: 120}}
+  inner: {{protocol: operator-reply@1, step_budget: 8, model_budget: 16, classify_threshold: 0.5}}
+states:
+  - {{name: answer, when: {{intent: Ask}}, actions: [source.read, reply.propose, reply.send, reply.decline], sources: [docs]}}
+  - {{name: hand-off, when: {{intent: Task}}, actions: [reply.decline], sources: []}}
+bindings:
+  - {{name: chat, kind: connectors, adapter: slack, connection: slack-fixture, list: conversations.list, get: conversations.history, search: conversations.replies, write: {WRITE}}}
+  - {{name: docs, kind: connectors, adapter: docs, connection: docs-fixture, search: docs.search}}
+channel: {{binding: chat, allow: [{CHANNEL}], bot_user_id: U0BOT}}
+writes: {{mode: approval, max_per_hour: 5}}
+policy: {{capabilities: [datasource.read, reply.propose, reply.send]}}
+runtime:
+  state_dir: {state}
+  connectors: {{program: {program}, state_dir: {connectors}}}
+  confinement: none
+",
+            state = scratch.state().display(),
+            program = fake.display(),
+            connectors = connectors_state.display(),
+        );
+        fs::write(scratch.spec(), spec).unwrap();
+        scratch
+    }
+
+    fn spec(&self) -> PathBuf {
+        self.root.join("agent.yaml")
+    }
+
+    fn state(&self) -> PathBuf {
+        self.root.join("agent-state")
+    }
+
+    /// The fixture catalog with its endpoints at `base_url`.
+    fn catalog(&self, base_url: &str) -> PathBuf {
+        let path = self.root.join("catalog.toml");
+        fs::write(&path, CATALOG.replace("http://127.0.0.1:1/v1", base_url)).unwrap();
+        path
+    }
+
+    fn command(&self) -> Command {
+        let home = self.root.join("home");
+        let mut command = Command::new(env!("CARGO_BIN_EXE_b10x-loom"));
+        command
+            .env("HOME", &home)
+            .env("CODEX_HOME", &home)
+            .env("XDG_DATA_HOME", &home)
+            .env_remove("RUST_LOG");
+        command
+    }
+
+    /// `agent serve` on the catalog at `catalog`, without `--once`.
+    fn serve_command(&self, catalog: &Path) -> Command {
+        let mut command = self.command();
+        command
+            .args(["agent", "serve", "--spec"])
+            .arg(self.spec())
+            .arg("--state")
+            .arg(self.state())
+            .arg("--catalog")
+            .arg(catalog)
+            .args([
+                "--classifier-model",
+                "lab-classifier",
+                "--model",
+                "lab-agent",
+            ]);
+        command
+    }
+
+    /// `agent serve --once` on the catalog at `base_url`.
+    fn serve_once(&self, base_url: &str) -> Output {
+        let catalog = self.catalog(base_url);
+        self.serve_command(&catalog)
+            .arg("--once")
+            .output()
+            .expect("run b10x-loom")
+    }
+
+    /// `agent resume <commission>`.
+    fn resume(&self, commission: &str) -> Output {
+        self.command()
+            .args(["agent", "resume", commission, "--spec"])
+            .arg(self.spec())
+            .arg("--state")
+            .arg(self.state())
+            .output()
+            .expect("run b10x-loom")
+    }
+
+    /// The commissions whose sends the state directory holds.
+    fn held(&self) -> Vec<String> {
+        let mut held: Vec<String> = fs::read_dir(self.state().join("approvals"))
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .filter_map(|entry| {
+                        entry
+                            .file_name()
+                            .to_str()?
+                            .strip_suffix(".json")
+                            .map(ToOwned::to_owned)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        held.sort();
+        held
+    }
+
+    /// Every run of the fake, its arguments.
+    fn argv(&self) -> Vec<Vec<String>> {
+        fs::read_to_string(self.root.join("connectors-state/argv.log"))
+            .unwrap_or_default()
+            .lines()
+            .map(|line| {
+                line.trim_end_matches('\t')
+                    .split('\t')
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// The invocations of `operation`.
+    fn invoked(&self, operation: &str) -> Vec<Vec<String>> {
+        self.argv()
+            .into_iter()
+            .filter(|argv| argv.contains(&"invoke".to_owned()))
+            .filter(|argv| {
+                argv.windows(2)
+                    .any(|w| w[0] == "--operation" && w[1] == operation)
+            })
+            .collect()
+    }
+}
+
+/// A child process killed and reaped on drop, so a failed assertion leaves none alive.
+struct Reaped(Child);
+
+impl Drop for Reaped {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+/// A recorded Chat Completions stream: `model` calls `tool` with `arguments`.
+fn sse(model: &str, tool: &str, arguments: Value) -> Vec<u8> {
+    let chunk = |delta: Value, finish: Value| {
+        json!({"id": format!("chatcmpl-{tool}"), "object": "chat.completion.chunk", "model": model,
+               "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]})
+    };
+    let events = [
+        chunk(
+            json!({"role": "assistant", "tool_calls": [{"index": 0, "id": format!("call-{tool}"),
+                   "type": "function", "function": {"name": tool, "arguments": ""}}]}),
+            Value::Null,
+        ),
+        chunk(
+            json!({"tool_calls": [{"index": 0, "function": {"arguments": arguments.to_string()}}]}),
+            Value::Null,
+        ),
+        chunk(json!({}), json!("tool_calls")),
+        json!({"id": format!("chatcmpl-{tool}"), "object": "chat.completion.chunk", "model": model,
+               "choices": [], "usage": {"prompt_tokens": 120, "completion_tokens": 7, "total_tokens": 127}}),
+    ];
+    let mut stream = String::new();
+    for event in events {
+        stream.push_str(&format!("data: {event}\n\n"));
+    }
+    stream.push_str("data: [DONE]\n\n");
+    stream.into_bytes()
+}
+
+/// Answers one request per recorded response, in order, on a loopback socket, and returns what
+/// each request carried.
+fn serve(responses: Vec<Vec<u8>>) -> (String, JoinHandle<Vec<String>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let handle = std::thread::spawn(move || {
+        let mut sent = Vec::new();
+        for response in responses {
+            let (mut socket, _) = listener.accept().expect("accepted");
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 8192];
+            loop {
+                let read = socket.read(&mut buffer).expect("read");
+                request.extend_from_slice(&buffer[..read]);
+                if read == 0 || complete(&request) {
+                    break;
+                }
+            }
+            let mut answer = Vec::from(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
+            );
+            answer.extend_from_slice(&response);
+            socket.write_all(&answer).expect("written");
+            let _ = socket.shutdown(std::net::Shutdown::Both);
+            sent.push(String::from_utf8_lossy(&request).into_owned());
+        }
+        sent
+    });
+    (base_url, handle)
+}
+
+/// Whether `request` holds its whole body, by its `Content-Length`.
+fn complete(request: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(request);
+    text.split_once("\r\n\r\n").is_some_and(|(head, rest)| {
+        head.to_ascii_lowercase()
+            .split_once("content-length:")
+            .and_then(|(_, tail)| tail.split('\r').next())
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .is_some_and(|length| rest.len() >= length)
+    })
+}
+
+/// Installs `source` as the executable `target` through `install(1)`, in a child process, so this
+/// process never holds a writable descriptor on a program a test runs.
+fn install_program(source: &Path, target: &Path) {
+    let status = std::process::Command::new("/usr/bin/install")
+        .args(["-m", "755"])
+        .arg(source)
+        .arg(target)
+        .status()
+        .unwrap();
+    assert!(status.success(), "install {}: {status}", target.display());
+}

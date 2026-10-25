@@ -24,3 +24,8 @@ scenarios:
   - scenarios/agent-check/an-http-binding-whose-method-is-not-get-is-refused.yaml
   - scenarios/agent-check/reply-send-without-writes-is-refused.yaml
   - scenarios/agent-check/an-empty-channel-allow-is-refused.yaml
+  - scenarios/agent-serve/a-send-outside-the-allow-list-is-refused.yaml
+  - scenarios/agent-serve/a-send-without-a-proposal-is-not-admissible.yaml
+  - scenarios/agent-serve/a-sixth-send-in-the-window-is-refused.yaml
+  - scenarios/agent-serve/a-send-is-held-until-approved.yaml
+  - scenarios/agent-serve/a-send-with-writes-none-is-refused.yaml

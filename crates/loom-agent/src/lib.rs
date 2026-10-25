@@ -29,14 +29,26 @@
 //!
 //! A member is named as the document spells it: `bindings[1].base_url`, `states[0].actions[2]`,
 //! `policy.capabilities[2]`. Nothing runs and nothing but the given text is read.
+//!
+//! Serving a checked spec is [`serve`]: [`SpecPlugin`], the plugin of the host built from it,
+//! which `b10x-loom agent serve --spec --state` runs; its sends decide `loom.agent.AdmitSend`
+//! ([`admit_send`]).
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-use loom_sdk::agent::{AgentSpec, Binding, WriteMode};
+use loom_sdk::agent::{AgentSpec, Binding};
 
-pub use loom_sdk::agent::{RefusalReason, SpecRefused};
+pub use loom_sdk::agent::{
+    AdmitSend, AdmitSendOutcome, RefusalReason, SendRefusalReason, SendRefused, SpecRefused,
+    WriteMode,
+};
+pub use serve::{
+    ResumeFailure, Resumed, SpecAuthority, SpecPlugin, admit_send, commission_id,
+    send_refusal_spelling,
+};
 
 mod credentials;
+pub mod serve;
 
 /// What a serveable spec was checked as: its agent id, the inner loop's protocol (none without
 /// loops), and how many states and bindings it declares.

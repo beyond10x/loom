@@ -1,0 +1,18 @@
+# story agent-serve: `writes.max_per_hour: 5` admits five sends an hour; the sixth is refused.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-sixth-send-in-the-window-is-refused
+summary: "With five sends in the hour and `max_per_hour: 5`, the next `reply.send` is refused."
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.AdmitSend
+    input: {mode: approval, channel_allowed: true, proposed: true, granted: true, sent_in_window: 4, max_per_hour: 5}
+    outcome: admitted
+  - at: 2026-10-25T00:01:00Z
+    command: loom.agent.AdmitSend
+    input: {mode: approval, channel_allowed: true, proposed: true, granted: true, sent_in_window: 5, max_per_hour: 5}
+    outcome: rate-limited
+    error:
+      name: loom.agent.SendRefused
+      fields: {reason: RateLimited, final: true}

@@ -17,7 +17,7 @@ The packages an application or an operator uses. An embedding depends on `b10x-l
 
 | Package | Directory | In Rust | What it is |
 |---|---|---|---|
-| `b10x-loom-agent` | [`crates/loom-agent`](https://github.com/beyond10x/loom/tree/main/crates/loom-agent) | `use b10x_loom_agent` | Checks a loom.agent/1 document before anything runs: whether it can be served against the plugin catalog, naming the member and the reason of the first refusal. |
+| `b10x-loom-agent` | [`crates/loom-agent`](https://github.com/beyond10x/loom/tree/main/crates/loom-agent) | `use b10x_loom_agent` | Checks a loom.agent/1 document before anything runs, naming the member and the reason of the first refusal, and serves one: the plugin host over the spec's channel, states, authority and governed writes. |
 | `b10x-loom-cli` | [`crates/loom-cli`](https://github.com/beyond10x/loom/tree/main/crates/loom-cli) | `use b10x_loom_cli`, binary `b10x-loom` | The b10x-loom command line: route an intent to a protocol and run it until it is blocked. |
 | `b10x-loom-commission` | [`crates/loom-commission`](https://github.com/beyond10x/loom/tree/main/crates/loom-commission) | `use b10x_loom_commission` | Commission's contracts and runtime: the responsibility model generated from ESS, the ports an embedder implements, admission and revalidation, and the loop that drives a commission until it is blocked. |
 | `b10x-loom-commission-conformance` | [`crates/loom-commission-conformance`](https://github.com/beyond10x/loom/tree/main/crates/loom-commission-conformance) | `use b10x_loom_commission_conformance` | The Rust ESS conformance target that holds b10x-loom-commission to its synthesized suite. |
