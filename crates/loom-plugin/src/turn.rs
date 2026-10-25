@@ -53,6 +53,7 @@ use llm_core::{
     BoxFuture, Cancel, Capabilities, Error, ErrorCode, Model, Provenance, StreamSink, TurnOutcome,
     TurnRequest,
 };
+use loom::agent::HttpBinding;
 use loom::datasource::{DataSource, ReadKind, SourceEntity};
 use loom::plugin::{
     Classification, InboundItem, Projection, ProposedCase, RecordOutcome, SourceRead, TurnResult,
@@ -84,7 +85,7 @@ use loom_sdk::{
 };
 
 use crate::codec::{intent_name, kind_name};
-use crate::effects::{DataSourceEffects, ITEM, SendPolicy};
+use crate::effects::{DataSourceEffects, HttpSources, ITEM, SendPolicy};
 use crate::project::{DECLINE, PROPOSE, READ, SEND};
 use crate::{Host, PROTOCOL, PluginAuthority, PluginError, TurnModel};
 
@@ -159,6 +160,9 @@ pub struct TurnOptions<'o, S> {
     pub suspensions: Option<&'o dyn SuspensionPort>,
     /// Under which the effect port performs `reply.send`; none sends nothing.
     pub send: Option<SendPolicy>,
+    /// The `http` bindings the turn may read, with their reader; none reads no `http` binding.
+    /// Only those the projection names are read, and are described to the model.
+    pub http: Option<HttpSources<'o>>,
     /// The commission id; a fixed one of the turn when `None`.
     pub commission: Option<Uuid>,
     /// The most executor steps of the turn.
@@ -177,6 +181,7 @@ impl TurnOptions<'static, MemoryCaseStore> {
             store: MemoryCaseStore::default(),
             suspensions: None,
             send: None,
+            http: None,
             commission: None,
             step_budget: TURN_STEP_BUDGET,
             model_budget: TURN_MODEL_BUDGET,
@@ -317,6 +322,13 @@ pub fn turn_with<S: FallibleCaseStore>(
         .cloned()
         .collect();
     let connectors = host.connectors_over(sources.clone());
+    let http: Vec<HttpBinding> = options.http.as_ref().map_or_else(Vec::new, |http| {
+        http.bindings
+            .iter()
+            .filter(|binding| projection.sources.contains(&binding.name))
+            .cloned()
+            .collect()
+    });
     let described = match connectors.sources() {
         Ok(described) => described,
         Err(error) => {
@@ -362,16 +374,20 @@ pub fn turn_with<S: FallibleCaseStore>(
     if let Some(policy) = options.send {
         effects = effects.with_send(policy);
     }
+    if let Some(http) = options.http {
+        effects = effects.with_http(http);
+    }
     let asked = AtomicU64::new(0);
     let lent = Lent {
         model: &*model.model,
         asked: &asked,
         budget: options.model_budget,
     };
-    let context = context(item, classification, projection, &described);
+    let context = context(item, classification, projection, &described, &http);
     let readable: Vec<String> = described
         .iter()
         .map(|(source, _)| source.name.0.clone())
+        .chain(http.iter().map(|binding| binding.name.0.clone()))
         .collect();
     let unusable = Unusable::default();
     let briefing = TurnBriefing {
@@ -513,13 +529,15 @@ pub fn turn_with<S: FallibleCaseStore>(
 }
 
 /// The part of every step's context that does not change: the item, its classification and the
-/// projection's sources with their entities. Every value it quotes has `<`, `>` and `&` written as
-/// `\u` escapes ([`inert`], [`push_data_text`]), so none spells a tag of the data block.
+/// projection's sources with their entities (the `http` bindings with their allowed paths). Every
+/// value it quotes has `<`, `>` and `&` written as `\u` escapes ([`inert`], [`push_data_text`]),
+/// so none spells a tag of the data block.
 fn context(
     item: &InboundItem,
     classification: &Classification,
     projection: &Projection,
     described: &[(DataSource, SourceEntities)],
+    http: &[HttpBinding],
 ) -> String {
     let mut text = String::new();
     let mut quoted = String::new();
@@ -537,7 +555,10 @@ fn context(
     let hints: Vec<&str> = classification
         .hints
         .iter()
-        .filter(|hint| described.iter().any(|(source, _)| source.name.0 == **hint))
+        .filter(|hint| {
+            described.iter().any(|(source, _)| source.name.0 == **hint)
+                || http.iter().any(|binding| binding.name.0 == **hint)
+        })
         .map(String::as_str)
         .collect();
     let _ = writeln!(
@@ -563,6 +584,22 @@ fn context(
             for (kind, entity) in entities {
                 let _ = writeln!(text, "  - {}", entity_line(*kind, entity));
             }
+        }
+        for binding in http {
+            let paths: Vec<String> = binding
+                .allow_paths
+                .iter()
+                .map(|path| format!("\"{}\"", inert(path)))
+                .collect();
+            let _ = writeln!(
+                text,
+                "- source `{}` (http GET of one allowed path)\n  - get: input {{\"path\": one of \
+                 [{}], \"query\": {{<name>: <value>, ...}} or absent}}; the answer is the response \
+                 body, at most {} bytes",
+                inert(&binding.name.0),
+                paths.join(", "),
+                binding.max_bytes
+            );
         }
     }
     if projection.actions.iter().any(|action| action == PROPOSE) {

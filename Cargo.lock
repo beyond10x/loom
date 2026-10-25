@@ -391,9 +391,11 @@ dependencies = [
  "chrono",
  "intake",
  "loom",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "serde_yaml_ng",
+ "tokio",
 ]
 
 [[package]]

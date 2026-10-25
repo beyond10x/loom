@@ -11,6 +11,15 @@
 //!   submits clock evidence; a read Connectors refuses is refused and submits none. A read that
 //!   finds Connectors or the connection down (the program timed out, or `not_granted`) stops the
 //!   run with an effect error and is reported by [`DataSourceEffects::unavailable`].
+//!   The read is dispatched by the binding's kind: a source among the port's `connectors` sources
+//!   goes to Connectors as above; one among its `http` bindings ([`DataSourceEffects::with_http`],
+//!   `story:agent-http-binding`) is read by `get` only, with `input: {path, query?}`, through the
+//!   [`HttpReader`] the host supplied, which decides `loom.agent.AdmitHttpRead` and
+//!   `loom.agent.BoundHttpAnswer` and opens the one connection. The port itself opens none. A
+//!   read the reader refuses (the method, the path, the bearer, a redirect, a failing status) is
+//!   refused and submits none; an endpoint it cannot reach stops the run as Connectors down does.
+//!   An answer cut at the binding's `max_bytes` reaches the transcript marked as cut. Adding an
+//!   `http` binding changes no `connectors` read: the two lists are disjoint by construction.
 //! - `reply.propose {text}` appends the proposal to the turn's record and submits
 //!   `reply_proposed`. It runs no command and sends nothing.
 //! - `reply.decline {reason}` records the decline and submits `reply_declined`.
@@ -33,8 +42,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use loom::agent::{AdmitSend, AdmitSendOutcome, SendRefusalReason, SendRefused, WriteMode};
-use loom::datasource::{DataSource, ReadKind, WriteApproval, WriteOperation, WriteResult};
+use loom::agent::{
+    AdmitSend, AdmitSendOutcome, HttpBinding, SendRefusalReason, SendRefused, WriteMode,
+};
+use loom::datasource::{
+    DataSource, ReadKind, SourceName, WriteApproval, WriteOperation, WriteResult,
+};
 use loom::plugin::{InboundItem, Projection, Proposal, SourceRead};
 use loom_sdk::CanonGovernor;
 use loom_sdk::commission::model::json::{self as model, Value};
@@ -79,6 +92,57 @@ pub const SEND_WINDOW_SECONDS: i64 = 60 * 60;
 /// The file in the state directory counting sends: one JSON line per performed send, its
 /// instant (`at`, RFC 3339) and idempotency key (`key`).
 pub const SENDS_FILE: &str = "sends.jsonl";
+
+/// What a read of an `http` binding answered, as the reader bounded it: the response status, the
+/// body read up to the binding's `max_bytes` (decoded as UTF-8, lossily), and whether it was cut
+/// there (`loom.agent.BoundHttpAnswer` `cut`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HttpAnswer {
+    /// The response status.
+    pub status: i64,
+    /// The body, at most `max_bytes` of it.
+    pub body: String,
+    /// Whether the body was cut at `max_bytes`.
+    pub cut: bool,
+}
+
+/// Why an [`HttpReader`] did not answer a read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HttpReadError {
+    /// The read is refused, before any request (`loom.agent.AdmitHttpRead`: the method, the
+    /// path, the bearer) or by the answer (`loom.agent.BoundHttpAnswer`: a redirect, a failing
+    /// status). The step is refused and the run goes on; the text names the reason in the enum's
+    /// spelling.
+    Refused(String),
+    /// The endpoint could not be reached, or did not answer in time: the run stops with an effect
+    /// error, and the host counts it against no item.
+    Unavailable(String),
+}
+
+/// Reads an `http` binding for the port: one GET of `path` with `query` under the binding's
+/// `base_url`, as `loom.agent.AdmitHttpRead` and `loom.agent.BoundHttpAnswer` decide.
+/// `b10x-loom-agent` supplies one; the port itself opens no connection.
+pub trait HttpReader: Send + Sync {
+    /// Reads `binding` at `path` with `query`, once.
+    ///
+    /// # Errors
+    /// [`HttpReadError::Refused`] for a read the binding or the answer refuses;
+    /// [`HttpReadError::Unavailable`] for an endpoint out of reach.
+    fn read(
+        &self,
+        binding: &HttpBinding,
+        path: &str,
+        query: &[(String, String)],
+    ) -> Result<HttpAnswer, HttpReadError>;
+}
+
+/// The `http` bindings a turn may read, and the reader that reads them.
+pub struct HttpSources<'a> {
+    /// The bindings; the port keeps those the projection names.
+    pub bindings: Vec<HttpBinding>,
+    /// What reads them.
+    pub reader: &'a dyn HttpReader,
+}
 
 /// How a turn may send its proposed reply: `reply.send` of `operator-reply@1`.
 #[derive(Debug, Clone)]
@@ -229,6 +293,9 @@ pub struct DataSourceEffects<'a, S> {
     item: &'a InboundItem,
     connectors: ConnectorsCli,
     sources: Vec<DataSource>,
+    projected: Vec<SourceName>,
+    http: Vec<HttpBinding>,
+    reader: Option<&'a dyn HttpReader>,
     actions: Vec<String>,
     send: Option<SendPolicy>,
     log: Mutex<Log>,
@@ -257,11 +324,27 @@ impl<'a, S: FallibleCaseStore> DataSourceEffects<'a, S> {
                 .filter(|source| projection.sources.contains(&source.name))
                 .cloned()
                 .collect(),
+            projected: projection.sources.clone(),
+            http: Vec::new(),
+            reader: None,
             actions: projection.actions.clone(),
             send: None,
             log: Mutex::default(),
             ids: AtomicU64::new(1),
         }
+    }
+
+    /// The port reading the `http` bindings of `sources` that the projection names, through its
+    /// reader. A binding the projection does not name is dropped here, so no read reaches it.
+    #[must_use]
+    pub fn with_http(mut self, sources: HttpSources<'a>) -> Self {
+        self.http = sources
+            .bindings
+            .into_iter()
+            .filter(|binding| self.projected.contains(&binding.name))
+            .collect();
+        self.reader = Some(sources.reader);
+        self
     }
 
     /// The port performing `reply.send` under `policy`, when the projection admits it. A policy
@@ -351,6 +434,9 @@ impl<'a, S: FallibleCaseStore> DataSourceEffects<'a, S> {
             }
         };
         let Some(source) = self.sources.iter().find(|source| source.name.0 == name) else {
+            if let Some(binding) = self.http.iter().find(|binding| binding.name.0 == name) {
+                return self.read_http(binding, kind, &input);
+            }
             return Ok(self.refused(format!(
                 "the source `{name}` is outside this turn's projection"
             )));
@@ -411,6 +497,101 @@ impl<'a, S: FallibleCaseStore> DataSourceEffects<'a, S> {
             report,
             attempt: None,
             audit: result.audit_ref.map(ConnectorAuditRef),
+            usage: None,
+        }))
+    }
+
+    /// `source.read` of an `http` binding: `get` only, `input: {path, query?}`, through the
+    /// reader (see the module documentation).
+    fn read_http(
+        &self,
+        binding: &HttpBinding,
+        kind: ReadKind,
+        input: &Value,
+    ) -> Result<EffectOutcome, EffectError> {
+        let name = binding.name.0.as_str();
+        if kind != ReadKind::Get {
+            return Ok(self.refused(format!(
+                "the source `{name}` declares no {} read in this turn's projection: an http \
+                 binding is read by get",
+                kind_name(kind)
+            )));
+        }
+        let Some(path) = text(input, "path") else {
+            return Ok(self.refused(format!("source.read of `{name}` names no `path`")));
+        };
+        let mut query = Vec::new();
+        match input.member("query") {
+            None | Some(Value::Null) => {}
+            Some(Value::Object(members)) => {
+                for (key, value) in members {
+                    let Value::Text(value) = value else {
+                        return Ok(self.refused(format!(
+                            "source.read of `{name}` has a `query` member `{key}` that is not text"
+                        )));
+                    };
+                    query.push((key.clone(), value.clone()));
+                }
+            }
+            Some(_) => {
+                return Ok(self.refused(format!(
+                    "source.read of `{name}` has a `query` that is not an object"
+                )));
+            }
+        }
+        let Some(reader) = self.reader else {
+            return Ok(self.refused(format!(
+                "the source `{name}` has no http reader in this turn"
+            )));
+        };
+        let input_text = text_of(input);
+        let answer = match reader.read(binding, path, &query) {
+            Ok(answer) => answer,
+            Err(HttpReadError::Refused(why)) => {
+                return Ok(self.refused(format!("the read of `{name}` was refused: {why}")));
+            }
+            Err(HttpReadError::Unavailable(why)) => {
+                return Err(self.unavailable_error(format!(
+                    "the read of `{name}` found the endpoint unavailable: {why}"
+                )));
+            }
+        };
+        let report = Value::Object(vec![
+            ("action".to_owned(), Value::Text(READ.to_owned())),
+            ("source".to_owned(), Value::Text(name.to_owned())),
+            (
+                "kind".to_owned(),
+                Value::Text(kind_name(ReadKind::Get).to_owned()),
+            ),
+            ("path".to_owned(), Value::Text(path.to_owned())),
+            (
+                "status".to_owned(),
+                Value::Number(answer.status.to_string()),
+            ),
+            ("cut".to_owned(), Value::Bool(answer.cut)),
+        ]);
+        self.evidence("source_read", report.clone())?;
+        let mark = if answer.cut {
+            format!(
+                " [cut at max_bytes {}: the answer is longer]",
+                binding.max_bytes
+            )
+        } else {
+            String::new()
+        };
+        let mut log = self.log();
+        log.reads.push(SourceRead {
+            source: binding.name.clone(),
+            kind,
+        });
+        log.transcript.push(format!(
+            "source.read {name} get {input_text} answered (untrusted data): {}{mark}",
+            cut(&answer.body)
+        ));
+        Ok(EffectOutcome::Performed(EffectOutcomePerformed {
+            report,
+            attempt: None,
+            audit: None,
             usage: None,
         }))
     }

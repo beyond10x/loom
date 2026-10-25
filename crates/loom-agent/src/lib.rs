@@ -32,12 +32,21 @@
 //!
 //! Serving a checked spec is [`serve`]: [`SpecPlugin`], the plugin of the host built from it,
 //! which `b10x-loom agent serve --spec --state` runs; its sends decide `loom.agent.AdmitSend`
-//! ([`admit_send`]).
+//! ([`admit_send`]), and its `http` bindings are read by [`http`]: [`HttpGet`], deciding
+//! `loom.agent.AdmitHttpRead` ([`admit_http_read`]) before any request and
+//! `loom.agent.BoundHttpAnswer` ([`bound_http_answer`]) over the answer.
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
 use loom_sdk::agent::{AgentSpec, Binding};
 
+pub use http::{
+    HTTP_TIMEOUT, HttpGet, admit_http_read, bound_http_answer, http_refusal_spelling, path_allowed,
+};
+pub use loom::agent::{
+    AdmitHttpRead, AdmitHttpReadOutcome, BoundHttpAnswer, BoundHttpAnswerOutcome,
+    HttpReadRefusalReason, HttpReadRefused,
+};
 pub use loom_sdk::agent::{
     AdmitSend, AdmitSendOutcome, RefusalReason, SendRefusalReason, SendRefused, SpecRefused,
     WriteMode,
@@ -48,6 +57,7 @@ pub use serve::{
 };
 
 mod credentials;
+pub mod http;
 pub mod serve;
 
 /// What a serveable spec was checked as: its agent id, the inner loop's protocol (none without

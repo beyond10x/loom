@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "8745d4eaaf221f3a1bb550570e3c053abb7a0be0d3ecc2ae5c5c74c9c641f0cd",
-    "contract_digest": "ee901859b361adccaddf46e3c87dad5bc8dd71ec3a5f0fb52c94b6a87e0042d4"
+    "source_digest": "09af172219b0fefa59e5b1327d8ad0c0d091a965ea1b67545155c88d6e8aeb27",
+    "contract_digest": "61002ca6f629015a9d3d582787f5c77dc4c33faaa158cf586504ae6079c93399"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -132,6 +132,13 @@
     {
       "kind": "domain_type",
       "source": "loom.agent.HttpBinding",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.agent.HttpReadRefusalReason",
       "disposition": {
         "disposition": "generated"
       }
@@ -1069,6 +1076,20 @@
     },
     {
       "kind": "command_contract",
+      "source": "loom.agent.AdmitHttpRead",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.agent.AdmitHttpRead",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
       "source": "loom.agent.AdmitSend",
       "disposition": {
         "disposition": "generated"
@@ -1077,6 +1098,20 @@
     {
       "kind": "command_behavior",
       "source": "loom.agent.AdmitSend",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.agent.BoundHttpAnswer",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.agent.BoundHttpAnswer",
       "disposition": {
         "disposition": "generated"
       }
@@ -1262,6 +1297,13 @@
     {
       "kind": "event_type",
       "source": "loom.session.SessionChangeProposed",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.agent.HttpReadRefused",
       "disposition": {
         "disposition": "generated"
       }

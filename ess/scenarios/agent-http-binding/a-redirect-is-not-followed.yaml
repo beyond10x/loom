@@ -1,0 +1,15 @@
+# story agent-http-binding: a redirect is never followed; the read is refused, and the host names
+# the location in the refusal the model reads.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-redirect-is-not-followed
+summary: A 302 answer is a refused read, not a second request.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.BoundHttpAnswer
+    input: {status: 302, bytes: 0, max_bytes: 262144}
+    outcome: redirected
+    error:
+      name: loom.agent.HttpReadRefused
+      fields: {reason: Redirected}

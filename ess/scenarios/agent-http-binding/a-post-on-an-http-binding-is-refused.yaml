@@ -1,0 +1,16 @@
+# story agent-http-binding: an `http` binding whose method is not GET starts no request. `agent
+# check` refuses the method first (`an-http-binding-whose-method-is-not-get-is-refused`); a host
+# refuses it again before any request.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-post-on-an-http-binding-is-refused
+summary: A read of an http binding whose method is POST is refused before any request.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.AdmitHttpRead
+    input: {method: POST, path_allowed: true, bearer_missing: false}
+    outcome: method-not-get
+    error:
+      name: loom.agent.HttpReadRefused
+      fields: {reason: MethodNotGet}

@@ -483,6 +483,17 @@ types:
     kind: enum
     variants: [WritesNone, OutsideAllowList, NoProposal, RateLimited]
 
+  # Why a read of an `http` binding answers the model nothing (story agent-http-binding), one
+  # reason per refusal of `AdmitHttpRead` and `BoundHttpAnswer`: the binding's method is not
+  # `GET` (`MethodNotGet`); the read's path is not exactly one of the binding's `allow_paths`, or
+  # holds a `..` segment or an encoded separator (`PathNotAllowed`); the binding names a
+  # `bearer_env` the host has no value for (`BearerMissing`); the endpoint answered a redirect,
+  # which is never followed (`Redirected`); the endpoint answered a status outside 2xx
+  # (`FailedStatus`).
+  - name: loom.agent.HttpReadRefusalReason
+    kind: enum
+    variants: [MethodNotGet, PathNotAllowed, BearerMissing, Redirected, FailedStatus]
+
 errors:
   # The refusal of `AdmitSend`: why, and whether it is final. A final refusal ends the turn's run
   # (Commission's `EffectOutcomeRefused.ends_run`): the item is handled and its reply never sent. A
@@ -493,6 +504,13 @@ errors:
         type: loom.agent.SendRefusalReason
       - name: final
         type: Boolean
+
+  # The refusal of `AdmitHttpRead` or `BoundHttpAnswer`: why. It ends the step refused, never the
+  # run: the model is told the refusal as data and the turn goes on.
+  - name: loom.agent.HttpReadRefused
+    fields:
+      - name: reason
+        type: loom.agent.HttpReadRefusalReason
 
   # The one refusal of `CheckAgentSpec`: why, which member of the document (a path such as
   # `states[0].actions[2]` or `bindings[1].method`; `document` when none), and the detail a person
@@ -610,4 +628,74 @@ commands:
             - granted == false
         accepts: nothing
       - name: admitted
+        accepts: nothing
+
+  # Whether a `source.read` of an `http` binding starts a request: `b10x-loom agent serve` decides
+  # it before any request, over the binding and the read's path. `method` is the binding's
+  # `method`; `path_allowed` whether the read's path is exactly one of the binding's
+  # `allow_paths`, holding no `..` segment and no encoded separator, which the host decides over
+  # the two texts; `bearer_missing` whether the binding names a `bearer_env` the host has no value
+  # for. The first refusal in declaration order is the answer; `admitted` is one GET of the path
+  # under the binding's `base_url`. Nothing is held between two decisions.
+  - name: loom.agent.AdmitHttpRead
+    input:
+      - name: method
+        type: String
+      - name: path_allowed
+        type: Boolean
+      - name: bearer_missing
+        type: Boolean
+    outcomes:
+      - name: method-not-get
+        when: method != GET
+        error: loom.agent.HttpReadRefused
+        payload:
+          loom.agent.HttpReadRefused: {reason: MethodNotGet}
+      - name: path-not-allowed
+        when: path_allowed == false
+        error: loom.agent.HttpReadRefused
+        payload:
+          loom.agent.HttpReadRefused: {reason: PathNotAllowed}
+      - name: bearer-missing
+        when: bearer_missing == true
+        error: loom.agent.HttpReadRefused
+        payload:
+          loom.agent.HttpReadRefused: {reason: BearerMissing}
+      - name: admitted
+        accepts: nothing
+
+  # What a turn reads of an `http` binding's answer: `status` is the response status, `bytes` how
+  # many bytes of the body the host read (it reads at most one past the bound), `max_bytes` the
+  # binding's bound. A redirect is never followed (`redirected`); a status outside 2xx answers
+  # nothing (`failed-status`); an answer past the bound reaches the model cut at `max_bytes` and
+  # marked as cut (`cut`); any other reaches it whole (`whole`).
+  - name: loom.agent.BoundHttpAnswer
+    input:
+      - name: status
+        type: Integer
+      - name: bytes
+        type: Integer
+      - name: max_bytes
+        type: Integer
+    outcomes:
+      - name: redirected
+        when:
+          all:
+            - status >= 300
+            - status <= 399
+        error: loom.agent.HttpReadRefused
+        payload:
+          loom.agent.HttpReadRefused: {reason: Redirected}
+      - name: failed-status
+        when:
+          any:
+            - status <= 199
+            - status >= 400
+        error: loom.agent.HttpReadRefused
+        payload:
+          loom.agent.HttpReadRefused: {reason: FailedStatus}
+      - name: cut
+        when: bytes > max_bytes
+        accepts: nothing
+      - name: whole
         accepts: nothing

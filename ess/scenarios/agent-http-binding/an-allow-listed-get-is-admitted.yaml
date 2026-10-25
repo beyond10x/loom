@@ -1,0 +1,11 @@
+# story agent-http-binding: a GET of an allow-listed path with its bearer at hand is one request.
+type: ess-scenario/4
+domain: loom.agent
+scenario: an-allow-listed-get-is-admitted
+summary: A GET of an allow-listed path is admitted.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.AdmitHttpRead
+    input: {method: GET, path_allowed: true, bearer_missing: false}
+    outcome: admitted

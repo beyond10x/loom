@@ -1,0 +1,15 @@
+# story agent-http-binding: a path that is not exactly one of `allow_paths`, or holds `..` or an
+# encoded separator, starts no request.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-path-outside-allow-paths-is-refused
+summary: A read whose path the binding does not allow is refused before any request.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.AdmitHttpRead
+    input: {method: GET, path_allowed: false, bearer_missing: false}
+    outcome: path-not-allowed
+    error:
+      name: loom.agent.HttpReadRefused
+      fields: {reason: PathNotAllowed}

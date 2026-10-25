@@ -1,0 +1,14 @@
+# story agent-http-binding: a status outside 2xx answers the model nothing but the refusal.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-failing-status-answers-nothing
+summary: A 503 answer is a refused read.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.BoundHttpAnswer
+    input: {status: 503, bytes: 0, max_bytes: 262144}
+    outcome: failed-status
+    error:
+      name: loom.agent.HttpReadRefused
+      fields: {reason: FailedStatus}
