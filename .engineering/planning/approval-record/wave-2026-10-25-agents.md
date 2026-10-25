@@ -57,3 +57,7 @@ One opening store commit on `wave/2026-10-25-agents` (this record, the Scope sec
 | agent-serve | impl/agent-serve from b40e1bb9 | 91fc7bc8 unit, db82a2f1 adversary round 1 | loom-w2-agent-serve (finished after merge) | its target/ | ~/.cache/scratch/fbf1604f-db7b-423e-bed5-b9a4dc96d66a/w2/agent-serve | merged into the integration branch at bc063973; review-result:adversary-agent-serve-pass-1 (6 findings, all fixed) |
 | agent-http-binding | impl/agent-http-binding from 62ea2a89 | a96c9230 unit, fix round 1 | loom-w2-agent-http-binding (finished after merge) | its target/ | ~/.cache/scratch/fbf1604f-db7b-423e-bed5-b9a4dc96d66a/w2/agent-http-binding | merged into the integration branch at 611d4742; review-result:adversary-agent-http-binding-pass-1 (7 findings, all fixed) |
 | agent-a2a | impl/agent-a2a from 62ea2a89 | de057abe unit, 4926e925 fix round 1 | loom-w2-agent-a2a (finished after merge) | its target/ | ~/.cache/scratch/fbf1604f-db7b-423e-bed5-b9a4dc96d66a/w2/agent-a2a | merged into the integration branch at 3e34cd75 (38 conflicts with unit 2 resolved, generated output regenerated); review-result:adversary-agent-a2a-pass-1 (7 findings, all fixed) |
+
+## Close
+
+main 62f2e664 merged at 031c338a; ESS pin 0.69.0 -> 0.69.2 in the next commit; one full gate on the integration branch: `task check` 2248 passed, 0 failed, 9 ignored (401 result lines); `task plan` valid; six drift checks no drift. Stories agent-serve, agent-http-binding, agent-a2a -> implemented. Landing: PR from wave/2026-10-25-agents, fast-forward of the green bot head to main.
