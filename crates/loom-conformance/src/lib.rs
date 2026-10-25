@@ -4,7 +4,7 @@
 //! runs against, and [`run_suite`] runs one suite against it and returns the
 //! `ess-conformance-report/2` document a caller reads the verdict from.
 //!
-//! Every command is answered by `b10x-loom-executor`, over two records:
+//! Every `loom.run` command is answered by `b10x-loom-executor`, over two records:
 //!
 //! * `ProjectCatalogue` by the generated behaviour of
 //!   `b10x_loom_executor::projection::CatalogueRecord`;
@@ -23,10 +23,19 @@
 //! through it, and the view `AgentSessions` reads the sessions it recorded (the `session` module
 //! says how).
 //!
-//! This crate translates values and records what was published. It decides no outcome: each
-//! answer is the outcome the executor returned, and each event is the one it returned.
+//! The `loom.agent` domain's `CheckAgentSpec` is answered by `b10x_loom_agent::check_text` over
+//! the plugin catalog (`loom_protocols::ProtocolCatalog::plugins`): `serveable`, or the branch of
+//! the refusal's reason with `SpecRefused` carrying its reason, member and detail. The target plays
+//! the file system for its `path` (the `agent` module says how).
 //!
-//! # The one external outcome
+//! This crate translates values and records what was published. It decides no outcome: each
+//! answer is the outcome the executor or the check returned, and each event is the one it
+//! returned.
+//!
+//! # The external outcomes
+//!
+//! `CheckAgentSpec`'s eight refusals are `external:`; a scenario forcing one of them hands the
+//! check the fixture holding that refusal's one defect (the `agent` module).
 //!
 //! `RevalidateSelection`'s `not-in-frontier` is `external:` in the specification, and the executor
 //! answers it from the frontier action ids in the command's input, which a Loom reads from the
@@ -41,6 +50,7 @@
 //! observation of one scenario can satisfy another. Consistency tokens come from a counter, so two
 //! runs of one suite report the same thing.
 
+mod agent;
 pub mod codec;
 mod session;
 
@@ -122,6 +132,9 @@ struct Live {
     log: Vec<ObservedEvent>,
     /// Whether the next `RevalidateSelection` is to find its action outside the frontier.
     not_in_frontier: bool,
+    /// The refusal branch of `CheckAgentSpec` the scenario forced for the next check, whose
+    /// fixture the target reads when the input's path names no file (the `agent` module).
+    forced_check: Option<String>,
     /// The invocations performed, which consistency tokens are minted from.
     sequence: u64,
     /// The sessions the session executor recorded, one `AgentSessions` row each.
@@ -193,6 +206,7 @@ impl ConformanceTarget for LoomTarget {
             session::PROPOSE_SESSION_CHANGE => {
                 session::propose_session_change(&mut live, input, correlation)?
             }
+            agent::CHECK_AGENT_SPEC => agent::check_agent_spec(&mut live, input)?,
             other => {
                 return Err(TargetError::unavailable(
                     format!("invoking `{other}`"),
@@ -341,14 +355,22 @@ impl ConformanceTarget for LoomTarget {
         request: ExternalOutcomeControl,
     ) -> Result<(), TargetError> {
         let forced = request.force.to_string();
-        if forced != format!("{REVALIDATE_SELECTION}/{NOT_IN_FRONTIER}") {
-            return Err(TargetError::unavailable(
-                format!("forcing `{forced}`"),
-                "the specification declares no such external outcome",
-            ));
+        if forced == format!("{REVALIDATE_SELECTION}/{NOT_IN_FRONTIER}") {
+            self.live.borrow_mut().not_in_frontier = true;
+            return Ok(());
         }
-        self.live.borrow_mut().not_in_frontier = true;
-        Ok(())
+        if let Some(branch) = forced
+            .strip_prefix(agent::CHECK_AGENT_SPEC)
+            .and_then(|rest| rest.strip_prefix('/'))
+            .filter(|branch| agent::is_branch(branch))
+        {
+            self.live.borrow_mut().forced_check = Some(branch.to_owned());
+            return Ok(());
+        }
+        Err(TargetError::unavailable(
+            format!("forcing `{forced}`"),
+            "the specification declares no such external outcome",
+        ))
     }
 
     fn redeliver_event(&self, request: RedeliveryRequest) -> Result<(), TargetError> {

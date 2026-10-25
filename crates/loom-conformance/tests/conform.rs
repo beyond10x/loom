@@ -109,7 +109,8 @@ fn ess(args: &[&str], out: Option<&Path>) -> String {
 }
 
 /// The suite `ess/` obliges, synthesized fresh with declared coverage (`--suite-format 5`), so the
-/// report can qualify the run `passed` rather than `inconclusive`.
+/// report can qualify the run `passed` rather than `inconclusive`, and with the authored scenarios
+/// `ess/ess-inputs.yaml` lists (`--scenarios ess`) beside the generated ones.
 fn synthesize(out: &Path) -> String {
     ess(
         &[
@@ -117,6 +118,8 @@ fn synthesize(out: &Path) -> String {
             "conform",
             "synthesize",
             "--path",
+            "ess",
+            "--scenarios",
             "ess",
             "--suite-format",
             "5",

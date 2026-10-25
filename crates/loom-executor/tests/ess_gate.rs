@@ -89,6 +89,8 @@ fn run_gate(dir: &Path, suite_out: &Path) -> Result<Json, GateFailure> {
         "synthesize",
         "--path",
         path_arg(dir),
+        "--scenarios",
+        path_arg(dir),
         "--out",
         path_arg(suite_out),
     ]);
@@ -286,11 +288,20 @@ fn copy_with_probe_marker(name: &str) -> (PathBuf, usize) {
 // Item 3: the whole gate over a copy that synthesize refuses fails at step 3, after steps 1 and 2
 // held. `Optional<Binary64>` validates and compiles, and the conformance suite refuses it. Every
 // confidence is retyped: `SelectAction` copies its input into `Selection.confidence`, and
-// retyping one side alone fails validation instead.
+// retyping one side alone fails validation instead. The copy lists no authored scenarios
+// (`scenarios: []`): validate checks the codecs the authored scenarios need, and refuses
+// `Binary64` for them (`ESS-AUTHOR-036`) at step 1, before synthesize is reached.
 #[test]
 fn gate_over_a_copy_synthesize_refuses_fails_at_synthesize() {
     let copy = scratch("gate_refused_copy").join("ess");
     copy_dir(&spec_dir(), &copy);
+    let inputs = copy.join("ess-inputs.yaml");
+    let listed = fs::read_to_string(&inputs).expect("read ess-inputs.yaml copy");
+    let at = listed
+        .find("\nscenarios:")
+        .expect("ess-inputs.yaml has a top-level `scenarios:` list");
+    fs::write(&inputs, format!("{}\nscenarios: []\n", &listed[..at]))
+        .expect("write ess-inputs.yaml copy");
     let run = copy.join("domains/run.yaml");
     let text = fs::read_to_string(&run).expect("read run.yaml copy");
     assert!(
