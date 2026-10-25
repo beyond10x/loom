@@ -18,9 +18,11 @@ chrono = "0.4"
 llm-core = { package = "b10x-llm-core", git = "https://github.com/beyond10x/llm", tag = "0.8.1" }
 intake_model = { package = "intake", path = "../../generated/rust/intake" }
 loom = { path = "../../generated/rust/loom" }
+reqwest = { version = "0.12", default-features = false }
 serde = "1"
 serde_json = "1"
 serde_yaml_ng = "0.10"
+tokio = { version = "1.53", features = ["rt"] }
 
 [dev-dependencies]
 b10x-loom-protocols = { path = "../loom-protocols" }

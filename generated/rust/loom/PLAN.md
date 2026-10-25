@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest 8745d4eaaf221f3a1bb550570e3c053abb7a0be0d3ecc2ae5c5c74c9c641f0cd
-  contract digest ee901859b361adccaddf46e3c87dad5bc8dd71ec3a5f0fb52c94b6a87e0042d4
+  model digest 09af172219b0fefa59e5b1327d8ad0c0d091a965ea1b67545155c88d6e8aeb27
+  contract digest 61002ca6f629015a9d3d582787f5c77dc4c33faaa158cf586504ae6079c93399
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-197 capabilities: **195 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+203 capabilities: **201 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -32,6 +32,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.agent.EgressAperture` |
 | domain type | `loom.agent.ExposeSpec` |
 | domain type | `loom.agent.HttpBinding` |
+| domain type | `loom.agent.HttpReadRefusalReason` |
 | domain type | `loom.agent.InnerLoop` |
 | domain type | `loom.agent.KubernetesDeploy` |
 | domain type | `loom.agent.KubernetesEgress` |
@@ -165,8 +166,12 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | entity lifecycle | `loom.run.Selection` |
 | entity lifecycle | `loom.run.SelectionRecord` |
 | entity lifecycle | `loom.session.AgentSession` |
+| command contract | `loom.agent.AdmitHttpRead` |
+| command behaviour | `loom.agent.AdmitHttpRead` |
 | command contract | `loom.agent.AdmitSend` |
 | command behaviour | `loom.agent.AdmitSend` |
+| command contract | `loom.agent.BoundHttpAnswer` |
+| command behaviour | `loom.agent.BoundHttpAnswer` |
 | command contract | `loom.agent.CheckAgentSpec` |
 | command contract | `loom.run.OverruleSelection` |
 | command behaviour | `loom.run.OverruleSelection` |
@@ -190,6 +195,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | event type | `loom.run.SelectionRecorded` |
 | event type | `loom.run.SelectionStale` |
 | event type | `loom.session.SessionChangeProposed` |
+| error type | `loom.agent.HttpReadRefused` |
 | error type | `loom.agent.SendRefused` |
 | error type | `loom.agent.SpecRefused` |
 | error type | `loom.run.ActionNotInCatalogue` |

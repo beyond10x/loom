@@ -208,6 +208,8 @@ impl ConformanceTarget for LoomTarget {
             }
             agent::CHECK_AGENT_SPEC => agent::check_agent_spec(&mut live, input)?,
             agent::ADMIT_SEND => agent::admit_send_command(input),
+            agent::ADMIT_HTTP_READ => agent::admit_http_read_command(input),
+            agent::BOUND_HTTP_ANSWER => agent::bound_http_answer_command(input),
             other => {
                 return Err(TargetError::unavailable(
                     format!("invoking `{other}`"),

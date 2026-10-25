@@ -1,0 +1,11 @@
+# story agent-http-binding: a body within `max_bytes` reaches the model whole.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-response-within-max-bytes-is-read-whole
+summary: A 200 answer within max_bytes is read whole.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.BoundHttpAnswer
+    input: {status: 200, bytes: 4096, max_bytes: 262144}
+    outcome: whole

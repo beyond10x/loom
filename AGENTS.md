@@ -681,6 +681,39 @@ plugin, the authority, the admission and the approval flow on the fake `connecto
 No live run against a channel was made for this story; `docs/qualification/2026-10-25-agent-serve.md`
 says what one is.
 
+An `http` binding is read by a served turn (`story:agent-http-binding`): `source.read {source,
+kind: get, input: {path, query?}}`, `get` only. The effect port dispatches a read by the binding's
+kind (`DataSourceEffects::with_http`, `TurnOptions::http`; a `connectors` source goes to
+Connectors as before, and an `http` binding beside it changes no such read,
+`crates/loom-plugin/tests/http_reads.rs`) to the `HttpReader` the host supplied; `SpecPlugin`
+supplies `HttpGet` (`crates/loom-agent/src/http.rs`) over its spec's `http` bindings, and
+`project` admits them as sources of a state. `HttpGet` decides `loom.agent.AdmitHttpRead`
+(`admit_http_read`) before any request: the binding's method is `GET` (`check` refuses another
+first; the host refuses it again), the path is allowed (`path_allowed`: exactly one of
+`allow_paths` and a `loom_sdk::agent::plain_http_path`, which starts with `/` and holds no `\`,
+no `.` or `..` segment, no percent-encoded separator or dot, no `?`, `#`, whitespace or control
+character; held even for an allow list naming such a path, and the decoder refuses such an
+`allow_paths` entry, so `check` answers `Malformed`) and the variable `bearer_env` names, when one
+is named, holds text (unset, empty or blank is `BearerMissing`). The one request is a GET of `base_url` + `path`
+with the query as parameters, on reqwest with redirects off and no proxy (as llm's `b10x-llm-http`
+is built; that crate exposes no GET at 0.8.1, so the GET is composed here on the same client),
+bounded by `HTTP_TIMEOUT`; the bearer is sent as an `authorization` header marked sensitive and
+never repeated. It then decides `loom.agent.BoundHttpAnswer` (`bound_http_answer`) over the
+status and the bytes read (at most one past `max_bytes`; the body of a redirect or a failure is
+never read): a redirect is a refusal naming at most 256 bytes of the location (`LOCATION_BYTES`)
+and no more than `max_bytes`, marked when cut, a status outside 2xx a refusal naming it, a body
+past the bound is cut at it and the transcript entry is marked `[cut at max_bytes N: the answer
+is longer]`, any other is read whole. The text never exceeds `max_bytes`: the bytes are cut
+first, backed off to a character boundary, and a byte that is not UTF-8 is dropped. A refusal is a refused step naming the reason in
+the enum's spelling; an endpoint out of reach is `PluginError::Unavailable`, as Connectors down
+is. The answer reaches the model only through the transcript's data block, as a Connectors read
+does (`a_log_line_is_data_not_instructions` in `crates/loom-plugin/tests/http_reads.rs`). The
+scenarios are `ess/scenarios/agent-http-binding/`; the tests `crates/loom-agent/tests/http.rs`
+(a loopback listener, no network; the bearer test reads `CARGO_PKG_NAME`, which cargo sets for
+the test process) and `crates/loom-plugin/tests/http_reads.rs` (a fake reader). No live run
+against an endpoint was made; `docs/qualification/2026-10-25-agent-http-binding.md` says what
+one is.
+
 ## Plugin host
 
 `b10x-loom-plugin` (`crates/loom-plugin`) hosts a plugin (ADR `plugin-hooks`): a crate linked at

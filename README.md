@@ -271,7 +271,13 @@ held: the turn ends proposed naming its commission, `b10x-loom approve <COMMISSI
 --state <DIR>` grants it, and the host performs it at its next poll, or `b10x-loom agent resume
 <COMMISSION> --spec <FILE> --state <DIR>` performs it now, once. `writes.mode: none` sends nothing
 and `auto` is not served yet. The models are the spec's `model` section, or `--catalog` route
-aliases as `plugin run` takes them. SIGTERM ends the host after the item it is handling.
+aliases as `plugin run` takes them. SIGTERM ends the host after the item it is handling. An
+`http` binding of the spec is read by `source.read` with `kind: get` and `input: {path, query?}`:
+one GET of a path exactly in its `allow_paths` under its `base_url`, carrying the bearer the
+variable `bearer_env` names, following no redirect, the body cut at `max_bytes` and marked; a path
+outside the list (or holding `\`, a `.` or `..` segment or an encoded separator, which
+`agent check` also refuses in the list), a method other than GET, a bearer variable unset, empty
+or blank, a redirect or a failing status is a refused read the model reads as data.
 
 ## Embed the runtime
 
@@ -387,7 +393,7 @@ surface kept stable within a release line, every port a host implements among it
 |---|---|
 | `b10x-loom-protocols` | The shared protocol catalog and verified offline installations |
 | `b10x-loom-cli` | The `b10x-loom` command line |
-| `b10x-loom-agent` | Checks a `loom.agent/1` spec before anything runs: the first reason it cannot be served, naming the member; `b10x-loom agent check` runs it. `SpecPlugin` serves a checked spec on the plugin host, holding each `reply.send` for approval; `b10x-loom agent serve` hosts it |
+| `b10x-loom-agent` | Checks a `loom.agent/1` spec before anything runs: the first reason it cannot be served, naming the member; `b10x-loom agent check` runs it. `SpecPlugin` serves a checked spec on the plugin host, holding each `reply.send` for approval and reading its `http` bindings by bounded GET (`HttpGet`); `b10x-loom agent serve` hosts it |
 | `b10x-loom-sdk` | The one crate an embedding depends on |
 | `b10x-loom-executor` | The executor: catalogue, action selection and argument generation, each model request one turn of an llm `Model` |
 | `b10x-loom-session-executor` | An `AgentExecutor` over a harness, Claude Code or Codex session run through metaharness (`0.15.0`) in a scratch copy: it proposes the session's change, never applies it, and summarizes the session's record as `trace-ir-summary/1`, with each tool call's decision and who made it; `SessionExecutor::from_spec` builds it from a `loom.agent/1` spec, offering only the spec's allowed tools; a b10x-harness session can read its endpoint's API key from the secret store by name (`api_key_secret`) |

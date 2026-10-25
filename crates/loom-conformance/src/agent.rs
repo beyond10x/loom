@@ -1,6 +1,7 @@
 //! `loom.agent.CheckAgentSpec`, answered by `b10x_loom_agent::check_text` over the plugin
-//! catalog (`ProtocolCatalog::plugins()`), and `loom.agent.AdmitSend`, answered by
-//! `b10x_loom_agent::admit_send` over its declared inputs alone.
+//! catalog (`ProtocolCatalog::plugins()`), and `loom.agent.AdmitSend`, `loom.agent.AdmitHttpRead`
+//! and `loom.agent.BoundHttpAnswer`, answered by `b10x_loom_agent::admit_send`,
+//! `admit_http_read` and `bound_http_answer` over their declared inputs alone.
 //!
 //! The command's one input is the document's `path`, and every refusal is `external:`: the
 //! document and the catalog are outside the input. This target plays the file system, as it plays
@@ -16,8 +17,10 @@
 use std::path::{Path, PathBuf};
 
 use b10x_loom_agent::{
-    AdmitSend, AdmitSendOutcome, RefusalReason, SendRefused, SpecRefused, WriteMode, admit_send,
-    check_text, send_refusal_spelling, spelling,
+    AdmitHttpRead, AdmitHttpReadOutcome, AdmitSend, AdmitSendOutcome, BoundHttpAnswer,
+    BoundHttpAnswerOutcome, HttpReadRefused, RefusalReason, SendRefused, SpecRefused, WriteMode,
+    admit_http_read, admit_send, bound_http_answer, check_text, http_refusal_spelling,
+    send_refusal_spelling, spelling,
 };
 use ess_conformance::target::{SemanticCommandResult, TargetError};
 use ess_primitives::node::Node;
@@ -30,6 +33,9 @@ pub(crate) const CHECK_AGENT_SPEC: &str = "loom.agent.CheckAgentSpec";
 const SPEC_REFUSED: &str = "loom.agent.SpecRefused";
 pub(crate) const ADMIT_SEND: &str = "loom.agent.AdmitSend";
 const SEND_REFUSED: &str = "loom.agent.SendRefused";
+pub(crate) const ADMIT_HTTP_READ: &str = "loom.agent.AdmitHttpRead";
+pub(crate) const BOUND_HTTP_ANSWER: &str = "loom.agent.BoundHttpAnswer";
+const HTTP_READ_REFUSED: &str = "loom.agent.HttpReadRefused";
 
 /// The refusal branches of `CheckAgentSpec`, each with the reason its fixture is refused for, in
 /// declaration order.
@@ -146,6 +152,54 @@ pub(crate) fn admit_send_command(input: &Input) -> Option<SemanticCommandResult>
         AdmitSendOutcome::RateLimited { error } => send_refusal("rate-limited", &error),
         AdmitSendOutcome::Held => took(ADMIT_SEND, "held"),
         AdmitSendOutcome::Admitted => took(ADMIT_SEND, "admitted"),
+    })
+}
+
+/// The refusal as `loom.agent.HttpReadRefused`, `reason` in the enum's spelling.
+fn http_refusal(command: &str, branch: &str, refused: &HttpReadRefused) -> SemanticCommandResult {
+    took(command, branch).with_error(error(HTTP_READ_REFUSED).with(
+        "reason",
+        Node::Text(http_refusal_spelling(refused.reason).to_owned()),
+    ))
+}
+
+/// Answers one `AdmitHttpRead`: `None` when an input is absent or cannot be held by its type.
+pub(crate) fn admit_http_read_command(input: &Input) -> Option<SemanticCommandResult> {
+    let request = AdmitHttpRead {
+        method: codec::text(input, "method")?,
+        path_allowed: codec::boolean(input, "path_allowed")?,
+        bearer_missing: codec::boolean(input, "bearer_missing")?,
+    };
+    Some(match admit_http_read(&request) {
+        AdmitHttpReadOutcome::MethodNotGet { error } => {
+            http_refusal(ADMIT_HTTP_READ, "method-not-get", &error)
+        }
+        AdmitHttpReadOutcome::PathNotAllowed { error } => {
+            http_refusal(ADMIT_HTTP_READ, "path-not-allowed", &error)
+        }
+        AdmitHttpReadOutcome::BearerMissing { error } => {
+            http_refusal(ADMIT_HTTP_READ, "bearer-missing", &error)
+        }
+        AdmitHttpReadOutcome::Admitted => took(ADMIT_HTTP_READ, "admitted"),
+    })
+}
+
+/// Answers one `BoundHttpAnswer`: `None` when an input is absent or cannot be held by its type.
+pub(crate) fn bound_http_answer_command(input: &Input) -> Option<SemanticCommandResult> {
+    let request = BoundHttpAnswer {
+        status: codec::integer(input, "status")?,
+        bytes: codec::integer(input, "bytes")?,
+        max_bytes: codec::integer(input, "max_bytes")?,
+    };
+    Some(match bound_http_answer(&request) {
+        BoundHttpAnswerOutcome::Redirected { error } => {
+            http_refusal(BOUND_HTTP_ANSWER, "redirected", &error)
+        }
+        BoundHttpAnswerOutcome::FailedStatus { error } => {
+            http_refusal(BOUND_HTTP_ANSWER, "failed-status", &error)
+        }
+        BoundHttpAnswerOutcome::Cut => took(BOUND_HTTP_ANSWER, "cut"),
+        BoundHttpAnswerOutcome::Whole => took(BOUND_HTTP_ANSWER, "whole"),
     })
 }
 

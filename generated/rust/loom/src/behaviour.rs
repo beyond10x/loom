@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 8745d4eaaf221f3a1bb550570e3c053abb7a0be0d3ecc2ae5c5c74c9c641f0cd
-// contract digest ee901859b361adccaddf46e3c87dad5bc8dd71ec3a5f0fb52c94b6a87e0042d4
+// model digest 09af172219b0fefa59e5b1327d8ad0c0d091a965ea1b67545155c88d6e8aeb27
+// contract digest 61002ca6f629015a9d3d582787f5c77dc4c33faaa158cf586504ae6079c93399
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -168,6 +168,28 @@ impl<P> Generated<P> {
     }
 }
 
+/// `loom.agent.AdmitHttpRead`, generated: every outcome is one the specification fully determines.
+impl<P> crate::agent::obligations::AdmitHttpReadBehavior for Generated<P>
+{
+    fn admit_http_read(&mut self, input: crate::agent::AdmitHttpRead) -> Result<crate::agent::AdmitHttpReadOutcome, UnmetObligation> {
+        let _ = &input;
+        // `method-not-get`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.method).map(|value| value.clone()), Some("GET".to_owned())).map(|value| !value), "loom.agent.AdmitHttpRead")? {
+            return Ok(crate::agent::AdmitHttpReadOutcome::MethodNotGet { error: crate::agent::HttpReadRefused { reason: crate::agent::HttpReadRefusalReason::MethodNotGet } });
+        }
+        // `path-not-allowed`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.path_allowed).map(|value| *value), Some(false)), "loom.agent.AdmitHttpRead")? {
+            return Ok(crate::agent::AdmitHttpReadOutcome::PathNotAllowed { error: crate::agent::HttpReadRefused { reason: crate::agent::HttpReadRefusalReason::PathNotAllowed } });
+        }
+        // `bearer-missing`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.bearer_missing).map(|value| *value), Some(true)), "loom.agent.AdmitHttpRead")? {
+            return Ok(crate::agent::AdmitHttpReadOutcome::BearerMissing { error: crate::agent::HttpReadRefused { reason: crate::agent::HttpReadRefusalReason::BearerMissing } });
+        }
+        // `admitted`: the default.
+        return Ok(crate::agent::AdmitHttpReadOutcome::Admitted);
+    }
+}
+
 /// `loom.agent.AdmitSend`, generated: every outcome is one the specification fully determines.
 impl<P> crate::agent::obligations::AdmitSendBehavior for Generated<P>
 {
@@ -195,6 +217,28 @@ impl<P> crate::agent::obligations::AdmitSendBehavior for Generated<P>
         }
         // `admitted`: the default.
         return Ok(crate::agent::AdmitSendOutcome::Admitted);
+    }
+}
+
+/// `loom.agent.BoundHttpAnswer`, generated: every outcome is one the specification fully determines.
+impl<P> crate::agent::obligations::BoundHttpAnswerBehavior for Generated<P>
+{
+    fn bound_http_answer(&mut self, input: crate::agent::BoundHttpAnswer) -> Result<crate::agent::BoundHttpAnswerOutcome, UnmetObligation> {
+        let _ = &input;
+        // `redirected`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(all(&[compare_numbers(Some(&input.status).map(|value| value.to_string()), Some("300".to_owned()), core::cmp::Ordering::is_ge), compare_numbers(Some(&input.status).map(|value| value.to_string()), Some("399".to_owned()), core::cmp::Ordering::is_le)]), "loom.agent.BoundHttpAnswer")? {
+            return Ok(crate::agent::BoundHttpAnswerOutcome::Redirected { error: crate::agent::HttpReadRefused { reason: crate::agent::HttpReadRefusalReason::Redirected } });
+        }
+        // `failed-status`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(any(&[compare_numbers(Some(&input.status).map(|value| value.to_string()), Some("199".to_owned()), core::cmp::Ordering::is_le), compare_numbers(Some(&input.status).map(|value| value.to_string()), Some("400".to_owned()), core::cmp::Ordering::is_ge)]), "loom.agent.BoundHttpAnswer")? {
+            return Ok(crate::agent::BoundHttpAnswerOutcome::FailedStatus { error: crate::agent::HttpReadRefused { reason: crate::agent::HttpReadRefusalReason::FailedStatus } });
+        }
+        // `cut`: an accepting branch, in declaration order.
+        if decided(compare_numbers(Some(&input.bytes).map(|value| value.to_string()), Some(&input.max_bytes).map(|value| value.to_string()), core::cmp::Ordering::is_gt), "loom.agent.BoundHttpAnswer")? {
+            return Ok(crate::agent::BoundHttpAnswerOutcome::Cut);
+        }
+        // `whole`: the default.
+        return Ok(crate::agent::BoundHttpAnswerOutcome::Whole);
     }
 }
 
@@ -533,6 +577,17 @@ fn all(truths: &[Option<bool>]) -> Option<bool> {
         None
     } else {
         Some(true)
+    }
+}
+
+/// Three-valued disjunction: true wins, then Unknown.
+fn any(truths: &[Option<bool>]) -> Option<bool> {
+    if truths.contains(&Some(true)) {
+        Some(true)
+    } else if truths.contains(&None) {
+        None
+    } else {
+        Some(false)
     }
 }
 

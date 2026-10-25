@@ -24,8 +24,17 @@ scenarios:
   - scenarios/agent-check/an-http-binding-whose-method-is-not-get-is-refused.yaml
   - scenarios/agent-check/reply-send-without-writes-is-refused.yaml
   - scenarios/agent-check/an-empty-channel-allow-is-refused.yaml
+  - scenarios/agent-check/an-allow-path-holding-a-dot-dot-segment-is-refused.yaml
   - scenarios/agent-serve/a-send-outside-the-allow-list-is-refused.yaml
   - scenarios/agent-serve/a-send-without-a-proposal-is-not-admissible.yaml
   - scenarios/agent-serve/a-sixth-send-in-the-window-is-refused.yaml
   - scenarios/agent-serve/a-send-is-held-until-approved.yaml
   - scenarios/agent-serve/a-send-with-writes-none-is-refused.yaml
+  - scenarios/agent-http-binding/a-post-on-an-http-binding-is-refused.yaml
+  - scenarios/agent-http-binding/a-path-outside-allow-paths-is-refused.yaml
+  - scenarios/agent-http-binding/a-missing-bearer-is-refused.yaml
+  - scenarios/agent-http-binding/an-allow-listed-get-is-admitted.yaml
+  - scenarios/agent-http-binding/a-redirect-is-not-followed.yaml
+  - scenarios/agent-http-binding/a-failing-status-answers-nothing.yaml
+  - scenarios/agent-http-binding/a-response-over-max-bytes-is-cut.yaml
+  - scenarios/agent-http-binding/a-response-within-max-bytes-is-read-whole.yaml

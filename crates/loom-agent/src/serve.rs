@@ -24,6 +24,9 @@
 //!   `resume_after_grant` with the grant file as the write's proof, and releases the Suspension.
 //!   `writes.mode: auto` is not served yet and is refused before anything runs; `none` sends
 //!   nothing, as the effect port refuses every send with `WritesNone`.
+//! - An `http` binding is a source of the states that name it, read by the effect port through
+//!   [`HttpGet`] (`crate::http`, `story:agent-http-binding`): one bounded GET of an allow-listed
+//!   path, no redirect followed, the bearer from the variable `bearer_env` names.
 //!
 //! The commission of a turn is derived from the agent id, the item id and its revision, so a
 //! person names it from the record line alone.
@@ -33,7 +36,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use b10x_loom_plugin::effects::{SENDS_FILE, detail};
+use b10x_loom_plugin::effects::{HttpSources, SENDS_FILE, detail};
 use b10x_loom_plugin::project::SEND;
 use b10x_loom_plugin::turn::stopped;
 use b10x_loom_plugin::{
@@ -45,7 +48,11 @@ use b10x_loom_plugin_slack::{SlackConfig, SlackHandler, TurnModels};
 use chrono::{SecondsFormat, Utc};
 use llm_core::Model;
 use loom::datasource::{DataSource, WriteOperation};
-use loom_sdk::agent::{AdmitSendOutcome, AgentSpec, Binding, ConnectorsBinding, WriteMode};
+use loom_sdk::agent::{
+    AdmitSendOutcome, AgentSpec, Binding, ConnectorsBinding, HttpBinding, WriteMode,
+};
+
+use crate::http::HttpGet;
 use loom_sdk::commission::model::json::Value;
 use loom_sdk::commission::model::primitives::{Timestamp, Uuid};
 use loom_sdk::commission::model::responsibility::{
@@ -84,6 +91,9 @@ pub struct SpecPlugin {
     protocol: String,
     authority: SpecAuthority,
     send: Option<Send>,
+    /// The spec's `http` bindings, read through `reader` (`story:agent-http-binding`).
+    http: Vec<HttpBinding>,
+    reader: HttpGet,
     classifier: Option<Box<dyn Model>>,
     turn_models: Option<TurnModels>,
     notes: Mutex<Vec<String>>,
@@ -205,11 +215,21 @@ impl SpecPlugin {
                 .unwrap_or_default(),
             mode,
         };
+        let http = spec
+            .bindings
+            .iter()
+            .filter_map(|binding| match binding {
+                Binding::Http(binding) => Some(binding.clone()),
+                Binding::Connectors(_) => None,
+            })
+            .collect();
         Ok(Self {
             protocol: loops.inner.protocol.clone(),
             spec,
             config,
             slack,
+            http,
+            reader: HttpGet::new(),
             state: std::path::absolute(state).map_err(|error| {
                 PluginError::State(format!(
                     "{} cannot be made absolute: {error}",
@@ -516,6 +536,7 @@ impl Plugin for SpecPlugin {
                 .sources
                 .iter()
                 .any(|source| source.name == *name)
+                || self.http.iter().any(|binding| binding.name == *name)
         };
         self.spec
             .states
@@ -577,6 +598,10 @@ impl Plugin for SpecPlugin {
                 store,
                 suspensions: Some(&suspensions),
                 send: self.policy(false, None, &proof),
+                http: Some(HttpSources {
+                    bindings: self.http.clone(),
+                    reader: &self.reader,
+                }),
                 commission: Some(commission.clone()),
                 step_budget,
                 model_budget,
