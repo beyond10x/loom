@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest f3a7ce1d84af0aa210bcdcb654d0345049da29dfb769d229bf126c3235f9073d
-  contract digest ea012624508e2cf3c3cdf5522ef160b4f74727db5a6edd27a5fd102ecf4ea2d4
+  model digest 94db884d84b620fc22483ab0d13d57dcffaf22250d1c9e736fc6846819918ca3
+  contract digest 99a43dd53faae20240cb043b9a0e26a5c20118628ddd2b731210419e5b195ad9
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-189 capabilities: **188 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+216 capabilities: **215 generated**, **1 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -117,6 +117,13 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.plugin.RecordOutcome` |
 | domain type | `loom.plugin.SourceRead` |
 | domain type | `loom.plugin.TurnResult` |
+| domain type | `loom.resource.CheckResult` |
+| domain type | `loom.resource.DeploymentAvailability` |
+| domain type | `loom.resource.ImageRef` |
+| domain type | `loom.resource.LoomAgent.State` |
+| domain type | `loom.resource.LoomAgentSpec` |
+| domain type | `loom.resource.ResourceName` |
+| domain type | `loom.resource.SecretRef` |
 | domain type | `loom.run.ActionCatalogue.State` |
 | domain type | `loom.run.ArgumentRequest.State` |
 | domain type | `loom.run.ArgumentRequestId` |
@@ -158,11 +165,20 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.workflow.WorkflowDefinition` |
 | domain type | `loom.workflow.WorkflowRunRecord` |
 | domain type | `loom.workflow.WorkflowStep` |
+| entity lifecycle | `loom.resource.LoomAgent` |
 | entity lifecycle | `loom.run.ActionCatalogue` |
 | entity lifecycle | `loom.run.ArgumentRequest` |
 | entity lifecycle | `loom.run.Selection` |
 | entity lifecycle | `loom.run.SelectionRecord` |
 | entity lifecycle | `loom.session.AgentSession` |
+| command contract | `loom.resource.ApplyLoomAgent` |
+| command behaviour | `loom.resource.ApplyLoomAgent` |
+| command contract | `loom.resource.DeleteLoomAgent` |
+| command behaviour | `loom.resource.DeleteLoomAgent` |
+| command contract | `loom.resource.ObserveDeployment` |
+| command behaviour | `loom.resource.ObserveDeployment` |
+| command contract | `loom.resource.RecordCheck` |
+| command behaviour | `loom.resource.RecordCheck` |
 | command contract | `loom.run.OverruleSelection` |
 | command behaviour | `loom.run.OverruleSelection` |
 | command contract | `loom.run.ProjectCatalogue` |
@@ -176,6 +192,12 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command contract | `loom.run.SelectAction` |
 | command contract | `loom.session.ProposeSessionChange` |
 | command behaviour | `loom.session.ProposeSessionChange` |
+| event type | `loom.resource.LoomAgentApplied` |
+| event type | `loom.resource.LoomAgentDegraded` |
+| event type | `loom.resource.LoomAgentDeleted` |
+| event type | `loom.resource.LoomAgentRecovered` |
+| event type | `loom.resource.LoomAgentRefused` |
+| event type | `loom.resource.LoomAgentRunning` |
 | event type | `loom.run.ActionSelected` |
 | event type | `loom.run.ArgumentsRequested` |
 | event type | `loom.run.CatalogueProjected` |
@@ -185,6 +207,9 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | event type | `loom.run.SelectionRecorded` |
 | event type | `loom.run.SelectionStale` |
 | event type | `loom.session.SessionChangeProposed` |
+| error type | `loom.resource.LoomAgentNotFound` |
+| error type | `loom.resource.LoomAgentStateConflict` |
+| error type | `loom.resource.StaleGeneration` |
 | error type | `loom.run.ActionNotInCatalogue` |
 | error type | `loom.run.CatalogueExists` |
 | error type | `loom.run.CatalogueNotFound` |
@@ -194,6 +219,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | error type | `loom.run.SelectionNotSelected` |
 | error type | `loom.run.SelectionRecordExists` |
 | error type | `loom.run.SelectionStateConflict` |
+| view type | `loom.resource.LoomAgents` |
+| view query | `loom.resource.LoomAgents` |
 | view type | `loom.run.Catalogues` |
 | view query | `loom.run.Catalogues` |
 | view type | `loom.run.SelectionRecords` |

@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest f3a7ce1d84af0aa210bcdcb654d0345049da29dfb769d229bf126c3235f9073d
-// contract digest ea012624508e2cf3c3cdf5522ef160b4f74727db5a6edd27a5fd102ecf4ea2d4
+// model digest 94db884d84b620fc22483ab0d13d57dcffaf22250d1c9e736fc6846819918ca3
+// contract digest 99a43dd53faae20240cb043b9a0e26a5c20118628ddd2b731210419e5b195ad9
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -19,6 +19,24 @@
 //! or — as `entity invariant` — the declared outcome would leave an entity breaking an invariant.
 
 use crate::obligation::UnmetObligation;
+
+/// Where `loom.resource.LoomAgent` is stored — a port the implementor provides.
+///
+/// Keyed by the identity `name`. Generated network entries supply an ephemeral implementation; durable storage remains a port.
+pub trait LoomAgentStorage {
+    /// The instance with this identity, or `None` where none is stored.
+    fn get(&self, identity: &crate::resource::ResourceName) -> Option<crate::resource::LoomAgentSnapshot>;
+
+    /// Stores this instance under its identity, replacing what was held.
+    fn put(&mut self, snapshot: crate::resource::LoomAgentSnapshot);
+
+    /// Removes the instance with this identity.
+    fn delete(&mut self, identity: &crate::resource::ResourceName);
+
+    /// Every stored instance, in the order the store keeps them: the order a generated query
+    /// answers an unordered view in.
+    fn list(&self) -> Vec<crate::resource::LoomAgentSnapshot>;
+}
 
 /// Where `loom.run.ActionCatalogue` is stored — a port the implementor provides.
 ///
@@ -165,6 +183,207 @@ impl<P> Generated<P> {
     /// The generated behaviours, over `ports`.
     pub fn new(ports: P) -> Self {
         Self { ports }
+    }
+}
+
+/// `loom.resource.ApplyLoomAgent`, generated: every outcome is one the specification fully determines.
+impl<P> crate::resource::obligations::ApplyLoomAgentBehavior for Generated<P>
+where
+    P: LoomAgentStorage,
+{
+    fn apply_loom_agent(&mut self, input: crate::resource::ApplyLoomAgent) -> Result<crate::resource::ApplyLoomAgentOutcome, UnmetObligation> {
+        let _ = &input;
+        // The addressed row, read before the branches that select by it.
+        let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
+            let identity: crate::resource::ResourceName = input.name.clone();
+            let data = crate::resource::LoomAgentData {
+                name: identity.clone(),
+                observed_generation: input.generation.clone(),
+                check: None,
+            };
+            let answer = crate::resource::ApplyLoomAgentOutcome::Created { loom_agent_applied: crate::resource::LoomAgentApplied { name: identity.clone(), generation: input.generation.clone() } };
+            LoomAgentStorage::put(&mut self.ports, crate::resource::AnyLoomAgent::Pending(crate::resource::LoomAgent::new(data)).snapshot());
+            return Ok(answer);
+        };
+        let _ = &held;
+        // `stale`: selected by the addressed row.
+        if decided(compare_numbers(Some(&held.data.observed_generation).map(|value| value.to_string()), Some(&input.generation).map(|value| value.to_string()), core::cmp::Ordering::is_gt), "loom.resource.ApplyLoomAgent")? {
+            return Ok(crate::resource::ApplyLoomAgentOutcome::Stale { error: crate::resource::StaleGeneration { name: input.name.clone(), generation: input.generation.clone(), observed_generation: held.data.observed_generation.clone() } });
+        }
+        // `unchanged`: selected by the addressed row.
+        if decided(compare_numbers(Some(&held.data.observed_generation).map(|value| value.to_string()), Some(&input.generation).map(|value| value.to_string()), core::cmp::Ordering::is_eq), "loom.resource.ApplyLoomAgent")? {
+            let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
+                let identity: crate::resource::ResourceName = input.name.clone();
+                let data = crate::resource::LoomAgentData {
+                    name: identity.clone(),
+                    observed_generation: input.generation.clone(),
+                    check: None,
+                };
+                let answer = crate::resource::ApplyLoomAgentOutcome::Created { loom_agent_applied: crate::resource::LoomAgentApplied { name: identity.clone(), generation: input.generation.clone() } };
+                LoomAgentStorage::put(&mut self.ports, crate::resource::AnyLoomAgent::Pending(crate::resource::LoomAgent::new(data)).snapshot());
+                return Ok(answer);
+            };
+            let _ = &held;
+            let answer = crate::resource::ApplyLoomAgentOutcome::Unchanged;
+            return Ok(answer);
+        }
+        // `respecified`: the default.
+        let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
+            let identity: crate::resource::ResourceName = input.name.clone();
+            let data = crate::resource::LoomAgentData {
+                name: identity.clone(),
+                observed_generation: input.generation.clone(),
+                check: None,
+            };
+            let answer = crate::resource::ApplyLoomAgentOutcome::Created { loom_agent_applied: crate::resource::LoomAgentApplied { name: identity.clone(), generation: input.generation.clone() } };
+            LoomAgentStorage::put(&mut self.ports, crate::resource::AnyLoomAgent::Pending(crate::resource::LoomAgent::new(data)).snapshot());
+            return Ok(answer);
+        };
+        let _ = &held;
+        let moved = match held.refine() {
+            crate::resource::AnyLoomAgent::Degraded(instance) => crate::resource::AnyLoomAgent::Pending(instance.respecify()),
+            crate::resource::AnyLoomAgent::Pending(instance) => crate::resource::AnyLoomAgent::Pending(instance.respecify()),
+            crate::resource::AnyLoomAgent::Refused(instance) => crate::resource::AnyLoomAgent::Pending(instance.respecify()),
+            crate::resource::AnyLoomAgent::Running(instance) => crate::resource::AnyLoomAgent::Pending(instance.respecify()),
+        };
+        let mut next = moved.snapshot();
+        next.data.observed_generation = input.generation.clone();
+        next.data.check = None;
+        let answer = crate::resource::ApplyLoomAgentOutcome::Respecified { loom_agent_applied: crate::resource::LoomAgentApplied { name: input.name.clone(), generation: input.generation.clone() } };
+        LoomAgentStorage::put(&mut self.ports, next);
+        return Ok(answer);
+    }
+}
+
+/// `loom.resource.DeleteLoomAgent`, generated: every outcome is one the specification fully determines.
+impl<P> crate::resource::obligations::DeleteLoomAgentBehavior for Generated<P>
+where
+    P: LoomAgentStorage,
+{
+    fn delete_loom_agent(&mut self, input: crate::resource::DeleteLoomAgent) -> Result<crate::resource::DeleteLoomAgentOutcome, UnmetObligation> {
+        let _ = &input;
+        // `deleted`: the default.
+        let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
+            return Ok(crate::resource::DeleteLoomAgentOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
+        };
+        let _ = &held;
+        let answer = crate::resource::DeleteLoomAgentOutcome::Deleted { loom_agent_deleted: crate::resource::LoomAgentDeleted { name: input.name.clone() } };
+        LoomAgentStorage::delete(&mut self.ports, &input.name);
+        return Ok(answer);
+    }
+}
+
+/// `loom.resource.ObserveDeployment`, generated: every outcome is one the specification fully determines.
+impl<P> crate::resource::obligations::ObserveDeploymentBehavior for Generated<P>
+where
+    P: LoomAgentStorage,
+{
+    fn observe_deployment(&mut self, input: crate::resource::ObserveDeployment) -> Result<crate::resource::ObserveDeploymentOutcome, UnmetObligation> {
+        let _ = &input;
+        // The addressed row, read before the branches that select by it.
+        let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
+            return Ok(crate::resource::ObserveDeploymentOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
+        };
+        let _ = &held;
+        // `degraded`: selected by the addressed row.
+        if decided(all(&[Some(matches!(held.state, crate::resource::LoomAgentState::Running)), equal(Some(&input.availability).map(|value| match value { crate::resource::DeploymentAvailability::Available => "Available", crate::resource::DeploymentAvailability::Unavailable => "Unavailable" }.to_owned()), Some("Unavailable".to_owned()))]), "loom.resource.ObserveDeployment")? {
+            let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
+                return Ok(crate::resource::ObserveDeploymentOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
+            };
+            let _ = &held;
+            let moved = match held.refine() {
+                crate::resource::AnyLoomAgent::Running(instance) => crate::resource::AnyLoomAgent::Degraded(instance.degrade()),
+                _ => return Err(undeclared("loom.resource.ObserveDeployment")),
+            };
+            let next = moved.snapshot();
+            let answer = crate::resource::ObserveDeploymentOutcome::Degraded { loom_agent_degraded: crate::resource::LoomAgentDegraded { name: input.name.clone() } };
+            LoomAgentStorage::put(&mut self.ports, next);
+            return Ok(answer);
+        }
+        // `still-running`: selected by the addressed row.
+        if decided(all(&[Some(matches!(held.state, crate::resource::LoomAgentState::Running)), equal(Some(&input.availability).map(|value| match value { crate::resource::DeploymentAvailability::Available => "Available", crate::resource::DeploymentAvailability::Unavailable => "Unavailable" }.to_owned()), Some("Available".to_owned()))]), "loom.resource.ObserveDeployment")? {
+            let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
+                return Ok(crate::resource::ObserveDeploymentOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
+            };
+            let _ = &held;
+            let answer = crate::resource::ObserveDeploymentOutcome::StillRunning;
+            return Ok(answer);
+        }
+        // `recovered`: selected by the addressed row.
+        if decided(all(&[Some(matches!(held.state, crate::resource::LoomAgentState::Degraded)), equal(Some(&input.availability).map(|value| match value { crate::resource::DeploymentAvailability::Available => "Available", crate::resource::DeploymentAvailability::Unavailable => "Unavailable" }.to_owned()), Some("Available".to_owned()))]), "loom.resource.ObserveDeployment")? {
+            let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
+                return Ok(crate::resource::ObserveDeploymentOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
+            };
+            let _ = &held;
+            let moved = match held.refine() {
+                crate::resource::AnyLoomAgent::Degraded(instance) => crate::resource::AnyLoomAgent::Running(instance.recover()),
+                _ => return Err(undeclared("loom.resource.ObserveDeployment")),
+            };
+            let next = moved.snapshot();
+            let answer = crate::resource::ObserveDeploymentOutcome::Recovered { loom_agent_recovered: crate::resource::LoomAgentRecovered { name: input.name.clone() } };
+            LoomAgentStorage::put(&mut self.ports, next);
+            return Ok(answer);
+        }
+        // `still-degraded`: selected by the addressed row.
+        if decided(all(&[Some(matches!(held.state, crate::resource::LoomAgentState::Degraded)), equal(Some(&input.availability).map(|value| match value { crate::resource::DeploymentAvailability::Available => "Available", crate::resource::DeploymentAvailability::Unavailable => "Unavailable" }.to_owned()), Some("Unavailable".to_owned()))]), "loom.resource.ObserveDeployment")? {
+            let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
+                return Ok(crate::resource::ObserveDeploymentOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
+            };
+            let _ = &held;
+            let answer = crate::resource::ObserveDeploymentOutcome::StillDegraded;
+            return Ok(answer);
+        }
+        // `no-deployment`: the default.
+        return Ok(crate::resource::ObserveDeploymentOutcome::NoDeployment { error: crate::resource::LoomAgentStateConflict { name: input.name.clone() } });
+    }
+}
+
+/// `loom.resource.RecordCheck`, generated: every outcome is one the specification fully determines.
+impl<P> crate::resource::obligations::RecordCheckBehavior for Generated<P>
+where
+    P: LoomAgentStorage,
+{
+    fn record_check(&mut self, input: crate::resource::RecordCheck) -> Result<crate::resource::RecordCheckOutcome, UnmetObligation> {
+        let _ = &input;
+        // The addressed row, read before the branches that select by it.
+        let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
+            return Ok(crate::resource::RecordCheckOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
+        };
+        let _ = &held;
+        // `stale`: selected by the addressed row.
+        if decided(compare_numbers(Some(&held.data.observed_generation).map(|value| value.to_string()), Some(&input.generation).map(|value| value.to_string()), core::cmp::Ordering::is_ne), "loom.resource.RecordCheck")? {
+            return Ok(crate::resource::RecordCheckOutcome::Stale { error: crate::resource::StaleGeneration { name: input.name.clone(), generation: input.generation.clone(), observed_generation: held.data.observed_generation.clone() } });
+        }
+        // `running`: an accepting branch, in declaration order.
+        if decided(compare_numbers(Some(&input.exit_code).map(|value| value.to_string()), Some("0".to_owned()), core::cmp::Ordering::is_eq), "loom.resource.RecordCheck")? {
+            let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
+                return Ok(crate::resource::RecordCheckOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
+            };
+            let _ = &held;
+            let moved = match held.refine() {
+                crate::resource::AnyLoomAgent::Pending(instance) => crate::resource::AnyLoomAgent::Running(instance.run()),
+                _ => return Ok(crate::resource::RecordCheckOutcome::OutOfOrder { error: crate::resource::LoomAgentStateConflict { name: input.name.clone() } }),
+            };
+            let mut next = moved.snapshot();
+            next.data.check = Some(crate::resource::CheckResult { exit_code: input.exit_code.clone(), message: input.message.clone() });
+            let answer = crate::resource::RecordCheckOutcome::Running { loom_agent_running: crate::resource::LoomAgentRunning { name: input.name.clone(), generation: input.generation.clone() } };
+            LoomAgentStorage::put(&mut self.ports, next);
+            return Ok(answer);
+        }
+        // `refused`: the default.
+        let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
+            return Ok(crate::resource::RecordCheckOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
+        };
+        let _ = &held;
+        let moved = match held.refine() {
+            crate::resource::AnyLoomAgent::Pending(instance) => crate::resource::AnyLoomAgent::Refused(instance.refuse()),
+            _ => return Ok(crate::resource::RecordCheckOutcome::OutOfOrder { error: crate::resource::LoomAgentStateConflict { name: input.name.clone() } }),
+        };
+        let mut next = moved.snapshot();
+        next.data.check = Some(crate::resource::CheckResult { exit_code: input.exit_code.clone(), message: input.message.clone() });
+        let answer = crate::resource::RecordCheckOutcome::Refused { loom_agent_refused: crate::resource::LoomAgentRefused { name: input.name.clone(), generation: input.generation.clone(), message: input.message.clone() } };
+        LoomAgentStorage::put(&mut self.ports, next);
+        return Ok(answer);
     }
 }
 
@@ -388,6 +607,25 @@ where
     }
 }
 
+/// `loom.resource.LoomAgents`, generated: every row is one the specification fully determines from the stored `loom.resource.LoomAgent`s.
+impl<P> crate::resource::obligations::LoomAgentsQuery for Generated<P>
+where
+    P: LoomAgentStorage,
+{
+    fn loom_agents(&self) -> Result<Vec<crate::resource::LoomAgents>, UnmetObligation> {
+        let admitted = LoomAgentStorage::list(&self.ports);
+        Ok(admitted
+            .into_iter()
+            .map(|held| crate::resource::LoomAgents {
+                name: held.data.name,
+                observed_generation: held.data.observed_generation,
+                check: held.data.check,
+                state: held.state,
+            })
+            .collect())
+    }
+}
+
 /// `loom.run.Catalogues`, generated: every row is one the specification fully determines from the stored `loom.run.ActionCatalogue`s.
 impl<P> crate::run::obligations::CataloguesQuery for Generated<P>
 where
@@ -487,6 +725,17 @@ fn undeclared(source: &'static str) -> UnmetObligation {
 /// A guard's truth, where it has one: Unknown selects no branch, so the model declares no outcome.
 fn decided(truth: Option<bool>, command: &'static str) -> Result<bool, UnmetObligation> {
     truth.ok_or_else(|| undeclared(command))
+}
+
+/// Three-valued conjunction: false wins, then Unknown.
+fn all(truths: &[Option<bool>]) -> Option<bool> {
+    if truths.contains(&Some(false)) {
+        Some(false)
+    } else if truths.contains(&None) {
+        None
+    } else {
+        Some(true)
+    }
 }
 
 /// Equality of two read values; an unread one is Unknown.

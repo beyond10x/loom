@@ -1,6 +1,6 @@
 [package]
 name = "b10x-loom-conformance"
-description = "The Rust ESS conformance target that holds b10x-loom-executor and b10x-loom-session-executor to the suite synthesized from Loom's run and session domains."
+description = "The Rust ESS conformance target that holds b10x-loom-executor, b10x-loom-session-executor and b10x-loom-resource to the suite synthesized from Loom's run, session and resource domains."
 publish = false
 version.workspace = true
 edition.workspace = true
@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 b10x-loom-commission = { path = "../loom-commission" }
 b10x-loom-executor = { path = "../loom-executor" }
+b10x-loom-resource = { path = "../loom-resource" }
 b10x-loom-session-executor = { path = "../loom-session-executor" }
 ess-conformance = { git = "https://github.com/beyond10x/ess.git", tag = "0.69.0" }
 ess-primitives = { git = "https://github.com/beyond10x/ess.git", tag = "0.69.0" }
