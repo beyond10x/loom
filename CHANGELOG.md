@@ -14,6 +14,11 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Added
 
+- `b10x-loom agent serve --spec <FILE> --state <DIR> [--once]` hosts the agent a `loom.agent/1` spec declares on the plugin host: polls only `channel.allow`, answers each item in a governed turn on the inner loop's protocol under the state whose `when` names the intent, with exactly `policy.capabilities` as its authority; `reply.send` writes the recorded proposal to the item's channel through the Connectors command line, at most `writes.max_per_hour` an hour, and in `writes.mode: approval` only after `b10x-loom approve <COMMISSION> reply.send --state <DIR>`; `b10x-loom agent resume <COMMISSION>` performs a granted send now; SIGTERM ends the host after the item (story:agent-serve)
+- `b10x-loom-agent`: `SpecPlugin`, `SpecAuthority`, `commission_id` and the re-exported `admit_send` (story:agent-serve)
+- `b10x-loom-plugin`: `turn_with` with `TurnOptions` and `Turned`; `DataSourceEffects::with_send` with `SendPolicy` performs `reply.send` once `admit_send` admits it (story:agent-serve)
+- `b10x-loom-plugin-slack`: `SlackHandler::with_channel_allow` and `poll`'s allow list (story:agent-serve)
+- `loom.agent.AdmitSend` with its error `SendRefused` and the enum `SendRefusalReason`, generated from `ess/domains/agent.yaml` and re-exported from `loom_sdk::agent`; five authored scenarios under `ess/scenarios/agent-serve/` (story:agent-serve)
 - `b10x-loom agent check --spec <FILE>` says whether a `loom.agent/1` spec can be served: exit 0 with one `checked` line, 3 with the first refusal naming its reason and member, 1 when the file cannot be read (story:agent-check)
 - `b10x-loom-agent`: `check` and `check_text` check a spec against the plugin catalog's protocols in the declaration order of `loom.agent.CheckAgentSpec`; `check_text` refuses a credential anywhere in the document before decoding it, without repeating it (story:agent-check)
 - `operator-reply@1` in `ProtocolCatalog::plugins()`: `inbound-answer@1`'s read and proposal plus `reply.send`, a write under the `reply.send` capability once a reply is proposed, and `reply.decline` (story:agent-check)
@@ -21,6 +26,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Changed
 
+- A plugin turn that ends `NeedsAuthority` or `AwaitingApproval` with a proposal under a suspension port is recorded `proposed`, naming the commission that awaits approval; a turn given a commission mints ids seeded with it, so two turns on two items never share a request id or an idempotency key (story:agent-serve)
 - `ProtocolCatalog::plugins()` holds `operator-reply@1` beside `inbound-answer@1`; `bundled()` holds neither (story:agent-check)
 - The conformance suite and the ESS gate synthesize with `--scenarios`, so authored scenarios join the synthesized ones (story:agent-check)
 

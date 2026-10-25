@@ -1,0 +1,16 @@
+# story agent-serve: in `writes.mode: approval` a send waits for a person's grant
+# (`b10x-loom approve <COMMISSION> reply.send`); once granted it is admitted.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-send-is-held-until-approved
+summary: In approval mode a `reply.send` is held before the grant and admitted after it.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.AdmitSend
+    input: {mode: approval, channel_allowed: true, proposed: true, granted: false, sent_in_window: 0, max_per_hour: 5}
+    outcome: held
+  - at: 2026-10-25T00:05:00Z
+    command: loom.agent.AdmitSend
+    input: {mode: approval, channel_allowed: true, proposed: true, granted: true, sent_in_window: 0, max_per_hour: 5}
+    outcome: admitted

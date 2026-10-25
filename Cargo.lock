@@ -383,9 +383,16 @@ dependencies = [
 name = "b10x-loom-agent"
 version = "0.40.0"
 dependencies = [
+ "b10x-llm-core",
+ "b10x-loom-plugin",
+ "b10x-loom-plugin-slack",
  "b10x-loom-protocols",
  "b10x-loom-sdk",
+ "chrono",
+ "intake",
+ "loom",
  "serde",
+ "serde_json",
  "serde_yaml_ng",
 ]
 

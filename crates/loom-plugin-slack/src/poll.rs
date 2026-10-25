@@ -14,25 +14,25 @@ use crate::{DEFAULT_LOOKBACK_MINUTES, MAX_LIST_PAGES, READ_LIMIT};
 /// The one `subtype` a person's message carries: a file shared with text.
 const PERSON_SUBTYPES: &[&str] = &["file_share"];
 
-/// One poll at `now` (microseconds since the Unix epoch).
+/// One poll at `now` (microseconds since the Unix epoch). With `allow`, only a member channel
+/// whose id it lists is walked: no history of any other channel is read.
 pub(crate) fn poll(
     config: &SlackConfig,
     host: &Host<'_>,
     state: &PluginState,
     objectives: &[Objective],
     now: i64,
+    allow: Option<&[String]>,
 ) -> Result<Poll, PluginError> {
     let reader = Reader {
         config,
         cli: host.connectors_over(Vec::new()),
     };
-    let channels = walk::order(
-        reader.member_channels()?,
-        config,
-        objectives,
-        &state.cursors,
-        now,
-    );
+    let mut members = reader.member_channels()?;
+    if let Some(allow) = allow {
+        members.retain(|member| allow.contains(&member.id));
+    }
+    let channels = walk::order(members, config, objectives, &state.cursors, now);
     let aged_by = now.saturating_sub(config.min_age_minutes.saturating_mul(60_000_000));
     let lookback = config.lookback_minutes.unwrap_or(DEFAULT_LOOKBACK_MINUTES);
     let mut mentions = Vec::new();

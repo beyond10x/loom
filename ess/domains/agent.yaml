@@ -475,7 +475,25 @@ types:
       [Malformed, SecretLiteral, UnknownProtocol, UnknownAction, UnboundSource, HttpMethod,
        SendWithoutWrites, EmptyChannelAllow]
 
+  # Why a served agent does not send a proposed reply (story agent-serve), one reason per refusal
+  # of `AdmitSend`: the spec's writes are `none` (`WritesNone`); the item's channel is not in
+  # `channel.allow` (`OutsideAllowList`); no reply is proposed for the item revision
+  # (`NoProposal`); the hour's sends reached `writes.max_per_hour` (`RateLimited`).
+  - name: loom.agent.SendRefusalReason
+    kind: enum
+    variants: [WritesNone, OutsideAllowList, NoProposal, RateLimited]
+
 errors:
+  # The refusal of `AdmitSend`: why, and whether it is final. A final refusal ends the turn's run
+  # (Commission's `EffectOutcomeRefused.ends_run`): the item is handled and its reply never sent. A
+  # refusal that is not final leaves the run to go on, as a send proposed before any reply.
+  - name: loom.agent.SendRefused
+    fields:
+      - name: reason
+        type: loom.agent.SendRefusalReason
+      - name: final
+        type: Boolean
+
   # The one refusal of `CheckAgentSpec`: why, which member of the document (a path such as
   # `states[0].actions[2]` or `bindings[1].method`; `document` when none), and the detail a person
   # reads (the action, source or protocol named, or what the decoder refused).
@@ -540,4 +558,56 @@ commands:
         payload:
           loom.agent.SpecRefused: {reason: EmptyChannelAllow}
       - name: serveable
+        accepts: nothing
+
+  # Whether a served agent sends the reply its turn proposed: `b10x-loom agent serve` decides it
+  # before `reply.send` reaches the connectors CLI, over what the host already knows. `mode` is
+  # the spec's `writes.mode`; `channel_allowed` whether the item's channel is in `channel.allow`;
+  # `proposed` whether a reply is recorded for the item revision; `granted` whether a person
+  # approved this send (`b10x-loom approve`); `sent_in_window` the sends of the last hour against
+  # `max_per_hour`. The first refusal in declaration order is the answer. `held` is approval mode
+  # before the grant: the turn ends awaiting approval and the send waits for `resume`. `admitted`
+  # is the send. Nothing here is held between two decisions: the counter is the state directory's.
+  - name: loom.agent.AdmitSend
+    input:
+      - name: mode
+        type: loom.agent.WriteMode
+      - name: channel_allowed
+        type: Boolean
+      - name: proposed
+        type: Boolean
+      - name: granted
+        type: Boolean
+      - name: sent_in_window
+        type: Integer
+      - name: max_per_hour
+        type: Integer
+    outcomes:
+      - name: writes-none
+        when: mode == none
+        error: loom.agent.SendRefused
+        payload:
+          loom.agent.SendRefused: {reason: WritesNone, final: true}
+      - name: outside-allow-list
+        when: channel_allowed == false
+        error: loom.agent.SendRefused
+        payload:
+          loom.agent.SendRefused: {reason: OutsideAllowList, final: true}
+      - name: no-proposal
+        when: proposed == false
+        error: loom.agent.SendRefused
+        payload:
+          loom.agent.SendRefused: {reason: NoProposal, final: false}
+      - name: rate-limited
+        when: sent_in_window >= max_per_hour
+        error: loom.agent.SendRefused
+        payload:
+          loom.agent.SendRefused: {reason: RateLimited, final: true}
+      - name: held
+        when:
+          all:
+            - mode == approval
+            - granted == false
+        accepts: nothing
+      - name: admitted
         accepts: nothing

@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 36d9f391b47bf4ff392161dfbb07aa4606f2481a4cc3a3d4ac33a45bc10d5732
-// contract digest 00b46a8d1edd40edd961dc9dcf2afe82e3d81210aec3a4882dbcfa4b17960ae1
+// model digest 8745d4eaaf221f3a1bb550570e3c053abb7a0be0d3ecc2ae5c5c74c9c641f0cd
+// contract digest ee901859b361adccaddf46e3c87dad5bc8dd71ec3a5f0fb52c94b6a87e0042d4
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Agent — `loom.agent`.
@@ -403,6 +403,19 @@ pub struct RuntimeSpec {
     pub confinement: ConfinementMode,
 }
 
+/// SendRefusalReason — `loom.agent.SendRefusalReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendRefusalReason {
+    /// `WritesNone`.
+    WritesNone,
+    /// `OutsideAllowList`.
+    OutsideAllowList,
+    /// `NoProposal`.
+    NoProposal,
+    /// `RateLimited`.
+    RateLimited,
+}
+
 /// SessionSpec — `loom.agent.SessionSpec`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionSpec {
@@ -471,6 +484,58 @@ pub struct WritesSpec {
     pub max_per_hour: i64,
 }
 
+/// AdmitSend — the input of `loom.agent.AdmitSend`.
+///
+/// Everything it can result in is [`AdmitSendOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmitSend {
+    /// `mode` — `loom.agent.WriteMode`.
+    pub mode: WriteMode,
+    /// `channel_allowed` — `Boolean`.
+    pub channel_allowed: bool,
+    /// `proposed` — `Boolean`.
+    pub proposed: bool,
+    /// `granted` — `Boolean`.
+    pub granted: bool,
+    /// `sent_in_window` — `Integer`.
+    pub sent_in_window: i64,
+    /// `max_per_hour` — `Integer`.
+    pub max_per_hour: i64,
+}
+
+/// Everything `loom.agent.AdmitSend` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdmitSendOutcome {
+    /// `writes-none` — when `mode == none`.
+    WritesNone {
+        /// Why it was refused: `loom.agent.SendRefused`.
+        error: SendRefused,
+    },
+    /// `outside-allow-list` — when `channel_allowed == false`.
+    OutsideAllowList {
+        /// Why it was refused: `loom.agent.SendRefused`.
+        error: SendRefused,
+    },
+    /// `no-proposal` — when `proposed == false`.
+    NoProposal {
+        /// Why it was refused: `loom.agent.SendRefused`.
+        error: SendRefused,
+    },
+    /// `rate-limited` — when `sent_in_window >= {fact: max_per_hour}`.
+    RateLimited {
+        /// Why it was refused: `loom.agent.SendRefused`.
+        error: SendRefused,
+    },
+    /// `held` — when `(mode == approval and granted == false)`.
+    Held,
+    /// `admitted` — otherwise.
+    Admitted,
+}
+
 /// CheckAgentSpec — the input of `loom.agent.CheckAgentSpec`.
 ///
 /// Everything it can result in is [`CheckAgentSpecOutcome`].
@@ -531,6 +596,15 @@ pub enum CheckAgentSpecOutcome {
     Serveable,
 }
 
+/// The declared error `loom.agent.SendRefused`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SendRefused {
+    /// `reason` — `loom.agent.SendRefusalReason`.
+    pub reason: SendRefusalReason,
+    /// `final` — `Boolean`.
+    pub r#final: bool,
+}
+
 /// The declared error `loom.agent.SpecRefused`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpecRefused {
@@ -542,12 +616,23 @@ pub struct SpecRefused {
     pub detail: String,
 }
 
-/// What this bounded context owes its implementor, as typed seams.
+/// What this bounded context owes its implementor, and the seams of what is generated.
 ///
-/// One trait per obligation in the synthesis plan, each carrying the plan's own contract.
-/// [`Unimplemented`](obligations::Unimplemented) satisfies every trait by refusing in the type system, so the workspace builds —
-/// and says exactly what it cannot yet do — before a line is hand-written.
+/// One trait per obligation in the synthesis plan, each carrying the plan's own contract, and one
+/// per generated behaviour, which [`Generated`](crate::behaviour::Generated) implements.
+/// [`Unimplemented`](obligations::Unimplemented) satisfies every owed trait by refusing in the type system.
 pub mod obligations {
+    /// The behaviour `loom.agent.AdmitSend` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait AdmitSendBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.agent.AdmitSend`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn admit_send(&mut self, input: super::AdmitSend) -> Result<super::AdmitSendOutcome, crate::obligation::UnmetObligation>;
+    }
+
     /// The behaviour `loom.agent.CheckAgentSpec` — an implementation obligation.
     ///
     /// Why it is not generated: kept an obligation by the fields of error `loom.agent.SpecRefused`, which the specification gives no source, in `malformed`.

@@ -392,6 +392,44 @@ pub struct AgentArgs {
     pub command: AgentCommand,
 }
 
+/// What `agent serve --help` says about the host and its exit status.
+pub const AGENT_SERVE_HELP: &str = "The spec is checked as `agent check` does before anything runs. The host is the plugin host over
+the spec: it polls the channel binding's channels that channel.allow lists (a message anywhere else is
+no item), classifies each new item, runs a turn on the inner loop's protocol under the state whose
+`when` names the item's intent, with the spec's capabilities as its authority, and records one line
+per handled item in record.jsonl in the state directory. reply.send is a governed write of the recorded
+proposal to the item's channel, at most writes.max_per_hour an hour (sends.jsonl). In writes.mode
+approval a send is held: the turn ends proposed naming its commission, the case and the Suspension
+stay in the state directory, and `b10x-loom approve <COMMISSION> reply.send --state <DIR>` grants it;
+the host performs it at its next poll, or `agent resume` performs it now. writes.mode auto is not
+served yet; none sends nothing.
+
+The models are the spec's `model` section (its routes document, relative to the spec, and the
+`agent` and `classifier` roles), or with --catalog the route aliases --model and --classifier-model
+name. With --once it runs one cycle and prints one line per proposal it recorded; without it, it
+polls every poll_interval_seconds until SIGTERM or SIGINT (a second one exits 130 at once).
+
+Exit status:
+  0  the cycles ran
+  1  the spec, the models or the state directory cannot be used, or the last cycle's poll failed
+  2  the command line is not valid
+  3  the spec cannot be served
+  130  a second SIGTERM or SIGINT ended it at once";
+
+/// What `agent resume --help` says about the send and its exit status.
+pub const AGENT_RESUME_HELP: &str = "Performs the send the commission's Suspension holds, once, after `b10x-loom approve <COMMISSION>
+reply.send --state <DIR>` wrote its grant: the write goes through the connectors command line with the
+idempotency key derived from the admitted request and the grant file as its proof, the Suspension is
+released, and the send is counted. A serving host performs granted sends itself at its next poll.
+
+Exit status:
+  0  the send was performed; standard output says what Connectors answered
+  1  the spec or a store cannot be used, or the resume failed
+  2  the command line is not valid
+  3  no send of the commission is held in the state directory
+  4  the send is not granted yet; nothing was performed
+  5  the resume was refused (in doubt, the case moved), or the send was refused; nothing was sent";
+
 /// The commands of `b10x-loom agent`.
 #[derive(Debug, Subcommand)]
 pub enum AgentCommand {
@@ -399,6 +437,54 @@ pub enum AgentCommand {
     /// spec that cannot. It runs nothing.
     #[command(after_help = AGENT_CHECK_HELP)]
     Check(AgentCheckArgs),
+    /// Host the agent a loom.agent/1 spec declares: poll its channel, answer each item in a
+    /// governed turn, and send a reply only as the spec's writes admit.
+    #[command(after_help = AGENT_SERVE_HELP)]
+    Serve(AgentServeArgs),
+    /// Perform a held send after its approval, once.
+    #[command(after_help = AGENT_RESUME_HELP)]
+    Resume(AgentResumeArgs),
+}
+
+/// The arguments of `b10x-loom agent serve`.
+#[derive(Debug, Args)]
+pub struct AgentServeArgs {
+    /// The loom.agent/1 document, YAML or JSON, in a regular file.
+    #[arg(long, value_name = "FILE")]
+    pub spec: PathBuf,
+    /// The host's state directory: its cursors, record, cases, Suspensions, grants and send
+    /// counter. One host holds it at a time.
+    #[arg(long, value_name = "DIR")]
+    pub state: PathBuf,
+    /// Run one cycle and stop.
+    #[arg(long)]
+    pub once: bool,
+    /// An llm catalog (`llm.catalog/1` TOML) in a regular file, instead of the spec's models:
+    /// `--model` and `--classifier-model` then each name a route alias of it.
+    #[arg(long, value_name = "PATH", requires_all = ["model", "classifier_model"])]
+    pub catalog: Option<PathBuf>,
+    /// The model each turn runs on: a name the spec's routes document serves, or with
+    /// `--catalog` a route alias. By default the spec's `agent` role.
+    #[arg(long, value_name = "ID")]
+    pub model: Option<String>,
+    /// The model that classifies each item: a name the spec's routes document serves, or with
+    /// `--catalog` a route alias. By default the spec's `classifier` role.
+    #[arg(long, value_name = "ID")]
+    pub classifier_model: Option<String>,
+}
+
+/// The arguments of `b10x-loom agent resume`.
+#[derive(Debug, Args)]
+pub struct AgentResumeArgs {
+    /// The commission whose held send was approved, as the record line names it.
+    #[arg(value_name = "COMMISSION")]
+    pub commission: String,
+    /// The loom.agent/1 document the host served.
+    #[arg(long, value_name = "FILE")]
+    pub spec: PathBuf,
+    /// The host's state directory.
+    #[arg(long, value_name = "DIR")]
+    pub state: PathBuf,
 }
 
 /// The arguments of `b10x-loom agent check`.

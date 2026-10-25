@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "36d9f391b47bf4ff392161dfbb07aa4606f2481a4cc3a3d4ac33a45bc10d5732",
-    "contract_digest": "00b46a8d1edd40edd961dc9dcf2afe82e3d81210aec3a4882dbcfa4b17960ae1"
+    "source_digest": "8745d4eaaf221f3a1bb550570e3c053abb7a0be0d3ecc2ae5c5c74c9c641f0cd",
+    "contract_digest": "ee901859b361adccaddf46e3c87dad5bc8dd71ec3a5f0fb52c94b6a87e0042d4"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -223,6 +223,13 @@
     {
       "kind": "domain_type",
       "source": "loom.agent.RuntimeSpec",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.agent.SendRefusalReason",
       "disposition": {
         "disposition": "generated"
       }
@@ -1062,6 +1069,20 @@
     },
     {
       "kind": "command_contract",
+      "source": "loom.agent.AdmitSend",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.agent.AdmitSend",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
       "source": "loom.agent.CheckAgentSpec",
       "disposition": {
         "disposition": "generated"
@@ -1241,6 +1262,13 @@
     {
       "kind": "event_type",
       "source": "loom.session.SessionChangeProposed",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.agent.SendRefused",
       "disposition": {
         "disposition": "generated"
       }

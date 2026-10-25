@@ -42,6 +42,14 @@ pub fn optional_uuid(input: &Input, name: &str) -> Option<Option<Uuid>> {
     }
 }
 
+/// The `Boolean` field `name`.
+pub fn boolean(input: &Input, name: &str) -> Option<bool> {
+    match input.get(name)? {
+        Node::Bool(value) => Some(*value),
+        _ => None,
+    }
+}
+
 /// The `Integer` field `name`.
 pub fn integer(input: &Input, name: &str) -> Option<i64> {
     integer_of(input.get(name)?)

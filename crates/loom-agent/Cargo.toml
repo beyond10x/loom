@@ -1,6 +1,6 @@
 [package]
 name = "b10x-loom-agent"
-description = "Checks a loom.agent/1 document before anything runs: whether it can be served against the plugin catalog, naming the member and the reason of the first refusal."
+description = "Checks a loom.agent/1 document before anything runs, naming the member and the reason of the first refusal, and serves one: the plugin host over the spec's channel, states, authority and governed writes."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,8 +11,15 @@ publish = false
 name = "b10x_loom_agent"
 
 [dependencies]
+b10x-loom-plugin = { path = "../loom-plugin" }
+b10x-loom-plugin-slack = { path = "../loom-plugin-slack" }
 b10x-loom-sdk = { path = "../loom-sdk" }
+chrono = "0.4"
+llm-core = { package = "b10x-llm-core", git = "https://github.com/beyond10x/llm", tag = "0.8.1" }
+intake_model = { package = "intake", path = "../../generated/rust/intake" }
+loom = { path = "../../generated/rust/loom" }
 serde = "1"
+serde_json = "1"
 serde_yaml_ng = "0.10"
 
 [dev-dependencies]

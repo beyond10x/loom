@@ -1,0 +1,15 @@
+# story agent-serve: `reply.send` needs the claim `reply.proposed` for the item revision. Without
+# it the send is refused and the run goes on, so the model can propose first.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-send-without-a-proposal-is-not-admissible
+summary: A `reply.send` before a `reply.propose` for the item is refused; the run goes on.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.AdmitSend
+    input: {mode: approval, channel_allowed: true, proposed: false, granted: true, sent_in_window: 0, max_per_hour: 5}
+    outcome: no-proposal
+    error:
+      name: loom.agent.SendRefused
+      fields: {reason: NoProposal, final: false}

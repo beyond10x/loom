@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 36d9f391b47bf4ff392161dfbb07aa4606f2481a4cc3a3d4ac33a45bc10d5732
-// contract digest 00b46a8d1edd40edd961dc9dcf2afe82e3d81210aec3a4882dbcfa4b17960ae1
+// model digest 8745d4eaaf221f3a1bb550570e3c053abb7a0be0d3ecc2ae5c5c74c9c641f0cd
+// contract digest ee901859b361adccaddf46e3c87dad5bc8dd71ec3a5f0fb52c94b6a87e0042d4
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -165,6 +165,36 @@ impl<P> Generated<P> {
     /// The generated behaviours, over `ports`.
     pub fn new(ports: P) -> Self {
         Self { ports }
+    }
+}
+
+/// `loom.agent.AdmitSend`, generated: every outcome is one the specification fully determines.
+impl<P> crate::agent::obligations::AdmitSendBehavior for Generated<P>
+{
+    fn admit_send(&mut self, input: crate::agent::AdmitSend) -> Result<crate::agent::AdmitSendOutcome, UnmetObligation> {
+        let _ = &input;
+        // `writes-none`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.mode).map(|value| match value { crate::agent::WriteMode::Auto => "auto", crate::agent::WriteMode::Approval => "approval", crate::agent::WriteMode::None => "none" }.to_owned()), Some("none".to_owned())), "loom.agent.AdmitSend")? {
+            return Ok(crate::agent::AdmitSendOutcome::WritesNone { error: crate::agent::SendRefused { reason: crate::agent::SendRefusalReason::WritesNone, r#final: true } });
+        }
+        // `outside-allow-list`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.channel_allowed).map(|value| *value), Some(false)), "loom.agent.AdmitSend")? {
+            return Ok(crate::agent::AdmitSendOutcome::OutsideAllowList { error: crate::agent::SendRefused { reason: crate::agent::SendRefusalReason::OutsideAllowList, r#final: true } });
+        }
+        // `no-proposal`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.proposed).map(|value| *value), Some(false)), "loom.agent.AdmitSend")? {
+            return Ok(crate::agent::AdmitSendOutcome::NoProposal { error: crate::agent::SendRefused { reason: crate::agent::SendRefusalReason::NoProposal, r#final: false } });
+        }
+        // `rate-limited`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(compare_numbers(Some(&input.sent_in_window).map(|value| value.to_string()), Some(&input.max_per_hour).map(|value| value.to_string()), core::cmp::Ordering::is_ge), "loom.agent.AdmitSend")? {
+            return Ok(crate::agent::AdmitSendOutcome::RateLimited { error: crate::agent::SendRefused { reason: crate::agent::SendRefusalReason::RateLimited, r#final: true } });
+        }
+        // `held`: an accepting branch, in declaration order.
+        if decided(all(&[equal(Some(&input.mode).map(|value| match value { crate::agent::WriteMode::Auto => "auto", crate::agent::WriteMode::Approval => "approval", crate::agent::WriteMode::None => "none" }.to_owned()), Some("approval".to_owned())), equal(Some(&input.granted).map(|value| *value), Some(false))]), "loom.agent.AdmitSend")? {
+            return Ok(crate::agent::AdmitSendOutcome::Held);
+        }
+        // `admitted`: the default.
+        return Ok(crate::agent::AdmitSendOutcome::Admitted);
     }
 }
 
@@ -493,6 +523,17 @@ fn undeclared(source: &'static str) -> UnmetObligation {
 /// A guard's truth, where it has one: Unknown selects no branch, so the model declares no outcome.
 fn decided(truth: Option<bool>, command: &'static str) -> Result<bool, UnmetObligation> {
     truth.ok_or_else(|| undeclared(command))
+}
+
+/// Three-valued conjunction: false wins, then Unknown.
+fn all(truths: &[Option<bool>]) -> Option<bool> {
+    if truths.contains(&Some(false)) {
+        Some(false)
+    } else if truths.contains(&None) {
+        None
+    } else {
+        Some(true)
+    }
 }
 
 /// Equality of two read values; an unread one is Unknown.

@@ -78,6 +78,7 @@ pub struct SlackHandler {
     classifier: Option<Box<dyn Model>>,
     turn_models: Option<TurnModels>,
     clock: Clock,
+    channel_allow: Option<Vec<String>>,
 }
 
 impl SlackHandler {
@@ -93,7 +94,16 @@ impl SlackHandler {
             classifier: None,
             turn_models: None,
             clock: Box::new(system_clock),
+            channel_allow: None,
         })
+    }
+
+    /// Walks only the member channels whose id `allow` lists (a served agent's `channel.allow`):
+    /// a message in any other channel is no item, and no history of it is read.
+    #[must_use]
+    pub fn with_channel_allow(mut self, allow: Vec<String>) -> Self {
+        self.channel_allow = Some(allow);
+        self
     }
 
     /// Classifies items, and picks a task's protocol, with `model`.
@@ -156,7 +166,14 @@ impl Plugin for SlackHandler {
         state: &PluginState,
         objectives: &[Objective],
     ) -> Result<Poll, PluginError> {
-        poll::poll(&self.config, host, state, objectives, (self.clock)())
+        poll::poll(
+            &self.config,
+            host,
+            state,
+            objectives,
+            (self.clock)(),
+            self.channel_allow.as_deref(),
+        )
     }
 
     fn classifier(&self) -> Result<&dyn Model, PluginError> {

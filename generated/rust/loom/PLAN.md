@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest 36d9f391b47bf4ff392161dfbb07aa4606f2481a4cc3a3d4ac33a45bc10d5732
-  contract digest 00b46a8d1edd40edd961dc9dcf2afe82e3d81210aec3a4882dbcfa4b17960ae1
+  model digest 8745d4eaaf221f3a1bb550570e3c053abb7a0be0d3ecc2ae5c5c74c9c641f0cd
+  contract digest ee901859b361adccaddf46e3c87dad5bc8dd71ec3a5f0fb52c94b6a87e0042d4
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-193 capabilities: **191 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+197 capabilities: **195 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -45,6 +45,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.agent.RefusalReason` |
 | domain type | `loom.agent.RunBudget` |
 | domain type | `loom.agent.RuntimeSpec` |
+| domain type | `loom.agent.SendRefusalReason` |
 | domain type | `loom.agent.SessionSpec` |
 | domain type | `loom.agent.StateWhen` |
 | domain type | `loom.agent.StopPolicy` |
@@ -164,6 +165,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | entity lifecycle | `loom.run.Selection` |
 | entity lifecycle | `loom.run.SelectionRecord` |
 | entity lifecycle | `loom.session.AgentSession` |
+| command contract | `loom.agent.AdmitSend` |
+| command behaviour | `loom.agent.AdmitSend` |
 | command contract | `loom.agent.CheckAgentSpec` |
 | command contract | `loom.run.OverruleSelection` |
 | command behaviour | `loom.run.OverruleSelection` |
@@ -187,6 +190,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | event type | `loom.run.SelectionRecorded` |
 | event type | `loom.run.SelectionStale` |
 | event type | `loom.session.SessionChangeProposed` |
+| error type | `loom.agent.SendRefused` |
 | error type | `loom.agent.SpecRefused` |
 | error type | `loom.run.ActionNotInCatalogue` |
 | error type | `loom.run.CatalogueExists` |
