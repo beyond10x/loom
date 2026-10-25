@@ -1,0 +1,15 @@
+# story agent-check: a channel whose allow list is empty is refused, naming the member. The
+# fixture is the operator example with `channel.allow: []`.
+type: ess-scenario/4
+domain: loom.agent
+scenario: an-empty-channel-allow-is-refused
+summary: An empty channel.allow is refused, naming the member.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.CheckAgentSpec
+    input: {path: ess/scenarios/agent-check/specs/empty-channel-allow.yaml}
+    outcome: empty-channel-allow
+    error:
+      name: loom.agent.SpecRefused
+      fields: {reason: EmptyChannelAllow, member: channel.allow, detail: no channel id is allowed}

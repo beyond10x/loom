@@ -16,6 +16,9 @@ pub const MAX_PROTOCOL_BYTES: usize = 1024 * 1024;
 pub const SYSTEM_QUERY_YAML: &str = include_str!("../../../protocols/system-query/1.yaml");
 /// Loom's read-only protocol a plugin turn answers an inbound item under. Plugin catalog only.
 pub const INBOUND_ANSWER_YAML: &str = include_str!("../../../protocols/inbound-answer/1.yaml");
+/// Loom's protocol a plugin turn answers an inbound item under and sends the proposed reply:
+/// `inbound-answer@1` plus `reply.send`. Plugin catalog only.
+pub const OPERATOR_REPLY_YAML: &str = include_str!("../../../protocols/operator-reply/1.yaml");
 
 /// A definition and its validated Canon model. Definition availability grants no authority.
 #[derive(Debug, Clone)]
@@ -122,20 +125,33 @@ impl ProtocolCatalog {
         )?;
         Ok(catalog)
     }
-    /// The plugin host's catalog: `inbound-answer@1` only. Routing and `protocols list` read
-    /// [`Self::bundled`], which does not hold it.
+    /// The plugin host's catalog: `inbound-answer@1` and `operator-reply@1`. Routing and
+    /// `protocols list` read [`Self::bundled`], which holds neither.
     pub fn plugins() -> Result<Self, String> {
         let mut catalog = Self::default();
-        catalog.add_yaml(
-            "inbound-answer@1",
-            INBOUND_ANSWER_YAML,
-            ProtocolSource {
-                kind: SourceKind::Loom,
-                location: "loom".into(),
-                revision: env!("CARGO_PKG_VERSION").into(),
-                path: "protocols/inbound-answer/1.yaml".into(),
-            },
-        )?;
+        for (name, yaml, path) in [
+            (
+                "inbound-answer@1",
+                INBOUND_ANSWER_YAML,
+                "protocols/inbound-answer/1.yaml",
+            ),
+            (
+                "operator-reply@1",
+                OPERATOR_REPLY_YAML,
+                "protocols/operator-reply/1.yaml",
+            ),
+        ] {
+            catalog.add_yaml(
+                name,
+                yaml,
+                ProtocolSource {
+                    kind: SourceKind::Loom,
+                    location: "loom".into(),
+                    revision: env!("CARGO_PKG_VERSION").into(),
+                    path: path.into(),
+                },
+            )?;
+        }
         Ok(catalog)
     }
     /// Engineering-only compatibility catalog used by existing embedding entrypoints.

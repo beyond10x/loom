@@ -1,0 +1,12 @@
+# story agent-check: the operator example serves. The path is the repository's; the conformance
+# target reads the file at it.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-valid-spec-checks
+summary: The operator example is serveable, so `b10x-loom agent check` exits 0 on it.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.CheckAgentSpec
+    input: {path: examples/agents/operator.yaml}
+    outcome: serveable

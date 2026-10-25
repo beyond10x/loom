@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 94db884d84b620fc22483ab0d13d57dcffaf22250d1c9e736fc6846819918ca3
-// contract digest 99a43dd53faae20240cb043b9a0e26a5c20118628ddd2b731210419e5b195ad9
+// model digest b45d71347c921a18e8cc80e0d679a2120f09cda4251d04af27cfc43bc9c8b295
+// contract digest e6cd03abb8d70a142f0445dce48f74758629d1f06380c00a5edfc6784fe535ec
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Agent — `loom.agent`.
@@ -350,6 +350,27 @@ pub struct PolicySpec {
     pub capabilities: Vec<String>,
 }
 
+/// RefusalReason — `loom.agent.RefusalReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefusalReason {
+    /// `Malformed`.
+    Malformed,
+    /// `SecretLiteral`.
+    SecretLiteral,
+    /// `UnknownProtocol`.
+    UnknownProtocol,
+    /// `UnknownAction`.
+    UnknownAction,
+    /// `UnboundSource`.
+    UnboundSource,
+    /// `HttpMethod`.
+    HttpMethod,
+    /// `SendWithoutWrites`.
+    SendWithoutWrites,
+    /// `EmptyChannelAllow`.
+    EmptyChannelAllow,
+}
+
 /// RunBudget — `loom.agent.RunBudget`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunBudget {
@@ -448,4 +469,107 @@ pub struct WritesSpec {
     pub mode: WriteMode,
     /// `max_per_hour` — `Integer`.
     pub max_per_hour: i64,
+}
+
+/// CheckAgentSpec — the input of `loom.agent.CheckAgentSpec`.
+///
+/// Everything it can result in is [`CheckAgentSpecOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckAgentSpec {
+    /// `path` — `String`.
+    pub path: String,
+}
+
+/// Everything `loom.agent.CheckAgentSpec` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckAgentSpecOutcome {
+    /// `malformed` — externally decided (the document at the path does not decode as a loom.agent/1 document).
+    Malformed {
+        /// Why it was refused: `loom.agent.SpecRefused`.
+        error: SpecRefused,
+    },
+    /// `secret-literal` — externally decided (a string of the document holds a credential).
+    SecretLiteral {
+        /// Why it was refused: `loom.agent.SpecRefused`.
+        error: SpecRefused,
+    },
+    /// `unknown-protocol` — externally decided (the inner loop names a protocol the plugin catalog does not hold, or states are declared with no inner loop).
+    UnknownProtocol {
+        /// Why it was refused: `loom.agent.SpecRefused`.
+        error: SpecRefused,
+    },
+    /// `unknown-action` — externally decided (a state names an action the inner loop's protocol does not declare).
+    UnknownAction {
+        /// Why it was refused: `loom.agent.SpecRefused`.
+        error: SpecRefused,
+    },
+    /// `unbound-source` — externally decided (a state, the outer loop or the channel names a source no binding declares).
+    UnboundSource {
+        /// Why it was refused: `loom.agent.SpecRefused`.
+        error: SpecRefused,
+    },
+    /// `http-method` — externally decided (an http binding's method is not GET).
+    HttpMethod {
+        /// Why it was refused: `loom.agent.SpecRefused`.
+        error: SpecRefused,
+    },
+    /// `send-without-writes` — externally decided (reply.send is a capability while writes are none or undeclared).
+    SendWithoutWrites {
+        /// Why it was refused: `loom.agent.SpecRefused`.
+        error: SpecRefused,
+    },
+    /// `empty-channel-allow` — externally decided (the channel's allow list is empty).
+    EmptyChannelAllow {
+        /// Why it was refused: `loom.agent.SpecRefused`.
+        error: SpecRefused,
+    },
+    /// `serveable` — otherwise.
+    Serveable,
+}
+
+/// The declared error `loom.agent.SpecRefused`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpecRefused {
+    /// `reason` — `loom.agent.RefusalReason`.
+    pub reason: RefusalReason,
+    /// `member` — `String`.
+    pub member: String,
+    /// `detail` — `String`.
+    pub detail: String,
+}
+
+/// What this bounded context owes its implementor, as typed seams.
+///
+/// One trait per obligation in the synthesis plan, each carrying the plan's own contract.
+/// [`Unimplemented`](obligations::Unimplemented) satisfies every trait by refusing in the type system, so the workspace builds —
+/// and says exactly what it cannot yet do — before a line is hand-written.
+pub mod obligations {
+    /// The behaviour `loom.agent.CheckAgentSpec` — an implementation obligation.
+    ///
+    /// Why it is not generated: kept an obligation by the fields of error `loom.agent.SpecRefused`, which the specification gives no source, in `malformed`.
+    ///
+    /// Contract: given `loom.agent.CheckAgentSpec` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `malformed` externally decided (the document at the path does not decode as a loom.agent/1 document), error `loom.agent.SpecRefused`; `secret-literal` externally decided (a string of the document holds a credential), error `loom.agent.SpecRefused`; `unknown-protocol` externally decided (the inner loop names a protocol the plugin catalog does not hold, or states are declared with no inner loop), error `loom.agent.SpecRefused`; `unknown-action` externally decided (a state names an action the inner loop's protocol does not declare), error `loom.agent.SpecRefused`; `unbound-source` externally decided (a state, the outer loop or the channel names a source no binding declares), error `loom.agent.SpecRefused`; `http-method` externally decided (an http binding's method is not GET), error `loom.agent.SpecRefused`; `send-without-writes` externally decided (reply.send is a capability while writes are none or undeclared), error `loom.agent.SpecRefused`; `empty-channel-allow` externally decided (the channel's allow list is empty), error `loom.agent.SpecRefused`; `serveable` otherwise.
+    pub trait CheckAgentSpecBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.agent.CheckAgentSpec`.
+        ///
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
+        fn check_agent_spec(&mut self, input: super::CheckAgentSpec) -> Result<super::CheckAgentSpecOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// Every obligation of this bounded context, refused in the type system.
+    ///
+    /// Each method returns the typed refusal naming what is owed — never a panic, never a guessed
+    /// value — so a workspace built on this stub compiles and reports its own gaps.
+    pub struct Unimplemented;
+
+    impl CheckAgentSpecBehavior for Unimplemented {
+        fn check_agent_spec(&mut self, _input: super::CheckAgentSpec) -> Result<super::CheckAgentSpecOutcome, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "loom.agent.CheckAgentSpec" })
+        }
+    }
 }

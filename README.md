@@ -243,6 +243,24 @@ line per proposal; `b10x-loom plugin report slack-handler --state <dir>` prints 
 configuration is `loom.slack.SlackConfig` as JSON; `plugin run --help` names its members, and
 `--catalog` takes route aliases as `run` does.
 
+`b10x-loom agent check --spec <FILE>` says whether a `loom.agent/1` spec can be served, against
+the plugin catalog (`inbound-answer@1`, `operator-reply@1`), and runs nothing. The first refusal
+is the answer: the text is not one YAML document; a value or key anywhere in it holds a credential
+(a URL with a user name or a query, or a token prefix such as `xoxb-`), named without repeating
+it, before the document is decoded; the document does not decode; the inner loop's
+protocol is not in the catalog, or states have no inner loop; a state names an action its
+protocol lacks; a state, the outer loop or the channel names a source no binding declares; an
+`http` binding's method is not `GET`; `reply.send` is a capability while writes are `none`; the
+channel allows no channel id. It exits 0 when the spec is serveable, 3 when it is refused, 1 when
+the file cannot be read:
+
+```console
+$ b10x-loom agent check --spec examples/agents/operator.yaml
+checked platform-operator: 3 states, 3 bindings, protocol operator-reply@1
+$ b10x-loom agent check --spec ess/scenarios/agent-check/specs/unknown-action.yaml
+b10x-loom: refused: UnknownAction at states[0].actions[2]: reply.escalate
+```
+
 ## Embed the runtime
 
 An application depends on one crate, `b10x-loom-sdk` (library `loom_sdk`). It re-exports
@@ -263,6 +281,7 @@ An agent can be written as data: a `loom.agent/1` document, YAML or JSON, which
 `loom_sdk::agent::parse` decodes into an `AgentSpec` (identity, models, session and tool policy,
 loops, states, bindings, channel, writes, capabilities, exposure, runtime and deployment),
 refusing a member the domain does not declare. `examples/agents/operator.yaml` is one.
+`b10x-loom agent check` (library `b10x-loom-agent`) says whether such a spec can be served.
 
 To deploy such an agent to Kubernetes, the `LoomAgent` custom resource carries the document as its
 `spec.agent`. Its CustomResourceDefinition, `deploy/crd/loomagents.loom.beyond10x.dev.yaml`, is
@@ -359,6 +378,7 @@ surface kept stable within a release line, every port a host implements among it
 |---|---|
 | `b10x-loom-protocols` | The shared protocol catalog and verified offline installations |
 | `b10x-loom-cli` | The `b10x-loom` command line |
+| `b10x-loom-agent` | Checks a `loom.agent/1` spec before anything runs: the first reason it cannot be served, naming the member; `b10x-loom agent check` runs it |
 | `b10x-loom-sdk` | The one crate an embedding depends on |
 | `b10x-loom-executor` | The executor: catalogue, action selection and argument generation, each model request one turn of an llm `Model` |
 | `b10x-loom-session-executor` | An `AgentExecutor` over a harness, Claude Code or Codex session run through metaharness (`0.15.0`) in a scratch copy: it proposes the session's change, never applies it, and summarizes the session's record as `trace-ir-summary/1`, with each tool call's decision and who made it; `SessionExecutor::from_spec` builds it from a `loom.agent/1` spec, offering only the spec's allowed tools; a b10x-harness session can read its endpoint's API key from the secret store by name (`api_key_secret`) |

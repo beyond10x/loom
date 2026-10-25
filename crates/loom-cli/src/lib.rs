@@ -4,7 +4,8 @@
 //! of its command line, so `loom-docs` can generate the CLI reference from it, the exit status a
 //! stop reason maps to, the run event stream `run --output jsonl` writes ([`events`]), the
 //! JSON `evaluate` reads and writes ([`evaluate`]), the llm catalog `run --catalog` reads
-//! ([`model_catalog`]), and the lines `plugin run --once` and `plugin report` print ([`plugin`]).
+//! ([`model_catalog`]), the lines `plugin run --once` and `plugin report` print ([`plugin`]),
+//! and what `agent check` reads and prints ([`agent`]).
 
 use std::path::PathBuf;
 
@@ -180,6 +181,7 @@ pub fn run_exit_status(run: &SliceRun) -> u8 {
     }
 }
 
+pub mod agent;
 pub mod evaluate;
 pub mod events;
 pub mod mandate;
@@ -226,6 +228,8 @@ pub enum Command {
     Evaluate(EvaluateArgs),
     /// Host a plugin, or print what it proposed. A plugin reads and proposes; it never sends.
     Plugin(PluginArgs),
+    /// Check an agent defined as data, a loom.agent/1 spec, before anything runs.
+    Agent(AgentArgs),
     /// Approve the request a commission's Suspension holds: write a grant into the state
     /// directory. Approval performs nothing; `resume` does.
     #[command(after_help = APPROVE_HELP)]
@@ -361,6 +365,49 @@ pub struct PluginReportArgs {
     /// The plugin's state directory.
     #[arg(long, value_name = "DIR")]
     pub state: PathBuf,
+}
+
+/// What `agent check --help` says about the check and its exit status.
+pub const AGENT_CHECK_HELP: &str = "The spec is checked against the plugin catalog, which holds inbound-answer@1 and operator-reply@1.
+The first refusal is the answer, in this order: the document does not decode (Malformed); a string of
+it holds a credential, a URL with a user name or a query, or a token prefix such as xoxb- or sk-
+(SecretLiteral; the value is never repeated); the inner loop's protocol is not in the catalog, or
+states are declared with no inner loop (UnknownProtocol); a state names an action its protocol lacks
+(UnknownAction); a state, the outer loop or the channel names a source no binding declares
+(UnboundSource); an http binding's method is not GET (HttpMethod); reply.send is a capability while
+writes are none or undeclared (SendWithoutWrites); the channel allows no channel id
+(EmptyChannelAllow). Nothing runs and nothing but the spec is read.
+
+Exit status:
+  0  serveable: standard output carries \"checked <agent>: <n> states, <m> bindings, protocol <protocol>\"
+     (protocol none without loops)
+  3  refused: standard error carries \"refused: <reason> at <member>: <detail>\"
+  1  the file cannot be read
+  2  the command line is not valid";
+
+/// The arguments of `b10x-loom agent`.
+#[derive(Debug, Args)]
+pub struct AgentArgs {
+    #[command(subcommand)]
+    pub command: AgentCommand,
+}
+
+/// The commands of `b10x-loom agent`.
+#[derive(Debug, Subcommand)]
+pub enum AgentCommand {
+    /// Say whether a loom.agent/1 spec can be served: refuse, naming the member and the reason, a
+    /// spec that cannot. It runs nothing.
+    #[command(after_help = AGENT_CHECK_HELP)]
+    Check(AgentCheckArgs),
+}
+
+/// The arguments of `b10x-loom agent check`.
+#[derive(Debug, Args)]
+pub struct AgentCheckArgs {
+    /// The loom.agent/1 document, YAML or JSON, in a regular file; a named pipe, a device or a
+    /// directory is refused.
+    #[arg(long, value_name = "FILE")]
+    pub spec: PathBuf,
 }
 
 /// The arguments of `b10x-loom evaluate`.

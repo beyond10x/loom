@@ -15,4 +15,13 @@ specification:
   - domains/session.yaml
   - domains/agent.yaml
   - domains/resource.yaml
-scenarios: []
+scenarios:
+  - scenarios/agent-check/a-valid-spec-checks.yaml
+  - scenarios/agent-check/a-malformed-document-is-refused.yaml
+  - scenarios/agent-check/a-secret-literal-is-refused.yaml
+  - scenarios/agent-check/an-unknown-protocol-is-refused.yaml
+  - scenarios/agent-check/a-state-naming-an-unknown-action-is-refused.yaml
+  - scenarios/agent-check/a-source-without-a-binding-is-refused.yaml
+  - scenarios/agent-check/an-http-binding-whose-method-is-not-get-is-refused.yaml
+  - scenarios/agent-check/reply-send-without-writes-is-refused.yaml
+  - scenarios/agent-check/an-empty-channel-allow-is-refused.yaml

@@ -16,6 +16,7 @@ use std::process::Command;
 
 /// `(package, directory under crates/, library name)` for every workspace member.
 const EXPECTED: [(&str, &str, Option<&str>); 24] = [
+    ("b10x-loom-agent", "loom-agent", Some("b10x_loom_agent")),
     (
         "b10x-loom-executor",
         "loom-executor",

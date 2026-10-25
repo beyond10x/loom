@@ -41,6 +41,10 @@ pub use models_config::agent::{
     WriteMode, WritesSpec,
 };
 
+/// Why a spec cannot be served: the refusal of `loom.agent.CheckAgentSpec` and its reason,
+/// generated from `ess/domains/agent.yaml`; `b10x-loom-agent` checks a spec into them.
+pub use models_config::agent::{RefusalReason, SpecRefused};
+
 /// The one format a document declares.
 pub const FORMAT: &str = "loom.agent/1";
 
