@@ -414,7 +414,10 @@ With expose.a2a the agent also answers A2A on --a2a-address and expose.a2a.port,
 the agent card at /.well-known/agent-card.json, and at expose.a2a.path JSON-RPC SendMessage, one
 turn on inbound-answer@1 answered with its record (nothing is sent through A2A), and GetTask. Every
 request but GET /ready and GET /live needs `Authorization: Bearer` with the token LOOM_A2A_BEARER
-holds; the host refuses to start without it. The listener stops when the host does.
+holds (a trailing newline or blank is dropped); the host refuses to start without it. The
+listener stops when the host does. A spec with expose.a2a and no channel polls nothing: the
+listener is the host, until SIGTERM or SIGINT, and --once is refused. A spec with neither is
+refused.
 
 Exit status:
   0  the cycles ran

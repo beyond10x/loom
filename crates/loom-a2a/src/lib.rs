@@ -27,6 +27,6 @@ pub mod wire;
 
 pub use admit::{Bearer, a2a_refusal_spelling, admit_a2a_request};
 pub use server::{
-    A2aServer, Answerer, BEARER_SCHEME, CARD_PATH, LIVE_PATH, MAX_CONNECTIONS, PROTOCOL_BINDING,
-    PROTOCOL_VERSION, READY_PATH, TASK_NOT_FOUND,
+    A2aServer, Answerer, BEARER_SCHEME, CARD_PATH, LIVE_PATH, MAX_CONNECTIONS, MAX_REVISION,
+    PROTOCOL_BINDING, PROTOCOL_VERSION, READY_PATH, TASK_NOT_FOUND, item_revision,
 };

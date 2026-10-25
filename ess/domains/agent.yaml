@@ -490,6 +490,13 @@ types:
     kind: enum
     variants: [MissingBearer, WrongBearer]
 
+  # Why `b10x-loom agent serve` does not serve a spec `CheckAgentSpec` accepts (story agent-a2a),
+  # one reason per refusal of `AdmitServe`: the spec declares neither a `channel` to poll nor
+  # `expose.a2a` to answer on, so the host would run nothing (`NothingToServe`).
+  - name: loom.agent.ServeRefusalReason
+    kind: enum
+    variants: [NothingToServe]
+
 errors:
   # The refusal of `AdmitSend`: why, and whether it is final. A final refusal ends the turn's run
   # (Commission's `EffectOutcomeRefused.ends_run`): the item is handled and its reply never sent. A
@@ -519,6 +526,12 @@ errors:
     fields:
       - name: reason
         type: loom.agent.A2aRefusalReason
+
+  # The refusal of `AdmitServe`: why. The host exits before it reads, calls a model or records.
+  - name: loom.agent.ServeRefused
+    fields:
+      - name: reason
+        type: loom.agent.ServeRefusalReason
 
 commands:
   # Whether the `loom.agent/1` document at `path` can be served: `b10x-loom agent check --spec`.
@@ -664,4 +677,37 @@ commands:
         when: probe == true
         accepts: nothing
       - name: admitted
+        accepts: nothing
+
+  # Whether `b10x-loom agent serve` serves a spec `CheckAgentSpec` accepts, and what its host runs
+  # (story agent-a2a): `channel` is whether the spec declares a `channel`, `a2a` whether it
+  # declares `expose.a2a`. A spec with neither is refused: the host would run nothing. With a
+  # channel the host polls it, and with `expose.a2a` as well it answers A2A beside the poll; with
+  # `expose.a2a` alone it polls nothing and its main loop is the A2A listener, which SIGTERM ends
+  # as it ends the poll. Decided before anything is read, a model called or a record written.
+  - name: loom.agent.AdmitServe
+    input:
+      - name: channel
+        type: Boolean
+      - name: a2a
+        type: Boolean
+    outcomes:
+      - name: nothing-to-serve
+        when:
+          all:
+            - channel == false
+            - a2a == false
+        error: loom.agent.ServeRefused
+        payload:
+          loom.agent.ServeRefused: {reason: NothingToServe}
+      - name: polls-and-answers
+        when:
+          all:
+            - channel == true
+            - a2a == true
+        accepts: nothing
+      - name: polls
+        when: channel == true
+        accepts: nothing
+      - name: answers
         accepts: nothing

@@ -41,13 +41,20 @@ pub fn a2a_refusal_spelling(reason: A2aRefusalReason) -> &'static str {
 pub struct Bearer(Vec<u8>);
 
 impl Bearer {
-    /// The bearer `token`.
+    /// The bearer `token`, without the whitespace around it: a Secret written from a file ends
+    /// in a newline, and a header value is read trimmed, so no request could present it.
     ///
     /// # Errors
-    /// `token` is empty or blank, so any request presenting an empty bearer would match it.
+    /// `token` is empty or blank, so any request presenting an empty bearer would match it; or
+    /// it holds a control character inside, which no header can carry, so no request could
+    /// present it either. The message names no byte of it.
     pub fn new(token: &str) -> Result<Self, String> {
-        if token.trim().is_empty() {
+        let token = token.trim();
+        if token.is_empty() {
             return Err("the A2A bearer is empty".to_owned());
+        }
+        if token.chars().any(char::is_control) {
+            return Err("the A2A bearer holds a control character".to_owned());
         }
         Ok(Self(token.as_bytes().to_vec()))
     }
@@ -101,6 +108,23 @@ mod tests {
         assert!(bearer.matches(b"token-1"));
         for other in [&b"token-2"[..], b"token-", b"token-11", b"", b"TOKEN-1"] {
             assert!(!bearer.matches(other), "{other:?}");
+        }
+    }
+
+    #[test]
+    fn the_whitespace_around_a_bearer_is_dropped_and_a_control_character_inside_refused() {
+        for stored in ["token-1\n", "token-1\r\n", " token-1\t"] {
+            let bearer = Bearer::new(stored).expect("a bearer");
+            assert!(bearer.matches(b"token-1"), "{stored:?}");
+            assert_eq!(
+                admit(&bearer, false, Some("Bearer token-1")),
+                AdmitA2aRequestOutcome::Admitted,
+                "{stored:?}"
+            );
+        }
+        for refused in ["\n", " \r\n ", "tok\nen-1", "token\u{7}-1"] {
+            let why = Bearer::new(refused).expect_err("refused");
+            assert!(!why.contains("token") && !why.contains("tok"), "{why}");
         }
     }
 

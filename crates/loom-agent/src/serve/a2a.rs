@@ -13,10 +13,11 @@
 //!
 //! Each `RuntimeEvent` of the turn's run reaches the task as it happens. The case and its records
 //! are kept in the state directory as every turn's are, under the commission of the item
-//! `a2a:<task>` and the message id as its revision.
+//! `a2a:<task>` and the revision `b10x_loom_a2a::item_revision` derives from the message id.
 //!
 //! The listener needs a bearer: [`bearer`] reads it from [`BEARER_ENV`], which the agent's Secret
-//! sets; serving refuses to start without it.
+//! sets; serving refuses to start without it. A spec with `expose.a2a` and no `channel` is served
+//! too, polling nothing ([`admit_serve`]).
 
 use std::fmt;
 
@@ -33,19 +34,60 @@ use b10x_loom_plugin::{
     RecordOutcome, TurnOptions, TurnResult, turn_with,
 };
 use loom_sdk::EventSink;
-use loom_sdk::agent::A2aExposure;
+use loom_sdk::agent::{A2aExposure, AgentSpec};
 use loom_sdk::governor::{FileCaseStore, FileSuspensionStore};
 
 use super::SpecPlugin;
 
+pub use loom::agent::{AdmitServe, AdmitServeOutcome, ServeRefusalReason, ServeRefused};
+
 /// The environment variable holding the bearer every A2A request but a probe carries.
 pub const BEARER_ENV: &str = "LOOM_A2A_BEARER";
+
+/// Why [`SpecPlugin::new`] refuses a spec [`admit_serve`] answers `nothing-to-serve`.
+pub const NOTHING_TO_SERVE: &str =
+    "neither `channel` nor `expose.a2a` is declared; nothing would be polled or answered";
+
+/// Decides `loom.agent.AdmitServe` (`ess/domains/agent.yaml`): a spec with neither a channel nor
+/// `expose.a2a` is refused, then one with both polls and answers, one with a channel polls, and
+/// one with `expose.a2a` alone answers A2A and polls nothing.
+pub fn admit_serve(input: &AdmitServe) -> AdmitServeOutcome {
+    match (input.channel, input.a2a) {
+        (false, false) => AdmitServeOutcome::NothingToServe {
+            error: ServeRefused {
+                reason: ServeRefusalReason::NothingToServe,
+            },
+        },
+        (true, true) => AdmitServeOutcome::PollsAndAnswers,
+        (true, false) => AdmitServeOutcome::Polls,
+        (false, true) => AdmitServeOutcome::Answers,
+    }
+}
+
+/// The input of [`admit_serve`] for `spec`: whether it declares a `channel` and `expose.a2a`.
+pub fn serve_input(spec: &AgentSpec) -> AdmitServe {
+    AdmitServe {
+        channel: spec.channel.is_some(),
+        a2a: spec
+            .expose
+            .as_ref()
+            .is_some_and(|expose| expose.a2a.is_some()),
+    }
+}
+
+/// `reason` as the enum `loom.agent.ServeRefusalReason` spells it.
+pub fn serve_refusal_spelling(reason: ServeRefusalReason) -> &'static str {
+    match reason {
+        ServeRefusalReason::NothingToServe => "NothingToServe",
+    }
+}
 
 /// The bearer of the A2A listener, from `value`, the content of [`BEARER_ENV`].
 ///
 /// # Errors
-/// [`PluginError::Config`] when it is unset, empty or blank; the message names the variable,
-/// never a value.
+/// [`PluginError::Config`] when it is unset, empty or blank once the whitespace around it is
+/// dropped (a Secret file's trailing newline), or holds a control character; the message names
+/// the variable, never a value.
 pub fn bearer(value: Option<&str>) -> Result<Bearer, PluginError> {
     value
         .ok_or_else(|| {
@@ -54,9 +96,10 @@ pub fn bearer(value: Option<&str>) -> Result<Bearer, PluginError> {
             ))
         })
         .and_then(|value| {
-            Bearer::new(value).map_err(|_| {
+            Bearer::new(value).map_err(|why| {
                 PluginError::Config(format!(
-                    "`expose.a2a` is declared and {BEARER_ENV} is empty; the listener needs a bearer"
+                    "`expose.a2a` is declared and {BEARER_ENV} cannot be used ({why}); the listener \
+                     needs a bearer"
                 ))
             })
         })
@@ -87,6 +130,14 @@ pub fn port(exposure: &A2aExposure) -> Result<u16, PluginError> {
                 exposure.port
             ))
         })
+}
+
+/// The projection an A2A turn runs on: the state's `projection` without `reply.send`. The turn's
+/// protocol, [`PROTOCOL`], declares no `reply.send` either; this keeps the A2A turn from sending
+/// should the protocol ever change.
+pub fn answer_projection(mut projection: Projection) -> Projection {
+    projection.actions.retain(|action| action != SEND);
+    projection
 }
 
 /// A served agent answering A2A messages: [`SpecPlugin`] under a host.
@@ -136,8 +187,7 @@ impl Answerer for Answering<'_> {
             };
             return Ok(plugin.result(item, &classification, turn));
         }
-        let mut projection = plugin.project(host, item, &classification);
-        projection.actions.retain(|action| action != SEND);
+        let projection = answer_projection(plugin.project(host, item, &classification));
         let turn = plugin
             .answer_turn(host, item, &classification, &projection, events)
             .map_err(error)?;

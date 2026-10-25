@@ -210,6 +210,7 @@ impl ConformanceTarget for LoomTarget {
             agent::CHECK_AGENT_SPEC => agent::check_agent_spec(&mut live, input)?,
             agent::ADMIT_SEND => agent::admit_send_command(input),
             a2a::ADMIT_A2A_REQUEST => a2a::admit_a2a_request_command(input),
+            a2a::ADMIT_SERVE => a2a::admit_serve_command(input),
             other => {
                 return Err(TargetError::unavailable(
                     format!("invoking `{other}`"),

@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 8ae58731f7f79f17db497c148f863a2a09f9d0b11cdd8a084f42d50b131fa4a2
-// contract digest 42772f0e3c9ac74486da92cac0a54283b8c90a6bd6e2ad7ea9bc7a6a54f0f463
+// model digest 569a18823a1c008e767c9990ab31e54692d3d9eb2751b8180ef11be4a3af9464
+// contract digest f3f75fccb010140c382640d2b5344010e7e8e5fabf0b2640c5b6945716960d3e
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -217,6 +217,28 @@ impl<P> crate::agent::obligations::AdmitSendBehavior for Generated<P>
         }
         // `admitted`: the default.
         return Ok(crate::agent::AdmitSendOutcome::Admitted);
+    }
+}
+
+/// `loom.agent.AdmitServe`, generated: every outcome is one the specification fully determines.
+impl<P> crate::agent::obligations::AdmitServeBehavior for Generated<P>
+{
+    fn admit_serve(&mut self, input: crate::agent::AdmitServe) -> Result<crate::agent::AdmitServeOutcome, UnmetObligation> {
+        let _ = &input;
+        // `nothing-to-serve`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(all(&[equal(Some(&input.channel).map(|value| *value), Some(false)), equal(Some(&input.a2a).map(|value| *value), Some(false))]), "loom.agent.AdmitServe")? {
+            return Ok(crate::agent::AdmitServeOutcome::NothingToServe { error: crate::agent::ServeRefused { reason: crate::agent::ServeRefusalReason::NothingToServe } });
+        }
+        // `polls-and-answers`: an accepting branch, in declaration order.
+        if decided(all(&[equal(Some(&input.channel).map(|value| *value), Some(true)), equal(Some(&input.a2a).map(|value| *value), Some(true))]), "loom.agent.AdmitServe")? {
+            return Ok(crate::agent::AdmitServeOutcome::PollsAndAnswers);
+        }
+        // `polls`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.channel).map(|value| *value), Some(true)), "loom.agent.AdmitServe")? {
+            return Ok(crate::agent::AdmitServeOutcome::Polls);
+        }
+        // `answers`: the default.
+        return Ok(crate::agent::AdmitServeOutcome::Answers);
     }
 }
 

@@ -147,11 +147,32 @@ fn agent_serve(arguments: &AgentServeArgs, spec: loom_sdk::agent::AgentSpec) -> 
         .map_err(|e| e.to_string())?
         .with_classifier(Box::new(a2a::SharedModel(Arc::clone(&classifier))))
         .with_turn_models(turn_models(Arc::clone(&model)));
+    let answers_only = a2a::answers_only(&a2a_spec);
+    if answers_only && arguments.once {
+        return Err(a2a::ONCE_WITHOUT_A_CHANNEL.to_owned());
+    }
     let bearer = std::env::var(a2a::BEARER_ENV).ok();
     let listening = a2a::prepare(&a2a_spec, arguments.a2a_address, bearer.as_deref())?;
     let stop = Arc::new(AtomicBool::new(arguments.once));
     if !arguments.once {
         stop_on_signals(Arc::clone(&stop))?;
+    }
+    if answers_only {
+        // Nothing to poll: the host's main loop is the A2A listener, holding the state directory
+        // as the polling host does, until SIGTERM or SIGINT.
+        let (server, socket) =
+            listening.ok_or_else(|| "`expose.a2a` declares no listener".to_owned())?;
+        let held = b10x_loom_plugin::state::StateDir::open(&arguments.state, plugin.config())
+            .map_err(|e| e.to_string())?;
+        let agent = a2a::Agent {
+            spec: a2a_spec,
+            state: &arguments.state,
+            classifier,
+            model,
+        };
+        let served = a2a::serve(&server, socket, agent, &stop, &stop);
+        drop(held);
+        return served;
     }
     let a2a_stop = AtomicBool::new(false);
     let (ran, served) = std::thread::scope(|scope| {

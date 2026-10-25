@@ -2,7 +2,9 @@
 //! `expose.a2a`, the listener is prepared before anything runs ([`prepare`]: its bearer from
 //! [`BEARER_ENV`], its port bound) and answers beside the polling host until the host stops
 //! ([`serve`]). Its turns run on an agent of their own, built from the same spec and models on the
-//! listener's thread, so the host's agent is never shared between threads.
+//! listener's thread, so the host's agent is never shared between threads. A spec with
+//! `expose.a2a` and no `channel` polls nothing ([`answers_only`]): the listener is the host's main
+//! loop, and SIGTERM ends it as it ends the poll.
 
 use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::path::Path;
@@ -11,7 +13,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use b10x_loom_a2a::A2aServer;
 use b10x_loom_agent::SpecPlugin;
-use b10x_loom_agent::serve::a2a::{Answering, bearer, listener, port};
+use b10x_loom_agent::serve::a2a::{
+    AdmitServeOutcome, Answering, admit_serve, bearer, listener, port, serve_input,
+};
 use llm_core::{BoxFuture, Cancel, Capabilities, Model, Provenance, StreamSink, TurnRequest};
 use loom_sdk::agent::AgentSpec;
 
@@ -21,6 +25,15 @@ pub use b10x_loom_agent::serve::a2a::BEARER_ENV;
 
 /// The address the listener binds by default: every interface, as a pod's port is reached.
 pub const DEFAULT_ADDRESS: &str = "0.0.0.0";
+
+/// Why `--once` is refused for a spec that only answers A2A.
+pub const ONCE_WITHOUT_A_CHANNEL: &str = "--once runs one poll cycle, and the spec declares no `channel` to poll; serve it without --once";
+
+/// Whether `spec` only answers A2A: `expose.a2a` and no `channel` (`loom.agent.AdmitServe`
+/// `answers`), so the host polls nothing.
+pub fn answers_only(spec: &AgentSpec) -> bool {
+    admit_serve(&serve_input(spec)) == AdmitServeOutcome::Answers
+}
 
 /// A model shared by the host's agent and the listener's: every call goes to the one model.
 pub struct SharedModel(pub Arc<dyn Model>);

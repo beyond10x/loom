@@ -18,8 +18,10 @@ use std::time::Duration;
 
 use b10x_loom_a2a::{Answerer, Bearer};
 use b10x_loom_agent::SpecPlugin;
-use b10x_loom_agent::serve::a2a::{Answering, BEARER_ENV, bearer, listener, port};
-use b10x_loom_plugin::{Host, RecordOutcome};
+use b10x_loom_agent::serve::a2a::{
+    Answering, BEARER_ENV, answer_projection, bearer, listener, port,
+};
+use b10x_loom_plugin::{Host, Projection, RecordOutcome};
 use b10x_loom_plugin_slack::TurnModels;
 use loom_sdk::agent::{A2aExposure, AgentSpec, parse};
 use loom_sdk::commission::model::responsibility::RuntimeEvent;
@@ -278,5 +280,133 @@ fn the_turns_runtime_events_reach_the_sink() {
             .iter()
             .any(|event| matches!(event, RuntimeEvent::ActionSelected(selected) if selected.action == "reply.propose")),
         "{events:?}"
+    );
+}
+
+// ---- adversary pass 1 (story:agent-a2a) -----------------------------------------------------------
+
+/// A Kubernetes Secret written from a file (`kubectl create secret --from-file`, a sealed secret
+/// made from `echo token > file`) carries the file's trailing newline into `LOOM_A2A_BEARER`, and
+/// no HTTP header can carry one back. The host either refuses such a value at start, naming the
+/// variable, or holds the token without it; it never starts a listener that refuses every client.
+#[test]
+fn adversary_a_bearer_with_a_secret_files_trailing_newline_still_admits_its_token() {
+    use b10x_loom_agent::serve::a2a::AdmitA2aRequestOutcome;
+
+    let value = format!("{TOKEN}\n");
+    match bearer(Some(&value)) {
+        Err(refused) => assert!(refused.to_string().contains(BEARER_ENV), "{refused}"),
+        Ok(held) => assert_eq!(
+            b10x_loom_a2a::admit::admit(&held, false, Some(&format!("Bearer {TOKEN}"))),
+            AdmitA2aRequestOutcome::Admitted,
+            "the listener started with a bearer no request can present"
+        ),
+    }
+}
+
+/// The first deployed agent of the design (slice A: http reads and the A2A answer, no chat
+/// channel) declares `expose.a2a` and no `channel`. It is served: its A2A messages run their turn.
+#[test]
+fn adversary_a_spec_exposing_a2a_without_a_channel_answers_its_messages() {
+    let fixture = fixture("a2a-no-channel");
+    let spec = parse(&format!(
+        "format: loom.agent/1
+agent: {{id: test-operator, name: Test operator, brief: Answer questions about the deploy.}}
+model:
+  routes: routes.yaml
+  roles: [{{role: agent, model: small}}, {{role: classifier, model: small}}]
+loops:
+  outer: {{poll_interval_seconds: 60, sources: [docs], min_age_minutes: 0, lookback_minutes: 120}}
+  inner: {{protocol: operator-reply@1, step_budget: 8, model_budget: 16, classify_threshold: 0.5}}
+states:
+  - {{name: answer, when: {{intent: Ask}}, actions: [source.read, reply.propose, reply.decline], sources: [docs]}}
+bindings:
+  - {{name: docs, kind: connectors, adapter: docs, connection: docs-fixture, search: docs.search}}
+policy: {{capabilities: [datasource.read, reply.propose]}}
+expose:
+  a2a: {{port: 8080, path: {PATH}, card: {{name: test-operator, description: Answers about the deploy, skills: [logs, metrics]}}}}
+runtime:
+  state_dir: {state}
+  connectors: {{program: {program}, state_dir: {connectors}}}
+  confinement: none
+",
+        state = fixture.plugin_state().display(),
+        program = fixture.root.join("connectors").display(),
+        connectors = fixture.connectors_state().display(),
+    ))
+    .expect("the slice A spec decodes");
+    let (turns, _made): (TurnModels, _) = support::turns(vec![vec![
+        (
+            "source_read",
+            json!({"source": "docs", "kind": "search", "input": {"query": "deploy"}}),
+        ),
+        ("reply_propose", json!({"text": REPLY})),
+    ]]);
+    let plugin = SpecPlugin::new(spec, &fixture.plugin_state())
+        .unwrap_or_else(|refused| {
+            panic!("a spec with expose.a2a and no channel cannot be served: {refused}")
+        })
+        .with_classifier(Box::new(Recorded::classifying("ask", &["docs"], 0.9)))
+        .with_turn_models(turns);
+    let host = Host::new(plugin.config()).with_environment(fixture.environment());
+    let agent = Answering::with_host(&plugin, host);
+    let mut events: Vec<RuntimeEvent> = Vec::new();
+    let record = agent
+        .answer(&support::host::item("a2a:no-channel"), &mut events)
+        .expect("the turn runs");
+    assert_eq!(record.outcome, RecordOutcome::Proposed, "{record:?}");
+    assert_eq!(record.proposal.as_deref(), Some(REPLY), "{record:?}");
+}
+
+// ---- fix round 1 (story:agent-a2a) ----------------------------------------------------------------
+
+/// Nothing is sent through A2A by two locks, each held here on its own: the A2A turn's protocol
+/// declares no `reply.send`, so its frontier never offers one, and the projection the turn runs on
+/// holds none even when the state the spec routes the intent to grants it.
+#[test]
+fn an_a2a_turn_is_never_offered_reply_send() {
+    let catalog = loom_sdk::ProtocolCatalog::plugins().expect("the plugin catalog");
+    let protocol = catalog
+        .get(b10x_loom_plugin::PROTOCOL)
+        .expect("the A2A turn's protocol is in the catalog")
+        .actions();
+    assert!(
+        !protocol.iter().any(|action| action == "reply.send"),
+        "{protocol:?}"
+    );
+
+    let fixture = fixture("a2a-projection");
+    let spec = spec(&fixture, 8080);
+    let granted = spec.states[0].actions.clone();
+    assert!(
+        granted.iter().any(|action| action == "reply.send"),
+        "{granted:?}"
+    );
+    let projection = answer_projection(Projection {
+        actions: granted,
+        sources: Vec::new(),
+    });
+    assert_eq!(
+        projection.actions,
+        ["source.read", "reply.propose", "reply.decline"],
+        "the A2A projection keeps every action but reply.send"
+    );
+}
+
+/// A spec with neither a `channel` nor `expose.a2a` is not served: `nothing-to-serve`
+/// (`loom.agent.AdmitServe`), before anything runs.
+#[test]
+fn a_spec_with_neither_a_channel_nor_a2a_is_not_served() {
+    let fixture = fixture("a2a-nothing");
+    let mut spec = spec(&fixture, 8080);
+    spec.expose = None;
+    spec.channel = None;
+    let refused = SpecPlugin::new(spec, &fixture.plugin_state())
+        .err()
+        .expect("refused")
+        .to_string();
+    assert!(
+        refused.contains("nothing would be polled or answered"),
+        "{refused}"
     );
 }

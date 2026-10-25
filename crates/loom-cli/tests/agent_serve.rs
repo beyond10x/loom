@@ -936,3 +936,149 @@ fn agent_serve_answers_a2a_beside_the_poll() {
         "the listener stopped with the host"
     );
 }
+
+impl Scratch {
+    /// Rewrites the spec as an agent reached only over A2A on `port`: `expose.a2a`, the `docs`
+    /// binding, no `channel`, no chat binding and no writes.
+    fn a2a_only(&self, port: u16) {
+        let spec = format!(
+            "format: loom.agent/1
+agent: {{id: test-operator, name: Test operator, brief: Answer questions about the deploy.}}
+model:
+  routes: routes.yaml
+  roles: [{{role: agent, model: small}}, {{role: classifier, model: small}}]
+loops:
+  outer: {{poll_interval_seconds: 3600, sources: [docs], min_age_minutes: 0, lookback_minutes: 120}}
+  inner: {{protocol: operator-reply@1, step_budget: 8, model_budget: 16, classify_threshold: 0.5}}
+states:
+  - {{name: answer, when: {{intent: Ask}}, actions: [source.read, reply.propose, reply.decline], sources: [docs]}}
+bindings:
+  - {{name: docs, kind: connectors, adapter: docs, connection: docs-fixture, search: docs.search}}
+policy: {{capabilities: [datasource.read, reply.propose]}}
+expose:
+  a2a: {{port: {port}, path: /a2a, card: {{name: test-operator, description: Answers about the deploy, skills: [logs]}}}}
+runtime:
+  state_dir: {state}
+  connectors: {{program: {program}, state_dir: {connectors}}}
+  confinement: none
+",
+            state = self.state().display(),
+            program = self.root.join("connectors").display(),
+            connectors = self.root.join("connectors-state").display(),
+        );
+        fs::write(self.spec(), spec).unwrap();
+    }
+}
+
+/// A spec with `expose.a2a` and no `channel` is served: the host polls nothing, its main loop is
+/// the A2A listener, a message runs its turn, and SIGTERM ends the host with exit 0. `--once` has
+/// no cycle to run there and is refused before anything is bound or read.
+#[test]
+fn agent_serve_answers_a2a_without_a_channel() {
+    let scratch = Scratch::new("a2a-only", 3600);
+    let port = free_port();
+    scratch.a2a_only(port);
+
+    let catalog = scratch.catalog("http://127.0.0.1:1/v1");
+    let once = scratch
+        .serve_command(&catalog)
+        .args(["--once", "--a2a-address", "127.0.0.1"])
+        .env("LOOM_A2A_BEARER", A2A_TOKEN)
+        .output()
+        .expect("run b10x-loom");
+    let stderr = String::from_utf8_lossy(&once.stderr);
+    assert_eq!(once.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("--once"), "{stderr}");
+    assert!(scratch.argv().is_empty(), "nothing was read");
+
+    let select = |action: &str| sse(AGENT, "select_action", json!({ "action": action }));
+    let (base_url, models) = serve(vec![
+        sse(
+            CLASSIFIER,
+            "classify_item",
+            json!({"intent": "ask", "hints": ["docs"], "confidence": 0.9}),
+        ),
+        select("source.read"),
+        sse(
+            AGENT,
+            "action_arguments",
+            json!({"source": "docs", "kind": "search", "input": {"query": "deploy"}}),
+        ),
+        select("reply.propose"),
+        sse(AGENT, "action_arguments", json!({"text": REPLY})),
+    ]);
+    let catalog = scratch.catalog(&base_url);
+    let mut child = Reaped(
+        scratch
+            .serve_command(&catalog)
+            .args(["--a2a-address", "127.0.0.1"])
+            .env("LOOM_A2A_BEARER", format!("{A2A_TOKEN}\n"))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start b10x-loom"),
+    );
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        if let Some((200, _)) = a2a_request(port, "GET", "/ready", None, None) {
+            break;
+        }
+        assert!(
+            child.0.try_wait().unwrap().is_none(),
+            "the host ended before its listener answered"
+        );
+        assert!(Instant::now() < deadline, "no readiness in 60 s");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let send = json!({"jsonrpc": "2.0", "id": "q-1", "method": "SendMessage",
+        "params": {"message": {"messageId": "m-1", "role": "ROLE_USER",
+            "parts": [{"text": "Is the deploy finished?"}]}}});
+    let (status, answer) = a2a_request(port, "POST", "/a2a", Some(A2A_TOKEN), Some(&send)).unwrap();
+    assert_eq!(status, 200, "{answer}");
+    let answer: Value = serde_json::from_str(&answer).unwrap();
+    let task = &answer["result"]["task"];
+    assert_eq!(task["status"]["state"], "TASK_STATE_COMPLETED", "{answer}");
+    let record = &task["artifacts"][0]["parts"][1]["data"];
+    assert_eq!(record["outcome"], "proposed", "{answer}");
+    assert_eq!(record["proposal"], REPLY, "{answer}");
+
+    let killed = Command::new("kill")
+        .args(["-TERM", &child.0.id().to_string()])
+        .status()
+        .expect("kill");
+    assert!(killed.success());
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "SIGTERM did not stop the host in 30 s"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let mut stderr = String::new();
+    child
+        .0
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    assert_eq!(status.code(), Some(0), "{stderr}");
+    assert!(stderr.contains("A2A listening on 127.0.0.1:"), "{stderr}");
+    assert_eq!(models.join().expect("the models answered").len(), 5);
+    assert!(
+        scratch
+            .argv()
+            .iter()
+            .all(|argv| !argv.iter().any(|arg| arg.starts_with("conversations."))),
+        "no channel is read: {:?}",
+        scratch.argv()
+    );
+    assert!(
+        a2a_request(port, "GET", "/live", None, None).is_none(),
+        "the listener stopped with the host"
+    );
+}

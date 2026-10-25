@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 8ae58731f7f79f17db497c148f863a2a09f9d0b11cdd8a084f42d50b131fa4a2
-// contract digest 42772f0e3c9ac74486da92cac0a54283b8c90a6bd6e2ad7ea9bc7a6a54f0f463
+// model digest 569a18823a1c008e767c9990ab31e54692d3d9eb2751b8180ef11be4a3af9464
+// contract digest f3f75fccb010140c382640d2b5344010e7e8e5fabf0b2640c5b6945716960d3e
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Agent — `loom.agent`.
@@ -425,6 +425,13 @@ pub enum SendRefusalReason {
     RateLimited,
 }
 
+/// ServeRefusalReason — `loom.agent.ServeRefusalReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServeRefusalReason {
+    /// `NothingToServe`.
+    NothingToServe,
+}
+
 /// SessionSpec — `loom.agent.SessionSpec`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionSpec {
@@ -581,6 +588,37 @@ pub enum AdmitSendOutcome {
     Admitted,
 }
 
+/// AdmitServe — the input of `loom.agent.AdmitServe`.
+///
+/// Everything it can result in is [`AdmitServeOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmitServe {
+    /// `channel` — `Boolean`.
+    pub channel: bool,
+    /// `a2a` — `Boolean`.
+    pub a2a: bool,
+}
+
+/// Everything `loom.agent.AdmitServe` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdmitServeOutcome {
+    /// `nothing-to-serve` — when `(channel == false and a2a == false)`.
+    NothingToServe {
+        /// Why it was refused: `loom.agent.ServeRefused`.
+        error: ServeRefused,
+    },
+    /// `polls-and-answers` — when `(channel == true and a2a == true)`.
+    PollsAndAnswers,
+    /// `polls` — when `channel == true`.
+    Polls,
+    /// `answers` — otherwise.
+    Answers,
+}
+
 /// CheckAgentSpec — the input of `loom.agent.CheckAgentSpec`.
 ///
 /// Everything it can result in is [`CheckAgentSpecOutcome`].
@@ -657,6 +695,13 @@ pub struct SendRefused {
     pub r#final: bool,
 }
 
+/// The declared error `loom.agent.ServeRefused`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServeRefused {
+    /// `reason` — `loom.agent.ServeRefusalReason`.
+    pub reason: ServeRefusalReason,
+}
+
 /// The declared error `loom.agent.SpecRefused`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpecRefused {
@@ -694,6 +739,17 @@ pub mod obligations {
         ///
         /// `Err` is the typed refusal of a request the model declares no outcome for.
         fn admit_send(&mut self, input: super::AdmitSend) -> Result<super::AdmitSendOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `loom.agent.AdmitServe` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait AdmitServeBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.agent.AdmitServe`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn admit_serve(&mut self, input: super::AdmitServe) -> Result<super::AdmitServeOutcome, crate::obligation::UnmetObligation>;
     }
 
     /// The behaviour `loom.agent.CheckAgentSpec` — an implementation obligation.

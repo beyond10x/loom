@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest 8ae58731f7f79f17db497c148f863a2a09f9d0b11cdd8a084f42d50b131fa4a2
-  contract digest 42772f0e3c9ac74486da92cac0a54283b8c90a6bd6e2ad7ea9bc7a6a54f0f463
+  model digest 569a18823a1c008e767c9990ab31e54692d3d9eb2751b8180ef11be4a3af9464
+  contract digest f3f75fccb010140c382640d2b5344010e7e8e5fabf0b2640c5b6945716960d3e
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-201 capabilities: **199 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+205 capabilities: **203 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -47,6 +47,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.agent.RunBudget` |
 | domain type | `loom.agent.RuntimeSpec` |
 | domain type | `loom.agent.SendRefusalReason` |
+| domain type | `loom.agent.ServeRefusalReason` |
 | domain type | `loom.agent.SessionSpec` |
 | domain type | `loom.agent.StateWhen` |
 | domain type | `loom.agent.StopPolicy` |
@@ -170,6 +171,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command behaviour | `loom.agent.AdmitA2aRequest` |
 | command contract | `loom.agent.AdmitSend` |
 | command behaviour | `loom.agent.AdmitSend` |
+| command contract | `loom.agent.AdmitServe` |
+| command behaviour | `loom.agent.AdmitServe` |
 | command contract | `loom.agent.CheckAgentSpec` |
 | command contract | `loom.run.OverruleSelection` |
 | command behaviour | `loom.run.OverruleSelection` |
@@ -195,6 +198,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | event type | `loom.session.SessionChangeProposed` |
 | error type | `loom.agent.A2aRefused` |
 | error type | `loom.agent.SendRefused` |
+| error type | `loom.agent.ServeRefused` |
 | error type | `loom.agent.SpecRefused` |
 | error type | `loom.run.ActionNotInCatalogue` |
 | error type | `loom.run.CatalogueExists` |

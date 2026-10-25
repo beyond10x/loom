@@ -45,7 +45,9 @@ use b10x_loom_plugin_slack::{SlackConfig, SlackHandler, TurnModels};
 use chrono::{SecondsFormat, Utc};
 use llm_core::Model;
 use loom::datasource::{DataSource, WriteOperation};
-use loom_sdk::agent::{AdmitSendOutcome, AgentSpec, Binding, ConnectorsBinding, WriteMode};
+use loom_sdk::agent::{
+    AdmitSendOutcome, AgentSpec, Binding, ChannelSpec, ConnectorsBinding, Loops, WriteMode,
+};
 use loom_sdk::commission::model::json::Value;
 use loom_sdk::commission::model::primitives::{Timestamp, Uuid};
 use loom_sdk::commission::model::responsibility::{
@@ -81,7 +83,7 @@ pub const SEND_CAPABILITY: &str = "reply.send";
 pub struct SpecPlugin {
     spec: AgentSpec,
     config: PluginConfig,
-    slack: SlackHandler,
+    slack: Option<SlackHandler>,
     state: PathBuf,
     protocol: String,
     authority: SpecAuthority,
@@ -106,8 +108,9 @@ impl SpecPlugin {
     ///
     /// # Errors
     /// [`PluginError::Config`] for a spec the check refuses, or one this host cannot serve:
-    /// no `runtime`, no `loops`, no `channel`, a channel binding that is not a connectors binding
-    /// with `list`, `get` and `search`, or `writes.mode: auto`.
+    /// no `runtime`, no `loops`, neither `channel` nor `expose.a2a`, a channel binding that is not
+    /// a connectors binding with `list`, `get` and `search`, or `writes.mode: auto`. A spec with
+    /// `expose.a2a` and no `channel` polls nothing ([`a2a::admit_serve`]).
     pub fn new(spec: AgentSpec, state: &Path) -> Result<Self, PluginError> {
         let config = |why: String| PluginError::Config(format!("the agent spec: {why}"));
         let catalog = ProtocolCatalog::plugins().map_err(PluginError::Config)?;
@@ -121,34 +124,13 @@ impl SpecPlugin {
             .loops
             .as_ref()
             .ok_or_else(|| config("`loops` is undeclared; nothing would poll".to_owned()))?;
-        let channel = spec
-            .channel
-            .as_ref()
-            .ok_or_else(|| config("`channel` is undeclared; nothing would poll".to_owned()))?;
-        let binding = spec
-            .bindings
-            .iter()
-            .find_map(|binding| match binding {
-                Binding::Connectors(binding) if binding.name == channel.binding => Some(binding),
-                _ => None,
-            })
-            .ok_or_else(|| {
-                config(format!(
-                    "`channel.binding` `{}` is no connectors binding",
-                    channel.binding.0
-                ))
-            })?;
-        let operation = |name: &str, held: &Option<loom::datasource::OperationId>| {
-            held.clone().ok_or_else(|| {
-                config(format!(
-                    "the channel binding `{}` declares no `{name}` operation",
-                    binding.name.0
-                ))
-            })
+        // `expose.a2a` alone is served too: nothing is polled, the host answers A2A only.
+        let channel = match a2a::admit_serve(&a2a::serve_input(&spec)) {
+            a2a::AdmitServeOutcome::NothingToServe { .. } => {
+                return Err(config(a2a::NOTHING_TO_SERVE.to_owned()));
+            }
+            _ => spec.channel.as_ref(),
         };
-        let list = operation("list", &binding.list)?;
-        let history = operation("get", &binding.get)?;
-        let replies = operation("search", &binding.search)?;
         let mode = spec
             .writes
             .as_ref()
@@ -174,31 +156,13 @@ impl SpecPlugin {
             workspace_roots: Vec::new(),
             checkouts: Vec::new(),
         };
-        let slack = SlackHandler::new(SlackConfig {
-            plugin: config.clone(),
-            adapter: binding.adapter.clone(),
-            connection: binding.connection.clone(),
-            list_channels: list,
-            history,
-            replies,
-            bot_user_id: channel.bot_user_id.clone(),
-            min_age_minutes: loops.outer.min_age_minutes,
-            seed: 1,
-            lookback_minutes: loops.outer.lookback_minutes,
-            channels: Vec::new(),
-        })?
-        .with_channel_allow(channel.allow.clone());
-        let send = binding.write.clone().map(|write| Send {
-            operation: WriteOperation {
-                action: SEND.to_owned(),
-                adapter: binding.adapter.clone(),
-                connection: binding.connection.clone(),
-                operation: write,
-            },
-            allow: channel.allow.clone(),
-            mode,
-            max_per_hour: spec.writes.as_ref().map_or(0, |writes| writes.max_per_hour),
-        });
+        let (slack, send) = match channel {
+            Some(channel) => {
+                let (slack, send) = polled(&spec, channel, &config, loops, mode)?;
+                (Some(slack), send)
+            }
+            None => (None, None),
+        };
         let authority = SpecAuthority {
             capabilities: spec
                 .policy
@@ -504,7 +468,14 @@ impl Plugin for SpecPlugin {
         objectives: &[Objective],
     ) -> Result<Poll, PluginError> {
         self.resume_granted(host);
-        self.slack.poll(host, state, objectives)
+        match &self.slack {
+            Some(slack) => slack.poll(host, state, objectives),
+            // `expose.a2a` alone: there is no channel, so no item; the cursors stay as they are.
+            None => Ok(Poll {
+                items: Vec::new(),
+                cursors: state.cursors.clone(),
+            }),
+        }
     }
 
     fn project(
@@ -771,6 +742,69 @@ fn read_held(path: &Path) -> Result<Held, String> {
 /// `commission` as the grant store names it.
 fn grant_id(commission: &str) -> grant::CommissionId {
     grant::CommissionId(intake_model::primitives::Uuid(commission.to_owned()))
+}
+
+/// The poll of `channel` and the send to it: the slack-handler over the channel binding's `list`,
+/// `get` and `search` operations, and the send policy's operation when the binding declares
+/// `write`.
+fn polled(
+    spec: &AgentSpec,
+    channel: &ChannelSpec,
+    plugin: &PluginConfig,
+    loops: &Loops,
+    mode: WriteMode,
+) -> Result<(SlackHandler, Option<Send>), PluginError> {
+    let config = |why: String| PluginError::Config(format!("the agent spec: {why}"));
+    let binding = spec
+        .bindings
+        .iter()
+        .find_map(|binding| match binding {
+            Binding::Connectors(binding) if binding.name == channel.binding => Some(binding),
+            _ => None,
+        })
+        .ok_or_else(|| {
+            config(format!(
+                "`channel.binding` `{}` is no connectors binding",
+                channel.binding.0
+            ))
+        })?;
+    let operation = |name: &str, held: &Option<loom::datasource::OperationId>| {
+        held.clone().ok_or_else(|| {
+            config(format!(
+                "the channel binding `{}` declares no `{name}` operation",
+                binding.name.0
+            ))
+        })
+    };
+    let list = operation("list", &binding.list)?;
+    let history = operation("get", &binding.get)?;
+    let replies = operation("search", &binding.search)?;
+    let slack = SlackHandler::new(SlackConfig {
+        plugin: plugin.clone(),
+        adapter: binding.adapter.clone(),
+        connection: binding.connection.clone(),
+        list_channels: list,
+        history,
+        replies,
+        bot_user_id: channel.bot_user_id.clone(),
+        min_age_minutes: loops.outer.min_age_minutes,
+        seed: 1,
+        lookback_minutes: loops.outer.lookback_minutes,
+        channels: Vec::new(),
+    })?
+    .with_channel_allow(channel.allow.clone());
+    let send = binding.write.clone().map(|write| Send {
+        operation: WriteOperation {
+            action: SEND.to_owned(),
+            adapter: binding.adapter.clone(),
+            connection: binding.connection.clone(),
+            operation: write,
+        },
+        allow: channel.allow.clone(),
+        mode,
+        max_per_hour: spec.writes.as_ref().map_or(0, |writes| writes.max_per_hour),
+    });
+    Ok((slack, send))
 }
 
 /// The data source of a connectors binding.

@@ -1,19 +1,24 @@
 //! The listener: routes, the JSON-RPC methods and the one thread that runs turns.
 //!
-//! Each connection is read on a thread of its own, at most [`MAX_CONNECTIONS`] at once; past it a
-//! connection is answered `503`. Every request is admitted first ([`crate::admit::admit`]), on its
+//! Each connection is read on a thread of its own. Until its request is admitted it holds one of
+//! [`MAX_CONNECTIONS`] unadmitted slots; a connection arriving when they are all held takes the
+//! slot of the oldest, which is cut off, so peers that send nothing, or nothing whole, cannot keep
+//! a probe from being read. An admitted request holds one of [`MAX_CONNECTIONS`] admitted slots
+//! until it is answered; past them it is answered `503`. A probe or a refusal takes no admitted
+//! slot. Every request is admitted first ([`crate::admit::admit`]), on its
 //! request line and headers: a probe is answered whatever it carries, every other request needs
 //! the bearer and is refused `401` before its body is read. Turns run one at a time on the thread
 //! that called [`A2aServer::serve`], which is the only one that touches the [`Answerer`], so an
 //! answerer need not be shared between threads; a connection hands its message over and waits for
 //! the record. A probe, the card and a task's status never wait for a turn.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::io;
-use std::net::TcpListener;
+use std::net::{Shutdown, TcpListener, TcpStream};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use a2a::discovery::{
@@ -40,7 +45,8 @@ pub const READY_PATH: &str = "/ready";
 /// The liveness probe.
 pub const LIVE_PATH: &str = "/live";
 
-/// The most connections read at once.
+/// The most connections read at once before their request is admitted, and the most admitted
+/// requests answered at once (see the module documentation).
 pub const MAX_CONNECTIONS: usize = 32;
 
 /// The A2A protocol version the card names.
@@ -79,6 +85,75 @@ struct Job {
     task: String,
     item: InboundItem,
     reply: Sender<Result<RecordLine, String>>,
+}
+
+/// The connection slots of one listener (see the module documentation).
+#[derive(Default)]
+struct Slots {
+    /// The connections not admitted yet, oldest first, each with a handle that cuts it off.
+    unadmitted: Mutex<Pending>,
+    /// The admitted requests not answered yet.
+    admitted: AtomicUsize,
+}
+
+/// The unadmitted connections and the id the next one gets.
+#[derive(Default)]
+struct Pending {
+    next: u64,
+    open: VecDeque<(u64, TcpStream)>,
+}
+
+impl Slots {
+    fn open(&self) -> MutexGuard<'_, Pending> {
+        self.unadmitted
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Takes an unadmitted slot for the connection `handle` refers to, cutting off the oldest
+    /// unadmitted connection when every slot is held; answers its id.
+    fn unadmitted(&self, handle: TcpStream) -> u64 {
+        let mut open = self.open();
+        while open.open.len() >= MAX_CONNECTIONS {
+            if let Some((_, oldest)) = open.open.pop_front() {
+                let _ = oldest.shutdown(Shutdown::Both);
+            }
+        }
+        let id = open.next;
+        open.next += 1;
+        open.open.push_back((id, handle));
+        id
+    }
+
+    /// Takes an admitted slot, or `None` when every one is held.
+    fn admitted(&self) -> Option<Admitted<'_>> {
+        if self.admitted.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+            self.admitted.fetch_sub(1, Ordering::SeqCst);
+            return None;
+        }
+        Some(Admitted(&self.admitted))
+    }
+}
+
+/// An unadmitted slot, given back when dropped (unless the connection was cut off already).
+struct Unadmitted<'a> {
+    slots: &'a Slots,
+    id: u64,
+}
+
+impl Drop for Unadmitted<'_> {
+    fn drop(&mut self) {
+        self.slots.open().open.retain(|(id, _)| *id != self.id);
+    }
+}
+
+/// An admitted slot, given back when dropped.
+struct Admitted<'a>(&'a AtomicUsize);
+
+impl Drop for Admitted<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl A2aServer {
@@ -189,25 +264,23 @@ impl A2aServer {
     ) -> io::Result<()> {
         listener.set_nonblocking(true)?;
         let (jobs, queue) = mpsc::channel::<Job>();
-        let active = AtomicUsize::new(0);
-        let active = &active;
+        let slots = Slots::default();
+        let slots = &slots;
         std::thread::scope(|scope| {
             let acceptor = scope.spawn(move || -> io::Result<()> {
                 while !stop.load(Ordering::SeqCst) {
                     match listener.accept() {
                         Ok((stream, _)) => {
+                            let Ok(handle) = stream.try_clone() else {
+                                continue;
+                            };
                             let Ok(connection) = Connection::new(stream) else {
                                 continue;
                             };
-                            if active.load(Ordering::SeqCst) >= MAX_CONNECTIONS {
-                                connection.answer(&Response::error(503, "too many connections"));
-                                continue;
-                            }
-                            active.fetch_add(1, Ordering::SeqCst);
+                            let id = slots.unadmitted(handle);
                             let jobs = jobs.clone();
                             scope.spawn(move || {
-                                self.connection(connection, &jobs, stop);
-                                active.fetch_sub(1, Ordering::SeqCst);
+                                self.connection(connection, id, slots, &jobs, stop);
                             });
                         }
                         Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
@@ -243,8 +316,17 @@ impl A2aServer {
         let _ = job.reply.send(result);
     }
 
-    /// Reads, admits and answers one request.
-    fn connection(&self, mut connection: Connection, jobs: &Sender<Job>, stop: &AtomicBool) {
+    /// Reads, admits and answers one request, `id` its unadmitted slot.
+    fn connection(
+        &self,
+        mut connection: Connection,
+        id: u64,
+        slots: &Slots,
+        jobs: &Sender<Job>,
+        stop: &AtomicBool,
+    ) {
+        // Held until the request is admitted or answered, whichever comes first.
+        let unadmitted = Unadmitted { slots, id };
         let head = match connection.head() {
             Ok(head) => head,
             Err(response) => return connection.answer(&response),
@@ -266,6 +348,10 @@ impl A2aServer {
             }
             AdmitA2aRequestOutcome::Admitted => {}
         }
+        let Some(_admitted) = slots.admitted() else {
+            return connection.answer(&Response::error(503, "too many requests at once"));
+        };
+        drop(unadmitted);
         let response = if head.path == CARD_PATH {
             if head.method == "GET" {
                 Response::json(200, &wire::card(&self.card(&base(&head))))
@@ -365,7 +451,7 @@ impl A2aServer {
         });
         let item = InboundItem {
             id: ItemId(format!("a2a:{task_id}")),
-            revision: message_id,
+            revision: item_revision(&message_id),
             text,
             details: loom::json::parse(&details.to_string()).unwrap_or(loom::json::Value::Null),
         };
@@ -406,6 +492,35 @@ impl A2aServer {
             None => rpc_error(id, TASK_NOT_FOUND, "no such task"),
         }
     }
+}
+
+/// The longest `messageId` kept as the item revision verbatim.
+pub const MAX_REVISION: usize = 128;
+
+/// The item revision of a message whose `messageId` is `message_id`: the id itself when it is a
+/// plain token (ASCII letters and digits, `-`, `_` and `.`, at most [`MAX_REVISION`] bytes),
+/// otherwise `m-` and 32 hex digits hashed from it. The revision reaches the turn's context
+/// outside the quoted item text, so no caller text that could end its quoting (a backtick, a line
+/// break) or carry an instruction is ever kept in it.
+pub fn item_revision(message_id: &str) -> String {
+    let plain = !message_id.is_empty()
+        && message_id.len() <= MAX_REVISION
+        && message_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'));
+    if plain {
+        return message_id.to_owned();
+    }
+    let fnv1a = |basis: u64| {
+        message_id.bytes().fold(basis, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+        })
+    };
+    format!(
+        "m-{:016x}{:016x}",
+        fnv1a(0xcbf2_9ce4_8422_2325),
+        fnv1a(0x8422_2325_cbf2_9ce4)
+    )
 }
 
 /// `http://<host>` from the request's `Host` header, when it names a host and port only;

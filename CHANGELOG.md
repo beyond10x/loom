@@ -28,6 +28,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `b10x-loom-agent`: `serve::a2a` with `Answering`, `BEARER_ENV`, `bearer` and `listener` (story:agent-a2a)
 - `b10x-loom-plugin`: `TurnOptions::events` hands each `RuntimeEvent` of a turn's run to a sink (story:agent-a2a)
 - `loom.agent.AdmitA2aRequest` with its error `A2aRefused` and the enum `A2aRefusalReason`, generated from `ess/domains/agent.yaml`; four authored scenarios under `ess/scenarios/agent-a2a/` (story:agent-a2a)
+- `b10x-loom agent serve` serves a spec with `expose.a2a` and no `channel`: it polls nothing and its main loop is the A2A listener until SIGTERM or SIGINT (`--once` is refused there); a spec with neither is refused before anything runs. `loom.agent.AdmitServe` with its error `ServeRefused` and the enum `ServeRefusalReason`, generated from `ess/domains/agent.yaml`, and three authored scenarios under `ess/scenarios/agent-a2a/`; `b10x-loom-agent`: `serve::a2a::admit_serve` and `answer_projection` (story:agent-a2a)
+- `b10x-loom-a2a`: the listener cuts off the oldest unadmitted connection when all 32 unadmitted slots are held, answers probes and refusals without an admitted slot, bounds the head (10 s), the body (30 s) and the answer (10 s) each as a whole (`408` past the head's or body's), trims the bearer of the whitespace around it and refuses one with a control character, and keeps a `messageId` as the item revision only as a plain token, hashing any other (`item_revision`) (story:agent-a2a)
 
 ### Changed
 
