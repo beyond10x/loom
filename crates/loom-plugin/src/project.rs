@@ -15,6 +15,8 @@ pub const READ: &str = "source.read";
 pub const PROPOSE: &str = "reply.propose";
 /// Records that the item gets no proposed reply.
 pub const DECLINE: &str = "reply.decline";
+/// Sends the recorded proposal (`operator-reply@1` only; a served agent's projection admits it).
+pub const SEND: &str = "reply.send";
 
 /// The projection of `classification` onto `config`.
 pub fn project(config: &PluginConfig, classification: &Classification) -> Projection {

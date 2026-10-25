@@ -1,0 +1,15 @@
+# story agent-a2a: a spec with neither a `channel` nor `expose.a2a` is refused before anything
+# runs, since its host would run nothing.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-spec-with-nothing-to-serve-is-refused
+summary: A spec declaring neither a `channel` nor `expose.a2a` is refused `NothingToServe`.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.AdmitServe
+    input: {channel: false, a2a: false}
+    outcome: nothing-to-serve
+    error:
+      name: loom.agent.ServeRefused
+      fields: {reason: NothingToServe}

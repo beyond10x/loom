@@ -33,6 +33,12 @@
 //! reading the projection's sources through the Connectors command line. Nothing is sent: a reply
 //! is a proposal in the record.
 //!
+//! A served agent (`b10x-loom-agent`, `b10x-loom agent serve`) runs the same host under
+//! [`turn_with`] and [`TurnOptions`]: its spec's protocol (`operator-reply@1`), its own authority,
+//! a case store and suspension port in its state directory, and a [`SendPolicy`] under which
+//! [`DataSourceEffects`] performs `reply.send` as a governed write after deciding
+//! `loom.agent.AdmitSend` ([`admit_send`]).
+//!
 //! The state directory ([`state::StateDir`]) holds `state.json`, written to a temporary file and
 //! renamed, and `record.jsonl`, one line per handled item. It is refused inside a workspace root or
 //! checkout the configuration names; the check compares paths and runs no git command.
@@ -58,7 +64,7 @@ use loom_sdk::connectors::cli::ConnectorsCli;
 
 pub use authority::{GRANTED, PluginAuthority};
 pub use codec::{decode_record_line, encode_record_line};
-pub use effects::DataSourceEffects;
+pub use effects::{DataSourceEffects, SendPolicy, admit_send};
 pub use loom::datasource;
 pub use loom::plugin::{
     Classification, Cursor, InboundItem, Intent, ItemFailures, ItemId, Objective, PluginConfig,
@@ -66,6 +72,7 @@ pub use loom::plugin::{
     TurnResult,
 };
 pub use loom::primitives::Decimal;
+pub use turn::{TurnOptions, Turned, turn_with};
 
 use loom::datasource::DataSource;
 

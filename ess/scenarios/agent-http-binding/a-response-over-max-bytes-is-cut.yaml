@@ -1,0 +1,11 @@
+# story agent-http-binding: a body past `max_bytes` reaches the model cut at the bound and marked.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-response-over-max-bytes-is-cut
+summary: A 200 answer one byte past max_bytes is cut.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.BoundHttpAnswer
+    input: {status: 200, bytes: 262145, max_bytes: 262144}
+    outcome: cut

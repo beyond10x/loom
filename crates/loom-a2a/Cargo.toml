@@ -1,0 +1,19 @@
+[package]
+name = "b10x-loom-a2a"
+description = "The A2A listener of a served agent: its agent card, one governed turn per message answered with the turn's record, the task's status as the turn's runtime events move it, readiness and liveness probes, and a refusal of every other request without the agent's bearer."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "b10x_loom_a2a"
+
+[dependencies]
+a2a = { git = "https://github.com/beyond10x/a2a", tag = "0.3.0" }
+b10x-loom-plugin = { path = "../loom-plugin" }
+b10x-loom-sdk = { path = "../loom-sdk" }
+chrono = "0.4"
+loom = { path = "../../generated/rust/loom" }
+serde_json = "1"

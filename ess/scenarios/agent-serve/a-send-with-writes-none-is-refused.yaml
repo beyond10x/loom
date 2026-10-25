@@ -1,0 +1,14 @@
+# story agent-serve: `writes.mode: none` sends nothing, whatever else holds.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-send-with-writes-none-is-refused
+summary: "With `writes.mode: none` every `reply.send` is refused, finally."
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.AdmitSend
+    input: {mode: none, channel_allowed: true, proposed: true, granted: true, sent_in_window: 0, max_per_hour: 5}
+    outcome: writes-none
+    error:
+      name: loom.agent.SendRefused
+      fields: {reason: WritesNone, final: true}

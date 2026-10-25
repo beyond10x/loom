@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-25T21:13:07Z",
+  "actor": "human:timo",
+  "artifact": "story:loom-operator",
+  "kind": "story",
+  "revision": 24,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check",
+    "reference": "task check exit 0 on the merge of origin/main 49301b69 (ESS pin 0.69.2) into fce5b221, installed ess 0.69.2: 425 test-result lines, 2327 passed, 0 failed, 9 ignored; task plan exit 0; conformance 119 executed, 0 skipped, 0 error; crate_names 27"
+  }
+}

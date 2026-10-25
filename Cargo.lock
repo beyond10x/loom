@@ -3,6 +3,11 @@
 version = 4
 
 [[package]]
+name = "a2a"
+version = "1.0.0"
+source = "git+https://github.com/beyond10x/a2a?tag=0.3.0#df57365fc193438c9c6203b861acdb15a0ecaf25"
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -431,13 +436,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "b10x-loom-a2a"
+version = "0.40.0"
+dependencies = [
+ "a2a",
+ "b10x-loom-plugin",
+ "b10x-loom-sdk",
+ "chrono",
+ "loom",
+ "serde_json",
+]
+
+[[package]]
 name = "b10x-loom-agent"
 version = "0.40.0"
 dependencies = [
+ "b10x-llm-core",
+ "b10x-loom-a2a",
+ "b10x-loom-plugin",
+ "b10x-loom-plugin-slack",
  "b10x-loom-protocols",
  "b10x-loom-sdk",
+ "chrono",
+ "intake",
+ "loom",
+ "reqwest 0.12.28",
  "serde",
+ "serde_json",
  "serde_yaml_ng",
+ "tokio",
 ]
 
 [[package]]
@@ -450,6 +477,7 @@ dependencies = [
  "b10x-llm-models",
  "b10x-llm-routing",
  "b10x-llm-tool-call",
+ "b10x-loom-a2a",
  "b10x-loom-agent",
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
@@ -1530,8 +1558,8 @@ dependencies = [
 
 [[package]]
 name = "ess-compiler"
-version = "0.69.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.69.0#e1cf58c11b311e02fe0dd45c8af78ab8889a40e5"
+version = "0.69.2"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.69.2#a3bc2df3df986e8d340553145e8615a00f982331"
 dependencies = [
  "ess-domain",
  "ess-primitives",
@@ -1542,8 +1570,8 @@ dependencies = [
 
 [[package]]
 name = "ess-conformance"
-version = "0.69.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.69.0#e1cf58c11b311e02fe0dd45c8af78ab8889a40e5"
+version = "0.69.2"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.69.2#a3bc2df3df986e8d340553145e8615a00f982331"
 dependencies = [
  "ess-compiler",
  "ess-domain",
@@ -1557,8 +1585,8 @@ dependencies = [
 
 [[package]]
 name = "ess-domain"
-version = "0.69.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.69.0#e1cf58c11b311e02fe0dd45c8af78ab8889a40e5"
+version = "0.69.2"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.69.2#a3bc2df3df986e8d340553145e8615a00f982331"
 dependencies = [
  "ess-primitives",
  "ess-yaml",
@@ -1570,8 +1598,8 @@ dependencies = [
 
 [[package]]
 name = "ess-gen"
-version = "0.69.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.69.0#e1cf58c11b311e02fe0dd45c8af78ab8889a40e5"
+version = "0.69.2"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.69.2#a3bc2df3df986e8d340553145e8615a00f982331"
 dependencies = [
  "ess-compiler",
  "ess-domain",
@@ -1587,8 +1615,8 @@ dependencies = [
 
 [[package]]
 name = "ess-http"
-version = "0.69.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.69.0#e1cf58c11b311e02fe0dd45c8af78ab8889a40e5"
+version = "0.69.2"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.69.2#a3bc2df3df986e8d340553145e8615a00f982331"
 dependencies = [
  "ess-compiler",
  "ess-domain",
@@ -1601,8 +1629,8 @@ dependencies = [
 
 [[package]]
 name = "ess-primitives"
-version = "0.69.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.69.0#e1cf58c11b311e02fe0dd45c8af78ab8889a40e5"
+version = "0.69.2"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.69.2#a3bc2df3df986e8d340553145e8615a00f982331"
 dependencies = [
  "ess-yaml",
  "schemars 0.8.22",
@@ -1613,8 +1641,8 @@ dependencies = [
 
 [[package]]
 name = "ess-transport"
-version = "0.69.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.69.0#e1cf58c11b311e02fe0dd45c8af78ab8889a40e5"
+version = "0.69.2"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.69.2#a3bc2df3df986e8d340553145e8615a00f982331"
 dependencies = [
  "ess-compiler",
  "ess-domain",
@@ -1625,8 +1653,8 @@ dependencies = [
 
 [[package]]
 name = "ess-yaml"
-version = "0.69.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.69.0#e1cf58c11b311e02fe0dd45c8af78ab8889a40e5"
+version = "0.69.2"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.69.2#a3bc2df3df986e8d340553145e8615a00f982331"
 dependencies = [
  "serde",
  "serde_norway",

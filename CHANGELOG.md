@@ -14,6 +14,15 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Added
 
+- An agent spec's `http` binding is read by a served turn: `source.read {source, kind: get, input: {path, query?}}` is one GET of a path exactly in `allow_paths` (no `\`, no `.` or `..` segment, no encoded separator, even when listed; `agent check` refuses such an entry as `Malformed`) under `base_url`, with the bearer the variable `bearer_env` names (unset, empty or blank is `BearerMissing`), no redirect followed (the refusal carries at most 256 bytes of the location), the body cut at `max_bytes` in bytes on a character boundary and marked, never longer than `max_bytes` (a byte that is not UTF-8 is dropped); a refusal (the method, the path, the bearer, a redirect, a failing status) is a refused step the model reads as data (story:agent-http-binding)
+- `b10x-loom-agent`: `HttpGet`, the `HttpReader` of a served agent, with `admit_http_read`, `bound_http_answer`, `path_allowed` and `http::LOCATION_BYTES`; `b10x-loom-sdk`: `agent::plain_http_path`, the rule `path_allowed` and the decoder of `allow_paths` share (story:agent-http-binding)
+- `b10x-loom-plugin`: `effects::HttpReader`, `HttpAnswer`, `HttpReadError` and `HttpSources`; `DataSourceEffects::with_http` and `TurnOptions::http` dispatch a read by the binding's kind (story:agent-http-binding)
+- `loom.agent.AdmitHttpRead` and `loom.agent.BoundHttpAnswer` with their error `HttpReadRefused` and the enum `HttpReadRefusalReason`, generated from `ess/domains/agent.yaml` and re-exported from `b10x_loom_agent`; eight authored scenarios under `ess/scenarios/agent-http-binding/` (story:agent-http-binding)
+- `b10x-loom agent serve --spec <FILE> --state <DIR> [--once]` hosts the agent a `loom.agent/1` spec declares on the plugin host: polls only `channel.allow`, answers each item in a governed turn on the inner loop's protocol under the state whose `when` names the intent, with exactly `policy.capabilities` as its authority; `reply.send` writes the recorded proposal to the item's channel through the Connectors command line, at most `writes.max_per_hour` an hour, and in `writes.mode: approval` only after `b10x-loom approve <COMMISSION> reply.send --state <DIR>`; `b10x-loom agent resume <COMMISSION>` performs a granted send now; SIGTERM ends the host after the item (story:agent-serve)
+- `b10x-loom-agent`: `SpecPlugin`, `SpecAuthority`, `commission_id` and the re-exported `admit_send` (story:agent-serve)
+- `b10x-loom-plugin`: `turn_with` with `TurnOptions` and `Turned`; `DataSourceEffects::with_send` with `SendPolicy` performs `reply.send` once `admit_send` admits it (story:agent-serve)
+- `b10x-loom-plugin-slack`: `SlackHandler::with_channel_allow` and `poll`'s allow list (story:agent-serve)
+- `loom.agent.AdmitSend` with its error `SendRefused` and the enum `SendRefusalReason`, generated from `ess/domains/agent.yaml` and re-exported from `loom_sdk::agent`; five authored scenarios under `ess/scenarios/agent-serve/` (story:agent-serve)
 - The `loom.resource` domain and the `LoomAgent` CRD projected from it, held by `task crd-drift` (story:loom-agent-resource-domain)
 - `b10x-loom-resource`: `LoomAgentRecord`, the resource's lifecycle record, and `crd::manifest` (story:loom-agent-resource-domain)
 - `b10x-loom agent check --spec <FILE>` says whether a `loom.agent/1` spec can be served: exit 0 with one `checked` line, 3 with the first refusal naming its reason and member, 1 when the file cannot be read (story:agent-check)
@@ -23,13 +32,22 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `b10x-loom-operator`, the `LoomAgent` controller: `run --config`, `render --resource` and `crd`; it checks the spec before any child exists (story:loom-operator)
 - `charts/loom-agents`, the Helm chart that installs the CRD and the controller with a namespaced Role, versioned with Loom (story:loom-operator)
 - `loom.resource`: `status.deployment`, `status.conditions` (`Checked`, `Available`) and the event `LoomAgentObserved` (story:loom-operator)
+- `b10x-loom agent serve` answers A2A when the spec declares `expose.a2a`, on `--a2a-address` (default `0.0.0.0`) and `expose.a2a.port`: the agent card at `/.well-known/agent-card.json`, `SendMessage` (one turn on `inbound-answer@1`, answered with its record; nothing is sent through A2A) and `GetTask` at `expose.a2a.path`, and `/ready` and `/live`; every other request needs `Authorization: Bearer` with the token `LOOM_A2A_BEARER` holds, and the host refuses to start without it (story:agent-a2a)
+- `b10x-loom-a2a`: `A2aServer`, `Answerer`, `Bearer` and `admit_a2a_request`, over the `a2a` crate of `beyond10x/a2a` at tag `0.3.0` (story:agent-a2a)
+- `b10x-loom-agent`: `serve::a2a` with `Answering`, `BEARER_ENV`, `bearer` and `listener` (story:agent-a2a)
+- `b10x-loom-plugin`: `TurnOptions::events` hands each `RuntimeEvent` of a turn's run to a sink (story:agent-a2a)
+- `loom.agent.AdmitA2aRequest` with its error `A2aRefused` and the enum `A2aRefusalReason`, generated from `ess/domains/agent.yaml`; four authored scenarios under `ess/scenarios/agent-a2a/` (story:agent-a2a)
+- `b10x-loom agent serve` serves a spec with `expose.a2a` and no `channel`: it polls nothing and its main loop is the A2A listener until SIGTERM or SIGINT (`--once` is refused there); a spec with neither is refused before anything runs. `loom.agent.AdmitServe` with its error `ServeRefused` and the enum `ServeRefusalReason`, generated from `ess/domains/agent.yaml`, and three authored scenarios under `ess/scenarios/agent-a2a/`; `b10x-loom-agent`: `serve::a2a::admit_serve` and `answer_projection` (story:agent-a2a)
+- `b10x-loom-a2a`: the listener cuts off the oldest unadmitted connection when all 32 unadmitted slots are held, answers probes and refusals without an admitted slot, bounds the head (10 s), the body (30 s) and the answer (10 s) each as a whole (`408` past the head's or body's), trims the bearer of the whitespace around it and refuses one with a control character, and keeps a `messageId` as the item revision only as a plain token, hashing any other (`item_revision`) (story:agent-a2a)
 
 ### Changed
 
+- A plugin turn that ends `NeedsAuthority` or `AwaitingApproval` with a proposal under a suspension port is recorded `proposed`, naming the commission that awaits approval; a turn given a commission mints ids seeded with it, so two turns on two items never share a request id or an idempotency key (story:agent-serve)
 - `ProtocolCatalog::plugins()` holds `operator-reply@1` beside `inbound-answer@1`; `bundled()` holds neither (story:agent-check)
 - The conformance suite and the ESS gate synthesize with `--scenarios`, so authored scenarios join the synthesized ones (story:agent-check)
 - `ObserveDeployment` records every observation: `still-running` and `still-degraded` set `deployment`; `respecified` clears it (story:loom-operator)
 - `task check` runs `task chart-check`, which needs Helm 3; CI installs Helm 3.19.0 by checksum (story:loom-operator)
+- Loom requires ESS 0.69.2; the conformance crates take `ess-conformance` and `ess-primitives` at tag `0.69.2`
 
 ## [0.40.0] - 2026-10-24
 

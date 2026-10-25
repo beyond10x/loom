@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest bdde76ecdfe74de23e60baede8074d4e9737e8f2f0216d333a526b9ab77440f8
-// contract digest 03245bddbe418d5c4aa42a0de1fee9b18c8f7793cca6608e8faafc316ee7de2d
+// model digest b69befdd806b9d978ce35adaeb5e7178ae55a9e9cf9cbe285f99ea07bf08b31b
+// contract digest c97fcdb6564b6e5dd954e22cdbe2b298eacbda14f2adefb10a318d925744ada0
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -183,6 +183,124 @@ impl<P> Generated<P> {
     /// The generated behaviours, over `ports`.
     pub fn new(ports: P) -> Self {
         Self { ports }
+    }
+}
+
+/// `loom.agent.AdmitA2aRequest`, generated: every outcome is one the specification fully determines.
+impl<P> crate::agent::obligations::AdmitA2aRequestBehavior for Generated<P>
+{
+    fn admit_a2a_request(&mut self, input: crate::agent::AdmitA2aRequest) -> Result<crate::agent::AdmitA2aRequestOutcome, UnmetObligation> {
+        let _ = &input;
+        // `missing-bearer`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(all(&[equal(Some(&input.probe).map(|value| *value), Some(false)), equal(Some(&input.bearer_presented).map(|value| *value), Some(false))]), "loom.agent.AdmitA2aRequest")? {
+            return Ok(crate::agent::AdmitA2aRequestOutcome::MissingBearer { error: crate::agent::A2aRefused { reason: crate::agent::A2aRefusalReason::MissingBearer } });
+        }
+        // `wrong-bearer`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(all(&[equal(Some(&input.probe).map(|value| *value), Some(false)), equal(Some(&input.bearer_matches).map(|value| *value), Some(false))]), "loom.agent.AdmitA2aRequest")? {
+            return Ok(crate::agent::AdmitA2aRequestOutcome::WrongBearer { error: crate::agent::A2aRefused { reason: crate::agent::A2aRefusalReason::WrongBearer } });
+        }
+        // `probe`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.probe).map(|value| *value), Some(true)), "loom.agent.AdmitA2aRequest")? {
+            return Ok(crate::agent::AdmitA2aRequestOutcome::Probe);
+        }
+        // `admitted`: the default.
+        return Ok(crate::agent::AdmitA2aRequestOutcome::Admitted);
+    }
+}
+
+/// `loom.agent.AdmitHttpRead`, generated: every outcome is one the specification fully determines.
+impl<P> crate::agent::obligations::AdmitHttpReadBehavior for Generated<P>
+{
+    fn admit_http_read(&mut self, input: crate::agent::AdmitHttpRead) -> Result<crate::agent::AdmitHttpReadOutcome, UnmetObligation> {
+        let _ = &input;
+        // `method-not-get`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.method).map(|value| value.clone()), Some("GET".to_owned())).map(|value| !value), "loom.agent.AdmitHttpRead")? {
+            return Ok(crate::agent::AdmitHttpReadOutcome::MethodNotGet { error: crate::agent::HttpReadRefused { reason: crate::agent::HttpReadRefusalReason::MethodNotGet } });
+        }
+        // `path-not-allowed`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.path_allowed).map(|value| *value), Some(false)), "loom.agent.AdmitHttpRead")? {
+            return Ok(crate::agent::AdmitHttpReadOutcome::PathNotAllowed { error: crate::agent::HttpReadRefused { reason: crate::agent::HttpReadRefusalReason::PathNotAllowed } });
+        }
+        // `bearer-missing`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.bearer_missing).map(|value| *value), Some(true)), "loom.agent.AdmitHttpRead")? {
+            return Ok(crate::agent::AdmitHttpReadOutcome::BearerMissing { error: crate::agent::HttpReadRefused { reason: crate::agent::HttpReadRefusalReason::BearerMissing } });
+        }
+        // `admitted`: the default.
+        return Ok(crate::agent::AdmitHttpReadOutcome::Admitted);
+    }
+}
+
+/// `loom.agent.AdmitSend`, generated: every outcome is one the specification fully determines.
+impl<P> crate::agent::obligations::AdmitSendBehavior for Generated<P>
+{
+    fn admit_send(&mut self, input: crate::agent::AdmitSend) -> Result<crate::agent::AdmitSendOutcome, UnmetObligation> {
+        let _ = &input;
+        // `writes-none`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.mode).map(|value| match value { crate::agent::WriteMode::Auto => "auto", crate::agent::WriteMode::Approval => "approval", crate::agent::WriteMode::None => "none" }.to_owned()), Some("none".to_owned())), "loom.agent.AdmitSend")? {
+            return Ok(crate::agent::AdmitSendOutcome::WritesNone { error: crate::agent::SendRefused { reason: crate::agent::SendRefusalReason::WritesNone, r#final: true } });
+        }
+        // `outside-allow-list`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.channel_allowed).map(|value| *value), Some(false)), "loom.agent.AdmitSend")? {
+            return Ok(crate::agent::AdmitSendOutcome::OutsideAllowList { error: crate::agent::SendRefused { reason: crate::agent::SendRefusalReason::OutsideAllowList, r#final: true } });
+        }
+        // `no-proposal`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.proposed).map(|value| *value), Some(false)), "loom.agent.AdmitSend")? {
+            return Ok(crate::agent::AdmitSendOutcome::NoProposal { error: crate::agent::SendRefused { reason: crate::agent::SendRefusalReason::NoProposal, r#final: false } });
+        }
+        // `rate-limited`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(compare_numbers(Some(&input.sent_in_window).map(|value| value.to_string()), Some(&input.max_per_hour).map(|value| value.to_string()), core::cmp::Ordering::is_ge), "loom.agent.AdmitSend")? {
+            return Ok(crate::agent::AdmitSendOutcome::RateLimited { error: crate::agent::SendRefused { reason: crate::agent::SendRefusalReason::RateLimited, r#final: true } });
+        }
+        // `held`: an accepting branch, in declaration order.
+        if decided(all(&[equal(Some(&input.mode).map(|value| match value { crate::agent::WriteMode::Auto => "auto", crate::agent::WriteMode::Approval => "approval", crate::agent::WriteMode::None => "none" }.to_owned()), Some("approval".to_owned())), equal(Some(&input.granted).map(|value| *value), Some(false))]), "loom.agent.AdmitSend")? {
+            return Ok(crate::agent::AdmitSendOutcome::Held);
+        }
+        // `admitted`: the default.
+        return Ok(crate::agent::AdmitSendOutcome::Admitted);
+    }
+}
+
+/// `loom.agent.AdmitServe`, generated: every outcome is one the specification fully determines.
+impl<P> crate::agent::obligations::AdmitServeBehavior for Generated<P>
+{
+    fn admit_serve(&mut self, input: crate::agent::AdmitServe) -> Result<crate::agent::AdmitServeOutcome, UnmetObligation> {
+        let _ = &input;
+        // `nothing-to-serve`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(all(&[equal(Some(&input.channel).map(|value| *value), Some(false)), equal(Some(&input.a2a).map(|value| *value), Some(false))]), "loom.agent.AdmitServe")? {
+            return Ok(crate::agent::AdmitServeOutcome::NothingToServe { error: crate::agent::ServeRefused { reason: crate::agent::ServeRefusalReason::NothingToServe } });
+        }
+        // `polls-and-answers`: an accepting branch, in declaration order.
+        if decided(all(&[equal(Some(&input.channel).map(|value| *value), Some(true)), equal(Some(&input.a2a).map(|value| *value), Some(true))]), "loom.agent.AdmitServe")? {
+            return Ok(crate::agent::AdmitServeOutcome::PollsAndAnswers);
+        }
+        // `polls`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.channel).map(|value| *value), Some(true)), "loom.agent.AdmitServe")? {
+            return Ok(crate::agent::AdmitServeOutcome::Polls);
+        }
+        // `answers`: the default.
+        return Ok(crate::agent::AdmitServeOutcome::Answers);
+    }
+}
+
+/// `loom.agent.BoundHttpAnswer`, generated: every outcome is one the specification fully determines.
+impl<P> crate::agent::obligations::BoundHttpAnswerBehavior for Generated<P>
+{
+    fn bound_http_answer(&mut self, input: crate::agent::BoundHttpAnswer) -> Result<crate::agent::BoundHttpAnswerOutcome, UnmetObligation> {
+        let _ = &input;
+        // `redirected`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(all(&[compare_numbers(Some(&input.status).map(|value| value.to_string()), Some("300".to_owned()), core::cmp::Ordering::is_ge), compare_numbers(Some(&input.status).map(|value| value.to_string()), Some("399".to_owned()), core::cmp::Ordering::is_le)]), "loom.agent.BoundHttpAnswer")? {
+            return Ok(crate::agent::BoundHttpAnswerOutcome::Redirected { error: crate::agent::HttpReadRefused { reason: crate::agent::HttpReadRefusalReason::Redirected } });
+        }
+        // `failed-status`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(any(&[compare_numbers(Some(&input.status).map(|value| value.to_string()), Some("199".to_owned()), core::cmp::Ordering::is_le), compare_numbers(Some(&input.status).map(|value| value.to_string()), Some("400".to_owned()), core::cmp::Ordering::is_ge)]), "loom.agent.BoundHttpAnswer")? {
+            return Ok(crate::agent::BoundHttpAnswerOutcome::FailedStatus { error: crate::agent::HttpReadRefused { reason: crate::agent::HttpReadRefusalReason::FailedStatus } });
+        }
+        // `cut`: an accepting branch, in declaration order.
+        if decided(compare_numbers(Some(&input.bytes).map(|value| value.to_string()), Some(&input.max_bytes).map(|value| value.to_string()), core::cmp::Ordering::is_gt), "loom.agent.BoundHttpAnswer")? {
+            return Ok(crate::agent::BoundHttpAnswerOutcome::Cut);
+        }
+        // `whole`: the default.
+        return Ok(crate::agent::BoundHttpAnswerOutcome::Whole);
     }
 }
 
@@ -766,6 +884,17 @@ fn all(truths: &[Option<bool>]) -> Option<bool> {
         None
     } else {
         Some(true)
+    }
+}
+
+/// Three-valued disjunction: true wins, then Unknown.
+fn any(truths: &[Option<bool>]) -> Option<bool> {
+    if truths.contains(&Some(true)) {
+        Some(true)
+    } else if truths.contains(&None) {
+        None
+    } else {
+        Some(false)
     }
 }
 

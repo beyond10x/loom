@@ -32,6 +32,10 @@ An agent as data: one `loom.agent/1` document naming the agent and its brief, it
 - `path` — `String`
 - `card` — `loom.agent.A2aCard`
 
+### `A2aRefusalReason`
+
+`loom.agent.A2aRefusalReason` is one of `MissingBearer` and `WrongBearer`.
+
 ### `ActionBudget`
 
 `loom.agent.ActionBudget` is a record of six fields:
@@ -157,6 +161,10 @@ An agent as data: one `loom.agent/1` document naming the agent and its brief, it
 - `bearer_env` — `Optional<String>`, which may be absent
 - `max_bytes` — `Integer`
 
+### `HttpReadRefusalReason`
+
+`loom.agent.HttpReadRefusalReason` is one of `MethodNotGet`, `PathNotAllowed`, `BearerMissing`, `Redirected` and `FailedStatus`.
+
 ### `InnerLoop`
 
 `loom.agent.InnerLoop` is a record of four fields:
@@ -263,6 +271,14 @@ An agent as data: one `loom.agent/1` document naming the agent and its brief, it
 - `connectors` — `loom.datasource.ConnectorsCliConfig`
 - `confinement` — `loom.agent.ConfinementMode`
 
+### `SendRefusalReason`
+
+`loom.agent.SendRefusalReason` is one of `WritesNone`, `OutsideAllowList`, `NoProposal` and `RateLimited`.
+
+### `ServeRefusalReason`
+
+`loom.agent.ServeRefusalReason` is one of `NothingToServe`.
+
 ### `SessionSpec`
 
 `loom.agent.SessionSpec` is a record of five fields:
@@ -310,6 +326,112 @@ An agent as data: one `loom.agent/1` document naming the agent and its brief, it
 
 ## Commands
 
+### `AdmitA2aRequest`
+
+`loom.agent.AdmitA2aRequest`.
+
+It takes:
+
+- `probe` — `Boolean`
+- `bearer_presented` — `Boolean`
+- `bearer_matches` — `Boolean`
+
+It has four outcomes.
+
+**`missing-bearer`** — Taken when `(probe == false and bearer_presented == false)` holds of the input. No entity in this specification changes. It reports `loom.agent.A2aRefused`, carrying `reason`. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`wrong-bearer`** — Taken when `(probe == false and bearer_matches == false)` holds of the input. No entity in this specification changes. It reports `loom.agent.A2aRefused`, carrying `reason`. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`probe`** — Taken when `probe == true` holds of the input. No entity in this specification changes. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`admitted`** — The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+### `AdmitHttpRead`
+
+`loom.agent.AdmitHttpRead`.
+
+It takes:
+
+- `method` — `String`
+- `path_allowed` — `Boolean`
+- `bearer_missing` — `Boolean`
+
+It has four outcomes.
+
+**`method-not-get`** — Taken when `method != GET` holds of the input. No entity in this specification changes. It reports `loom.agent.HttpReadRefused`, carrying `reason`. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`path-not-allowed`** — Taken when `path_allowed == false` holds of the input. No entity in this specification changes. It reports `loom.agent.HttpReadRefused`, carrying `reason`. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`bearer-missing`** — Taken when `bearer_missing == true` holds of the input. No entity in this specification changes. It reports `loom.agent.HttpReadRefused`, carrying `reason`. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`admitted`** — The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+### `AdmitSend`
+
+`loom.agent.AdmitSend`.
+
+It takes:
+
+- `mode` — `loom.agent.WriteMode`
+- `channel_allowed` — `Boolean`
+- `proposed` — `Boolean`
+- `granted` — `Boolean`
+- `sent_in_window` — `Integer`
+- `max_per_hour` — `Integer`
+
+It has six outcomes.
+
+**`writes-none`** — Taken when `mode == none` holds of the input. No entity in this specification changes. It reports `loom.agent.SendRefused`, carrying `reason` and `final`. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`outside-allow-list`** — Taken when `channel_allowed == false` holds of the input. No entity in this specification changes. It reports `loom.agent.SendRefused`, carrying `reason` and `final`. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`no-proposal`** — Taken when `proposed == false` holds of the input. No entity in this specification changes. It reports `loom.agent.SendRefused`, carrying `reason` and `final`. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`rate-limited`** — Taken when `sent_in_window >= {fact: max_per_hour}` holds of the input. No entity in this specification changes. It reports `loom.agent.SendRefused`, carrying `reason` and `final`. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`held`** — Taken when `(mode == approval and granted == false)` holds of the input. No entity in this specification changes. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`admitted`** — The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+### `AdmitServe`
+
+`loom.agent.AdmitServe`.
+
+It takes:
+
+- `channel` — `Boolean`
+- `a2a` — `Boolean`
+
+It has four outcomes.
+
+**`nothing-to-serve`** — Taken when `(channel == false and a2a == false)` holds of the input. No entity in this specification changes. It reports `loom.agent.ServeRefused`, carrying `reason`. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`polls-and-answers`** — Taken when `(channel == true and a2a == true)` holds of the input. No entity in this specification changes. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`polls`** — Taken when `channel == true` holds of the input. No entity in this specification changes. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`answers`** — The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+### `BoundHttpAnswer`
+
+`loom.agent.BoundHttpAnswer`.
+
+It takes:
+
+- `status` — `Integer`
+- `bytes` — `Integer`
+- `max_bytes` — `Integer`
+
+It has four outcomes.
+
+**`redirected`** — Taken when `(status >= 300 and status <= 399)` holds of the input. No entity in this specification changes. It reports `loom.agent.HttpReadRefused`, carrying `reason`. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`failed-status`** — Taken when `(status <= 199 or status >= 400)` holds of the input. No entity in this specification changes. It reports `loom.agent.HttpReadRefused`, carrying `reason`. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`cut`** — Taken when `bytes > {fact: max_bytes}` holds of the input. No entity in this specification changes. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`whole`** — The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
 ### `CheckAgentSpec`
 
 `loom.agent.CheckAgentSpec`.
@@ -340,6 +462,41 @@ It has nine outcomes.
 
 ## Errors
 
+### `A2aRefused`
+
+It carries:
+
+- `reason` — `loom.agent.A2aRefusalReason`
+
+Reported by `loom.agent.AdmitA2aRequest` on its `missing-bearer` and `wrong-bearer` outcomes.
+
+### `HttpReadRefused`
+
+It carries:
+
+- `reason` — `loom.agent.HttpReadRefusalReason`
+
+Reported by `loom.agent.AdmitHttpRead` on its `method-not-get`, `path-not-allowed` and `bearer-missing` outcomes.
+
+Reported by `loom.agent.BoundHttpAnswer` on its `redirected` and `failed-status` outcomes.
+
+### `SendRefused`
+
+It carries:
+
+- `reason` — `loom.agent.SendRefusalReason`
+- `final` — `Boolean`
+
+Reported by `loom.agent.AdmitSend` on its `writes-none`, `outside-allow-list`, `no-proposal` and `rate-limited` outcomes.
+
+### `ServeRefused`
+
+It carries:
+
+- `reason` — `loom.agent.ServeRefusalReason`
+
+Reported by `loom.agent.AdmitServe` on its `nothing-to-serve` outcome.
+
 ### `SpecRefused`
 
 It carries:
@@ -353,4 +510,4 @@ Reported by `loom.agent.CheckAgentSpec` on its `malformed`, `secret-literal`, `u
 
 ---
 
-Generated from loom v1 · model digest `bdde76ecdfe74de23e60baede8074d4e9737e8f2f0216d333a526b9ab77440f8` · contract digest `slice-sha256/2:9e4f9aac1a99c444bb25be0761b19692234e50c84321052be9ceb50d78c680a2`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · model digest `b69befdd806b9d978ce35adaeb5e7178ae55a9e9cf9cbe285f99ea07bf08b31b` · contract digest `slice-sha256/2:f94df87f3c7db75a7c5cb9fe180cec296f84a29a2d9f6586625b7ba914c88e46`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

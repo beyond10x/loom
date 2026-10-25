@@ -166,6 +166,63 @@ fn an_http_binding_whose_method_is_not_get_is_refused() {
     );
 }
 
+/// An allowed path no read may use (`ess/domains/agent.yaml` `HttpBinding`) is refused when the
+/// document is read, naming the entry, rather than left for `path_allowed` to refuse at every read;
+/// the ESS scenario `an-allow-path-holding-a-dot-dot-segment-is-refused` fixes the first.
+#[test]
+fn an_allow_path_no_read_may_use_is_refused() {
+    let detail = |at: &str| {
+        format!(
+            "`{at}` is not a plain path, one that starts with `/` and holds no `\\`, no `.` or `..` \
+             segment, no encoded separator or dot, no `?` or `#` and no whitespace"
+        )
+    };
+    assert_eq!(
+        refused_text(&fixture("allow-path-dot-dot")),
+        refusal(
+            RefusalReason::Malformed,
+            "document",
+            &detail("bindings[2].allow_paths[1]")
+        )
+    );
+    for path in [
+        "\"/api\\\\..\\\\secret\"",
+        "\"/api\\\\v1\"",
+        "/api/../secret",
+        "/api/./v1",
+        "/api/v1/..",
+        "/api/%2e%2e/secret",
+        "/api/%2Fsecret",
+        "\"/api/v1?token=x\"",
+        "\"/api/v1#x\"",
+        "\"/api/v 1\"",
+        "api/v1",
+    ] {
+        let text = with(
+            &operator_text(),
+            "allow_paths: [/api/v1/query, /api/v1/alerts]",
+            &format!("allow_paths: [/api/v1/query, {path}]"),
+        );
+        assert_eq!(
+            refused_text(&text),
+            refusal(
+                RefusalReason::Malformed,
+                "document",
+                &detail("bindings[2].allow_paths[1]")
+            ),
+            "{path}"
+        );
+    }
+    for path in ["/", "/api/v1/", "/api/v1/query_range", "/api/v1.2/a..b"] {
+        let text = with(
+            &operator_text(),
+            "allow_paths: [/api/v1/query, /api/v1/alerts]",
+            &format!("allow_paths: [/api/v1/query, {path}]"),
+        );
+        assert!(check_text(&text, &plugin_actions).is_ok(), "{path}");
+    }
+}
+
 #[test]
 fn reply_send_without_writes_is_refused() {
     assert_eq!(

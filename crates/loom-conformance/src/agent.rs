@@ -1,5 +1,7 @@
 //! `loom.agent.CheckAgentSpec`, answered by `b10x_loom_agent::check_text` over the plugin
-//! catalog (`ProtocolCatalog::plugins()`).
+//! catalog (`ProtocolCatalog::plugins()`), and `loom.agent.AdmitSend`, `loom.agent.AdmitHttpRead`
+//! and `loom.agent.BoundHttpAnswer`, answered by `b10x_loom_agent::admit_send`,
+//! `admit_http_read` and `bound_http_answer` over their declared inputs alone.
 //!
 //! The command's one input is the document's `path`, and every refusal is `external:`: the
 //! document and the catalog are outside the input. This target plays the file system, as it plays
@@ -14,7 +16,12 @@
 
 use std::path::{Path, PathBuf};
 
-use b10x_loom_agent::{RefusalReason, SpecRefused, check_text, spelling};
+use b10x_loom_agent::{
+    AdmitHttpRead, AdmitHttpReadOutcome, AdmitSend, AdmitSendOutcome, BoundHttpAnswer,
+    BoundHttpAnswerOutcome, HttpReadRefused, RefusalReason, SendRefused, SpecRefused, WriteMode,
+    admit_http_read, admit_send, bound_http_answer, check_text, http_refusal_spelling,
+    send_refusal_spelling, spelling,
+};
 use ess_conformance::target::{SemanticCommandResult, TargetError};
 use ess_primitives::node::Node;
 use loom_protocols::ProtocolCatalog;
@@ -24,6 +31,11 @@ use crate::{Live, error, took};
 
 pub(crate) const CHECK_AGENT_SPEC: &str = "loom.agent.CheckAgentSpec";
 const SPEC_REFUSED: &str = "loom.agent.SpecRefused";
+pub(crate) const ADMIT_SEND: &str = "loom.agent.AdmitSend";
+const SEND_REFUSED: &str = "loom.agent.SendRefused";
+pub(crate) const ADMIT_HTTP_READ: &str = "loom.agent.AdmitHttpRead";
+pub(crate) const BOUND_HTTP_ANSWER: &str = "loom.agent.BoundHttpAnswer";
+const HTTP_READ_REFUSED: &str = "loom.agent.HttpReadRefused";
 
 /// The refusal branches of `CheckAgentSpec`, each with the reason its fixture is refused for, in
 /// declaration order.
@@ -99,6 +111,96 @@ fn refusal(refused: &SpecRefused) -> SemanticCommandResult {
             .with("member", Node::Text(refused.member.clone()))
             .with("detail", Node::Text(refused.detail.clone())),
     )
+}
+
+/// The `loom.agent.WriteMode` field `name`, in the enum's spelling.
+fn write_mode(input: &Input, name: &str) -> Option<WriteMode> {
+    match codec::text(input, name)?.as_str() {
+        "auto" => Some(WriteMode::Auto),
+        "approval" => Some(WriteMode::Approval),
+        "none" => Some(WriteMode::None),
+        _ => None,
+    }
+}
+
+/// The refusal as `loom.agent.SendRefused`, `reason` in the enum's spelling.
+fn send_refusal(branch: &str, refused: &SendRefused) -> SemanticCommandResult {
+    took(ADMIT_SEND, branch).with_error(
+        error(SEND_REFUSED)
+            .with(
+                "reason",
+                Node::Text(send_refusal_spelling(refused.reason).to_owned()),
+            )
+            .with("final", Node::Bool(refused.r#final)),
+    )
+}
+
+/// Answers one `AdmitSend`: `None` when an input is absent or cannot be held by its type.
+pub(crate) fn admit_send_command(input: &Input) -> Option<SemanticCommandResult> {
+    let request = AdmitSend {
+        mode: write_mode(input, "mode")?,
+        channel_allowed: codec::boolean(input, "channel_allowed")?,
+        proposed: codec::boolean(input, "proposed")?,
+        granted: codec::boolean(input, "granted")?,
+        sent_in_window: codec::integer(input, "sent_in_window")?,
+        max_per_hour: codec::integer(input, "max_per_hour")?,
+    };
+    Some(match admit_send(&request) {
+        AdmitSendOutcome::WritesNone { error } => send_refusal("writes-none", &error),
+        AdmitSendOutcome::OutsideAllowList { error } => send_refusal("outside-allow-list", &error),
+        AdmitSendOutcome::NoProposal { error } => send_refusal("no-proposal", &error),
+        AdmitSendOutcome::RateLimited { error } => send_refusal("rate-limited", &error),
+        AdmitSendOutcome::Held => took(ADMIT_SEND, "held"),
+        AdmitSendOutcome::Admitted => took(ADMIT_SEND, "admitted"),
+    })
+}
+
+/// The refusal as `loom.agent.HttpReadRefused`, `reason` in the enum's spelling.
+fn http_refusal(command: &str, branch: &str, refused: &HttpReadRefused) -> SemanticCommandResult {
+    took(command, branch).with_error(error(HTTP_READ_REFUSED).with(
+        "reason",
+        Node::Text(http_refusal_spelling(refused.reason).to_owned()),
+    ))
+}
+
+/// Answers one `AdmitHttpRead`: `None` when an input is absent or cannot be held by its type.
+pub(crate) fn admit_http_read_command(input: &Input) -> Option<SemanticCommandResult> {
+    let request = AdmitHttpRead {
+        method: codec::text(input, "method")?,
+        path_allowed: codec::boolean(input, "path_allowed")?,
+        bearer_missing: codec::boolean(input, "bearer_missing")?,
+    };
+    Some(match admit_http_read(&request) {
+        AdmitHttpReadOutcome::MethodNotGet { error } => {
+            http_refusal(ADMIT_HTTP_READ, "method-not-get", &error)
+        }
+        AdmitHttpReadOutcome::PathNotAllowed { error } => {
+            http_refusal(ADMIT_HTTP_READ, "path-not-allowed", &error)
+        }
+        AdmitHttpReadOutcome::BearerMissing { error } => {
+            http_refusal(ADMIT_HTTP_READ, "bearer-missing", &error)
+        }
+        AdmitHttpReadOutcome::Admitted => took(ADMIT_HTTP_READ, "admitted"),
+    })
+}
+
+/// Answers one `BoundHttpAnswer`: `None` when an input is absent or cannot be held by its type.
+pub(crate) fn bound_http_answer_command(input: &Input) -> Option<SemanticCommandResult> {
+    let request = BoundHttpAnswer {
+        status: codec::integer(input, "status")?,
+        bytes: codec::integer(input, "bytes")?,
+        max_bytes: codec::integer(input, "max_bytes")?,
+    };
+    Some(match bound_http_answer(&request) {
+        BoundHttpAnswerOutcome::Redirected { error } => {
+            http_refusal(BOUND_HTTP_ANSWER, "redirected", &error)
+        }
+        BoundHttpAnswerOutcome::FailedStatus { error } => {
+            http_refusal(BOUND_HTTP_ANSWER, "failed-status", &error)
+        }
+        BoundHttpAnswerOutcome::Cut => took(BOUND_HTTP_ANSWER, "cut"),
+        BoundHttpAnswerOutcome::Whole => took(BOUND_HTTP_ANSWER, "whole"),
+    })
 }
 
 /// Answers one `CheckAgentSpec`: `None` when the input carries no text `path`.

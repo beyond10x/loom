@@ -65,7 +65,7 @@ variant.
 Since `0.6.0` a run whose case moved to a revision whose frontier still admits an action ends
 `RunOutcome::CaseMovedOn`, naming the Run's revision and the current one; start a new Run at the
 current revision. Callers that match `RunOutcome` exhaustively handle the new variant. Loom
-requires ESS 0.69.0.
+requires ESS 0.69.2.
 
 Since `0.7.0` a process can supervise a run through `b10x-loom run --output jsonl`, decide a case
 it keeps itself through `b10x-loom evaluate`, and drive a run with a model from an llm catalog
@@ -127,7 +127,7 @@ revision it was suspended at. Callers of `run_until_blocked` see no change; call
 Since `0.16.0` a step performed under an authority grant passes Commission's approval gate:
 `run_until_blocked` runs the executor again instead of ending the Run `AwaitingApproval`, so a
 caller that matched `AwaitingApproval` after a granted effect now gets the Run's own end, and a
-plugin turn is one Run. Loom requires ESS 0.69.0.
+plugin turn is one Run. Loom requires ESS 0.69.2.
 
 Since `0.15.0` a confidence fallback is recorded as two selections, the overruled fast one
 naming its replacement, each with the strategy of the selector that made it, and every
@@ -261,6 +261,24 @@ $ b10x-loom agent check --spec ess/scenarios/agent-check/specs/unknown-action.ya
 b10x-loom: refused: UnknownAction at states[0].actions[2]: reply.escalate
 ```
 
+`b10x-loom agent serve --spec <FILE> --state <DIR> [--once]` hosts the agent a checked spec
+declares: the plugin host over the spec, polling only the channels `channel.allow` lists through
+its `connectors` channel binding, classifying each item and answering it in a governed turn on the
+inner loop's protocol under the state whose `when` names the intent, with exactly
+`policy.capabilities` as its authority. `reply.send` is a governed write of the recorded proposal
+to the item's channel, at most `writes.max_per_hour` an hour. In `writes.mode: approval` a send is
+held: the turn ends proposed naming its commission, `b10x-loom approve <COMMISSION> reply.send
+--state <DIR>` grants it, and the host performs it at its next poll, or `b10x-loom agent resume
+<COMMISSION> --spec <FILE> --state <DIR>` performs it now, once. `writes.mode: none` sends nothing
+and `auto` is not served yet. The models are the spec's `model` section, or `--catalog` route
+aliases as `plugin run` takes them. SIGTERM ends the host after the item it is handling. An
+`http` binding of the spec is read by `source.read` with `kind: get` and `input: {path, query?}`:
+one GET of a path exactly in its `allow_paths` under its `base_url`, carrying the bearer the
+variable `bearer_env` names, following no redirect, the body cut at `max_bytes` and marked; a path
+outside the list (or holding `\`, a `.` or `..` segment or an encoded separator, which
+`agent check` also refuses in the list), a method other than GET, a bearer variable unset, empty
+or blank, a redirect or a failing status is a refused read the model reads as data.
+
 ## Deploy agents to Kubernetes
 
 A `LoomAgent` resource carries a `loom.agent/1` document as its `spec.agent`, and the controller
@@ -351,7 +369,10 @@ An agent can be written as data: a `loom.agent/1` document, YAML or JSON, which
 `loom_sdk::agent::parse` decodes into an `AgentSpec` (identity, models, session and tool policy,
 loops, states, bindings, channel, writes, capabilities, exposure, runtime and deployment),
 refusing a member the domain does not declare. `examples/agents/operator.yaml` is one.
-`b10x-loom agent check` (library `b10x-loom-agent`) says whether such a spec can be served.
+`b10x-loom agent check` (library `b10x-loom-agent`) says whether such a spec can be served, and
+`b10x_loom_agent::SpecPlugin` is the plugin `b10x-loom agent serve` hosts over it: `SpecAuthority`
+grants exactly `policy.capabilities`, and `admit_send` decides each `reply.send` as
+`loom.agent.AdmitSend` declares.
 
 To deploy such an agent to Kubernetes, the `LoomAgent` custom resource carries the document as its
 `spec.agent`. Its CustomResourceDefinition, `deploy/crd/loomagents.loom.beyond10x.dev.yaml`, is
@@ -448,13 +469,14 @@ surface kept stable within a release line, every port a host implements among it
 |---|---|
 | `b10x-loom-protocols` | The shared protocol catalog and verified offline installations |
 | `b10x-loom-cli` | The `b10x-loom` command line |
-| `b10x-loom-agent` | Checks a `loom.agent/1` spec before anything runs: the first reason it cannot be served, naming the member; `b10x-loom agent check` runs it |
+| `b10x-loom-agent` | Checks a `loom.agent/1` spec before anything runs: the first reason it cannot be served, naming the member; `b10x-loom agent check` runs it. `SpecPlugin` serves a checked spec on the plugin host, holding each `reply.send` for approval and reading its `http` bindings by bounded GET (`HttpGet`); `b10x-loom agent serve` hosts it |
+| `b10x-loom-a2a` | The A2A listener of a served agent (`expose.a2a`): its agent card, one governed turn per `SendMessage` answered with the turn's record, `GetTask` following the turn's runtime events, readiness and liveness probes, and a refusal of every other request without the agent's bearer; `b10x-loom agent serve` opens it |
 | `b10x-loom-sdk` | The one crate an embedding depends on |
 | `b10x-loom-executor` | The executor: catalogue, action selection and argument generation, each model request one turn of an llm `Model` |
 | `b10x-loom-session-executor` | An `AgentExecutor` over a harness, Claude Code or Codex session run through metaharness (`0.15.0`) in a scratch copy: it proposes the session's change, never applies it, and summarizes the session's record as `trace-ir-summary/1`, with each tool call's decision and who made it; `SessionExecutor::from_spec` builds it from a `loom.agent/1` spec, offering only the spec's allowed tools; a b10x-harness session can read its endpoint's API key from the secret store by name (`api_key_secret`) |
 | `b10x-loom-commission` | Commission's contracts and runtime loop, generated from its ESS specification |
 | `b10x-loom-connectors` | Commission's `ConnectorInvoker` over a Connectors service (Connectors `v0.35.0`) |
-| `b10x-loom-plugin` | The plugin host: polls a plugin, classifies each item and answers it in a governed read-only turn over Connectors data sources, one record line per item |
+| `b10x-loom-plugin` | The plugin host: polls a plugin, classifies each item and answers it in a governed turn over Connectors data sources, one record line per item; a turn given a `SendPolicy` may send the reply it proposed, once admitted |
 | `b10x-loom-plugin-slack` | The slack-handler plugin: walks the Slack channels the bot is a member of, read only, and proposes answers to the messages nobody answered; `b10x-loom plugin run slack-handler` hosts it |
 | `b10x-loom-resource` | The `LoomAgent` Kubernetes resource: its lifecycle record over the generated `loom.resource` behaviour, and the CRD projected from the specification; talks to no cluster |
 | `b10x-loom-operator` | The `b10x-loom-operator` controller: reconciles a `LoomAgent` into a pod and its children, and renders them; installed by `charts/loom-agents` |

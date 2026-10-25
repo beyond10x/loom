@@ -1,0 +1,15 @@
+# story agent-serve: a send to a channel outside `channel.allow` runs no command. The refusal is
+# final, so the turn's run ends.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-send-outside-the-allow-list-is-refused
+summary: A `reply.send` whose channel is not in the allow list is refused before any process runs.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.AdmitSend
+    input: {mode: approval, channel_allowed: false, proposed: true, granted: true, sent_in_window: 0, max_per_hour: 5}
+    outcome: outside-allow-list
+    error:
+      name: loom.agent.SendRefused
+      fields: {reason: OutsideAllowList, final: true}

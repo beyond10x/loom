@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest bdde76ecdfe74de23e60baede8074d4e9737e8f2f0216d333a526b9ab77440f8
-// contract digest 03245bddbe418d5c4aa42a0de1fee9b18c8f7793cca6608e8faafc316ee7de2d
+// model digest b69befdd806b9d978ce35adaeb5e7178ae55a9e9cf9cbe285f99ea07bf08b31b
+// contract digest c97fcdb6564b6e5dd954e22cdbe2b298eacbda14f2adefb10a318d925744ada0
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Agent — `loom.agent`.
@@ -29,6 +29,15 @@ pub struct A2aExposure {
     pub path: String,
     /// `card` — `loom.agent.A2aCard`.
     pub card: A2aCard,
+}
+
+/// A2aRefusalReason — `loom.agent.A2aRefusalReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum A2aRefusalReason {
+    /// `MissingBearer`.
+    MissingBearer,
+    /// `WrongBearer`.
+    WrongBearer,
 }
 
 /// ActionBudget — `loom.agent.ActionBudget`.
@@ -238,6 +247,21 @@ pub struct HttpBinding {
     pub max_bytes: i64,
 }
 
+/// HttpReadRefusalReason — `loom.agent.HttpReadRefusalReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HttpReadRefusalReason {
+    /// `MethodNotGet`.
+    MethodNotGet,
+    /// `PathNotAllowed`.
+    PathNotAllowed,
+    /// `BearerMissing`.
+    BearerMissing,
+    /// `Redirected`.
+    Redirected,
+    /// `FailedStatus`.
+    FailedStatus,
+}
+
 /// InnerLoop — `loom.agent.InnerLoop`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InnerLoop {
@@ -403,6 +427,26 @@ pub struct RuntimeSpec {
     pub confinement: ConfinementMode,
 }
 
+/// SendRefusalReason — `loom.agent.SendRefusalReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendRefusalReason {
+    /// `WritesNone`.
+    WritesNone,
+    /// `OutsideAllowList`.
+    OutsideAllowList,
+    /// `NoProposal`.
+    NoProposal,
+    /// `RateLimited`.
+    RateLimited,
+}
+
+/// ServeRefusalReason — `loom.agent.ServeRefusalReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServeRefusalReason {
+    /// `NothingToServe`.
+    NothingToServe,
+}
+
 /// SessionSpec — `loom.agent.SessionSpec`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionSpec {
@@ -471,6 +515,200 @@ pub struct WritesSpec {
     pub max_per_hour: i64,
 }
 
+/// AdmitA2aRequest — the input of `loom.agent.AdmitA2aRequest`.
+///
+/// Everything it can result in is [`AdmitA2aRequestOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmitA2aRequest {
+    /// `probe` — `Boolean`.
+    pub probe: bool,
+    /// `bearer_presented` — `Boolean`.
+    pub bearer_presented: bool,
+    /// `bearer_matches` — `Boolean`.
+    pub bearer_matches: bool,
+}
+
+/// Everything `loom.agent.AdmitA2aRequest` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdmitA2aRequestOutcome {
+    /// `missing-bearer` — when `(probe == false and bearer_presented == false)`.
+    MissingBearer {
+        /// Why it was refused: `loom.agent.A2aRefused`.
+        error: A2aRefused,
+    },
+    /// `wrong-bearer` — when `(probe == false and bearer_matches == false)`.
+    WrongBearer {
+        /// Why it was refused: `loom.agent.A2aRefused`.
+        error: A2aRefused,
+    },
+    /// `probe` — when `probe == true`.
+    Probe,
+    /// `admitted` — otherwise.
+    Admitted,
+}
+
+/// AdmitHttpRead — the input of `loom.agent.AdmitHttpRead`.
+///
+/// Everything it can result in is [`AdmitHttpReadOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmitHttpRead {
+    /// `method` — `String`.
+    pub method: String,
+    /// `path_allowed` — `Boolean`.
+    pub path_allowed: bool,
+    /// `bearer_missing` — `Boolean`.
+    pub bearer_missing: bool,
+}
+
+/// Everything `loom.agent.AdmitHttpRead` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdmitHttpReadOutcome {
+    /// `method-not-get` — when `method != GET`.
+    MethodNotGet {
+        /// Why it was refused: `loom.agent.HttpReadRefused`.
+        error: HttpReadRefused,
+    },
+    /// `path-not-allowed` — when `path_allowed == false`.
+    PathNotAllowed {
+        /// Why it was refused: `loom.agent.HttpReadRefused`.
+        error: HttpReadRefused,
+    },
+    /// `bearer-missing` — when `bearer_missing == true`.
+    BearerMissing {
+        /// Why it was refused: `loom.agent.HttpReadRefused`.
+        error: HttpReadRefused,
+    },
+    /// `admitted` — otherwise.
+    Admitted,
+}
+
+/// AdmitSend — the input of `loom.agent.AdmitSend`.
+///
+/// Everything it can result in is [`AdmitSendOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmitSend {
+    /// `mode` — `loom.agent.WriteMode`.
+    pub mode: WriteMode,
+    /// `channel_allowed` — `Boolean`.
+    pub channel_allowed: bool,
+    /// `proposed` — `Boolean`.
+    pub proposed: bool,
+    /// `granted` — `Boolean`.
+    pub granted: bool,
+    /// `sent_in_window` — `Integer`.
+    pub sent_in_window: i64,
+    /// `max_per_hour` — `Integer`.
+    pub max_per_hour: i64,
+}
+
+/// Everything `loom.agent.AdmitSend` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdmitSendOutcome {
+    /// `writes-none` — when `mode == none`.
+    WritesNone {
+        /// Why it was refused: `loom.agent.SendRefused`.
+        error: SendRefused,
+    },
+    /// `outside-allow-list` — when `channel_allowed == false`.
+    OutsideAllowList {
+        /// Why it was refused: `loom.agent.SendRefused`.
+        error: SendRefused,
+    },
+    /// `no-proposal` — when `proposed == false`.
+    NoProposal {
+        /// Why it was refused: `loom.agent.SendRefused`.
+        error: SendRefused,
+    },
+    /// `rate-limited` — when `sent_in_window >= {fact: max_per_hour}`.
+    RateLimited {
+        /// Why it was refused: `loom.agent.SendRefused`.
+        error: SendRefused,
+    },
+    /// `held` — when `(mode == approval and granted == false)`.
+    Held,
+    /// `admitted` — otherwise.
+    Admitted,
+}
+
+/// AdmitServe — the input of `loom.agent.AdmitServe`.
+///
+/// Everything it can result in is [`AdmitServeOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmitServe {
+    /// `channel` — `Boolean`.
+    pub channel: bool,
+    /// `a2a` — `Boolean`.
+    pub a2a: bool,
+}
+
+/// Everything `loom.agent.AdmitServe` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdmitServeOutcome {
+    /// `nothing-to-serve` — when `(channel == false and a2a == false)`.
+    NothingToServe {
+        /// Why it was refused: `loom.agent.ServeRefused`.
+        error: ServeRefused,
+    },
+    /// `polls-and-answers` — when `(channel == true and a2a == true)`.
+    PollsAndAnswers,
+    /// `polls` — when `channel == true`.
+    Polls,
+    /// `answers` — otherwise.
+    Answers,
+}
+
+/// BoundHttpAnswer — the input of `loom.agent.BoundHttpAnswer`.
+///
+/// Everything it can result in is [`BoundHttpAnswerOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundHttpAnswer {
+    /// `status` — `Integer`.
+    pub status: i64,
+    /// `bytes` — `Integer`.
+    pub bytes: i64,
+    /// `max_bytes` — `Integer`.
+    pub max_bytes: i64,
+}
+
+/// Everything `loom.agent.BoundHttpAnswer` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BoundHttpAnswerOutcome {
+    /// `redirected` — when `(status >= 300 and status <= 399)`.
+    Redirected {
+        /// Why it was refused: `loom.agent.HttpReadRefused`.
+        error: HttpReadRefused,
+    },
+    /// `failed-status` — when `(status <= 199 or status >= 400)`.
+    FailedStatus {
+        /// Why it was refused: `loom.agent.HttpReadRefused`.
+        error: HttpReadRefused,
+    },
+    /// `cut` — when `bytes > {fact: max_bytes}`.
+    Cut,
+    /// `whole` — otherwise.
+    Whole,
+}
+
 /// CheckAgentSpec — the input of `loom.agent.CheckAgentSpec`.
 ///
 /// Everything it can result in is [`CheckAgentSpecOutcome`].
@@ -531,6 +769,36 @@ pub enum CheckAgentSpecOutcome {
     Serveable,
 }
 
+/// The declared error `loom.agent.A2aRefused`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct A2aRefused {
+    /// `reason` — `loom.agent.A2aRefusalReason`.
+    pub reason: A2aRefusalReason,
+}
+
+/// The declared error `loom.agent.HttpReadRefused`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HttpReadRefused {
+    /// `reason` — `loom.agent.HttpReadRefusalReason`.
+    pub reason: HttpReadRefusalReason,
+}
+
+/// The declared error `loom.agent.SendRefused`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SendRefused {
+    /// `reason` — `loom.agent.SendRefusalReason`.
+    pub reason: SendRefusalReason,
+    /// `final` — `Boolean`.
+    pub r#final: bool,
+}
+
+/// The declared error `loom.agent.ServeRefused`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServeRefused {
+    /// `reason` — `loom.agent.ServeRefusalReason`.
+    pub reason: ServeRefusalReason,
+}
+
 /// The declared error `loom.agent.SpecRefused`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpecRefused {
@@ -542,12 +810,67 @@ pub struct SpecRefused {
     pub detail: String,
 }
 
-/// What this bounded context owes its implementor, as typed seams.
+/// What this bounded context owes its implementor, and the seams of what is generated.
 ///
-/// One trait per obligation in the synthesis plan, each carrying the plan's own contract.
-/// [`Unimplemented`](obligations::Unimplemented) satisfies every trait by refusing in the type system, so the workspace builds —
-/// and says exactly what it cannot yet do — before a line is hand-written.
+/// One trait per obligation in the synthesis plan, each carrying the plan's own contract, and one
+/// per generated behaviour, which [`Generated`](crate::behaviour::Generated) implements.
+/// [`Unimplemented`](obligations::Unimplemented) satisfies every owed trait by refusing in the type system.
 pub mod obligations {
+    /// The behaviour `loom.agent.AdmitA2aRequest` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait AdmitA2aRequestBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.agent.AdmitA2aRequest`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn admit_a2a_request(&mut self, input: super::AdmitA2aRequest) -> Result<super::AdmitA2aRequestOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `loom.agent.AdmitHttpRead` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait AdmitHttpReadBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.agent.AdmitHttpRead`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn admit_http_read(&mut self, input: super::AdmitHttpRead) -> Result<super::AdmitHttpReadOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `loom.agent.AdmitSend` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait AdmitSendBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.agent.AdmitSend`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn admit_send(&mut self, input: super::AdmitSend) -> Result<super::AdmitSendOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `loom.agent.AdmitServe` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait AdmitServeBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.agent.AdmitServe`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn admit_serve(&mut self, input: super::AdmitServe) -> Result<super::AdmitServeOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `loom.agent.BoundHttpAnswer` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait BoundHttpAnswerBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.agent.BoundHttpAnswer`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn bound_http_answer(&mut self, input: super::BoundHttpAnswer) -> Result<super::BoundHttpAnswerOutcome, crate::obligation::UnmetObligation>;
+    }
+
     /// The behaviour `loom.agent.CheckAgentSpec` — an implementation obligation.
     ///
     /// Why it is not generated: kept an obligation by the fields of error `loom.agent.SpecRefused`, which the specification gives no source, in `malformed`.

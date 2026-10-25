@@ -1,0 +1,12 @@
+# story agent-a2a: a spec with `expose.a2a` and no `channel` (an agent reached only over A2A) is
+# served: its host polls nothing and answers A2A until SIGTERM.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-spec-exposing-a2a-without-a-channel-is-served
+summary: A spec declaring `expose.a2a` and no `channel` is served; it answers A2A and polls nothing.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.AdmitServe
+    input: {channel: false, a2a: true}
+    outcome: answers

@@ -134,6 +134,8 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | A Connector invocation is made once, and only Connectors' own "nothing changed" is a refusal | `crates/loom-connectors/tests/connectors_invoker.rs` |
 | A write through the Connectors command line runs only for an admitted request and is bound to its admitted action and arguments, with an absolute approval proof path passed and never read, and an idempotency key derived from the request id; another action, input other than the admitted arguments, an operation not described as a write, or a missing, relative or control-character proof path, invokes nothing; an `unknown` or lost write is returned unknown and never invoked again; reads still refuse a write; only an applied write of the admitted request becomes the protocol's evidence, naming its step and, for a route, its target (the `queue` or `owner` the admitted arguments name, which the governor removes before Canon reads the record); a route whose target cannot be read, or whose answer names another one, records nothing and says why | `crates/loom-connectors/tests/connectors_cli_write.rs` (`an_admitted_write_passes_the_proof_path_and_the_derived_key`, `a_write_without_an_absolute_proof_path_starts_nothing`, `an_operation_not_described_as_a_write_is_refused_before_the_invoke`, `the_same_admitted_request_yields_the_same_idempotency_key`, `an_unknown_write_is_returned_unknown_and_never_invoked_again`, `a_write_whose_answer_is_lost_is_unknown`, `invoke_read_still_refuses_a_mutation_operation`), `crates/loom-connectors/tests/support_triage_route.rs` (`an_applied_route_records_a_routing_record_naming_the_step`, `the_route_is_not_admitted_before_the_review_approved`, `a_route_not_applied_records_no_evidence`), `crates/loom-connectors/tests/adversary_w172_governed_write.rs` (`input_the_runtime_did_not_admit_is_never_written`, `a_request_admitted_for_another_action_writes_nothing`, `a_control_character_proof_path_starts_no_process`, `the_adapter_refuses_the_write_of_another_admitted_request`, `the_record_names_the_target_the_admitted_arguments_name`, `a_route_whose_target_cannot_be_read_records_nothing_and_says_why`, `an_answer_naming_another_target_records_nothing`), `crates/loom-governor/tests/adversary2_governor.rs` (`a_target_in_the_facts_leaves_the_record_as_canon_evaluates_it`) |
 | A spec that cannot be served is refused before anything runs, naming the member and the reason, in declaration order of `loom.agent.CheckAgentSpec`; a credential in the document is refused without repeating it; `operator-reply@1` is in the plugin catalog, not the bundled one, and its `reply.send` is blocked until a reply is proposed | `crates/loom-agent/tests/check.rs` (`a_valid_spec_checks`, `a_state_naming_an_unknown_action_is_refused`, `a_source_without_a_binding_is_refused`, `a_secret_literal_is_refused`, `every_credential_shape_is_refused_without_repeating_it`, `a_credential_in_an_enum_member_is_refused_before_the_decoder`, `the_first_refusal_in_declaration_order_is_the_answer`), `crates/loom-cli/tests/agent_check.rs` (`a_secret_literal_is_refused_without_repeating_it`), `crates/loom-protocols/tests/operator_reply.rs` (`operator_reply_send_needs_a_proposal`, `plugin_catalog_lists_operator_reply`, `bundled_catalog_excludes_operator_reply`), `crates/loom-protocols/tests/inbound_answer.rs` (`bundled_catalog_excludes_inbound_answer`), `task conform` (`loom.agent.CheckAgentSpec`) |
+| A served spec polls only `channel.allow`, sends only what it proposed, to the item's channel, at most `writes.max_per_hour` an hour, and in `writes.mode: approval` only after a person's grant; its authority is exactly `policy.capabilities`; SIGTERM ends the host after the item | `crates/loom-agent/tests/serve.rs` (`a_message_outside_the_allow_list_is_no_item`, `a_send_outside_the_allow_list_runs_no_command`, `a_send_without_a_proposal_is_not_admissible`, `a_sixth_send_in_the_window_is_refused`, `a_send_is_held_until_approved`, `the_spec_authority_grants_exactly_the_policy_capabilities`, `writes_mode_auto_is_refused_before_anything_runs`), `crates/loom-cli/tests/agent_serve.rs` (`sigterm_ends_the_host_after_the_item`, `agent_serve_once_holds_the_send_and_resume_performs_it`), `crates/loom-plugin-slack/tests/poll.rs` (`an_allow_list_restricts_the_walk_to_its_channels`), `task conform` (`loom.agent.AdmitSend`) |
+| A served spec with `expose.a2a` answers A2A beside the poll: the agent card lists the spec's skills, a message runs one turn on `inbound-answer@1` and is answered with its record, the task's status follows the turn's runtime events, and nothing is sent through A2A; every request but a probe without the agent's bearer, or with another, is refused `401` before any turn, and the host refuses to start without `LOOM_A2A_BEARER`, holding it without a Secret file's trailing newline; a spec with `expose.a2a` and no `channel` answers A2A and polls nothing, one with neither is refused; idle or trickling peers cannot keep a probe from being answered; a `messageId` that is no plain token never reaches the turn's context | `crates/loom-a2a/tests/a2a.rs` (`agent_card_lists_the_spec_skills`, `a_message_runs_one_turn_and_returns_its_record`, `an_unauthenticated_request_is_refused`, `a_wrong_bearer_is_refused`, `task_status_follows_the_turns_runtime_events`, `the_probes_answer_without_a_bearer`, `adversary_the_liveness_probe_is_answered_while_unauthenticated_peers_hold_every_slot`, `the_liveness_probe_is_answered_while_admitted_messages_hold_every_slot`, `adversary_a_head_trickled_one_byte_at_a_time_is_cut_off`, `a_message_id_that_is_no_plain_token_never_becomes_the_revision`), `crates/loom-a2a/src/admit.rs` (`the_whitespace_around_a_bearer_is_dropped_and_a_control_character_inside_refused`), `crates/loom-a2a/src/http.rs` (`a_trickled_head_is_cut_off_at_its_deadline`, `a_trickled_body_is_cut_off_at_its_deadline`, `draining_a_trickling_caller_ends_at_its_deadline`), `crates/loom-agent/tests/a2a.rs` (`a_message_runs_one_governed_turn_and_sends_nothing`, `the_turns_runtime_events_reach_the_sink`, `an_a2a_turn_is_never_offered_reply_send`, `adversary_a_spec_exposing_a2a_without_a_channel_answers_its_messages`, `a_spec_with_neither_a_channel_nor_a2a_is_not_served`, `adversary_a_bearer_with_a_secret_files_trailing_newline_still_admits_its_token`), `crates/loom-cli/tests/agent_serve.rs` (`agent_serve_answers_a2a_beside_the_poll`, `agent_serve_refuses_to_start_without_the_a2a_bearer`, `agent_serve_answers_a2a_without_a_channel`), `task conform` (`loom.agent.AdmitA2aRequest`, `loom.agent.AdmitServe`) |
 | A plugin turn reads only the sources and kinds of its projection, and a proposal is recorded, never sent | `crates/loom-plugin/tests/effects.rs` (`effects_refuse_an_undeclared_read`, `propose_writes_the_record_only`) |
 | A slack-handler run describes and invokes only the three configured Slack reads and the turns' data-source reads, and records one line per item it proposes for; nothing is sent | `crates/loom-plugin-slack/tests/run.rs` (`fixture_run_invokes_no_write`, `fixture_run_records_three_proposals`) |
 | A read through Connectors is performed naming its audit record; a write without a recorded attempt is an error | `crates/loom-connectors/tests/connectors_invoker.rs` (`an_admitted_read_is_performed_with_its_result_and_names_its_audit_record`, `a_write_without_a_recorded_attempt_is_still_an_error`), `crates/loom-commission-testkit/tests/effect_invocation.rs` (`a_performed_that_names_another_record_than_its_binding_requires_is_not_answered`) |
@@ -211,7 +213,7 @@ changing `ess/`. Every story names that change and that test in its `## ESS firs
 change with no behaviour change is exempt, and its story says so.
 
 `ess_gate.rs` (both copies) reads this section and fails when a phrase it checks is gone; reword
-with the tests open. CI installs `ess` 0.69.0 (`.github/workflows/check.yml`); move that pin when a
+with the tests open. CI installs `ess` 0.69.2 (`.github/workflows/check.yml`); move that pin when a
 newer ESS ships.
 
 ## Gate
@@ -648,6 +650,110 @@ anywhere, because the YAML reader's cost grows with the square of flow nesting
 holds (`Decimal`, `Timestamp`, `SessionKind`, `Intent`, the datasource ids and
 `ConnectorsCliConfig`) are re-exported from `loom_sdk::agent`.
 
+Serving a checked spec is `SpecPlugin` (`crates/loom-agent/src/serve.rs`, `story:agent-serve`), the
+`Plugin` `b10x-loom agent serve --spec --state [--once]` runs through `run_plugin`. `SpecPlugin::new`
+runs `check` again, needs `runtime`, `loops` and `channel`, a `connectors` channel binding with
+`list`, `get` and `search`, and refuses `writes.mode: auto` (not served yet); it lowers the spec
+to the host's `PluginConfig` (connectors from `runtime`, sources from the `connectors` bindings,
+the outer loop's interval and the inner loop's threshold) and to a `SlackHandler` over the channel
+binding, `with_channel_allow(channel.allow)`, so a message outside the allow list is no item. The
+projection of an item is the state whose `when.intent` is its intent (its actions, and its sources
+among the configured ones); no state means a `stopped` record. A turn runs `turn_with` on the inner
+loop's protocol with the spec's budgets, over a `FileCaseStore` and `FileSuspensionStore` in the
+host's state directory, under `SpecAuthority` (grants exactly `policy.capabilities`, holds
+`reply.send` as `ApprovalRequired` in `writes.mode: approval`, denies everything else) and a
+`SendPolicy` for the channel binding's `write`. A send that is held leaves the Suspension in the
+state directory and `approvals/<commission>.json` naming the item; the record line says
+`reply.send awaits approval: commission <id>`, the commission being `commission_id(agent, item,
+revision)`, a stable UUID of the three. `b10x-loom approve <COMMISSION> reply.send --state <DIR>`
+writes the grant as it does for a run; `SpecPlugin::resume` performs the send once through
+`resume_after_grant` under `GrantAuthority`, with the grant file as the write's proof, and a serving
+host does so for every granted commission at its next poll (`b10x-loom agent resume` does it now,
+holding the state directory's record lock as a host does, so the two never perform one grant at
+once: while a host holds it the command exits 1 naming the hold,
+`a_resume_while_the_state_is_held_is_refused`). A resume decides `admit_send` before any process:
+a refusal there (the window is full, the channel left the allow list) performs nothing and keeps
+the held file, the Suspension and the grant for a later resume; only a send performed or refused
+under the process removes the held file (`a_resume_refused_before_any_process_keeps_the_send_held`).
+The state directory is made absolute in `SpecPlugin::new`, because the grant file is the write's
+proof and Connectors refuses a relative proof (`a_relative_state_directory_performs_the_granted_send`).
+A turn's ids are seeded with its commission (the first two groups of each id), so two turns taking
+the same steps on two items suspend two request ids and their sends carry two idempotency keys
+(`two_approved_sends_on_two_items_carry_two_idempotency_keys`).
+Sends are counted in `sends.jsonl` in the state directory. `agent serve` settles the models before
+any read: the spec's `model` section (`loom_sdk::models::from_routes` on `model.routes`, relative to
+the spec, for the `agent` and `classifier` roles) or `--catalog` with `--model` and
+`--classifier-model` as `plugin run`. The tests are `crates/loom-agent/tests/serve.rs` (the
+plugin, the authority, the admission and the approval flow on the fake `connectors`) and
+`crates/loom-cli/tests/agent_serve.rs` (the binary, `sigterm_ends_the_host_after_the_item`).
+No live run against a channel was made for this story; `docs/qualification/2026-10-25-agent-serve.md`
+says what one is.
+
+An `http` binding is read by a served turn (`story:agent-http-binding`): `source.read {source,
+kind: get, input: {path, query?}}`, `get` only. The effect port dispatches a read by the binding's
+kind (`DataSourceEffects::with_http`, `TurnOptions::http`; a `connectors` source goes to
+Connectors as before, and an `http` binding beside it changes no such read,
+`crates/loom-plugin/tests/http_reads.rs`) to the `HttpReader` the host supplied; `SpecPlugin`
+supplies `HttpGet` (`crates/loom-agent/src/http.rs`) over its spec's `http` bindings, and
+`project` admits them as sources of a state. `HttpGet` decides `loom.agent.AdmitHttpRead`
+(`admit_http_read`) before any request: the binding's method is `GET` (`check` refuses another
+first; the host refuses it again), the path is allowed (`path_allowed`: exactly one of
+`allow_paths` and a `loom_sdk::agent::plain_http_path`, which starts with `/` and holds no `\`,
+no `.` or `..` segment, no percent-encoded separator or dot, no `?`, `#`, whitespace or control
+character; held even for an allow list naming such a path, and the decoder refuses such an
+`allow_paths` entry, so `check` answers `Malformed`) and the variable `bearer_env` names, when one
+is named, holds text (unset, empty or blank is `BearerMissing`). The one request is a GET of `base_url` + `path`
+with the query as parameters, on reqwest with redirects off and no proxy (as llm's `b10x-llm-http`
+is built; that crate exposes no GET at 0.8.1, so the GET is composed here on the same client),
+bounded by `HTTP_TIMEOUT`; the bearer is sent as an `authorization` header marked sensitive and
+never repeated. It then decides `loom.agent.BoundHttpAnswer` (`bound_http_answer`) over the
+status and the bytes read (at most one past `max_bytes`; the body of a redirect or a failure is
+never read): a redirect is a refusal naming at most 256 bytes of the location (`LOCATION_BYTES`)
+and no more than `max_bytes`, marked when cut, a status outside 2xx a refusal naming it, a body
+past the bound is cut at it and the transcript entry is marked `[cut at max_bytes N: the answer
+is longer]`, any other is read whole. The text never exceeds `max_bytes`: the bytes are cut
+first, backed off to a character boundary, and a byte that is not UTF-8 is dropped. A refusal is a refused step naming the reason in
+the enum's spelling; an endpoint out of reach is `PluginError::Unavailable`, as Connectors down
+is. The answer reaches the model only through the transcript's data block, as a Connectors read
+does (`a_log_line_is_data_not_instructions` in `crates/loom-plugin/tests/http_reads.rs`). The
+scenarios are `ess/scenarios/agent-http-binding/`; the tests `crates/loom-agent/tests/http.rs`
+(a loopback listener, no network; the bearer test reads `CARGO_PKG_NAME`, which cargo sets for
+the test process) and `crates/loom-plugin/tests/http_reads.rs` (a fake reader). No live run
+against an endpoint was made; `docs/qualification/2026-10-25-agent-http-binding.md` says what
+one is.
+
+A spec with `expose.a2a` is also answered over A2A (`story:agent-a2a`): `b10x-loom-a2a`
+(`crates/loom-a2a`) is the listener, A2A 1.0.1 over JSON-RPC 2.0 on std `TcpListener`, its protocol
+types the `a2a` crate of `beyond10x/a2a` pinned by tag without its `server` feature (types only; the
+feature's exact pins conflict with this lock). It serves the agent card at
+`/.well-known/agent-card.json`, `SendMessage` (alias `message/send`) and `GetTask` (alias
+`tasks/get`) at `expose.a2a.path`, and `GET /ready` and `GET /live`. Every request but a probe needs
+`Authorization: Bearer <token>`, decided on the head before the body is read by
+`loom.agent.AdmitA2aRequest` (`admit_a2a_request`, conformed by `task conform`); the token is
+`LOOM_A2A_BEARER`, compared in constant time and never printed, and `agent serve` exits 1 naming
+the variable before anything runs when the spec exposes A2A and it is unset or empty. Turns run one
+at a time on the thread that called `A2aServer::serve`, because a `SpecPlugin` is not `Sync`;
+`agent serve` builds a second `SpecPlugin` from the same spec and models for the listener's thread
+(`crates/loom-cli/src/a2a.rs`) and stops the listener when the host stops. An A2A turn
+(`crates/loom-agent/src/serve/a2a.rs`, `Answering`) classifies, projects and runs as a polled item
+does, but on `inbound-answer@1` with `reply.send` out of the projection and no `SendPolicy`, so
+nothing is sent through A2A; `TurnOptions::events` hands each `RuntimeEvent` to the task, which
+moves to `TASK_STATE_WORKING` naming the step, and the record ends it (`proposed` completes,
+`declined` rejects, anything else fails). Tasks are held in memory, at most 256, the oldest ended
+dropped first. A spec with `expose.a2a` and no `channel` is served too (`loom.agent.AdmitServe`,
+`admit_serve`): `SpecPlugin` polls nothing, and `agent serve`'s main loop is the listener, holding
+the state directory until SIGTERM or SIGINT; `--once` is refused there, and a spec with neither is
+refused before anything runs. The listener's bounds: a connection holds one of 32 unadmitted slots
+until its request is admitted (the oldest is cut off when a 33rd arrives, so idle peers cannot keep
+a probe out) and an admitted request one of 32 admitted slots (`503` past them; probes and refusals
+take none); the head is due within 10 s of the connection, the body within 30 s of the head, the
+answer within 10 s, each as a whole. The bearer is trimmed of the whitespace around it (a Secret
+file's newline) and refused with a control character inside. A `messageId` becomes the item
+revision only as a plain token (ASCII letters, digits, `-`, `_`, `.`, at most 128 bytes), else
+`m-` and a 128-bit FNV-1a hash of it, since the revision reaches the turn's context unquoted. Not
+done: A2A turns in `record.jsonl`, streaming, push and multi-turn tasks.
+`docs/qualification/2026-10-25-agent-a2a.md` says what was verified and what the manual run is.
+
 ## Resource
 
 An agent deployed to Kubernetes is a `LoomAgent` resource (group `loom.beyond10x.dev`, version
@@ -809,7 +915,17 @@ with Loom's chooser path (a
 turn's llm `Model`, revalidating against the governor), `PluginAuthority` (grants `datasource.read`
 and `reply.propose`, denies every other capability) and `DataSourceEffects`, which reads through
 `loom_connectors::cli`, refuses a `{source, kind}` outside the projection before any command, and
-submits one `source_read` evidence per performed read. Each step offers the frontier's catalogue,
+submits one `source_read` evidence per performed read. `turn_with` takes `TurnOptions` (the
+protocol, the authority, the case store, an optional suspension port, an optional `SendPolicy` and
+commission, the budgets) and answers `Turned` (the result, the commission, whether a send awaits
+approval); `turn` is the read-only default over them. With a `SendPolicy`, `DataSourceEffects`
+performs `reply.send`: `admit_send` (`effects.rs`, `loom.agent.AdmitSend` in its declared order:
+`writes-none`, `outside-allow-list`, `no-proposal`, `rate-limited` are final refusals; `held` ends
+the step refused but not the run; `admitted` writes) decides before any command, the arguments must
+name the item's channel, its `ts` as the thread and the proposed text verbatim, the write goes
+through `ConnectorsCli::invoke_write` with the policy's proof file, and one `reply_sent` evidence
+names what Connectors answered. The send counter is `sends.jsonl` under the policy's directory, one
+line per performed send, read within `SEND_WINDOW_SECONDS`. Each step offers the frontier's catalogue,
 narrowed to the projection's actions, in one forced `select_action` request, then asks for the
 selected action's arguments in one forced `action_arguments` request whose schema is the action's;
 both carry what the turn did so far, the reports of its reads included, as one data block
@@ -872,7 +988,8 @@ stored `ts`, and a thread only for a message with replies. The walk orders chann
 weight, staleness, member count, then a seeded draw. A message younger than `min_age_minutes`, a
 bot's, a system message (`subtype` other than `file_share`), one the bot reacted to or one with a
 thread reply from anybody but its poster is no item; mentions of the bot come first. A channel's
-cursor never passes a message too young to judge. The tests in `crates/loom-plugin-slack/tests/`
+cursor never passes a message too young to judge. `SlackHandler::with_channel_allow` restricts the
+walk to the member channels it names (`an_allow_list_restricts_the_walk_to_its_channels`). The tests in `crates/loom-plugin-slack/tests/`
 reuse `crates/loom-plugin/tests/support/mod.rs` by path and answer Slack-shaped JSON from
 `tests/fixtures/` through the fake `connectors`; ids there are synthetic.
 

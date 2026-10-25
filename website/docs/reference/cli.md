@@ -30,6 +30,8 @@ Generated from the clap definition of the `b10x-loom` command line in [`crates/l
 | [`b10x-loom plugin report`](#b10x-loom-plugin-report) | Print one line per proposal a plugin recorded in its state directory: a proposed reply or a proposed case |
 | [`b10x-loom agent`](#b10x-loom-agent) | Check an agent defined as data, a loom.agent/1 spec, before anything runs |
 | [`b10x-loom agent check`](#b10x-loom-agent-check) | Say whether a loom.agent/1 spec can be served: refuse, naming the member and the reason, a spec that cannot. It runs nothing |
+| [`b10x-loom agent serve`](#b10x-loom-agent-serve) | Host the agent a loom.agent/1 spec declares: poll its channel, answer each item in a governed turn, and send a reply only as the spec's writes admit |
+| [`b10x-loom agent resume`](#b10x-loom-agent-resume) | Perform a held send after its approval, once |
 | [`b10x-loom approve`](#b10x-loom-approve) | Approve the request a commission's Suspension holds: write a grant into the state directory. Approval performs nothing; `resume` does |
 | [`b10x-loom resume`](#b10x-loom-resume) | Continue a commission's suspended run after its approval: perform the suspended request once, release the Suspension, and run on until the run stops |
 
@@ -252,6 +254,87 @@ Exit status:
   3  refused: standard error carries "refused: <reason> at <member>: <detail>"
   1  the file cannot be read
   2  the command line is not valid
+```
+
+## `b10x-loom agent serve`
+
+Host the agent a loom.agent/1 spec declares: poll its channel, answer each item in a governed turn, and send a reply only as the spec's writes admit
+
+```text
+Usage: b10x-loom agent serve [OPTIONS] --spec <FILE> --state <DIR>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--spec <FILE>` | yes | none | The loom.agent/1 document, YAML or JSON, in a regular file |
+| `--state <DIR>` | yes | none | The host's state directory: its cursors, record, cases, Suspensions, grants and send counter. One host holds it at a time |
+| `--once` | no | `false` | Run one cycle and stop |
+| `--catalog <PATH>` | no | none | An llm catalog (`llm.catalog/1` TOML) in a regular file, instead of the spec's models: `--model` and `--classifier-model` then each name a route alias of it |
+| `--model <ID>` | no | none | The model each turn runs on: a name the spec's routes document serves, or with `--catalog` a route alias. By default the spec's `agent` role |
+| `--classifier-model <ID>` | no | none | The model that classifies each item: a name the spec's routes document serves, or with `--catalog` a route alias. By default the spec's `classifier` role |
+| `--a2a-address <IP>` | no | `0.0.0.0` | The address the A2A listener binds when the spec declares `expose.a2a`, on its port |
+
+```text
+The spec is checked as `agent check` does before anything runs. The host is the plugin host over
+the spec: it polls the channel binding's channels that channel.allow lists (a message anywhere else is
+no item), classifies each new item, runs a turn on the inner loop's protocol under the state whose
+`when` names the item's intent, with the spec's capabilities as its authority, and records one line
+per handled item in record.jsonl in the state directory. reply.send is a governed write of the recorded
+proposal to the item's channel, at most writes.max_per_hour an hour (sends.jsonl). In writes.mode
+approval a send is held: the turn ends proposed naming its commission, the case and the Suspension
+stay in the state directory, and `b10x-loom approve <COMMISSION> reply.send --state <DIR>` grants it;
+the host performs it at its next poll, or `agent resume` performs it now. writes.mode auto is not
+served yet; none sends nothing.
+
+The models are the spec's `model` section (its routes document, relative to the spec, and the
+`agent` and `classifier` roles), or with --catalog the route aliases --model and --classifier-model
+name. With --once it runs one cycle and prints one line per proposal it recorded; without it, it
+polls every poll_interval_seconds until SIGTERM or SIGINT (a second one exits 130 at once).
+
+With expose.a2a the agent also answers A2A on --a2a-address and expose.a2a.port, beside the poll:
+the agent card at /.well-known/agent-card.json, and at expose.a2a.path JSON-RPC SendMessage, one
+turn on inbound-answer@1 answered with its record (nothing is sent through A2A), and GetTask. Every
+request but GET /ready and GET /live needs `Authorization: Bearer` with the token LOOM_A2A_BEARER
+holds (a trailing newline or blank is dropped); the host refuses to start without it. The
+listener stops when the host does. A spec with expose.a2a and no channel polls nothing: the
+listener is the host, until SIGTERM or SIGINT, and --once is refused. A spec with neither is
+refused.
+
+Exit status:
+  0  the cycles ran
+  1  the spec, the models or the state directory cannot be used, or the last cycle's poll failed
+  2  the command line is not valid
+  3  the spec cannot be served
+  130  a second SIGTERM or SIGINT ended it at once
+```
+
+## `b10x-loom agent resume`
+
+Perform a held send after its approval, once
+
+```text
+Usage: b10x-loom agent resume --spec <FILE> --state <DIR> <COMMISSION>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `<COMMISSION>` | yes | none | The commission whose held send was approved, as the record line names it |
+| `--spec <FILE>` | yes | none | The loom.agent/1 document the host served |
+| `--state <DIR>` | yes | none | The host's state directory |
+
+```text
+Performs the send the commission's Suspension holds, once, after `b10x-loom approve <COMMISSION>
+reply.send --state <DIR>` wrote its grant: the write goes through the connectors command line with the
+idempotency key derived from the admitted request and the grant file as its proof, the Suspension is
+released, and the send is counted. A serving host performs granted sends itself at its next poll.
+
+Exit status:
+  0  the send was performed; standard output says what Connectors answered
+  1  the spec or a store cannot be used, or the resume failed
+  2  the command line is not valid
+  3  no send of the commission is held in the state directory
+  4  the send is not granted yet; nothing was performed
+  5  the resume was refused (in doubt, the case moved), or the send was refused; nothing was sent
 ```
 
 ## `b10x-loom approve`

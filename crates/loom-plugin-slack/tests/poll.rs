@@ -76,6 +76,41 @@ fn poll_lists_member_channels_only() {
     );
 }
 
+/// With an allow list the walk reads only the member channels it names: a message in any other
+/// channel, member or not, is no item (`story:agent-serve`,
+/// `a_message_outside_the_allow_list_is_no_item`).
+#[test]
+fn an_allow_list_restricts_the_walk_to_its_channels() {
+    let fixture = fixture("allow-list");
+    channels(
+        &fixture,
+        json!([
+            member("C0FIXTURE1", 5),
+            member("C0FIXTURE2", 3),
+            member("C0FIXTURE3", 9),
+        ]),
+    );
+    history(
+        &fixture,
+        vec![message("U0ALICE", &ago(60, 1), "Is staging up?")],
+    );
+    let config = config(&fixture);
+    let plugin_config = config.plugin.clone();
+    let weights: Vec<Objective> = plugin_config.objectives.clone();
+    let plugin = handler(config).with_channel_allow(vec!["C0FIXTURE2".to_owned()]);
+
+    let polled = plugin
+        .poll(&fixture.host(&plugin_config), &empty(), &weights)
+        .expect("the poll answers");
+
+    assert_eq!(
+        history_order(&fixture),
+        ["C0FIXTURE2"],
+        "only the allowed channel is read"
+    );
+    assert_eq!(ids(&polled), [item_id("C0FIXTURE2", &ago(60, 1))]);
+}
+
 /// Channels the weight, staleness and volume cannot tell apart are ordered by the seed: the same
 /// seed twice gives the same order, and some other seed another one.
 #[test]

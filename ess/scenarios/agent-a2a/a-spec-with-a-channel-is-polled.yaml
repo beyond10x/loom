@@ -1,0 +1,16 @@
+# story agent-a2a: a spec with a `channel` is polled; with `expose.a2a` as well its host answers
+# A2A beside the poll.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-spec-with-a-channel-is-polled
+summary: A spec declaring a `channel` is polled, and answers A2A beside the poll when it declares `expose.a2a`.
+
+timeline:
+  - at: 2026-10-25T00:00:00Z
+    command: loom.agent.AdmitServe
+    input: {channel: true, a2a: false}
+    outcome: polls
+  - at: 2026-10-25T00:01:00Z
+    command: loom.agent.AdmitServe
+    input: {channel: true, a2a: true}
+    outcome: polls-and-answers
