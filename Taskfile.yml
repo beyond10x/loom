@@ -21,6 +21,7 @@ tasks:
       - task: ess-gate
       - task: commission:ess-gate
       - task: drift
+      - task: crd-drift
       - task: commission:drift
       - task: intake-drift
       - task: no-hand-model
@@ -79,6 +80,16 @@ tasks:
     desc: Fail when generated/rust/loom/ differs from a fresh synthesis of ess/, naming the file.
     cmds:
       - cargo run -q --locked -p loom-xtask -- drift
+
+  crd-generate:
+    desc: Write deploy/crd/loomagents.loom.beyond10x.dev.yaml, the LoomAgent CRD projected from ess/.
+    cmds:
+      - cargo run -q --locked -p loom-xtask -- crd-generate
+
+  crd-drift:
+    desc: Fail when deploy/crd/loomagents.loom.beyond10x.dev.yaml differs from a fresh projection of ess/, naming the file.
+    cmds:
+      - cargo run -q --locked -p loom-xtask -- crd-drift
 
   no-hand-model:
     desc: Fail when crates/loom-executor/src defines, or renames something to, a type ess/ declares.

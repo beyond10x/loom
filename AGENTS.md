@@ -195,7 +195,9 @@ reads the verdict from the report by Commission's rules. The governor's nouns ar
 Commission's and Canon's, except its stateless evaluation request, decision and refusal, which are
 the `loom.evaluation` domain (`ess/domains/evaluation.yaml`), and its held case as a durable store
 writes it, which is the `loom.governor` domain (`ess/domains/governor.yaml`); a noun it introduces
-gets a declaration before a story is written around it.
+gets a declaration before a story is written around it. The `LoomAgent` Kubernetes resource, its
+spec and its lifecycle as a controller reconciles it are the `loom.resource` domain
+(`ess/domains/resource.yaml`, § Resource), from which the CRD's schema is projected.
 
 An open question is settled before the specification changes, in a story or in a
 `decision-blocker` when nobody has decided it, and is never written into `ess/` as an `UNMAPPED:`
@@ -218,7 +220,7 @@ running the delegation-refusal tests. Run `cargo fetch --locked` before the gate
 the offline dependency guard inspects the full graph, including platform-specific crates.
 Before a change is reported done, in this order:
 
-1. `task check`: the three specification validations, both ESS gates, all three drift checks, both
+1. `task check`: the three specification validations, both ESS gates, all four drift checks, both
    no-hand-model checks, Loom's, Commission's and intake's conformance suites, the dependency guard,
    `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
    `cargo test --workspace --locked`, `task consumer-check`, then `task docs-check` and
@@ -265,6 +267,7 @@ cache; never delete a `target/` by hand.
 | `generated/rust/loom/` | `ess generate synthesize` over `ess/`, via `loom-xtask` | `task generate` | `task drift` |
 | `generated/rust/commission/` | the same over `ess/commission/`, via `loom-commission-xtask` | `task commission:generate` | `task commission:drift` |
 | `generated/rust/intake/` | synthesis over `ess/intake/`, via `loom-xtask` | `task intake-generate` | `task intake-drift` |
+| `deploy/crd/loomagents.loom.beyond10x.dev.yaml` | `loom-xtask crd-generate`, projecting the JSON Schemas `ess generate --kind schema` writes for `ess/` through `b10x_loom_resource::crd` | `task crd-generate` | `task crd-drift` |
 | `website/docs/reference/cli.md` | `loom-docs`, from `b10x_loom_cli::Cli` (`crates/loom-cli/src/lib.rs`) | `task docs-generate` | `task docs-check` |
 | `website/docs/reference/crates.md` | `loom-docs`, from `cargo metadata` | `task docs-generate` | `task docs-check` |
 | `website/docs/reference/ess/`, `website/data/ess/` | `loom-docs`, from `ess/` and `ess/intake/` | `task docs-generate` | `task docs-check` |
@@ -616,6 +619,61 @@ anywhere, because the YAML reader's cost grows with the square of flow nesting
 (`crates/loom-sdk/tests/adversary_w20261022w3_agent_domain.rs`). The types of other domains a spec
 holds (`Decimal`, `Timestamp`, `SessionKind`, `Intent`, the datasource ids and
 `ConnectorsCliConfig`) are re-exported from `loom_sdk::agent`.
+
+## Resource
+
+An agent deployed to Kubernetes is a `LoomAgent` resource (group `loom.beyond10x.dev`, version
+`v1alpha1`, namespaced), the `loom.resource` domain (`ess/domains/resource.yaml`,
+`story:loom-agent-resource-domain`). Its spec, `LoomAgentSpec`, holds the `loom.agent/1` document
+verbatim as `agent` (no second agent schema), the llm `routes` document untyped, the
+connectors-local TOML, a Secret reference and an image override. The entity `LoomAgent` is the
+controller's view of one resource: `observedGeneration`, the spec check's result `check`, and
+the state Pending, Running, Refused or Degraded. `ApplyLoomAgent`, `RecordCheck`,
+`ObserveDeployment` and `DeleteLoomAgent` move it, and the view `LoomAgents` lists it.
+
+The spec lives in the cluster, in the resource; the record keeps only the generation it applied
+and the check for that generation, and a controller re-reads the spec on every reconcile. A stored
+`AgentSpec` would hold a `Decimal` (`loops.inner.classify_threshold`) that no ESS 0.69.0 view
+observes exactly (ESS-SYNTH-001, "Decimal and Binary64 replay results are unsupported"), which
+would leave the domain's refusals and preserving outcomes without a scenario.
+
+`b10x-loom-resource` (`crates/loom-resource`) holds `LoomAgentRecord`, an in-memory store that
+implements the generated `LoomAgentStorage` port and runs the generated behaviour over itself,
+keeping the events each outcome published; `task conform` holds it to the domain's suite
+(`crates/loom-conformance/src/resource.rs`). Its `crd::manifest` projects the CRD
+(`deploy/crd/loomagents.loom.beyond10x.dev.yaml`, § Generated files) from the two JSON Schemas
+`ess generate --kind schema` writes, and refuses a result that is not a Kubernetes structural
+schema. Every keyword is carried, rewritten, dropped as an ESS annotation or refused by name
+(`crd.rs` module doc lists each). It inlines every `$ref`, writes `const` as `enum`, keeps a map's
+value schema (`additionalProperties`) and drops only `additionalProperties: false`, and types a
+`Decimal` as `number`, since `loom_sdk::agent::parse` reads a number or a string there and a
+structural schema has no number-or-string type. An ESS `Json` (here `routes`), wherever it stands,
+becomes an untyped node with `x-kubernetes-preserve-unknown-fields`, so it admits any JSON value as
+the specification does; the pod's `b10x-loom agent check` is what reads the routes document. A
+`format` the API server reads otherwise than ESS writes it is refused by name: `duration` (ESS's
+ISO 8601, the API server's Go duration). It flattens the `bindings` union so the tag `kind` sits
+beside the fields of every variant; each variant's `oneOf` entry names that variant's required
+fields and refuses, by `not: {anyOf: [{required: [<f>]}, …]}`, every field only another variant
+declares. A union variant whose value is not a struct (a map, a `Json`, a scalar) is refused,
+naming the union and the variant, since the flattened form carries only declared members.
+
+The CRD requires every member the specification declares required, except a `List<…>` the
+`loom.agent` document declares, which its decoder reads as empty when absent; a list another
+document declares, such as `model.roles`, stays required (`ABSENT_LIST_IS_EMPTY` in `crd.rs`,
+`every_object_requires_exactly_what_the_specification_declares_required`).
+`examples/agents/operator.yaml` validates against the projected schema as written
+(`crates/loom-resource/tests/crd.rs`). The API server prunes a member the schema does not declare
+rather than refusing it (a client sends `fieldValidation=Strict` to have it refused); it refuses a
+declared member of the wrong type or of another binding variant. What reaches the pod is a document
+the schema admitted, which `b10x-loom agent check` reads again. The decoder's own checks that the
+specification does not declare (the `format` value, ports, non-blank text, variable names, RFC 3339
+instants) are not in the CRD.
+
+The status is `observedGeneration`, `state` and `check`. `status.state` is the lifecycle state the
+design calls `phase`; the design's `status.deployment` and `status.conditions` belong to the
+controller and are added with it. The controller, `crates/loom-operator` with `kube` and
+`k8s-openapi`, is step 6 of the CRD deployment design (`docs/design/loom-agent-crd-deployment.md`
+§ 9) and is not yet written. Nothing in Loom talks to a cluster.
 
 ## Plugin host
 

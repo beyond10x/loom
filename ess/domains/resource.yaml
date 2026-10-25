@@ -1,0 +1,383 @@
+# The `LoomAgent` Kubernetes custom resource and its lifecycle (story loom-agent-resource-domain).
+# Sources read: the CRD deployment design (`docs/design/loom-agent-crd-deployment.md`, D1, D2, D8,
+# § 5.1, § 8) and `loom.agent.AgentSpec` (`ess/domains/agent.yaml`), which `spec.agent` holds
+# verbatim, so there is no second agent schema (D1). The resource is namespaced and one controller
+# instance watches one namespace (design § 11), so its name alone identifies it. The lifecycle is
+# the controller's view of the resource: what it records as it reconciles, never what the model
+# or the pod says about itself. The CRD's `openAPIV3Schema` is projected from this domain and from
+# `loom.agent` by `loom-xtask crd-generate` (`deploy/crd/loomagents.loom.beyond10x.dev.yaml`);
+# `spec` is `LoomAgentSpec`, `status` is the entity's fields other than its name. The spec itself
+# is held by the cluster, in the resource; the controller re-reads it on every reconcile and the
+# record keeps only the generation it applied, because a stored `AgentSpec` holds a `Decimal`
+# (`loops.inner.classify_threshold`) that no view can observe exactly (ESS 0.69.0, ESS-SYNTH-001
+# "Decimal and Binary64 replay results are unsupported"), which would leave the refusals and the
+# preserving outcomes below without a scenario.
+domain: loom.resource
+
+summary: >-
+  The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`): its spec, the
+  `loom.agent/1` document and what the pod needs beside it, and its lifecycle as the controller
+  reconciles it: applied into Pending, Running or Refused by the spec check, Degraded and back by
+  the child Deployment's availability, Pending again on a new generation, and gone on delete.
+
+naming:
+  wire: resource
+  display: Resource
+
+types:
+  # The resource's `metadata.name`, unique in the controller's namespace.
+  - name: loom.resource.ResourceName
+    kind: newtype
+    of: String
+
+  # The Secret the pod's environment is read from, by name; the Secret itself is created outside
+  # the resource and never read by the controller (design § 7).
+  - name: loom.resource.SecretRef
+    kind: struct
+    fields:
+      - name: name
+        type: String
+
+  # The agent image, overriding the controller's default (design § 5.1).
+  - name: loom.resource.ImageRef
+    kind: struct
+    fields:
+      - name: repository
+        type: String
+      - name: tag
+        type: String
+
+  # What the controller read of the child Deployment: available, its pod is ready; unavailable, it
+  # is not (design § 5.2, status from the Deployment's conditions).
+  - name: loom.resource.DeploymentAvailability
+    kind: enum
+    variants: [Available, Unavailable]
+
+  # What `b10x-loom agent check` said of the spec, as the pod's init container ran it: its exit
+  # code (0, the spec is served) and its message (empty on 0).
+  - name: loom.resource.CheckResult
+    kind: struct
+    fields:
+      - name: exit_code
+        type: Integer
+        naming: {wire: exitCode}
+      - name: message
+        type: String
+
+  # The resource's `spec`: the `loom.agent/1` document verbatim; the llm `routes.yaml` inline, a
+  # document of llm's own format that Loom passes through, so it is untyped here and holds secrets
+  # only as `env:` or `file:` references; the connectors-local TOML, only for `connectors`
+  # bindings; the Secret the container's environment comes from; and an image overriding the
+  # controller's default. Wire names are Kubernetes's.
+  - name: loom.resource.LoomAgentSpec
+    kind: struct
+    fields:
+      - name: agent
+        type: loom.agent.AgentSpec
+      - name: routes
+        type: Json
+      - name: connectors_config
+        type: Optional<String>
+        naming: {wire: connectorsConfig}
+      - name: secret_ref
+        type: Optional<loom.resource.SecretRef>
+        naming: {wire: secretRef}
+      - name: image
+        type: Optional<loom.resource.ImageRef>
+
+entities:
+  # One `LoomAgent` resource as the controller holds it. `observed_generation` is the
+  # `metadata.generation` of the spec the controller last applied, the spec staying in the cluster;
+  # `check` is the spec check's result for that generation, absent until it ran. The state
+  # is the controller's phase: Pending from apply until the check ran; Running when the check
+  # passed; Refused when it failed, until a new generation is applied; Degraded while the child
+  # Deployment is unavailable, Running again when it is. A new generation returns every state to
+  # Pending with the check cleared. Nothing is terminal: a resource leaves by deletion.
+  - name: loom.resource.LoomAgent
+    identity:
+      name: name
+      type: loom.resource.ResourceName
+    fields:
+      - name: observed_generation
+        type: Integer
+        naming: {wire: observedGeneration}
+      - name: check
+        type: Optional<loom.resource.CheckResult>
+    lifecycle:
+      initial: Pending
+      states: [Pending, Running, Refused, Degraded]
+      terminal: []
+      transitions:
+        - name: run
+          from: [Pending]
+          to: Running
+        - name: refuse
+          from: [Pending]
+          to: Refused
+        - name: degrade
+          from: [Running]
+          to: Degraded
+        - name: recover
+          from: [Degraded]
+          to: Running
+        - name: respecify
+          from: [Pending, Running, Refused, Degraded]
+          to: Pending
+
+errors:
+  # The command names a generation older than the one the controller holds: an informer replaying
+  # an earlier event, or a check result of a pod the controller already replaced.
+  - name: loom.resource.StaleGeneration
+    fields:
+      - name: name
+        type: loom.resource.ResourceName
+      - name: generation
+        type: Integer
+      - name: observed_generation
+        type: Integer
+
+  - name: loom.resource.LoomAgentNotFound
+    fields:
+      - name: name
+        type: loom.resource.ResourceName
+
+  # The command does not apply in the resource's state: a check result for a resource that is not
+  # Pending, or a Deployment observation for one that has no Deployment yet.
+  - name: loom.resource.LoomAgentStateConflict
+    fields:
+      - name: name
+        type: loom.resource.ResourceName
+
+events:
+  - name: loom.resource.LoomAgentApplied
+    fields:
+      - name: name
+        type: loom.resource.ResourceName
+      - name: generation
+        type: Integer
+
+  - name: loom.resource.LoomAgentRunning
+    fields:
+      - name: name
+        type: loom.resource.ResourceName
+      - name: generation
+        type: Integer
+
+  - name: loom.resource.LoomAgentRefused
+    fields:
+      - name: name
+        type: loom.resource.ResourceName
+      - name: generation
+        type: Integer
+      - name: message
+        type: String
+
+  - name: loom.resource.LoomAgentDegraded
+    fields:
+      - name: name
+        type: loom.resource.ResourceName
+
+  - name: loom.resource.LoomAgentRecovered
+    fields:
+      - name: name
+        type: loom.resource.ResourceName
+
+  - name: loom.resource.LoomAgentDeleted
+    fields:
+      - name: name
+        type: loom.resource.ResourceName
+
+commands:
+  # The controller saw the resource at a generation: created, or changed. A generation the
+  # controller already holds is a reconcile of what it has and changes nothing; an older one is
+  # stale and refused; a newer one returns the resource to Pending, its check cleared, from
+  # whatever state it held, Pending included (design § 5.1: the check runs again for every
+  # generation).
+  - name: loom.resource.ApplyLoomAgent
+    input:
+      - name: name
+        type: loom.resource.ResourceName
+      - name: generation
+        type: Integer
+    outcomes:
+      - name: created
+        unknown_instance: true
+        creates: loom.resource.LoomAgent
+        instance: name
+        sets:
+          observed_generation: input.generation
+        emits: [loom.resource.LoomAgentApplied]
+        payload:
+          loom.resource.LoomAgentApplied:
+            name: input.name
+            generation: input.generation
+      - name: stale
+        when_subject:
+          predicate: observed_generation > input.generation
+        error: loom.resource.StaleGeneration
+        payload:
+          loom.resource.StaleGeneration:
+            name: input.name
+            generation: input.generation
+            observed_generation: {subject: observed_generation}
+      - name: unchanged
+        when_subject:
+          predicate: observed_generation == input.generation
+        preserves: loom.resource.LoomAgent
+        instance: name
+      - name: respecified
+        moves: loom.resource.LoomAgent.respecify
+        instance: name
+        sets:
+          observed_generation: input.generation
+          check: {cleared: true}
+        emits: [loom.resource.LoomAgentApplied]
+        payload:
+          loom.resource.LoomAgentApplied:
+            name: input.name
+            generation: input.generation
+
+  # The spec check ran in the pod's init container for a generation: exit code 0 runs the agent,
+  # any other refuses it. A result for a generation the controller has moved past is stale; a
+  # result for a resource that is not Pending is out of order and changes nothing.
+  - name: loom.resource.RecordCheck
+    input:
+      - name: name
+        type: loom.resource.ResourceName
+      - name: generation
+        type: Integer
+      - name: exit_code
+        type: Integer
+      - name: message
+        type: String
+    outcomes:
+      - name: unknown
+        unknown_instance: true
+        error: loom.resource.LoomAgentNotFound
+        payload:
+          loom.resource.LoomAgentNotFound:
+            name: input.name
+      - name: stale
+        when_subject:
+          predicate: observed_generation != input.generation
+        error: loom.resource.StaleGeneration
+        payload:
+          loom.resource.StaleGeneration:
+            name: input.name
+            generation: input.generation
+            observed_generation: {subject: observed_generation}
+      - name: running
+        when: exit_code == 0
+        moves: loom.resource.LoomAgent.run
+        instance: name
+        sets:
+          check: {exit_code: input.exit_code, message: input.message}
+        emits: [loom.resource.LoomAgentRunning]
+        payload:
+          loom.resource.LoomAgentRunning:
+            name: input.name
+            generation: input.generation
+      - name: refused
+        moves: loom.resource.LoomAgent.refuse
+        instance: name
+        sets:
+          check: {exit_code: input.exit_code, message: input.message}
+        emits: [loom.resource.LoomAgentRefused]
+        payload:
+          loom.resource.LoomAgentRefused:
+            name: input.name
+            generation: input.generation
+            message: input.message
+      - name: out-of-order
+        wrong_state: true
+        error: loom.resource.LoomAgentStateConflict
+        payload:
+          loom.resource.LoomAgentStateConflict:
+            name: input.name
+
+  # The controller read the child Deployment's availability: a Running resource whose Deployment
+  # is unavailable is Degraded, a Degraded one whose Deployment is available is Running again,
+  # and one already in the state the observation says is left as it is. A resource without a
+  # Deployment to observe (Pending, Refused) answers a state conflict.
+  - name: loom.resource.ObserveDeployment
+    input:
+      - name: name
+        type: loom.resource.ResourceName
+      - name: availability
+        type: loom.resource.DeploymentAvailability
+    outcomes:
+      - name: unknown
+        unknown_instance: true
+        error: loom.resource.LoomAgentNotFound
+        payload:
+          loom.resource.LoomAgentNotFound:
+            name: input.name
+      - name: degraded
+        when_subject_state: Running
+        when: availability == Unavailable
+        moves: loom.resource.LoomAgent.degrade
+        instance: name
+        emits: [loom.resource.LoomAgentDegraded]
+        payload:
+          loom.resource.LoomAgentDegraded:
+            name: input.name
+      - name: still-running
+        when_subject_state: Running
+        when: availability == Available
+        preserves: loom.resource.LoomAgent
+        instance: name
+      - name: recovered
+        when_subject_state: Degraded
+        when: availability == Available
+        moves: loom.resource.LoomAgent.recover
+        instance: name
+        emits: [loom.resource.LoomAgentRecovered]
+        payload:
+          loom.resource.LoomAgentRecovered:
+            name: input.name
+      - name: still-degraded
+        when_subject_state: Degraded
+        when: availability == Unavailable
+        preserves: loom.resource.LoomAgent
+        instance: name
+      - name: no-deployment
+        error: loom.resource.LoomAgentStateConflict
+        payload:
+          loom.resource.LoomAgentStateConflict:
+            name: input.name
+
+  # The resource is gone from the cluster: the controller forgets it. Its children go with it by
+  # owner reference (design § 5.2), which is Kubernetes's, not this domain's.
+  - name: loom.resource.DeleteLoomAgent
+    input:
+      - name: name
+        type: loom.resource.ResourceName
+    outcomes:
+      - name: deleted
+        deletes: loom.resource.LoomAgent
+        instance: name
+        emits: [loom.resource.LoomAgentDeleted]
+        payload:
+          loom.resource.LoomAgentDeleted:
+            name: input.name
+      - name: unknown
+        unknown_instance: true
+        error: loom.resource.LoomAgentNotFound
+        payload:
+          loom.resource.LoomAgentNotFound:
+            name: input.name
+
+views:
+  # Every resource the controller holds, one row each, with the fields its status publishes.
+  - name: loom.resource.LoomAgents
+    source: loom.resource.LoomAgent
+    consistency: read_your_writes
+    fields:
+      - name: name
+        type: loom.resource.ResourceName
+      - name: observed_generation
+        type: Integer
+      - name: check
+        type: Optional<loom.resource.CheckResult>
+      - name: state
+        type: loom.resource.LoomAgent.State

@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// `(package, directory under crates/, library name)` for every workspace member.
-const EXPECTED: [(&str, &str, Option<&str>); 23] = [
+const EXPECTED: [(&str, &str, Option<&str>); 24] = [
     (
         "b10x-loom-executor",
         "loom-executor",
@@ -92,6 +92,11 @@ const EXPECTED: [(&str, &str, Option<&str>); 23] = [
         "b10x-loom-protocols",
         "loom-protocols",
         Some("loom_protocols"),
+    ),
+    (
+        "b10x-loom-resource",
+        "loom-resource",
+        Some("b10x_loom_resource"),
     ),
     ("loom-docs", "loom-docs", None),
     ("loom-xtask", "loom-xtask", None),

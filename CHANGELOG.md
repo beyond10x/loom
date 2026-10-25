@@ -12,6 +12,11 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- The `loom.resource` domain and the `LoomAgent` CRD projected from it, held by `task crd-drift` (story:loom-agent-resource-domain)
+- `b10x-loom-resource`: `LoomAgentRecord`, the resource's lifecycle record, and `crd::manifest` (story:loom-agent-resource-domain)
+
 ## [0.40.0] - 2026-10-24
 
 ### Changed
