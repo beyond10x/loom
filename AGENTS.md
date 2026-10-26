@@ -960,7 +960,11 @@ its exit code, end time and reason are read from the Job's own pod (`observation
 the Job's uid, so a pod of another Job never speaks for it, the program container `loom-agent`
 (`render::CONTAINER`), the latest `finishedAt`. While the Job counts the run over but its own pod is in no final
 phase and its program container has not terminated (the pod still stopping), nothing is observed
-and the reconcile comes again after 30 s, so the exit code is not lost. With no such pod, or a pod
+and the reconcile comes again after 30 s, so the exit code is not lost; a pod still terminating
+60 s (`TERMINATION_SLACK`) past its deletion deadline (`deletionTimestamp` plus
+`deletionGracePeriodSeconds`) no longer holds it, and the run ends with no exit code and the
+reason `PodNeverFinishedTerminating`. A Job of the generation seen counting its run over is never
+created again: if it is deleted, the run ends at once from what its pods still say. With no such pod, or a pod
 list answered 403 or 404, the exit code and end time are absent and the reason is that of the
 Job's `Failed` or `Complete` condition; a refused list is logged and the `Completed` message says
 the pod could not be read. No pod is watched, and an active run reads none. After a controller restart

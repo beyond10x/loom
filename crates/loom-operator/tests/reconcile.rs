@@ -423,10 +423,19 @@ fn agent(generation: i64, spec_agent: &str, rest: &str) -> LoomAgent {
     serde_yaml_ng::from_str(&text).expect("a LoomAgent")
 }
 
+/// A context over `client` whose clock reads [`NOW`].
 fn context(client: Client) -> Arc<Context> {
     let config = Config::parse(CONFIG).expect("the test configuration");
-    Arc::new(Context::new(client, config).expect("the context"))
+    Arc::new(
+        Context::new(client, config)
+            .expect("the context")
+            .with_clock(|| NOW.parse().expect("an instant")),
+    )
 }
+
+/// The time the reconcile tests' controller reads: a terminating pod's deletion deadline is
+/// held against it.
+const NOW: &str = "2026-10-26T12:00:30Z";
 
 async fn reconciled(resource: LoomAgent, ctx: &Arc<Context>) -> Action {
     reconcile(Arc::new(resource), Arc::clone(ctx))
@@ -1598,6 +1607,25 @@ async fn a_refused_pod_list_leaves_the_exit_code_absent() {
     );
 }
 
+/// `story:command-run-exit-status`: a pod still terminating more than 60 s past its deletion
+/// deadline ends the run without an exit code, the reason saying it never finished terminating.
+#[tokio::test]
+async fn a_pod_stuck_terminating_ends_the_run_with_its_reason() {
+    let (path, mut stuck) = pod(
+        "platform-operator-x1",
+        &format!("uid-of-{JOB}"),
+        json!({"running": {"startedAt": "2026-10-26T11:00:00Z"}}),
+    );
+    stuck["metadata"]["deletionTimestamp"] = json!("2026-10-26T11:59:00Z");
+    stuck["metadata"]["deletionGracePeriodSeconds"] = json!(29);
+    let (status, _) = ended_with(failed(), vec![(path, stuck)]).await;
+    assert_eq!(status["state"], "Failed");
+    assert_eq!(
+        status["run"],
+        json!({"reason": "PodNeverFinishedTerminating"})
+    );
+}
+
 /// `story:command-variant-runs-once`: a Job's pod template cannot change, so a new generation
 /// deletes the Job of the earlier one (its pod first, propagation `Foreground`) and, once the
 /// delete answers it gone, creates its own.
@@ -2151,5 +2179,197 @@ async fn adv_a_run_counted_failed_while_its_pod_terminates_reports_the_exit_code
         status["run"]["exitCode"], 143,
         "the program's exit code, readable from the Job's own pod once it terminated, never \
          reaches the status: {status}"
+    );
+}
+
+// Adversary cases, pass 2, for story:command-run-exit-status (wave 2026-10-26-cmdv, unit u2).
+
+/// The pod of the resource's Job, deleted while its program still runs: `deletionTimestamp` at
+/// `deleted_at` (when its grace period ends), phase Running, the program container running.
+fn adv_terminating_pod(deleted_at: &str) -> (String, Value) {
+    let (path, mut pod) = adv_pod(
+        "platform-operator-x1",
+        true,
+        json!([adv_container(
+            "loom-agent",
+            json!({"running": {"startedAt": "2020-01-01T00:00:00Z"}})
+        )]),
+    );
+    pod["metadata"]["deletionTimestamp"] = json!(deleted_at);
+    pod["metadata"]["deletionGracePeriodSeconds"] = json!(30);
+    pod["status"]["phase"] = json!("Running");
+    (path, pod)
+}
+
+/// A Job that counts its one pod failed while that pod terminates, as the Job controller writes
+/// it from 1.31 on (`FailureTarget`, `Failed` delayed) and before it (`Failed` at once).
+fn adv_counted_failed() -> [Value; 2] {
+    [
+        json!({"failed": 1, "conditions": [{
+            "type": "FailureTarget", "status": "True", "reason": "BackoffLimitExceeded",
+        }]}),
+        json!({"failed": 1, "conditions": [{
+            "type": "Failed", "status": "True", "reason": "BackoffLimitExceeded",
+        }]}),
+    ]
+}
+
+/// While the Job counts the run failed and its own pod still terminates, the reconcile observes
+/// nothing, publishes the resource Running with `Completed` Unknown `RunNotFinished`, records
+/// no run, and comes again after 30 s (RETRY), not after 300 s.
+#[tokio::test]
+async fn adv_a_terminating_pod_holds_the_run_open_and_retries_after_30_s() {
+    for run in adv_counted_failed() {
+        let (client, fake) = fake();
+        let ctx = context(client);
+        reconciled(command_agent(1, "run"), &ctx).await;
+        fake.take();
+        let before = ctx.events().len();
+        let (path, pod) = adv_terminating_pod("2100-01-01T00:00:00Z");
+        fake.put(&path, pod);
+        fake.set_run(JOB, Some(run.clone()));
+        let action = reconciled(command_agent(1, "run"), &ctx).await;
+        assert_eq!(
+            action,
+            Action::requeue(Duration::from_secs(30)),
+            "{run}: the wait comes again after RETRY"
+        );
+        let status = published(&fake.take());
+        assert_eq!(status["state"], "Running", "{run}");
+        assert!(status.get("run").is_none(), "{run}: {status}");
+        assert_eq!(
+            conditions(&status)[2],
+            triple("Completed", "Unknown", "RunNotFinished")
+        );
+        assert_eq!(
+            ctx.events().len(),
+            before,
+            "{run}: nothing observed while the pod terminates: {:?}",
+            ctx.events()
+        );
+    }
+}
+
+/// A pod deleted on a node that no longer answers (taint-based eviction of an unreachable node)
+/// keeps its `deletionTimestamp`, phase Running and running container for as long as the node is
+/// gone: nothing will ever write its container's end. Long past its grace period the run must
+/// still be reported over, as the story's outcome asks ("a caller reads the outcome from the
+/// resource"); the controller waits for it without a limit and the resource reads Running for
+/// good while its Job says the run failed.
+#[tokio::test]
+async fn adv_a_pod_stuck_terminating_past_its_grace_period_does_not_hold_the_run_open() {
+    for run in adv_counted_failed() {
+        let (client, fake) = fake();
+        let ctx = context(client);
+        reconciled(command_agent(1, "run"), &ctx).await;
+        let (path, pod) = adv_terminating_pod("2020-01-01T00:05:00Z");
+        fake.put(&path, pod);
+        fake.set_run(JOB, Some(run.clone()));
+        for _ in 0..3 {
+            reconciled(command_agent(1, "run"), &ctx).await;
+        }
+        let status = published(&fake.take());
+        assert_eq!(
+            status["state"], "Failed",
+            "{run}: a pod whose grace period ended years ago still holds the run open: {status}"
+        );
+    }
+}
+
+/// The controller saw the Job count the run failed (`failed: 1`) and waits for the pod's end.
+/// If the Job is deleted in that window (someone clears a Job stuck behind a terminating pod),
+/// the next reconcile creates the Job again and the program runs a second time for the same
+/// generation, beside the old pod still in its grace period: the controller must never re-create
+/// the Job of a generation whose run it saw finish (wave decision D2). Before the wait, the first
+/// observation recorded Failed and the deleted Job stayed deleted.
+#[tokio::test]
+async fn adv_a_job_deleted_while_its_pod_terminates_is_not_run_again() {
+    for run in adv_counted_failed() {
+        let (client, fake) = fake();
+        let ctx = context(client);
+        reconciled(command_agent(1, "run"), &ctx).await;
+        let (path, pod) = adv_terminating_pod("2100-01-01T00:00:00Z");
+        fake.put(&path, pod);
+        fake.set_run(JOB, Some(run.clone()));
+        reconciled(command_agent(1, "run"), &ctx).await;
+        fake.take();
+
+        fake.remove(JOB);
+        reconciled(command_agent(1, "run"), &ctx).await;
+        let seen = fake.take();
+        assert!(
+            !applies(&seen).contains(&JOB),
+            "{run}: the Job of a generation whose run was seen over is created again: {:?}",
+            applies(&seen)
+        );
+        assert!(!fake.holds(JOB), "{run}: the program runs a second time");
+    }
+}
+
+/// A pod list refused (403) for one generation is noted in that generation's `Completed`
+/// message only: the next generation's Running status carries no note, and once its pod list is
+/// answered its run's end carries none either.
+#[tokio::test]
+async fn adv_a_refused_pod_list_is_not_noted_on_the_next_generation() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(command_agent(1, "run"), &ctx).await;
+    fake.set_forbidden(PODS);
+    fake.set_run(JOB, Some(failed()));
+    reconciled(command_agent(1, "run"), &ctx).await;
+    let status = published(&fake.take());
+    assert!(
+        message(&status, "Completed").ends_with("(the list was answered 403)"),
+        "{status}"
+    );
+
+    fake.server.lock().expect("the fake").forbidden = None;
+    fake.set_run(JOB, None);
+    reconciled(command_agent(2, "run, --again"), &ctx).await;
+    let status = published(&fake.take());
+    assert_eq!(status["state"], "Running");
+    assert_eq!(
+        message(&status, "Completed"),
+        "the Job's run has not finished"
+    );
+
+    let (path, pod) = pod(
+        "platform-operator-x2",
+        &format!("uid-of-{JOB}"),
+        terminated(0, "2026-10-26T13:00:00Z", "Completed"),
+    );
+    fake.put(&path, pod);
+    fake.set_run(JOB, Some(succeeded()));
+    reconciled(command_agent(2, "run, --again"), &ctx).await;
+    let status = published(&fake.take());
+    assert_eq!(status["state"], "Completed");
+    assert_eq!(
+        message(&status, "Completed"),
+        "the program exited with code 0 at 2026-10-26T13:00:00Z (Completed)"
+    );
+}
+
+/// A pod list that flips: answered while the pod terminates (the run held open), then refused
+/// (403) on the next reconcile. The run is then recorded with no exit code and the note, and a
+/// later answered list does not read it again (a Failed resource reads no child).
+#[tokio::test]
+async fn adv_a_pod_list_refused_after_the_wait_records_the_run_with_the_note() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(command_agent(1, "run"), &ctx).await;
+    let (path, pod) = adv_terminating_pod("2100-01-01T00:00:00Z");
+    fake.put(&path, pod);
+    fake.set_run(JOB, Some(failed()));
+    reconciled(command_agent(1, "run"), &ctx).await;
+    assert_eq!(published(&fake.take())["state"], "Running");
+
+    fake.set_forbidden(PODS);
+    reconciled(command_agent(1, "run"), &ctx).await;
+    let status = published(&fake.take());
+    assert_eq!(status["state"], "Failed");
+    assert_eq!(
+        message(&status, "Completed"),
+        "the Job's run failed with no exit code read from its pod; its pod could not be read (the \
+         list was answered 403)"
     );
 }

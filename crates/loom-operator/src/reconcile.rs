@@ -37,10 +37,14 @@
 //!    carries its exit code, end time and reason, read from the Job's own pod (`observation`):
 //!    one its label selector names whose controlling owner reference is the Job's uid. While the
 //!    Job counts the run over but its own pod is in no final phase and its program container has
-//!    not terminated, nothing is observed and the reconcile comes again after [`RETRY`]. Then each
-//!    child it controls that this generation does not render (a Service once `expose.a2a` is
-//!    gone, the ServiceAccount an earlier generation named) is deleted. Every delete propagates
-//!    in the foreground: what the child owns, a Job's pod included, goes before it does.
+//!    not terminated, nothing is observed and the reconcile comes again after [`RETRY`]. A pod
+//!    still terminating [`TERMINATION_SLACK`] past its deletion deadline does not hold it: the run
+//!    ends with no exit code and the reason [`NEVER_TERMINATED`]. Once a Job of the generation was
+//!    seen counting its run over it is never created again: if it is gone, the run ends at once
+//!    from what its pods still say. Then each child it controls that this generation does not
+//!    render (a Service once `expose.a2a` is gone, the ServiceAccount an earlier generation named)
+//!    is deleted. Every delete propagates in the foreground: what the child owns, a Job's pod
+//!    included, goes before it does.
 //! 6. A `Completed` or `Failed` resource has no child applied, read or deleted: its run is over
 //!    until a new generation respecifies it.
 //! 7. The record's row is published as the status by server-side apply on the status
@@ -80,6 +84,7 @@ use k8s_openapi::api::core::v1::{
 };
 use k8s_openapi::api::networking::v1::NetworkPolicy;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, Time};
+use k8s_openapi::jiff::{SignedDuration, Timestamp as JiffTimestamp};
 use kube::api::{
     Api, DeleteParams, ListParams, Patch, PatchParams, Preconditions, PropagationPolicy,
 };
@@ -158,16 +163,18 @@ struct Held {
     uid: String,
     applied: BTreeSet<(Kind, String)>,
     pods_refused: Option<u16>,
+    over: Option<JobRun>,
 }
 
 /// What every reconcile shares: the client, the configuration, the plugin catalog the check
-/// reads, and the record.
+/// reads, the record, and the clock.
 pub struct Context {
     client: Client,
     config: Config,
     catalog: ProtocolCatalog,
     record: Mutex<LoomAgentRecord>,
     held: Mutex<HashMap<String, Held>>,
+    clock: fn() -> JiffTimestamp,
 }
 
 impl Context {
@@ -182,7 +189,15 @@ impl Context {
             catalog: ProtocolCatalog::plugins()?,
             record: Mutex::new(LoomAgentRecord::new()),
             held: Mutex::new(HashMap::new()),
+            clock: JiffTimestamp::now,
         })
+    }
+
+    /// This context, reading the time from `clock` instead of the system clock: the time a
+    /// terminating pod's deletion deadline is compared with.
+    #[must_use]
+    pub fn with_clock(self, clock: fn() -> k8s_openapi::jiff::Timestamp) -> Self {
+        Self { clock, ..self }
     }
 
     fn record(&self) -> MutexGuard<'_, LoomAgentRecord> {
@@ -204,6 +219,7 @@ impl Context {
             uid: uid.to_owned(),
             applied: BTreeSet::new(),
             pods_refused: None,
+            over: None,
         };
         let replaced = {
             let mut held = self.held();
@@ -250,6 +266,28 @@ impl Context {
         if let Some(held) = self.held().get_mut(name) {
             held.pods_refused = code;
         }
+    }
+
+    /// Notes that the Job `run` of the resource `name` was seen counting its run over.
+    fn saw_over(&self, name: &str, run: &JobRun) {
+        if let Some(held) = self.held().get_mut(name) {
+            held.over = Some(run.clone());
+        }
+    }
+
+    /// The Job of the resource `name` last seen counting its run over, when it is of
+    /// `generation`; one of another generation is forgotten.
+    fn seen_over(&self, name: &str, generation: Option<i64>) -> Option<JobRun> {
+        let mut held = self.held();
+        let held = held.get_mut(name)?;
+        if held
+            .over
+            .as_ref()
+            .is_some_and(|run| run.generation != generation)
+        {
+            held.over = None;
+        }
+        held.over.clone()
     }
 
     /// The code the last list of the pods of the resource `name` was refused with, if it was.
@@ -791,6 +829,7 @@ async fn observation(
     resource: &ResourceName,
     job: Option<&Job>,
     phase: RunPhase,
+    wait: bool,
 ) -> Result<Option<ObserveRun>, kube::Error> {
     let mut observed = ObserveRun {
         name: resource.clone(),
@@ -802,7 +841,7 @@ async fn observation(
     let Some(job) = job.filter(|_| phase != RunPhase::Active) else {
         return Ok(Some(observed));
     };
-    let read = pod_read(&ctx.client, namespace, &resource.0, job).await?;
+    let read = pod_read(&ctx.client, namespace, &resource.0, job, (ctx.clock)()).await?;
     ctx.refuse_pods(
         &resource.0,
         match read {
@@ -816,8 +855,9 @@ async fn observation(
             observed.finished_at = end.finished_at.as_ref().and_then(wire_time);
             observed.reason = end.reason;
         }
-        PodRead::Ending => return Ok(None),
-        PodRead::Absent => observed.reason = job_reason(job, phase),
+        PodRead::Ending if wait => return Ok(None),
+        PodRead::Ending | PodRead::Absent => observed.reason = job_reason(job, phase),
+        PodRead::Stuck => observed.reason = Some(NEVER_TERMINATED.to_owned()),
         PodRead::Refused(code) => {
             eprintln!(
                 "b10x-loom-operator: {}: the pod list was answered {code}; the run's exit code \
@@ -837,6 +877,10 @@ enum PodRead {
     /// None terminated yet, and a pod of the Job's own is in no final phase: its container is
     /// still being stopped, so its end comes.
     Ending,
+    /// None terminated, and each pod of the Job's own still in no final phase is being deleted
+    /// and past its grace period by more than [`TERMINATION_SLACK`]: its node no longer
+    /// answers, and nothing will write its container's end.
+    Stuck,
     /// No pod of the Job's own has a program container that terminated or will.
     Absent,
     /// The API server answered the list with this code (403 or 404).
@@ -849,6 +893,7 @@ async fn pod_read(
     namespace: &str,
     resource: &str,
     job: &Job,
+    now: JiffTimestamp,
 ) -> Result<PodRead, kube::Error> {
     let Some(uid) = job.metadata.uid.as_deref() else {
         return Ok(PodRead::Absent);
@@ -897,18 +942,50 @@ async fn pod_read(
     if let Some(end) = ended {
         return Ok(PodRead::Ended(end));
     }
-    let ending = own.iter().any(|pod| {
-        let phase = pod
-            .status
-            .as_ref()
-            .and_then(|status| status.phase.as_deref());
-        !matches!(phase, Some("Succeeded" | "Failed"))
-    });
-    Ok(if ending {
-        PodRead::Ending
-    } else {
+    let unfinished: Vec<&Pod> = own
+        .iter()
+        .filter(|pod| {
+            let phase = pod
+                .status
+                .as_ref()
+                .and_then(|status| status.phase.as_deref());
+            !matches!(phase, Some("Succeeded" | "Failed"))
+        })
+        .collect();
+    Ok(if unfinished.is_empty() {
         PodRead::Absent
+    } else if unfinished.iter().all(|pod| stuck(pod, now)) {
+        PodRead::Stuck
+    } else {
+        PodRead::Ending
     })
+}
+
+/// How long past its deletion deadline (`deletionTimestamp` plus `deletionGracePeriodSeconds`) a
+/// pod of a finished run may still be terminating before the controller stops waiting for its
+/// container's end and records the run without an exit code.
+pub const TERMINATION_SLACK: Duration = Duration::from_secs(60);
+
+/// The reason a run's end carries when its pod never finished terminating.
+pub const NEVER_TERMINATED: &str = "PodNeverFinishedTerminating";
+
+/// Whether `pod` is being deleted and its deletion deadline plus [`TERMINATION_SLACK`] is past
+/// at `now`.
+fn stuck(pod: &Pod, now: JiffTimestamp) -> bool {
+    let Some(deleted) = pod.metadata.deletion_timestamp.as_ref() else {
+        return false;
+    };
+    let grace = pod
+        .metadata
+        .deletion_grace_period_seconds
+        .unwrap_or(0)
+        .max(0);
+    let slack = i64::try_from(TERMINATION_SLACK.as_secs()).unwrap_or(i64::MAX);
+    let limit = SignedDuration::from_secs(grace.saturating_add(slack));
+    deleted
+        .0
+        .checked_add(limit)
+        .is_ok_and(|deadline| deadline < now)
 }
 
 /// The status of the program container of `pod`, if the pod reports one.
@@ -1175,6 +1252,19 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                 .filter(|(_, _, run)| run.generation == agent.metadata.generation)
                 .map(|(_, _, run)| run);
             if running.is_none()
+                && let Some(seen) = ctx.seen_over(&name, agent.metadata.generation)
+            {
+                let observed =
+                    observation(&ctx, &namespace, &key, Some(&seen.job), seen.phase, false).await?;
+                if let Some(observed) = observed {
+                    ctx.record().observe_run(observed)?;
+                }
+                if let Some(row) = row(&ctx, &key) {
+                    publish(&ctx, &namespace, &name, agent.status.as_ref(), &row).await?;
+                }
+                return Ok(Action::requeue(REQUEUE));
+            }
+            if running.is_none()
                 && !workloads_gone(&ctx, &namespace, &name, &owner, children, job).await?
             {
                 if let Some(row) = row(&ctx, &key) {
@@ -1185,7 +1275,10 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
             let mut ending = false;
             match running {
                 Some(run) if run.phase != RunPhase::Active => {
-                    match observation(&ctx, &namespace, &key, Some(&run.job), run.phase).await? {
+                    ctx.saw_over(&name, run);
+                    match observation(&ctx, &namespace, &key, Some(&run.job), run.phase, true)
+                        .await?
+                    {
                         Some(observed) => {
                             ctx.record().observe_run(observed)?;
                         }
@@ -1208,7 +1301,7 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                         Observed::Deployment(None) => {}
                         Observed::Job(phase, applied) => {
                             let job = applied.as_deref().or(running.map(|run| &run.job));
-                            match observation(&ctx, &namespace, &key, job, phase).await? {
+                            match observation(&ctx, &namespace, &key, job, phase, true).await? {
                                 Some(observed) => {
                                     ctx.record().observe_run(observed)?;
                                 }
