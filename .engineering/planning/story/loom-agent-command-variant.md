@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:loom-agent-command-variant
 kind: story
-status: active
+status: implemented
 title: 'LoomAgent slice C: a Command variant runs its own image and entrypoint with a workspace, /config and Secret files'
 relations:
 - decomposes: epic:loom-sdk-for-products
@@ -34,10 +34,11 @@ scope:
   path: website/data/ess
 - confidence: cited
   path: website/docs/reference
-revision: 16
+revision: 17
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-26T09:58:54Z", actor: "human:timo", revision: 15}
 - {from: "proposed", to: "active", at: "2026-10-26T09:58:54Z", actor: "human:timo", revision: 16}
+- {from: "active", to: "implemented", at: "2026-10-26T10:58:22Z", actor: "human:timo", revision: 17, decided_on: {"recorded":{"test_result":1,"review_outcome":2}}}
 ---
 ## Outcome
 

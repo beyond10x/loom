@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-26T10:58:18Z",
+  "actor": "human:timo",
+  "artifact": "story:loom-agent-command-variant",
+  "kind": "story",
+  "revision": 16,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check",
+    "reference": "task check steps exit 0 on a8c9b572 (ESS 0.69.2): 415 test-result lines, 2298 passed, 0 failed, 9 ignored; task conform 119 scenarios, 110 passed, 0 failed, 0 skipped, 9 unsupported"
+  }
+}

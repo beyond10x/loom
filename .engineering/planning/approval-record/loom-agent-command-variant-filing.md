@@ -8,7 +8,7 @@ tags:
 - non-interactive
 relations:
 - decides: story:loom-agent-command-variant
-revision: 1
+revision: 2
 ---
 # Filing and approving story:loom-agent-command-variant, wave 2026-10-26-slicec
 
@@ -48,3 +48,20 @@ The wave's commits, under the grant: the opening store commit, the unit's ESS-fi
 its implementation commits, the adversary's test commits, the merge into
 `wave/2026-10-26-slicec`, the closing store commit, the bot pull request and the fast-forward of
 `main`, then the release commit, tag and GitHub Release per AGENTS.md § Releases.
+
+## Wave result
+
+- One unit, implemented by the coordinator itself rather than a dispatched implementor (the domain,
+  CRD, controller and chart are one dependency chain): ESS first `84e0aadd` (red: `task drift`
+  and `task crd-drift` exit 201 before regeneration), implementation `6a522d88`.
+- Ledger between the passes: carried 0, new 3, resolved 2. Pass 1: 2 findings (credential after
+  `:` in `spec.command`; `TooLarge` for a huge Command `spec.agent`), fixed in `988c6ac9`. Pass 2:
+  3 findings (`Authorization:Bearer` join, shell punctuation such as `<<<ghp_`, `TooLarge` for
+  `spec.command` undocumented), fixed in `a6369f70`; the coordinator read that correction (no test
+  edited, operator suite 91 of 91). No third attack. The credential walk over a free-form
+  `spec.command` script is a deny-list and stays a heuristic; the Secret belongs in `secretRef`.
+- Gate on the integration branch `a8c9b572`, every step of `task check` exit 0 with ESS 0.69.2:
+  415 test-result lines, 2298 passed, 0 failed, 9 ignored; `task conform` 119 scenarios, 110
+  passed, 0 failed, 0 skipped, 9 unsupported.
+- The `/config` contract: the `spec.agent` document is written verbatim to `/config/agent.yaml`
+  (keys in the order the API server keeps them, as `/etc/agent/agent.yaml` for `agent serve`).
