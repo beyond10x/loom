@@ -868,6 +868,7 @@ fn spec_agent_is_the_agent_document_and_required() {
             "agent",
             "command",
             "connectorsConfig",
+            "env",
             "image",
             "routes",
             "secretFiles",
@@ -1051,6 +1052,25 @@ fn the_command_variant_members_are_declared_with_what_each_requires() {
     assert_eq!(
         schema["properties"]["status"]["properties"]["variant"],
         json!({"type": "string", "enum": ["AgentServe", "Command"]})
+    );
+}
+
+#[test]
+fn spec_env_is_an_optional_list_of_names_and_values() {
+    let document = projected();
+    let spec = &open_api(&document)["properties"]["spec"];
+    assert!(!names(&spec["required"]).contains(&"env".to_owned()));
+    assert_eq!(
+        spec["properties"]["env"],
+        json!({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}, "value": {"type": "string"}},
+                "required": ["name", "value"],
+            },
+        }),
+        "the entry is Kubernetes's EnvVar without valueFrom"
     );
 }
 

@@ -33,10 +33,16 @@
 //!    (`EgressHostNotAllowed`).
 //! 8. `spec.command`, each entrypoint and argument walked whole and word by word as the
 //!    connectors text is (`SecretLiteral`); one beyond the walk's bound is `TooLarge`.
-//! 9. A `spec.workspace.mountPath` or `spec.secretFiles.mountPath` that is not absolute and plain,
-//!    is, holds or lies beneath a directory the controller mounts ([`RESERVED_MOUNTS`]) or the
-//!    other one (`MountPathInvalid`).
-//! 10. A `spec.workspace.claimName` outside the configuration's `allowedClaimNames`
+//! 9. `spec.env`, on either variant: the list walked whole, names and values, then each value
+//!    word by word as `spec.command` is (`SecretLiteral`; `TooLarge` beyond the walk's bound);
+//!    then, entry by entry, a name that is not an environment variable name
+//!    `[A-Za-z_][A-Za-z0-9_]*` (`NotAVariableName`, `loom.agent`'s reason for the same rule), a
+//!    name the controller sets on a container itself ([`CONTROLLER_ENV`]) or one an earlier
+//!    entry gives (`EnvNameConflict`).
+//! 10. A `spec.workspace.mountPath` or `spec.secretFiles.mountPath` that is not absolute and
+//!     plain, is, holds or lies beneath a directory the controller mounts ([`RESERVED_MOUNTS`])
+//!     or the other one (`MountPathInvalid`).
+//! 11. A `spec.workspace.claimName` outside the configuration's `allowedClaimNames`
 //!     (`ClaimNotAllowed`).
 //!
 //! The walk of steps 2 and 3 reads a text that is not a `loom.agent/1` document only within the
@@ -58,7 +64,8 @@ use serde_yaml_ng::{Mapping, Value};
 use b10x_loom_resource::model::AgentVariant;
 
 use crate::config::{Config, ModelRoute};
-use crate::resource::{CommandSpec, LoomAgentSpec};
+use crate::render::CONTROLLER_ENV;
+use crate::resource::{CommandSpec, EnvVar, LoomAgentSpec};
 
 /// The exit code a refusal is recorded with, as `b10x-loom agent check` exits on one.
 pub const REFUSED: i64 = 3;
@@ -242,6 +249,68 @@ fn command_credential(command: &CommandSpec) -> Result<(), Refusal> {
         }
     }
     word_credential(&found, "spec.command")
+}
+
+/// Walks `spec.env` for a credential, the list whole (names and values) and then each value word
+/// by word as `spec.command` is; one beyond the walk's bound is `TooLarge`.
+fn env_credential(env: &[EnvVar]) -> Result<(), Refusal> {
+    credential(&yaml(&env, "spec.env")?, "spec.env")?;
+    let found: Vec<Word> = env
+        .iter()
+        .enumerate()
+        .flat_map(|(index, entry)| {
+            words(&entry.value).into_iter().map(move |text| Word {
+                text,
+                member: format!("spec.env[{index}].value"),
+                line: None,
+            })
+        })
+        .collect();
+    word_credential(&found, "spec.env")
+}
+
+/// Whether `name` is an environment variable name, `[A-Za-z_][A-Za-z0-9_]*`: the rule
+/// `loom.agent` holds a `bearer_env` to.
+fn variable_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    bytes
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == b'_')
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+/// Refuses a `spec.env` name that is not a variable name (`NotAVariableName`), one the
+/// controller sets itself ([`CONTROLLER_ENV`]) or one an earlier entry gives (`EnvNameConflict`),
+/// never repeating the name.
+fn env_names(env: &[EnvVar]) -> Result<(), Refusal> {
+    for (index, entry) in env.iter().enumerate() {
+        let at = format!("spec.env[{index}].name");
+        if !variable_name(&entry.name) {
+            return Err(Refusal::new(
+                spelling(RefusalReason::NotAVariableName),
+                at,
+                "it is not an environment variable name, [A-Za-z_][A-Za-z0-9_]*",
+            ));
+        }
+        if CONTROLLER_ENV.contains(&entry.name.as_str()) {
+            return Err(Refusal::new(
+                "EnvNameConflict",
+                at,
+                "the controller sets it on the container",
+            ));
+        }
+        if let Some(first) = env[..index]
+            .iter()
+            .position(|earlier| earlier.name == entry.name)
+        {
+            return Err(Refusal::new(
+                "EnvNameConflict",
+                at,
+                format!("it repeats spec.env[{first}].name"),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// `member` of a document at `at` in the resource.
@@ -689,6 +758,11 @@ pub fn admit(
         command_credential(command)?;
     }
 
+    if let Some(env) = &spec.env {
+        env_credential(env)?;
+        env_names(env)?;
+    }
+
     mount_paths(spec)?;
 
     if let Some(claim) = spec
@@ -741,6 +815,7 @@ mod tests {
             connectors_config: connectors.map(str::to_owned),
             secret_ref: None,
             secret_files: None,
+            env: None,
             image: None,
             command: None,
             workspace: None,

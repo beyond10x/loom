@@ -39,6 +39,9 @@ pub struct LoomAgentSpec {
     /// The Secret whose keys become files in the agent container.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret_files: Option<SecretFiles>,
+    /// Plain environment values of the agent container, in order, after the controller's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<Vec<EnvVar>>,
     /// The agent image, overriding the controller's default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<ImageRef>,
@@ -91,6 +94,15 @@ pub struct Workspace {
 pub struct SecretRef {
     /// The Secret's name.
     pub name: String,
+}
+
+/// One entry of `spec.env`: a plain environment variable of the agent container.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EnvVar {
+    /// The variable's name, `[A-Za-z_][A-Za-z0-9_]*`.
+    pub name: String,
+    /// Its value, never a credential.
+    pub value: String,
 }
 
 /// `spec.secretFiles`: a Secret, by name, in the resource's namespace, whose keys are files in

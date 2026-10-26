@@ -30,7 +30,9 @@
 //!   `/config`, so `spec.agent` is `/config/agent.yaml`; `HOME` is `/var/lib/agent`, and an
 //!   emptyDir is at `/tmp`, the root staying read-only.
 //!
-//!   On either variant `spec.workspace` adds a read-write volume at its `mountPath`: the claim
+//!   On either variant `spec.env` is the agent container's `env` after the controller's own
+//!   ([`CONTROLLER_ENV`]), in declaration order, beside the `spec.secretRef` environment; no init
+//!   container gets it. `spec.workspace` adds a read-write volume at its `mountPath`: the claim
 //!   `claimName`, else an emptyDir. `spec.secretFiles` adds its Secret as the read-only volume
 //!   `secret-files-source` (mode 0440) and a memory emptyDir `secret-files`; the init container
 //!   `stage-secret-files`, run first from the configured default image, runs `b10x-loom agent
@@ -106,6 +108,11 @@ pub const STAGED_SUBDIR: &str = "files";
 pub const A2A_PORT: &str = "a2a";
 /// The annotation of the pod template naming the resource's generation.
 pub const GENERATION_ANNOTATION: &str = "loom.beyond10x.dev/generation";
+/// The variable naming the `Command` variant's home directory, [`STATE_DIR`].
+pub const HOME: &str = "HOME";
+/// Every environment variable the controller sets on a container of either variant; a
+/// `spec.env` entry may name none of them.
+pub const CONTROLLER_ENV: [&str; 1] = [HOME];
 /// The label that names the namespace a peer stands in, which Kubernetes sets on every namespace.
 const NAMESPACE_LABEL: &str = "kubernetes.io/metadata.name";
 
@@ -425,6 +432,27 @@ impl Renderer<'_> {
         self.agent.spec.workspace.is_some() || self.agent.spec.secret_files.is_some()
     }
 
+    /// The agent container's environment: the controller's own ([`CONTROLLER_ENV`]; `HOME` for
+    /// the `Command` variant), then `spec.env` in declaration order; none when both are empty.
+    /// The init containers get none of it: they run `b10x-loom` for the controller, not the
+    /// agent.
+    fn env(&self) -> Option<Vec<EnvVar>> {
+        let own = (self.admitted.variant == AgentVariant::Command).then(|| EnvVar {
+            name: HOME.to_owned(),
+            value: Some(STATE_DIR.to_owned()),
+            value_from: None,
+        });
+        let env: Vec<EnvVar> = own
+            .into_iter()
+            .chain(self.agent.spec.env.iter().flatten().map(|entry| EnvVar {
+                name: entry.name.clone(),
+                value: Some(entry.value.clone()),
+                value_from: None,
+            }))
+            .collect();
+        (!env.is_empty()).then_some(env)
+    }
+
     fn probe(path: &str) -> Probe {
         Probe {
             http_get: Some(HTTPGetAction {
@@ -492,13 +520,7 @@ impl Renderer<'_> {
             image: Some(self.image()),
             command,
             args,
-            env: (self.admitted.variant == AgentVariant::Command).then(|| {
-                vec![EnvVar {
-                    name: "HOME".to_owned(),
-                    value: Some(STATE_DIR.to_owned()),
-                    value_from: None,
-                }]
-            }),
+            env: self.env(),
             env_from: self.agent.spec.secret_ref.as_ref().map(|secret| {
                 vec![EnvFromSource {
                     secret_ref: Some(SecretEnvSource {

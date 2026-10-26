@@ -524,6 +524,18 @@ spec:
                 type: object
               connectorsConfig:
                 type: string
+              env:
+                items:
+                  properties:
+                    name:
+                      type: string
+                    value:
+                      type: string
+                  required:
+                  - name
+                  - value
+                  type: object
+                type: array
               image:
                 properties:
                   repository:
