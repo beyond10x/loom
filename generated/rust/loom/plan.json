@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "07ffbf64bb72f343da062e4358fa115d25faab45d924b8c2f49b08afd1505c2a",
-    "contract_digest": "24f6dfbec7944350b2c11ba13831b80eba85d7bf29c68207b9b3abb2798be2a0"
+    "source_digest": "bd0680f8ac3534518a439d54a62dfd2a90bf5c733881ebeb4328aed4f2b64019",
+    "contract_digest": "686d3e50c2ac373e8881a3960e68cf840d8e87f71ccb441f5efdc3580e3c3fa1"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -146,6 +146,13 @@
     {
       "kind": "domain_type",
       "source": "loom.agent.HttpReadRefusalReason",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.agent.HttpTrustRefusalReason",
       "disposition": {
         "disposition": "generated"
       }
@@ -1230,6 +1237,20 @@
     },
     {
       "kind": "command_contract",
+      "source": "loom.agent.AdmitHttpTrust",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.agent.AdmitHttpTrust",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
       "source": "loom.agent.AdmitSend",
       "disposition": {
         "disposition": "generated"
@@ -1570,6 +1591,13 @@
     {
       "kind": "error_type",
       "source": "loom.agent.HttpReadRefused",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.agent.HttpTrustRefused",
       "disposition": {
         "disposition": "generated"
       }

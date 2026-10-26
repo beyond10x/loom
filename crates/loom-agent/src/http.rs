@@ -20,19 +20,29 @@
 //!
 //! The crate's HTTP client is reqwest, the one llm's `b10x-llm-http` is built on; that crate
 //! exposes no GET at the pinned tag (0.8.1: `post_json`, `post_sse`), so the GET is composed here
-//! on the same client, with the same redirect and proxy rules.
+//! on the same client, with the same redirect and proxy rules, over rustls with the webpki roots.
+//!
+//! An `https` endpoint a cluster CA signs is read when the host setting [`CA_FILE_ENV`]
+//! (`LOOM_HTTP_CA_FILE`, `story:http-binding-cluster-ca`) names that CA's PEM file: [`http_trust`]
+//! reads it once and decides `loom.agent.AdmitHttpTrust` ([`admit_http_trust`]); the
+//! [`HttpTrust`] it returns reaches [`HttpGet::with_trust`], and every read then trusts the file's
+//! certificates beside the webpki roots. Nothing else in the host is given them.
 
 use std::ffi::OsStr;
+use std::fmt;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use b10x_loom_plugin::effects::{HttpAnswer, HttpReadError, HttpReader};
 use loom::agent::{
-    AdmitHttpRead, AdmitHttpReadOutcome, BoundHttpAnswer, BoundHttpAnswerOutcome, HttpBinding,
-    HttpReadRefusalReason, HttpReadRefused,
+    AdmitHttpRead, AdmitHttpReadOutcome, AdmitHttpTrust, AdmitHttpTrustOutcome, BoundHttpAnswer,
+    BoundHttpAnswerOutcome, HttpBinding, HttpReadRefusalReason, HttpReadRefused,
+    HttpTrustRefusalReason, HttpTrustRefused,
 };
 use loom_sdk::agent::plain_http_path;
-use reqwest::Url;
 use reqwest::header::{AUTHORIZATION, HeaderValue, LOCATION};
+use reqwest::{Certificate, Url};
 
 /// The bound on one read: connecting, and the whole exchange.
 pub const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
@@ -40,6 +50,186 @@ pub const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 /// The most bytes of a redirect's location a refusal carries; the binding's `max_bytes` bounds it
 /// further.
 pub const LOCATION_BYTES: usize = 256;
+
+/// The host setting naming the PEM file whose certificates every `http` binding read trusts
+/// beside the webpki roots.
+pub const CA_FILE_ENV: &str = "LOOM_HTTP_CA_FILE";
+
+/// The most bytes the file [`CA_FILE_ENV`] names may hold; the host reads at most one past it.
+pub const CA_FILE_MAX_BYTES: i64 = 1_048_576;
+
+/// Decides `loom.agent.AdmitHttpTrust` (`ess/domains/agent.yaml`): not named is `webpki-only`;
+/// named, the first refusal in declaration order, else `extended`.
+pub fn admit_http_trust(input: &AdmitHttpTrust) -> AdmitHttpTrustOutcome {
+    let refused = |reason: HttpTrustRefusalReason| HttpTrustRefused { reason };
+    if !input.named {
+        return AdmitHttpTrustOutcome::WebpkiOnly;
+    }
+    if !input.read {
+        return AdmitHttpTrustOutcome::Unreadable {
+            error: refused(HttpTrustRefusalReason::Unreadable),
+        };
+    }
+    if input.bytes > CA_FILE_MAX_BYTES {
+        return AdmitHttpTrustOutcome::TooLarge {
+            error: refused(HttpTrustRefusalReason::TooLarge),
+        };
+    }
+    if input.certificates <= 0 {
+        return AdmitHttpTrustOutcome::NoCertificate {
+            error: refused(HttpTrustRefusalReason::NoCertificate),
+        };
+    }
+    AdmitHttpTrustOutcome::Extended
+}
+
+/// `reason` as the enum `loom.agent.HttpTrustRefusalReason` spells it.
+pub fn http_trust_refusal_spelling(reason: HttpTrustRefusalReason) -> &'static str {
+    match reason {
+        HttpTrustRefusalReason::Unreadable => "Unreadable",
+        HttpTrustRefusalReason::TooLarge => "TooLarge",
+        HttpTrustRefusalReason::NoCertificate => "NoCertificate",
+    }
+}
+
+/// The roots every `http` binding read trusts beside the webpki roots: none by default, the
+/// certificates of the file [`CA_FILE_ENV`] names when [`http_trust`] takes it.
+#[derive(Clone, Default)]
+pub struct HttpTrust {
+    roots: Vec<Certificate>,
+}
+
+impl HttpTrust {
+    /// How many certificates this trust adds to the webpki roots.
+    #[must_use]
+    pub fn roots(&self) -> usize {
+        self.roots.len()
+    }
+}
+
+impl fmt::Debug for HttpTrust {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HttpTrust")
+            .field("roots", &self.roots.len())
+            .finish()
+    }
+}
+
+/// Why [`http_trust`] refuses the file [`CA_FILE_ENV`] names. Its text names the variable, the
+/// reason in the enum's spelling and the path, never the file's content.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HttpTrustError {
+    /// Why, as `loom.agent.HttpTrustRefused` holds it.
+    pub reason: HttpTrustRefusalReason,
+    /// The path the variable names.
+    pub path: PathBuf,
+    /// What the host found: the read's error, the bound, or what a certificate needs.
+    pub detail: String,
+}
+
+impl fmt::Display for HttpTrustError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{CA_FILE_ENV}: {}: the file {} {}",
+            http_trust_refusal_spelling(self.reason),
+            self.path.display(),
+            self.detail
+        )
+    }
+}
+
+impl std::error::Error for HttpTrustError {}
+
+/// The file at `path`, read as a regular file up to one byte past [`CA_FILE_MAX_BYTES`].
+fn read_bounded(path: &Path) -> std::io::Result<Vec<u8>> {
+    if !std::fs::metadata(path)?.is_file() {
+        return Err(std::io::Error::other("is not a regular file"));
+    }
+    let bound = u64::try_from(CA_FILE_MAX_BYTES).unwrap_or(u64::MAX) + 1;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take(bound)
+        .read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+/// The PEM certificates of `pem` when a TLS client takes every one of them as a root, else none:
+/// a block that does not decode, or a certificate rustls refuses as a trust anchor, makes the file
+/// hold none, so a read never fails later on a root the host took at start-up.
+fn roots_of(pem: &[u8]) -> Vec<Certificate> {
+    let Ok(roots) = Certificate::from_pem_bundle(pem) else {
+        return Vec::new();
+    };
+    let client = roots
+        .iter()
+        .fold(
+            reqwest::Client::builder().tls_built_in_root_certs(false),
+            |builder, root| builder.add_root_certificate(root.clone()),
+        )
+        .build();
+    if client.is_err() {
+        return Vec::new();
+    }
+    roots
+}
+
+/// The trust of `value`, the value of [`CA_FILE_ENV`] on the host (`None` when unset): decided
+/// once by `loom.agent.AdmitHttpTrust` ([`admit_http_trust`]) over whether it names a path (set
+/// to text that is not blank; the text around it is trimmed, as a Secret's trailing newline),
+/// whether that file was read, its bytes and its certificates.
+///
+/// # Errors
+/// A refusal of [`admit_http_trust`]: the file cannot be read as a regular file, holds more than
+/// [`CA_FILE_MAX_BYTES`], holds no certificate, or holds any block a TLS client does not take as a
+/// root (all or nothing: one such block refuses the whole file).
+pub fn http_trust(value: Option<&OsStr>) -> Result<HttpTrust, HttpTrustError> {
+    let path = value.and_then(|value| match value.to_str() {
+        Some(text) if text.trim().is_empty() => None,
+        Some(text) => Some(PathBuf::from(text.trim())),
+        None => Some(PathBuf::from(value)),
+    });
+    let read = path.as_deref().map(read_bounded);
+    let bytes = match &read {
+        Some(Ok(bytes)) => bytes.as_slice(),
+        _ => &[],
+    };
+    let length = i64::try_from(bytes.len()).unwrap_or(i64::MAX);
+    let roots = if length > CA_FILE_MAX_BYTES {
+        Vec::new()
+    } else {
+        roots_of(bytes)
+    };
+    let refusal = |error: HttpTrustRefused, detail: String| HttpTrustError {
+        reason: error.reason,
+        path: path.clone().unwrap_or_default(),
+        detail,
+    };
+    match admit_http_trust(&AdmitHttpTrust {
+        named: path.is_some(),
+        read: matches!(read, Some(Ok(_))),
+        bytes: length,
+        certificates: i64::try_from(roots.len()).unwrap_or(i64::MAX),
+    }) {
+        AdmitHttpTrustOutcome::WebpkiOnly => Ok(HttpTrust::default()),
+        AdmitHttpTrustOutcome::Unreadable { error } => Err(refusal(
+            error,
+            match read {
+                Some(Err(why)) => format!("cannot be read: {why}"),
+                _ => "cannot be read".to_owned(),
+            },
+        )),
+        AdmitHttpTrustOutcome::TooLarge { error } => Err(refusal(
+            error,
+            format!("holds more than {CA_FILE_MAX_BYTES} bytes"),
+        )),
+        AdmitHttpTrustOutcome::NoCertificate { error } => Err(refusal(
+            error,
+            "holds no PEM certificate, or one a TLS client does not take as a root".to_owned(),
+        )),
+        AdmitHttpTrustOutcome::Extended => Ok(HttpTrust { roots }),
+    }
+}
 
 /// Decides `loom.agent.AdmitHttpRead` (`ess/domains/agent.yaml`): the first refusal in
 /// declaration order, else `admitted`.
@@ -130,6 +320,7 @@ fn utf8_within(bytes: &[u8], max: usize) -> String {
 #[derive(Debug, Clone)]
 pub struct HttpGet {
     timeout: Duration,
+    trust: HttpTrust,
 }
 
 impl Default for HttpGet {
@@ -139,18 +330,26 @@ impl Default for HttpGet {
 }
 
 impl HttpGet {
-    /// A reader bounded by [`HTTP_TIMEOUT`].
+    /// A reader bounded by [`HTTP_TIMEOUT`], trusting the webpki roots.
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            timeout: HTTP_TIMEOUT,
-        }
+        Self::with_timeout(HTTP_TIMEOUT)
     }
 
     /// A reader whose every read is bounded by `timeout`: connecting, and the whole exchange.
     #[must_use]
     pub fn with_timeout(timeout: Duration) -> Self {
-        Self { timeout }
+        Self {
+            timeout,
+            trust: HttpTrust::default(),
+        }
+    }
+
+    /// This reader, trusting `trust`'s certificates beside the webpki roots on every read.
+    #[must_use]
+    pub fn with_trust(mut self, trust: HttpTrust) -> Self {
+        self.trust = trust;
+        self
     }
 }
 
@@ -259,7 +458,14 @@ impl HttpReader for HttpGet {
             .map_err(|error| {
                 HttpReadError::Unavailable(format!("no runtime for the read: {error}"))
             })?;
-        let client = reqwest::Client::builder()
+        // The webpki roots stay; the host's `LOOM_HTTP_CA_FILE` certificates are added beside them.
+        let client = self
+            .trust
+            .roots
+            .iter()
+            .fold(reqwest::Client::builder(), |builder, root| {
+                builder.add_root_certificate(root.clone())
+            })
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
             .connect_timeout(self.timeout)

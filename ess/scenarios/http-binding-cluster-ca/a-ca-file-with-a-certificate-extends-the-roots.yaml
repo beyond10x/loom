@@ -1,0 +1,16 @@
+# story http-binding-cluster-ca: a readable `LOOM_HTTP_CA_FILE` within the bound holding a
+# certificate extends the roots every `http` binding read trusts, beside the webpki roots.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-ca-file-with-a-certificate-extends-the-roots
+summary: A `LOOM_HTTP_CA_FILE` holding a certificate within 1048576 bytes extends the webpki roots.
+
+timeline:
+  - at: 2026-10-26T00:00:00Z
+    command: loom.agent.AdmitHttpTrust
+    input: {named: true, read: true, bytes: 1182, certificates: 1}
+    outcome: extended
+  - at: 2026-10-26T00:01:00Z
+    command: loom.agent.AdmitHttpTrust
+    input: {named: true, read: true, bytes: 1048576, certificates: 2}
+    outcome: extended

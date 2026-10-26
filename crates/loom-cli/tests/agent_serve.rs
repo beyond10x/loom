@@ -17,9 +17,12 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use rcgen::{BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use serde_json::{Value, json};
 
 const CATALOG: &str = include_str!("fixtures/catalog-route/catalog.toml");
@@ -530,7 +533,8 @@ runtime:
             .env("HOME", &home)
             .env("CODEX_HOME", &home)
             .env("XDG_DATA_HOME", &home)
-            .env_remove("RUST_LOG");
+            .env_remove("RUST_LOG")
+            .env_remove("LOOM_HTTP_CA_FILE");
         command
     }
 
@@ -815,6 +819,71 @@ fn agent_serve_refuses_to_start_without_the_a2a_bearer() {
     }
 }
 
+/// `LOOM_HTTP_CA_FILE` naming a missing file, an empty file, a file holding no certificate or one
+/// past 1048576 bytes stops the host with exit 1 naming the variable and the reason, before any
+/// read, model call or record, and never prints the file (`story:http-binding-cluster-ca`).
+#[test]
+fn agent_serve_refuses_to_start_on_an_unusable_http_ca_file() {
+    let scratch = Scratch::new("ca-file", 3600);
+    let catalog = scratch.catalog("http://127.0.0.1:1/v1");
+    let text = "the cluster CA is in the service account's ca.crt, not here\n";
+    let mut large = text.repeat(1_048_576 / text.len() + 1).into_bytes();
+    large.truncate(1_048_577);
+    let cases: [(&str, Option<&[u8]>, &str); 4] = [
+        ("missing.pem", None, "Unreadable"),
+        ("empty.pem", Some(b""), "NoCertificate"),
+        ("text.pem", Some(text.as_bytes()), "NoCertificate"),
+        ("large.pem", Some(&large), "TooLarge"),
+    ];
+    for (name, bytes, reason) in cases {
+        let path = scratch.root.join(name);
+        if let Some(bytes) = bytes {
+            fs::write(&path, bytes).unwrap();
+        }
+        let output = scratch
+            .serve_command(&catalog)
+            .arg("--once")
+            .env("LOOM_HTTP_CA_FILE", &path)
+            .output()
+            .expect("run b10x-loom");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{name}: {stderr}");
+        assert!(
+            stderr.contains(&format!("LOOM_HTTP_CA_FILE: {reason}")),
+            "{name}: {stderr}"
+        );
+        assert!(
+            !stderr.contains("service account"),
+            "the file is printed: {stderr}"
+        );
+        assert!(scratch.argv().is_empty(), "{name}: nothing was read");
+        assert!(
+            !scratch.state().join("record.jsonl").exists(),
+            "{name}: nothing was recorded"
+        );
+    }
+}
+
+/// `LOOM_HTTP_CA_FILE` set to blank text is no setting: the host starts as without it, here
+/// reaching the next start-up check, the A2A bearer.
+#[test]
+fn agent_serve_takes_a_blank_http_ca_file_as_no_setting() {
+    let scratch = Scratch::new("ca-file-blank", 3600);
+    scratch.expose_a2a(free_port());
+    let catalog = scratch.catalog("http://127.0.0.1:1/v1");
+    let output = scratch
+        .serve_command(&catalog)
+        .args(["--once", "--a2a-address", "127.0.0.1"])
+        .env("LOOM_HTTP_CA_FILE", " \n")
+        .env_remove("LOOM_A2A_BEARER")
+        .output()
+        .expect("run b10x-loom");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("LOOM_A2A_BEARER"), "{stderr}");
+    assert!(!stderr.contains("LOOM_HTTP_CA_FILE"), "{stderr}");
+}
+
 /// With `expose.a2a` and its bearer the served agent answers A2A beside the poll: the probes
 /// without a bearer, the card and every message only with it, and a message is one turn on
 /// `inbound-answer@1` answered with its record. Nothing is sent through A2A; SIGTERM ends both.
@@ -1081,4 +1150,285 @@ fn agent_serve_answers_a2a_without_a_channel() {
         a2a_request(port, "GET", "/live", None, None).is_none(),
         "the listener stopped with the host"
     );
+}
+
+// ---- story:http-binding-cluster-ca ---------------------------------------------------------------
+
+/// The path the `logs` binding allows, read with `kind: get`.
+const LOGS_PATH: &str = "/api/v1/query";
+/// What the cluster-CA-signed endpoint answers.
+const LOGS_BODY: &str = r#"{"status":"success","data":["cluster-ca-endpoint-answered"]}"#;
+
+/// A cluster CA minted when the test runs, and an endpoint certificate for `127.0.0.1` it signs.
+/// No key is committed.
+struct ClusterCa {
+    /// The CA's certificate, PEM: what `LOOM_HTTP_CA_FILE` names.
+    pem: String,
+    /// The endpoint's certificate and key.
+    endpoint: (CertificateDer<'static>, PrivateKeyDer<'static>),
+}
+
+impl ClusterCa {
+    fn mint() -> Self {
+        let ca_key = KeyPair::generate().expect("a CA key");
+        let mut ca = CertificateParams::new(Vec::<String>::new()).expect("CA parameters");
+        ca.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        ca.distinguished_name
+            .push(DnType::CommonName, "loom agent serve test cluster CA");
+        let ca_cert = ca.self_signed(&ca_key).expect("a self-signed CA");
+        let key = KeyPair::generate().expect("an endpoint key");
+        let mut endpoint =
+            CertificateParams::new(vec!["127.0.0.1".to_owned()]).expect("endpoint parameters");
+        endpoint.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+        let cert = endpoint
+            .signed_by(&key, &ca_cert, &ca_key)
+            .expect("an endpoint certificate");
+        Self {
+            pem: ca_cert.pem(),
+            endpoint: (
+                cert.der().clone(),
+                PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key.serialize_der())),
+            ),
+        }
+    }
+
+    /// Writes the CA's PEM into `scratch` and returns its path.
+    fn file(&self, scratch: &Scratch) -> PathBuf {
+        let path = scratch.root.join("cluster-ca.pem");
+        fs::write(&path, self.pem.as_bytes()).unwrap();
+        path
+    }
+
+    /// A TLS listener on the loopback presenting the endpoint certificate: its `https` base URL,
+    /// and a thread answering the first connection with [`LOGS_BODY`] that returns the request
+    /// head it read after the handshake, or `None` when the handshake failed or nothing connected
+    /// within 60 s.
+    fn serve(&self) -> (String, JoinHandle<Option<String>>) {
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let config = Arc::new(
+            rustls::ServerConfig::builder_with_provider(provider)
+                .with_safe_default_protocol_versions()
+                .expect("protocol versions")
+                .with_no_client_auth()
+                .with_single_cert(vec![self.endpoint.0.clone()], self.endpoint.1.clone_key())
+                .expect("a server configuration"),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let base = format!("https://{}", listener.local_addr().unwrap());
+        let handle = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(60);
+            let socket = loop {
+                match listener.accept() {
+                    Ok((socket, _)) => break socket,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if Instant::now() >= deadline {
+                            return None;
+                        }
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                    Err(_) => return None,
+                }
+            };
+            socket.set_nonblocking(false).ok()?;
+            socket
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .ok()?;
+            let connection = rustls::ServerConnection::new(config).ok()?;
+            let mut tls = rustls::StreamOwned::new(connection, socket);
+            let mut seen = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            while !seen.windows(4).any(|w| w == b"\r\n\r\n") {
+                let read = tls.read(&mut buffer).ok()?;
+                if read == 0 {
+                    return None;
+                }
+                seen.extend_from_slice(&buffer[..read]);
+            }
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{LOGS_BODY}",
+                LOGS_BODY.len()
+            );
+            tls.write_all(response.as_bytes()).ok()?;
+            tls.conn.send_close_notify();
+            tls.flush().ok()?;
+            let _ = tls.sock.shutdown(std::net::Shutdown::Both);
+            Some(String::from_utf8_lossy(&seen).into_owned())
+        });
+        (base, handle)
+    }
+}
+
+impl Scratch {
+    /// Adds the `http` binding `logs` at `base` (one allowed path) to the spec, and lets the
+    /// `answer` state read it.
+    fn https_logs(&self, base: &str) {
+        let spec = fs::read_to_string(self.spec()).unwrap();
+        let binding = format!(
+            "search: docs.search}}\n  - {{name: logs, kind: http, base_url: {base}, allow_paths: [{LOGS_PATH}], method: GET, max_bytes: 4096}}\n"
+        );
+        let changed = spec
+            .replace("sources: [docs]}", "sources: [docs, logs]}")
+            .replace("search: docs.search}\n", &binding);
+        assert_ne!(changed, spec, "the spec gained the logs binding");
+        fs::write(self.spec(), changed).unwrap();
+    }
+}
+
+/// The model's answers for one turn that reads `logs` and proposes, after the classifier's.
+fn reads_the_logs() -> Vec<Vec<u8>> {
+    let select = |action: &str| sse(AGENT, "select_action", json!({ "action": action }));
+    vec![
+        sse(
+            CLASSIFIER,
+            "classify_item",
+            json!({"intent": "ask", "hints": ["logs"], "confidence": 0.9}),
+        ),
+        select("source.read"),
+        sse(
+            AGENT,
+            "action_arguments",
+            json!({"source": "logs", "kind": "get", "input": {"path": LOGS_PATH, "query": {"query": "up"}}}),
+        ),
+        select("reply.propose"),
+        sse(AGENT, "action_arguments", json!({"text": REPLY})),
+    ]
+}
+
+/// The endpoint's answer reached the model: a request after the read carries [`LOGS_BODY`]'s
+/// marker, as data in the transcript.
+fn assert_read_reached_the_model(models: JoinHandle<Vec<String>>) {
+    let requests = models.join().expect("the models answered");
+    assert!(
+        requests[2..]
+            .iter()
+            .any(|request| request.contains("cluster-ca-endpoint-answered")),
+        "the endpoint's answer never reached the model: {requests:?}"
+    );
+}
+
+/// With `LOOM_HTTP_CA_FILE` naming a cluster CA's PEM file, a turn of the host's own agent reads
+/// an `https` binding that CA signs: the endpoint receives the GET after a completed handshake,
+/// the turn records the read and its answer reaches the model. The host's agent is given the
+/// file's roots (`crates/loom-cli/src/main.rs`, `SpecPlugin::with_http_trust`), not only the A2A
+/// listener's.
+#[test]
+fn agent_serve_reads_an_https_binding_a_cluster_ca_signs() {
+    let scratch = Scratch::new("ca-host", 0);
+    let ca = ClusterCa::mint();
+    let (base, endpoint) = ca.serve();
+    scratch.https_logs(&base);
+    let mut responses = reads_the_logs();
+    let select = |action: &str| sse(AGENT, "select_action", json!({ "action": action }));
+    responses.push(select("reply.send"));
+    responses.push(sse(
+        AGENT,
+        "action_arguments",
+        json!({"channel": CHANNEL, "thread_ts": scratch.ts, "text": REPLY}),
+    ));
+    let (base_url, models) = serve(responses);
+    let catalog = scratch.catalog(&base_url);
+
+    let output = scratch
+        .serve_command(&catalog)
+        .arg("--once")
+        .env("LOOM_HTTP_CA_FILE", ca.file(&scratch))
+        .output()
+        .expect("run b10x-loom");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let head = endpoint.join().expect("the endpoint thread finished");
+    let head = head.unwrap_or_else(|| {
+        panic!(
+            "no GET reached the endpoint after a handshake ({}):\n{stdout}\n{stderr}",
+            output.status
+        )
+    });
+    assert!(
+        head.starts_with(&format!("GET {LOGS_PATH}?query=up HTTP/1.1")),
+        "{head}"
+    );
+    assert_eq!(output.status.code(), Some(0), "{stdout}\n{stderr}");
+    let record = fs::read_to_string(scratch.state().join("record.jsonl")).unwrap();
+    let line: Value = serde_json::from_str(record.lines().next().expect("one record")).unwrap();
+    assert_eq!(line["reads"][0]["source"], "logs", "{record}");
+    assert_read_reached_the_model(models);
+}
+
+/// With `LOOM_HTTP_CA_FILE` naming a cluster CA's PEM file, a turn reached through the A2A
+/// listener reads an `https` binding that CA signs, as the host's own agent does: the listener's
+/// agent is given the same roots (`crates/loom-cli/src/a2a.rs`, `SpecPlugin::with_http_trust`).
+#[test]
+fn an_a2a_turn_reads_an_https_binding_a_cluster_ca_signs() {
+    let scratch = Scratch::new("ca-a2a", 3600);
+    let port = free_port();
+    scratch.a2a_only(port);
+    let ca = ClusterCa::mint();
+    let (base, endpoint) = ca.serve();
+    scratch.https_logs(&base);
+    let (base_url, models) = serve(reads_the_logs());
+    let catalog = scratch.catalog(&base_url);
+    let mut child = Reaped(
+        scratch
+            .serve_command(&catalog)
+            .args(["--a2a-address", "127.0.0.1"])
+            .env("LOOM_A2A_BEARER", A2A_TOKEN)
+            .env("LOOM_HTTP_CA_FILE", ca.file(&scratch))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start b10x-loom"),
+    );
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        if let Some((200, _)) = a2a_request(port, "GET", "/ready", None, None) {
+            break;
+        }
+        assert!(
+            child.0.try_wait().unwrap().is_none(),
+            "the host ended before its listener answered"
+        );
+        assert!(Instant::now() < deadline, "no readiness in 60 s");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let send = json!({"jsonrpc": "2.0", "id": "q-1", "method": "SendMessage",
+        "params": {"message": {"messageId": "m-1", "role": "ROLE_USER",
+            "parts": [{"text": "Is the deploy up?"}]}}});
+
+    let (status, answer) = a2a_request(port, "POST", "/a2a", Some(A2A_TOKEN), Some(&send)).unwrap();
+
+    let head = endpoint.join().expect("the endpoint thread finished");
+    let head =
+        head.unwrap_or_else(|| panic!("no GET reached the endpoint after a handshake:\n{answer}"));
+    assert!(
+        head.starts_with(&format!("GET {LOGS_PATH}?query=up HTTP/1.1")),
+        "{head}"
+    );
+    assert_eq!(status, 200, "{answer}");
+    let answer: Value = serde_json::from_str(&answer).unwrap();
+    let task = &answer["result"]["task"];
+    assert_eq!(task["status"]["state"], "TASK_STATE_COMPLETED", "{answer}");
+    let record = &task["artifacts"][0]["parts"][1]["data"];
+    assert_eq!(record["outcome"], "proposed", "{answer}");
+    assert_eq!(record["reads"][0]["source"], "logs", "{answer}");
+    assert_read_reached_the_model(models);
+
+    let killed = Command::new("kill")
+        .args(["-TERM", &child.0.id().to_string()])
+        .status()
+        .expect("kill");
+    assert!(killed.success());
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "SIGTERM did not stop the host in 30 s"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert_eq!(status.code(), Some(0));
 }

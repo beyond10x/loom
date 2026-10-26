@@ -230,6 +230,7 @@ impl ConformanceTarget for LoomTarget {
             agent::ADMIT_SEND => agent::admit_send_command(input),
             agent::ADMIT_HTTP_READ => agent::admit_http_read_command(input),
             agent::BOUND_HTTP_ANSWER => agent::bound_http_answer_command(input),
+            agent::ADMIT_HTTP_TRUST => agent::admit_http_trust_command(input),
             a2a::ADMIT_A2A_REQUEST => a2a::admit_a2a_request_command(input),
             a2a::ADMIT_SERVE => a2a::admit_serve_command(input),
             other => {

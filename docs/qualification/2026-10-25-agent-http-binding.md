@@ -30,10 +30,22 @@ reader, with no network and no credential, and passes in the unit's gate:
   `path_allowed` function (`crates/loom-agent/src/http.rs`) or of
   `loom_sdk::agent::plain_http_path`; only the Rust tests in `crates/loom-agent/tests/http.rs`,
   `check.rs` and `adv_http_binding.rs` do.
-- An `https` `base_url` is verified against the webpki roots only: the reader has no cluster-CA
-  setting yet, so an endpoint whose certificate a cluster CA signs fails the read as unavailable.
-  The TLS backend (reqwest `rustls-tls-webpki-roots`) is enabled by another dependency's features
-  in the workspace build, not by `crates/loom-agent/Cargo.toml`, and no test reads an `https` URL.
+- Cluster CA (updated 2026-10-26, `story:http-binding-cluster-ca`). Verified offline: an `https`
+  loopback endpoint whose certificate a CA minted at test time signs is unavailable to the reader
+  without `LOOM_HTTP_CA_FILE` and read with that CA's PEM file
+  (`crates/loom-agent/tests/http_trust.rs`,
+  `without_the_setting_an_endpoint_a_cluster_ca_signs_is_unavailable`,
+  `with_the_ca_file_the_endpoint_a_cluster_ca_signs_is_read`); a missing, empty, certificate-less
+  or over-1048576-byte file is refused naming the variable and not the file, by `http_trust` and
+  by `agent serve` with exit 1 (`agent_serve_refuses_to_start_on_an_unusable_http_ca_file` in
+  `crates/loom-cli/tests/agent_serve.rs`); `loom.agent.AdmitHttpTrust` is conformed by
+  `task conform`. `crates/loom-agent/Cargo.toml` now declares reqwest's
+  `rustls-tls-webpki-roots` itself. Not verified: no run against a real cluster CA or an
+  in-cluster endpoint; no test reads an endpoint the webpki roots sign with the setting present
+  (that needs the network), so that the file's roots are added beside the webpki roots rather
+  than instead of them rests on the reader's code (`HttpGet::read` adds them to a client that
+  keeps its built-in roots); no `agent serve` test starts with a valid CA file, because the
+  command line's tests mint no certificate.
 - No real log or metrics endpoint was read: every answer in the tests comes from a loopback
   listener, so what a real endpoint answers for an allowed path, and whether `max_bytes` of
   262144 is a useful bound for one, is unverified until the manual run.

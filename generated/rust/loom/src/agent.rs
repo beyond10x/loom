@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 07ffbf64bb72f343da062e4358fa115d25faab45d924b8c2f49b08afd1505c2a
-// contract digest 24f6dfbec7944350b2c11ba13831b80eba85d7bf29c68207b9b3abb2798be2a0
+// model digest bd0680f8ac3534518a439d54a62dfd2a90bf5c733881ebeb4328aed4f2b64019
+// contract digest 686d3e50c2ac373e8881a3960e68cf840d8e87f71ccb441f5efdc3580e3c3fa1
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Agent — `loom.agent`.
@@ -260,6 +260,17 @@ pub enum HttpReadRefusalReason {
     Redirected,
     /// `FailedStatus`.
     FailedStatus,
+}
+
+/// HttpTrustRefusalReason — `loom.agent.HttpTrustRefusalReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HttpTrustRefusalReason {
+    /// `Unreadable`.
+    Unreadable,
+    /// `TooLarge`.
+    TooLarge,
+    /// `NoCertificate`.
+    NoCertificate,
 }
 
 /// InnerLoop — `loom.agent.InnerLoop`.
@@ -590,6 +601,49 @@ pub enum AdmitHttpReadOutcome {
     Admitted,
 }
 
+/// AdmitHttpTrust — the input of `loom.agent.AdmitHttpTrust`.
+///
+/// Everything it can result in is [`AdmitHttpTrustOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmitHttpTrust {
+    /// `named` — `Boolean`.
+    pub named: bool,
+    /// `read` — `Boolean`.
+    pub read: bool,
+    /// `bytes` — `Integer`.
+    pub bytes: i64,
+    /// `certificates` — `Integer`.
+    pub certificates: i64,
+}
+
+/// Everything `loom.agent.AdmitHttpTrust` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdmitHttpTrustOutcome {
+    /// `unreadable` — when `(named == true and read == false)`.
+    Unreadable {
+        /// Why it was refused: `loom.agent.HttpTrustRefused`.
+        error: HttpTrustRefused,
+    },
+    /// `too-large` — when `(named == true and bytes > 1048576)`.
+    TooLarge {
+        /// Why it was refused: `loom.agent.HttpTrustRefused`.
+        error: HttpTrustRefused,
+    },
+    /// `no-certificate` — when `(named == true and certificates <= 0)`.
+    NoCertificate {
+        /// Why it was refused: `loom.agent.HttpTrustRefused`.
+        error: HttpTrustRefused,
+    },
+    /// `webpki-only` — when `named == false`.
+    WebpkiOnly,
+    /// `extended` — otherwise.
+    Extended,
+}
+
 /// AdmitSend — the input of `loom.agent.AdmitSend`.
 ///
 /// Everything it can result in is [`AdmitSendOutcome`].
@@ -783,6 +837,13 @@ pub struct HttpReadRefused {
     pub reason: HttpReadRefusalReason,
 }
 
+/// The declared error `loom.agent.HttpTrustRefused`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HttpTrustRefused {
+    /// `reason` — `loom.agent.HttpTrustRefusalReason`.
+    pub reason: HttpTrustRefusalReason,
+}
+
 /// The declared error `loom.agent.SendRefused`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SendRefused {
@@ -836,6 +897,17 @@ pub mod obligations {
         ///
         /// `Err` is the typed refusal of a request the model declares no outcome for.
         fn admit_http_read(&mut self, input: super::AdmitHttpRead) -> Result<super::AdmitHttpReadOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `loom.agent.AdmitHttpTrust` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait AdmitHttpTrustBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.agent.AdmitHttpTrust`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn admit_http_trust(&mut self, input: super::AdmitHttpTrust) -> Result<super::AdmitHttpTrustOutcome, crate::obligation::UnmetObligation>;
     }
 
     /// The behaviour `loom.agent.AdmitSend` — generated.
