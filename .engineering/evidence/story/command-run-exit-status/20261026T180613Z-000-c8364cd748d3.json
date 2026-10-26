@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-26T18:06:13Z",
+  "actor": "human:timo",
+  "artifact": "story:command-run-exit-status",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "new behaviour the baseline cannot show: the CRD at 51bde991 has no status.run and no Completed condition type; at a69e9d3b status.run carries exitCode and finishedAt (git diff deploy/crd), and tests a_completed_run_reports_exit_code_0 and a_failed_run_reports_its_exit_code pass in cargo test -p b10x-loom-operator (174 passed, 0 failed); VERIFIED",
+    "reference": "u2/verify-crd.diff (coordinator scratch)"
+  }
+}

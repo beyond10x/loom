@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-26T19:10:25Z",
+  "actor": "human:timo",
+  "artifact": "story:loom-agent-spec-env",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "new behaviour the baseline cannot show: the CRD at e20461ad has no spec.env; at ee95b29b spec.env (list of name/value) is in deploy/crd (git diff deploy/crd), and spec_env_values_reach_the_container and a_credential_in_spec_env_is_refused_without_repeating_it pass in cargo test -p b10x-loom-operator (146 passed, 0 failed, implementor round 2); VERIFIED",
+    "reference": "u3/verify-crd.diff (coordinator scratch)"
+  }
+}
