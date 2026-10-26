@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-26T20:13:04Z",
+  "actor": "human:timo",
+  "artifact": "story:command-opaque-config-files",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "new behaviour the baseline cannot show: the CRD at 204e0a89 requires spec.agent and has no spec.configFiles; at 693915c1 spec.agent is optional and spec.configFiles is declared (git diff deploy/crd), and config_files_are_written_verbatim_under_config passes in cargo test -p b10x-loom-operator (163 passed, 0 failed, implementor round 2); VERIFIED",
+    "reference": "u4/verify-crd.diff (coordinator scratch)"
+  }
+}

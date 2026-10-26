@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-26T20:13:04Z",
+  "actor": "human:timo",
+  "artifact": "story:takt-delivery-fixture-args",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "new behaviour the baseline cannot show: golden/takt-delivery.yaml at 597f3334 passes args run, --repo, /workspace/takt after the image entrypoint; at 171d55b6 only --iterations 1, no other golden changed (git diff tests/golden), and the_takt_delivery_fixture_runs_takt_once passes; VERIFIED",
+    "reference": "u4/verify-fixture.diff (coordinator scratch); commit 171d55b6"
+  }
+}
