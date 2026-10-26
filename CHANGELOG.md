@@ -15,7 +15,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Added
 
 - `loom.resource`: the states `Completed` and `Failed`, the command `ObserveRun` (`RunPhase` Active, Succeeded, Failed; outcomes `still-active`, `completed`, `failed`, `finished`, `no-run`, `unknown`) and the events `LoomAgentRunObserved`, `LoomAgentCompleted`, `LoomAgentFailed`; `LoomAgentRecord::observe_run` (story:command-variant-runs-once)
-- `b10x-loom-operator`: a finished Job is not started again; a new generation deletes the older Job (background propagation) and creates it on the next reconcile; the status of a `Command` resource reads `Available` `RunNotFinished`, `RunSucceeded` or `RunFailed` (story:command-variant-runs-once)
+- `b10x-loom-operator`: a finished Job is not started again and a Job of the current generation is never sent again; a new generation deletes the older Job, and a Command Deployment an earlier release made, in the foreground and creates the Job only once both are gone; every child delete now propagates in the foreground; the status of a `Command` resource reads `Available` `RunNotFinished`, `RunSucceeded` or `RunFailed` (story:command-variant-runs-once)
 
 ### Changed
 

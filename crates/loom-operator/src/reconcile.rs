@@ -24,16 +24,19 @@
 //! 5. A `Running` or `Degraded` resource has its children read again: a child a predecessor
 //!    controls is deleted and the children are applied on the next reconcile, after [`RETRY`]; a
 //!    child someone else controls fails the reconcile ([`Error::NotOwned`]) and is never taken
-//!    over. A `Command` resource's Job whose pod template carries another generation is deleted
-//!    the same way, because a Job's pod template cannot change: the next reconcile creates it at
-//!    the resource's generation. A Job that has finished (`Complete` or `Failed`) is not applied
-//!    again; its run is `ObserveRun`. Otherwise the children are applied by server-side apply,
-//!    field manager `b10x-loom-operator`, forced; the Deployment's `Available` condition in the
-//!    apply's answer, when its status has observed the applied generation, is
-//!    `ObserveDeployment`, and the Job's run in the apply's answer is `ObserveRun`. Then each
-//!    child it controls that this generation does not render (a Service once `expose.a2a` is
-//!    gone, the ServiceAccount an earlier generation named) is deleted. Every delete propagates
-//!    in the background, so a Job's pod goes with it.
+//!    over. Before a `Command` resource's Job is created, its Job of another generation (a Job's
+//!    pod template cannot change) and a Deployment an earlier release made for it are deleted;
+//!    while either still terminates nothing is applied and the reconcile comes again after
+//!    [`RETRY`], so an old pod and the new run never share the workspace. A Job of the
+//!    resource's generation is never sent again: one that has finished (`Complete` or `Failed`)
+//!    has nothing applied and its run is `ObserveRun`; one still active has the other children
+//!    applied and its run, as read, is `ObserveRun`. Otherwise the children are applied by
+//!    server-side apply, field manager `b10x-loom-operator`, forced; the Deployment's `Available`
+//!    condition in the apply's answer, when its status has observed the applied generation, is
+//!    `ObserveDeployment`, and the created Job's run is `ObserveRun`. Then each child it controls
+//!    that this generation does not render (a Service once `expose.a2a` is gone, the
+//!    ServiceAccount an earlier generation named) is deleted. Every delete propagates in the
+//!    foreground: what the child owns, a Job's pod included, goes before it does.
 //! 6. A `Completed` or `Failed` resource has no child applied, read or deleted: its run is over
 //!    until a new generation respecifies it.
 //! 7. The record's row is published as the status by server-side apply on the status
@@ -382,14 +385,16 @@ where
 }
 
 /// Deletes the `K` named `name` in `namespace`, preconditioned on `uid`, the uid read; one that
-/// is gone or was replaced meanwhile is left alone. Propagation is `Background`, so what the child
-/// owns goes too: the API server's default for a Job orphans its pod.
+/// is gone or was replaced meanwhile is left alone. Propagation is `Foreground`: what the child
+/// owns (a Job's pod, a Deployment's ReplicaSets and pods) goes first, and the child stays,
+/// terminating, until it has (the API server's default for a Job orphans its pod). Answers whether
+/// the child is gone: false while it terminates, or when another object took its name.
 async fn delete_uid<K>(
     client: &Client,
     namespace: &str,
     name: &str,
     uid: &str,
-) -> Result<(), kube::Error>
+) -> Result<bool, kube::Error>
 where
     K: Resource<Scope = NamespaceResourceScope, DynamicType = ()>
         + Clone
@@ -402,12 +407,13 @@ where
             uid: Some(uid.to_owned()),
             resource_version: None,
         }),
-        propagation_policy: Some(PropagationPolicy::Background),
+        propagation_policy: Some(PropagationPolicy::Foreground),
         ..DeleteParams::default()
     };
     match api.delete(name, &params).await {
-        Ok(_) => Ok(()),
-        Err(kube::Error::Api(status)) if status.code == 404 || status.code == 409 => Ok(()),
+        Ok(answer) => Ok(answer.is_right()),
+        Err(kube::Error::Api(status)) if status.code == 404 => Ok(true),
+        Err(kube::Error::Api(status)) if status.code == 409 => Ok(false),
         Err(error) => Err(error),
     }
 }
@@ -435,14 +441,14 @@ async fn held_kind(
     }
 }
 
-/// Deletes the child of `kind` named `name` whose uid is `uid`.
+/// Deletes the child of `kind` named `name` whose uid is `uid`; answers whether it is gone.
 async fn delete_kind(
     kind: Kind,
     client: &Client,
     namespace: &str,
     name: &str,
     uid: &str,
-) -> Result<(), kube::Error> {
+) -> Result<bool, kube::Error> {
     match kind {
         Kind::ServiceAccount => delete_uid::<ServiceAccount>(client, namespace, name, uid).await,
         Kind::ConfigMap => delete_uid::<ConfigMap>(client, namespace, name, uid).await,
@@ -749,19 +755,64 @@ enum Observed {
     Job(RunPhase),
 }
 
-/// Applies `children`, and answers what the applied workload reports.
+/// Before a `Command` resource's Job is created: deletes the Job of another generation `stale`
+/// names, and a Deployment of the Job's name the resource or a predecessor controls (one an
+/// earlier release made for a `Command` resource), and answers whether both are gone. Until they
+/// are, the Job waits, so the old pod and the new run never share the workspace. An `AgentServe`
+/// resource's Deployment waits for nothing: it is updated in place, `Recreate`.
+async fn workloads_gone(
+    ctx: &Context,
+    namespace: &str,
+    resource: &str,
+    owner: &str,
+    children: &Children,
+    stale: Option<(&Surveyed, &String, JobRun)>,
+) -> Result<bool, kube::Error> {
+    if !matches!(children.workload, Workload::Job(_)) {
+        return Ok(true);
+    }
+    let mut gone = true;
+    if let Some((job, uid, _)) = stale {
+        if delete_kind(job.kind, &ctx.client, namespace, &job.name, uid).await? {
+            ctx.unremember(resource, job.kind, &job.name);
+        } else {
+            gone = false;
+        }
+    }
+    let deployment = children.workload.name();
+    let kind = Kind::Deployment;
+    if let Holding::Ours(uid) | Holding::Predecessor(uid) =
+        held_kind(kind, &ctx.client, namespace, &deployment, resource, owner).await?
+    {
+        if delete_kind(kind, &ctx.client, namespace, &deployment, &uid).await? {
+            ctx.unremember(resource, kind, &deployment);
+        } else {
+            gone = false;
+        }
+    }
+    Ok(gone)
+}
+
+/// Applies `children`, and answers what the applied workload reports. A Job of this generation
+/// that already runs (`running`, the phase it was read with) is not sent again: its pod template
+/// cannot change, and one rendered since (a new default image, new default resources) would be
+/// refused as immutable for as long as the run lasts.
 async fn apply_children(
     client: &Client,
     namespace: &str,
     children: &Children,
+    running: Option<RunPhase>,
 ) -> Result<Observed, kube::Error> {
     apply(client, namespace, &children.service_account).await?;
     apply(client, namespace, &children.config_map).await?;
-    let observed = match &children.workload {
-        Workload::Deployment(deployment) => {
+    let observed = match (&children.workload, running) {
+        (Workload::Deployment(deployment), _) => {
             Observed::Deployment(availability(&apply(client, namespace, deployment).await?))
         }
-        Workload::Job(job) => Observed::Job(run_phase(&apply(client, namespace, job).await?)),
+        (Workload::Job(_), Some(phase)) => Observed::Job(phase),
+        (Workload::Job(job), None) => {
+            Observed::Job(run_phase(&apply(client, namespace, job).await?))
+        }
     };
     apply(client, namespace, &children.network_policy).await?;
     if let Some(service) = &children.service {
@@ -917,19 +968,22 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                 }
                 return Ok(Action::requeue(RETRY));
             }
-            match job {
-                Some((job, uid, run)) if run.generation != agent.metadata.generation => {
-                    delete_kind(job.kind, &ctx.client, &namespace, &job.name, uid).await?;
-                    ctx.unremember(&name, job.kind, &job.name);
-                    if let Some(row) = row(&ctx, &key) {
-                        publish(&ctx, &namespace, &name, agent.status.as_ref(), &row).await?;
-                    }
-                    return Ok(Action::requeue(RETRY));
+            let running = job
+                .filter(|(_, _, run)| run.generation == agent.metadata.generation)
+                .map(|(_, _, run)| run.phase);
+            if running.is_none()
+                && !workloads_gone(&ctx, &namespace, &name, &owner, children, job).await?
+            {
+                if let Some(row) = row(&ctx, &key) {
+                    publish(&ctx, &namespace, &name, agent.status.as_ref(), &row).await?;
                 }
-                Some((_, _, run)) if run.phase != RunPhase::Active => {
+                return Ok(Action::requeue(RETRY));
+            }
+            match running {
+                Some(phase) if phase != RunPhase::Active => {
                     ctx.record().observe_run(ObserveRun {
                         name: key.clone(),
-                        phase: run.phase,
+                        phase,
                     })?;
                 }
                 _ => {
@@ -937,7 +991,7 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                     for (kind, child) in &current {
                         ctx.remember(&name, *kind, child);
                     }
-                    match apply_children(&ctx.client, &namespace, children).await? {
+                    match apply_children(&ctx.client, &namespace, children, running).await? {
                         Observed::Deployment(Some(availability)) => {
                             ctx.record().observe_deployment(ObserveDeployment {
                                 name: key.clone(),

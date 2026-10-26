@@ -936,12 +936,18 @@ forced); a child someone else controls by then fails the reconcile and is not ta
 up, and each child it controls that this generation does not render (an account an earlier
 generation named, a Service once `expose.a2a` is gone) is deleted. A `Command` resource's Job is
 read first: one whose pod template annotation `loom.beyond10x.dev/generation` is not the
-resource's generation is deleted (a Job's pod template cannot change) and created at the new one on
-the next reconcile; one that has finished (condition `Complete` or `Failed` true, or `succeeded` or
-`failed` above 0) is not applied again and its run is `ObserveRun`; else it is applied and the
-answer's run is `ObserveRun` (no status yet reads Active). A Completed or Failed resource has no
-child applied, read or deleted. Every delete propagates in the background, so a Job's pod goes with
-it. The run is read from the Job, never from a Pod. After a controller restart a finished Job still
+resource's generation is deleted (a Job's pod template cannot change), and so is a Deployment of
+its name an earlier release made for it; while either still terminates nothing is applied and the
+reconcile comes again after 30 s, so an old pod and the new run never share the workspace. Once
+both are gone the Job is created. A Job of the resource's generation is never sent again (a
+controller upgrade that changes the default image or resources would otherwise get `422
+immutable` for the rest of the run): one that has finished (condition `Complete` or `Failed`
+true, or `succeeded` or `failed` above 0) has nothing applied and its run is `ObserveRun`; one
+still active has the other children applied and its run, as read, is `ObserveRun` (no status yet
+reads Active). A Completed or Failed resource has no child applied, read or deleted. Every delete
+propagates in the foreground: a Job's pod, a Deployment's ReplicaSets and pods go before it does.
+An AgentServe resource does not wait for a Job a `Command` generation left: it is deleted by the
+sweep after the Deployment is applied. The run is read from the Job, never from a Pod. After a controller restart a finished Job still
 there is observed, not run again; a Job deleted while the controller was down runs once more. The
 status goes out by server-side apply on `/status`, only when it changed; conditions follow
 `src/status.rs` (a table per state in its module doc; a Command resource's `Available` reads
