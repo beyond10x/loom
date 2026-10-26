@@ -8,7 +8,7 @@ tags:
 - non-interactive
 relations:
 - decides: story:loom-agent-command-variant
-revision: 2
+revision: 3
 ---
 # Filing and approving story:loom-agent-command-variant, wave 2026-10-26-slicec
 
@@ -65,3 +65,25 @@ its implementation commits, the adversary's test commits, the merge into
   passed, 0 failed, 0 skipped, 9 unsupported.
 - The `/config` contract: the `spec.agent` document is written verbatim to `/config/agent.yaml`
   (keys in the order the API server keeps them, as `/etc/agent/agent.yaml` for `agent serve`).
+
+## Follow-up: trial fixes
+
+The orchestrator asked, after the first kind trial on 0.41.0, for a follow-up unit before the 0.42.0
+tag instead of reopening PR 133. It was filed as `story:loom-agent-trial-fixes` and implemented
+by the coordinator on `impl/loom-agent-trial-fixes`:
+
+- ESS first `fdb86b1f` (red: `task drift` exit 201), implementation `9d8c420c`, adversary fixes
+  `1f2ed835`, scenario listing `9aa720bb`; merged as `577aa2d2`, `8eb252bf`, `a9180c30`.
+- Its three points: two Secrets (`secretRef` as environment, `secretFiles` as files); files the pod
+  user owns (init container `stage-secret-files`, `b10x-loom agent stage-files`, dir 0700, files
+  0600); `runtime.connectors` and `deploy.kubernetes.image_repository` optional. The unreleased
+  `spec.secretRef.mountPath` is removed.
+- Adversary pass 1 (`review-result:adversary-trial-fixes-pass-1`): 6 findings, 2 red. F1, F2 and
+  F4 fixed, F3 and F5 documented, F6 accepted as infeasible. The coordinator verified the
+  correction: both red cases green, no test edited. No second attack.
+- The ESS-first scenario was missing from `ess/ess-inputs.yaml` until `9aa720bb`. The gate on
+  `577aa2d2` therefore ran 30 scenarios; the gate on `a9180c30` ran 31.
+- Gate on `a9180c30`: every step of `task check` exit 0, with 417 test-result lines, 2310 passed,
+  0 failed, 9 ignored; `task conform` passed; its suite holds 120 scenarios (the run with the new scenario mutated reported 119 of 120).
+- Not run on a cluster here. Whether `b10x-gates` accepts the staged files was reasoned against
+  kubelet behaviour and held by `adv_staged_files_under_a_setgid_world_writable_root_pass_the_gates_reader`.

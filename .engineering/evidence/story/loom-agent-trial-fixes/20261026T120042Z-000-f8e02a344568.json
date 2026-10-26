@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-26T12:00:42Z",
+  "actor": "human:timo",
+  "artifact": "story:loom-agent-trial-fixes",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check",
+    "reference": "task check steps exit 0 on a9180c30 (ESS 0.69.2): 417 test-result lines, 2310 passed, 0 failed, 9 ignored; loom spec 31 scenarios valid; task conform passed, 120 scenarios (a mutated outcome of the new scenario gives 119 of 120)"
+  }
+}
