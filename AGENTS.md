@@ -822,7 +822,8 @@ outcomes need, so the controller compares the Job's generation itself (§ Operat
 (`name`) gives a Secret as the environment; `spec.secretFiles` (`name`, `mountPath`) gives another
 as files the pod user owns (`story:loom-agent-trial-fixes`), so a pod can hold a model key as an
 environment variable and a forge key as files. `spec.env` (a list of `EnvVar`: `name`, `value`,
-`story:loom-agent-spec-env`) gives plain values to the agent container on either variant; its
+`story:loom-agent-spec-env`) gives values to the agent container on either variant, which the
+kubelet expands (`$(NAME)`) as it does any `env` value; its
 refusals are the controller's (§ Operator, wave decision D5), not the domain's. `runtime.connectors` and
 `deploy.kubernetes.image_repository` in `loom.agent/1` are optional; `agent serve` still refuses a
 spec without `runtime.connectors`. `RecordCheck`
@@ -927,7 +928,12 @@ variant, a credential in a name or value (the list whole, then each value word b
 `spec.command`; `SecretLiteral` at `spec.env[<i>].value` or `.name`, `TooLarge` beyond the bound),
 then a name that is not `[A-Za-z_][A-Za-z0-9_]*` (`NotAVariableName`, `loom.agent`'s reason for
 the same rule), a name in `render::CONTROLLER_ENV` (`HOME`, refused on both variants) or one an
-earlier entry gives (`EnvNameConflict`); a `spec.workspace.mountPath` or
+earlier entry gives (`EnvNameConflict`); then each `spec.env` value and each `spec.command`
+entry again as the kubelet expands it (`$$` is `$`; `$(NAME)` from `render::controller_env`
+and the entries before for a value, the whole environment for a command; an unknown name, a
+`secretRef` key among them, stays as written), whole and word by word (`SecretLiteral`, its detail
+saying it was found after expansion; `TooLarge` when references add more than
+`MAX_EXPANDED_BYTES`, 2 MiB); a `spec.workspace.mountPath` or
 `spec.secretFiles.mountPath` that is not absolute and plain or overlaps `/etc/agent`, `/config`,
 `/var/lib/agent`, `/tmp` or the other (`MountPathInvalid`); a `claimName` not allowed
 (`ClaimNotAllowed`). A `Command` resource's `spec.agent` passes only the credential walk and the

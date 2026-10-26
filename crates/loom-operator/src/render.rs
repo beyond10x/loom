@@ -113,6 +113,16 @@ pub const HOME: &str = "HOME";
 /// Every environment variable the controller sets on a container of either variant; a
 /// `spec.env` entry may name none of them.
 pub const CONTROLLER_ENV: [&str; 1] = [HOME];
+
+/// The environment the controller sets on the agent container of `variant`, each name and
+/// value, in the order the container receives them, before `spec.env`.
+#[must_use]
+pub fn controller_env(variant: AgentVariant) -> Vec<(&'static str, &'static str)> {
+    match variant {
+        AgentVariant::AgentServe => Vec::new(),
+        AgentVariant::Command => vec![(HOME, STATE_DIR)],
+    }
+}
 /// The label that names the namespace a peer stands in, which Kubernetes sets on every namespace.
 const NAMESPACE_LABEL: &str = "kubernetes.io/metadata.name";
 
@@ -437,13 +447,13 @@ impl Renderer<'_> {
     /// The init containers get none of it: they run `b10x-loom` for the controller, not the
     /// agent.
     fn env(&self) -> Option<Vec<EnvVar>> {
-        let own = (self.admitted.variant == AgentVariant::Command).then(|| EnvVar {
-            name: HOME.to_owned(),
-            value: Some(STATE_DIR.to_owned()),
-            value_from: None,
-        });
-        let env: Vec<EnvVar> = own
+        let env: Vec<EnvVar> = controller_env(self.admitted.variant)
             .into_iter()
+            .map(|(name, value)| EnvVar {
+                name: name.to_owned(),
+                value: Some(value.to_owned()),
+                value_from: None,
+            })
             .chain(self.agent.spec.env.iter().flatten().map(|entry| EnvVar {
                 name: entry.name.clone(),
                 value: Some(entry.value.clone()),

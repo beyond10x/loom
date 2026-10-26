@@ -1072,4 +1072,94 @@ fn a_name_given_twice_is_refused_naming_both() {
     }
     let distinct = env(&[("cargo_home", "/a"), ("CARGO_HOME", "/b")]);
     render_document(&command_with(&distinct), &config()).expect("names differ by case");
+
+    let mut many: Vec<(String, String)> = (0..40_000)
+        .map(|index| (format!("V{index}"), "x".to_owned()))
+        .collect();
+    many.push(("V17".to_owned(), "y".to_owned()));
+    let entries: Vec<(&str, &str)> = many
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect();
+    assert_eq!(
+        refusal(&serve_with(&env(&entries)), &config()),
+        "refused: EnvNameConflict at spec.env[40000].name: it repeats spec.env[17].name"
+    );
+}
+
+/// The kubelet expands `$(NAME)` in a value from the entries before it, and in the command from
+/// the whole environment, so each is walked again as the program reads it.
+#[test]
+fn a_credential_joined_by_variable_expansion_is_refused_without_repeating_it() {
+    let joined = TAKT.replace(
+        "--iterations, '1']",
+        "--iterations, '1', --token, '$(PART)_000fake']",
+    );
+    let cases = [
+        (
+            serve_with(&env(&[("PART", "ghp"), ("TOKEN", "$(PART)_000fake")])),
+            "refused: SecretLiteral at spec.env[1].value: a value with the prefix `ghp_`, after \
+             `$(VAR)` expansion",
+        ),
+        (
+            serve_with(&env(&[
+                ("BASE", "https://u:not-a-real-password"),
+                ("URL", "$(BASE)@forge.example/repo"),
+            ])),
+            "refused: SecretLiteral at spec.env[1].value: ",
+        ),
+        (
+            wrapped(
+                &takt_agent(),
+                &format!("{joined}{}", env(&[("PART", "ghp")])),
+            ),
+            "refused: SecretLiteral at spec.command.args[6]: a value with the prefix `ghp_`, \
+             after `$(VAR)` expansion",
+        ),
+        (
+            command_with(&env(&[
+                ("PART", "xoxb"),
+                ("TOKEN", "--token $(PART)-000fake"),
+            ])),
+            "refused: SecretLiteral at spec.env[1].value: a value with the prefix `xoxb-`, after \
+             `$(VAR)` expansion",
+        ),
+    ];
+    for (resource, expected) in cases {
+        let message = refusal(&resource, &config());
+        assert!(message.starts_with(expected), "{expected} <- {message}");
+        for value in ["000fake", "not-a-real-password"] {
+            assert!(!message.contains(value), "{message}");
+        }
+    }
+
+    for admitted in [
+        env(&[("PART", "ghp"), ("TOKEN", "$$(PART)_000fake")]),
+        env(&[("TOKEN", "$(PART)_000fake"), ("PART", "ghp")]),
+        env(&[("TOKEN", "$(FROM_SECRET)_000fake")]),
+        env(&[("CARGO_HOME", "$(HOME)/cargo")]),
+    ] {
+        render_document(&command_with(&admitted), &config())
+            .unwrap_or_else(|error| panic!("{admitted}: {error}"));
+    }
+}
+
+/// References that double a value at each step would expand beyond any memory; past the bound
+/// the expanded text is refused unwalked.
+#[test]
+fn variable_references_expanding_beyond_the_bound_are_too_large() {
+    let mut entries = vec![("V0".to_owned(), "a".repeat(1024))];
+    for index in 1..=12 {
+        entries.push((format!("V{index}"), format!("$(V{0})$(V{0})", index - 1)));
+    }
+    let entries: Vec<(&str, &str)> = entries
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect();
+    assert_eq!(
+        refusal(&serve_with(&env(&entries)), &config()),
+        "refused: TooLarge at spec.env[11].value: its `$(VAR)` references, expanded, add more \
+         than 2097152 bytes, more than the credential walk reads"
+    );
+    render_document(&serve_with(&env(&entries[..10])), &config()).expect("within the bound");
 }

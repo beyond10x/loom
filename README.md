@@ -350,11 +350,15 @@ the environment and `spec.secretFiles` (`name`, `mountPath`) another as files: a
 runs `b10x-loom agent stage-files` to copy its keys into a directory the pod user owns (mode 0700,
 files 0600), since a tool such as `b10x-gates` refuses a key file another user owns or others may
 read. The values must allow both names in `allowedSecretNames`. `spec.env` (a list of `name` and
-`value`) gives plain values, such as `CARGO_HOME` or `CARGO_NET_OFFLINE`, to the agent container
-on either variant, after the controller's own (`HOME` for a `Command` resource) and in the order
-given. The controller refuses a value or name holding a credential (`SecretLiteral`), a name that
-is not `[A-Za-z_][A-Za-z0-9_]*` (`NotAVariableName`), and a name given twice or one it sets
-itself (`EnvNameConflict`; `HOME`, on either variant); a secret belongs in `spec.secretRef`.
+`value`) gives values such as `CARGO_HOME` or `CARGO_NET_OFFLINE` to the agent container on
+either variant, after the controller's own (`HOME` for a `Command` resource) and in the order
+given. The kubelet expands `$(NAME)` in them from the variables before, and in `spec.command`
+from the whole environment, so the controller walks each value and each command entry for a
+credential as written and again after that expansion; it refuses a credential in either form or
+in a name (`SecretLiteral`), a name that is not `[A-Za-z_][A-Za-z0-9_]*` (`NotAVariableName`),
+and a name given twice or one it sets itself (`EnvNameConflict`; `HOME`, on either variant). A
+secret belongs in `spec.secretRef` or `spec.secretFiles`: the walk knows credential shapes, not
+every secret.
 For a `Command` resource the controller checks `spec.agent` only for a credential and against
 the `loom.agent/1` decoder, not the plugin catalog, and walks `spec.command` for a credential too.
 
