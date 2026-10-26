@@ -721,6 +721,7 @@ fn adv2_every_states_status_is_admitted_by_the_crds_status_schema() {
                         deployment: read.map(|availability| DeploymentStatus { availability }),
                         variant,
                         conditions: None,
+                        run: None,
                         state,
                     };
                     let value = serde_json::to_value(status::status(&row)).expect("JSON");

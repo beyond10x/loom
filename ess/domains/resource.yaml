@@ -19,8 +19,9 @@ summary: >-
   The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`): its spec, the
   `loom.agent/1` document and what the pod needs beside it, and its lifecycle as the controller
   reconciles it: applied into Pending, Running or Refused by the spec check, Degraded and back by
-  the child Deployment's availability, Completed or Failed when the child Job's run ends, Pending
-  again on a new generation, and gone on delete.
+  the child Deployment's availability, Completed or Failed when the child Job's run ends, with the
+  program's exit code and the time it ended, Pending again on a new generation, and gone on
+  delete.
 
 naming:
   wire: resource
@@ -104,6 +105,25 @@ types:
     kind: enum
     variants: [Active, Succeeded, Failed]
 
+  # How the child Job's run ended (story command-run-exit-status), read from the Job's own pod,
+  # the one whose controller is the Job: `exit_code` and `finished_at` are the program
+  # container's `state.terminated` (`exitCode`, `finishedAt`), `reason` its terminated reason
+  # (`Completed`, `Error`, `OOMKilled`). A run whose program container's end was never read (its
+  # pod deleted before the controller read it, or a pod that ended before its container ran) has
+  # neither an exit code nor an end time, and `reason` is then the reason of the Job's own
+  # `Failed` or `Complete` condition (`BackoffLimitExceeded`).
+  - name: loom.resource.RunEnd
+    kind: struct
+    fields:
+      - name: exit_code
+        type: Optional<Integer>
+        naming: {wire: exitCode}
+      - name: finished_at
+        type: Optional<Timestamp>
+        naming: {wire: finishedAt}
+      - name: reason
+        type: Optional<String>
+
   # What the spec check said of the spec: its exit code (0, the spec is served) and its message
   # (empty on 0). The controller runs the check in-process before any child exists, with the
   # library behind `b10x-loom agent check`, and records its own refusals of the resource (a Secret
@@ -118,10 +138,12 @@ types:
         type: String
 
   # The Kubernetes condition types the controller publishes: `Checked`, whether the spec check
-  # passed for the observed generation, and `Available`, whether the child Deployment is.
+  # passed for the observed generation; `Available`, whether the child Deployment is; and, for a
+  # `Command` resource only, `Completed`, whether its run ended with exit code 0 (story
+  # command-run-exit-status).
   - name: loom.resource.ConditionType
     kind: enum
-    variants: [Checked, Available]
+    variants: [Checked, Available, Completed]
 
   # A condition's status as Kubernetes spells it, quoted so YAML reads text and not a boolean.
   - name: loom.resource.ConditionStatus
@@ -211,6 +233,11 @@ entities:
       # generation (story loom-agent-command-variant).
       - name: variant
         type: Optional<loom.resource.AgentVariant>
+      # How the `Command` resource's run of this generation ended, recorded when it moves to
+      # Completed or Failed and cleared by a new generation, so a caller reads the program's exit
+      # code from the resource and not from the pod (story command-run-exit-status).
+      - name: run
+        type: Optional<loom.resource.RunEnd>
       # The controller's projection of `state`, `check` and `deployment` as Kubernetes conditions,
       # computed when it publishes the status. No command sets it, because a `sets:` value on ESS
       # 0.69.0 admits no list (a list is read only as the `via:` of a related read, and `[]` needs
@@ -323,21 +350,26 @@ events:
       - name: availability
         type: loom.resource.DeploymentAvailability
 
-  # The child Job's run of a generation ended with exit code 0.
+  # The child Job's run of a generation ended with exit code 0, as far as its pod was read.
   - name: loom.resource.LoomAgentCompleted
     fields:
       - name: name
         type: loom.resource.ResourceName
       - name: generation
         type: Integer
+      - name: exit_code
+        type: Optional<Integer>
 
-  # The child Job's run of a generation ended otherwise.
+  # The child Job's run of a generation ended otherwise: the program's exit code, absent when no
+  # container of the run terminated.
   - name: loom.resource.LoomAgentFailed
     fields:
       - name: name
         type: loom.resource.ResourceName
       - name: generation
         type: Integer
+      - name: exit_code
+        type: Optional<Integer>
 
   # An observation of the child Job whose run has not ended.
   - name: loom.resource.LoomAgentRunObserved
@@ -393,6 +425,7 @@ commands:
           check: {cleared: true}
           deployment: {cleared: true}
           variant: {cleared: true}
+          run: {cleared: true}
         emits: [loom.resource.LoomAgentApplied]
         payload:
           loom.resource.LoomAgentApplied:
@@ -542,13 +575,21 @@ commands:
   # generation: on `format: ess/25` a guard on a subject field (`observed_generation !=
   # input.generation`) and guards on the held state cannot share a command, so the controller
   # observes only a Job whose pod template names the generation the record holds, and deletes any
-  # other.
+  # other. The observation carries how the run ended as far as the Job's own pod says
+  # (`exit_code`, `finished_at`, `reason`, story command-run-exit-status); `completed` and `failed`
+  # record it as `run`, and the other outcomes leave `run` as it was.
   - name: loom.resource.ObserveRun
     input:
       - name: name
         type: loom.resource.ResourceName
       - name: phase
         type: loom.resource.RunPhase
+      - name: exit_code
+        type: Optional<Integer>
+      - name: finished_at
+        type: Optional<Timestamp>
+      - name: reason
+        type: Optional<String>
     outcomes:
       - name: unknown
         unknown_instance: true
@@ -571,21 +612,27 @@ commands:
         when: phase == Succeeded
         moves: loom.resource.LoomAgent.complete
         instance: name
+        sets:
+          run: {exit_code: input.exit_code, finished_at: input.finished_at, reason: input.reason}
         emits: [loom.resource.LoomAgentCompleted]
         payload:
           loom.resource.LoomAgentCompleted:
             name: input.name
             generation: {subject: observed_generation}
+            exit_code: input.exit_code
       - name: failed
         when_subject_state: Running
         when: phase == Failed
         moves: loom.resource.LoomAgent.fail
         instance: name
+        sets:
+          run: {exit_code: input.exit_code, finished_at: input.finished_at, reason: input.reason}
         emits: [loom.resource.LoomAgentFailed]
         payload:
           loom.resource.LoomAgentFailed:
             name: input.name
             generation: {subject: observed_generation}
+            exit_code: input.exit_code
       - name: finished
         when_subject_state: [Completed, Failed]
         preserves: loom.resource.LoomAgent
@@ -635,6 +682,8 @@ views:
         type: Optional<loom.resource.DeploymentStatus>
       - name: variant
         type: Optional<loom.resource.AgentVariant>
+      - name: run
+        type: Optional<loom.resource.RunEnd>
       - name: conditions
         type: Optional<List<loom.resource.Condition>>
       - name: state

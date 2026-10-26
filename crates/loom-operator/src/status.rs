@@ -2,27 +2,32 @@
 //! controller computes for it.
 //!
 //! No `loom.resource` command sets `conditions` (ESS 0.69.0 admits no list under `sets:`), so the
-//! controller projects them from the row's `state`, `check`, `deployment` and `variant`:
+//! controller projects them from the row's `state`, `check`, `deployment`, `variant` and `run`:
 //!
-//! | state | `Checked` | `Available` |
-//! |---|---|---|
-//! | Pending | Unknown, `CheckPending` | Unknown, `CheckPending` |
-//! | Running, `AgentServe` | True, `SpecServeable` | True, `DeploymentAvailable`; Unknown, `DeploymentNotObserved` before the Deployment is read |
-//! | Running, `Command` | True, `SpecAdmitted` | Unknown, `RunNotFinished` |
-//! | Degraded | True, `SpecServeable` | False, `DeploymentUnavailable` |
-//! | Completed | True, `SpecAdmitted` | False, `RunSucceeded` |
-//! | Failed | True, `SpecAdmitted` | False, `RunFailed` |
-//! | Refused | False, `SpecRefused` | False, `SpecRefused` |
+//! | state | `Checked` | `Available` | `Completed` |
+//! |---|---|---|---|
+//! | Pending | Unknown, `CheckPending` | Unknown, `CheckPending` | none |
+//! | Running, `AgentServe` | True, `SpecServeable` | True, `DeploymentAvailable`; Unknown, `DeploymentNotObserved` before the Deployment is read | none |
+//! | Running, `Command` | True, `SpecAdmitted` | Unknown, `RunNotFinished` | Unknown, `RunNotFinished` |
+//! | Degraded | True, `SpecServeable` | False, `DeploymentUnavailable` | none |
+//! | Completed | True, `SpecAdmitted` | False, `RunSucceeded` | True, `RunSucceeded` |
+//! | Failed | True, `SpecAdmitted` | False, `RunFailed` | False, `RunFailed` |
+//! | Refused | False, `SpecRefused` | False, `SpecRefused` | none |
 //!
 //! A `Command` resource's pod is a Job that runs once, so its `Available` reads the Job's run:
 //! not finished while Running, False once the run ended, since nothing runs any more and nothing
-//! starts again before a new generation. Only an `AgentServe` resource reaches Degraded, since
-//! only its Deployment is observed for availability. A row that carries conditions is published
+//! starts again before a new generation. Its `Completed` says how the run ended (story
+//! command-run-exit-status): its message names the program's exit code and when it ended, as the
+//! row's `run` holds them, or, for a run whose program container's end was never read (its pod
+//! gone first, or ended before the container ran), that no exit code was read and the Job's
+//! reason; [`pods_unread`] adds that the pod could not be read when the API server refused the
+//! list. Only an `AgentServe` resource reaches Degraded, since only its Deployment is observed
+//! for availability. A row that carries conditions is published
 //! with its own.
 
 use b10x_loom_resource::model::{
     AgentVariant, CheckResult, Condition, ConditionStatus, ConditionType, DeploymentAvailability,
-    DeploymentStatus, LoomAgentState, LoomAgents,
+    DeploymentStatus, LoomAgentState, LoomAgents, RunEnd,
 };
 
 use crate::resource;
@@ -62,7 +67,27 @@ fn condition_type(kind: ConditionType) -> &'static str {
     match kind {
         ConditionType::Checked => "Checked",
         ConditionType::Available => "Available",
+        ConditionType::Completed => "Completed",
     }
+}
+
+/// How a run that `ended` ("succeeded", "failed") ended, as `run` holds it: the exit code and
+/// when, with the reason; or that no exit code was read, with the reason the Job gave.
+fn run_message(ended: &str, run: Option<&RunEnd>) -> String {
+    let Some(run) = run else {
+        return format!("the Job's run {ended}; its pod was not read");
+    };
+    let mut message = match run.exit_code {
+        Some(code) => format!("the program exited with code {code}"),
+        None => format!("the Job's run {ended} with no exit code read from its pod"),
+    };
+    if let Some(at) = &run.finished_at {
+        message.push_str(&format!(" at {}", at.0));
+    }
+    if let Some(reason) = &run.reason {
+        message.push_str(&format!(" ({reason})"));
+    }
+    message
 }
 
 fn condition_status(status: ConditionStatus) -> &'static str {
@@ -88,13 +113,15 @@ fn condition(
 }
 
 /// The conditions `Checked` and `Available` of a resource in `state`, from its check and what
-/// was last read of its Deployment and the variant its check recorded.
+/// was last read of its Deployment and the variant its check recorded, and, for a `Command`
+/// resource, `Completed` from how its run ended.
 #[must_use]
 pub fn conditions(
     state: LoomAgentState,
     check: Option<&CheckResult>,
     deployment: Option<&DeploymentStatus>,
     variant: Option<AgentVariant>,
+    run: Option<&RunEnd>,
 ) -> Vec<Condition> {
     let message = check.map(|check| check.message.clone()).unwrap_or_default();
     match state {
@@ -127,10 +154,10 @@ pub fn conditions(
             ),
         ],
         LoomAgentState::Completed | LoomAgentState::Failed => {
-            let (reason, ended) = if state == LoomAgentState::Completed {
-                ("RunSucceeded", "succeeded")
+            let (reason, ended, completed) = if state == LoomAgentState::Completed {
+                ("RunSucceeded", "succeeded", ConditionStatus::True)
             } else {
-                ("RunFailed", "failed")
+                ("RunFailed", "failed", ConditionStatus::False)
             };
             vec![
                 condition(
@@ -147,6 +174,12 @@ pub fn conditions(
                         "the Job's run {ended}; it is not started again before a new generation"
                     ),
                 ),
+                condition(
+                    ConditionType::Completed,
+                    completed,
+                    reason,
+                    run_message(ended, run),
+                ),
             ]
         }
         LoomAgentState::Running if variant == Some(AgentVariant::Command) => vec![
@@ -158,6 +191,12 @@ pub fn conditions(
             ),
             condition(
                 ConditionType::Available,
+                ConditionStatus::Unknown,
+                "RunNotFinished",
+                "the Job's run has not finished",
+            ),
+            condition(
+                ConditionType::Completed,
                 ConditionStatus::Unknown,
                 "RunNotFinished",
                 "the Job's run has not finished",
@@ -200,6 +239,19 @@ pub fn conditions(
     }
 }
 
+/// Says in the message of a decided `Completed` condition of `status` that the run's pod could
+/// not be read: the API server answered the list of the Job's pods with `code` (403 or 404), so
+/// the run has no exit code for that reason, not because its pod was gone.
+pub fn pods_unread(status: &mut resource::LoomAgentStatus, code: u16) {
+    for condition in status.conditions.iter_mut().flatten() {
+        if condition.kind == "Completed" && condition.status != "Unknown" {
+            condition.message.push_str(&format!(
+                "; its pod could not be read (the list was answered {code})"
+            ));
+        }
+    }
+}
+
 /// The status a row of `LoomAgents` publishes.
 #[must_use]
 pub fn status(row: &LoomAgents) -> resource::LoomAgentStatus {
@@ -209,6 +261,7 @@ pub fn status(row: &LoomAgents) -> resource::LoomAgentStatus {
             row.check.as_ref(),
             row.deployment.as_ref(),
             row.variant,
+            row.run.as_ref(),
         )
     });
     resource::LoomAgentStatus {
@@ -225,6 +278,11 @@ pub fn status(row: &LoomAgents) -> resource::LoomAgentStatus {
                 availability: availability(read.availability).to_owned(),
             }),
         variant: row.variant.map(|variant| variant_name(variant).to_owned()),
+        run: row.run.as_ref().map(|run| resource::RunStatus {
+            exit_code: run.exit_code,
+            finished_at: run.finished_at.as_ref().map(|at| at.0.clone()),
+            reason: run.reason.clone(),
+        }),
         conditions: Some(
             conditions
                 .into_iter()
@@ -241,6 +299,7 @@ pub fn status(row: &LoomAgents) -> resource::LoomAgentStatus {
 
 #[cfg(test)]
 mod tests {
+    use b10x_loom_resource::Timestamp;
     use b10x_loom_resource::model::ResourceName;
 
     use super::*;
@@ -272,7 +331,7 @@ mod tests {
     #[test]
     fn pending_is_unknown_on_both_conditions() {
         assert_eq!(
-            triples(&conditions(LoomAgentState::Pending, None, None, None)),
+            triples(&conditions(LoomAgentState::Pending, None, None, None, None)),
             [
                 (
                     ConditionType::Checked,
@@ -296,6 +355,7 @@ mod tests {
             Some(&check),
             None,
             Some(AgentVariant::AgentServe),
+            None,
         );
         assert_eq!(
             triples(&unread),
@@ -319,6 +379,7 @@ mod tests {
                 Some(&check),
                 Some(&read(DeploymentAvailability::Available)),
                 Some(AgentVariant::AgentServe),
+                None
             )),
             [
                 (
@@ -344,6 +405,7 @@ mod tests {
                 Some(&check),
                 Some(&read(DeploymentAvailability::Unavailable)),
                 Some(AgentVariant::AgentServe),
+                None
             )),
             [
                 (
@@ -368,6 +430,7 @@ mod tests {
             Some(&check),
             None,
             Some(AgentVariant::AgentServe),
+            None,
         );
         assert_eq!(
             triples(&refused),
@@ -396,7 +459,8 @@ mod tests {
                 LoomAgentState::Running,
                 Some(&check),
                 None,
-                command
+                command,
+                None
             )),
             [
                 (
@@ -409,13 +473,22 @@ mod tests {
                     ConditionStatus::Unknown,
                     "RunNotFinished"
                 ),
+                (
+                    ConditionType::Completed,
+                    ConditionStatus::Unknown,
+                    "RunNotFinished"
+                ),
             ]
         );
-        for (state, reason) in [
-            (LoomAgentState::Completed, "RunSucceeded"),
-            (LoomAgentState::Failed, "RunFailed"),
+        for (state, reason, completed) in [
+            (
+                LoomAgentState::Completed,
+                "RunSucceeded",
+                ConditionStatus::True,
+            ),
+            (LoomAgentState::Failed, "RunFailed", ConditionStatus::False),
         ] {
-            let ended = conditions(state, Some(&check), None, command);
+            let ended = conditions(state, Some(&check), None, command, None);
             assert_eq!(
                 triples(&ended),
                 [
@@ -425,6 +498,7 @@ mod tests {
                         "SpecAdmitted"
                     ),
                     (ConditionType::Available, ConditionStatus::False, reason),
+                    (ConditionType::Completed, completed, reason),
                 ]
             );
             assert_eq!(ended[0].message, "admitted");
@@ -441,6 +515,7 @@ mod tests {
             check: Some(checked(0, "checked")),
             deployment: Some(read(DeploymentAvailability::Unavailable)),
             variant: Some(AgentVariant::Command),
+            run: None,
             conditions: None,
             state: LoomAgentState::Degraded,
         };
@@ -454,5 +529,68 @@ mod tests {
         let conditions = status.conditions.expect("conditions");
         assert_eq!(conditions[1].kind, "Available");
         assert_eq!(conditions[1].status, "False");
+    }
+
+    /// `story:command-run-exit-status`: the `Completed` condition names the program's exit code
+    /// and when the run ended; a failed run with no exit code says so and names the Job's
+    /// reason; the row's `run` is published as `status.run`.
+    #[test]
+    fn the_completed_condition_names_how_the_run_ended() {
+        let check = checked(0, "admitted");
+        let command = Some(AgentVariant::Command);
+        let exited = RunEnd {
+            exit_code: Some(3),
+            finished_at: Some(Timestamp("2026-10-26T12:00:00Z".to_owned())),
+            reason: Some("Error".to_owned()),
+        };
+        let failed = conditions(
+            LoomAgentState::Failed,
+            Some(&check),
+            None,
+            command,
+            Some(&exited),
+        );
+        assert_eq!(
+            failed[2].message,
+            "the program exited with code 3 at 2026-10-26T12:00:00Z (Error)"
+        );
+        let unread = RunEnd {
+            exit_code: None,
+            finished_at: None,
+            reason: Some("BackoffLimitExceeded".to_owned()),
+        };
+        let failed = conditions(
+            LoomAgentState::Failed,
+            Some(&check),
+            None,
+            command,
+            Some(&unread),
+        );
+        assert_eq!(
+            failed[2].message,
+            "the Job's run failed with no exit code read from its pod (BackoffLimitExceeded)"
+        );
+
+        let row = LoomAgents {
+            name: ResourceName("a".to_owned()),
+            observed_generation: 2,
+            check: Some(check),
+            deployment: None,
+            variant: command,
+            run: Some(exited),
+            conditions: None,
+            state: LoomAgentState::Failed,
+        };
+        let published = serde_json::to_value(status(&row)).expect("JSON");
+        assert_eq!(
+            published["run"],
+            serde_json::json!({
+                "exitCode": 3,
+                "finishedAt": "2026-10-26T12:00:00Z",
+                "reason": "Error",
+            })
+        );
+        assert_eq!(published["conditions"][2]["type"], "Completed");
+        assert_eq!(published["conditions"][2]["status"], "False");
     }
 }

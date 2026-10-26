@@ -130,7 +130,10 @@ pub struct LoomAgentStatus {
     /// What the pod of the checked generation runs: `AgentServe` or `Command`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub variant: Option<String>,
-    /// The conditions `Checked` and `Available`.
+    /// How a `Command` resource's run ended, once it did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<RunStatus>,
+    /// The conditions `Checked` and `Available`, and `Completed` for a `Command` resource.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conditions: Option<Vec<Condition>>,
 }
@@ -145,6 +148,22 @@ pub struct CheckStatus {
     pub message: String,
 }
 
+/// `status.run`: the program container's exit code, when it ended and why, each absent when the
+/// Job's pod did not say.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunStatus {
+    /// The program's exit code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
+    /// When the program ended, RFC 3339.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<String>,
+    /// The terminated container's reason, or the Job's `Failed` reason when no container ended.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 /// `status.deployment`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeploymentStatus {
@@ -155,7 +174,7 @@ pub struct DeploymentStatus {
 /// One entry of `status.conditions`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Condition {
-    /// `Checked` or `Available`.
+    /// `Checked`, `Available` or `Completed`.
     #[serde(rename = "type")]
     pub kind: String,
     /// `True`, `False` or `Unknown`.
@@ -198,6 +217,11 @@ mod tests {
                 availability: "Available".to_owned(),
             }),
             variant: Some("Command".to_owned()),
+            run: Some(RunStatus {
+                exit_code: Some(3),
+                finished_at: Some("2026-10-26T12:00:00Z".to_owned()),
+                reason: None,
+            }),
             conditions: Some(vec![Condition {
                 kind: "Checked".to_owned(),
                 status: "True".to_owned(),
@@ -213,6 +237,7 @@ mod tests {
                 "check": {"exitCode": 0, "message": "checked"},
                 "deployment": {"availability": "Available"},
                 "variant": "Command",
+                "run": {"exitCode": 3, "finishedAt": "2026-10-26T12:00:00Z"},
                 "conditions": [{
                     "type": "Checked", "status": "True", "reason": "SpecServeable",
                     "message": "checked",

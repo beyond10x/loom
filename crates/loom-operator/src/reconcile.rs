@@ -33,10 +33,18 @@
 //!    applied and its run, as read, is `ObserveRun`. Otherwise the children are applied by
 //!    server-side apply, field manager `b10x-loom-operator`, forced; the Deployment's `Available`
 //!    condition in the apply's answer, when its status has observed the applied generation, is
-//!    `ObserveDeployment`, and the created Job's run is `ObserveRun`. Then each child it controls
-//!    that this generation does not render (a Service once `expose.a2a` is gone, the
-//!    ServiceAccount an earlier generation named) is deleted. Every delete propagates in the
-//!    foreground: what the child owns, a Job's pod included, goes before it does.
+//!    `ObserveDeployment`, and the created Job's run is `ObserveRun`. A finished run's `ObserveRun`
+//!    carries its exit code, end time and reason, read from the Job's own pod (`observation`):
+//!    one its label selector names whose controlling owner reference is the Job's uid. While the
+//!    Job counts the run over but its own pod is in no final phase and its program container has
+//!    not terminated, nothing is observed and the reconcile comes again after [`RETRY`]. A pod
+//!    still terminating [`TERMINATION_SLACK`] past its deletion deadline does not hold it: the run
+//!    ends with no exit code and the reason [`NEVER_TERMINATED`]. Once a Job of the generation was
+//!    seen counting its run over it is never created again: if it is gone, the run ends at once
+//!    from what its pods still say. Then each child it controls that this generation does not
+//!    render (a Service once `expose.a2a` is gone, the ServiceAccount an earlier generation named)
+//!    is deleted. Every delete propagates in the foreground: what the child owns, a Job's pod
+//!    included, goes before it does.
 //! 6. A `Completed` or `Failed` resource has no child applied, read or deleted: its run is over
 //!    until a new generation respecifies it.
 //! 7. The record's row is published as the status by server-side apply on the status
@@ -53,7 +61,8 @@
 //! resource is created again at its cluster generation, checked again, and its status rewritten.
 //! A `Command` resource whose finished Job is still there reads its run from it and does not run
 //! again; one whose Job was deleted while the controller was down runs once more.
-//! The controller reads and writes no Secret and reads no Pod.
+//! The controller reads and writes no Secret, and reads a Pod only to learn how a finished run
+//! ended; it watches none.
 
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
@@ -65,14 +74,17 @@ use b10x_loom_resource::model::{
     ApplyLoomAgent, ApplyLoomAgentOutcome, DeleteLoomAgent, DeploymentAvailability, LoomAgentState,
     LoomAgents, ObserveDeployment, ObserveRun, RecordCheck, ResourceName, RunPhase,
 };
-use b10x_loom_resource::{LoomAgentRecord, ResourceEvent, UnmetObligation};
+use b10x_loom_resource::{LoomAgentRecord, ResourceEvent, Timestamp, UnmetObligation};
 use futures::StreamExt;
 use k8s_openapi::NamespaceResourceScope;
 use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::batch::v1::Job;
-use k8s_openapi::api::core::v1::{ConfigMap, Service, ServiceAccount};
+use k8s_openapi::api::core::v1::{
+    ConfigMap, ContainerStateTerminated, ContainerStatus, Pod, Service, ServiceAccount,
+};
 use k8s_openapi::api::networking::v1::NetworkPolicy;
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, Time};
+use k8s_openapi::jiff::{SignedDuration, Timestamp as JiffTimestamp};
 use kube::api::{
     Api, DeleteParams, ListParams, Patch, PatchParams, Preconditions, PropagationPolicy,
 };
@@ -144,21 +156,25 @@ impl From<UnmetObligation> for Error {
 
 /// What the controller holds of a resource beside its record: its uid, and each child (kind and
 /// name) it applied for that uid and has not seen deleted, so a child a later generation no
-/// longer renders is found by name as well as by its label.
+/// longer renders is found by name as well as by its label, and the code a list of its
+/// Job's pods was last refused with.
 #[derive(Debug)]
 struct Held {
     uid: String,
     applied: BTreeSet<(Kind, String)>,
+    pods_refused: Option<u16>,
+    over: Option<JobRun>,
 }
 
 /// What every reconcile shares: the client, the configuration, the plugin catalog the check
-/// reads, and the record.
+/// reads, the record, and the clock.
 pub struct Context {
     client: Client,
     config: Config,
     catalog: ProtocolCatalog,
     record: Mutex<LoomAgentRecord>,
     held: Mutex<HashMap<String, Held>>,
+    clock: fn() -> JiffTimestamp,
 }
 
 impl Context {
@@ -173,7 +189,15 @@ impl Context {
             catalog: ProtocolCatalog::plugins()?,
             record: Mutex::new(LoomAgentRecord::new()),
             held: Mutex::new(HashMap::new()),
+            clock: JiffTimestamp::now,
         })
+    }
+
+    /// This context, reading the time from `clock` instead of the system clock: the time a
+    /// terminating pod's deletion deadline is compared with.
+    #[must_use]
+    pub fn with_clock(self, clock: fn() -> k8s_openapi::jiff::Timestamp) -> Self {
+        Self { clock, ..self }
     }
 
     fn record(&self) -> MutexGuard<'_, LoomAgentRecord> {
@@ -194,6 +218,8 @@ impl Context {
         let fresh = || Held {
             uid: uid.to_owned(),
             applied: BTreeSet::new(),
+            pods_refused: None,
+            over: None,
         };
         let replaced = {
             let mut held = self.held();
@@ -232,6 +258,41 @@ impl Context {
         if let Some(held) = self.held().get_mut(name) {
             held.applied.remove(&(kind, child.to_owned()));
         }
+    }
+
+    /// Notes the code the API server answered the last list of the pods of the resource `name`
+    /// with, when it refused it (403 or 404), or that it did not.
+    fn refuse_pods(&self, name: &str, code: Option<u16>) {
+        if let Some(held) = self.held().get_mut(name) {
+            held.pods_refused = code;
+        }
+    }
+
+    /// Notes that the Job `run` of the resource `name` was seen counting its run over.
+    fn saw_over(&self, name: &str, run: &JobRun) {
+        if let Some(held) = self.held().get_mut(name) {
+            held.over = Some(run.clone());
+        }
+    }
+
+    /// The Job of the resource `name` last seen counting its run over, when it is of
+    /// `generation`; one of another generation is forgotten.
+    fn seen_over(&self, name: &str, generation: Option<i64>) -> Option<JobRun> {
+        let mut held = self.held();
+        let held = held.get_mut(name)?;
+        if held
+            .over
+            .as_ref()
+            .is_some_and(|run| run.generation != generation)
+        {
+            held.over = None;
+        }
+        held.over.clone()
+    }
+
+    /// The code the last list of the pods of the resource `name` was refused with, if it was.
+    fn pods_refused(&self, name: &str) -> Option<u16> {
+        self.held().get(name).and_then(|held| held.pods_refused)
     }
 
     /// The view `LoomAgents`: one row per resource the record holds.
@@ -595,11 +656,12 @@ fn wanted(children: &Children) -> Vec<(Kind, String)> {
 }
 
 /// What a Job the resource controls says of its run: the generation its pod template names and
-/// the run's phase.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// the run's phase, and the Job as read, whose pod says how a finished run ended.
+#[derive(Debug, Clone)]
 struct JobRun {
     generation: Option<i64>,
     phase: RunPhase,
+    job: Job,
 }
 
 /// One child a resource renders, and who controls it now; for a Job the resource controls, what
@@ -631,6 +693,7 @@ async fn survey(
                     let run = matches!(holding, Holding::Ours(_)).then(|| JobRun {
                         generation: job_generation(&job),
                         phase: run_phase(&job),
+                        job: job.clone(),
                     });
                     (holding, run)
                 }
@@ -748,11 +811,224 @@ fn run_phase(job: &Job) -> RunPhase {
     }
 }
 
+/// The run of the resource `resource` as `ObserveRun` takes it: the Job's phase and, once the
+/// run is over, how it ended; `None` while the run is over by the Job's count but its own pod
+/// still terminates, so the caller comes again after [`RETRY`] instead of observing an end it
+/// cannot read yet. An active run says nothing more and reads no pod. A finished one reads the
+/// exit code and end time from the Job's pod: the pods its label selector names (the resource's
+/// instance label when it has none) and whose controlling owner reference is the Job's uid, so a
+/// pod of another Job never speaks for it. Of those, the one whose program container
+/// ([`render::CONTAINER`]) terminated last answers; its `reason` comes along. With no such pod
+/// (deleted before its container's end was read, or one in a final phase whose container never
+/// ran) the exit code and end time are absent and the reason is the Job's own, from its `Failed`
+/// or `Complete` condition. A list answered 403 or 404 is the same, logged, and the resource's
+/// `Completed` condition says its pod could not be read.
+async fn observation(
+    ctx: &Context,
+    namespace: &str,
+    resource: &ResourceName,
+    job: Option<&Job>,
+    phase: RunPhase,
+    wait: bool,
+) -> Result<Option<ObserveRun>, kube::Error> {
+    let mut observed = ObserveRun {
+        name: resource.clone(),
+        phase,
+        exit_code: None,
+        finished_at: None,
+        reason: None,
+    };
+    let Some(job) = job.filter(|_| phase != RunPhase::Active) else {
+        return Ok(Some(observed));
+    };
+    let read = pod_read(&ctx.client, namespace, &resource.0, job, (ctx.clock)()).await?;
+    ctx.refuse_pods(
+        &resource.0,
+        match read {
+            PodRead::Refused(code) => Some(code),
+            _ => None,
+        },
+    );
+    match read {
+        PodRead::Ended(end) => {
+            observed.exit_code = Some(i64::from(end.exit_code));
+            observed.finished_at = end.finished_at.as_ref().and_then(wire_time);
+            observed.reason = end.reason;
+        }
+        PodRead::Ending if wait => return Ok(None),
+        PodRead::Ending | PodRead::Absent => observed.reason = job_reason(job, phase),
+        PodRead::Stuck => observed.reason = Some(NEVER_TERMINATED.to_owned()),
+        PodRead::Refused(code) => {
+            eprintln!(
+                "b10x-loom-operator: {}: the pod list was answered {code}; the run's exit code \
+                 is not read",
+                resource.0
+            );
+            observed.reason = job_reason(job, phase);
+        }
+    }
+    Ok(Some(observed))
+}
+
+/// What the pods of a Job whose run is over say of how it ended.
+enum PodRead {
+    /// The program container of the Job's own pod terminated; the latest when there are more.
+    Ended(ContainerStateTerminated),
+    /// None terminated yet, and a pod of the Job's own is in no final phase: its container is
+    /// still being stopped, so its end comes.
+    Ending,
+    /// None terminated, and each pod of the Job's own still in no final phase is being deleted
+    /// and past its grace period by more than [`TERMINATION_SLACK`]: its node no longer
+    /// answers, and nothing will write its container's end.
+    Stuck,
+    /// No pod of the Job's own has a program container that terminated or will.
+    Absent,
+    /// The API server answered the list with this code (403 or 404).
+    Refused(u16),
+}
+
+/// How the program container of the Job's own pods ended, or that it is still ending.
+async fn pod_read(
+    client: &Client,
+    namespace: &str,
+    resource: &str,
+    job: &Job,
+    now: JiffTimestamp,
+) -> Result<PodRead, kube::Error> {
+    let Some(uid) = job.metadata.uid.as_deref() else {
+        return Ok(PodRead::Absent);
+    };
+    let selector = job
+        .spec
+        .as_ref()
+        .and_then(|spec| spec.selector.as_ref())
+        .and_then(|selector| selector.match_labels.as_ref())
+        .filter(|labels| !labels.is_empty())
+        .map_or_else(
+            || instance(resource),
+            |labels| {
+                labels
+                    .iter()
+                    .map(|(key, value)| format!("{key}={value}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            },
+        );
+    let api: Api<Pod> = Api::namespaced(client.clone(), namespace);
+    let pods = match api.list(&ListParams::default().labels(&selector)).await {
+        Ok(list) => list.items,
+        Err(kube::Error::Api(status)) if matches!(status.code, 403 | 404) => {
+            return Ok(PodRead::Refused(status.code));
+        }
+        Err(error) => return Err(error),
+    };
+    let own: Vec<Pod> = pods
+        .into_iter()
+        .filter(|pod| {
+            pod.metadata
+                .owner_references
+                .iter()
+                .flatten()
+                .any(|reference| reference.controller == Some(true) && reference.uid == uid)
+        })
+        .collect();
+    let ended = own
+        .iter()
+        .filter_map(|pod| program(pod)?.state.as_ref()?.terminated.clone())
+        .max_by(|left, right| {
+            let at = |end: &ContainerStateTerminated| end.finished_at.as_ref().map(|time| time.0);
+            at(left).cmp(&at(right))
+        });
+    if let Some(end) = ended {
+        return Ok(PodRead::Ended(end));
+    }
+    let unfinished: Vec<&Pod> = own
+        .iter()
+        .filter(|pod| {
+            let phase = pod
+                .status
+                .as_ref()
+                .and_then(|status| status.phase.as_deref());
+            !matches!(phase, Some("Succeeded" | "Failed"))
+        })
+        .collect();
+    Ok(if unfinished.is_empty() {
+        PodRead::Absent
+    } else if unfinished.iter().all(|pod| stuck(pod, now)) {
+        PodRead::Stuck
+    } else {
+        PodRead::Ending
+    })
+}
+
+/// How long past its deletion deadline (`deletionTimestamp` plus `deletionGracePeriodSeconds`) a
+/// pod of a finished run may still be terminating before the controller stops waiting for its
+/// container's end and records the run without an exit code.
+pub const TERMINATION_SLACK: Duration = Duration::from_secs(60);
+
+/// The reason a run's end carries when its pod never finished terminating.
+pub const NEVER_TERMINATED: &str = "PodNeverFinishedTerminating";
+
+/// Whether `pod` is being deleted and its deletion deadline plus [`TERMINATION_SLACK`] is past
+/// at `now`.
+fn stuck(pod: &Pod, now: JiffTimestamp) -> bool {
+    let Some(deleted) = pod.metadata.deletion_timestamp.as_ref() else {
+        return false;
+    };
+    let grace = pod
+        .metadata
+        .deletion_grace_period_seconds
+        .unwrap_or(0)
+        .max(0);
+    let slack = i64::try_from(TERMINATION_SLACK.as_secs()).unwrap_or(i64::MAX);
+    let limit = SignedDuration::from_secs(grace.saturating_add(slack));
+    deleted
+        .0
+        .checked_add(limit)
+        .is_ok_and(|deadline| deadline < now)
+}
+
+/// The status of the program container of `pod`, if the pod reports one.
+fn program(pod: &Pod) -> Option<&ContainerStatus> {
+    pod.status
+        .as_ref()?
+        .container_statuses
+        .as_ref()?
+        .iter()
+        .find(|container| container.name == render::CONTAINER)
+}
+
+/// A Kubernetes time as the API server writes it.
+fn wire_time(time: &Time) -> Option<Timestamp> {
+    match serde_json::to_value(time) {
+        Ok(serde_json::Value::String(text)) => Some(Timestamp(text)),
+        _ => None,
+    }
+}
+
+/// The reason of the Job's condition that says how its run ended: `Failed` for a failed run,
+/// `Complete` for a succeeded one, when it holds and names one.
+fn job_reason(job: &Job, phase: RunPhase) -> Option<String> {
+    let kind = match phase {
+        RunPhase::Failed => "Failed",
+        RunPhase::Succeeded => "Complete",
+        RunPhase::Active => return None,
+    };
+    job.status
+        .as_ref()?
+        .conditions
+        .iter()
+        .flatten()
+        .find(|condition| condition.type_ == kind && condition.status == "True")?
+        .reason
+        .clone()
+}
+
 /// What the applied workload reports: the Deployment's availability, once its status observed
 /// its generation, or the Job's run.
 enum Observed {
     Deployment(Option<DeploymentAvailability>),
-    Job(RunPhase),
+    Job(RunPhase, Option<Box<Job>>),
 }
 
 /// Before a `Command` resource's Job is created: deletes the Job of another generation `stale`
@@ -766,7 +1042,7 @@ async fn workloads_gone(
     resource: &str,
     owner: &str,
     children: &Children,
-    stale: Option<(&Surveyed, &String, JobRun)>,
+    stale: Option<(&Surveyed, &String, &JobRun)>,
 ) -> Result<bool, kube::Error> {
     if !matches!(children.workload, Workload::Job(_)) {
         return Ok(true);
@@ -809,9 +1085,10 @@ async fn apply_children(
         (Workload::Deployment(deployment), _) => {
             Observed::Deployment(availability(&apply(client, namespace, deployment).await?))
         }
-        (Workload::Job(_), Some(phase)) => Observed::Job(phase),
+        (Workload::Job(_), Some(phase)) => Observed::Job(phase, None),
         (Workload::Job(job), None) => {
-            Observed::Job(run_phase(&apply(client, namespace, job).await?))
+            let applied = apply(client, namespace, job).await?;
+            Observed::Job(run_phase(&applied), Some(Box::new(applied)))
         }
     };
     apply(client, namespace, &children.network_policy).await?;
@@ -829,7 +1106,10 @@ async fn publish(
     current: Option<&crate::resource::LoomAgentStatus>,
     row: &LoomAgents,
 ) -> Result<(), kube::Error> {
-    let status = status::status(row);
+    let mut status = status::status(row);
+    if let Some(code) = ctx.pods_refused(name) {
+        status::pods_unread(&mut status, code);
+    }
     if current == Some(&status) {
         return Ok(());
     }
@@ -953,7 +1233,7 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                 .collect();
             let job = found
                 .iter()
-                .find_map(|child| match (&child.holding, child.run) {
+                .find_map(|child| match (&child.holding, &child.run) {
                     (Holding::Ours(uid), Some(run)) => Some((child, uid, run)),
                     _ => None,
                 });
@@ -970,7 +1250,20 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
             }
             let running = job
                 .filter(|(_, _, run)| run.generation == agent.metadata.generation)
-                .map(|(_, _, run)| run.phase);
+                .map(|(_, _, run)| run);
+            if running.is_none()
+                && let Some(seen) = ctx.seen_over(&name, agent.metadata.generation)
+            {
+                let observed =
+                    observation(&ctx, &namespace, &key, Some(&seen.job), seen.phase, false).await?;
+                if let Some(observed) = observed {
+                    ctx.record().observe_run(observed)?;
+                }
+                if let Some(row) = row(&ctx, &key) {
+                    publish(&ctx, &namespace, &name, agent.status.as_ref(), &row).await?;
+                }
+                return Ok(Action::requeue(REQUEUE));
+            }
             if running.is_none()
                 && !workloads_gone(&ctx, &namespace, &name, &owner, children, job).await?
             {
@@ -979,19 +1272,26 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                 }
                 return Ok(Action::requeue(RETRY));
             }
+            let mut ending = false;
             match running {
-                Some(phase) if phase != RunPhase::Active => {
-                    ctx.record().observe_run(ObserveRun {
-                        name: key.clone(),
-                        phase,
-                    })?;
+                Some(run) if run.phase != RunPhase::Active => {
+                    ctx.saw_over(&name, run);
+                    match observation(&ctx, &namespace, &key, Some(&run.job), run.phase, true)
+                        .await?
+                    {
+                        Some(observed) => {
+                            ctx.record().observe_run(observed)?;
+                        }
+                        None => ending = true,
+                    }
                 }
                 _ => {
                     let current: BTreeSet<(Kind, String)> = wanted(children).into_iter().collect();
                     for (kind, child) in &current {
                         ctx.remember(&name, *kind, child);
                     }
-                    match apply_children(&ctx.client, &namespace, children, running).await? {
+                    let phase = running.map(|run| run.phase);
+                    match apply_children(&ctx.client, &namespace, children, phase).await? {
                         Observed::Deployment(Some(availability)) => {
                             ctx.record().observe_deployment(ObserveDeployment {
                                 name: key.clone(),
@@ -999,17 +1299,26 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                             })?;
                         }
                         Observed::Deployment(None) => {}
-                        Observed::Job(phase) => {
-                            ctx.record().observe_run(ObserveRun {
-                                name: key.clone(),
-                                phase,
-                            })?;
+                        Observed::Job(phase, applied) => {
+                            let job = applied.as_deref().or(running.map(|run| &run.job));
+                            match observation(&ctx, &namespace, &key, job, phase, true).await? {
+                                Some(observed) => {
+                                    ctx.record().observe_run(observed)?;
+                                }
+                                None => ending = true,
+                            }
                         }
                     }
                     if !owner.is_empty() {
                         delete_owned(&ctx, &namespace, &name, &owner, &current).await?;
                     }
                 }
+            }
+            if ending {
+                if let Some(row) = row(&ctx, &key) {
+                    publish(&ctx, &namespace, &name, agent.status.as_ref(), &row).await?;
+                }
+                return Ok(Action::requeue(RETRY));
             }
         }
         _ => {}
