@@ -260,8 +260,10 @@ spec:
           readOnly: true
         - mountPath: /var/lib/agent
           name: state
+          subPath: home
         - mountPath: /tmp
           name: tmp
+          subPath: tmp
         - mountPath: /workspace
           name: workspace
         - mountPath: /var/run/secrets/takt
@@ -300,6 +302,36 @@ spec:
           readOnly: true
         - mountPath: /var/run/loom/secret-files
           name: secret-files
+      - command:
+        - b10x-loom
+        - agent
+        - prepare-dirs
+        - --dir
+        - /var/run/loom/tmp/tmp
+        - --dir
+        - /var/run/loom/state/home
+        image: registry.example/loom-agent:0.40.0
+        name: prepare-writable-dirs
+        resources:
+          limits:
+            cpu: 250m
+            memory: 256Mi
+          requests:
+            cpu: 250m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 10001
+        volumeMounts:
+        - mountPath: /var/run/loom/tmp
+          name: tmp
+        - mountPath: /var/run/loom/state
+          name: state
       restartPolicy: Never
       securityContext:
         fsGroup: 10001

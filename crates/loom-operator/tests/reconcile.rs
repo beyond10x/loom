@@ -1150,7 +1150,7 @@ async fn a_refusal_of_the_spec_reads_no_child_again() {
 }
 
 #[tokio::test]
-async fn a_command_resource_is_admitted_running_with_its_variant_and_no_init_container() {
+async fn a_command_resource_is_admitted_running_with_its_variant_and_no_check_container() {
     let (client, fake) = fake();
     let ctx = context(client);
     let spec = example().replace("protocol: operator-reply@1", "protocol: takt-delivery@1");
@@ -1167,7 +1167,17 @@ async fn a_command_resource_is_admitted_running_with_its_variant_and_no_init_con
         .find(|seen| seen.method == Method::PATCH && seen.path == JOB)
         .expect("the Job is applied");
     let pod = &job.body["spec"]["template"]["spec"];
-    assert!(pod.get("initContainers").is_none(), "{pod}");
+    let init: Vec<&str> = pod["initContainers"]
+        .as_array()
+        .expect("init containers")
+        .iter()
+        .map(|container| container["name"].as_str().expect("a name"))
+        .collect();
+    assert_eq!(
+        init,
+        ["prepare-writable-dirs"],
+        "no check: the image holds no b10x-loom; {pod}"
+    );
     assert!(pod["containers"][0].get("command").is_none(), "{pod}");
     assert!(pod["containers"][0].get("args").is_none(), "{pod}");
 

@@ -298,6 +298,12 @@ an init container for `spec.secretFiles`, so the files are those of the Secret w
 started; a changed Secret reaches the agent in a new pod. Exit 1 names the path it could not read
 or write.
 
+`b10x-loom agent prepare-dirs --dir <DIR>...` makes each directory one the caller owns with mode
+exactly 0700, setgid and sticky cleared, keeping what it holds when it exists and refusing a link
+in its place. The controller runs it in an init container of a `Command` pod for `/tmp` and
+`HOME`, whose emptyDirs Kubernetes leaves mode 0777. Exit 1 names the directory it could not
+prepare.
+
 ## Deploy agents to Kubernetes
 
 A `LoomAgent` resource carries a `loom.agent/1` document as its `spec.agent` (Loom's deployment
@@ -349,7 +355,9 @@ the run ended from the resource. `spec.workspace` (`mountPath`, optional `claimN
 the environment and `spec.secretFiles` (`name`, `mountPath`) another as files: an init container
 runs `b10x-loom agent stage-files` to copy its keys into a directory the pod user owns (mode 0700,
 files 0600), since a tool such as `b10x-gates` refuses a key file another user owns or others may
-read. The values must allow both names in `allowedSecretNames`. `spec.env` (a list of `name` and
+read. The values must allow both names in `allowedSecretNames`. A `Command`
+pod's `/tmp` and `HOME` are likewise directories an init container makes owned by the pod user
+with mode 0700 (`b10x-loom agent prepare-dirs`). `spec.env` (a list of `name` and
 `value`) gives values such as `CARGO_HOME` or `CARGO_NET_OFFLINE` to the agent container on
 either variant, after the controller's own (`HOME` for a `Command` resource) and in the order
 given. The kubelet expands `$(NAME)` in them and in `spec.command`, also from the Secret's keys

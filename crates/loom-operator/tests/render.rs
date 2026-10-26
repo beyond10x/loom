@@ -632,8 +632,8 @@ fn a_command_resource_runs_the_image_program_over_config_with_its_volumes() {
     let init = at(pod, &["initContainers"]).as_sequence().expect("init");
     assert_eq!(
         init.len(),
-        1,
-        "only the staging, no check: the image holds no b10x-loom to check with: {pod:?}"
+        2,
+        "the staging and the writable dirs, no check: the image holds no b10x-loom to check with: {pod:?}"
     );
     let stage = &init[0];
     assert_eq!(text(stage, &["name"]), "stage-secret-files");

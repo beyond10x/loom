@@ -21,6 +21,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `loom.resource`: `EnvVar` (`name`, `value`) and `LoomAgentSpec.env`; `b10x-loom-operator` renders `spec.env` on the agent container after its own `env` and refuses a credential in it or in `spec.command`, as written or after the kubelet's `$(VAR)` expansion, an unknown reference also read as a URL scheme (`SecretLiteral`), a name that is not a variable name (`NotAVariableName`) and a repeated or reserved name (`EnvNameConflict`, `render::CONTROLLER_ENV`) (story:loom-agent-spec-env)
 - `loom.resource`: `ConfigFile` (`name`, `content`) and `LoomAgentSpec.config_files` (`spec.configFiles`); `b10x-loom-operator` writes each file verbatim at `/config/<name>` of a `Command` resource's pod and refuses a name that is not a plain file name or starts with `..` (`ConfigFileInvalid`), a repeated name or one the ConfigMap holds (`ConfigFileConflict`), a credential in a name or content (`SecretLiteral`, the content walked whole, as every document of a YAML stream and as TOML where it reads as either, and word by word by line; `TooLarge` for a YAML stream the walk cannot read whole), a ConfigMap over Kubernetes's 1 MiB (`TooLarge`) and `configFiles` on an `AgentServe` resource (`Malformed`) (story:command-opaque-config-files)
 - `b10x_loom_agent::yaml_stream_credential` and `StreamWalk`: the credential walk of `check_text` over every document of any YAML stream (after a scan error, over each piece between `---` lines), answering the strings it read and `TooLarge` rather than "no credential" for a stream it cannot read whole (its byte, flow or alias bound, the parser's recursion or repetition limit) (story:command-opaque-config-files)
+- `b10x-loom agent prepare-dirs --dir <DIR>...`: makes each directory one the caller owns with mode exactly 0700 (setgid and sticky cleared), keeping what it holds, refusing a link in its place (story:writable-dirs-mode-0700)
 
 ### Changed
 
@@ -31,6 +32,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - The `loom-agents` chart's Role grants `get` and `list` on `pods`, no `watch`, for a finished run's exit code; still nothing on Secrets or Events (story:command-run-exit-status)
 - **Breaking:** `LoomAgentSpec` gains `env`, both the generated `loom.resource` model and `b10x_loom_operator::resource`; a struct literal no longer compiles (story:loom-agent-spec-env)
 - **Breaking:** `LoomAgentSpec.agent` is optional (`Option<AgentSpec>` in the generated `loom.resource` model, `Option<serde_json::Value>` in `b10x_loom_operator::resource`) and `LoomAgentSpec` gains `config_files`; `b10x_loom_operator::admission::Admitted` holds `spec` and `agent` as options and gains `config_files`, and `admission::default_routes` takes `Option<&AgentSpec>`. The CRD no longer requires `spec.agent`; the controller refuses an `AgentServe` resource without it (`Malformed` at `spec.agent`) (story:command-opaque-config-files)
+
+### Fixed
+
+- A `Command` `LoomAgent` pod's `/tmp` and `HOME` (`/var/lib/agent`) are directories owned by user 10001 with mode 0700, made by the init container `prepare-writable-dirs` in their emptyDirs and mounted by `subPath`; they were the emptyDir roots, mode 0777 (2777 with `fsGroup`), under which a reader such as `b10x-gates` refuses a credential file (story:writable-dirs-mode-0700)
 
 ## [0.43.0] - 2026-10-26
 

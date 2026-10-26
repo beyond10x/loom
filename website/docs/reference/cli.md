@@ -33,6 +33,7 @@ Generated from the clap definition of the `b10x-loom` command line in [`crates/l
 | [`b10x-loom agent serve`](#b10x-loom-agent-serve) | Host the agent a loom.agent/1 spec declares: poll its channel, answer each item in a governed turn, and send a reply only as the spec's writes admit |
 | [`b10x-loom agent resume`](#b10x-loom-agent-resume) | Perform a held send after its approval, once |
 | [`b10x-loom agent stage-files`](#b10x-loom-agent-stage-files) | Copy the keys of a mounted Secret volume into a directory this user owns, the directory mode 0700 and each file 0600 |
+| [`b10x-loom agent prepare-dirs`](#b10x-loom-agent-prepare-dirs) | Make each directory one this user owns with mode exactly 0700, keeping what it holds |
 | [`b10x-loom approve`](#b10x-loom-approve) | Approve the request a commission's Suspension holds: write a grant into the state directory. Approval performs nothing; `resume` does |
 | [`b10x-loom resume`](#b10x-loom-resume) | Continue a commission's suspended run after its approval: perform the suspended request once, release the Suspension, and run on until the run stops |
 
@@ -375,6 +376,32 @@ set to mode 0700, and must not be a link.
 Exit status:
   0  the keys were staged; standard output says how many
   1  --from cannot be read, --to is not a directory, or a key cannot be copied
+  2  the command line is not valid
+```
+
+## `b10x-loom agent prepare-dirs`
+
+Make each directory one this user owns with mode exactly 0700, keeping what it holds
+
+```text
+Usage: b10x-loom agent prepare-dirs --dir <DIR>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--dir <DIR>` | yes | none | A directory to prepare; give one or more |
+
+```text
+Kubernetes makes an emptyDir's root mode 0777 (setgid with fsGroup), and a non-root container cannot
+change it, so a reader that refuses a file under a directory its group or others may write refuses
+every file there. b10x-loom-operator runs this in the init container prepare-writable-dirs of a
+Command pod and mounts the directories at /tmp and HOME. Each --dir is created when absent, kept
+with what it holds when present, and set to mode 0700 with setgid and sticky cleared; it must not
+be a link, and only its owner can set its mode.
+
+Exit status:
+  0  every directory was prepared; standard output says how many
+  1  a directory is a link, is not a directory, or cannot be made or set to 0700
   2  the command line is not valid
 ```
 

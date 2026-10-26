@@ -13,10 +13,10 @@ use b10x_loom_cli::model_catalog::ModelCatalog;
 use b10x_loom_cli::plugin::{is_proposal, recorded, report_line, turn_models};
 use b10x_loom_cli::regular_file;
 use b10x_loom_cli::{
-    AgentCheckArgs, AgentCommand, AgentResumeArgs, AgentServeArgs, AgentStageFilesArgs,
-    ApproveArgs, Cli, Command, Confinement, DEFAULT_MODEL, EvaluateArgs, Output, PluginCommand,
-    PluginName, ProtocolCommand, ResumeArgs, RunArgs, approve_exit_status, resume_exit_status,
-    run_exit_status,
+    AgentCheckArgs, AgentCommand, AgentPrepareDirsArgs, AgentResumeArgs, AgentServeArgs,
+    AgentStageFilesArgs, ApproveArgs, Cli, Command, Confinement, DEFAULT_MODEL, EvaluateArgs,
+    Output, PluginCommand, PluginName, ProtocolCommand, ResumeArgs, RunArgs, approve_exit_status,
+    resume_exit_status, run_exit_status,
 };
 use b10x_loom_cli::{a2a, agent};
 use b10x_loom_intake_slice::bindings::ActionBindings;
@@ -75,6 +75,7 @@ fn main() -> ExitCode {
             AgentCommand::Serve(arguments) => agent_serve_command(&arguments),
             AgentCommand::Resume(arguments) => agent_resume_command(&arguments),
             AgentCommand::StageFiles(arguments) => agent_stage_files_command(&arguments),
+            AgentCommand::PrepareDirs(arguments) => agent_prepare_dirs_command(&arguments),
         },
         Command::Approve(arguments) => approve_command(&arguments),
         Command::Resume(arguments) => resume_command(&arguments),
@@ -109,6 +110,17 @@ fn agent_stage_files_command(arguments: &AgentStageFilesArgs) -> ExitCode {
         }
         Err(why) => failed(&why),
     }
+}
+
+/// `agent prepare-dirs`: each `--dir` a directory this user owns, mode 0700.
+fn agent_prepare_dirs_command(arguments: &AgentPrepareDirsArgs) -> ExitCode {
+    for dir in &arguments.dirs {
+        if let Err(why) = b10x_loom_cli::stage::prepare(dir) {
+            return failed(&why);
+        }
+    }
+    println!("prepared {} directories", arguments.dirs.len());
+    ExitCode::SUCCESS
 }
 
 /// The spec of `agent serve` and `agent resume`, read and checked; a refused spec exits 3.
