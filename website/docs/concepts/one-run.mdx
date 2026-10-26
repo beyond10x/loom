@@ -4,7 +4,7 @@ sidebar_position: 1
 description: The five steps of a governed run, which of them are Loom's and which the Commission runtime's, and what runs today.
 status: shipped
 lede: For each step, the frontier's admissible actions become a catalogue, one action is chosen, its arguments are generated, and only then does the Commission runtime recheck it and hand it to an effect port. The first three steps are Loom's. The last two are the runtime's.
-source: Atlas ADR 0071 (Loom owns the model/tool loop) and ADR 0082 (Commission invokes); crates/loom-executor, crates/loom-commission/src/runtime.rs
+source: Atlas ADRs 0096 and 0098 (Loom is the governed runtime and calls llm for its decisions; ADR 0096 superseded ADR 0071) and ADR 0082 (Commission invokes); crates/loom-executor, crates/loom-commission/src/runtime.rs
 ---
 
 <Flow label="One Loom step" steps={[

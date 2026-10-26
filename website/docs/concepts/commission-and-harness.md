@@ -2,10 +2,10 @@
 title: Commission, Harness and Metaharness
 sidebar_label: Commission and Harness
 sidebar_position: 4
-description: Commission's contracts and runtime inside Loom, the Harness Loom started from, and Metaharness, which compares harnesses.
+description: Commission's contracts and runtime inside Loom, the Harness Loom started from, and Metaharness, the layer below Loom that drives and compares harnesses.
 status: shipped
-lede: Commission's contracts and runtime live in Loom as their own crate, which never depends on the executor; Loom no longer carries a port of Harness and reaches models through llm; Metaharness compares Loom with other harnesses.
-source: Atlas ADRs 0075, 0090 and 0098; Taskfile.commission.yml (deps-guard)
+lede: Commission's contracts and runtime live in Loom as their own crate, which never depends on the executor; Loom no longer carries a port of Harness and reaches models through llm; Loom is the governed runtime above Metaharness, which drives and compares the harnesses.
+source: Atlas ADRs 0075, 0090, 0096 and 0098; Taskfile.commission.yml (deps-guard)
 ---
 
 ## Commission
@@ -39,6 +39,7 @@ instead.
 
 [Metaharness](https://beyond10x.github.io/metaharness/)
 ([GitHub](https://github.com/beyond10x/metaharness)) drives harnesses from outside and makes their
-runs observable and comparable. Loom is the native executor it compares against other harnesses on
-the same case and evidence criteria, for example Loom with a fast selector against Loom with a
-reasoning selector.
+runs observable and comparable. It is the layer below Loom: Loom is the governed runtime, not a
+harness Metaharness compares, and when a step needs agent work Loom runs a session through
+Metaharness in Harness, Claude Code or Codex (Atlas ADRs 0096 and 0098; ADR 0096 superseded ADR 0071,
+which had made Loom the native harness).

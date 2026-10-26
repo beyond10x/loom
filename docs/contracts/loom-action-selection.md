@@ -130,8 +130,9 @@ Only Loom's own revalidation against the current frontier (`stale-revision`, `no
 moves it to `Refused`. One that Loom's own admission check refuses stays `Selected`, and one that
 Commission's runtime refuses after Loom proposed it (stale, or no longer admitted) stays
 `Admitted`. An answer naming an action outside the catalogue makes no selection and so no record.
-Metaharness reads the records through `Loom::selection_records`. They are never evidence (Atlas ADR
-0074).
+The embedding host reads the records through `Loom::selection_records`, and a trial reads them as
+Loom's decision records (Atlas ADR 0101); metaharness never depends on loom-sdk (Atlas ADR 0098).
+They are never evidence (Atlas ADR 0074).
 
 ## Safety rules
 

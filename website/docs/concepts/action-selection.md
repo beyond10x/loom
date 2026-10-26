@@ -42,7 +42,8 @@ action-selection contract,
 5. **Low confidence falls back** to a stronger path.
 6. For catalogues larger than about 20 actions, a selector may choose a **family first, then an
    action** within it.
-7. Selection telemetry is available to **Metaharness** for evaluation, and is never evidence.
+7. Selection telemetry is available to the embedding host and to trials for evaluation (Atlas
+   ADR 0101), and is never evidence.
 
 Rules 1 to 4 hold today. The catalogue is projected from the frontier of each step; Loom puts every
 selection to Commission's admission check, and one it refuses, such as an action outside the

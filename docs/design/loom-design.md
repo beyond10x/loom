@@ -120,15 +120,8 @@ Again, these are optimizations inside an already-governed envelope.
 
 ## Metaharness
 
-Metaharness remains the cross-harness evaluator/driver.
-
-It should be able to compare:
-
-```text
-Loom + Laya selector
-Loom + reasoning selector
-external coding harness
-other model/runtime
-```
-
-against the same cases and evidence criteria.
+Metaharness drives and compares the harnesses (Claude Code, Codex, b10x-harness). Loom runs agent
+work through it and is the governed runtime above it, not one of the harnesses it compares (Atlas
+ADRs 0096 and 0098; ADR 0096 superseded ADR 0071, Loom as the native harness). Comparing Loom with
+the Laya selector against Loom with a reasoning selector on the same cases is a trial's work, which
+reads Loom's decision records beside the harness traces (Atlas ADR 0101).
