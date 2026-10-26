@@ -348,9 +348,10 @@ fn adversary_a_denied_tool_is_not_offered_through_a_comma_in_an_allowed_entry() 
 // ------------------------------------------------------------------ b10x-harness under ask
 
 /// A b10x-harness spec denying a tool under `decisions: ask` is what `SpecError::DenyUnenforced`
-/// tells its author to write, and `from_spec` builds it. metaharness's b10x adapter delivers
-/// `observe` only and refuses `tool.decide`, so such an executor's every session is refused
-/// before it starts. `from_spec` should refuse the spec instead of building it.
+/// tells its author to write, and `from_spec` builds it. Up to metaharness 0.18.0 the b10x adapter
+/// delivered `observe` only and refused `tool.decide`, so such an executor's every session was
+/// refused before it started (0.19.0 delivers `ask`, but Loom has no b10x rules to decide with).
+/// `from_spec` should refuse the spec instead of building it.
 #[test]
 fn adversary_a_harness_spec_from_spec_builds_can_start_a_session() {
     let fixture = Fixture::new("harness-ask");

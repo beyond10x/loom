@@ -1145,7 +1145,7 @@ event is a whole message, one line apart from the next
 which metaharness passes on as an opaque event) drops what its failed attempt streamed
 (`crates/loom-session-executor/tests/adversary_w20261024w2_u1.rs`).
 It is the one crate that links metaharness (`metaharness` and
-`metaharness-b10x` at tag `0.15.0`; move them together); `b10x-loom-sdk` and
+`metaharness-b10x` at tag `0.19.0`; move them together); `b10x-loom-sdk` and
 `b10x-loom-conformance` reach it through it. No `metaharness` program runs. Its tests run
 scripted sessions only (metaharness's `ScriptedRunner`): no harness program, no model, no
 network.

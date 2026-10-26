@@ -251,8 +251,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-catalogue"
-version = "0.18.0"
-source = "git+https://github.com/beyond10x/harness?rev=330e2cde6299e4e55b05664001e73903959a076f#330e2cde6299e4e55b05664001e73903959a076f"
+version = "0.20.0"
+source = "git+https://github.com/beyond10x/harness?rev=684c99f5e8c7e1d22d7b29f717b71856db81766a#684c99f5e8c7e1d22d7b29f717b71856db81766a"
 dependencies = [
  "b10x-harness-wire",
  "b10x-tool-code-editor",
@@ -267,8 +267,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-loop"
-version = "0.18.0"
-source = "git+https://github.com/beyond10x/harness?rev=330e2cde6299e4e55b05664001e73903959a076f#330e2cde6299e4e55b05664001e73903959a076f"
+version = "0.20.0"
+source = "git+https://github.com/beyond10x/harness?rev=684c99f5e8c7e1d22d7b29f717b71856db81766a#684c99f5e8c7e1d22d7b29f717b71856db81766a"
 dependencies = [
  "b10x-harness-wire",
  "jsonschema 0.52.1",
@@ -280,8 +280,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-harness-wire"
-version = "0.18.0"
-source = "git+https://github.com/beyond10x/harness?rev=330e2cde6299e4e55b05664001e73903959a076f#330e2cde6299e4e55b05664001e73903959a076f"
+version = "0.20.0"
+source = "git+https://github.com/beyond10x/harness?rev=684c99f5e8c7e1d22d7b29f717b71856db81766a#684c99f5e8c7e1d22d7b29f717b71856db81766a"
 dependencies = [
  "httpdate",
  "serde",
@@ -838,8 +838,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-tool-code-editor"
-version = "0.4.0"
-source = "git+https://github.com/beyond10x/tools?tag=0.4.0#6017fccc5a0110f0f8f1da5f0a56570825cf95b5"
+version = "0.5.0"
+source = "git+https://github.com/beyond10x/tools?tag=0.5.0#99e36edceee62f7d21d4532df993c2628a70229b"
 dependencies = [
  "b10x-tool-contract",
  "schemars 1.2.3",
@@ -851,8 +851,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-tool-contract"
-version = "0.4.0"
-source = "git+https://github.com/beyond10x/tools?tag=0.4.0#6017fccc5a0110f0f8f1da5f0a56570825cf95b5"
+version = "0.5.0"
+source = "git+https://github.com/beyond10x/tools?tag=0.5.0#99e36edceee62f7d21d4532df993c2628a70229b"
 dependencies = [
  "clap",
  "schemars 1.2.3",
@@ -865,8 +865,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-tool-fs"
-version = "0.4.0"
-source = "git+https://github.com/beyond10x/tools?tag=0.4.0#6017fccc5a0110f0f8f1da5f0a56570825cf95b5"
+version = "0.5.0"
+source = "git+https://github.com/beyond10x/tools?tag=0.5.0#99e36edceee62f7d21d4532df993c2628a70229b"
 dependencies = [
  "b10x-tool-contract",
  "globset",
@@ -879,8 +879,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-tool-process"
-version = "0.4.0"
-source = "git+https://github.com/beyond10x/tools?tag=0.4.0#6017fccc5a0110f0f8f1da5f0a56570825cf95b5"
+version = "0.5.0"
+source = "git+https://github.com/beyond10x/tools?tag=0.5.0#99e36edceee62f7d21d4532df993c2628a70229b"
 dependencies = [
  "b10x-tool-contract",
  "nix",
@@ -892,8 +892,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-tool-search"
-version = "0.4.0"
-source = "git+https://github.com/beyond10x/tools?tag=0.4.0#6017fccc5a0110f0f8f1da5f0a56570825cf95b5"
+version = "0.5.0"
+source = "git+https://github.com/beyond10x/tools?tag=0.5.0#99e36edceee62f7d21d4532df993c2628a70229b"
 dependencies = [
  "b10x-tool-contract",
  "b10x-tool-fs",
@@ -906,8 +906,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-tool-toolchain"
-version = "0.4.0"
-source = "git+https://github.com/beyond10x/tools?tag=0.4.0#6017fccc5a0110f0f8f1da5f0a56570825cf95b5"
+version = "0.5.0"
+source = "git+https://github.com/beyond10x/tools?tag=0.5.0#99e36edceee62f7d21d4532df993c2628a70229b"
 dependencies = [
  "b10x-tool-contract",
  "b10x-tool-process",
@@ -3734,8 +3734,8 @@ dependencies = [
 
 [[package]]
 name = "metaharness"
-version = "0.15.0"
-source = "git+https://github.com/beyond10x/metaharness?tag=0.15.0#f39e7739cfcfbbc7c30bb341bfd29e36492f53ad"
+version = "0.19.0"
+source = "git+https://github.com/beyond10x/metaharness?tag=0.19.0#e1b0e36c2bfa2e8e96c7a7dc5dbce7eca6057e2b"
 dependencies = [
  "getrandom 0.4.3",
  "metaharness-b10x",
@@ -3752,8 +3752,8 @@ dependencies = [
 
 [[package]]
 name = "metaharness-b10x"
-version = "0.15.0"
-source = "git+https://github.com/beyond10x/metaharness?tag=0.15.0#f39e7739cfcfbbc7c30bb341bfd29e36492f53ad"
+version = "0.19.0"
+source = "git+https://github.com/beyond10x/metaharness?tag=0.19.0#e1b0e36c2bfa2e8e96c7a7dc5dbce7eca6057e2b"
 dependencies = [
  "b10x-harness-catalogue",
  "b10x-harness-loop",
@@ -3765,8 +3765,8 @@ dependencies = [
 
 [[package]]
 name = "metaharness-claude"
-version = "0.15.0"
-source = "git+https://github.com/beyond10x/metaharness?tag=0.15.0#f39e7739cfcfbbc7c30bb341bfd29e36492f53ad"
+version = "0.19.0"
+source = "git+https://github.com/beyond10x/metaharness?tag=0.19.0#e1b0e36c2bfa2e8e96c7a7dc5dbce7eca6057e2b"
 dependencies = [
  "metaharness-protocol",
  "serde",
@@ -3775,8 +3775,8 @@ dependencies = [
 
 [[package]]
 name = "metaharness-codex"
-version = "0.15.0"
-source = "git+https://github.com/beyond10x/metaharness?tag=0.15.0#f39e7739cfcfbbc7c30bb341bfd29e36492f53ad"
+version = "0.19.0"
+source = "git+https://github.com/beyond10x/metaharness?tag=0.19.0#e1b0e36c2bfa2e8e96c7a7dc5dbce7eca6057e2b"
 dependencies = [
  "metaharness-protocol",
  "serde_json",
@@ -3784,8 +3784,8 @@ dependencies = [
 
 [[package]]
 name = "metaharness-protocol"
-version = "0.15.0"
-source = "git+https://github.com/beyond10x/metaharness?tag=0.15.0#f39e7739cfcfbbc7c30bb341bfd29e36492f53ad"
+version = "0.19.0"
+source = "git+https://github.com/beyond10x/metaharness?tag=0.19.0#e1b0e36c2bfa2e8e96c7a7dc5dbce7eca6057e2b"
 dependencies = [
  "serde",
  "serde_json",
@@ -3794,8 +3794,8 @@ dependencies = [
 
 [[package]]
 name = "metaharness-tools"
-version = "0.15.0"
-source = "git+https://github.com/beyond10x/metaharness?tag=0.15.0#f39e7739cfcfbbc7c30bb341bfd29e36492f53ad"
+version = "0.19.0"
+source = "git+https://github.com/beyond10x/metaharness?tag=0.19.0#e1b0e36c2bfa2e8e96c7a7dc5dbce7eca6057e2b"
 dependencies = [
  "b10x-harness-catalogue",
  "b10x-harness-wire",

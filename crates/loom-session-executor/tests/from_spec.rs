@@ -324,6 +324,12 @@ fn a_denied_tool_is_never_offered() {
         &script,
     );
     let (request, _) = one_session(&executor, &script);
+    assert_eq!(
+        request.args.iter().filter(|arg| *arg == "--tools").count(),
+        1,
+        "metaharness's native tool list is replaced, not followed by the offered one: {:?}",
+        request.args
+    );
     let offered = offered(&request);
     assert_eq!(
         offered,
