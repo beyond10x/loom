@@ -53,7 +53,7 @@
 //!    expansion; `TooLarge` when the references add more than [`MAX_EXPANDED_BYTES`]).
 //! 10. A non-empty `spec.configFiles`, only for `Command`: on an `AgentServe` resource, whose
 //!     program reads none, it is `Malformed`. Then entry by entry, a name that is not a plain
-//!     file name (`[A-Za-z0-9._-]+`, not `.` or `..`, at most [`MAX_CONFIG_FILE_NAME`] bytes:
+//!     file name (`[A-Za-z0-9._-]+`, not `.`, not starting with `..`, at most [`MAX_CONFIG_FILE_NAME`] bytes:
 //!     `ConfigFileInvalid`), one an earlier entry gives or one the ConfigMap already holds
 //!     (`routes.yaml`, `connectors.toml`, and `agent.yaml` when `spec.agent` is present:
 //!     `ConfigFileConflict`).
@@ -61,9 +61,13 @@
 //!     [`MAX_CONFIG_MAP_BYTES`] (`TooLarge`), refused rather than failing at apply.
 //! 12. Each `spec.configFiles` content, which the controller decodes nothing of, walked for a
 //!     credential (`SecretLiteral`) by every walk step 3 makes and more: the list whole, names
-//!     and contents; each content as a YAML document and as a TOML table, when it reads as one,
-//!     whole and word by word, so an escape does not hide one; and every word of the raw text,
-//!     named by its line. A content beyond the walk's bound is `TooLarge`.
+//!     and contents; each content as a YAML stream, every document of it, and as a TOML table
+//!     when it reads as one, whole and word by word, so a YAML or TOML escape (`\x67`,
+//!     `\u0067`) does not hide one from a program that reads the file as either; and every word
+//!     of the raw text, named by its line. An encoding neither reader undoes (base64, say) can
+//!     still hide one: the walk knows credential shapes, not every secret. A content beyond the
+//!     walk's bound, or a YAML stream it cannot read whole (its aliases or nesting cost more than
+//!     the agent decoder's bound allows), is `TooLarge`.
 //! 13. A `spec.workspace.mountPath` or `spec.secretFiles.mountPath` that is not absolute and
 //!     plain, is, holds or lies beneath a directory the controller mounts ([`RESERVED_MOUNTS`])
 //!     or the other one (`MountPathInvalid`).
@@ -83,7 +87,10 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use b10x_loom_agent::{Checked, RefusalReason, TOKEN_PREFIXES, check_text, spelling};
+use b10x_loom_agent::{
+    Checked, RefusalReason, StreamWalk, TOKEN_PREFIXES, check_text, spelling,
+    yaml_stream_credential,
+};
 use llm_models::routes::Routes;
 use loom_sdk::agent::{AgentSpec, parse};
 use serde_yaml_ng::{Mapping, Value};
@@ -765,13 +772,13 @@ pub const MAX_CONFIG_FILE_NAME: usize = 253;
 /// which the API server refuses the ConfigMap at apply.
 pub const MAX_CONFIG_MAP_BYTES: usize = 1024 * 1024;
 
-/// Whether `name` is a plain file name: `[A-Za-z0-9._-]+`, not `.` or `..`, at most
+/// Whether `name` is a plain file name: `[A-Za-z0-9._-]+`, not `.`, not starting with `..`, at most
 /// [`MAX_CONFIG_FILE_NAME`] bytes, so it is a ConfigMap key and a file directly under `/config`.
 fn plain_file_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= MAX_CONFIG_FILE_NAME
         && name != "."
-        && name != ".."
+        && !name.starts_with("..")
         && name
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
@@ -801,7 +808,7 @@ fn config_file_names(
                 "ConfigFileInvalid",
                 at,
                 format!(
-                    "it is not a plain file name, [A-Za-z0-9._-]+ other than `.` and `..`, of at \
+                    "it is not a plain file name, [A-Za-z0-9._-]+ other than `.` and not starting with `..`, of at \
                      most {MAX_CONFIG_FILE_NAME} bytes"
                 ),
             ));
@@ -829,11 +836,53 @@ fn config_file_names(
     Ok(())
 }
 
+/// The words of every string of every document of `text` read as a YAML stream (each key, value
+/// and tag, aliases replayed), each at `at`; the documents up to the first that does not read as
+/// YAML. Called only once the stream walk read the whole stream within its budget, so what it
+/// decodes is bounded by that budget.
+fn yaml_words(text: &str, at: &str) -> Vec<Word> {
+    fn strings(value: &Value, out: &mut Vec<String>) {
+        match value {
+            Value::String(text) => out.push(text.clone()),
+            Value::Sequence(items) => items.iter().for_each(|item| strings(item, out)),
+            Value::Mapping(map) => {
+                for (key, value) in map {
+                    strings(key, out);
+                    strings(value, out);
+                }
+            }
+            Value::Tagged(tagged) => {
+                out.push(tagged.tag.to_string());
+                strings(&tagged.value, out);
+            }
+            Value::Null | Value::Bool(_) | Value::Number(_) => {}
+        }
+    }
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let mut found = Vec::new();
+    for document in serde_yaml_ng::Deserializer::from_str(text) {
+        let Ok(value) = <Value as serde::Deserialize>::deserialize(document) else {
+            break;
+        };
+        strings(&value, &mut found);
+    }
+    found
+        .iter()
+        .flat_map(|text| words(text))
+        .map(|text| Word {
+            text,
+            member: at.to_owned(),
+            line: None,
+        })
+        .collect()
+}
+
 /// Walks `spec.configFiles` for a credential: the list whole, names and contents; then each
-/// content as a YAML document and as a TOML table when it reads as one, whole and word by word;
-/// then every word of each raw content, named by its line. Nothing decoded is kept: the walk
-/// only reads what the program may read. A refusal stands at the content, never at a member
-/// inside it, so it spells no key of the file; beyond the walk's bound it is `TooLarge`.
+/// content as a YAML stream (every document, `TooLarge` when the walk cannot read it whole) and
+/// as a TOML table when it reads as one, whole and word by word; then every word of each raw
+/// content, named by its line. Nothing decoded is kept: the walk only reads what the program may
+/// read. A refusal stands at the content, never at a member inside it, so it spells no key of
+/// the file; beyond the walk's bound it is `TooLarge`.
 fn config_files_credential(files: &[ConfigFile]) -> Result<(), Refusal> {
     credential(&yaml(&files, "spec.configFiles")?, "spec.configFiles")?;
     for (index, file) in files.iter().enumerate() {
@@ -848,13 +897,34 @@ fn config_files_credential(files: &[ConfigFile]) -> Result<(), Refusal> {
                 refusal
             }
         };
-        if let Some((_, detail)) = first_credential(&file.content, &at)? {
-            return Err(Refusal::new(
-                spelling(RefusalReason::SecretLiteral),
-                at,
-                format!("{detail}, read as YAML"),
-            ));
+        match yaml_stream_credential(&file.content) {
+            StreamWalk::Found { shape, .. } => {
+                return Err(Refusal::new(
+                    spelling(RefusalReason::SecretLiteral),
+                    at,
+                    format!("{shape}, read as YAML"),
+                ));
+            }
+            StreamWalk::TooLarge => {
+                return Err(Refusal::new(
+                    "TooLarge",
+                    at,
+                    "read as YAML, it costs more than the credential walk reads (its size, `[` or \
+                     `{` bytes, aliases or nesting)",
+                ));
+            }
+            StreamWalk::Clean => {}
         }
+        word_credential(&yaml_words(&file.content, &at), &at).map_err(|refusal| {
+            if refusal.reason == spelling(RefusalReason::SecretLiteral) {
+                Refusal {
+                    detail: format!("{}, read as YAML", refusal.detail),
+                    ..refusal
+                }
+            } else {
+                refusal
+            }
+        })?;
         if let Ok(table) = toml::from_str::<toml::Table>(&file.content) {
             credential(&yaml(&table, &at)?, &at).map_err(inside)?;
             let mut decoded = Vec::new();

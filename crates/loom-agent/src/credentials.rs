@@ -58,6 +58,7 @@ pub(crate) fn bound(text: &str) -> Option<usize> {
 pub(crate) fn first(text: &str, budget: usize) -> Option<(String, String)> {
     let walk = Walk {
         left: Cell::new(budget),
+        spent: Cell::new(false),
         found: RefCell::new(None),
     };
     let root = Node {
@@ -70,9 +71,76 @@ pub(crate) fn first(text: &str, budget: usize) -> Option<(String, String)> {
     }
 }
 
-/// One walk: what it may still spend and the first credential it found.
+/// How a walk of every document of a YAML stream ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StreamWalk {
+    /// The walk read every document it could and found no credential. A text that is not YAML
+    /// from some document on is walked up to that document.
+    Clean,
+    /// The first credential: the document it stands in (from 0), its member within that
+    /// document, spelt as `check_text` spells one, and its shape.
+    Found {
+        /// The document, from 0.
+        document: usize,
+        /// The member within the document.
+        member: String,
+        /// The credential's shape, never its value.
+        shape: String,
+    },
+    /// The walk could not read the stream whole: the text is beyond the decoder's byte or flow
+    /// bound, its aliases cost more than the bound allows, or the parser's own recursion or
+    /// repetition limit stopped it. Nothing the walk did not read is known to be clean.
+    TooLarge,
+}
+
+/// Walks every document of `text`, a YAML stream, for a credential, within one budget for the
+/// whole stream: [`bound`], the decoder's alias bound. A credential found before the walk stopped
+/// is the answer, whatever stopped it; a walk the budget or the parser's recursion or repetition
+/// limit stopped otherwise is [`StreamWalk::TooLarge`], never "no credential". A scan error ends
+/// the stream: the documents before it were walked, and no YAML reader reads past it.
+pub(crate) fn first_in_stream(text: &str) -> StreamWalk {
+    let Some(budget) = bound(text) else {
+        return StreamWalk::TooLarge;
+    };
+    let walk = Walk {
+        left: Cell::new(budget),
+        spent: Cell::new(false),
+        found: RefCell::new(None),
+    };
+    for (document, deserializer) in serde_yaml_ng::Deserializer::from_str(text).enumerate() {
+        let root = Node {
+            walk: &walk,
+            at: String::new(),
+        };
+        let walked = root.deserialize(deserializer);
+        if let Some((member, shape)) = walk.found.borrow_mut().take() {
+            return StreamWalk::Found {
+                document,
+                member,
+                shape,
+            };
+        }
+        match walked {
+            Ok(()) => {}
+            Err(_) if walk.spent.get() => return StreamWalk::TooLarge,
+            Err(error) => {
+                let message = error.to_string();
+                if message.starts_with("recursion limit exceeded")
+                    || message.starts_with("repetition limit exceeded")
+                {
+                    return StreamWalk::TooLarge;
+                }
+                return StreamWalk::Clean;
+            }
+        }
+    }
+    StreamWalk::Clean
+}
+
+/// One walk: what it may still spend, whether it ran out, and the first credential it found.
 struct Walk {
     left: Cell<usize>,
+    spent: Cell<bool>,
     found: RefCell<Option<(String, String)>>,
 }
 
@@ -82,7 +150,10 @@ impl Walk {
             .left
             .get()
             .checked_sub(text.saturating_add(NODE_BYTES))
-            .ok_or_else(|| E::custom("the walk's budget is spent"))?;
+            .ok_or_else(|| {
+                self.spent.set(true);
+                E::custom("the walk's budget is spent")
+            })?;
         self.left.set(left);
         Ok(())
     }

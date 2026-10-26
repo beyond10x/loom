@@ -113,7 +113,7 @@ pub struct EnvVar {
 /// One entry of `spec.configFiles`: a file the program reads at `/config/<name>`, verbatim.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfigFile {
-    /// The file's name, a plain file name (`[A-Za-z0-9._-]+`, not `.` or `..`).
+    /// The file's name, a plain file name (`[A-Za-z0-9._-]+`, not `.`, not starting with `..`).
     pub name: String,
     /// Its text, never holding a credential.
     pub content: String,

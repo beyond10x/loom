@@ -71,6 +71,7 @@ pub use serve::{
 };
 
 mod credentials;
+pub use credentials::StreamWalk;
 pub mod http;
 pub mod serve;
 
@@ -139,6 +140,17 @@ pub fn check_text(
         )
     })?;
     check(&spec, actions)
+}
+
+/// Walks `text`, any YAML stream rather than one `loom.agent/1` document, for a credential: every
+/// node of every document, as [`check_text`] walks one, within one budget for the whole stream
+/// (the decoder's byte, flow and alias bounds). Where [`check_text`] leaves a text the decoder
+/// refuses to the decoder, this answers [`StreamWalk::TooLarge`] for a stream it could not read
+/// whole, so a caller that decodes nothing (an opaque configuration file) never reads "no
+/// credential" for a text it did not walk. One leading U+FEFF is dropped first.
+#[must_use]
+pub fn yaml_stream_credential(text: &str) -> StreamWalk {
+    credentials::first_in_stream(text.strip_prefix('\u{feff}').unwrap_or(text))
 }
 
 /// Checks `spec`, a decoded `loom.agent/1` document, against `actions` as [`check_text`] does,

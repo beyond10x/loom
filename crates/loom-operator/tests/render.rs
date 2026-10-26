@@ -1535,6 +1535,7 @@ fn a_config_file_name_that_is_not_a_plain_file_name_is_refused_without_repeating
         "..",
         "hidden-name/x",
         "../hidden-name",
+        "..hidden-name",
         "hidden name",
         "hidden-name\t",
         "hidden-n\u{e4}me",
@@ -1548,7 +1549,7 @@ fn a_config_file_name_that_is_not_a_plain_file_name_is_refused_without_repeating
         assert_eq!(
             message,
             "refused: ConfigFileInvalid at spec.configFiles[1].name: it is not a plain file \
-             name, [A-Za-z0-9._-]+ other than `.` and `..`, of at most 253 bytes",
+             name, [A-Za-z0-9._-]+ other than `.` and not starting with `..`, of at most 253 bytes",
             "{name:?}"
         );
         assert!(!message.contains("hidden"), "{message}");
@@ -1557,7 +1558,7 @@ fn a_config_file_name_that_is_not_a_plain_file_name_is_refused_without_repeating
         &command_without_agent(&config_files(&[
             (&longest, "x"),
             ("a-b_c.d", "y"),
-            ("...", "z"),
+            (".hidden", "z"),
         ])),
         &config(),
     )
@@ -1595,5 +1596,26 @@ fn a_config_file_name_given_twice_or_held_by_the_controller_is_refused() {
              file of that name under /config itself",
             "{name} with spec.agent {with_agent}"
         );
+    }
+}
+
+/// A YAML escape inside a value of several words: the stream walk reads each value whole, so
+/// each decoded string is also walked word by word, as a TOML string is.
+#[test]
+fn an_escaped_token_inside_a_yaml_value_of_several_words_is_refused() {
+    for content in [
+        "flags: \"--verbose --token \\x67hp_000fake\"\n",
+        "kind: run\n---\nargs: [\"-H\", \"Authorization: \\x42earer 000fake\"]\n",
+    ] {
+        let message = refusal(
+            &command_without_agent(&config_files(&[("run.yaml", content)])),
+            &config(),
+        );
+        assert!(
+            message.starts_with("refused: SecretLiteral at spec.configFiles[0].content: "),
+            "{content:?}: {message}"
+        );
+        assert!(message.ends_with(", read as YAML"), "{message}");
+        assert!(!message.contains("000fake"), "{message}");
     }
 }

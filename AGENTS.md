@@ -943,15 +943,19 @@ command); a name it does not know (a `secretRef` key, the service environment su
 may supply a URL scheme. Each reading is walked whole and word by word (`SecretLiteral`, its
 detail saying it was found after expansion; `TooLarge` when references add more than
 `MAX_EXPANDED_BYTES`, 2 MiB, to a reading); a non-empty `spec.configFiles` on `AgentServe`
-(`Malformed`), then a name that is not a plain file name (`[A-Za-z0-9._-]+`, not `.` or `..`, at
-most 253 bytes: `ConfigFileInvalid`), one an earlier entry gives or one the ConfigMap holds already
+(`Malformed`), then a name that is not a plain file name (`[A-Za-z0-9._-]+`, not `.`, not
+starting with `..`, which the kubelet keeps for itself, at most 253 bytes: Kubernetes's rule for a
+ConfigMap key; `ConfigFileInvalid`), one an earlier entry gives or one the ConfigMap holds already
 (`routes.yaml`, `connectors.toml`, and `agent.yaml` when `spec.agent` is present:
 `ConfigFileConflict`); a ConfigMap whose keys and values hold more than 1 MiB together, Kubernetes's
 limit (`TooLarge`, before apply); a credential in a file (`SecretLiteral` at
 `spec.configFiles[<i>].content` or `.name`, never a member inside the file): the list whole, each
-content as a YAML document and as a TOML table when it reads as one (whole and word by word, so an
-escape hides nothing), then each word of the raw text, named by line, as `spec.connectorsConfig`
-is walked; `TooLarge` beyond the bound; a `spec.workspace.mountPath` or
+content as a YAML stream (every document, `b10x_loom_agent::yaml_stream_credential`) and as a TOML
+table when it reads as one (whole and word by word, so a YAML or TOML escape hides nothing from a
+program reading the file as either; an encoding neither undoes, such as base64, still can), then
+each word of the raw text, named by line, as `spec.connectorsConfig` is walked; `TooLarge` beyond
+the bound, and for a YAML stream whose aliases or nesting the walk cannot read whole within the
+agent decoder's alias bound; a `spec.workspace.mountPath` or
 `spec.secretFiles.mountPath` that is not absolute and plain or overlaps `/etc/agent`, `/config`,
 `/var/lib/agent`, `/tmp` or the other (`MountPathInvalid`); a `claimName` not allowed
 (`ClaimNotAllowed`). A `Command` resource's `spec.agent` passes only the credential walk and the

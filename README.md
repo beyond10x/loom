@@ -365,7 +365,7 @@ the `loom.agent/1` decoder, not the plugin catalog, and walks `spec.command` for
 A `Command` resource may leave `spec.agent` out and give its program's own configuration as
 `spec.configFiles` (a list of `name` and `content`), each written verbatim at `/config/<name>`; the
 controller decodes nothing of them. It refuses a name that is not a plain file name
-(`[A-Za-z0-9._-]+`, not `.` or `..`: `ConfigFileInvalid`), a name given twice or one it writes
+(`[A-Za-z0-9._-]+`, not `.`, not starting with `..`: `ConfigFileInvalid`), a name given twice or one it writes
 itself (`routes.yaml`, `connectors.toml`, and `agent.yaml` beside `spec.agent`:
 `ConfigFileConflict`), a credential in a name or content (`SecretLiteral`, walked as
 `spec.connectorsConfig` is and also as YAML and TOML where a file reads as either), and a ConfigMap
