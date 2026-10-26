@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-26T16:54:33Z",
+  "actor": "human:timo",
+  "artifact": "story:command-variant-runs-once",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "golden render of the takt-delivery Command resource (crates/loom-operator/tests/golden/takt-delivery.yaml, asserted by tests/render.rs) at 38455359 vs dbf79bd8: kind Deployment vs kind Job with backoffLimit 0, restartPolicy Never, no ttlSecondsAfterFinished; VERIFIED",
+    "reference": "u1/verify-baseline.yaml vs u1/verify-treatment.yaml (coordinator scratch)"
+  }
+}
