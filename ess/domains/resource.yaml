@@ -108,10 +108,10 @@ types:
   # How the child Job's run ended (story command-run-exit-status), read from the Job's own pod,
   # the one whose controller is the Job: `exit_code` and `finished_at` are the program
   # container's `state.terminated` (`exitCode`, `finishedAt`), `reason` its terminated reason
-  # (`Completed`, `Error`, `OOMKilled`). A run that failed with no container that terminated (its
-  # pod never started, or a deadline ended it) has neither an exit code nor an end time, and
-  # `reason` is then the reason of the Job's own `Failed` condition (`DeadlineExceeded`,
-  # `BackoffLimitExceeded`).
+  # (`Completed`, `Error`, `OOMKilled`). A run whose program container's end was never read (its
+  # pod deleted before the controller read it, or a pod that ended before its container ran) has
+  # neither an exit code nor an end time, and `reason` is then the reason of the Job's own
+  # `Failed` or `Complete` condition (`BackoffLimitExceeded`).
   - name: loom.resource.RunEnd
     kind: struct
     fields:

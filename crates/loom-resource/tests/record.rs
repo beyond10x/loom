@@ -680,9 +680,9 @@ fn a_command_run_records_how_it_ended_until_a_new_generation() {
 
     apply(&mut record, 3);
     check(&mut record, 3, 0, "admitted");
-    let never_started = ended(None, None, Some("DeadlineExceeded"));
+    let never_read = ended(None, None, Some("BackoffLimitExceeded"));
     assert_eq!(
-        observe_end(&mut record, RunPhase::Failed, &never_started),
+        observe_end(&mut record, RunPhase::Failed, &never_read),
         ObserveRunOutcome::Failed {
             loom_agent_failed: LoomAgentFailed {
                 name: name(),
@@ -693,5 +693,5 @@ fn a_command_run_records_how_it_ended_until_a_new_generation() {
     );
     let failed = row(&record).expect("the row");
     assert_eq!(failed.state, LoomAgentState::Failed);
-    assert_eq!(failed.run, Some(never_started));
+    assert_eq!(failed.run, Some(never_read));
 }

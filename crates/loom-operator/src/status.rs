@@ -18,9 +18,11 @@
 //! not finished while Running, False once the run ended, since nothing runs any more and nothing
 //! starts again before a new generation. Its `Completed` says how the run ended (story
 //! command-run-exit-status): its message names the program's exit code and when it ended, as the
-//! row's `run` holds them, or, for a run that failed with no container that terminated, that no
-//! exit code was read and the Job's reason. Only an `AgentServe` resource reaches Degraded, since
-//! only its Deployment is observed for availability. A row that carries conditions is published
+//! row's `run` holds them, or, for a run whose program container's end was never read (its pod
+//! gone first, or ended before the container ran), that no exit code was read and the Job's
+//! reason; [`pods_unread`] adds that the pod could not be read when the API server refused the
+//! list. Only an `AgentServe` resource reaches Degraded, since only its Deployment is observed
+//! for availability. A row that carries conditions is published
 //! with its own.
 
 use b10x_loom_resource::model::{
@@ -233,6 +235,19 @@ pub fn conditions(
                 ),
                 available,
             ]
+        }
+    }
+}
+
+/// Says in the message of a decided `Completed` condition of `status` that the run's pod could
+/// not be read: the API server answered the list of the Job's pods with `code` (403 or 404), so
+/// the run has no exit code for that reason, not because its pod was gone.
+pub fn pods_unread(status: &mut resource::LoomAgentStatus, code: u16) {
+    for condition in status.conditions.iter_mut().flatten() {
+        if condition.kind == "Completed" && condition.status != "Unknown" {
+            condition.message.push_str(&format!(
+                "; its pod could not be read (the list was answered {code})"
+            ));
         }
     }
 }
@@ -542,7 +557,7 @@ mod tests {
         let unread = RunEnd {
             exit_code: None,
             finished_at: None,
-            reason: Some("DeadlineExceeded".to_owned()),
+            reason: Some("BackoffLimitExceeded".to_owned()),
         };
         let failed = conditions(
             LoomAgentState::Failed,
@@ -553,7 +568,7 @@ mod tests {
         );
         assert_eq!(
             failed[2].message,
-            "the Job's run failed with no exit code read from its pod (DeadlineExceeded)"
+            "the Job's run failed with no exit code read from its pod (BackoffLimitExceeded)"
         );
 
         let row = LoomAgents {

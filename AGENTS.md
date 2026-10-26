@@ -958,9 +958,12 @@ sweep after the Deployment is applied. The run's phase is read from the Job. Onc
 its exit code, end time and reason are read from the Job's own pod (`observation` in
 `src/reconcile.rs`): the pods the Job's label selector names whose controlling owner reference is
 the Job's uid, so a pod of another Job never speaks for it, the program container `loom-agent`
-(`render::CONTAINER`), the latest `finishedAt`. With no such pod, or a pod list answered 403 or
-404, the exit code and end time are absent and the reason is that of the Job's `Failed` or
-`Complete` condition. No pod is watched, and an active run reads none. After a controller restart
+(`render::CONTAINER`), the latest `finishedAt`. While the Job counts the run over but its own pod is in no final
+phase and its program container has not terminated (the pod still stopping), nothing is observed
+and the reconcile comes again after 30 s, so the exit code is not lost. With no such pod, or a pod
+list answered 403 or 404, the exit code and end time are absent and the reason is that of the
+Job's `Failed` or `Complete` condition; a refused list is logged and the `Completed` message says
+the pod could not be read. No pod is watched, and an active run reads none. After a controller restart
 a finished Job still there is observed, not run again; a Job deleted while the controller was down runs once more. The
 status goes out by server-side apply on `/status`, only when it changed; conditions follow
 `src/status.rs` (a table per state in its module doc; a Command resource's `Available` reads

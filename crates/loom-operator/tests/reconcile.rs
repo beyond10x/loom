@@ -1530,46 +1530,48 @@ async fn a_pod_of_another_job_does_not_speak_for_the_run() {
     );
 }
 
-/// `story:command-run-exit-status`: a Job that failed with no container that terminated (its
-/// deadline passed before the program started) still reports failed, with no exit code and the
-/// Job's reason in the condition's message.
+/// `story:command-run-exit-status`: a Job that failed while no program container's end can be
+/// read (its pod deleted before the controller read it, or a pod that ended in phase `Failed`
+/// before its container ran) still reports failed, with no exit code and the Job's reason in the
+/// condition's message.
 #[tokio::test]
 async fn a_failed_run_without_a_terminated_container_reports_the_jobs_reason() {
     let own = format!("uid-of-{JOB}");
-    let deadline = json!({"failed": 1, "conditions": [{
-        "type": "Failed", "status": "True", "reason": "DeadlineExceeded",
-    }]});
-    let (status, events) = ended_with(
-        deadline,
-        vec![pod(
-            "platform-operator-x1",
-            &own,
-            json!({"waiting": {"reason": "ImagePullBackOff"}}),
-        )],
-    )
-    .await;
-    assert_eq!(status["state"], "Failed");
-    assert_eq!(status["run"], json!({"reason": "DeadlineExceeded"}));
-    assert_eq!(
-        conditions(&status)[2],
-        triple("Completed", "False", "RunFailed")
+    let (path, mut never_ran) = pod(
+        "platform-operator-x1",
+        &own,
+        json!({"waiting": {"reason": "ContainerCreating"}}),
     );
-    assert_eq!(
-        message(&status, "Completed"),
-        "the Job's run failed with no exit code read from its pod (DeadlineExceeded)"
-    );
-    assert_eq!(
-        events.last(),
-        Some(&ResourceEvent::Failed(LoomAgentFailed {
-            name: name(),
-            generation: 1,
-            exit_code: None,
-        }))
-    );
+    never_ran["status"]["phase"] = json!("Failed");
+    for pods in [vec![], vec![(path, never_ran)]] {
+        let gone = json!({"failed": 1, "conditions": [{
+            "type": "Failed", "status": "True", "reason": "BackoffLimitExceeded",
+        }]});
+        let (status, events) = ended_with(gone, pods).await;
+        assert_eq!(status["state"], "Failed");
+        assert_eq!(status["run"], json!({"reason": "BackoffLimitExceeded"}));
+        assert_eq!(
+            conditions(&status)[2],
+            triple("Completed", "False", "RunFailed")
+        );
+        assert_eq!(
+            message(&status, "Completed"),
+            "the Job's run failed with no exit code read from its pod (BackoffLimitExceeded)"
+        );
+        assert_eq!(
+            events.last(),
+            Some(&ResourceEvent::Failed(LoomAgentFailed {
+                name: name(),
+                generation: 1,
+                exit_code: None,
+            }))
+        );
+    }
 }
 
 /// `story:command-run-exit-status`: a list of pods the API server refuses (403, a Role without
-/// the read) leaves the exit code absent; the run still ends Failed.
+/// the read) leaves the exit code absent and the `Completed` condition says the pod could not be
+/// read; the run still ends Failed.
 #[tokio::test]
 async fn a_refused_pod_list_leaves_the_exit_code_absent() {
     let (client, fake) = fake();
@@ -1589,6 +1591,11 @@ async fn a_refused_pod_list_leaves_the_exit_code_absent() {
     let status = published(&fake.take());
     assert_eq!(status["state"], "Failed");
     assert_eq!(status["run"], json!({}));
+    assert_eq!(
+        message(&status, "Completed"),
+        "the Job's run failed with no exit code read from its pod; its pod could not be read (the \
+         list was answered 403)"
+    );
 }
 
 /// `story:command-variant-runs-once`: a Job's pod template cannot change, so a new generation
@@ -1894,4 +1901,255 @@ async fn adv_after_a_restart_a_finished_job_is_observed_and_not_run_again() {
     let status = published(&seen);
     assert_eq!(status["state"], "Completed");
     assert_eq!(status["observedGeneration"], 1);
+}
+
+// Adversary cases for story:command-run-exit-status (wave 2026-10-26-cmdv, unit u2).
+
+/// A pod of the resource's Job named `name`, controlled by the Job when `controller`, its
+/// container statuses `containers` as written.
+fn adv_pod(name: &str, controller: bool, containers: Value) -> (String, Value) {
+    let path = format!("{PODS}/{name}");
+    let pod = json!({
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "name": name,
+            "namespace": "agents",
+            "uid": format!("uid-of-{path}"),
+            "labels": {"batch.kubernetes.io/controller-uid": format!("uid-of-{JOB}")},
+            "ownerReferences": [{
+                "apiVersion": "batch/v1", "kind": "Job", "name": NAME,
+                "uid": format!("uid-of-{JOB}"), "controller": controller,
+            }],
+        },
+        "status": {"containerStatuses": containers},
+    });
+    (path, pod)
+}
+
+/// A container status of `name` in `state`.
+fn adv_container(name: &str, state: Value) -> Value {
+    json!({
+        "name": name, "image": "registry.example/takt:0.12.0", "imageID": "",
+        "ready": false, "restartCount": 0, "state": state,
+    })
+}
+
+/// A pod may run a container beside the program (a mesh sidecar an admission webhook injects
+/// first): only the program container `loom-agent` speaks for the run, even when the sidecar is
+/// listed first and terminated later with exit code 0.
+#[tokio::test]
+async fn adv_a_sidecar_does_not_speak_for_the_program() {
+    let (path, pod) = adv_pod(
+        "platform-operator-x1",
+        true,
+        json!([
+            adv_container(
+                "mesh-proxy",
+                terminated(0, "2026-10-26T13:00:00Z", "Completed")
+            ),
+            adv_container("loom-agent", terminated(3, "2026-10-26T12:00:00Z", "Error")),
+        ]),
+    );
+    let (status, _) = ended_with(failed(), vec![(path, pod)]).await;
+    assert_eq!(
+        status["run"],
+        json!({"exitCode": 3, "finishedAt": "2026-10-26T12:00:00Z", "reason": "Error"}),
+        "the program container's end, not the sidecar's"
+    );
+}
+
+/// Of several pods the Job controls, the one whose program terminated last answers, whatever
+/// order the list returns them in.
+#[tokio::test]
+async fn adv_the_jobs_pod_that_ended_last_answers() {
+    let (later_path, later) = adv_pod(
+        "platform-operator-a",
+        true,
+        json!([adv_container(
+            "loom-agent",
+            terminated(7, "2026-10-26T12:30:00Z", "Error")
+        )]),
+    );
+    let (earlier_path, earlier) = adv_pod(
+        "platform-operator-b",
+        true,
+        json!([adv_container(
+            "loom-agent",
+            terminated(1, "2026-10-26T12:00:00Z", "Error")
+        )]),
+    );
+    let (status, _) =
+        ended_with(failed(), vec![(later_path, later), (earlier_path, earlier)]).await;
+    assert_eq!(
+        status["run"],
+        json!({"exitCode": 7, "finishedAt": "2026-10-26T12:30:00Z", "reason": "Error"})
+    );
+}
+
+/// A pod that names the Job's uid in an owner reference that is not its controller does not
+/// speak for the run.
+#[tokio::test]
+async fn adv_a_pod_the_job_does_not_control_does_not_speak_for_the_run() {
+    let (path, pod) = adv_pod(
+        "platform-operator-x1",
+        false,
+        json!([adv_container(
+            "loom-agent",
+            terminated(0, "2026-10-26T12:00:00Z", "Completed")
+        )]),
+    );
+    let (status, _) = ended_with(failed(), vec![(path, pod)]).await;
+    assert_eq!(status["state"], "Failed");
+    assert_eq!(status["run"], json!({}));
+}
+
+/// A program the kernel killed (exit code 137, `OOMKilled`) whose runtime recorded no
+/// `finishedAt` reports the exit code and reason, and no end time.
+#[tokio::test]
+async fn adv_a_killed_program_without_an_end_time_reports_137() {
+    let (path, pod) = adv_pod(
+        "platform-operator-x1",
+        true,
+        json!([adv_container(
+            "loom-agent",
+            json!({"terminated": {"exitCode": 137, "signal": 9, "reason": "OOMKilled"}})
+        )]),
+    );
+    let (status, events) = ended_with(failed(), vec![(path, pod)]).await;
+    assert_eq!(
+        status["run"],
+        json!({"exitCode": 137, "reason": "OOMKilled"})
+    );
+    assert_eq!(
+        message(&status, "Completed"),
+        "the program exited with code 137 (OOMKilled)"
+    );
+    assert_eq!(
+        events.last(),
+        Some(&ResourceEvent::Failed(LoomAgentFailed {
+            name: name(),
+            generation: 1,
+            exit_code: Some(137),
+        }))
+    );
+}
+
+/// A new generation clears the run the earlier one recorded: the status publishes no `run`, and
+/// `Completed` reads `RunNotFinished` again once the new Job runs.
+#[tokio::test]
+async fn adv_a_new_generation_clears_the_run() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(command_agent(1, "run"), &ctx).await;
+    let (path, pod) = pod(
+        "platform-operator-x1",
+        &format!("uid-of-{JOB}"),
+        terminated(3, "2026-10-26T12:00:00Z", "Error"),
+    );
+    fake.put(&path, pod);
+    fake.set_run(JOB, Some(failed()));
+    reconciled(command_agent(1, "run"), &ctx).await;
+    assert_eq!(published(&fake.take())["run"]["exitCode"], 3);
+    fake.remove(&path);
+    fake.set_run(JOB, None);
+
+    reconciled(command_agent(2, "run, --again"), &ctx).await;
+    let status = published(&fake.take());
+    assert_eq!(status["state"], "Running");
+    assert!(status.get("run").is_none(), "run cleared: {status}");
+    assert_eq!(
+        conditions(&status)[2],
+        triple("Completed", "Unknown", "RunNotFinished")
+    );
+}
+
+/// After a controller restart a finished Job still there is observed, not run again, and its
+/// pod's exit code is read again: the status the restarted controller publishes keeps `run`.
+#[tokio::test]
+async fn adv_a_restarted_controller_reads_the_finished_runs_exit_code_again() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(command_agent(1, "run"), &ctx).await;
+    let (path, pod) = pod(
+        "platform-operator-x1",
+        &format!("uid-of-{JOB}"),
+        terminated(0, "2026-10-26T12:00:00Z", "Completed"),
+    );
+    fake.put(&path, pod);
+    fake.set_run(JOB, Some(succeeded()));
+    reconciled(command_agent(1, "run"), &ctx).await;
+    fake.take();
+
+    let (restarted_client, restarted) = self::fake();
+    for (at, object) in fake.objects() {
+        restarted.put(&at, object);
+    }
+    let after = context(restarted_client);
+    reconciled(command_agent(1, "run"), &after).await;
+    let seen = restarted.take();
+    assert!(!applies(&seen).contains(&JOB), "not run again: {seen:?}");
+    let status = published(&seen);
+    assert_eq!(status["state"], "Completed");
+    assert_eq!(
+        status["run"],
+        json!({"exitCode": 0, "finishedAt": "2026-10-26T12:00:00Z", "reason": "Completed"})
+    );
+}
+
+/// The Job controller counts a pod that is terminating (deleted or evicted while it runs: a node
+/// drain, a preemption) as failed at once, `status.failed: 1`, while the program still runs out
+/// its grace period; the API server then adds `FailureTarget` and only writes `Failed` once the
+/// pod has terminated. The controller moves the resource to Failed on `failed: 1` and reads the
+/// pod then, before its container terminated, and a Failed resource is never read again: the
+/// program's exit code (143 here, SIGTERM) is lost for good although the pod reports it seconds
+/// later and stays readable.
+#[tokio::test]
+async fn adv_a_run_counted_failed_while_its_pod_terminates_reports_the_exit_code() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(command_agent(1, "run"), &ctx).await;
+    let mut seen = fake.take();
+
+    let (path, mut pod) = adv_pod(
+        "platform-operator-x1",
+        true,
+        json!([adv_container(
+            "loom-agent",
+            json!({"running": {"startedAt": "2026-10-26T11:59:00Z"}})
+        )]),
+    );
+    pod["metadata"]["deletionTimestamp"] = json!("2026-10-26T12:00:00Z");
+    fake.put(&path, pod.clone());
+    fake.set_run(
+        JOB,
+        Some(json!({"failed": 1, "conditions": [{
+            "type": "FailureTarget", "status": "True", "reason": "BackoffLimitExceeded",
+        }]})),
+    );
+    reconciled(command_agent(1, "run"), &ctx).await;
+    seen.extend(fake.take());
+
+    pod["status"]["containerStatuses"] = json!([adv_container(
+        "loom-agent",
+        terminated(143, "2026-10-26T12:00:20Z", "Error")
+    )]);
+    fake.put(&path, pod);
+    fake.set_run(
+        JOB,
+        Some(json!({"failed": 1, "conditions": [
+            {"type": "FailureTarget", "status": "True", "reason": "BackoffLimitExceeded"},
+            {"type": "Failed", "status": "True", "reason": "BackoffLimitExceeded"},
+        ]})),
+    );
+    reconciled(command_agent(1, "run"), &ctx).await;
+    seen.extend(fake.take());
+
+    let status = published(&seen);
+    assert_eq!(status["state"], "Failed");
+    assert_eq!(
+        status["run"]["exitCode"], 143,
+        "the program's exit code, readable from the Job's own pod once it terminated, never \
+         reaches the status: {status}"
+    );
 }
