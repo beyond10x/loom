@@ -252,7 +252,7 @@ An agent as data: one `loom.agent/1` document naming the agent and its brief, it
 
 ### `RefusalReason`
 
-`loom.agent.RefusalReason` is one of `Malformed`, `SecretLiteral`, `UnknownProtocol`, `UnknownAction`, `UnboundSource`, `HttpMethod`, `SendWithoutWrites` and `EmptyChannelAllow`.
+`loom.agent.RefusalReason` is one of `Malformed`, `SecretLiteral`, `UnknownFormat`, `BlankText`, `NotAVariableName`, `PortOutOfRange`, `NotAPlainPath`, `NotAnInstant`, `UnknownProtocol`, `UnknownAction`, `UnboundSource`, `HttpMethod`, `SendWithoutWrites` and `EmptyChannelAllow`.
 
 ### `RunBudget`
 
@@ -467,11 +467,23 @@ It takes:
 
 - `path` — `String`
 
-It has nine outcomes.
+It has 15 outcomes.
 
 **`malformed`** — Decided outside the input: the document at the path does not decode as a loom.agent/1 document. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.agent.SpecRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
 
 **`secret-literal`** — Decided outside the input: a string of the document holds a credential. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.agent.SpecRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`unknown-format`** — Decided outside the input: the document's format is not loom.agent/1. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.agent.SpecRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`blank-text`** — Decided outside the input: a text member of the document is empty or only whitespace. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.agent.SpecRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`not-a-variable-name`** — Decided outside the input: a bearer_env of the document is not an environment variable name. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.agent.SpecRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`port-out-of-range`** — Decided outside the input: a port of the document is outside 1 to 65535. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.agent.SpecRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`not-a-plain-path`** — Decided outside the input: an allow_paths entry of an http binding is not a plain path. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.agent.SpecRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`not-an-instant`** — Decided outside the input: a Timestamp member of the document is not an RFC 3339 instant. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.agent.SpecRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
 
 **`unknown-protocol`** — Decided outside the input: the inner loop names a protocol the plugin catalog does not hold, or states are declared with no inner loop. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.agent.SpecRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
 
@@ -540,9 +552,9 @@ It carries:
 - `member` — `String`
 - `detail` — `String`
 
-Reported by `loom.agent.CheckAgentSpec` on its `malformed`, `secret-literal`, `unknown-protocol`, `unknown-action`, `unbound-source`, `http-method`, `send-without-writes` and `empty-channel-allow` outcomes.
+Reported by `loom.agent.CheckAgentSpec` on its `malformed`, `secret-literal`, `unknown-format`, `blank-text`, `not-a-variable-name`, `port-out-of-range`, `not-a-plain-path`, `not-an-instant`, `unknown-protocol`, `unknown-action`, `unbound-source`, `http-method`, `send-without-writes` and `empty-channel-allow` outcomes.
 
 
 ---
 
-Generated from loom v1 · model digest `bd0680f8ac3534518a439d54a62dfd2a90bf5c733881ebeb4328aed4f2b64019` · contract digest `slice-sha256/2:fa88f006076f955f433e935b3068b60d07904d01c94bfed69d835887362cd30f`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · model digest `8b29b45d6bbeb27dcbf0d6fc9d820dcd9d106f4aff9a7ce7da17f8d25ed952b3` · contract digest `slice-sha256/2:a98c8386c834e4366f781f11890ec0d486f99e76097cb27b39836bd974e44c60`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

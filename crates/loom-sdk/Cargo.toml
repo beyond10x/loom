@@ -26,6 +26,7 @@ b10x-llm-http = { git = "https://github.com/beyond10x/llm", tag = "0.8.1" }
 models_config = { package = "loom", path = "../../generated/rust/loom" }
 serde = "1"
 serde_yaml_ng = "0.10"
+chrono = "0.4"
 libc = "0.2"
 serde_json = "1"
 tokio = { version = "1.53", features = ["rt"] }

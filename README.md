@@ -247,7 +247,11 @@ configuration is `loom.slack.SlackConfig` as JSON; `plugin run --help` names its
 the plugin catalog (`inbound-answer@1`, `operator-reply@1`), and runs nothing. The first refusal
 is the answer: the text is not one YAML document; a value or key anywhere in it holds a credential
 (a URL with a user name or a query, or a token prefix such as `xoxb-`), named without repeating
-it, before the document is decoded; the document does not decode; the inner loop's
+it, before the document is decoded; the document does not decode, a value that breaks a rule of
+the domain answering its own reason at the first member the decoder refuses (`UnknownFormat`,
+`BlankText`, `NotAVariableName` for a `bearer_env`, `PortOutOfRange`, `NotAPlainPath` for an
+`allow_paths` entry, `NotAnInstant` for a deadline that is not an RFC 3339 instant) and anything
+else `Malformed`; the inner loop's
 protocol is not in the catalog, or states have no inner loop; a state names an action its
 protocol lacks; a state, the outer loop or the channel names a source no binding declares; an
 `http` binding's method is not `GET`; `reply.send` is a capability while writes are `none`; the

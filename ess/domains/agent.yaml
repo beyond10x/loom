@@ -258,7 +258,8 @@ types:
   # variable holding a bearer token (absent, none), and the most bytes an answer may hold. Each
   # allowed path starts with `/` and holds no `\`, no `.` or `..` segment, no percent-encoded
   # separator or dot, no `?` or `#` and no whitespace or control character; a document listing
-  # another is malformed.
+  # another is refused (`NotAPlainPath`). `bearer_env` is an environment variable name,
+  # `[A-Za-z_][A-Za-z0-9_]*` (`NotAVariableName`).
   - name: loom.agent.HttpBinding
     kind: struct
     fields:
@@ -467,7 +468,13 @@ types:
 
   # Why a spec cannot be served (story agent-check), one reason per refusal of `CheckAgentSpec`:
   # the document does not decode as a `loom.agent/1` document (`Malformed`); a string of the
-  # document holds a credential, where only a reference belongs (`SecretLiteral`); the inner
+  # document holds a credential, where only a reference belongs (`SecretLiteral`); the document
+  # decodes but a value breaks a rule of the domain (story agent-spec-constraints-in-ess): `format`
+  # is not `loom.agent/1` (`UnknownFormat`), a text member is empty or only whitespace
+  # (`BlankText`), a `bearer_env` is not an environment variable name `[A-Za-z_][A-Za-z0-9_]*`
+  # (`NotAVariableName`), a port is outside 1 to 65535 (`PortOutOfRange`), an `allow_paths` entry
+  # of an `http` binding is not a plain path (`NotAPlainPath`), a `Timestamp` member is not an
+  # RFC 3339 instant such as `2026-12-31T23:59:59Z` (`NotAnInstant`); the inner
   # loop's protocol is not in the plugin catalog, or states are declared with no inner loop to
   # check them against (`UnknownProtocol`); a state names an action its protocol lacks
   # (`UnknownAction`); a state, the outer loop or the channel names a source no binding declares
@@ -477,7 +484,8 @@ types:
   - name: loom.agent.RefusalReason
     kind: enum
     variants:
-      [Malformed, SecretLiteral, UnknownProtocol, UnknownAction, UnboundSource, HttpMethod,
+      [Malformed, SecretLiteral, UnknownFormat, BlankText, NotAVariableName, PortOutOfRange,
+       NotAPlainPath, NotAnInstant, UnknownProtocol, UnknownAction, UnboundSource, HttpMethod,
        SendWithoutWrites, EmptyChannelAllow]
 
   # Why a served agent does not send a proposed reply (story agent-serve), one reason per refusal
@@ -574,9 +582,14 @@ errors:
 commands:
   # Whether the `loom.agent/1` document at `path` can be served: `b10x-loom agent check --spec`.
   # The document and the plugin catalog it is checked against are outside the input, so every
-  # refusal is external; the first refusal found, in declaration order, is the answer, and a
-  # document none of them claims is serveable. Nothing runs, nothing is read but the document,
-  # and nothing is held between two checks.
+  # refusal is external. The first refusal found is the answer: text that is not one YAML
+  # document (`malformed`); then `secret-literal`, found by walking the YAML before it is decoded;
+  # then the decoder's refusals, `malformed` and `unknown-format` to `not-an-instant`, which come
+  # from one walk of the document, so the first member that walk refuses decides which of them
+  # answers (a YAML tag anywhere is refused before the walk, which reads the undeclared members of
+  # a mapping first and then its members in the order the domain declares them); then the rest,
+  # in declaration order. A document none of them claims is serveable. Nothing runs, nothing is
+  # read but the document, and nothing is held between two checks.
   - name: loom.agent.CheckAgentSpec
     input:
       - name: path
@@ -592,6 +605,36 @@ commands:
         error: loom.agent.SpecRefused
         payload:
           loom.agent.SpecRefused: {reason: SecretLiteral}
+      - name: unknown-format
+        external: the document's format is not loom.agent/1
+        error: loom.agent.SpecRefused
+        payload:
+          loom.agent.SpecRefused: {reason: UnknownFormat}
+      - name: blank-text
+        external: a text member of the document is empty or only whitespace
+        error: loom.agent.SpecRefused
+        payload:
+          loom.agent.SpecRefused: {reason: BlankText}
+      - name: not-a-variable-name
+        external: a bearer_env of the document is not an environment variable name
+        error: loom.agent.SpecRefused
+        payload:
+          loom.agent.SpecRefused: {reason: NotAVariableName}
+      - name: port-out-of-range
+        external: a port of the document is outside 1 to 65535
+        error: loom.agent.SpecRefused
+        payload:
+          loom.agent.SpecRefused: {reason: PortOutOfRange}
+      - name: not-a-plain-path
+        external: an allow_paths entry of an http binding is not a plain path
+        error: loom.agent.SpecRefused
+        payload:
+          loom.agent.SpecRefused: {reason: NotAPlainPath}
+      - name: not-an-instant
+        external: a Timestamp member of the document is not an RFC 3339 instant
+        error: loom.agent.SpecRefused
+        payload:
+          loom.agent.SpecRefused: {reason: NotAnInstant}
       - name: unknown-protocol
         external: the inner loop names a protocol the plugin catalog does not hold, or states are declared with no inner loop
         error: loom.agent.SpecRefused

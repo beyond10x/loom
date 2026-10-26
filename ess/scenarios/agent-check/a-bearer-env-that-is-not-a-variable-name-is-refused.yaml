@@ -1,0 +1,20 @@
+# story agent-spec-constraints-in-ess: a `bearer_env` that is not an environment variable name
+# (`[A-Za-z_][A-Za-z0-9_]*`) is refused, naming the member; the detail never repeats the text, which
+# may be a secret written in the wrong place. The fixture is the operator example with the
+# `metrics` binding's `bearer_env: METRICS-TOKEN`.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-bearer-env-that-is-not-a-variable-name-is-refused
+summary: An http binding whose bearer_env is not a variable name is refused without repeating it.
+
+timeline:
+  - at: 2026-10-26T00:00:00Z
+    command: loom.agent.CheckAgentSpec
+    input: {path: ess/scenarios/agent-check/specs/not-a-variable-name.yaml}
+    outcome: not-a-variable-name
+    error:
+      name: loom.agent.SpecRefused
+      fields:
+        reason: NotAVariableName
+        member: bindings[2].bearer_env
+        detail: "`bindings[2].bearer_env` is not an environment variable name"

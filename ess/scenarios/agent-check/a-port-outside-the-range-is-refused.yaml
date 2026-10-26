@@ -1,0 +1,28 @@
+# story agent-spec-constraints-in-ess: a port is 1 to 65535, so `0` and `65536` are each refused,
+# naming the member. The fixtures are the operator example with `expose.a2a.port` `0` and `65536`.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-port-outside-the-range-is-refused
+summary: An A2A port of 0, and one of 65536, is refused as out of range, naming the member.
+
+timeline:
+  - at: 2026-10-26T00:00:00Z
+    command: loom.agent.CheckAgentSpec
+    input: {path: ess/scenarios/agent-check/specs/port-out-of-range.yaml}
+    outcome: port-out-of-range
+    error:
+      name: loom.agent.SpecRefused
+      fields:
+        reason: PortOutOfRange
+        member: expose.a2a.port
+        detail: "`expose.a2a.port` is not a port from 1 to 65535"
+  - at: 2026-10-26T00:00:01Z
+    command: loom.agent.CheckAgentSpec
+    input: {path: ess/scenarios/agent-check/specs/port-out-of-range-65536.yaml}
+    outcome: port-out-of-range
+    error:
+      name: loom.agent.SpecRefused
+      fields:
+        reason: PortOutOfRange
+        member: expose.a2a.port
+        detail: "`expose.a2a.port` is not a port from 1 to 65535"

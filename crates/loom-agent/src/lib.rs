@@ -16,7 +16,16 @@
 //!    known token prefix ([`TOKEN_PREFIXES`]). The detail names the shape and never repeats the
 //!    value. It is found by walking the YAML before decoding, so a member the decoder would
 //!    refuse, whose message would repeat the value, is answered here first;
-//! 3. [`RefusalReason::Malformed`]: the decoder refuses the document (`document`, its message);
+//! 3. the decoder refuses the document, its message the detail: a value that breaks a rule of the
+//!    domain under its own reason, at the member, [`RefusalReason::UnknownFormat`] (`format` is
+//!    not `loom.agent/1`), [`RefusalReason::BlankText`] (a text member empty or only whitespace),
+//!    [`RefusalReason::NotAVariableName`] (a `bearer_env`; the text is never repeated),
+//!    [`RefusalReason::PortOutOfRange`] (outside 1 to 65535), [`RefusalReason::NotAPlainPath`]
+//!    (an `allow_paths` entry) and [`RefusalReason::NotAnInstant`] (a `Timestamp` that is not an
+//!    RFC 3339 instant); any other refusal [`RefusalReason::Malformed`] at `document`. These come
+//!    from the decoder's one walk, so the first member it refuses decides which answers: a YAML
+//!    tag anywhere first, then each mapping's undeclared members before its declared ones, in the
+//!    order the domain declares them;
 //! 4. [`RefusalReason::UnknownProtocol`]: the catalog does not hold the inner loop's protocol, or
 //!    states are declared with no inner loop;
 //! 5. [`RefusalReason::UnknownAction`]: a state names an action its protocol does not declare;
@@ -105,8 +114,9 @@ const SEND: &str = "reply.send";
 /// One leading U+FEFF is dropped first: YAML admits a byte order mark at the start of a stream.
 ///
 /// # Errors
-/// The first refusal, as the crate documentation orders them; [`RefusalReason::Malformed`] when
-/// the document does not decode, naming `document` and carrying the decoder's message, unless
+/// The first refusal, as the crate documentation orders them. When the document does not
+/// decode, the decoder's reason ([`loom_sdk::agent::AgentSpecError::reason`]) at the member it
+/// names, or [`RefusalReason::Malformed`] at `document`, carrying the decoder's message, unless
 /// the document holds a credential the decoder's message could repeat.
 pub fn check_text(
     text: &str,
@@ -121,8 +131,13 @@ pub fn check_text(
     if let Some((member, shape)) = budget.and_then(|budget| credentials::first(text, budget)) {
         return Err(refused(RefusalReason::SecretLiteral, member, shape));
     }
-    let spec = decoded
-        .map_err(|error| refused(RefusalReason::Malformed, "document", error.to_string()))?;
+    let spec = decoded.map_err(|error| {
+        refused(
+            error.reason(),
+            error.member().unwrap_or("document"),
+            error.to_string(),
+        )
+    })?;
     check(&spec, actions)
 }
 
@@ -158,6 +173,12 @@ pub fn spelling(reason: RefusalReason) -> &'static str {
     match reason {
         RefusalReason::Malformed => "Malformed",
         RefusalReason::SecretLiteral => "SecretLiteral",
+        RefusalReason::UnknownFormat => "UnknownFormat",
+        RefusalReason::BlankText => "BlankText",
+        RefusalReason::NotAVariableName => "NotAVariableName",
+        RefusalReason::PortOutOfRange => "PortOutOfRange",
+        RefusalReason::NotAPlainPath => "NotAPlainPath",
+        RefusalReason::NotAnInstant => "NotAnInstant",
         RefusalReason::UnknownProtocol => "UnknownProtocol",
         RefusalReason::UnknownAction => "UnknownAction",
         RefusalReason::UnboundSource => "UnboundSource",

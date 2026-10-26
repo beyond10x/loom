@@ -43,9 +43,15 @@ const HTTP_TRUST_REFUSED: &str = "loom.agent.HttpTrustRefused";
 
 /// The refusal branches of `CheckAgentSpec`, each with the reason its fixture is refused for, in
 /// declaration order.
-const BRANCHES: [(&str, RefusalReason); 8] = [
+const BRANCHES: [(&str, RefusalReason); 14] = [
     ("malformed", RefusalReason::Malformed),
     ("secret-literal", RefusalReason::SecretLiteral),
+    ("unknown-format", RefusalReason::UnknownFormat),
+    ("blank-text", RefusalReason::BlankText),
+    ("not-a-variable-name", RefusalReason::NotAVariableName),
+    ("port-out-of-range", RefusalReason::PortOutOfRange),
+    ("not-a-plain-path", RefusalReason::NotAPlainPath),
+    ("not-an-instant", RefusalReason::NotAnInstant),
     ("unknown-protocol", RefusalReason::UnknownProtocol),
     ("unknown-action", RefusalReason::UnknownAction),
     ("unbound-source", RefusalReason::UnboundSource),

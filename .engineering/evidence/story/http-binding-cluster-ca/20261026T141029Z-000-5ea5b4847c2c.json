@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-26T14:10:29Z",
+  "actor": "human:timo",
+  "artifact": "story:http-binding-cluster-ca",
+  "kind": "story",
+  "revision": 14,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:http-binding-cluster-ca-adversary-q13",
+    "review": "review-result:http-binding-cluster-ca-adversary-q13",
+    "outcome": "fixed"
+  }
+}

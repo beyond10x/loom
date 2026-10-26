@@ -627,7 +627,16 @@ alias bound); `SecretLiteral` (a URL with user information or a query, or a toke
 parser reads, every scalar, key and tag in document order, before the document is decoded, so it
 covers every member by construction and precedes the decode-level `Malformed`: a decoder message
 (an undeclared enum spelling, an unknown key) never carries a credential; a key holding one is
-named by the mapping that holds it. Then `Malformed` (the decoder refuses the document), and
+named by the mapping that holds it. Then the decoder's refusals (`story:agent-spec-constraints-in-ess`):
+a value breaking a rule of the domain answers its own reason at the member, the decoder's message the
+detail (`AgentSpecError::reason` and `member`): `UnknownFormat` (`format`), `BlankText` (a text
+member empty or only whitespace), `NotAVariableName` (a `bearer_env`), `PortOutOfRange`,
+`NotAPlainPath` (an `allow_paths` entry) and `NotAnInstant` (a `Timestamp`, `session.budget.deadline`,
+that is not an RFC 3339 date-time with `T` and an offset, as Commission reads it); any other is
+`Malformed` at `document`. They come from the decoder's one walk, so the first member it refuses
+decides which answers: a YAML tag anywhere first, then in each mapping its undeclared members, then
+its members in the order the domain declares them
+(`the_first_member_the_decoder_refuses_decides_its_refusal`). Then
 `check`'s own checks in the declaration order of the command's outcomes: `UnknownProtocol`,
 `UnknownAction`, `UnboundSource` (states, then the outer loop, then the channel), `HttpMethod`,
 `SendWithoutWrites` and `EmptyChannelAllow`. `check` takes a decoded spec and so starts at
@@ -643,7 +652,8 @@ else (`ESS-AUTHOR-001`). `examples/agents/operator.yaml` decodes
 (`crates/loom-sdk/tests/agent_spec.rs`, `the_operator_example_decodes`; the unknown-member unit test
 is `agent::tests::a_spec_with_an_unknown_member_is_refused_in_yaml_and_json`). It also refuses
 empty or blank text, a YAML tag on any value, a `bearer_env` that is no environment variable name
-(`[A-Za-z_][A-Za-z0-9_]*`, the text never repeated) and a port outside 1 to 65535. Before reading
+(`[A-Za-z_][A-Za-z0-9_]*`, the text never repeated), a port outside 1 to 65535 and a deadline that
+is not an RFC 3339 instant (`deadline: 2026-12-31`), each but the tag under its own reason. Before reading
 YAML it refuses a document holding more than `MAX_FLOW_OPENERS` (4096) `[` or `{` bytes, counted
 anywhere, because the YAML reader's cost grows with the square of flow nesting
 (`crates/loom-sdk/tests/adversary_w20261022w3_agent_domain.rs`). The types of other domains a spec
@@ -701,7 +711,7 @@ first; the host refuses it again), the path is allowed (`path_allowed`: exactly 
 `allow_paths` and a `loom_sdk::agent::plain_http_path`, which starts with `/` and holds no `\`,
 no `.` or `..` segment, no percent-encoded separator or dot, no `?`, `#`, whitespace or control
 character; held even for an allow list naming such a path, and the decoder refuses such an
-`allow_paths` entry, so `check` answers `Malformed`) and the variable `bearer_env` names, when one
+`allow_paths` entry, so `check` answers `NotAPlainPath`) and the variable `bearer_env` names, when one
 is named, holds text (unset, empty or blank is `BearerMissing`). The one request is a GET of `base_url` + `path`
 with the query as parameters, on reqwest with redirects off and no proxy (as llm's `b10x-llm-http`
 is built; that crate exposes no GET at 0.8.1, so the GET is composed here on the same client),

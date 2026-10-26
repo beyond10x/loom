@@ -11,7 +11,12 @@
 //! be absent and is then empty. A decimal is a number or a string spelling one. `format` must be
 //! `loom.agent/1`. Text is never empty or blank, no value carries a YAML tag, a `bearer_env` is
 //! an environment variable name (never a token, and a refusal does not repeat it), an `http`
-//! binding's allowed path is a [`plain_http_path`] and a port is 1 to 65535. A document holding
+//! binding's allowed path is a [`plain_http_path`], a port is 1 to 65535 and a `Timestamp` (a run
+//! budget's `deadline`) is an RFC 3339 instant. Each of these six rules is refused under its own
+//! [`RefusalReason`] at the member ([`AgentSpecError::reason`], [`AgentSpecError::member`]), any
+//! other refusal as `Malformed`. The document is read in one walk, each mapping's undeclared
+//! members first and then its members in the order the domain declares them, and the first member
+//! it refuses is the answer; a YAML tag anywhere is refused before that walk. A document holding
 //! more than [`MAX_FLOW_OPENERS`] `[` or `{` is refused before it is read.
 //!
 //! Decoding checks the shape only. Whether a spec can be served (a state naming an action its
@@ -52,17 +57,49 @@ pub use models_config::agent::{AdmitSend, AdmitSendOutcome, SendRefusalReason, S
 /// The one format a document declares.
 pub const FORMAT: &str = "loom.agent/1";
 
-/// Why a document was refused; the message names the member.
+/// Why a document was refused; the message names the member. A value that breaks a rule of the
+/// domain carries its own [`RefusalReason`] and the member it stands at; any other refusal (the
+/// document is not one YAML document, a member undeclared or missing, a value of the wrong type,
+/// an enum spelling undeclared, a YAML tag, the models section) is [`RefusalReason::Malformed`]
+/// and names no member apart from its message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentSpecError {
     message: String,
+    reason: RefusalReason,
+    member: Option<String>,
 }
 
 impl AgentSpecError {
     fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            reason: RefusalReason::Malformed,
+            member: None,
         }
+    }
+
+    /// A value at `member` breaks the rule `reason` names.
+    fn value(reason: RefusalReason, member: &str, message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            reason,
+            member: Some(member.to_owned()),
+        }
+    }
+
+    /// The rule the document broke: `UnknownFormat`, `BlankText`, `NotAVariableName`,
+    /// `PortOutOfRange`, `NotAPlainPath` or `NotAnInstant` for a value, `Malformed` for anything
+    /// else.
+    #[must_use]
+    pub fn reason(&self) -> RefusalReason {
+        self.reason
+    }
+
+    /// The member the refused value stands at, as the document spells it (`agent.name`,
+    /// `bindings[1].bearer_env`); `None` for a [`RefusalReason::Malformed`] refusal.
+    #[must_use]
+    pub fn member(&self) -> Option<&str> {
+        self.member.as_deref()
     }
 }
 
@@ -80,7 +117,8 @@ impl std::error::Error for AgentSpecError {}
 /// The text exceeds its byte bound, is not YAML or JSON, expands past its bound through YAML
 /// aliases, declares another format, or does not decode into [`AgentSpec`]: a member the domain
 /// does not declare, a required member missing, a value of the wrong type, or an enum spelling it
-/// does not declare. The message names the member.
+/// does not declare; or a value breaks a rule of the domain ([`AgentSpecError::reason`]). The
+/// message names the member.
 pub fn parse(text: &str) -> Result<AgentSpec, AgentSpecError> {
     if u64::try_from(text.len()).map_or(true, |length| length > crate::models::MAX_BYTES) {
         return Err(AgentSpecError::new("the document exceeds its byte bound"));
@@ -227,7 +265,11 @@ fn join(at: &str, name: &str) -> String {
 fn text(value: &Value, at: &str) -> Result<String, AgentSpecError> {
     match value.as_str() {
         Some(text) if !text.trim().is_empty() => Ok(text.to_owned()),
-        Some(_) => Err(AgentSpecError::new(format!("`{at}` is empty"))),
+        Some(_) => Err(AgentSpecError::value(
+            RefusalReason::BlankText,
+            at,
+            format!("`{at}` is empty"),
+        )),
         None => Err(AgentSpecError::new(format!("`{at}` is not text"))),
     }
 }
@@ -244,9 +286,11 @@ fn variable_name(value: &Value, at: &str) -> Result<String, AgentSpecError> {
     if valid {
         Ok(name)
     } else {
-        Err(AgentSpecError::new(format!(
-            "`{at}` is not an environment variable name"
-        )))
+        Err(AgentSpecError::value(
+            RefusalReason::NotAVariableName,
+            at,
+            format!("`{at}` is not an environment variable name"),
+        ))
     }
 }
 
@@ -279,25 +323,47 @@ fn allow_path(value: &Value, at: &str) -> Result<String, AgentSpecError> {
     if plain_http_path(&path) {
         Ok(path)
     } else {
-        Err(AgentSpecError::new(format!(
-            "`{at}` is not a plain path, one that starts with `/` and holds no `\\`, no `.` or \
+        Err(AgentSpecError::value(
+            RefusalReason::NotAPlainPath,
+            at,
+            format!(
+                "`{at}` is not a plain path, one that starts with `/` and holds no `\\`, no `.` or \
              `..` segment, no encoded separator or dot, no `?` or `#` and no whitespace"
-        )))
+            ),
+        ))
     }
 }
 
+/// A port, 1 to 65535. An integer the YAML reader holds outside `i64` (past it up to `u64::MAX`)
+/// is outside that range too, not a value of the wrong type; one past `u64` or below `i64` the
+/// reader refuses with the whole document.
 fn port(value: &Value, at: &str) -> Result<i64, AgentSpecError> {
-    let port = integer(value, at)?;
-    if (1..=65_535).contains(&port) {
-        Ok(port)
+    let port = if beyond_i64(value) {
+        None
     } else {
-        Err(AgentSpecError::new(format!(
-            "`{at}` is not a port from 1 to 65535"
-        )))
+        Some(integer(value, at)?)
+    };
+    match port {
+        Some(port) if (1..=65_535).contains(&port) => Ok(port),
+        _ => Err(AgentSpecError::value(
+            RefusalReason::PortOutOfRange,
+            at,
+            format!("`{at}` is not a port from 1 to 65535"),
+        )),
     }
+}
+
+/// Whether `value` is an integer past `i64`, which the YAML reader holds up to `u64::MAX`.
+fn beyond_i64(value: &Value) -> bool {
+    value.as_i64().is_none() && value.as_u64().is_some()
 }
 
 fn integer(value: &Value, at: &str) -> Result<i64, AgentSpecError> {
+    if beyond_i64(value) {
+        return Err(AgentSpecError::new(format!(
+            "`{at}` is an integer outside -9223372036854775808 to 9223372036854775807"
+        )));
+    }
     value
         .as_i64()
         .ok_or_else(|| AgentSpecError::new(format!("`{at}` is not an integer")))
@@ -328,8 +394,23 @@ fn decimal(value: &Value, at: &str) -> Result<Decimal, AgentSpecError> {
     Ok(Decimal(spelled))
 }
 
+/// A `Timestamp`: an RFC 3339 `date-time`, a full date, `T` (or `t`), a full time with an
+/// optional fraction of a second and `Z` (or `z`) or a numeric offset, the instant Commission
+/// reads a run's deadline as. The space RFC 3339 lets an application put for the `T` is refused,
+/// and so is any character outside ASCII (chrono takes U+2212 MINUS SIGN for an offset's `-`),
+/// because Commission reads neither. A refusal does not repeat the text.
 fn timestamp(value: &Value, at: &str) -> Result<Timestamp, AgentSpecError> {
-    text(value, at).map(Timestamp)
+    let instant = text(value, at)?;
+    let separated = matches!(instant.as_bytes().get(10), Some(b'T' | b't'));
+    if instant.is_ascii() && separated && chrono::DateTime::parse_from_rfc3339(&instant).is_ok() {
+        Ok(Timestamp(instant))
+    } else {
+        Err(AgentSpecError::value(
+            RefusalReason::NotAnInstant,
+            at,
+            format!("`{at}` is not an RFC 3339 instant"),
+        ))
+    }
 }
 
 fn variant<T: Copy>(value: &Value, at: &str, declared: &[(&str, T)]) -> Result<T, AgentSpecError> {
@@ -366,9 +447,11 @@ fn spec(value: &Value) -> Result<AgentSpec, AgentSpecError> {
     )?;
     let format = members.get("format", text)?;
     if format != FORMAT {
-        return Err(AgentSpecError::new(format!(
-            "`format` is `{format}`, not `{FORMAT}`"
-        )));
+        return Err(AgentSpecError::value(
+            RefusalReason::UnknownFormat,
+            "format",
+            format!("`format` is `{format}`, not `{FORMAT}`"),
+        ));
     }
     Ok(AgentSpec {
         format,
@@ -618,27 +701,43 @@ fn state(value: &Value, at: &str) -> Result<AgentState, AgentSpecError> {
     })
 }
 
+/// The members a `connectors` binding declares, its tag `kind` first.
+const CONNECTORS_BINDING: [&str; 8] = [
+    "kind",
+    "name",
+    "adapter",
+    "connection",
+    "list",
+    "search",
+    "get",
+    "write",
+];
+
+/// The members an `http` binding declares, its tag `kind` first.
+const HTTP_BINDING: [&str; 7] = [
+    "kind",
+    "name",
+    "base_url",
+    "allow_paths",
+    "method",
+    "bearer_env",
+    "max_bytes",
+];
+
+/// A binding, its tag `kind` deciding which members it declares. A member neither kind declares
+/// is refused before `kind` is read, so the walk's order holds: undeclared members, then `kind`,
+/// then a member only the other kind declares (undeclared once `kind` names this one), then the
+/// members of this kind.
 fn binding(value: &Value, at: &str) -> Result<Binding, AgentSpecError> {
-    let kind = value
-        .as_mapping()
-        .and_then(|mapping| mapping.get("kind"))
-        .ok_or_else(|| AgentSpecError::new(format!("`{}` is missing", join(at, "kind"))))?;
-    match text(kind, &join(at, "kind"))?.as_str() {
+    let either: Vec<&str> = CONNECTORS_BINDING
+        .iter()
+        .chain(&HTTP_BINDING)
+        .copied()
+        .collect();
+    let kind = Members::of(value, at, &either)?.get("kind", text)?;
+    match kind.as_str() {
         "connectors" => {
-            let members = Members::of(
-                value,
-                at,
-                &[
-                    "kind",
-                    "name",
-                    "adapter",
-                    "connection",
-                    "list",
-                    "search",
-                    "get",
-                    "write",
-                ],
-            )?;
+            let members = Members::of(value, at, &CONNECTORS_BINDING)?;
             Ok(Binding::Connectors(ConnectorsBinding {
                 name: members.get("name", source)?,
                 adapter: members.get("adapter", |value, at| text(value, at).map(AdapterAlias))?,
@@ -651,19 +750,7 @@ fn binding(value: &Value, at: &str) -> Result<Binding, AgentSpecError> {
             }))
         }
         "http" => {
-            let members = Members::of(
-                value,
-                at,
-                &[
-                    "kind",
-                    "name",
-                    "base_url",
-                    "allow_paths",
-                    "method",
-                    "bearer_env",
-                    "max_bytes",
-                ],
-            )?;
+            let members = Members::of(value, at, &HTTP_BINDING)?;
             Ok(Binding::Http(HttpBinding {
                 name: members.get("name", source)?,
                 base_url: members.get("base_url", text)?,
@@ -828,5 +915,74 @@ mod tests {
         let json = r#"{"format": "loom.agent/1", "agent": {"id": "a", "name": "A", "brief": "b", "owner": "x"}, "model": {"routes": "routes.yaml", "roles": []}}"#;
         let refused = parse(json).expect_err("an unknown member decodes");
         assert_eq!(refused.to_string(), "unknown member `agent.owner`");
+        assert_eq!(
+            (refused.reason(), refused.member()),
+            (RefusalReason::Malformed, None)
+        );
+    }
+
+    /// Each value rule is refused under its own reason, at the member, the message naming it.
+    #[test]
+    fn a_value_refusal_carries_its_reason_and_member() {
+        let session = |budget: &str| {
+            format!(
+                "{MINIMAL}session: {{kind: Codex, budget: {budget}, stop: {{approval_gate: true, on_breach: KeepStep}}, confinement: none, tools: {{decisions: ask}}}}\n"
+            )
+        };
+        let http = |extra: &str| {
+            format!(
+                "{MINIMAL}bindings: [{{kind: http, name: m, base_url: 'http://m', method: GET, max_bytes: 1, {extra}}}]\n"
+            )
+        };
+        for (text, reason, member) in [
+            (
+                MINIMAL.replace("loom.agent/1", "loom.agent/2"),
+                RefusalReason::UnknownFormat,
+                "format",
+            ),
+            (
+                MINIMAL.replace("name: A", "name: ' '"),
+                RefusalReason::BlankText,
+                "agent.name",
+            ),
+            (
+                http("bearer_env: 'not a name'"),
+                RefusalReason::NotAVariableName,
+                "bindings[0].bearer_env",
+            ),
+            (
+                http("allow_paths: [/a/../b]"),
+                RefusalReason::NotAPlainPath,
+                "bindings[0].allow_paths[0]",
+            ),
+            (
+                format!(
+                    "{MINIMAL}expose: {{a2a: {{port: 65536, path: /a, card: {{name: n, description: d}}}}}}\n"
+                ),
+                RefusalReason::PortOutOfRange,
+                "expose.a2a.port",
+            ),
+            (
+                session("{deadline: '2026-12-31'}"),
+                RefusalReason::NotAnInstant,
+                "session.budget.deadline",
+            ),
+        ] {
+            let refused = parse(&text).expect_err(member);
+            assert_eq!(
+                (refused.reason(), refused.member()),
+                (reason, Some(member)),
+                "{refused}"
+            );
+            assert!(refused.to_string().contains(member), "{refused}");
+        }
+        let instant = parse(&session("{deadline: '2026-12-31T23:59:59Z'}")).expect("an instant");
+        assert_eq!(
+            instant
+                .session
+                .and_then(|session| session.budget.deadline)
+                .map(|deadline| deadline.0),
+            Some("2026-12-31T23:59:59Z".to_owned())
+        );
     }
 }

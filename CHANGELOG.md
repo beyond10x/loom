@@ -17,6 +17,11 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `LOOM_HTTP_CA_FILE`: an `http` binding read trusts that PEM file's certificates beside the webpki roots; `agent serve` reads it once at start-up and exits 1 naming the variable when it is unreadable, over 1048576 bytes, holds no certificate or any block not taken as a root (all or nothing) (story:http-binding-cluster-ca)
 - `loom.agent.AdmitHttpTrust` with `HttpTrustRefused` and `HttpTrustRefusalReason`; `b10x-loom-agent`: `http_trust`, `admit_http_trust`, `HttpTrust`, `HttpGet::with_trust`, `SpecPlugin::with_http_trust` (story:http-binding-cluster-ca)
 
+### Changed
+
+- **Breaking:** `loom.agent.RefusalReason` gains `UnknownFormat`, `BlankText`, `NotAVariableName`, `PortOutOfRange`, `NotAPlainPath`, `NotAnInstant`; `check_text` answers them at the member, not `Malformed` (story:agent-spec-constraints-in-ess)
+- **Breaking:** `loom_sdk::agent::parse` refuses a `deadline` that is not an RFC 3339 instant (`2026-12-31`); `AgentSpecError::reason` and `member` name the rule (story:agent-spec-constraints-in-ess)
+
 ## [0.42.0] - 2026-10-26
 
 ### Added

@@ -27,6 +27,11 @@ scenarios:
   - scenarios/agent-check/an-empty-channel-allow-is-refused.yaml
   - scenarios/agent-check/an-allow-path-holding-a-dot-dot-segment-is-refused.yaml
   - scenarios/agent-check/a-spec-without-connectors-or-image-repository-checks.yaml
+  - scenarios/agent-check/an-unknown-format-is-refused.yaml
+  - scenarios/agent-check/a-blank-text-member-is-refused.yaml
+  - scenarios/agent-check/a-bearer-env-that-is-not-a-variable-name-is-refused.yaml
+  - scenarios/agent-check/a-port-outside-the-range-is-refused.yaml
+  - scenarios/agent-check/a-deadline-that-is-not-an-instant-is-refused.yaml
   - scenarios/agent-serve/a-send-outside-the-allow-list-is-refused.yaml
   - scenarios/agent-serve/a-send-without-a-proposal-is-not-admissible.yaml
   - scenarios/agent-serve/a-sixth-send-in-the-window-is-refused.yaml
