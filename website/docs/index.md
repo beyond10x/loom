@@ -64,8 +64,8 @@ SDK example runs on scripted fake models. Each page says whether what it describ
 - It does not keep the engineering record of a case or compare harnesses. Both are neighbours'
   work: [AEP](https://beyond10x.github.io/ecosystem/aep/) ([GitHub](https://github.com/beyond10x/aep)) keeps
   the record, and [Metaharness](https://beyond10x.github.io/metaharness/)
-  ([GitHub](https://github.com/beyond10x/metaharness)) drives and compares harnesses, with Loom as
-  the native one.
+  ([GitHub](https://github.com/beyond10x/metaharness)) drives and compares harnesses. Loom is
+  the governed runtime above it, not one of those harnesses (Atlas ADR 0096).
 
 Loom is specified in [ESS](https://beyond10x.github.io/ess/)
 ([GitHub](https://github.com/beyond10x/ess)); the [specification reference](/docs/reference/ess)

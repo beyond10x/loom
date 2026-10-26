@@ -39,7 +39,7 @@ An example policy:
 | `p < 0.60` | Use the full planner, ask for clarification, or do nothing. |
 
 :::note[These thresholds are an example]
-Exact thresholds must be calibrated per domain and measured by Metaharness. A high probability
+Exact thresholds must be calibrated per domain and measured by a trial (Atlas ADR 0101). A high probability
 changes which path picks the action; it never changes what the action is allowed to do.
 :::
 
