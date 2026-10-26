@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-26T20:55:51Z",
+  "actor": "human:timo",
+  "artifact": "story:command-run-exit-status",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "acceptance held at 83e12754: crates/loom-operator/tests/reconcile.rs:1438 a_completed_run_reports_exit_code_0, reconcile.rs:1475 a_failed_run_reports_its_exit_code; task check on the wave head 83e12754: 2481 passed, 0 failed, 9 ignored (427 test binaries), every step exit 0; task plan and task website exit 0",
+    "reference": "83e12754"
+  }
+}

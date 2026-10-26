@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-26T20:55:51Z",
+  "actor": "human:timo",
+  "artifact": "story:takt-delivery-fixture-args",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "acceptance held at 83e12754: crates/loom-operator/tests/render.rs:506 the_takt_delivery_fixture_runs_takt_once and the golden takt-delivery.yaml (commit 171d55b6); task check on the wave head 83e12754: 2481 passed, 0 failed, 9 ignored (427 test binaries), every step exit 0; task plan and task website exit 0",
+    "reference": "83e12754"
+  }
+}
