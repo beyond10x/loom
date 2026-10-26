@@ -181,7 +181,8 @@ fn roots_of(pem: &[u8]) -> Vec<Certificate> {
 ///
 /// # Errors
 /// A refusal of [`admit_http_trust`]: the file cannot be read as a regular file, holds more than
-/// [`CA_FILE_MAX_BYTES`], or holds no certificate a TLS client takes as a root.
+/// [`CA_FILE_MAX_BYTES`], holds no certificate, or holds any block a TLS client does not take as a
+/// root (all or nothing: one such block refuses the whole file).
 pub fn http_trust(value: Option<&OsStr>) -> Result<HttpTrust, HttpTrustError> {
     let path = value.and_then(|value| match value.to_str() {
         Some(text) if text.trim().is_empty() => None,

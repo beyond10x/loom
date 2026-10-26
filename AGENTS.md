@@ -736,8 +736,11 @@ file's content. The roots reach `HttpGet` only (`HttpGet::with_trust`,
 call, the Connectors child or the A2A listener's own socket. A host setting, not a spec member:
 which CA signs an endpoint is the cluster's, as `LOOM_A2A_BEARER` is. The tests are
 `crates/loom-agent/tests/http_trust.rs` (a test CA and a loopback TLS listener minted at test
-time with `rcgen` and `rustls`, dev-dependencies of `b10x-loom-agent`; no key is committed) and
-`agent_serve_refuses_to_start_on_an_unusable_http_ca_file` in `crates/loom-cli/tests/agent_serve.rs`.
+time with `rcgen` and `rustls`, dev-dependencies of `b10x-loom-agent` and `b10x-loom-cli`; no key
+is committed) and, in `crates/loom-cli/tests/agent_serve.rs`,
+`agent_serve_refuses_to_start_on_an_unusable_http_ca_file`,
+`agent_serve_reads_an_https_binding_a_cluster_ca_signs` (the host's agent) and
+`an_a2a_turn_reads_an_https_binding_a_cluster_ca_signs` (the A2A listener's agent).
 
 A spec with `expose.a2a` is also answered over A2A (`story:agent-a2a`): `b10x-loom-a2a`
 (`crates/loom-a2a`) is the listener, A2A 1.0.1 over JSON-RPC 2.0 on std `TcpListener`, its protocol

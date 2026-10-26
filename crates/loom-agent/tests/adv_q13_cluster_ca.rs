@@ -216,7 +216,10 @@ fn adv_a_served_turn_reads_an_https_binding_through_the_plugin_trust() {
 fn adv_a_character_device_is_unreadable() {
     let (reason, message) = reason_of(Path::new("/dev/zero")).expect_err("a device is refused");
     assert_eq!(reason, HttpTrustRefusalReason::Unreadable, "{message}");
-    assert!(message.contains("LOOM_HTTP_CA_FILE: Unreadable"), "{message}");
+    assert!(
+        message.contains("LOOM_HTTP_CA_FILE: Unreadable"),
+        "{message}"
+    );
 }
 
 /// A FIFO with no writer is refused `Unreadable` at once; opening it would block the host.

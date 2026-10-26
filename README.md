@@ -282,8 +282,9 @@ endpoint is trusted by the webpki roots and, when `LOOM_HTTP_CA_FILE` names a PE
 cluster CA; on Kubernetes a file `spec.secretFiles` gives, the variable from `spec.secretRef`), by
 its certificates beside them. `agent serve` reads the file once before anything runs and exits 1
 naming the variable, never printing the file, when it cannot be read, holds more than 1048576
-bytes or holds no certificate; model calls, the Connectors command line and the A2A listener are
-not given these roots.
+bytes, holds no certificate or holds any block a TLS client does not take as a root (all or
+nothing: one such block refuses the whole file); model calls, the Connectors command line and the
+A2A listener are not given these roots.
 
 `b10x-loom agent stage-files --from <DIR> --to <DIR>` copies each key of a mounted Kubernetes
 Secret volume into a directory the caller owns (mode 0700, each file 0600, a file an earlier run
