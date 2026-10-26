@@ -9,6 +9,10 @@
 //! followed: the copy is a new file, and a file there that no current key names is removed, so a
 //! key dropped from the Secret is not left readable. `--to` must be a directory, not a link to
 //! one, and a directory inside it is refused.
+//!
+//! What `b10x-loom agent prepare-dirs` does, [`prepare`]: make each directory one the caller owns
+//! with mode exactly 0700 inside an emptyDir whose root the kubelet leaves mode 0777 (setgid with
+//! `fsGroup`), which a non-root container cannot change.
 
 use std::collections::BTreeSet;
 use std::fs::{self, DirBuilder, OpenOptions};
@@ -108,6 +112,48 @@ pub fn stage(from: &Path, to: &Path) -> Result<usize, String> {
         fs::remove_file(&stale).map_err(|why| named(&stale, &why))?;
     }
     Ok(staged)
+}
+
+/// Makes `dir` a directory this user owns with mode exactly [`DIR_MODE`]: created when absent,
+/// kept with what it holds when present, and setgid, sticky and every other bit cleared, since a
+/// directory made under a setgid emptyDir root inherits setgid. The mode is set through the
+/// opened directory, never through a link in its place, and only the directory's owner may set
+/// it, so a directory another user owns is refused.
+///
+/// # Errors
+/// The reason, naming the path, when `dir` is a link or not a directory, cannot be made or
+/// opened, or its mode cannot be set to [`DIR_MODE`].
+pub fn prepare(dir: &Path) -> Result<(), String> {
+    let named = |why: &dyn std::fmt::Display| format!("{}: {why}", dir.display());
+    match DirBuilder::new().mode(DIR_MODE).create(dir) {
+        Ok(()) => {}
+        Err(why) if why.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(why) => return Err(named(&why)),
+    }
+    let opened = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(dir)
+        .map_err(|why| match why.raw_os_error() {
+            Some(libc::ELOOP) => named(&"is a link, not a directory"),
+            Some(libc::ENOTDIR) => named(&"is not a directory"),
+            _ => named(&why),
+        })?;
+    opened
+        .set_permissions(fs::Permissions::from_mode(DIR_MODE))
+        .map_err(|why| named(&why))?;
+    let mode = opened
+        .metadata()
+        .map_err(|why| named(&why))?
+        .permissions()
+        .mode()
+        & 0o7777;
+    if mode != DIR_MODE {
+        return Err(named(&format_args!(
+            "its mode is {mode:o}, not {DIR_MODE:o}"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

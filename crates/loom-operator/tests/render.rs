@@ -632,8 +632,8 @@ fn a_command_resource_runs_the_image_program_over_config_with_its_volumes() {
     let init = at(pod, &["initContainers"]).as_sequence().expect("init");
     assert_eq!(
         init.len(),
-        1,
-        "only the staging, no check: the image holds no b10x-loom to check with: {pod:?}"
+        2,
+        "the staging and the writable dirs, no check: the image holds no b10x-loom to check with: {pod:?}"
     );
     let stage = &init[0];
     assert_eq!(text(stage, &["name"]), "stage-secret-files");
@@ -1617,5 +1617,99 @@ fn an_escaped_token_inside_a_yaml_value_of_several_words_is_refused() {
         );
         assert!(message.ends_with(", read as YAML"), "{message}");
         assert!(!message.contains("000fake"), "{message}");
+    }
+}
+
+/// Each `(name, mountPath, subPath)` of `container`'s volume mounts, in order.
+fn mounts_of(container: &Value) -> Vec<(String, String, Option<String>)> {
+    container["volumeMounts"]
+        .as_sequence()
+        .expect("mounts")
+        .iter()
+        .map(|mount| {
+            (
+                text(mount, &["name"]).to_owned(),
+                text(mount, &["mountPath"]).to_owned(),
+                mount["subPath"].as_str().map(ToOwned::to_owned),
+            )
+        })
+        .collect()
+}
+
+/// `story:writable-dirs-mode-0700`: Kubernetes makes an emptyDir's root mode 0777 (setgid with
+/// `fsGroup`) and a non-root container cannot change it, so a `Command` pod's `/tmp` and `HOME`
+/// are directories an init container makes in their emptyDirs, owned by the pod's user with mode
+/// 0700, mounted by `subPath`. The mode itself is held by `crates/loom-cli/tests/prepare_dirs.rs`.
+#[test]
+fn the_writable_dirs_are_0700_and_owned_by_the_pod_user() {
+    let bare = wrapped(
+        &takt_agent(),
+        "  routes: {}\n  image: {repository: registry.example/takt, tag: '0.12.0'}\n  command: \
+         {args: [--iterations, '1']}\n",
+    );
+    for resource in [takt_resource(), bare] {
+        let pod = pod_of(&render_document(&resource, &config()).expect("rendered"));
+        let init = pod["initContainers"]
+            .as_sequence()
+            .expect("init containers");
+        let prepare = init
+            .iter()
+            .find(|container| text(container, &["name"]) == "prepare-writable-dirs")
+            .unwrap_or_else(|| panic!("an init container prepares the directories: {pod:?}"));
+        assert_eq!(
+            text(prepare, &["image"]),
+            "registry.example/loom-agent:0.40.0",
+            "the controller's default image, which carries b10x-loom whatever spec.image is"
+        );
+        assert_eq!(
+            strings(prepare, &["command"]),
+            [
+                "b10x-loom",
+                "agent",
+                "prepare-dirs",
+                "--dir",
+                "/var/run/loom/tmp/tmp",
+                "--dir",
+                "/var/run/loom/state/home"
+            ]
+        );
+        assert_eq!(
+            at(prepare, &["securityContext", "runAsUser"]).as_i64(),
+            Some(10001),
+            "the directories it makes are the pod user's"
+        );
+        assert_eq!(
+            at(prepare, &["securityContext", "readOnlyRootFilesystem"]).as_bool(),
+            Some(true)
+        );
+        assert!(prepare["env"].is_null() && prepare["envFrom"].is_null());
+        assert_eq!(
+            mounts_of(prepare),
+            [
+                ("tmp".to_owned(), "/var/run/loom/tmp".to_owned(), None),
+                ("state".to_owned(), "/var/run/loom/state".to_owned(), None),
+            ]
+        );
+
+        let container = &pod["containers"][0];
+        let mounts = mounts_of(container);
+        for (name, path, sub) in [("tmp", "/tmp", "tmp"), ("state", "/var/lib/agent", "home")] {
+            assert!(
+                mounts.contains(&(name.to_owned(), path.to_owned(), Some(sub.to_owned()))),
+                "{path} is the prepared directory {sub} of the emptyDir {name}: {mounts:?}"
+            );
+        }
+        assert!(
+            env_of(container).contains(&("HOME".to_owned(), "/var/lib/agent".to_owned())),
+            "HOME is the prepared directory"
+        );
+        let volumes = pod["volumes"].as_sequence().expect("volumes");
+        for name in ["tmp", "state"] {
+            let volume = volumes
+                .iter()
+                .find(|volume| text(volume, &["name"]) == name)
+                .unwrap_or_else(|| panic!("the volume {name}"));
+            assert!(volume["emptyDir"].is_mapping(), "{name} is an emptyDir");
+        }
     }
 }

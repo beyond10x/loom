@@ -1038,7 +1038,14 @@ init container, runs `spec.command`, mounts the ConfigMap at `/config` (the cont
 `spec.agent` is `/config/agent.yaml`, the document the resource holds, keys in the order the API
 server keeps them, as `/etc/agent/agent.yaml` is for `agent serve`; each of `spec.configFiles` is
 `/config/<name>`, verbatim), sets `HOME=/var/lib/agent`
-and adds an emptyDir at `/tmp`; `status.conditions` `Checked` then reads `SpecAdmitted` instead of
+and adds an emptyDir at `/tmp`. `/tmp` and `HOME` are the directories `tmp/tmp` and `state/home`
+of the emptyDirs `tmp` and `state`, mounted by `subPath`: the init container `prepare-writable-dirs`
+(image `defaultImage`, after `stage-secret-files`) runs `b10x-loom agent prepare-dirs --dir
+/var/run/loom/tmp/tmp --dir /var/run/loom/state/home`, which makes each owned by user 10001 with
+mode exactly 0700 (setgid and sticky cleared), since Kubernetes makes an emptyDir's root 0777,
+setgid with `fsGroup`, and a reader such as `b10x-gates` refuses a file under a directory others
+may write (the `AgentServe` pod's `state` emptyDir is mounted whole, as before). A `Command`
+resource's `status.conditions` `Checked` reads `SpecAdmitted` instead of
 `SpecServeable`. On either variant `spec.env` follows the controller's own `env`
 (`render::CONTROLLER_ENV`, which `tests/render.rs` holds to every name the renderer sets) on the
 agent container, in declaration order, beside the `secretRef` `envFrom`; no init container gets

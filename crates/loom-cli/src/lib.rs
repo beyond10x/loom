@@ -472,6 +472,30 @@ pub enum AgentCommand {
     /// mode 0700 and each file 0600.
     #[command(after_help = AGENT_STAGE_FILES_HELP)]
     StageFiles(AgentStageFilesArgs),
+    /// Make each directory one this user owns with mode exactly 0700, keeping what it holds.
+    #[command(after_help = AGENT_PREPARE_DIRS_HELP)]
+    PrepareDirs(AgentPrepareDirsArgs),
+}
+
+/// What `agent prepare-dirs --help` says about the directories and its exit status.
+pub const AGENT_PREPARE_DIRS_HELP: &str = "Kubernetes makes an emptyDir's root mode 0777 (setgid with fsGroup), and a non-root container cannot
+change it, so a reader that refuses a file under a directory its group or others may write refuses
+every file there. b10x-loom-operator runs this in the init container prepare-writable-dirs of a
+Command pod and mounts the directories at /tmp and HOME. Each --dir is created when absent, kept
+with what it holds when present, and set to mode 0700 with setgid and sticky cleared; it must not
+be a link, and only its owner can set its mode.
+
+Exit status:
+  0  every directory was prepared; standard output says how many
+  1  a directory is a link, is not a directory, or cannot be made or set to 0700
+  2  the command line is not valid";
+
+/// The arguments of `b10x-loom agent prepare-dirs`.
+#[derive(Debug, Args)]
+pub struct AgentPrepareDirsArgs {
+    /// A directory to prepare; give one or more.
+    #[arg(long = "dir", value_name = "DIR", required = true)]
+    pub dirs: Vec<PathBuf>,
 }
 
 /// What `agent stage-files --help` says about the copy and its exit status.

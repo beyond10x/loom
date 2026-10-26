@@ -31,7 +31,12 @@
 //!   `spec.command.args`, each left to the image when absent; the ConfigMap is read-only at
 //!   `/config`, so `spec.agent` is `/config/agent.yaml` and each of `spec.configFiles` is
 //!   `/config/<name>`; `HOME` is `/var/lib/agent`, and an emptyDir is at `/tmp`, the root
-//!   staying read-only.
+//!   staying read-only. Both are directories the init container `prepare-writable-dirs`, run from
+//!   the configured default image, makes with `b10x-loom agent prepare-dirs` in the emptyDirs
+//!   `tmp` and `state` (`tmp/tmp`, `state/home`; owned by user 10001, mode 0700, setgid and
+//!   sticky cleared), mounted by `subPath`, since Kubernetes makes an emptyDir's root 0777
+//!   (setgid with `fsGroup`) and a reader that refuses a file under a directory others may write
+//!   would refuse every file there.
 //!
 //!   On either variant `spec.env` is the agent container's `env` after the controller's own
 //!   ([`CONTROLLER_ENV`]), in declaration order, beside the `spec.secretRef` environment; no init
@@ -92,8 +97,18 @@ pub const STATE_DIR: &str = "/var/lib/agent";
 /// Where the `Command` variant's container reads the ConfigMap: `/config/agent.yaml` is
 /// `spec.agent`, `/config/<name>` each of `spec.configFiles`.
 pub const CONFIG_DIR: &str = "/config";
-/// The `Command` variant's writable temporary directory, an emptyDir.
+/// The `Command` variant's writable temporary directory: [`TMP_SUBDIR`] of the emptyDir `tmp`.
 pub const TMP_DIR: &str = "/tmp";
+/// The directory in the emptyDir `tmp` the `Command` variant's container mounts at [`TMP_DIR`],
+/// made by the init container `prepare-writable-dirs`: mode 0700, owned by [`USER`].
+pub const TMP_SUBDIR: &str = "tmp";
+/// The directory in the emptyDir `state` the `Command` variant's container mounts at
+/// [`STATE_DIR`], its `HOME`, made as [`TMP_SUBDIR`] is.
+pub const HOME_SUBDIR: &str = "home";
+/// Where `prepare-writable-dirs` mounts the emptyDir `tmp`.
+pub const TMP_VOLUME_DIR: &str = "/var/run/loom/tmp";
+/// Where `prepare-writable-dirs` mounts the emptyDir `state`.
+pub const STATE_VOLUME_DIR: &str = "/var/run/loom/state";
 /// The mode of the `spec.secretFiles` Secret volume's files: read by the owner and by `fsGroup`,
 /// so the staging init container, running as [`USER`] in that group, reads them.
 pub const SECRET_FILE_MODE: i32 = 0o440;
@@ -336,6 +351,7 @@ impl Renderer<'_> {
             mounts.push(VolumeMount {
                 name: "tmp".to_owned(),
                 mount_path: TMP_DIR.to_owned(),
+                sub_path: Some(TMP_SUBDIR.to_owned()),
                 ..VolumeMount::default()
             });
             volumes.push(Volume {
@@ -433,6 +449,46 @@ impl Renderer<'_> {
         })
     }
 
+    /// The `Command` variant's init container that makes [`TMP_SUBDIR`] and [`HOME_SUBDIR`] in
+    /// the emptyDirs `tmp` and `state` as directories the pod's user owns with mode 0700:
+    /// Kubernetes makes an emptyDir's root mode 0777 (setgid with `fsGroup`), which a non-root
+    /// container cannot change. `b10x-loom agent prepare-dirs` from the controller's default
+    /// image, as [`Self::stage_files`] runs.
+    fn prepare_dirs(&self) -> Option<Container> {
+        (self.admitted.variant == AgentVariant::Command).then(|| Container {
+            name: "prepare-writable-dirs".to_owned(),
+            image: Some(self.config.default_image.to_string()),
+            command: Some(
+                [
+                    "b10x-loom",
+                    "agent",
+                    "prepare-dirs",
+                    "--dir",
+                    &format!("{TMP_VOLUME_DIR}/{TMP_SUBDIR}"),
+                    "--dir",
+                    &format!("{STATE_VOLUME_DIR}/{HOME_SUBDIR}"),
+                ]
+                .map(str::to_owned)
+                .to_vec(),
+            ),
+            resources: Some(self.resources()),
+            security_context: Some(self.security()),
+            volume_mounts: Some(vec![
+                VolumeMount {
+                    name: "tmp".to_owned(),
+                    mount_path: TMP_VOLUME_DIR.to_owned(),
+                    ..VolumeMount::default()
+                },
+                VolumeMount {
+                    name: "state".to_owned(),
+                    mount_path: STATE_VOLUME_DIR.to_owned(),
+                    ..VolumeMount::default()
+                },
+            ]),
+            ..Container::default()
+        })
+    }
+
     /// Whether the pod mounts a workspace or a Secret's files, which `fsGroup` makes the
     /// container's user able to write and read.
     fn needs_fs_group(&self) -> bool {
@@ -518,6 +574,8 @@ impl Renderer<'_> {
             VolumeMount {
                 name: "state".to_owned(),
                 mount_path: STATE_DIR.to_owned(),
+                sub_path: (self.admitted.variant == AgentVariant::Command)
+                    .then(|| HOME_SUBDIR.to_owned()),
                 ..VolumeMount::default()
             },
         ];
@@ -581,6 +639,7 @@ impl Renderer<'_> {
                     let init: Vec<Container> = self
                         .stage_files()
                         .into_iter()
+                        .chain(self.prepare_dirs())
                         .chain((self.admitted.variant == AgentVariant::AgentServe).then_some(check))
                         .collect();
                     (!init.is_empty()).then_some(init)

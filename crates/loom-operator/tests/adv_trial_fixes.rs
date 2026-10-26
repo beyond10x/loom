@@ -114,7 +114,10 @@ fn adv_command_variant_with_secret_files_and_no_workspace_sets_fs_group() {
         "  routes: {}\n  command: {args: [run]}\n  secretFiles: {name: takt-forge, mountPath: /var/run/secrets/takt}\n",
     );
     let pod = pod(&render_document(&resource, &config()).expect("rendered"));
-    assert_eq!(names(&pod["initContainers"]), ["stage-secret-files"]);
+    assert_eq!(
+        names(&pod["initContainers"]),
+        ["stage-secret-files", "prepare-writable-dirs"]
+    );
     assert_eq!(pod["securityContext"]["fsGroup"].as_i64(), Some(10001));
 }
 
