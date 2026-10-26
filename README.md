@@ -327,8 +327,8 @@ kind: Deployment
 
 Helm installs the chart's `crds/` once and never upgrades it; `b10x-loom-operator crd` prints the
 CRD of the installed version. For each resource the controller first runs the check of
-`b10x-loom agent check` over `spec.agent`, looks for a credential in `spec.routes` and
-`spec.connectorsConfig`, and holds the Secret, the namespace and the egress hosts to its
+`b10x-loom agent check` over `spec.agent`, looks for a credential in `spec.routes`,
+`spec.connectorsConfig` and `spec.env`, and holds the Secret, the namespace and the egress hosts to its
 configuration. A refusal is the resource's status (`state: Refused`, `check` naming the member)
 and no child is created. Otherwise it applies a ServiceAccount, a ConfigMap, a Deployment that
 checks the spec again in an init container and runs `b10x-loom agent serve`, a NetworkPolicy and,
@@ -349,9 +349,19 @@ the run ended from the resource. `spec.workspace` (`mountPath`, optional `claimN
 the environment and `spec.secretFiles` (`name`, `mountPath`) another as files: an init container
 runs `b10x-loom agent stage-files` to copy its keys into a directory the pod user owns (mode 0700,
 files 0600), since a tool such as `b10x-gates` refuses a key file another user owns or others may
-read. The values must allow both names in `allowedSecretNames`. For this variant the controller checks `spec.agent` only for a
-credential and against the `loom.agent/1` decoder, not the plugin catalog, and walks
-`spec.command` for a credential too.
+read. The values must allow both names in `allowedSecretNames`. `spec.env` (a list of `name` and
+`value`) gives values such as `CARGO_HOME` or `CARGO_NET_OFFLINE` to the agent container on
+either variant, after the controller's own (`HOME` for a `Command` resource) and in the order
+given. The kubelet expands `$(NAME)` in them and in `spec.command`, also from the Secret's keys
+and the service environment, so the controller walks each value and command entry as written
+and again expanded against what it knows (its own `env` and the `spec.env` entries), reading a
+reference to any other name both as written and as a URL scheme, since it may supply one. It
+refuses a credential in any of these readings or in a name (`SecretLiteral`), a name that is not
+`[A-Za-z_][A-Za-z0-9_]*` (`NotAVariableName`), and a name given twice or one it sets itself
+(`EnvNameConflict`; `HOME`, on either variant). A secret belongs in `spec.secretRef` or
+`spec.secretFiles`: the walk knows credential shapes, not every secret.
+For a `Command` resource the controller checks `spec.agent` only for a credential and against
+the `loom.agent/1` decoder, not the plugin catalog, and walks `spec.command` for a credential too.
 
 `b10x-loom-operator render` prints what the controller would apply for one resource and talks to no
 cluster. Install it with `cargo install --locked --path crates/loom-operator`. Here the example

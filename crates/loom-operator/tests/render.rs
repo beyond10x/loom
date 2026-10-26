@@ -10,7 +10,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use b10x_loom_operator::config::Config;
-use b10x_loom_operator::render::{RenderError, render_document};
+use b10x_loom_operator::render::{CONTROLLER_ENV, RenderError, render_document};
 use serde_yaml_ng::Value;
 
 /// The controller configuration the golden file is rendered with.
@@ -842,4 +842,386 @@ fn the_serve_variant_still_refuses_a_protocol_outside_the_catalog() {
         message.starts_with("refused: UnknownProtocol at spec.agent."),
         "{message}"
     );
+}
+
+/// `spec.env` as YAML, each name and value single-quoted.
+fn env(entries: &[(&str, &str)]) -> String {
+    let quoted = |text: &str| format!("'{}'", text.replace('\'', "''"));
+    let mut out = String::from("  env:\n");
+    for (name, value) in entries {
+        out.push_str(&format!(
+            "  - {{name: {}, value: {}}}\n",
+            quoted(name),
+            quoted(value)
+        ));
+    }
+    out
+}
+
+/// The serve variant's resource with `rest` after its routes and Secret.
+fn serve_with(rest: &str) -> String {
+    wrapped(
+        &example(),
+        &format!("  routes: {{}}\n  secretRef: {{name: platform-operator-secrets}}\n{rest}"),
+    )
+}
+
+/// The `Command` variant's resource with `rest` after the takt members.
+fn command_with(rest: &str) -> String {
+    wrapped(&takt_agent(), &format!("{TAKT}{rest}"))
+}
+
+/// The pod template's spec of the rendered workload, a Deployment or a Job.
+fn pod_of(rendered: &str) -> Value {
+    let docs = documents(rendered);
+    at(&docs[2], &["spec", "template", "spec"]).clone()
+}
+
+/// Each `name` and `value` of `container`'s `env`, in order; none when it has no `env`.
+fn env_of(container: &Value) -> Vec<(String, String)> {
+    container["env"]
+        .as_sequence()
+        .map(|entries| {
+            entries
+                .iter()
+                .map(|entry| {
+                    (
+                        text(entry, &["name"]).to_owned(),
+                        text(entry, &["value"]).to_owned(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// What a trial run of the `Command` variant set through a wrapper script before `spec.env`.
+const TRIAL_ENV: [(&str, &str); 4] = [
+    ("CARGO_HOME", "/workspace/cargo"),
+    ("CARGO_TARGET_DIR", "/workspace/target"),
+    ("CARGO_NET_OFFLINE", "true"),
+    ("B10X_GATES_POLICY", "/var/run/secrets/takt/policy.json"),
+];
+
+fn owned(entries: &[(&str, &str)]) -> Vec<(String, String)> {
+    entries
+        .iter()
+        .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+        .collect()
+}
+
+#[test]
+fn spec_env_values_reach_the_container() {
+    let pod =
+        pod_of(&render_document(&command_with(&env(&TRIAL_ENV)), &config()).expect("rendered"));
+    let container = &pod["containers"][0];
+    let mut expected = owned(&[("HOME", "/var/lib/agent")]);
+    expected.extend(owned(&TRIAL_ENV));
+    assert_eq!(
+        env_of(container),
+        expected,
+        "the controller's own first, then spec.env in declaration order"
+    );
+    assert_eq!(
+        text(container, &["envFrom", "0", "secretRef", "name"]),
+        "platform-operator-secrets",
+        "beside the secretRef environment"
+    );
+    for init in pod["initContainers"].as_sequence().expect("init") {
+        assert_eq!(env_of(init), [], "an init container gets none: {init:?}");
+    }
+
+    let reversed: Vec<(&str, &str)> = TRIAL_ENV.iter().rev().copied().collect();
+    let pod = pod_of(&render_document(&serve_with(&env(&reversed)), &config()).expect("rendered"));
+    let container = &pod["containers"][0];
+    assert_eq!(env_of(container), owned(&reversed), "the serve variant too");
+    assert_eq!(
+        text(container, &["envFrom", "0", "secretRef", "name"]),
+        "platform-operator-secrets"
+    );
+    for init in pod["initContainers"].as_sequence().expect("init") {
+        assert_eq!(env_of(init), [], "{init:?}");
+    }
+
+    let pod = pod_of(&render_document(&serve_with("  env: []\n"), &config()).expect("rendered"));
+    assert!(
+        pod["containers"][0]["env"].is_null(),
+        "an empty spec.env renders no env"
+    );
+}
+
+#[test]
+fn a_credential_in_spec_env_is_refused_without_repeating_it() {
+    let cases = [
+        (
+            env(&[("CARGO_HOME", "/w"), ("FORGE_TOKEN", "xoxb-000-fake")]),
+            "refused: SecretLiteral at spec.env[1].value: a value with the prefix `xoxb-`",
+        ),
+        (
+            env(&[("FLAGS", "--verbose --token ghp_000fake")]),
+            "refused: SecretLiteral at spec.env[0].value: a value with the prefix `ghp_`",
+        ),
+        (
+            env(&[("AUTH", "Authorization:Bearer 000fake")]),
+            "refused: SecretLiteral at spec.env[0].value: a value with the prefix `Bearer `",
+        ),
+        (
+            env(&[("FORGE", "https://u:not-a-real-password@forge.example")]),
+            "refused: SecretLiteral at spec.env[0].value: ",
+        ),
+        (
+            env(&[("CARGO_HOME", "/w"), ("ghp_000fake", "x")]),
+            "refused: SecretLiteral at spec.env[1].name: a value with the prefix `ghp_`",
+        ),
+    ];
+    for (rest, expected) in &cases {
+        for resource in [command_with(rest), serve_with(rest)] {
+            let message = refusal(&resource, &config());
+            assert!(message.starts_with(expected), "{expected} <- {message}");
+            for value in ["000-fake", "000fake", "not-a-real-password"] {
+                assert!(!message.contains(value), "{message}");
+            }
+        }
+    }
+
+    let long = "a ".repeat(1024 * 1024 + 64);
+    let message = refusal(&command_with(&env(&[("LONG", &long)])), &config());
+    assert_eq!(
+        message,
+        "refused: TooLarge at spec.env: it is longer than 2097152 bytes as YAML, more than the \
+         credential walk reads"
+    );
+    let braces = "{".repeat(4097);
+    let message = refusal(&command_with(&env(&[("BRACES", &braces)])), &config());
+    assert_eq!(
+        message,
+        "refused: TooLarge at spec.env: it holds more than 4096 `[` or `{` bytes, more than the \
+         credential walk reads"
+    );
+}
+
+/// [`CONTROLLER_ENV`] is every name the controller sets on any container of either variant, so a
+/// name the renderer starts setting without adding it there fails here.
+#[test]
+fn a_reserved_variable_name_is_refused() {
+    let mut set = Vec::new();
+    for resource in [command_with(""), serve_with("")] {
+        let pod = pod_of(&render_document(&resource, &config()).expect("rendered"));
+        for list in ["containers", "initContainers"] {
+            for container in pod[list].as_sequence().into_iter().flatten() {
+                set.extend(env_of(container).into_iter().map(|(name, _)| name));
+            }
+        }
+    }
+    set.sort_unstable();
+    set.dedup();
+    let mut reserved: Vec<String> = CONTROLLER_ENV
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect();
+    reserved.sort_unstable();
+    assert_eq!(set, reserved, "CONTROLLER_ENV names what render sets");
+
+    for name in CONTROLLER_ENV {
+        let rest = env(&[("CARGO_HOME", "/w"), (name, "/workspace")]);
+        for resource in [command_with(&rest), serve_with(&rest)] {
+            assert_eq!(
+                refusal(&resource, &config()),
+                "refused: EnvNameConflict at spec.env[1].name: the controller sets it on the \
+                 container"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_name_that_is_not_a_variable_name_is_refused_without_repeating_it() {
+    for name in [
+        "",
+        "1PATH",
+        "CARGO-HOME",
+        "CARGO HOME",
+        "A=B",
+        "A.B",
+        "ÄRGER",
+    ] {
+        let rest = env(&[("CARGO_HOME", "/w"), (name, "x")]);
+        for resource in [command_with(&rest), serve_with(&rest)] {
+            assert_eq!(
+                refusal(&resource, &config()),
+                "refused: NotAVariableName at spec.env[1].name: it is not an environment \
+                 variable name, [A-Za-z_][A-Za-z0-9_]*",
+                "{name:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_name_given_twice_is_refused_naming_both() {
+    let rest = env(&[
+        ("CARGO_HOME", "/a"),
+        ("CARGO_NET_OFFLINE", "true"),
+        ("CARGO_HOME", "/b"),
+    ]);
+    for resource in [command_with(&rest), serve_with(&rest)] {
+        assert_eq!(
+            refusal(&resource, &config()),
+            "refused: EnvNameConflict at spec.env[2].name: it repeats spec.env[0].name"
+        );
+    }
+    let distinct = env(&[("cargo_home", "/a"), ("CARGO_HOME", "/b")]);
+    render_document(&command_with(&distinct), &config()).expect("names differ by case");
+
+    let mut many: Vec<(String, String)> = (0..40_000)
+        .map(|index| (format!("V{index}"), "x".to_owned()))
+        .collect();
+    many.push(("V17".to_owned(), "y".to_owned()));
+    let entries: Vec<(&str, &str)> = many
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect();
+    assert_eq!(
+        refusal(&serve_with(&env(&entries)), &config()),
+        "refused: EnvNameConflict at spec.env[40000].name: it repeats spec.env[17].name"
+    );
+}
+
+/// The kubelet expands `$(NAME)` in a value from the entries before it, and in the command from
+/// the whole environment, so each is walked again as the program reads it.
+#[test]
+fn a_credential_joined_by_variable_expansion_is_refused_without_repeating_it() {
+    let joined = TAKT.replace(
+        "--iterations, '1']",
+        "--iterations, '1', --token, '$(PART)_000fake']",
+    );
+    let cases = [
+        (
+            serve_with(&env(&[("PART", "ghp"), ("TOKEN", "$(PART)_000fake")])),
+            "refused: SecretLiteral at spec.env[1].value: a value with the prefix `ghp_`, after \
+             `$(VAR)` expansion",
+        ),
+        (
+            serve_with(&env(&[
+                ("BASE", "https://u:not-a-real-password"),
+                ("URL", "$(BASE)@forge.example/repo"),
+            ])),
+            "refused: SecretLiteral at spec.env[1].value: ",
+        ),
+        (
+            wrapped(
+                &takt_agent(),
+                &format!("{joined}{}", env(&[("PART", "ghp")])),
+            ),
+            "refused: SecretLiteral at spec.command.args[6]: a value with the prefix `ghp_`, \
+             after `$(VAR)` expansion",
+        ),
+        (
+            command_with(&env(&[
+                ("PART", "xoxb"),
+                ("TOKEN", "--token $(PART)-000fake"),
+            ])),
+            "refused: SecretLiteral at spec.env[1].value: a value with the prefix `xoxb-`, after \
+             `$(VAR)` expansion",
+        ),
+    ];
+    for (resource, expected) in cases {
+        let message = refusal(&resource, &config());
+        assert!(message.starts_with(expected), "{expected} <- {message}");
+        for value in ["000fake", "not-a-real-password"] {
+            assert!(!message.contains(value), "{message}");
+        }
+    }
+
+    for admitted in [
+        env(&[("PART", "ghp"), ("TOKEN", "$$(PART)_000fake")]),
+        env(&[("TOKEN", "$(PART)_000fake"), ("PART", "ghp")]),
+        env(&[("TOKEN", "$(FROM_SECRET)_000fake")]),
+        env(&[("CARGO_HOME", "$(HOME)/cargo")]),
+    ] {
+        render_document(&command_with(&admitted), &config())
+            .unwrap_or_else(|error| panic!("{admitted}: {error}"));
+    }
+}
+
+/// A name the controller does not know (the service environment, a `secretRef` key) may supply
+/// a `scheme://` at run time, so the walk reads such a reference as a scheme too: a URL it
+/// completes with user information is refused, directly, through another entry or in the
+/// command, even one standing just before `@` (the safe side: it may be `scheme://user`), and a
+/// reference that completes nothing is admitted.
+#[test]
+fn an_unknown_reference_is_walked_as_a_possible_url_scheme() {
+    let expected = "refused: SecretLiteral at ";
+    for (resource, member) in [
+        (
+            serve_with(&env(&[(
+                "FORGE_URL",
+                "$(KUBERNETES_PORT)x:not-a-real-password@forge.example/repo",
+            )])),
+            "spec.env[0].value: ",
+        ),
+        (
+            serve_with(&env(&[
+                ("BASE", "$(FORGE_SCHEME)"),
+                ("FORGE_URL", "$(BASE)u:not-a-real-password@forge.example"),
+            ])),
+            "spec.env[1].value: ",
+        ),
+        (
+            wrapped(
+                &takt_agent(),
+                &TAKT.replace(
+                    "--iterations, '1']",
+                    "--iterations, '1', '$(FORGE_SCHEME)u:not-a-real-password@forge.example']",
+                ),
+            ),
+            "spec.command.args[5]: ",
+        ),
+        (
+            serve_with(&env(&[("NOTE", "$(USER_NAME)@forge.example")])),
+            "spec.env[0].value: ",
+        ),
+    ] {
+        let message = refusal(&resource, &config());
+        assert!(
+            message.starts_with(&format!("{expected}{member}")),
+            "{member} <- {message}"
+        );
+        assert!(message.ends_with(", after `$(VAR)` expansion"), "{message}");
+        for hidden in [
+            "not-a-real-password",
+            "KUBERNETES_PORT",
+            "FORGE_SCHEME",
+            "USER_NAME",
+        ] {
+            assert!(!message.contains(hidden), "{message}");
+        }
+    }
+    for admitted in [
+        env(&[("API", "$(KUBERNETES_PORT)/healthz")]),
+        env(&[("PATHS", "$(HOME)/bin:$(CARGO_HOME)/bin")]),
+    ] {
+        render_document(&command_with(&admitted), &config())
+            .unwrap_or_else(|error| panic!("{admitted}: {error}"));
+    }
+}
+
+/// References that double a value at each step would expand beyond any memory; past the bound
+/// the expanded text is refused unwalked.
+#[test]
+fn variable_references_expanding_beyond_the_bound_are_too_large() {
+    let mut entries = vec![("V0".to_owned(), "a".repeat(1024))];
+    for index in 1..=12 {
+        entries.push((format!("V{index}"), format!("$(V{0})$(V{0})", index - 1)));
+    }
+    let entries: Vec<(&str, &str)> = entries
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect();
+    assert_eq!(
+        refusal(&serve_with(&env(&entries)), &config()),
+        "refused: TooLarge at spec.env[11].value: its `$(VAR)` references, expanded, add more \
+         than 2097152 bytes, more than the credential walk reads"
+    );
+    render_document(&serve_with(&env(&entries[..10])), &config()).expect("within the bound");
 }

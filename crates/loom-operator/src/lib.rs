@@ -71,6 +71,10 @@ mod tests {
                 name: "f".to_owned(),
                 mount_path: "/m".to_owned(),
             }),
+            env: Some(vec![resource::EnvVar {
+                name: "N".to_owned(),
+                value: "v".to_owned(),
+            }]),
             image: Some(resource::ImageRef {
                 repository: "r".to_owned(),
                 tag: "t".to_owned(),

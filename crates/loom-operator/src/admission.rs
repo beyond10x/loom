@@ -33,10 +33,24 @@
 //!    (`EgressHostNotAllowed`).
 //! 8. `spec.command`, each entrypoint and argument walked whole and word by word as the
 //!    connectors text is (`SecretLiteral`); one beyond the walk's bound is `TooLarge`.
-//! 9. A `spec.workspace.mountPath` or `spec.secretFiles.mountPath` that is not absolute and plain,
-//!    is, holds or lies beneath a directory the controller mounts ([`RESERVED_MOUNTS`]) or the
-//!    other one (`MountPathInvalid`).
-//! 10. A `spec.workspace.claimName` outside the configuration's `allowedClaimNames`
+//! 9. `spec.env`, on either variant: the list walked whole, names and values, then each value
+//!    word by word as `spec.command` is (`SecretLiteral`; `TooLarge` beyond the walk's bound);
+//!    then, entry by entry, a name that is not an environment variable name
+//!    `[A-Za-z_][A-Za-z0-9_]*` (`NotAVariableName`, `loom.agent`'s reason for the same rule), a
+//!    name the controller sets on a container itself ([`CONTROLLER_ENV`]) or one an earlier
+//!    entry gives (`EnvNameConflict`). Then each `spec.env` value and each `spec.command`
+//!    entrypoint and argument again, as the program may read it after the kubelet's `$(VAR)`
+//!    expansion (`$$` is `$`). The walk knows only the controller's own environment and the
+//!    `spec.env` entries: a value expands against those before it, a command against all of
+//!    them. A name it does not know (a key of the `spec.secretRef` Secret, the service
+//!    environment such as `KUBERNETES_PORT`) is read twice: left as written, and as
+//!    [`UNKNOWN_REFERENCE`], a scheme, since such a reference may supply one. Each reading is
+//!    walked whole and word by word (`SecretLiteral`, its detail saying it was found after
+//!    expansion; `TooLarge` when the references add more than [`MAX_EXPANDED_BYTES`]).
+//! 10. A `spec.workspace.mountPath` or `spec.secretFiles.mountPath` that is not absolute and
+//!     plain, is, holds or lies beneath a directory the controller mounts ([`RESERVED_MOUNTS`])
+//!     or the other one (`MountPathInvalid`).
+//! 11. A `spec.workspace.claimName` outside the configuration's `allowedClaimNames`
 //!     (`ClaimNotAllowed`).
 //!
 //! The walk of steps 2 and 3 reads a text that is not a `loom.agent/1` document only within the
@@ -50,6 +64,8 @@
 //! <n> states, <m> bindings, protocol <protocol>`; an admitted `Command` spec as `admitted <agent>
 //! for its own command: …`.
 
+use std::collections::HashMap;
+
 use b10x_loom_agent::{Checked, RefusalReason, TOKEN_PREFIXES, check_text, spelling};
 use llm_models::routes::Routes;
 use loom_sdk::agent::{AgentSpec, parse};
@@ -58,7 +74,8 @@ use serde_yaml_ng::{Mapping, Value};
 use b10x_loom_resource::model::AgentVariant;
 
 use crate::config::{Config, ModelRoute};
-use crate::resource::{CommandSpec, LoomAgentSpec};
+use crate::render::{CONTROLLER_ENV, controller_env};
+use crate::resource::{CommandSpec, EnvVar, LoomAgentSpec};
 
 /// The exit code a refusal is recorded with, as `b10x-loom agent check` exits on one.
 pub const REFUSED: i64 = 3;
@@ -242,6 +259,228 @@ fn command_credential(command: &CommandSpec) -> Result<(), Refusal> {
         }
     }
     word_credential(&found, "spec.command")
+}
+
+/// Walks `spec.env` for a credential, the list whole (names and values) and then each value word
+/// by word as `spec.command` is; one beyond the walk's bound is `TooLarge`.
+fn env_credential(env: &[EnvVar]) -> Result<(), Refusal> {
+    credential(&yaml(&env, "spec.env")?, "spec.env")?;
+    let found: Vec<Word> = env
+        .iter()
+        .enumerate()
+        .flat_map(|(index, entry)| {
+            words(&entry.value).into_iter().map(move |text| Word {
+                text,
+                member: format!("spec.env[{index}].value"),
+                line: None,
+            })
+        })
+        .collect();
+    word_credential(&found, "spec.env")
+}
+
+/// Whether `name` is an environment variable name, `[A-Za-z_][A-Za-z0-9_]*`: the rule
+/// `loom.agent` holds a `bearer_env` to.
+fn variable_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    bytes
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == b'_')
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+/// Refuses a `spec.env` name that is not a variable name (`NotAVariableName`), one the
+/// controller sets itself ([`CONTROLLER_ENV`]) or one an earlier entry gives (`EnvNameConflict`),
+/// never repeating the name.
+fn env_names(env: &[EnvVar]) -> Result<(), Refusal> {
+    let mut seen: HashMap<&str, usize> = HashMap::with_capacity(env.len());
+    for (index, entry) in env.iter().enumerate() {
+        let at = format!("spec.env[{index}].name");
+        if !variable_name(&entry.name) {
+            return Err(Refusal::new(
+                spelling(RefusalReason::NotAVariableName),
+                at,
+                "it is not an environment variable name, [A-Za-z_][A-Za-z0-9_]*",
+            ));
+        }
+        if CONTROLLER_ENV.contains(&entry.name.as_str()) {
+            return Err(Refusal::new(
+                "EnvNameConflict",
+                at,
+                "the controller sets it on the container",
+            ));
+        }
+        if let Some(first) = seen.insert(entry.name.as_str(), index) {
+            return Err(Refusal::new(
+                "EnvNameConflict",
+                at,
+                format!("it repeats spec.env[{first}].name"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The most bytes `$(VAR)` references may add to `spec.env` and `spec.command` together when
+/// expanded, in each of the two readings the walk takes; beyond it the expanded text is not
+/// walked and the resource is `TooLarge`.
+pub const MAX_EXPANDED_BYTES: usize = MAX_WALKED_BYTES;
+
+/// What the walk puts in place of a reference to a name it does not know, in its second
+/// reading: a scheme. The kubelet also expands from the `spec.secretRef` Secret's keys and the
+/// service environment, which every pod has (`KUBERNETES_PORT` is `tcp://<address>:443`), so
+/// such a reference may supply the `scheme://` that makes the text after it a URL.
+pub const UNKNOWN_REFERENCE: &str = "a://";
+
+/// `text` as the kubelet expands it against `known`: `$$` is `$`, `$(NAME)` is the value of
+/// `NAME` when `known` holds it, any other `$` is itself. A reference to a name `known` does not
+/// hold stays as written, or becomes `unknown` when one is given. Each substituted value is
+/// charged to `budget`; `None` when it runs out.
+fn expand(
+    text: &str,
+    known: &HashMap<&str, String>,
+    unknown: Option<&str>,
+    budget: &mut usize,
+) -> Option<String> {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('$') {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + 1..];
+        if let Some(tail) = after.strip_prefix('$') {
+            out.push('$');
+            rest = tail;
+        } else if let Some(inner) = after.strip_prefix('(')
+            && let Some(close) = inner.find(')')
+        {
+            let name = &inner[..close];
+            match (known.get(name), unknown) {
+                (Some(value), _) => {
+                    *budget = budget.checked_sub(value.len())?;
+                    out.push_str(value);
+                }
+                (None, Some(placeholder)) => {
+                    *budget = budget.checked_sub(placeholder.len())?;
+                    out.push_str(placeholder);
+                }
+                (None, None) => {
+                    out.push_str("$(");
+                    out.push_str(name);
+                    out.push(')');
+                }
+            }
+            rest = &inner[close + 1..];
+        } else {
+            out.push('$');
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    Some(out)
+}
+
+/// One way of reading the environment the kubelet expands from: what the walk knows of each
+/// name, what a reference to any other becomes, and the bytes its references may still add.
+struct Reading<'s> {
+    known: HashMap<&'s str, String>,
+    unknown: Option<&'static str>,
+    budget: usize,
+}
+
+/// The words the text `written` at `member` is walked as after expansion: each distinct
+/// expanded reading whole, then each word of it; none for a reading that changed nothing,
+/// since the text as written was walked already.
+fn expanded_words(written: &str, readings: [String; 2], member: &str, out: &mut Vec<Word>) {
+    let [first, second] = readings;
+    let distinct = if second == first {
+        vec![first]
+    } else {
+        vec![first, second]
+    };
+    for expanded in distinct {
+        if expanded == written {
+            continue;
+        }
+        let pieces = words(&expanded);
+        out.push(Word {
+            text: expanded,
+            member: member.to_owned(),
+            line: None,
+        });
+        out.extend(pieces.into_iter().map(|text| Word {
+            text,
+            member: member.to_owned(),
+            line: None,
+        }));
+    }
+}
+
+/// Walks `spec.env` and `spec.command` as the program may read them after the kubelet's
+/// `$(VAR)` expansion. The walk knows the controller's own environment of `variant` and each
+/// `spec.env` entry once declared: a value expands against those before it, an entrypoint or
+/// argument against all of them. It does not know the `spec.secretRef` Secret's keys nor the
+/// service environment, which the kubelet also expands from, so it reads each text twice: with
+/// a reference to a name it does not know left as written, as the kubelet leaves one it does
+/// not know either, and with that reference as [`UNKNOWN_REFERENCE`], a scheme, so a URL whose
+/// scheme such a reference supplies shows its user information. A credential found in either
+/// reading is `SecretLiteral` at the member, never repeating it; references adding more than
+/// [`MAX_EXPANDED_BYTES`] to a reading are `TooLarge`.
+fn expanded_credential(spec: &LoomAgentSpec, variant: AgentVariant) -> Result<(), Refusal> {
+    let own: HashMap<&str, String> = controller_env(variant)
+        .into_iter()
+        .map(|(name, value)| (name, value.to_owned()))
+        .collect();
+    let mut readings = [None, Some(UNKNOWN_REFERENCE)].map(|unknown| Reading {
+        known: own.clone(),
+        unknown,
+        budget: MAX_EXPANDED_BYTES,
+    });
+    let too_large = |member: &str| {
+        Refusal::new(
+            "TooLarge",
+            member,
+            format!(
+                "its `$(VAR)` references, expanded, add more than {MAX_EXPANDED_BYTES} bytes, \
+                 more than the credential walk reads"
+            ),
+        )
+    };
+    let read = |readings: &mut [Reading<'_>; 2], text: &str, member: &str| {
+        let mut out = [String::new(), String::new()];
+        for (slot, reading) in out.iter_mut().zip(readings.iter_mut()) {
+            *slot = expand(text, &reading.known, reading.unknown, &mut reading.budget)
+                .ok_or_else(|| too_large(member))?;
+        }
+        Ok::<_, Refusal>(out)
+    };
+    let mut found = Vec::new();
+    for (index, entry) in spec.env.iter().flatten().enumerate() {
+        let member = format!("spec.env[{index}].value");
+        let expanded = read(&mut readings, &entry.value, &member)?;
+        for (reading, value) in readings.iter_mut().zip(expanded.iter()) {
+            reading.known.insert(entry.name.as_str(), value.clone());
+        }
+        expanded_words(&entry.value, expanded, &member, &mut found);
+    }
+    if let Some(command) = &spec.command {
+        for (list, items) in [("entrypoint", &command.entrypoint), ("args", &command.args)] {
+            for (index, item) in items.iter().flatten().enumerate() {
+                let member = format!("spec.command.{list}[{index}]");
+                let expanded = read(&mut readings, item, &member)?;
+                expanded_words(item, expanded, &member, &mut found);
+            }
+        }
+    }
+    word_credential(&found, "spec.env").map_err(|refusal| {
+        if refusal.reason == spelling(RefusalReason::SecretLiteral) {
+            Refusal {
+                detail: format!("{}, after `$(VAR)` expansion", refusal.detail),
+                ..refusal
+            }
+        } else {
+            refusal
+        }
+    })
 }
 
 /// `member` of a document at `at` in the resource.
@@ -689,6 +928,12 @@ pub fn admit(
         command_credential(command)?;
     }
 
+    if let Some(env) = &spec.env {
+        env_credential(env)?;
+        env_names(env)?;
+    }
+    expanded_credential(spec, variant)?;
+
     mount_paths(spec)?;
 
     if let Some(claim) = spec
@@ -741,6 +986,7 @@ mod tests {
             connectors_config: connectors.map(str::to_owned),
             secret_ref: None,
             secret_files: None,
+            env: None,
             image: None,
             command: None,
             workspace: None,

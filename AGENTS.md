@@ -797,8 +797,8 @@ An agent deployed to Kubernetes is a `LoomAgent` resource (group `loom.beyond10x
 `v1alpha1`, namespaced), the `loom.resource` domain (`ess/domains/resource.yaml`,
 `story:loom-agent-resource-domain`). Its spec, `LoomAgentSpec`, holds the `loom.agent/1` document
 verbatim as `agent` (no second agent schema), the llm `routes` document untyped, the
-connectors-local TOML, a Secret reference for the environment, an optional Secret for files, an
-image override, an optional command and an optional workspace volume. The entity `LoomAgent` is the
+connectors-local TOML, a Secret reference for the environment, an optional Secret for files,
+plain environment values, an image override, an optional command and an optional workspace volume. The entity `LoomAgent` is the
 controller's view of one resource: `observedGeneration`, the spec check's result `check`, and
 the state Pending, Running, Refused, Degraded, Completed or Failed. `ApplyLoomAgent`, `RecordCheck`,
 `ObserveDeployment`, `ObserveRun` and `DeleteLoomAgent` move it, and the view `LoomAgents` lists it.
@@ -821,7 +821,10 @@ outcomes need, so the controller compares the Job's generation itself (§ Operat
 (`mountPath`, optional `claimName`) is a read-write volume on either variant. `spec.secretRef`
 (`name`) gives a Secret as the environment; `spec.secretFiles` (`name`, `mountPath`) gives another
 as files the pod user owns (`story:loom-agent-trial-fixes`), so a pod can hold a model key as an
-environment variable and a forge key as files. `runtime.connectors` and
+environment variable and a forge key as files. `spec.env` (a list of `EnvVar`: `name`, `value`,
+`story:loom-agent-spec-env`) gives values to the agent container on either variant, which the
+kubelet expands (`$(NAME)`) as it does any `env` value; its
+refusals are the controller's (§ Operator, wave decision D5), not the domain's. `runtime.connectors` and
 `deploy.kubernetes.image_repository` in `loom.agent/1` are optional; `agent serve` still refuses a
 spec without `runtime.connectors`. `RecordCheck`
 records the variant the controller admitted; `respecified` clears it, and the view and
@@ -920,7 +923,19 @@ words are walked in sequences within it; empty routes without `modelRoute` (`NoM
 `secretRef` or `secretFiles` not allowed (`SecretNotAllowed`); a `deploy.kubernetes.namespace` other than the
 resource's (`NamespaceMismatch`); an egress entry naming neither a host nor a namespace (its rule
 would admit every destination on its port), or a host not allowed (`EgressHostNotAllowed`); a
-credential in `spec.command` (`SecretLiteral`; `TooLarge` beyond the bound); a `spec.workspace.mountPath` or
+credential in `spec.command` (`SecretLiteral`; `TooLarge` beyond the bound); in `spec.env`, on either
+variant, a credential in a name or value (the list whole, then each value word by word as
+`spec.command`; `SecretLiteral` at `spec.env[<i>].value` or `.name`, `TooLarge` beyond the bound),
+then a name that is not `[A-Za-z_][A-Za-z0-9_]*` (`NotAVariableName`, `loom.agent`'s reason for
+the same rule), a name in `render::CONTROLLER_ENV` (`HOME`, refused on both variants) or one an
+earlier entry gives (`EnvNameConflict`); then each `spec.env` value and each `spec.command`
+entry again as the kubelet may expand it (`$$` is `$`). The walk knows only
+`render::controller_env` and the `spec.env` entries (before it for a value, all of them for a
+command); a name it does not know (a `secretRef` key, the service environment such as
+`KUBERNETES_PORT`) is read twice, left as written and as `UNKNOWN_REFERENCE` (`a://`), since it
+may supply a URL scheme. Each reading is walked whole and word by word (`SecretLiteral`, its
+detail saying it was found after expansion; `TooLarge` when references add more than
+`MAX_EXPANDED_BYTES`, 2 MiB, to a reading); a `spec.workspace.mountPath` or
 `spec.secretFiles.mountPath` that is not absolute and plain or overlaps `/etc/agent`, `/config`,
 `/var/lib/agent`, `/tmp` or the other (`MountPathInvalid`); a `claimName` not allowed
 (`ClaimNotAllowed`). A `Command` resource's `spec.agent` passes only the credential walk and the
@@ -997,7 +1012,10 @@ init container, runs `spec.command`, mounts the ConfigMap at `/config` (the cont
 `spec.agent` is `/config/agent.yaml`, the document the resource holds, keys in the order the API
 server keeps them, as `/etc/agent/agent.yaml` is for `agent serve`), sets `HOME=/var/lib/agent`
 and adds an emptyDir at `/tmp`; `status.conditions` `Checked` then reads `SpecAdmitted` instead of
-`SpecServeable`. `spec.workspace` adds the claim or an emptyDir. `spec.secretFiles` adds the Secret
+`SpecServeable`. On either variant `spec.env` follows the controller's own `env`
+(`render::CONTROLLER_ENV`, which `tests/render.rs` holds to every name the renderer sets) on the
+agent container, in declaration order, beside the `secretRef` `envFrom`; no init container gets
+it, since they run `b10x-loom` for the controller. `spec.workspace` adds the claim or an emptyDir. `spec.secretFiles` adds the Secret
 volume `secret-files-source` (mode 0440) and a memory emptyDir `secret-files`; the init container
 `stage-secret-files` (image `defaultImage`, first of the init containers) runs `b10x-loom agent
 stage-files --from /var/run/loom/secret-files-source --to /var/run/loom/secret-files/files`, which
